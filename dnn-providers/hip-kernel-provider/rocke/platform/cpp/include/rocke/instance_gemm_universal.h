@@ -237,6 +237,46 @@ typedef struct rocke_gemm_trait_spec
     /* the last tile along an MN-contiguous operand's dimension ends at the
      * extent (origin ld - tile), so no DMA row runs past the operand. */
     bool mn_ld_any;
+    /* ---- the hb_sched K-tile slot schedule and its levers (Python TraitSpec
+     * fields of the same names; see gemm_universal.py for the rationale; every
+     * default keeps the emission unchanged). The Python defaults are set by
+     * rocke_gemm_universal_spec_default (hb_rel_slot / hb_acq_slot /
+     * hb_acq_b_slot -1, hb_read_every 1, hb_rel_gap 4, kloop_unroll 1). ---- */
+    /* (dtl_frag_prefetch + mfma_interleave) one MFMA stream per K tile with
+     * every fragment read, release / acquire sync and DTL issue pinned to an
+     * MFMA slot. */
+    bool hb_sched;
+    int hb_rel_slot; /* release slot (-1: auto) */
+    int hb_acq_slot; /* acquire slot (-1: auto) */
+    int hb_read_every; /* MFMAs between two next-atom fragment reads */
+    int hb_dtl_every; /* MFMAs between two DTL issues (0: evenly) */
+    int hb_acq_b_slot; /* the B operand's own acquire slot (-1: one acquire) */
+    bool hb_split_rel; /* per-operand release */
+    int hb_rel_gap; /* MFMAs between the last read and the auto release */
+    /* (dtl_stages >= 2) K tiles per main-loop trip: kloop_unroll * dtl_stages */
+    int kloop_unroll;
+    /* (hb_sched + dtl_hoist) the per-tile DTL address math in small steps
+     * pinned to free MFMA slots */
+    bool dtl_addr_spread;
+    int hb_dtl_delay; /* MFMA slots between the release and the first DTL */
+    /* two copies of the main loop, the odd one's reads / DTLs one slot later
+     * (1: by SIMD parity, 2: by wave-index parity) */
+    int hb_skew;
+    int hb_skew_dtl; /* the odd copy's DTL shift (0: the read shift) */
+    int hb_tile_lgkm0; /* lgkmcnt(0) after every K tile's last MFMA slot */
+    bool das_anchor; /* dtl_addr_spread: pin each step's SGPR result */
+    bool das_late; /* dtl_addr_spread: the steps after the last read */
+    /* MFMA issue order within a K atom: serpentine rows (order 1); mfma_order
+     * 2 / 3 the alternatives (mfma_order_perm) */
+    bool mfma_serpentine;
+    int mfma_order;
+    /* (rilv_vec_epilogue + pad_m / pad_n + dtl_tight_rsrc) the vector
+     * epilogue on ragged M / N: 1 control-flow guards, 2 branch-free buffer
+     * stores over C */
+    int rve_pad;
+    /* (dtl_tight_rsrc + dtl_hoist + pad_m / pad_n) exact DTL bounds only on
+     * the operand whose row dimension is padded */
+    bool dtl_tight_ragged_only;
 } rocke_gemm_trait_spec_t;
 
 /* ------------------------------------------------------------------ DataSpec */

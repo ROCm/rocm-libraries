@@ -48,10 +48,20 @@ search engine. Measured winners ship in the tuned route table
 
 The candidate's ``sweep_space`` is its knob neighbourhood (K tile, stage
 count, persistent grid, paired 16-byte epilogue stores), for the tuning
-engine to search. The C++ engine mirrors the route key and the single-launch
-MN routes of the tuned table (``rocke::gett::tuned_plan``; the table is compiled
-into the engine); the cost-model routes, the pack hybrid and the tuning flow are
-Python engine only.
+engine to search.
+
+AOT route table: :data:`TENSOR_GETT_AOT` (sidecar ``tensor_gett_aot.json``)
+freezes the product route (route and GEMM body) of fixed problems for
+ahead-of-time kernel packs; :func:`aot_route_plan` rebuilds a plan from an
+entry, and :func:`plan_tensor_gett` never reads it
+(``tools/gen_tensor_gett_aot.py`` writes and refreshes it).
+
+The C++ engine mirrors the route key and rebuilds the launch programs of both
+tables (``rocke::gett::table_plan``: single-launch MN, the pack hybrid, and the
+K-contiguous route with its operand packs; the tables are compiled into the
+engine); the ``tensor_gett_aot`` / ``tensor_gett_kc`` / ``tensor_pack`` parity
+families keep the two engines byte-identical. The cost-model routes and the
+tuning flow are Python engine only.
 """
 
 from __future__ import annotations
@@ -973,35 +983,55 @@ TENSOR_GETT_USE_TUNED = True
 TENSOR_GETT_TUNED_FILE = "tensor_gett_tuned.json"
 
 
-def _load_shipped_tuned() -> dict:
+#: AOT route table: the product route (:func:`plan_tensor_gett`) of fixed
+#: problems, frozen for ahead-of-time kernel packs (hipTensor's rocKE kernel
+#: pack carries one launch program per entry: the pack steps and the GETT
+#: launch). Same format as the tuned table; each entry is
+#: :func:`tensor_gett_aot_entry` of its problem, which the tests check, so the
+#: table follows the product route. :func:`plan_tensor_gett` never reads it.
+#: Regenerate with ``platform/tools/gen_tensor_gett_aot.py``.
+TENSOR_GETT_AOT_FILE = "tensor_gett_aot.json"
+
+
+def _read_table(fname: str) -> dict:
     import json
     from pathlib import Path
 
-    path = Path(__file__).with_name(TENSOR_GETT_TUNED_FILE)
+    path = Path(__file__).with_name(fname)
     if not path.exists():
         return {}
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8")).get("entries", {})
+
+
+def _load_table(fname: str) -> dict:
     return {
         arch: {k: (e["route"], e["body"]) for k, e in table.items()}
-        for arch, table in raw.get("entries", {}).items()
+        for arch, table in _read_table(fname).items()
     }
+
+
+def _load_shipped_tuned() -> dict:
+    return _load_table(TENSOR_GETT_TUNED_FILE)
 
 
 _SHIPPED_TUNED: dict = _load_shipped_tuned()
 TENSOR_GETT_TUNED: dict = {a: dict(t) for a, t in _SHIPPED_TUNED.items()}
+#: ``{arch: {tensor_gett_route_key(req): (route, gemm config)}}`` of the AOT
+#: route table (:data:`TENSOR_GETT_AOT_FILE`)
+TENSOR_GETT_AOT: dict = _load_table(TENSOR_GETT_AOT_FILE)
 
 
 def tuned_entry_problem(arch: str, key: str) -> Optional[dict]:
     """The problem (``modes_a`` / ``modes_b`` / ``modes_d`` / ``extents`` /
     ``dtype`` / ``bilinear``) a shipped tuned entry was measured on, or None."""
-    import json
-    from pathlib import Path
+    e = _read_table(TENSOR_GETT_TUNED_FILE).get(arch, {}).get(key)
+    return None if e is None else e.get("problem")
 
-    path = Path(__file__).with_name(TENSOR_GETT_TUNED_FILE)
-    if not path.exists():
-        return None
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    e = raw.get("entries", {}).get(arch, {}).get(key)
+
+def aot_entry_problem(arch: str, key: str) -> Optional[dict]:
+    """The problem of an AOT route table entry (as :func:`tuned_entry_problem`),
+    or None."""
+    e = _read_table(TENSOR_GETT_AOT_FILE).get(arch, {}).get(key)
     return None if e is None else e.get("problem")
 
 
@@ -1287,7 +1317,52 @@ def tune_tensor_gett(
 def _tuned_plan(req: "TensorGettRequest") -> Optional["TensorGettPlan"]:
     """The plan of ``req``'s tuned-table entry, or None (no entry, or the
     entry no longer builds a valid route)."""
-    table = TENSOR_GETT_TUNED.get(req.arch)
+    return _table_plan(req, TENSOR_GETT_TUNED, "tuned route table")
+
+
+def aot_route_plan(req: "TensorGettRequest") -> Optional["TensorGettPlan"]:
+    """The plan of ``req``'s AOT route table entry (:data:`TENSOR_GETT_AOT`),
+    or None. It equals :func:`plan_tensor_gett` of ``req`` (the tests check
+    every entry)."""
+    return _table_plan(req, TENSOR_GETT_AOT, "AOT route table")
+
+
+def tensor_gett_aot_entry(req: "TensorGettRequest") -> Optional[tuple]:
+    """``(key, entry)`` of ``req`` for the AOT route table: the route and GEMM
+    body of :func:`plan_tensor_gett` and the problem, or None when the product
+    route runs no GEMM body (the ring-body fallback) or the problem has
+    explicit strides (table problems are packed)."""
+    from ..gemm.selector import config_string
+
+    p = req.problem
+    if p.strides_a is not None or p.strides_b is not None or p.strides_d is not None:
+        return None
+    sp = plan_tensor_gett(req).gett.spec
+    if not (sp.mn_body or sp.kc_body):
+        return None
+    problem = {
+        "bilinear": bool(p.bilinear),
+        "dtype": req.dtype,
+        "extents": {m: int(e) for m, e in sorted(dict(p.extents).items())},
+        "modes_a": list(p.modes_a),
+        "modes_b": list(p.modes_b),
+        "modes_d": list(p.modes_d),
+    }
+    entry = {
+        "body": config_string(_route_body(sp)),
+        "problem": problem,
+        "route": "kc" if sp.kc_body else "mn",
+    }
+    return tensor_gett_route_key(req), entry
+
+
+def _table_plan(
+    req: "TensorGettRequest", tables: dict, source: str
+) -> Optional["TensorGettPlan"]:
+    """The plan of ``req``'s entry in ``tables`` (``{arch: {key: (route,
+    config)}}``), or None (no entry, or the entry no longer builds a valid
+    route)."""
+    table = tables.get(req.arch)
     if not table:
         return None
     ent = table.get(tensor_gett_route_key(req))
@@ -1315,7 +1390,7 @@ def _tuned_plan(req: "TensorGettRequest") -> Optional["TensorGettPlan"]:
         return None
     if pl is None:
         return None
-    return replace(pl, explanation=pl.explanation + ("tuned route table",))
+    return replace(pl, explanation=pl.explanation + (source,))
 
 
 def gett_operand_sources(plan: TensorGettPlan) -> tuple:
@@ -1337,7 +1412,12 @@ __all__ = [
     "TensorGettRoute",
     "TensorGettTuneResult",
     "TensorPackStep",
+    "TENSOR_GETT_AOT",
+    "TENSOR_GETT_AOT_FILE",
     "TENSOR_GETT_TUNED",
+    "aot_entry_problem",
+    "aot_route_plan",
+    "tensor_gett_aot_entry",
     "plan_tensor_gett_candidates",
     "tensor_gett_neighbour_routes",
     "tensor_gett_route_key",

@@ -10,8 +10,9 @@ epilogue. Its index maps (the mixed-radix digits of the GEMM rows of each operan
 and of D's rows and columns) are compile-time constants there: one kernel per problem. Here the
 same body takes them from kernel arguments (the hooks' digit functions use magic-number
 division), so one kernel serves every problem of its class, and hipTensor's kernel pack carries
-the classes. With ``geom`` the builder makes them constants again, which is the problem-specific
-kernel hipTensor's JIT compiles (the class recipe is rolled over every geometry value).
+the classes. With ``geom`` the builder makes them constants again: the problem-specific kernel of
+one problem (the class recipe is rolled over every geometry value; hipTensor's JIT does not build
+it).
 
 Class (:class:`RgettSpec`): data type, bilinear, the DTL lane width of each operand (``vec_a`` /
 ``vec_b``: 8 elements = 16-byte lanes when the operand's fastest run and every other stride are

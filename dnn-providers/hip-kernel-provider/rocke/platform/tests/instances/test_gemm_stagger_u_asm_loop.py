@@ -414,9 +414,10 @@ class PythonOnlyTest(unittest.TestCase):
             ("stagger_u", 0),
             ("stagger_u_stride", 1),
             ("stagger_u_map", 0),
-            ("mfma_serpentine", False),
         ):
             self.assertIn(f, _be._PYTHON_ONLY_GEMM_LEVERS)
+        # mfma_serpentine is mirrored by the C++ engine (parity: gemm_hb_emit)
+        self.assertNotIn("mfma_serpentine", dict(_be._PYTHON_ONLY_GEMM_LEVERS))
         with self.assertRaises(NotImplementedError) as cm:
             _be._refuse_python_only_levers(replace(TraitSpec(), stagger_u=8))
         self.assertIn("stagger_u", str(cm.exception))

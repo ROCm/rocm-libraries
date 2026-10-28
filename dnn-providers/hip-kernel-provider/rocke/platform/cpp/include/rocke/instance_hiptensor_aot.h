@@ -7,13 +7,18 @@
  *
  *   ew.EwSpec / build_ew                    rocke_htaot_ew_spec_t / rocke_build_htaot_ew
  *   reduce.ReduceSpec / build_reduce        rocke_htaot_reduce_spec_t / rocke_build_htaot_reduce
+ *   rreduce.RreduceSpec / build_rreduce     rocke_htaot_rreduce_spec_t / rocke_build_htaot_rreduce
+ *   rreduce.RreduceFinalSpec / build_rreduce_final
+ *                                           rocke_htaot_rreduce_final_spec_t /
+ *                                           rocke_build_htaot_rreduce_final
  *   jit_ew.EwJitSpec / build_ew_jit         rocke_htaot_ew_jit_spec_t / rocke_build_htaot_ew_jit
  *   ewt.EwtSpec / build_ewt                 rocke_htaot_ewt_spec_t / rocke_build_htaot_ewt
  *
  * Every builder makes the same builder calls in the same order as its Python
  * twin, so both engines lower every kernel to the same LLVM IR (enforced by the
  * hiptensor_aot_* parity families under library/tests/parity). The host-side
- * planning rules (host.py, gett_host.py, jit_ew.jit_class_of, ewt.ewt_plan)
+ * planning rules (host.py, gett_host.py, rreduce_host.py, jit_ew.jit_class_of,
+ * ewt.ewt_plan)
  * live in hipTensor's C++ planner, not here.
  *
  * Dtype strings: "f16", "bf16", "f32", "f64"; NULL (or "") for an absent B / C.
@@ -34,10 +39,12 @@
 extern "C" {
 #endif
 
-/* Kernel ABI names (Python EW_ABI, REDUCE_ABI, EW_JIT_ABI, EWT_ABI). */
+/* Kernel ABI names (Python EW_ABI, REDUCE_ABI, EW_JIT_ABI, EWV_ABI, EWT_ABI). */
 #define ROCKE_HTAOT_EW_ABI "hiptensor-aot-ew/v1"
 #define ROCKE_HTAOT_REDUCE_ABI "hiptensor-aot-reduce/v1"
 #define ROCKE_HTAOT_EW_JIT_ABI "hiptensor-jit-ew/v1"
+/* the vector classes of the elementwise kernel (rocke_htaot_ewv_kernel_name) */
+#define ROCKE_HTAOT_EWV_ABI "hiptensor-aot-ewv/v1"
 #define ROCKE_HTAOT_EWT_ABI "hiptensor-aot-ewt/v2"
 
 /* common.MAX_RANK */
@@ -84,6 +91,86 @@ rocke_status_t
     rocke_htaot_reduce_kernel_name(const rocke_htaot_reduce_spec_t* s, char* out, size_t cap);
 rocke_kernel_def_t* rocke_build_htaot_reduce(rocke_ir_builder_t* b,
                                              const rocke_htaot_reduce_spec_t* s);
+
+/* ------------------------------------------------------------- rreduce */
+
+/* Python rreduce.RREDUCE_ABI */
+#define ROCKE_HTAOT_RREDUCE_ABI "hiptensor-aot-rreduce/v1"
+
+/* Python rreduce.RreduceSpec (a tuned reduction class, the geometry as kernel
+ * arguments). mode: "row" | "col"; op: "add" | "mul" | "max" | "min"; nr: the
+ * reduced slots (1, 2, 3, 4 or 8). */
+typedef struct rocke_htaot_rreduce_spec
+{
+    const char* mode;
+    const char* a;
+    const char* d;
+    const char* op;
+    int nr;
+    int block;
+    int vec;
+    int lanes;
+    int unroll;
+    int rows; /* col: reduction-row threads per tile (0: block / lanes) */
+    bool nt; /* streaming A loads (gfx942 / gfx950) */
+    bool una; /* opA other than IDENTITY */
+    bool idx64;
+    int wave;
+} rocke_htaot_rreduce_spec_t;
+
+rocke_htaot_rreduce_spec_t rocke_htaot_rreduce_spec_default(void);
+/* RreduceSpec.check(); false with Python's message in `reason`. */
+bool rocke_htaot_rreduce_check(const rocke_htaot_rreduce_spec_t* s, char* reason, size_t cap);
+rocke_status_t
+    rocke_htaot_rreduce_kernel_name(const rocke_htaot_rreduce_spec_t* s, char* out, size_t cap);
+rocke_kernel_def_t* rocke_build_htaot_rreduce(rocke_ir_builder_t* b,
+                                              const rocke_htaot_rreduce_spec_t* s);
+
+/* Python rreduce.RreduceFinalSpec (the split finalize of a class). */
+typedef struct rocke_htaot_rreduce_final_spec
+{
+    const char* a;
+    const char* d;
+    const char* op;
+    int lanes;
+    bool idx64;
+    int block;
+    int wave;
+} rocke_htaot_rreduce_final_spec_t;
+
+rocke_htaot_rreduce_final_spec_t rocke_htaot_rreduce_final_spec_default(void);
+bool rocke_htaot_rreduce_final_check(const rocke_htaot_rreduce_final_spec_t* f,
+                                     char* reason,
+                                     size_t cap);
+rocke_status_t rocke_htaot_rreduce_final_kernel_name(const rocke_htaot_rreduce_final_spec_t* f,
+                                                     char* out,
+                                                     size_t cap);
+rocke_kernel_def_t* rocke_build_htaot_rreduce_final(rocke_ir_builder_t* b,
+                                                    const rocke_htaot_rreduce_final_spec_t* f);
+
+/* The route table of the classes (library/kernels/common/hiptensor_aot/rreduce_table.json,
+ * compiled into the engine) and the functions of rreduce_host.py over it. */
+const char* rocke_htaot_rreduce_table_json(void);
+/* pack_classes(arch): the classes of the target's pack (its palette, then the classes of its
+ * tuned problems, no duplicates). Writes up to `cap` specs (their strings are static) and
+ * returns the count; -1 with the reason in `err` when the table is malformed. */
+int rocke_htaot_rreduce_pack_classes(const char* arch,
+                                     rocke_htaot_rreduce_spec_t* out,
+                                     int cap,
+                                     char* err,
+                                     size_t err_cap);
+/* final_classes(): the finalize classes of every pack. Writes up to `cap`, returns the count. */
+int rocke_htaot_rreduce_final_classes(rocke_htaot_rreduce_final_spec_t* out, int cap);
+/* routes(arch): the pack routes of the target's tuned problems, in the table's order
+ * ("reduce.tuned.<hash>" = the launch knobs, "reduce.tuned.<hash>.key" = the canonical
+ * problem). The count (-1: malformed table), then route i's name and value. */
+int rocke_htaot_rreduce_route_count(const char* arch, char* err, size_t err_cap);
+bool rocke_htaot_rreduce_route(const char* arch,
+                               int i,
+                               char* name,
+                               size_t name_cap,
+                               char* value,
+                               size_t value_cap);
 
 /* -------------------------------------------------------------- jit_ew */
 

@@ -225,9 +225,22 @@ class EmissionTest(unittest.TestCase):
         )
 
 
+# mirrored by the C++ engine (parity: tests/instances/parity/gemm_hb_emit)
+_MIRRORED = ("hb_tile_lgkm0", "hb_skew_dtl", "das_anchor", "das_late")
+
+
 class PythonOnlyTest(unittest.TestCase):
+    def test_engine_receives_mirrored(self):
+        keys = {k for k, _ in _be._PYTHON_ONLY_GEMM_LEVERS}
+        for k in _MIRRORED:
+            self.assertNotIn(k, keys)
+            _off, on, _flag = _KNOBS[k]
+            _be._refuse_python_only_levers(replace(TraitSpec(), **{k: on}))
+
     def test_engine_refuses(self):
         for k, (off, on, _flag) in _KNOBS.items():
+            if k in _MIRRORED:
+                continue
             self.assertIn((k, off), _be._PYTHON_ONLY_GEMM_LEVERS)
             with self.assertRaises(NotImplementedError) as cm:
                 _be._refuse_python_only_levers(replace(TraitSpec(), **{k: on}))

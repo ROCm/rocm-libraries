@@ -247,12 +247,16 @@ class TestEngineGuard(unittest.TestCase):
         for tr, tile in (
             (_EF, _T22),
             (replace(_A16, ilv_split_wait=8, ilv_barrier_after=1), _T22),
-            (_HB, _T22),
-            (replace(_ER3, **dict(_RILV, hb_sched=True)), _T22),
             (_PP7, _T24),
         ):
             with self.assertRaises(NotImplementedError):
                 _be.universal_gemm_spec_to_dict(_spec(tr, tile))
+
+    def test_hb_sched_crosses_to_the_engine(self):
+        # the hb_sched slot schedule is mirrored in C++ (parity: gemm_hb_emit)
+        d = _be.universal_gemm_spec_to_dict(_spec(_HB, _T22))
+        self.assertIs(d["hb_sched"], True)
+        self.assertEqual(d["hb_read_every"], 2)
 
     def test_row_interleave_levers_cross_to_the_engine(self):
         # the row-interleave layout (with the early-release levers) is mirrored in C++

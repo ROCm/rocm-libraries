@@ -37,7 +37,8 @@
 //    not compile serves the plans from the file; files of another format version, device class
 //    or kernel ABI are refused with HIPTENSOR_STATUS_INVALID_VALUE, unreadable, damaged or
 //    untrusted ones with HIPTENSOR_STATUS_IO_ERROR, damaged entries are skipped, an empty file
-//    reads as nothing.
+//    reads as nothing; spec keys of another key scheme are dropped (the entries are served by
+//    identity, and written again once used).
 // RockeJitLatency.DISABLED_Report prints plan-creation and kernel times (JIT and pack kernels).
 
 #include <gtest/gtest.h>
@@ -1114,6 +1115,52 @@ namespace
         return out;
     }
 
+    // Replaces `from` by `to` (the same length) in every entry of a kernel cache file and
+    // rewrites the entries' checksums: the spec keys of the entries name another key scheme.
+    std::vector<uint8_t>
+        withKeyText(std::vector<uint8_t> in, std::string const& from, std::string const& to)
+    {
+        auto const h = parseHeader(in);
+        if(!h.ok || from.size() != to.size())
+        {
+            return {};
+        }
+        uint32_t count = 0;
+        std::memcpy(&count, in.data() + h.count, 4);
+        size_t at = h.shaAt + 32;
+        for(uint32_t e = 0; e < count; e++)
+        {
+            uint64_t size = 0;
+            std::memcpy(&size, in.data() + at, 8);
+            auto const begin = in.begin() + at, end = begin + (size - 32);
+            for(auto it = std::search(begin, end, from.begin(), from.end()); it != end;
+                it      = std::search(it, end, from.begin(), from.end()))
+            {
+                it = std::copy(to.begin(), to.end(), it);
+            }
+            auto check = sha256(in.data() + at, size - 32);
+            std::memcpy(in.data() + at + size - 32, check.data(), 32);
+            at += size;
+        }
+        return in;
+    }
+
+    uint32_t entryCount(std::vector<uint8_t> const& b)
+    {
+        auto const h     = parseHeader(b);
+        uint32_t   count = 0;
+        if(h.ok)
+        {
+            std::memcpy(&count, b.data() + h.count, 4);
+        }
+        return count;
+    }
+
+    bool contains(std::vector<uint8_t> const& b, std::string const& text)
+    {
+        return std::search(b.begin(), b.end(), text.begin(), text.end()) != b.end();
+    }
+
     // Problems the file round trip carries (three classes and a contraction).
     std::vector<Case> fileCases()
     {
@@ -1413,6 +1460,69 @@ TEST(RockeJitChild, StaleEntries)
     auto         j = runCase(fileCases()[1], HIPTENSOR_JIT_MODE_DEFAULT, rng);
     EXPECT_EQ(j.specialized, std::string(accept) == "1" ? 1 : 0);
     EXPECT_EQ(j.compiled, 0);
+}
+
+// Entries whose spec keys belong to another key scheme (hiptensor-rocke-jit/v1, the recipe JIT's)
+// lose those keys when read: a fresh process serves them only by identity (no compile), and
+// writing leaves an entry out until a plan has used it.
+TEST(RockeJitCacheFile, ForeignSpecKeysAreDropped)
+{
+    auto exe = selfExecutable();
+    if(exe.empty())
+    {
+        GTEST_SKIP() << "needs /proc/self/exe";
+    }
+    std::mt19937 rng(73);
+    ASSERT_EQ(runCase(fileCases()[1], HIPTENSOR_JIT_MODE_DEFAULT, rng).specialized, 1);
+    ApiObjects api;
+    auto       good = tempFile("keys_src");
+    ASSERT_EQ(hiptensorWriteKernelCacheToFile(api.handle, good.c_str()), HIPTENSOR_STATUS_SUCCESS);
+    auto const src = readBytes(good);
+    ASSERT_TRUE(contains(src, "hiptensor-rocke-jit/v2|"));
+    auto foreign = withKeyText(src, "hiptensor-rocke-jit/v2|", "hiptensor-rocke-jit/v1|");
+    ASSERT_FALSE(foreign.empty());
+    ASSERT_FALSE(contains(foreign, "hiptensor-rocke-jit/v2|"));
+    auto path = tempFile("keys");
+    writeBytes(path, foreign);
+    {
+        ScopedEnvironmentVariable file("HIPTENSOR_ROCKE_TEST_CACHE_FILE", path.c_str());
+        ScopedEnvironmentVariable nocompile("HIPTENSOR_ROCKE_JIT_NO_COMPILE", "1");
+        std::string cmd = "\"" + exe + "\" --gtest_filter=RockeJitChild.ForeignSpecKeys";
+        EXPECT_EQ(std::system(cmd.c_str()), 0);
+    }
+    std::remove(good.c_str());
+    std::remove(path.c_str());
+}
+
+// The child of RockeJitCacheFile.ForeignSpecKeysAreDropped (skipped when run on its own).
+TEST(RockeJitChild, ForeignSpecKeys)
+{
+    char const* path = std::getenv("HIPTENSOR_ROCKE_TEST_CACHE_FILE");
+    if(path == nullptr || std::getenv("HIPTENSOR_ROCKE_JIT_NO_COMPILE") == nullptr)
+    {
+        GTEST_SKIP() << "run by RockeJitCacheFile.ForeignSpecKeysAreDropped";
+    }
+    ApiObjects api;
+    ASSERT_EQ(hiptensorReadKernelCacheFromFile(api.handle, path), HIPTENSOR_STATUS_SUCCESS);
+    // not used yet: no key of this scheme, so not written
+    auto unused = tempFile("keys_unused");
+    ASSERT_EQ(hiptensorWriteKernelCacheToFile(api.handle, unused.c_str()),
+              HIPTENSOR_STATUS_SUCCESS);
+    EXPECT_EQ(entryCount(readBytes(unused)), 0u);
+    // served by identity, without a compile
+    std::mt19937 rng(73);
+    auto         j = runCase(fileCases()[1], HIPTENSOR_JIT_MODE_DEFAULT, rng);
+    EXPECT_EQ(j.specialized, 1);
+    EXPECT_EQ(j.compiled, 0);
+    // used: written with its key of this scheme only
+    auto used = tempFile("keys_used");
+    ASSERT_EQ(hiptensorWriteKernelCacheToFile(api.handle, used.c_str()), HIPTENSOR_STATUS_SUCCESS);
+    auto const bytes = readBytes(used);
+    EXPECT_GE(entryCount(bytes), 1u);
+    EXPECT_TRUE(contains(bytes, "hiptensor-rocke-jit/v2|"));
+    EXPECT_FALSE(contains(bytes, "hiptensor-rocke-jit/v1|"));
+    std::remove(unused.c_str());
+    std::remove(used.c_str());
 }
 
 // Header checks: format version, device class and kernel ABI are INVALID_VALUE; a damaged or

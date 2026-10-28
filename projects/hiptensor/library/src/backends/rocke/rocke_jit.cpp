@@ -75,9 +75,15 @@ namespace hiptensor
             // pack kernels they replace.
             constexpr char kEwJitFamily[] = ROCKE_HTAOT_EW_JIT_ABI;
             constexpr char kEwAbi[]       = ROCKE_HTAOT_EW_ABI;
-            constexpr char kEwvAbi[]      = "hiptensor-aot-ewv/v1";
+            constexpr char kEwvAbi[]      = ROCKE_HTAOT_EWV_ABI;
+            // The scheme of the spec keys: "<prefix>|<arch>|<class key>|<rocKE build id>|<values>".
             // v2: the kernels come from rocKE's C++ builder, named by the engine's build id (v1
-            // named a recipe of a recipe file)
+            // named a recipe of a recipe file). The build id covers rocKE's builders, not this
+            // file: bump the version when the values change meaning for the same class and
+            // build (the axis loop of specializeStep: the vector magic numbers of m0 / s0,
+            // n_in / e0 counted in vectors, the order of the class's axes), or when the lowering
+            // or compile options of build() change without changing the LLVM IR. Keys of another
+            // version are dropped when a cache file is read.
             constexpr char     kSpecKeyPrefix[] = "hiptensor-rocke-jit/v2";
             constexpr char     kCacheMagic[8]   = {'H', 'T', 'K', 'C', 'A', 'C', 'H', '\0'};
             constexpr uint32_t kCacheFormat     = 1u;
@@ -656,6 +662,19 @@ namespace hiptensor
                                        char const*        api = "hiptensorReadKernelCacheFromFile");
 
             private:
+                // Drops the spec keys of another key scheme (kSpecKeyPrefix): nothing looks them
+                // up any more. The entry stays reachable by its identity.
+                static void dropForeignKeys(std::vector<std::string>& keys)
+                {
+                    std::string const prefix = std::string(kSpecKeyPrefix) + "|";
+                    keys.erase(std::remove_if(keys.begin(),
+                                              keys.end(),
+                                              [&](std::string const& k) {
+                                                  return k.compare(0, prefix.size(), prefix) != 0;
+                                              }),
+                               keys.end());
+                }
+
                 void alias(Entry& e, std::string const& key)
                 {
                     if(key.empty())
@@ -721,7 +740,11 @@ namespace hiptensor
                     std::scoped_lock lock(mMutex);
                     for(auto const& e : mEntries)
                     {
-                        if(e->isa != isa || (one != nullptr && e.get() != one))
+                        // An entry without a spec key is one read from a file of an earlier key
+                        // scheme and not used since (using it adds the key): no lookup reaches
+                        // it, so it is not written.
+                        if(e->isa != isa || (one != nullptr && e.get() != one)
+                           || e->specKeys.empty())
                         {
                             continue;
                         }
@@ -860,7 +883,8 @@ namespace hiptensor
                     entry->options      = e.strs();
                     entry->freshProcess = e.u8() != 0;
                     e.digest(entry->llvmSha);
-                    entry->specKeys    = e.strs();
+                    entry->specKeys = e.strs();
+                    dropForeignKeys(entry->specKeys);
                     auto       symbols = e.strs();
                     PackKernel stored_layout;
                     uint32_t   nargs = e.u32();
@@ -1020,36 +1044,6 @@ namespace hiptensor
                 s.block       = static_cast<int>(k.attr("block"));
                 char why[160] = {0};
                 return !bad && rocke_htaot_ew_check(&s, why, sizeof(why));
-            }
-
-            // The rows the JIT specializes: the rows of the API's operations (rocke_ew_rows.hpp)
-            // with the default block size, the math rows with 32-bit offsets only. The rows of
-            // mixed-type contractions and the 64-bit-offset math rows keep their pack kernels.
-            bool jitRow(rocke_htaot_ew_spec_t const& s)
-            {
-                auto const name = [](char const* dt) { return dt != nullptr ? dt : ""; };
-                if((s.math && s.idx64) || s.block != rocke_htaot_ew_spec_default().block)
-                {
-                    return false;
-                }
-                if(s.cplx)
-                {
-                    return s.arity == 1 ? hasEwRow(kEwRowsC1, EwRow2{name(s.a), name(s.d)})
-                                        : s.arity == 2
-                                              && hasEwRow(kEwRowsC2,
-                                                          EwRow3{name(s.a), name(s.c), name(s.d)});
-                }
-                switch(s.arity)
-                {
-                case 1:
-                    return hasEwRow(kEwRows1, EwRow2{name(s.a), name(s.d)});
-                case 2:
-                    return hasEwRow(kEwRows2, EwRow3{name(s.a), name(s.c), name(s.d)});
-                case 3:
-                    return hasEwRow(kEwRows3, EwRow4{name(s.a), name(s.b), name(s.c), name(s.d)});
-                default:
-                    return false;
-                }
             }
 
             // A name written by one of rocKE's name functions.
@@ -1337,11 +1331,9 @@ namespace hiptensor
                                  : "no input is read with vector loads (gathered or broadcast)";
                     return false;
                 }
-                // the JIT's kernel classes: the rows of jitRow; a math row only with every input
-                // a vector
-                char why[160] = {0};
-                if(!jitRow(cls.spec.base) || (cls.spec.base.math && cls.vec == 1)
-                   || !rocke_htaot_ew_jit_check(&cls.spec, why, sizeof(why)))
+                // the JIT's kernel classes (rocke_ew_rows.hpp): the rows of jitRow; a math row
+                // only with every input a vector
+                if(!jitClassAdmitted(cls.spec))
                 {
                     reason = "no JIT class " + cls.key;
                     return false;

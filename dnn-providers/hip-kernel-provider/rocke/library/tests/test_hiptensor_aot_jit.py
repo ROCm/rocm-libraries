@@ -51,8 +51,8 @@ def test_class_rolls(spec):
 
 def test_recipe_independent_of_build_history():
     """A class's recipe depends on the class only: kernels built before it in the same process
-    (the hipTensor pack builder rolls the classes in a process pool, in any order) change
-    nothing, so the recipe file is reproducible across builds."""
+    (a roller may roll the classes in a process pool, in any order) change nothing, so a file
+    of rolled recipes is reproducible across builds."""
     from kernels.common.hiptensor_aot.ew import build_ew
     from rocke.portable_ir.src.recipe_bundle import cbor_encode
 

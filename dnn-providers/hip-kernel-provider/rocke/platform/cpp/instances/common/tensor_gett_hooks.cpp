@@ -124,6 +124,26 @@ std::vector<std::pair<std::string, std::string>> trait_fields(const rocke_gemm_t
     f.push_back({"mn_pad", I(t.mn_pad_set ? t.mn_pad : 32)});
     f.push_back({"mn_chunk", I(t.mn_chunk)});
     f.push_back({"mn_ld_any", rb(t.mn_ld_any)});
+    f.push_back({"hb_sched", rb(t.hb_sched)});
+    f.push_back({"hb_rel_slot", I(t.hb_rel_slot)});
+    f.push_back({"hb_acq_slot", I(t.hb_acq_slot)});
+    f.push_back({"hb_read_every", I(t.hb_read_every)});
+    f.push_back({"hb_dtl_every", I(t.hb_dtl_every)});
+    f.push_back({"hb_acq_b_slot", I(t.hb_acq_b_slot)});
+    f.push_back({"hb_split_rel", rb(t.hb_split_rel)});
+    f.push_back({"hb_rel_gap", I(t.hb_rel_gap)});
+    f.push_back({"kloop_unroll", I(t.kloop_unroll)});
+    f.push_back({"dtl_addr_spread", rb(t.dtl_addr_spread)});
+    f.push_back({"hb_dtl_delay", I(t.hb_dtl_delay)});
+    f.push_back({"hb_skew", I(t.hb_skew)});
+    f.push_back({"hb_skew_dtl", I(t.hb_skew_dtl)});
+    f.push_back({"hb_tile_lgkm0", I(t.hb_tile_lgkm0)});
+    f.push_back({"das_anchor", rb(t.das_anchor)});
+    f.push_back({"das_late", rb(t.das_late)});
+    f.push_back({"mfma_serpentine", rb(t.mfma_serpentine)});
+    f.push_back({"mfma_order", I(t.mfma_order)});
+    f.push_back({"rve_pad", I(t.rve_pad)});
+    f.push_back({"dtl_tight_ragged_only", rb(t.dtl_tight_ragged_only)});
     return f;
 }
 
@@ -223,7 +243,9 @@ std::vector<std::string> mn_body_errors(const rocke_gemm_universal_spec_t& spec)
                                         "streamk",
                                         "lds_row_interleave",
                                         "rilv_vec_epilogue",
-                                        "rve_store_nt"};
+                                        "rve_store_nt",
+                                        "hb_sched",
+                                        "dtl_addr_spread"};
     auto got = trait_fields(tr);
     auto ref = trait_fields(rocke_gemm_universal_spec_default().trait);
     for(const char* f : fixed)
@@ -243,6 +265,51 @@ std::vector<std::string> mn_body_errors(const rocke_gemm_universal_spec_t& spec)
                            + " (dropped on the MN GETT body)");
     if(tr.persistent_ctas < 0)
         errs.push_back("persistent_ctas=" + std::to_string(tr.persistent_ctas) + " (>= 0)");
+    return errs;
+}
+
+rocke_gemm_trait_spec_t kc_body_trait(const rocke_gemm_trait_spec_t& trait)
+{
+    /* KC_BODY_DROPPED, and a cshuffle epilogue becomes the direct one (the hook
+     * writes D) */
+    rocke_gemm_trait_spec_t t = trait;
+    t.rve_store_nt = false;
+    t.pad_fast_tile = false;
+    t.cshuffle_no_alias = false;
+    if(strcmp(t.epilogue, "default") != 0)
+        t.epilogue = "default";
+    return t;
+}
+
+std::vector<std::string> kc_body_errors(const rocke_gemm_universal_spec_t& spec)
+{
+    const rocke_gemm_tile_spec_t& t = spec.tile;
+    const rocke_gemm_trait_spec_t& tr = spec.trait;
+    std::vector<std::string> errs;
+    if(strcmp(spec.data.layout, "RCR") != 0)
+        errs.push_back(std::string("layout ") + spec.data.layout
+                       + " (the K-contiguous body is RCR)");
+    if(!(t.warp_tile_m == 16 && t.warp_tile_n == 16))
+        errs.push_back("atoms must be 16x16 (the epilogue's lane layout)");
+    if(strcmp(tr.epilogue, "default") != 0)
+        errs.push_back(std::string("epilogue=") + rs(tr.epilogue)
+                       + " (the GETT epilogue replaces the direct one)");
+    /* KC_BODY_FIXED_FIELDS (sab_vec16, sab_store_nt and dtl_k_tail are
+     * Python-engine-only levers: at their defaults here) */
+    static const char* const fixed[]
+        = {"persistent", "split_k", "mfma_swap_ab", "streamk", "pad_k", "active_tile_skip"};
+    auto got = trait_fields(tr);
+    auto ref = trait_fields(rocke_gemm_universal_spec_default().trait);
+    for(const char* f : fixed)
+        if(field(got, f) != field(ref, f))
+            errs.push_back(std::string(f) + "=" + field(got, f)
+                           + " (the K-contiguous GETT body needs " + field(ref, f) + ")");
+    static const std::pair<const char*, const char*> dropped[]
+        = {{"rve_store_nt", "False"}, {"pad_fast_tile", "False"}, {"cshuffle_no_alias", "False"}};
+    for(const auto& d : dropped)
+        if(field(got, d.first) != d.second)
+            errs.push_back(std::string(d.first) + "=" + field(got, d.first)
+                           + " (dropped on the K-contiguous GETT body)");
     return errs;
 }
 
@@ -300,8 +367,24 @@ rocke_gett_hooks::rocke_gett_hooks(const rocke::gett::Plan& plan_,
     }
     if(kc)
     {
-        err_ = "GETT K-contiguous bodies (kc_tile, epilogue_rve) are implemented by the Python "
-               "engine only (no C++ mirror yet)";
+        std::vector<std::string> bad = rocke::gett::kc_body_errors(spec);
+        if(!bad.empty())
+        {
+            err_ = "GETT K-contiguous body: " + join(bad, "; ");
+            return;
+        }
+        if(k.epi_v16 || k.store_nt || k.epi_pair)
+        {
+            err_ = "epi_v16 / store_nt / epi_pair are MN-body knobs (the K-contiguous bodies use "
+                   "their own epilogue layout)";
+            return;
+        }
+        if(spec.trait.rilv_vec_epilogue && !plan.vec_dc8)
+        {
+            err_ = "the row-interleave vector epilogue stores 8 consecutive columns: D needs "
+                   "8-element runs on the column side";
+            return;
+        }
         return;
     }
     if(mn)
@@ -1135,6 +1218,111 @@ void rocke_gett_hooks::epilogue(rocke_ir_builder_t* b,
                 }
             }
         }
+    }
+}
+
+void rocke_gett_hooks::epilogue_rve(rocke_ir_builder_t* b,
+                                    const std::vector<V*>& accf,
+                                    V* row0,
+                                    V* col0,
+                                    int mfmas_m,
+                                    int mfmas_n,
+                                    int c_per_lane,
+                                    V* C)
+{
+    const rocke::gett::Plan& pl = plan;
+    if(mfmas_n != 8)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "the GETT row-interleave epilogue needs 8 columns per lane");
+        return;
+    }
+    V* c0 = ci(b, 0);
+    V* big = ci(b, rocke::gett::OOB);
+    int64_t db = d_bytes();
+    V* cdb = ci(b, i32_bits(db));
+    V* rs_d = rocke_b_buffer_rsrc(b, C, cdb);
+    V* rs_c = nullptr;
+    if(k.bilinear)
+    {
+        V* cdb2 = ci(b, i32_bits(db));
+        rs_c = rocke_b_buffer_rsrc(b, p["Cin"], cdb2);
+    }
+    bool bf = rocke_type_eq(dt, rocke_bf16());
+    bool rag_m = pl.M % bmn[0] != 0;
+    bool rag_n = pl.N % bmn[1] != 0;
+    DPart cpart = d_part(b, col0, pl.d_col_digits, rag_n ? pl.N : 0, big);
+    V* alpha = p["alpha"];
+    std::vector<std::pair<int, int>> rows;
+    for(int mi = 0; mi < mfmas_m; ++mi)
+        for(int v = 0; v < c_per_lane; ++v)
+            rows.push_back({mi, v});
+    auto off_of = [&](int mi, int v) {
+        V* cm = ci(b, v * mfmas_m + mi);
+        V* m = rocke_b_add(b, row0, cm);
+        DPart r = d_part(b, m, pl.d_row_digits, rag_m ? pl.M : 0, big);
+        return d_off(b, r, cpart);
+    };
+    using CL = std::pair<V*, std::vector<V*>>;
+    auto cload = [&](size_t i) {
+        V* off = off_of(rows[i].first, rows[i].second);
+        V* cv = rocke_b_buffer_load_vN(b, rs_c, off, c0, dt, 8);
+        std::vector<V*> xs;
+        for(int e = 0; e < 8; ++e)
+            xs.push_back(rocke_b_vec_extract(b, cv, e));
+        return CL{off, xs};
+    };
+    int cpf = k.bilinear ? k.c_prefetch : 0;
+    std::map<size_t, CL> pend;
+    for(size_t i = 0; i < std::min((size_t)cpf, rows.size()); ++i)
+        pend[i] = cload(i);
+    for(size_t i = 0; i < rows.size(); ++i)
+    {
+        int mi = rows[i].first, v = rows[i].second;
+        V* off = nullptr;
+        std::vector<V*> cl;
+        bool have_c = false;
+        if(k.bilinear)
+        {
+            if(cpf)
+            {
+                CL x = pend[i];
+                pend.erase(i);
+                if(i + cpf < rows.size())
+                    pend[i + cpf] = cload(i + cpf);
+                off = x.first;
+                cl = x.second;
+            }
+            else
+            {
+                CL x = cload(i);
+                off = x.first;
+                cl = x.second;
+            }
+            have_c = true;
+        }
+        else
+            off = off_of(mi, v);
+        std::vector<V*> xs;
+        for(int ni = 0; ni < 8; ++ni)
+        {
+            V* x = rocke_b_vec_extract(b, accf[mi * mfmas_n + ni], v);
+            xs.push_back(rocke_b_fmul(b, alpha, x));
+        }
+        if(have_c)
+            for(int e = 0; e < 8; ++e)
+            {
+                V* cf = rocke_b_cast_to_f32(b, cl[e]);
+                xs[e] = rocke_b_fma(b, p["beta"], cf, xs[e]);
+            }
+        std::vector<V*> hs;
+        for(V* x : xs)
+            hs.push_back(rocke_b_cast_f32_to(b, x, dt));
+        V* vec = rocke_b_vec_pack(b, hs.data(), 8, dt);
+        if(bf)
+            rocke_b_buffer_store_vN_bf16(b, rs_d, off, c0, vec, 4);
+        else
+            rocke_b_buffer_store_vN_f16(b, rs_d, off, c0, vec, 4);
     }
 }
 

@@ -509,9 +509,12 @@ void rocke_gemm_emit_store_swapped_acc(rocke_ir_builder_t* b,
 /* rilv_vec_epilogue (Python _emit_epilogue_default, the row-interleave branch):
  * atom (mi, ni), lane (q = lane / 16, c = lane % 16), slot v holds
  * C[wm + (4q + v) * mfmas_m + mi, wn + c * mfmas_n + ni]: 8 consecutive columns
- * per (mi, v) -> one 16-byte store each (f32 output: two). The Python-engine-
- * only forms (rve_pad, the prologue epi, the rich-epilogue / tensor GETT hooks)
- * are refused before emission. */
+ * per (mi, v) -> one 16-byte store each (f32 output: two). A tensor GETT hook
+ * (K-contiguous body) owns the store (epilogue_rve). rve_pad (ragged M / N): 1
+ * guards every store with branches (one per-lane column branch around the
+ * stores, a per-store row branch), 2 stores through one buffer resource over C
+ * whose out-of-range lanes get voffset = num_records. The Python-engine-only
+ * forms (the prologue epi, the rich-epilogue hook) are refused before emission. */
 static void gemm_emit_rilv_vec_epilogue(rocke_ir_builder_t* b,
                                         const rocke_gemm_universal_spec_t* spec,
                                         rocke_value_t* const* accs,
@@ -519,6 +522,7 @@ static void gemm_emit_rilv_vec_epilogue(rocke_ir_builder_t* b,
                                         rocke_value_t* block_m_off,
                                         rocke_value_t* block_warp_m_off,
                                         rocke_value_t* block_warp_n_off,
+                                        rocke_value_t* M,
                                         rocke_value_t* N,
                                         rocke_value_t* C,
                                         int c_per_lane,
@@ -528,13 +532,15 @@ static void gemm_emit_rilv_vec_epilogue(rocke_ir_builder_t* b,
                                         bool fused_is_mde)
 {
     const rocke_gemm_tile_spec_t* t = &spec->tile;
+    const rocke_gemm_trait_spec_t* tr = &spec->trait;
     int mfmas_m = rocke_gemm_tile_mfmas_per_warp_m(t);
     int mfmas_n = rocke_gemm_tile_mfmas_per_warp_n(t);
     bool f32 = rocke_type_eq(storage_dtype, rocke_f32());
-    bool wide_c = spec->trait.wide_addr;
+    bool wide_c = tr->wide_addr;
+    bool pad_m = tr->pad_m, pad_n = tr->pad_n;
     rocke_mem_opts_t nt = ROCKE_MEM_OPTS_INIT;
     nt.temporal_hint = ROCKE_TEMPORAL_STREAMING;
-    const rocke_mem_opts_t* st_opts = spec->trait.rve_store_nt ? &nt : NULL;
+    const rocke_mem_opts_t* st_opts = tr->rve_store_nt ? &nt : NULL;
     if(fused_epilogue != NULL && f32)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "prologue out_f32 does not support a fused epilogue");
@@ -544,7 +550,7 @@ static void gemm_emit_rilv_vec_epilogue(rocke_ir_builder_t* b,
     {
         /* wide_addr: C base = C + block_m_off * N * elem bytes (i64); the store
          * offsets are relative to the tile's first row */
-        if(spec->batched)
+        if(spec->batched || spec->_gett != NULL)
         {
             rocke_i_set_err(
                 b, ROCKE_ERR_VALUE, "wide_addr: no batched C / rich-epilogue or tensor GETT hook");
@@ -557,6 +563,29 @@ static void gemm_emit_rilv_vec_epilogue(rocke_ir_builder_t* b,
         rocke_value_t* by = rocke_b_mul(b, mn, eb);
         C = rocke_b_global_ptr_add(b, C, by);
     }
+    /* rve_pad */
+    bool rv_pad_m = tr->rve_pad == 1 && pad_m;
+    bool rv_pad_n = tr->rve_pad == 1 && pad_n;
+    bool rv_buf = tr->rve_pad == 2 && (pad_m || pad_n);
+    rocke_value_t* rv_nbytes = NULL;
+    rocke_value_t* rv_rsrc = NULL;
+    bool bf_st = rocke_type_eq(storage_dtype, rocke_bf16());
+    if(rv_buf && wide_c && !f32)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "wide_addr: rve_pad 2 (one buffer resource over C) has a u32 range");
+        return;
+    }
+    if(rv_buf)
+    {
+        /* branch-free bounds: one buffer resource over C (M * N * 2 bytes); an
+         * out-of-range store gets voffset = num_records and is dropped */
+        rocke_value_t* rv_mn = rocke_b_mul(b, M, N);
+        rocke_value_t* dbl = rocke_b_add_nuw(b, rv_mn, rv_mn);
+        rv_nbytes = rocke_b_to_sgpr_u32(b, dbl);
+        rv_rsrc = rocke_b_buffer_rsrc(b, C, rv_nbytes);
+    }
     rocke_value_t* c16 = rocke_b_const_i32(b, 16);
     rocke_value_t* q = rocke_b_div(b, lane, c16);
     rocke_value_t* cn = rocke_b_mod(b, lane, c16);
@@ -564,6 +593,30 @@ static void gemm_emit_rilv_vec_epilogue(rocke_ir_builder_t* b,
     rocke_value_t* row0 = rocke_b_add(b, block_warp_m_off, rq);
     rocke_value_t* cq = rocke_b_mul(b, cn, rocke_b_const_i32(b, mfmas_n));
     rocke_value_t* col0 = rocke_b_add(b, block_warp_n_off, cq);
+    if(spec->_gett != NULL)
+    {
+        /* a K-contiguous tensor GETT hook owns the whole tile store (Python: the
+         * _mono / _gett hook's epilogue_rve): lane (q, cn) holds rows
+         * row0 + v * mfmas_m + mi x columns col0 + ni as f32 accumulators */
+        std::vector<rocke_value_t*> accf;
+        for(int i = 0; i < mfmas_m * mfmas_n; ++i)
+            accf.push_back(rocke_gemm_acc_agpr_out(b, spec, accs[i]));
+        const_cast<struct rocke_gett_hooks*>(spec->_gett)
+            ->epilogue_rve(b, accf, row0, col0, mfmas_m, mfmas_n, c_per_lane, C);
+        return;
+    }
+    rocke_if_t colguard;
+    bool has_colguard = false;
+    if(rv_pad_n)
+    {
+        /* every store of this lane covers columns col0 + n0 .. + 7 with
+         * n0 < mfmas_n: all inside C iff col0 + mfmas_n <= N (N % 8 == 0 and
+         * mfmas_n == 8), else all outside -- one guard per lane */
+        rocke_value_t* lt = rocke_b_cmp_lt(b, col0, N);
+        colguard = rocke_b_scf_if(b, lt);
+        rocke_b_region_enter(b, colguard.then_region);
+        has_colguard = true;
+    }
     for(int mi = 0; mi < mfmas_m; ++mi)
     {
         rocke_value_t* hs[ROCKE_GEMM_MAX_ACCS];
@@ -592,6 +645,25 @@ static void gemm_emit_rilv_vec_epilogue(rocke_ir_builder_t* b,
                     rocke_value_t* c_off = rocke_b_add(b, rn, cc);
                     if(batch_off_c != NULL)
                         c_off = rocke_b_add(b, batch_off_c, c_off);
+                    /* bounds (pad_m / pad_n): N % 8 == 0 (launch contract), so the 8
+                     * columns are all inside or all outside C; the lane-wide column
+                     * guard (rve_pad 1) already covers the columns */
+                    rocke_value_t* f_ok = NULL;
+                    if(pad_m)
+                        f_ok = rocke_b_cmp_lt(b, c_m, M);
+                    if(pad_n && !has_colguard)
+                    {
+                        rocke_value_t* cn1 = rocke_b_const_i32(b, n0);
+                        rocke_value_t* ccol = rocke_b_add(b, col0, cn1);
+                        rocke_value_t* okn = rocke_b_cmp_lt(b, ccol, N);
+                        f_ok = f_ok == NULL ? okn : rocke_b_land(b, f_ok, okn);
+                    }
+                    rocke_if_t f_if;
+                    if(f_ok != NULL)
+                    {
+                        f_if = rocke_b_scf_if(b, f_ok);
+                        rocke_b_region_enter(b, f_if.then_region);
+                    }
                     for(int h4 = 0; h4 < 8; h4 += 4)
                     {
                         rocke_value_t* xs[4];
@@ -606,6 +678,8 @@ static void gemm_emit_rilv_vec_epilogue(rocke_ir_builder_t* b,
                         }
                         rocke_b_global_store_vN_ex(b, C, o4, v4, 4, 16, st_opts);
                     }
+                    if(f_ok != NULL)
+                        rocke_b_region_leave(b);
                     continue;
                 }
                 rocke_value_t* xs[8];
@@ -621,14 +695,62 @@ static void gemm_emit_rilv_vec_epilogue(rocke_ir_builder_t* b,
                     c_off = rocke_b_add(b, batch_off_c, c_off);
                 if(fused_epilogue != NULL)
                 {
-                    /* the op chain on the 8 consecutive columns */
-                    vec = rocke_gemm_fe_apply_vec(
-                        b, fused_epilogue, fused_is_mde, vec, c_m, c_n, 8);
+                    /* the op chain on the 8 consecutive columns; a row / column past
+                     * C (dropped store) reads the operand tensors (bias, residual) at
+                     * row / column 0 instead of past their end */
+                    rocke_value_t* fm = c_m;
+                    rocke_value_t* fn = c_n;
+                    if(pad_m)
+                    {
+                        rocke_value_t* lt = rocke_b_cmp_lt(b, c_m, M);
+                        rocke_value_t* z = rocke_b_const_i32(b, 0);
+                        fm = rocke_b_select(b, lt, c_m, z);
+                    }
+                    if(pad_n)
+                    {
+                        rocke_value_t* lt = rocke_b_cmp_lt(b, c_n, N);
+                        rocke_value_t* z = rocke_b_const_i32(b, 0);
+                        fn = rocke_b_select(b, lt, c_n, z);
+                    }
+                    vec = rocke_gemm_fe_apply_vec(b, fused_epilogue, fused_is_mde, vec, fm, fn, 8);
                 }
-                rocke_b_global_store_vN_ex(b, C, c_off, vec, 8, 16, st_opts);
+                /* _rve_guarded_store(c_m, c_n, c_off, vec) */
+                if(rv_buf)
+                {
+                    rocke_value_t* ok = NULL;
+                    if(pad_m)
+                        ok = rocke_b_cmp_lt(b, c_m, M);
+                    if(pad_n)
+                    {
+                        rocke_value_t* okn = rocke_b_cmp_lt(b, c_n, N);
+                        ok = ok == NULL ? okn : rocke_b_land(b, ok, okn);
+                    }
+                    rocke_value_t* dbl = rocke_b_add_nuw(b, c_off, c_off);
+                    rocke_value_t* voff = rocke_b_select(b, ok, dbl, rv_nbytes);
+                    rocke_value_t* z = rocke_b_const_i32(b, 0);
+                    if(bf_st)
+                        rocke_b_buffer_store_vN_bf16(b, rv_rsrc, voff, z, vec, 4);
+                    else
+                        rocke_b_buffer_store_vN_f16(b, rv_rsrc, voff, z, vec, 4);
+                    continue;
+                }
+                if(!rv_pad_m)
+                {
+                    rocke_b_global_store_vN_ex(b, C, c_off, vec, 8, 16, st_opts);
+                    continue;
+                }
+                {
+                    rocke_value_t* lt = rocke_b_cmp_lt(b, c_m, M);
+                    rocke_if_t iff = rocke_b_scf_if(b, lt);
+                    rocke_b_region_enter(b, iff.then_region);
+                    rocke_b_global_store_vN_ex(b, C, c_off, vec, 8, 16, st_opts);
+                    rocke_b_region_leave(b);
+                }
             }
         }
     }
+    if(has_colguard)
+        rocke_b_region_leave(b);
 }
 
 void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
@@ -777,6 +899,7 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
                                         block_m_off,
                                         block_warp_m_off,
                                         block_warp_n_off,
+                                        M,
                                         N,
                                         C,
                                         c_per_lane,
@@ -1331,15 +1454,16 @@ void rocke_gemm_ep_default(rocke_gemm_build_ctx_t* ctx,
     {
         /* the tensor GETT hook owns the epilogue (alpha / beta, permuted D) */
         std::vector<rocke_value_t*> v(vals, vals + num_vals);
-        ctx->gett->epilogue(b,
-                            v,
-                            bm,
-                            bn,
-                            ctx->C,
-                            ctx->warp_m_idx,
-                            ctx->warp_n_idx,
-                            ctx->lane,
-                            [b, spec](rocke_value_t* a) { return rocke_gemm_acc_agpr_out(b, spec, a); });
+        ctx->gett->epilogue(
+            b,
+            v,
+            bm,
+            bn,
+            ctx->C,
+            ctx->warp_m_idx,
+            ctx->warp_n_idx,
+            ctx->lane,
+            [b, spec](rocke_value_t* a) { return rocke_gemm_acc_agpr_out(b, spec, a); });
         return;
     }
     if(!spec->trait.pad_fast_tile)

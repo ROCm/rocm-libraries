@@ -72,6 +72,22 @@ add_hiptensor_unit_test(backend_seam_test
     )
 # The rocKE backend's kernels through the public API (HIPTENSOR_BACKEND=rocke, no fallback).
 if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
+    # The C++ pack builder lists the kernels, attributes, routes and JIT classes rocKE's Python
+    # reference lists (the manifests the rocKE tree keeps in library/builders/hiptensor/
+    # manifests). No GPU, no compile; a build from prebuilt packs has no builder to check.
+    set(_ROCKE_MANIFESTS "${HIPTENSOR_ROCKE_SOURCE_DIR}/library/builders/hiptensor/manifests")
+    if(TARGET hiptensor_rocke_pack_builder AND EXISTS "${_ROCKE_MANIFESTS}")
+        set(_ROCKE_MANIFEST_ARCHS)
+        foreach(target IN LISTS HIPTENSOR_ROCKE_SUPPORTED_TARGETS)
+            list(APPEND _ROCKE_MANIFEST_ARCHS --arch ${target})
+        endforeach()
+        add_test(NAME rocke_pack_manifest_test
+                 COMMAND hiptensor_rocke_pack_builder --list ${_ROCKE_MANIFEST_ARCHS}
+                         --check-manifests "${_ROCKE_MANIFESTS}")
+    elseif(TARGET hiptensor_rocke_pack_builder)
+        message(STATUS "rocKE pack manifests: ${_ROCKE_MANIFESTS} not found; "
+                       "rocke_pack_manifest_test not added")
+    endif()
     add_hiptensor_unit_test(rocke_backend_test
         ${HIPTENSOR_COMMON_TEST_SOURCES}
         ${CMAKE_CURRENT_SOURCE_DIR}/rocke_backend_test.cpp

@@ -199,6 +199,10 @@ typedef struct rocke_gemm_build_ctx
     int mfmas_m; /* t.mfmas_per_warp_m                        */
     int mfmas_n; /* t.mfmas_per_warp_n                        */
     int k_atoms; /* t.k_atoms_per_tile_k                      */
+    /* _mo_perm: the MFMA issue order of a K atom (mfma_serpentine = order 1,
+     * else mfma_order), slot -> accumulator index, for even / odd K atoms;
+     * the identity for the default order (_mo_ilv = mo_perm[0]) */
+    int mo_perm[2][ROCKE_GEMM_MAX_ACCS];
 
     /* ---- accumulators -- */
     rocke_value_t* acc_init; /* _emit_zero_acc_op(b, op)          */
@@ -312,6 +316,13 @@ void rocke_gemm_lds_swizzle_params(
  * kernel is only correct while each operand is at most this many bytes (the
  * dispatcher enforces it per request). */
 #define ROCKE_GEMM_DTL_BUFFER_NUM_RECORDS 0x7FFF0000
+
+/* hb_sched helpers (gemm_universal.py _hb_k_atoms / hb_last_read_slot /
+ * hb_slots) and mfma_order_perm (`even` / `odd`: mfmas_m * mfmas_n entries) */
+int rocke_gemm_hb_k_atoms(const rocke_gemm_universal_spec_t* spec);
+int rocke_gemm_hb_last_read_slot(const rocke_gemm_universal_spec_t* spec);
+void rocke_gemm_hb_slots(const rocke_gemm_universal_spec_t* spec, int* rel, int* acq);
+void rocke_gemm_mfma_order_perm(int mo, int mfmas_m, int mfmas_n, int* even, int* odd);
 
 /* _atom_frag_lengths(op) -> (a,b,c)_frag_len. Pure; fills out-params. */
 void rocke_gemm_atom_frag_lengths(const rocke_mmaop_t* op, int* a_frag, int* b_frag, int* c_frag);

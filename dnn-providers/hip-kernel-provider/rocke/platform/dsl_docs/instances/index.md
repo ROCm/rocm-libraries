@@ -41,9 +41,12 @@ cost model). Autotune mode: `plan_tensor_gett_candidates` lists the candidate ro
 (the selector's best both-MN-contiguous and RCR bodies plus one-step body mutations) and
 `tune_tensor_gett` measures them with the search engine; measured winners ship in the
 tuned route table `tensor_gett_tuned.json`, which `plan_tensor_gett` consults first.
-gfx950. The C++ engine mirrors the ring and MN-layout bodies and the tuned
-table's single-launch routes (`cpp/instances/common/tensor_gett_*.cpp`); the
-K-contiguous bodies, the pack hybrid and the tuning flow are Python engine only.
+The AOT route table `tensor_gett_aot.json` freezes the product route of fixed problems
+for ahead-of-time kernel packs (`aot_route_plan`; `tools/gen_tensor_gett_aot.py`).
+gfx950. The C++ engine mirrors the ring, MN-layout and K-contiguous bodies, the pack
+kernel and both tables' launch programs (`rocke::gett::table_plan`: single launch, pack
+hybrid, K-contiguous route; `cpp/instances/common/tensor_gett_*.cpp`); the cost-model
+routes and the tuning flow are Python engine only.
 
 Fused operand prologues for the universal GEMM (f32 operands with bf16 split
 emulation, unary opA / opB, interleaved complex-f32 B):

@@ -12,6 +12,7 @@
 
 #include "rocke/arena.h"
 #include "rocke/error_boundary.hpp"
+#include "rocke/instance_gemm_internal.h" /* ROCKE_GEMM_DTL_BUFFER_NUM_RECORDS */
 #include "rocke/ir_internal.h"
 #include "rocke/json_dom.h"
 
@@ -212,6 +213,26 @@ std::string trait_json(const rocke_gemm_trait_spec_t& t)
     v["mn_pad"] = I(t.mn_pad_set ? t.mn_pad : 32);
     v["mn_chunk"] = I(t.mn_chunk);
     v["mn_ld_any"] = jbool(t.mn_ld_any);
+    v["hb_sched"] = jbool(t.hb_sched);
+    v["hb_rel_slot"] = I(t.hb_rel_slot);
+    v["hb_acq_slot"] = I(t.hb_acq_slot);
+    v["hb_read_every"] = I(t.hb_read_every);
+    v["hb_dtl_every"] = I(t.hb_dtl_every);
+    v["hb_acq_b_slot"] = I(t.hb_acq_b_slot);
+    v["hb_split_rel"] = jbool(t.hb_split_rel);
+    v["hb_rel_gap"] = I(t.hb_rel_gap);
+    v["kloop_unroll"] = I(t.kloop_unroll);
+    v["dtl_addr_spread"] = jbool(t.dtl_addr_spread);
+    v["hb_dtl_delay"] = I(t.hb_dtl_delay);
+    v["hb_skew"] = I(t.hb_skew);
+    v["hb_skew_dtl"] = I(t.hb_skew_dtl);
+    v["hb_tile_lgkm0"] = I(t.hb_tile_lgkm0);
+    v["das_anchor"] = jbool(t.das_anchor);
+    v["das_late"] = jbool(t.das_late);
+    v["mfma_serpentine"] = jbool(t.mfma_serpentine);
+    v["mfma_order"] = I(t.mfma_order);
+    v["rve_pad"] = I(t.rve_pad);
+    v["dtl_tight_ragged_only"] = jbool(t.dtl_tight_ragged_only);
     std::vector<std::pair<std::string, std::string>> m(v.begin(), v.end());
     return jobj(m, ", ", ": ");
 }
@@ -384,6 +405,21 @@ std::string sha256_hex(const std::string& s)
     return hex_words(h, 8);
 }
 
+std::string json_str(const std::string& s)
+{
+    return jstr(s);
+}
+
+std::string json_modes(const std::vector<std::string>& v)
+{
+    return jmodes(v, ", ");
+}
+
+std::string json_modemap(const ModeMap& m)
+{
+    return jmodemap(m, ", ");
+}
+
 /* ------------------------------------------------------------ body specs */
 
 rocke_gemm_trait_spec_t mn_body_trait(const rocke_gemm_trait_spec_t& trait)
@@ -446,6 +482,24 @@ bool TensorGettSpec::plan(Plan* out, std::string* why) const
         sb = as_map(strides_b);
     if(has_strides_d)
         sd = as_map(strides_d);
+    if(has_kc_tile)
+    {
+        /* tr = kc_trait or TraitSpec(): the vector epilogue's GEMM B owns D's
+         * fastest mode */
+        bool rilv = has_kc_trait && kc_trait.rilv_vec_epilogue;
+        return plan_gett(modes_a,
+                         modes_b,
+                         modes_d,
+                         as_map(extents),
+                         has_strides_a ? &sa : nullptr,
+                         has_strides_b ? &sb : nullptr,
+                         has_strides_d ? &sd : nullptr,
+                         kc_tile.tile_k,
+                         true,
+                         rilv ? 'B' : 'A',
+                         out,
+                         why);
+    }
     return plan_gett(modes_a,
                      modes_b,
                      modes_d,
@@ -483,6 +537,10 @@ std::string TensorGettSpec::json_key() const
         m.push_back({"mn_tile", tile_json(mn_tile)});
     if(has_mn_trait)
         m.push_back({"mn_trait", trait_json(mn_trait)});
+    if(has_kc_tile)
+        m.push_back({"kc_tile", tile_json(kc_tile)});
+    if(has_kc_trait)
+        m.push_back({"kc_trait", trait_json(kc_trait)});
     return jobj(m, ", ", ": ");
 }
 
@@ -495,7 +553,22 @@ rocke_gemm_universal_spec_t TensorGettSpec::body(std::string* name_store) const
 {
     *name_store = kernel_name();
     rocke_gemm_universal_spec_t s;
-    if(has_mn_tile)
+    if(has_kc_tile)
+    {
+        s = rocke_gemm_universal_spec_default();
+        s.tile = kc_tile;
+        s.trait
+            = kc_body_trait(has_kc_trait ? kc_trait : rocke_gemm_universal_spec_default().trait);
+        std::string dt = gemm_dt(dtype);
+        const char* d = dt == "bf16" ? "bf16" : "fp16";
+        s.data.dtype_a = d;
+        s.data.dtype_b = d;
+        s.data.dtype_c = d;
+        s.data.layout = "RCR";
+        s.block_size = 0;
+        rocke_gemm_universal_spec_finalize(&s);
+    }
+    else if(has_mn_tile)
     {
         s = rocke_gemm_universal_spec_default();
         s.tile = mn_tile;
@@ -543,7 +616,24 @@ bool is_valid_spec(const TensorGettSpec& spec, const char* arch, std::string* wh
         return set_why(why, "knobs.acc_pin " + std::to_string(k.acc_pin) + " not in (0, 1, 2)");
     if(!(0 <= k.c_prefetch && k.c_prefetch <= 8))
         return set_why(why, "knobs.c_prefetch " + std::to_string(k.c_prefetch) + " not in 0..8");
-    if(spec.has_mn_tile)
+    if(spec.has_kc_tile)
+    {
+        if(spec.has_mn_tile || spec.has_mn_trait)
+            return set_why(why, "kc_tile excludes mn_tile");
+        const std::pair<const char*, int> legacy[]
+            = {{"tile_k", spec.tile_k == 32},
+               {"dtl_stages", spec.dtl_stages == 3},
+               {"persistent_ctas", spec.persistent_ctas == 0},
+               {"chiplet_wgm", spec.chiplet_wgm == 8},
+               {"chiplet_chunk_size", spec.chiplet_chunk_size == 64}};
+        for(const auto& f : legacy)
+            if(!f.second)
+                return set_why(why,
+                               std::string(f.first) + " is a ring-body field; set it on kc_trait");
+    }
+    else if(spec.has_kc_trait)
+        return set_why(why, "kc_trait without kc_tile");
+    else if(spec.has_mn_tile)
     {
         if(spec.mn_tile.tile_k != spec.tile_k)
             return set_why(why,
@@ -567,6 +657,13 @@ bool is_valid_spec(const TensorGettSpec& spec, const char* arch, std::string* wh
     for(int o = 0; o < 2; ++o)
         if(plan.ops[o].nbytes > MAX_TENSOR_BYTES)
             return set_why(why, "operand " + plan.ops[o].name + " spans more than 2 GiB");
+    if(plan.kc)
+    {
+        std::string bname;
+        std::string lw = gemm_launch_shape_error(spec.body(&bname), plan.M, plan.N, plan.K);
+        if(!lw.empty())
+            return set_why(why, "K-contiguous body: " + lw);
+    }
     int64_t span = 0;
     for(const auto& m : plan.modes_d)
         span += (plan.ext.at(m) - 1) * plan.strides_d.at(m);
@@ -618,7 +715,7 @@ void tensor_gett_grid(const TensorGettSpec& spec, int grid[3])
     std::string why;
     spec.plan(&plan, &why);
     grid[1] = grid[2] = 1;
-    if(spec.has_mn_tile)
+    if(spec.has_mn_tile || spec.has_kc_tile)
     {
         std::string name;
         rocke_gemm_universal_spec_t body = spec.body(&name);
@@ -656,6 +753,137 @@ std::pair<std::string, std::string> launch_operands(const TensorGettSpec& spec)
     std::string why;
     spec.plan(&plan, &why);
     return {plan.ops[0].name, plan.ops[1].name};
+}
+
+std::pair<std::vector<std::string>, std::vector<std::string>>
+    kc_operand_modes(const TensorGettSpec& spec)
+{
+    Plan plan;
+    std::string why;
+    spec.plan(&plan, &why);
+    std::vector<std::string> k_outer(plan.k_order.rbegin(), plan.k_order.rend());
+    std::vector<std::string> a = plan.ops[0].rows_order, b = plan.ops[1].rows_order;
+    a.insert(a.end(), k_outer.begin(), k_outer.end());
+    b.insert(b.end(), k_outer.begin(), k_outer.end());
+    return {a, b};
+}
+
+/* ------------------------------------------------------------ launch rules */
+
+std::string gemm_launch_shape_error(const rocke_gemm_universal_spec_t& spec,
+                                    int64_t M,
+                                    int64_t N,
+                                    int64_t K)
+{
+    const rocke_gemm_tile_spec_t& t = spec.tile;
+    const rocke_gemm_trait_spec_t& tr = spec.trait;
+    if(spec.data.layout == nullptr || strcmp(spec.data.layout, "RCR") != 0
+       || spec._prologue != nullptr)
+        return "launch_shape_error: only RCR bodies without an operand prologue are mirrored";
+    struct Dim
+    {
+        const char* name;
+        const char* lower;
+        int64_t dim;
+        int tile;
+        bool padded;
+    };
+    const Dim dims[] = {{"M", "m", M, t.tile_m, tr.pad_m},
+                        {"N", "n", N, t.tile_n, tr.pad_n},
+                        {"K", "k", K, t.tile_k, tr.pad_k}};
+    for(const auto& d : dims)
+        if(!d.padded && d.dim % d.tile)
+            return std::string(d.name) + "=" + std::to_string(d.dim) + " is not a multiple of tile_"
+                   + d.lower + "=" + std::to_string(d.tile) + " and pad_" + d.lower
+                   + " is off (the body has no bounds checks on " + d.name + ": wrong results)";
+    /* dtl_k_tail is a Python-engine-only lever (always off here) */
+    if(tr.direct_to_lds && K % t.tile_k)
+        return "direct_to_lds: K=" + std::to_string(K)
+               + " is not a multiple of tile_k=" + std::to_string(t.tile_k)
+               + "; the DRAM->LDS loads do not mask the K tail (wrong results even with pad_k; "
+                 "needs dtl_k_tail)";
+    /* no prologue: the operand rows are M and N */
+    int64_t ra = M, rb = N;
+    if(tr.dtl_tight_rsrc && !tr.wide_addr && std::max(ra, rb) * K * 2 >= ((int64_t)1 << 31))
+        return "dtl_tight_rsrc: operand bytes max(M, N) * K * 2 = "
+               + std::to_string(std::max(ra, rb) * K * 2) + " do not fit the i32 buffer range";
+    if(tr.rve_pad && tr.pad_n && N % 8)
+        return "rve_pad: N=" + std::to_string(N)
+               + " is not a multiple of 8 (each lane stores 8 consecutive 16-bit columns with one "
+                 "16-byte store)";
+    /* no prologue: the vector epilogue stores 16-bit C */
+    if(tr.rve_pad == 2 && M * N * 2 >= ((int64_t)1 << 32))
+        return "rve_pad 2: C bytes M * N * 2 = " + std::to_string(M * N * 2)
+               + " do not fit the u32 buffer range";
+    if(tr.split_k > 1)
+    {
+        /* split_k_aligned is a Python-engine-only lever (always off here) */
+        if(K % tr.split_k)
+            return "K=" + std::to_string(K)
+                   + " is not a multiple of split_k=" + std::to_string(tr.split_k);
+        if(K / tr.split_k % t.tile_k)
+            return "K=" + std::to_string(K) + " is not a multiple of split_k * tile_k = "
+                   + std::to_string((int64_t)tr.split_k * t.tile_k)
+                   + " (each K-slice must be whole tiles"
+                   + (tr.pad_k ? "; pad_k masks at K, not at the slice end: use split_k_aligned"
+                               : "")
+                   + ")";
+    }
+    /* _g1_launch_error */
+    bool m_rag = M % t.tile_m != 0;
+    bool n_rag = N % t.tile_n != 0;
+    if(m_rag || n_rag)
+    {
+        if(tr.direct_to_lds)
+        {
+            if(!tr.dtl_tight_rsrc)
+                return std::string("direct_to_lds with ragged ") + (m_rag ? "M" : "N")
+                       + " needs dtl_tight_rsrc (the unbounded DMA reads rows past the operand)";
+            if(tr.dtl_tight_ragged_only && ((m_rag && !tr.pad_m) || (n_rag && !tr.pad_n)))
+                return "dtl_tight_ragged_only bounds only the padded operand";
+        }
+        else
+            /* pad_row_clamp / kc_row_guard / vgpr_prefetch are Python-engine-only levers */
+            return std::string("ragged ") + (m_rag ? "M" : "N")
+                   + " on the global-load body needs pad_row_clamp (the loads of the rows past "
+                     "the operand read past its allocation)";
+    }
+    if(n_rag && tr.preshuffle_b)
+        return "preshuffle_b needs N % tile_n == 0 (host-padded B)";
+    if(tr.direct_to_lds && K % t.tile_k)
+        return "direct_to_lds: K=" + std::to_string(K) + " % tile_k=" + std::to_string(t.tile_k)
+               + " != 0 needs dtl_k_tail (the DMA has no K mask: the last tile reads the next row)";
+    if(K < 1 || M < 1 || N < 1)
+        return "empty GEMM " + std::to_string(M) + "x" + std::to_string(N) + "x"
+               + std::to_string(K);
+    if(!tr.persistent_ctas && (M + t.tile_m - 1) / t.tile_m > 65535)
+        return std::to_string((M + t.tile_m - 1) / t.tile_m)
+               + " row tiles exceed the grid.y limit 65535";
+    if(tr.split_k > 65535)
+        return "split_k " + std::to_string(tr.split_k) + " exceeds the grid.z limit 65535";
+    if(tr.wide_addr)
+    {
+        int64_t span_b = t.tile_n;
+        const std::pair<const char*, int64_t> tiles[]
+            = {{"A", (int64_t)t.tile_m * K * 2}, {"B", span_b * K * 2}};
+        for(const auto& x : tiles)
+            if(x.second > ROCKE_GEMM_DTL_BUFFER_NUM_RECORDS)
+                return std::string("wide_addr: an operand ") + x.first + " tile spans "
+                       + std::to_string(x.second) + " bytes, past the DTL buffer range 0x7fff0000";
+        if((int64_t)t.tile_m * N > ((int64_t)1 << 31))
+            return "wide_addr: a C tile spans " + std::to_string((int64_t)t.tile_m * N)
+                   + " elements; the tile-relative i32 store offsets cover at most 2**31";
+        return "";
+    }
+    const std::pair<const char*, int64_t> elems[] = {{"A", ra * K}, {"B", rb * K}, {"C", M * N}};
+    for(const auto& x : elems)
+        if(x.second > ((int64_t)1 << 31))
+            return std::string("operand ") + x.first + " has " + std::to_string(x.second)
+                   + " elements; the universal body's i32 element offsets cover at most 2**31";
+    if(tr.direct_to_lds && std::max(ra, rb) * K * 2 > ROCKE_GEMM_DTL_BUFFER_NUM_RECORDS)
+        return "direct_to_lds: an operand of " + std::to_string(std::max(ra, rb) * K * 2)
+               + " bytes exceeds the DTL buffer range 0x7fff0000";
+    return "";
 }
 
 /* ------------------------------------------------------------ parse_config */
@@ -923,6 +1151,46 @@ bool set_field(rocke_gemm_trait_spec_t* t, const std::string& k, const PVal& v, 
         return I(&t->mn_chunk);
     if(k == "mn_ld_any")
         return B(&t->mn_ld_any);
+    if(k == "hb_sched")
+        return B(&t->hb_sched);
+    if(k == "hb_rel_slot")
+        return I(&t->hb_rel_slot);
+    if(k == "hb_acq_slot")
+        return I(&t->hb_acq_slot);
+    if(k == "hb_read_every")
+        return I(&t->hb_read_every);
+    if(k == "hb_dtl_every")
+        return I(&t->hb_dtl_every);
+    if(k == "hb_acq_b_slot")
+        return I(&t->hb_acq_b_slot);
+    if(k == "hb_split_rel")
+        return B(&t->hb_split_rel);
+    if(k == "hb_rel_gap")
+        return I(&t->hb_rel_gap);
+    if(k == "kloop_unroll")
+        return I(&t->kloop_unroll);
+    if(k == "dtl_addr_spread")
+        return B(&t->dtl_addr_spread);
+    if(k == "hb_dtl_delay")
+        return I(&t->hb_dtl_delay);
+    if(k == "hb_skew")
+        return I(&t->hb_skew);
+    if(k == "hb_skew_dtl")
+        return I(&t->hb_skew_dtl);
+    if(k == "hb_tile_lgkm0")
+        return I(&t->hb_tile_lgkm0);
+    if(k == "das_anchor")
+        return B(&t->das_anchor);
+    if(k == "das_late")
+        return B(&t->das_late);
+    if(k == "mfma_serpentine")
+        return B(&t->mfma_serpentine);
+    if(k == "mfma_order")
+        return I(&t->mfma_order);
+    if(k == "rve_pad")
+        return I(&t->rve_pad);
+    if(k == "dtl_tight_ragged_only")
+        return B(&t->dtl_tight_ragged_only);
     for(const auto& f : k_trait_fields)
         if(k == f.first)
             return set_why(why,
@@ -1140,26 +1408,27 @@ std::string route_key(const TensorGettSpec& p)
     return sha256_hex(body).substr(0, 20);
 }
 
-bool tuned_plan(const TunedEntry& entry,
-                const std::string& arch,
-                TensorGettSpec* out,
-                std::string* why)
+namespace
 {
-    TensorGettSpec p = tuned_problem(entry);
-    if(entry.route != "mn")
-        return set_why(
-            why,
-            "tuned GETT route '" + entry.route
-                + "': only the 'mn' route is mirrored by the C++ engine (the K-contiguous "
-                  "'kc' bodies are Python-engine only)");
-    if(!(p.dtype == "fp16" || p.dtype == "bf16"))
-        return set_why(why, "tuned GETT entry dtype '" + p.dtype + "'");
-    rocke_gemm_tile_spec_t tile;
-    rocke_gemm_trait_spec_t trait;
-    if(!parse_config(entry.body, &tile, &trait, why))
-        return false;
-    /* _spec_mn(req, [(tile, trait)]) */
+
+/* the request dtype (TensorGettRequest.dtype) */
+std::string req_dtype(const TensorGettSpec& p)
+{
+    return p.dtype == "f16" || p.dtype == "fp16" ? "fp16" : p.dtype;
+}
+
+/* _spec_mn(req, [(tile, trait)]): the MN-layout GETT spec on one explicit
+ * body (the 16-byte permlane epilogue when it applies); false when neither
+ * form is valid (why: the plain form's reason) */
+bool spec_mn_explicit(const TensorGettSpec& p,
+                      const rocke_gemm_tile_spec_t& tile,
+                      const rocke_gemm_trait_spec_t& trait,
+                      const std::string& arch,
+                      TensorGettSpec* out,
+                      std::string* why)
+{
     TensorGettSpec sp = p;
+    sp.dtype = req_dtype(p);
     sp.knobs.bilinear = p.knobs.bilinear;
     sp.knobs.c_prefetch = p.knobs.bilinear ? 2 : 0; /* TENSOR_GETT_MN_C_PREFETCH */
     sp.tile_k = tile.tile_k;
@@ -1173,17 +1442,360 @@ bool tuned_plan(const TunedEntry& entry,
     sp.mn_trait = trait;
     TensorGettSpec v16 = sp;
     v16.knobs.epi_v16 = true; /* TENSOR_GETT_MN_EPI_V16 */
-    std::string w1, w2;
+    std::string w1;
     if(is_valid_spec(v16, arch.c_str(), &w1))
+    {
         *out = v16;
-    else if(is_valid_spec(sp, arch.c_str(), &w2))
+        return true;
+    }
+    if(is_valid_spec(sp, arch.c_str(), why))
+    {
         *out = sp;
-    else
+        return true;
+    }
+    return false;
+}
+
+bool in(const std::vector<std::string>& v, const std::string& m)
+{
+    return std::find(v.begin(), v.end(), m) != v.end();
+}
+
+/* the K modes: in both operands, not in D */
+std::vector<std::string> k_modes_of(const TensorGettSpec& p)
+{
+    std::vector<std::string> k;
+    for(const auto& m : p.modes_a)
+        if(in(p.modes_b, m) && !in(p.modes_d, m))
+            k.push_back(m);
+    return k;
+}
+
+/* _pack_order(modes, k_modes, ext) with TENSOR_GETT_PACK_ORDER "local": only
+ * the K modes that split the innermost free modes move */
+std::vector<std::string> pack_order(const std::vector<std::string>& modes,
+                                    const std::vector<std::string>& k_modes,
+                                    const std::map<std::string, int64_t>& ext)
+{
+    std::vector<std::string> full;
+    for(const auto& m : modes)
+        if(in(k_modes, m))
+            full.push_back(m);
+    for(const auto& m : modes)
+        if(!in(k_modes, m))
+            full.push_back(m);
+    int64_t prod = 1;
+    int first = -1;
+    for(int i = (int)modes.size() - 1; i >= 0; --i)
+    {
+        if(in(k_modes, modes[i]))
+            continue;
+        prod *= ext.at(modes[i]);
+        first = i;
+        if(prod % 8 == 0)
+            break;
+    }
+    if(first < 0 || prod % 8 != 0)
+        return full;
+    std::vector<std::string> out(modes.begin(), modes.begin() + first);
+    std::vector<std::string> inner(modes.begin() + first, modes.end());
+    for(const auto& m : inner)
+        if(in(k_modes, m))
+            out.push_back(m);
+    for(const auto& m : inner)
+        if(!in(k_modes, m))
+            out.push_back(m);
+    return out;
+}
+
+/* _pack_step(nm, ps, arch) with TENSOR_GETT_PACK_KERNEL "tensor_pack" */
+PackStep pack_step(const std::string& nm, const TensorPackSpec& ps)
+{
+    PackStep st;
+    st.operand = nm;
+    st.spec = ps;
+    tensor_pack_grid(ps, st.grid);
+    st.block = tensor_pack_block(ps);
+    st.workspace_bytes = 2 * ps.numel();
+    return st;
+}
+
+const std::vector<std::string>& op_modes(const TensorGettSpec& p, const std::string& nm)
+{
+    return nm == "A" ? p.modes_a : p.modes_b;
+}
+
+/* the operand's stride map; false when the operand is packed (no strides) */
+bool op_strides(const TensorGettSpec& p, const std::string& nm, std::map<std::string, int64_t>* st)
+{
+    bool has = nm == "A" ? p.has_strides_a : p.has_strides_b;
+    if(has)
+        *st = as_map(nm == "A" ? p.strides_a : p.strides_b);
+    return has;
+}
+
+/* the pack step of user operand nm into the row-major order `order` */
+bool make_pack(const TensorGettSpec& p,
+               const std::string& nm,
+               const std::vector<std::string>& order,
+               const std::string& arch,
+               PackStep* out,
+               std::string* why)
+{
+    std::map<std::string, int64_t> ext = as_map(p.extents);
+    const std::vector<std::string>& modes = op_modes(p, nm);
+    std::map<std::string, int64_t> st;
+    bool has = op_strides(p, nm, &st);
+    std::map<std::string, int64_t> oe;
+    for(const auto& m : modes)
+        oe[m] = ext.at(m);
+    TensorPackSpec ps = TensorPackSpec::make(modes, order, oe, has ? &st : nullptr, req_dtype(p));
+    if(!pack_is_valid_spec(ps, arch.c_str(), why))
+        return false;
+    *out = pack_step(nm, ps);
+    return true;
+}
+
+/* _plan_mn(req, [(tile, trait)]): the single launch, else the pack hybrid */
+bool plan_mn(const TensorGettSpec& p,
+             const rocke_gemm_tile_spec_t& tile,
+             const rocke_gemm_trait_spec_t& trait,
+             const std::string& arch,
+             TablePlan* out,
+             std::string* why)
+{
+    std::string w;
+    TensorGettSpec sp;
+    /* _mn_result(req, bodies): _request_errors, _spec_mn, is_valid_spec */
+    if(spec_mn_explicit(p, tile, trait, arch, &sp, &w))
+    {
+        out->packs.clear();
+        out->gett = sp;
+        out->workspace_bytes = 0;
+        return true;
+    }
+    /* the pack hybrid: the operands whose runs are not 16-byte DTL-able are packed */
+    TensorGettSpec ring = p;
+    ring.tile_k = 32;
+    ring.has_mn_tile = false;
+    ring.has_mn_trait = false;
+    Plan plan;
+    std::string pw;
+    std::vector<PackStep> packs;
+    TensorGettSpec newp = p;
+    bool no_pack = false;
+    if(ring.plan(&plan, &pw))
+    {
+        std::vector<std::string> k_modes = k_modes_of(p);
+        std::map<std::string, int64_t> ext = as_map(p.extents);
+        for(int r = 0; r < 2; ++r)
+        {
+            const OpGeom& op = plan.ops[r];
+            if(op.vec >= 8)
+                continue;
+            const std::string nm = op.name;
+            std::vector<std::string> order = pack_order(op_modes(p, nm), k_modes, ext);
+            PackStep st;
+            std::string vw;
+            if(!make_pack(p, nm, order, arch, &st, &vw))
+            {
+                w = "operand " + nm + ": no pack (" + vw + ")";
+                no_pack = true;
+                packs.clear();
+                break;
+            }
+            packs.push_back(st);
+            if(nm == "A")
+            {
+                newp.modes_a = order;
+                newp.has_strides_a = false;
+                newp.strides_a.clear();
+            }
+            else
+            {
+                newp.modes_b = order;
+                newp.has_strides_b = false;
+                newp.strides_b.clear();
+            }
+        }
+    }
+    if(!no_pack && !packs.empty())
+    {
+        std::string w2;
+        if(spec_mn_explicit(newp, tile, trait, arch, &sp, &w2))
+        {
+            out->packs = packs;
+            out->gett = sp;
+            out->workspace_bytes = 0;
+            for(const auto& s : packs)
+                out->workspace_bytes += s.workspace_bytes;
+            return true;
+        }
+        w = "the packed problem has no MN-layout body: " + w2;
+    }
+    return set_why(why, "no MN-layout plan on the entry's body: " + w);
+}
+
+/* _kc_plan(problem, role): the K-contiguous plan with D's fastest mode on the
+ * GEMM operand `role` */
+bool kc_plan(const TensorGettSpec& p, char role, Plan* out, std::string* why)
+{
+    std::map<std::string, int64_t> sa, sb, sd;
+    if(p.has_strides_a)
+        sa = as_map(p.strides_a);
+    if(p.has_strides_b)
+        sb = as_map(p.strides_b);
+    if(p.has_strides_d)
+        sd = as_map(p.strides_d);
+    return plan_gett(p.modes_a,
+                     p.modes_b,
+                     p.modes_d,
+                     as_map(p.extents),
+                     p.has_strides_a ? &sa : nullptr,
+                     p.has_strides_b ? &sb : nullptr,
+                     p.has_strides_d ? &sd : nullptr,
+                     0,
+                     true,
+                     role,
+                     out,
+                     why);
+}
+
+/* _spec_kc(req, body): the K-contiguous GETT spec on an explicit RCR body; the
+ * body's epilogue decides which GEMM operand owns D's fastest mode */
+bool spec_kc_explicit(const TensorGettSpec& p,
+                      const rocke_gemm_tile_spec_t& tile,
+                      const rocke_gemm_trait_spec_t& trait,
+                      const std::string& arch,
+                      TensorGettSpec* out,
+                      std::string* why)
+{
+    std::string w = "no K-contiguous plan";
+    for(char role : {'B', 'A'})
+    {
+        Plan plan;
+        std::string pw;
+        if(!kc_plan(p, role, &plan, &pw))
+        {
+            w = pw;
+            continue;
+        }
+        if(trait.rilv_vec_epilogue != (role == 'B'))
+            continue;
+        /* TENSOR_GETT_KC_MIN_D_RUN / TENSOR_GETT_KC_SHORT_RUN_MIN_K */
+        if(role == 'B' && plan.d_col_digits.d[0].e < 128 && plan.K < 4096)
+        {
+            w = "D's column run is too short for the vector epilogue route";
+            continue;
+        }
+        TensorGettSpec sp = p;
+        sp.dtype = req_dtype(p);
+        sp.tile_k = 32;
+        sp.dtl_stages = 3;
+        sp.persistent_ctas = 0;
+        sp.chiplet_wgm = 8;
+        sp.chiplet_chunk_size = 64;
+        sp.has_mn_tile = false;
+        sp.has_mn_trait = false;
+        sp.has_kc_tile = true;
+        sp.kc_tile = tile;
+        sp.has_kc_trait = true;
+        sp.kc_trait = trait;
+        sp.knobs.epi_v16 = false;
+        sp.knobs.store_nt = false;
+        sp.knobs.epi_pair = false;
+        sp.knobs.c_prefetch = p.knobs.bilinear ? 8 : 0; /* TENSOR_GETT_KC_C_PREFETCH */
+        if(is_valid_spec(sp, arch.c_str(), &w))
+        {
+            *out = sp;
+            return true;
+        }
+    }
+    return set_why(why, w);
+}
+
+/* _plan_kc(req, body): both operands packed K-contiguous, then the GETT on the
+ * RCR body */
+bool plan_kc(const TensorGettSpec& p,
+             const rocke_gemm_tile_spec_t& tile,
+             const rocke_gemm_trait_spec_t& trait,
+             const std::string& arch,
+             TablePlan* out,
+             std::string* why)
+{
+    /* _table_plan: the entry needs the K-contiguous plan with GEMM B owning D's
+     * fastest mode (Python takes the RCR dispatcher pick of that plan as the
+     * spec the entry's tile and trait replace) */
+    Plan kp;
+    std::string w;
+    if(!kc_plan(p, 'B', &kp, &w))
+        return set_why(why, "no K-contiguous plan: " + w);
+    TensorGettSpec sp;
+    if(!spec_kc_explicit(p, tile, trait, arch, &sp, &w))
+        return set_why(why, "no K-contiguous GETT on the entry's body: " + w);
+    auto ops = launch_operands(sp);
+    auto orders = kc_operand_modes(sp);
+    std::vector<PackStep> packs;
+    for(int i = 0; i < 2; ++i)
+    {
+        const std::string& nm = i == 0 ? ops.first : ops.second;
+        PackStep st;
+        if(!make_pack(p, nm, i == 0 ? orders.first : orders.second, arch, &st, &w))
+            return set_why(why, "operand " + nm + ": no pack (" + w + ")");
+        packs.push_back(st);
+    }
+    out->packs = packs;
+    out->gett = sp;
+    out->workspace_bytes = 0;
+    for(const auto& s : packs)
+        out->workspace_bytes += s.workspace_bytes;
+    return true;
+}
+
+} // namespace
+
+bool table_plan(const TunedEntry& entry, const std::string& arch, TablePlan* out, std::string* why)
+{
+    TensorGettSpec p = tuned_problem(entry);
+    if(!(p.dtype == "fp16" || p.dtype == "bf16"))
+        return set_why(why, "route table entry dtype '" + p.dtype + "'");
+    rocke_gemm_tile_spec_t tile;
+    rocke_gemm_trait_spec_t trait;
+    if(!parse_config(entry.body, &tile, &trait, why))
+        return false;
+    if(entry.route == "mn")
+        return plan_mn(p, tile, trait, arch, out, why);
+    if(entry.route == "kc")
+        return plan_kc(p, tile, trait, arch, out, why);
+    return set_why(why, "route table entry " + entry.key + ": unknown route '" + entry.route + "'");
+}
+
+void gett_operand_sources(const TablePlan& plan, int src[2])
+{
+    std::pair<std::string, std::string> ops = launch_operands(plan.gett);
+    const std::string* names[2] = {&ops.first, &ops.second};
+    for(int i = 0; i < 2; ++i)
+    {
+        src[i] = -1;
+        for(size_t j = 0; j < plan.packs.size(); ++j)
+            if(plan.packs[j].operand == *names[i])
+                src[i] = (int)j;
+    }
+}
+
+bool tuned_plan(const TunedEntry& entry,
+                const std::string& arch,
+                TensorGettSpec* out,
+                std::string* why)
+{
+    TablePlan tp;
+    if(!table_plan(entry, arch, &tp, why))
+        return false;
+    if(!tp.packs.empty())
         return set_why(why,
-                       "tuned GETT entry " + entry.key
-                           + " gives no single-launch MN plan (the pack-hybrid fallback is "
-                             "Python-engine only): "
-                           + w2);
+                       "route table entry " + entry.key
+                           + " is a pack-hybrid route (table_plan has its pack steps)");
+    *out = tp.gett;
     return true;
 }
 

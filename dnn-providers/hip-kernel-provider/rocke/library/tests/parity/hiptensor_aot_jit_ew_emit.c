@@ -3,8 +3,8 @@
 /*
  * tests/parity/hiptensor_aot_jit_ew_emit.c -- C-side emitter for the problem-specialized elementwise kernels of hipTensor's JIT (geometry as constants).
  * Enumerates the configs of hiptensor_aot_jit_ew_emit.py in the same order (the rows of
- * _hiptensor_aot_rows.py) and builds each kernel with
- * rocke/instance_hiptensor_aot.h.
+ * _hiptensor_aot_rows.py, three geometry points each, config index = point * <classes> +
+ * class) and builds each kernel with rocke/instance_hiptensor_aot.h.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -218,19 +218,52 @@ std::vector<int64_t> geometry(int n, int seed)
     return out;
 }
 
-rocke_kernel_def_t* build(rocke_ir_builder_t* b, int idx, int* known)
+/* _hiptensor_aot_rows.GEOMETRY_POINTS: the target of each geometry point */
+const char* const POINT_ARCH[3] = {"gfx950", "gfx942", "gfx90a"};
+
+/* _hiptensor_aot_rows.geometry_point */
+std::vector<int64_t> geometry_point(const rocke_htaot_ew_jit_spec_t* spec, int seed, int point)
+{
+    int n = rocke_htaot_ew_jit_axes(spec, nullptr, nullptr, 0);
+    bool is64[ROCKE_HTAOT_EW_JIT_MAX_AXES] = {false};
+    rocke_htaot_ew_jit_axes(spec, nullptr, is64, ROCKE_HTAOT_EW_JIT_MAX_AXES);
+    std::vector<int64_t> drawn = geometry(n, seed);
+    if(point == 0)
+        return drawn;
+    const int64_t I32[5] = {INT32_MIN, -1, INT32_MAX, 0, 1};
+    const int64_t I64[5] = {(int64_t)1 << 31,
+                            ((int64_t)1 << 32) + 7,
+                            ((int64_t)1 << 40) + 3,
+                            INT64_MAX,
+                            -((int64_t)1 << 31) - 1};
+    std::vector<int64_t> out(n);
+    for(int j = 0; j < n; ++j)
+    {
+        if(point == 1)
+            out[j] = j % 3;
+        else if(j % 6 == 5)
+            out[j] = is64[j] ? ((int64_t)1 << 31) + drawn[j] : -drawn[j];
+        else
+            out[j] = is64[j] ? I64[j % 6] : I32[j % 6];
+    }
+    return out;
+}
+
+rocke_kernel_def_t* build(rocke_ir_builder_t* b, int idx, int* known, const char** arch)
 {
     std::vector<rocke_htaot_ew_jit_spec_t> rows;
     for(bool idx64 : {false, true})
         for(const Row& r : ew_params(idx64, false))
             for(const auto& c : jit_classes(r))
                 rows.push_back(c);
-    if(idx < 0 || idx >= (int)rows.size())
+    int n_rows = (int)rows.size();
+    if(idx < 0 || idx >= 3 * n_rows)
         return nullptr;
     *known = 1;
-    int n = rocke_htaot_ew_jit_axes(&rows[idx], nullptr, nullptr, 0);
-    std::vector<int64_t> g = geometry(n, idx);
-    return rocke_build_htaot_ew_jit(b, &rows[idx], g.data(), (int)g.size());
+    int point = idx / n_rows, cls = idx % n_rows;
+    *arch = POINT_ARCH[point];
+    std::vector<int64_t> g = geometry_point(&rows[cls], cls, point);
+    return rocke_build_htaot_ew_jit(b, &rows[cls], g.data(), (int)g.size());
 }
 
 } // namespace
@@ -253,7 +286,7 @@ int main(int argc, char** argv)
     rocke_ir_builder_t b;
     memset(&b, 0, sizeof b);
     int known = 0;
-    rocke_kernel_def_t* kernel = build(&b, idx, &known);
+    rocke_kernel_def_t* kernel = build(&b, idx, &known, &arch);
     if(!known)
     {
         fprintf(stderr, "unknown config index %d\n", idx);

@@ -36,8 +36,9 @@ Kernel families (attribute "family"):
     gett64   f64 / complex f64 strided batched GEMM with runtime sizes
     gett32   the same strided GEMM with f32 / complex f32 words (f32 products, f32
              accumulation): the native route of f32 contractions
-    gett     the launches of rocKE's tuned GETT route table (f16 / bf16 contractions of fixed
-             shapes): pack kernels and the GETT kernel, with a launch record per problem
+    gett     the launches of rocKE's tuned and AOT GETT route tables (f16 / bf16 contractions
+             of fixed shapes; the AOT table freezes the product route of each problem): pack
+             kernels and the GETT kernel, with a launch record per problem
     rgett    rocKE's ring GETT body (f16 / bf16 contractions on gfx950) with its index maps as
              kernel arguments: the operands read and D written in place, one class per lane
              width / D vector width (kernels.common.hiptensor_aot.rgett)
@@ -55,16 +56,26 @@ The backend's JIT (HIPTENSOR_ENABLE_ROCKE_JIT) needs nothing from this script: h
 the problem-specialized kernels (kernels.common.hiptensor_aot.jit_ew) at run time with their C++
 twins, which it links.
 
-The route table carries the tuning constants of rocKE's body rules and, per tuned GETT problem,
-``gett.tuned.<hash>`` (the launch record) and ``gett.tuned.<hash>.key`` (the canonical problem,
-see :func:`gett_problem_key`). With --select-models, it also carries the kernel selection models
+The route table carries the tuning constants of rocKE's body rules and, per problem of the
+tuned and AOT GETT route tables, ``gett.tuned.<hash>`` (the launch record) and
+``gett.tuned.<hash>.key`` (the canonical problem, see :func:`gett_problem_key`). With --select-models, it also carries the kernel selection models
 of the target, ``select.model.<cell>`` (``<dir>/<arch>/<cell>.model``, written by the selection
 training flow; see rocke_select.hpp for the format).
+
+With --list, it writes each target's manifest ``<out>/<arch>.manifest`` instead of its pack,
+without lowering or compiling anything (:func:`pack_manifest`): the kernels with their attributes
+and argument names, the routes and the kernel classes of hipTensor's JIT. The manifests of
+hipTensor's targets are kept in ``manifests/`` next to this script (regenerate them with
+``make_rocke_pack.py --list --arch gfx90a --arch gfx942 --arch gfx950 --out
+library/builders/hiptensor/manifests`` when a kernel, attribute, route or JIT class changes);
+library/tests/test_hiptensor_pack_cross_check.py checks that they are current, and hipTensor's
+test rocke_pack_manifest_test checks that its C++ builder writes the same.
 
 Usage:
     make_rocke_pack.py --arch gfx950 [--arch gfx942] --out DIR [--rocke-src DIR]
                         [--jobs N] [--cache-dir DIR] [--compile-timeout S] [--num-cus N]
                         [--select-models DIR] [--only REGEX]
+    make_rocke_pack.py --list --arch gfx950 [--arch gfx942] --out DIR [--num-cus N]
 """
 
 import argparse
@@ -252,6 +263,14 @@ def rocke_features():
     except (ImportError, AttributeError) as e:
         out["gett"] = f"no tuned GETT route table ({e})"
     try:
+        from rocke.dispatch.families import tensor_gett as tg
+
+        for name in ("TENSOR_GETT_AOT_FILE", "aot_entry_problem", "aot_route_plan"):
+            getattr(tg, name)
+        out["gett_aot"] = out["gett"]
+    except (ImportError, AttributeError) as e:
+        out["gett_aot"] = f"no GETT AOT route table ({e})"
+    try:
         from rocke.instances.common import gett_f64 as g
 
         for name in (
@@ -299,7 +318,7 @@ def rocke_features():
     try:
         from kernels.common.hiptensor_aot import jit_ew
 
-        for name in ("EwJitSpec", "jit_classes", "EW_JIT_ABI"):
+        for name in ("EwJitSpec", "jit_classes", "EW_JIT_ABI", "EWV_ABI"):
             getattr(jit_ew, name)
         out["jit"] = ""
     except (ImportError, AttributeError) as e:
@@ -394,6 +413,8 @@ def kernel_descriptors(arch, num_cus):
                 )
     for key in tuned_gett_keys(arch) if not features["gett"] else []:
         out.append(("gett_plan", dict(key=key)))
+    for key in aot_gett_keys(arch) if not features["gett_aot"] else []:
+        out.append(("gett_plan", dict(key=key, table="aot")))
     if arch in DGETT_ARCHES and not features["dgett"]:
         for cplx in (False, True):
             for comp in ("f32", "f64") if cplx else ("f16", "bf16", "f32", "f64"):
@@ -559,17 +580,30 @@ def _gett64_spec(params, arch, num_cus, dtype="f64"):
     return spec, "ok"
 
 
-def tuned_gett_keys(arch):
-    """Keys of rocKE's shipped tuned GETT route table for ``arch``."""
+def _table_keys(fname, arch):
     from pathlib import Path
 
     from rocke.dispatch.families import tensor_gett as tg
 
-    path = Path(tg.__file__).with_name(tg.TENSOR_GETT_TUNED_FILE)
+    path = Path(tg.__file__).with_name(fname)
     if not path.exists():
         return []
     raw = json.loads(path.read_text(encoding="utf-8"))
     return sorted(raw.get("entries", {}).get(arch, {}))
+
+
+def tuned_gett_keys(arch):
+    """Keys of rocKE's shipped tuned GETT route table for ``arch``."""
+    from rocke.dispatch.families import tensor_gett as tg
+
+    return _table_keys(tg.TENSOR_GETT_TUNED_FILE, arch)
+
+
+def aot_gett_keys(arch):
+    """Keys of rocKE's GETT AOT route table for ``arch`` (the product routes of fixed problems)."""
+    from rocke.dispatch.families import tensor_gett as tg
+
+    return _table_keys(tg.TENSOR_GETT_AOT_FILE, arch)
 
 
 def fnv1a64(text):
@@ -603,7 +637,8 @@ def _row_major(modes, ext):
 
 
 def build_gett_plan(params, arch):
-    """The kernels and the launch record of one tuned GETT problem.
+    """The kernels and the launch record of one problem of the tuned GETT route table, or of the
+    AOT route table with ``params["table"] == "aot"``.
 
     Record: ``v1;ws=<workspace bytes>;steps=<n>`` then per launch
     ``|k=<kernel>;g=<x>,<y>,<z>;b=<threads>;a=<name>=<value>,...`` where a value is
@@ -613,9 +648,10 @@ def build_gett_plan(params, arch):
     from rocke.instances.common.tensor import GettKnobs, TensorGettSpec
 
     key = params["key"]
-    prob = tg.tuned_entry_problem(arch, key)
+    aot = params.get("table") == "aot"
+    prob = (tg.aot_entry_problem if aot else tg.tuned_entry_problem)(arch, key)
     if prob is None:
-        return None, "no tuned entry"
+        return None, "no route table entry"
     ext = {k: int(v) for k, v in prob["extents"].items()}
     dt = "fp16" if prob["dtype"] in ("f16", "fp16") else prob["dtype"]
     bilinear = bool(prob["bilinear"])
@@ -629,8 +665,11 @@ def build_gett_plan(params, arch):
     )
     req = tg.TensorGettRequest(problem=spec, arch=arch)
     if tg.tensor_gett_route_key(req) != key:
-        return None, "the tuned entry's key does not reproduce"
-    gp = tg.plan_tensor_gett(req)
+        return None, "the route table entry's key does not reproduce"
+    # the AOT entry's frozen route (equal to plan_tensor_gett, which rocKE's tests check)
+    gp = tg.aot_route_plan(req) if aot else tg.plan_tensor_gett(req)
+    if gp is None:
+        raise ValueError(f"the AOT route table entry {key} gives no plan")
     kernels = []
     steps = []
     ws_off = {}
@@ -675,7 +714,7 @@ def build_gett_plan(params, arch):
         )
     steps.append((kd, tuple(gp.gett.grid), tuple(gp.gett.block), binds))
     kernels.append(kd)
-    # The canonical key with the packed row-major strides the tuned problem was measured with
+    # The canonical key with the packed row-major strides the entry's problem has
     # (in hipTensor: the same memory layout, mode lists reversed and column-major strides).
     tensors = []
     for modes in (prob["modes_d"], prob["modes_a"], prob["modes_b"]):
@@ -776,13 +815,13 @@ def build_kernel(family, params, arch, num_cus):
         return build_universal_gemm(spec, arch), attrs
     if family == "ewv":
         from kernels.common.hiptensor_aot.ew import EwSpec
-        from kernels.common.hiptensor_aot.jit_ew import EwJitSpec, build_ew_jit
+        from kernels.common.hiptensor_aot.jit_ew import EWV_ABI, EwJitSpec, build_ew_jit
 
         base = EwSpec(**params["base"])
         spec = EwJitSpec(base, params["vec"], tuple(params["unit"]))
         attrs = dict(
             family="ewv",
-            abi="hiptensor-aot-ewv/v1",
+            abi=EWV_ABI,
             arity=base.arity,
             cplx=0,
             idx64=0,
@@ -1343,6 +1382,75 @@ def routes_for(arch, num_cus):
     return r
 
 
+def hiptensor_jit_classes():
+    """The kernel names of the classes hipTensor's JIT specializes (its rule:
+    ``jitClassAdmitted`` of hipTensor's rocke_ew_rows.hpp): every class of :func:`jit_classes`
+    of the rows of the API's operations (no mixed-type rows), without the 64-bit-offset math
+    rows."""
+    from kernels.common.hiptensor_aot.ew import EwSpec
+    from kernels.common.hiptensor_aot.jit_ew import jit_classes
+
+    names = set()
+    for idx64 in (False, True):
+        for p in ew_params(idx64, mixed=False):
+            if p.get("math") and idx64:
+                continue
+            names.update(c.kernel_name() for c in jit_classes([EwSpec(**p)]))
+    return sorted(names)
+
+
+def _manifest_field(s):
+    return str(s).replace("\\", "\\\\").replace("\n", "\\n")
+
+
+def pack_manifest(arch, num_cus):
+    """The manifest of the pack of ``arch`` (``--list``; hipTensor's C++ builder writes the same
+    text): a comment line, then one line per kernel in pack order (``kernel <name>
+    <attribute>=<value>... params=<count>:<digest>``, strings quoted; the digest: the first 16
+    hex digits of the SHA-256 of the comma-joined argument names), one per route (``route
+    <key>=<value>``, sorted, no selection models) and one per kernel class of hipTensor's JIT
+    (``jit <kernel name>``, sorted). Nothing is lowered or compiled."""
+    kernels = {}
+    routes = routes_for(arch, num_cus)
+    for family, params in kernel_descriptors(arch, num_cus):
+        if family == "gett_plan":
+            plan, _why = build_gett_plan(params, arch)
+            if plan is None:
+                continue
+            built = [
+                (k, dict(family="gett", abi="rocke-tensor-gett/v1"))
+                for k in plan["kernels"]
+            ]
+            route = fnv1a64(plan["key"])
+            routes[f"gett.tuned.{route}"] = plan["record"]
+            routes[f"gett.tuned.{route}.key"] = plan["key"]
+        else:
+            kernel, attrs = build_kernel(family, params, arch, num_cus)
+            if kernel is None:
+                continue
+            built = [(kernel, attrs)]
+        for kernel, attrs in built:
+            fields = [f"kernel {kernel.name}"]
+            for k, v in sorted(attrs.items()):
+                if isinstance(v, (bool, int)):
+                    fields.append(f"{k}={int(v)}")
+                else:
+                    fields.append(f'{k}="{_manifest_field(v)}"')
+            names = ",".join(p.name for p in kernel.params)
+            digest = hashlib.sha256(names.encode()).hexdigest()[:16]
+            fields.append(f"params={len(kernel.params)}:{digest}")
+            # a kernel several descriptors build keeps the first one's record, as in the pack
+            kernels.setdefault(kernel.name, " ".join(fields))
+    out = [f"# rocKE kernel pack manifest {arch}"]
+    out += [kernels[n] for n in sorted(kernels)]
+    out += [
+        f"route {_manifest_field(k)}={_manifest_field(v)}"
+        for k, v in sorted(routes.items())
+    ]
+    out += [f"jit {n}" for n in hiptensor_jit_classes()]
+    return "\n".join(out) + "\n"
+
+
 def select_models(model_dir, arch):
     """Route entries of the selection models of ``arch``: ``{select.model.<cell>: text}``."""
     out = {}
@@ -1371,6 +1479,12 @@ def main(argv=None):
     )
     ap.add_argument("--arch", action="append", default=[])
     ap.add_argument("--out", required=True)
+    ap.add_argument(
+        "--list",
+        action="store_true",
+        help="write the manifest <out>/<arch>.manifest of each pack instead of the pack "
+        "(nothing is compiled)",
+    )
     ap.add_argument("--jobs", type=int, default=0)
     ap.add_argument("--cache-dir", default="")
     ap.add_argument("--compile-timeout", type=float, default=600.0)
@@ -1392,6 +1506,16 @@ def main(argv=None):
     src = os.path.abspath(a.rocke_src)
     _scrub_env()
     _setup_paths(src)
+    if a.list:
+        from rocke.helpers.split_k import arch_num_cus
+
+        os.makedirs(a.out, exist_ok=True)
+        for arch in a.arch:
+            text = pack_manifest(arch, a.num_cus or arch_num_cus(arch))
+            with open(os.path.join(a.out, f"{arch}.manifest"), "w", newline="\n") as f:
+                f.write(text)
+            print(f"rocKE pack {arch}: manifest {os.path.join(a.out, arch)}.manifest")
+        return 0
     compiler_id = _compiler_id()
     rocke_version = _rocke_version(src)
     if a.cache_dir:

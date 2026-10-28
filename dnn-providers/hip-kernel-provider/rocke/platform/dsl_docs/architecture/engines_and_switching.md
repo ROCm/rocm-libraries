@@ -87,20 +87,22 @@ Provider flags (`ROCKE_C_JIT`, `ROCKE_KERNEL_LIB_PATH`, `HIPDNN_PLUGIN_PATH`, `R
 ## Python-only universal-GEMM levers
 
 Some universal-GEMM `TraitSpec` levers are implemented by the Python builder only
-(`rocke/core/backend.py` `_PYTHON_ONLY_GEMM_LEVERS`): the slot schedules of the
-row-interleave layout (`hb_*`, `sia_*`), the padded vector epilogue (`rve_pad`), the
-DTL issue-economy and instruction-economy levers (`dtl_rsrc_word3`, `kloop_unroll`,
-`dtl_addr_spread`, `hb_dtl_delay`, `hb_tile_lgkm0`, `dtl_base_fold`, `das_*`,
-`dtl_clamp_k`), the K start staggers (`stagger_u*`, `k_stagger*`, `k_stagger_rc`),
-the MFMA issue orders (`mfma_serpentine`, `mfma_order`), the hand-ordered loop
-(`asm_loop*`, `fr0_loop_order`), the wave-specialized ping-pong (`pingpong`, `pp_*`), `ilv_early_free` / `ilv_ef_spread` /
-`ilv_split_wait`, `sk_xcd_local`, `dtl_tight_ragged_only` and the levers of the
-VGPR-staged MN-contiguous operand loader (`mn_vec`, `vp_mn_*`). The ring, AGPR /
-interleave, persistent / stream-K and early-release levers, the row-interleave LDS layout
-(`lds_row_interleave`, `rilv_pad`), its vector epilogue (`rilv_vec_epilogue`,
-`rve_store_nt`), the DTL origin levers (`dtl_soff0`, `wide_addr`) and the MN-contiguous
-operands of the DTL ring (layouts `RRR` / `CRR` / `CCR`, `mn_pad`, `mn_chunk`, `mn_ld_any`;
-`cpp/instances/common/gemm_mn_operand.cpp`) are mirrored in the C++ builder.
+(`rocke/core/backend.py` `_PYTHON_ONLY_GEMM_LEVERS`): the SIA-style slot schedule
+(`sia_*`), the DTL issue-economy and instruction-economy levers `dtl_rsrc_word3`,
+`dtl_base_fold` and `dtl_clamp_k`, the K start staggers (`stagger_u*`, `k_stagger*`,
+`k_stagger_rc`), the hand-ordered loop (`asm_loop*`, `fr0_loop_order`), the
+wave-specialized ping-pong (`pingpong`, `pp_*`), `ilv_early_free` / `ilv_ef_spread` /
+`ilv_split_wait`, `sk_xcd_local` and the levers of the VGPR-staged MN-contiguous operand
+loader (`mn_vec`, `vp_mn_*`). The ring, AGPR / interleave, persistent / stream-K and
+early-release levers, the row-interleave LDS layout (`lds_row_interleave`, `rilv_pad`),
+its slot schedule (`hb_*`: `hb_sched` and its slot, skew and delay levers), its vector
+epilogue (`rilv_vec_epilogue`, `rve_store_nt`, `rve_pad`), the main-loop unroll and DTL
+address levers (`kloop_unroll`, `dtl_addr_spread`, `das_anchor`, `das_late`), the MFMA
+issue orders (`mfma_serpentine`, `mfma_order`), the DTL origin and bounds levers
+(`dtl_soff0`, `wide_addr`, `dtl_tight_ragged_only`) and the MN-contiguous operands of the
+DTL ring (layouts `RRR` / `CRR` / `CCR`, `mn_pad`, `mn_chunk`, `mn_ld_any`;
+`cpp/instances/common/gemm_mn_operand.cpp`) are mirrored in the C++ builder (the
+`gemm_hb` parity family covers the slot-schedule bodies).
 
 - A kernel built with a Python-only lever is ordinary IR: it lowers through either
   engine via the IR seam (`cpp` / `both` backends, and the provider's Fast,
@@ -108,10 +110,9 @@ operands of the DTL ring (layouts `RRR` / `CRR` / `CCR`, `mn_pad`, `mn_chunk`, `
 - The C++ *builder* (the C-JIT mode and the per-family `rocke_engine` builders) cannot
   build it: the spec converters (`universal_gemm_spec_to_dict` and the GEMM-wrapper
   converters) raise `NotImplementedError` instead of silently building another kernel.
-- The gfx950 GEMM dispatcher's row-interleave bodies (`dispatch/gemm/common.py`,
-  `rilv_*`) combine the mirrored layout with Python-only schedule levers by default,
-  so a Python-free C-JIT deployment does not have those dispatch picks; serve them as
-  prebuilt HSACO or shipped IR. The emulated-f32 bodies of `dispatch/gemm/cf32.py`
+- A gfx950 GEMM dispatcher body (`dispatch/gemm/common.py`) that combines a mirrored
+  layout with a Python-only lever is not available to a Python-free C-JIT deployment;
+  serve it as prebuilt HSACO or shipped IR. The emulated-f32 bodies of `dispatch/gemm/cf32.py`
   (`cf32_body`) are mirrored as a table (`cpp/instances/common/gemm_cf32.cpp`).
 
 ## Python-only side channels and families
@@ -122,9 +123,10 @@ universal-GEMM / attention emission is byte-identical. The C++ engine mirrors
 `spec._prologue` (`rocke_gemm_universal_spec_t._prologue`,
 `cpp/instances/common/gemm_prologue.cpp`; the `gemm_cf32` and `gemm_prologue_unary`
 parity families) except its `stage="vgpr"` and `epi`, which the converters refuse, and
-`spec._gett` for the ring and MN-layout GETT bodies (`rocke_gett_hooks`,
-`cpp/instances/common/tensor_gett_*.cpp`; the `tensor_gett` parity family; the K-contiguous
-bodies stay Python-only). It has no mirror for the others, so the C++ builder and the C-JIT
+`spec._gett` for the ring, MN-layout and K-contiguous GETT bodies (`rocke_gett_hooks`,
+`cpp/instances/common/tensor_gett_*.cpp`; the `tensor_gett`, `tensor_gett_kc` and
+`tensor_gett_aot` parity families) with the operand pack kernel (`tensor_pack`). It has no
+mirror for the others, so the C++ builder and the C-JIT
 mode cannot build those kernels; their IR lowers through either engine like any other (see
 above).
 

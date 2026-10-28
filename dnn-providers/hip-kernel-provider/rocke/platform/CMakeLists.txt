@@ -192,6 +192,34 @@ add_custom_command(
   COMMENT "Embedding the tuned GETT route table"
   VERBATIM)
 target_sources(rocke_core_objects PRIVATE "${_ROCKE_TG_CPP}")
+# The GETT AOT route table (tensor_gett_aot.json: the product routes of fixed
+# problems, frozen for ahead-of-time kernel packs): rocke_tensor_gett_aot_json()
+set(_ROCKE_TGA_JSON
+    "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke/dispatch/families/tensor_gett_aot.json")
+set(_ROCKE_TGA_CPP "${CMAKE_CURRENT_BINARY_DIR}/generated/tensor_gett_aot_table.cpp")
+add_custom_command(
+  OUTPUT "${_ROCKE_TGA_CPP}"
+  COMMAND "${CMAKE_COMMAND}" "-DIN=${_ROCKE_TGA_JSON}" "-DOUT=${_ROCKE_TGA_CPP}"
+          "-DSYMBOL=rocke_tensor_gett_aot_json"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocke_embed_json.cmake"
+  DEPENDS "${_ROCKE_TGA_JSON}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocke_embed_json.cmake"
+  COMMENT "Embedding the GETT AOT route table"
+  VERBATIM)
+target_sources(rocke_core_objects PRIVATE "${_ROCKE_TGA_CPP}")
+# The route table of hipTensor's tuned reduction classes (hiptensor_rreduce.json: per target the
+# palette of the kernel pack and the tuned problems): rocke_htaot_rreduce_table_json()
+set(_ROCKE_RRT_JSON
+    "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke/dispatch/families/hiptensor_rreduce.json")
+set(_ROCKE_RRT_CPP "${CMAKE_CURRENT_BINARY_DIR}/generated/hiptensor_rreduce_table.cpp")
+add_custom_command(
+  OUTPUT "${_ROCKE_RRT_CPP}"
+  COMMAND "${CMAKE_COMMAND}" "-DIN=${_ROCKE_RRT_JSON}" "-DOUT=${_ROCKE_RRT_CPP}"
+          "-DSYMBOL=rocke_htaot_rreduce_table_json"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocke_embed_json.cmake"
+  DEPENDS "${_ROCKE_RRT_JSON}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocke_embed_json.cmake"
+  COMMENT "Embedding the hipTensor reduction route table"
+  VERBATIM)
+target_sources(rocke_core_objects PRIVATE "${_ROCKE_RRT_CPP}")
 
 # --- Portable-IR bundle freshness / provenance stamp -------------------------
 # Generate a deterministic, git-independent provenance header from the engine

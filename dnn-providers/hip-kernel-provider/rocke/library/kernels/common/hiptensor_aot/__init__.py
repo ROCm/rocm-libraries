@@ -6,9 +6,9 @@
   operand packing and epilogue);
 * :mod:`.reduce` -- strided reduction kernels (row, col, split finalize);
 * :mod:`.host` -- the launch-argument rules hipTensor's C++ runtime implements;
-* :mod:`.jit_ew` -- the problem-specialized form of :mod:`.ew` for hipTensor's JIT (recipes rolled
-  at build time, replayed by the C++ recipe VM), and its vector classes with the geometry as
-  kernel arguments;
+* :mod:`.jit_ew` -- the problem-specialized form of :mod:`.ew` for hipTensor's JIT (hipTensor
+  builds it with the C++ twin, ``rocke_build_htaot_ew_jit``), and its vector classes with the
+  geometry as kernel arguments;
 * :mod:`.ewt` -- tiled elementwise kernel for transposing layouts;
 * :mod:`.dgett` -- direct GETT: any contraction read and written in place, no workspace;
 * :mod:`.rgett` -- rocKE's ring GETT body with runtime index maps (f16 / bf16, gfx950);

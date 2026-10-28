@@ -24,6 +24,8 @@
 #include "rocke/instance_tensor_gett.h" /* the _gett side channel */
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
+#include <algorithm>
+#include <map>
 #include <vector>
 
 #define STG_MAX_STAGES 4
@@ -104,6 +106,14 @@ typedef struct staged_state
     rocke_value_t* g_t0[2 * ROCKE_GEMM_MAX_DTL_PASSES]; /* GETT: A voffs, then B voffs */
     rocke_value_t* mn_fbase[2][STG_MAX_STAGES]; /* Python _mn_fbase: lane base per stage */
     int mn_fsh[2][STG_MAX_STAGES]; /* ... and its folded 64 KiB shift (elements) */
+    /* kloop_unroll: U = kloop_unroll * S tiles per main-loop trip */
+    int U;
+    /* hb_sched: the (release, acquire) MFMA slots of a K tile (hb_slots) and
+     * the MFMA-slot shift of the reads / DTL issues of the loop copy being
+     * emitted (hb_skew: 1 for the odd copy, else 0) */
+    int hb_rel;
+    int hb_acq;
+    int hb_shift;
 } staged_state_t;
 
 /* The deferred issue closures of one `_dtl_issues(stage, k_ld, tile0s, valid)`
@@ -129,7 +139,8 @@ typedef struct staged_issue_set
 
 /* Python _org(nm, tile0, k): element offset of the operand tile at K offset
  * k: tile0 + k (K-contiguous) or tile0 + k * ld (MN-contiguous). */
-static rocke_value_t* staged_org(staged_state_t* st, bool is_a, rocke_value_t* tile0, rocke_value_t* k)
+static rocke_value_t*
+    staged_org(staged_state_t* st, bool is_a, rocke_value_t* tile0, rocke_value_t* k)
 {
     rocke_ir_builder_t* b = st->b;
     rocke_gemm_build_ctx_t* ctx = st->ctx;
@@ -231,7 +242,12 @@ static staged_issue_set_t staged_dtl_issues(staged_state_t* st,
             rocke_value_t* sum;
             rocke_value_t* by;
             rocke_value_t* sel;
-            if(st->tight)
+            /* _tight_ops: dtl_tight_ragged_only bounds only the operand whose row
+             * dimension is padded */
+            bool rag = st->ctx->spec->trait.dtl_tight_ragged_only
+                           ? (o == 0 ? st->ctx->spec->trait.pad_m : st->ctx->spec->trait.pad_n)
+                           : true;
+            if(st->tight && rag)
             {
                 staged_tight_rs(st,
                                 o,
@@ -244,7 +260,7 @@ static staged_issue_set_t staged_dtl_issues(staged_state_t* st,
                                 &s.h_soff[o]);
                 continue;
             }
-            if(st->ctx->spec->trait.dtl_soff0)
+            if(st->ctx->spec->trait.dtl_soff0 || st->tight)
             {
                 /* origin in the resource base, inline soffset 0 */
                 rocke_value_t* org;
@@ -810,12 +826,14 @@ static void staged_ilv_cluster(staged_state_t* st,
         rocke_b_sched_barrier(b, 0);
         rocke_b_s_setprio(b, 1);
     }
-    for(mi = 0; mi < mfmas_m; ++mi)
+    /* MFMA slot `pos` issues accumulator mo_perm[0][pos] (Python _mo_ilv) */
+    for(int pos = 0; pos < n; ++pos)
     {
-        for(ni = 0; ni < mfmas_n; ++ni)
         {
-            int flat = mi * mfmas_n + ni;
-            if(deferred && flat == bar->pre)
+            int flat = ctx->mo_perm[0][pos];
+            mi = flat / mfmas_n;
+            ni = flat % mfmas_n;
+            if(deferred && pos == bar->pre)
             {
                 rocke_b_s_waitcnt(b, bar->vm_wait, 0, -1);
                 rocke_b_s_barrier_bare(b);
@@ -845,10 +863,10 @@ static void staged_ilv_cluster(staged_state_t* st,
                 if(sp_i < 1)
                     sp_i = 1;
                 for(j = 0; j < n_loads; ++j)
-                    if(lo + (j * sp_l) / n_loads == flat)
+                    if(lo + (j * sp_l) / n_loads == pos)
                         staged_frag_one(st, fl, j);
                 for(j = 0; j < n_issues; ++j)
-                    if(lo + (j * sp_i) / n_issues == flat)
+                    if(lo + (j * sp_i) / n_issues == pos)
                         staged_issue_one(st, iss, j);
                 rocke_b_sched_barrier(b, 0);
                 continue;
@@ -871,7 +889,7 @@ static void staged_ilv_cluster(staged_state_t* st,
                         take_load = true;
                     else
                         take_load = (2 * jl + 1) * wl <= (2 * jd + 1) * wd;
-                    if(lo + (r * (n - lo)) / ev_n == flat)
+                    if(lo + (r * (n - lo)) / ev_n == pos)
                     {
                         if(take_load)
                             staged_frag_one(st, fl, jl);
@@ -888,14 +906,14 @@ static void staged_ilv_cluster(staged_state_t* st,
                 continue;
             }
             for(j = 0; j < n_loads; ++j)
-                if(lo + (j * (n - lo)) / n_loads == flat)
+                if(lo + (j * (n - lo)) / n_loads == pos)
                     staged_frag_one(st, fl, j);
             for(j = 0; j < n_issues; ++j)
             {
                 int span = n - lo;
                 int at = every > 0 ? lo + (j * every < span - 1 ? j * every : span - 1)
                                    : lo + (j * span) / n_issues;
-                if(at == flat)
+                if(at == pos)
                     staged_issue_one(st, iss, j);
             }
             rocke_b_sched_barrier(b, 0);
@@ -983,17 +1001,19 @@ static void staged_ilv_cluster_ev(staged_state_t* st,
         rocke_b_sched_barrier(b, 0);
         rocke_b_s_setprio(b, 1);
     }
-    for(mi = 0; mi < mfmas_m; ++mi)
+    /* MFMA slot `pos` issues accumulator mo_perm[0][pos] (Python _mo_ilv) */
+    for(int pos = 0; pos < n; ++pos)
     {
-        for(ni = 0; ni < mfmas_n; ++ni)
         {
-            int flat = mi * mfmas_n + ni;
+            int flat = ctx->mo_perm[0][pos];
+            mi = flat / mfmas_n;
+            ni = flat % mfmas_n;
             for(e = 0; e < n_ev; ++e)
             {
-                if(evs[e].pos != flat)
+                if(evs[e].pos != pos)
                     continue;
                 cur = e;
-                lo = flat;
+                lo = pos;
                 hi = e + 1 < n_ev ? evs[e + 1].pos : n;
                 off = 0;
                 switch(evs[e].kind)
@@ -1041,7 +1061,7 @@ static void staged_ilv_cluster_ev(staged_state_t* st,
             acc[flat] = staged_mma_ab(st, fa[mi], fb[ni], acc[flat], ni);
             if(cur >= 0)
                 for(j = 0; j < cnt; ++j)
-                    if(staged_ev_slot(ctx, is_issue, lo, hi, j, cnt) == flat)
+                    if(staged_ev_slot(ctx, is_issue, lo, hi, j, cnt) == pos)
                     {
                         if(is_issue)
                             staged_issue_one(st, ec->iss, off + j);
@@ -1056,6 +1076,525 @@ static void staged_ilv_cluster_ev(staged_state_t* st,
         rocke_b_s_setprio(b, 0);
         rocke_b_sched_barrier(b, 0);
     }
+}
+
+/* ---- hb_sched: the K-tile slot schedule (Python _tile_hb) and the deferred
+ * DTL address steps of dtl_addr_spread (Python _dtl_issues_deferred) ---- */
+
+/* _dtl_issues_deferred(stage, k_i, tile0s, kup): the hold dict of the address
+ * steps; NULL = not computed yet */
+typedef struct staged_def
+{
+    int stage;
+    rocke_value_t* k_i;
+    rocke_value_t* t0[2]; /* the (A, B) tile origins */
+    bool tile0s; /* a persistent tile's origins (Python tile0s is not None) */
+    rocke_value_t* k;
+    rocke_value_t* ok;
+    rocke_value_t* nrec;
+    rocke_value_t* ka;
+    rocke_value_t* org[2];
+    rocke_value_t* soff[2];
+    rocke_value_t* rs[2];
+} staged_def_t;
+
+/* das_anchor: a side-effecting read of v keeps its SALU here */
+static void staged_def_anc(staged_state_t* st, rocke_value_t* v)
+{
+    if(!st->ctx->spec->trait.das_anchor)
+        return;
+    rocke_inline_asm_opts_t o;
+    memset(&o, 0, sizeof o);
+    o.sideeffect = true;
+    o.sideeffect_set = true;
+    rocke_b_inline_asm(st->b, "", "s", &v, 1, NULL, 0, &o);
+}
+
+static void staged_def_s_k(staged_state_t* st, staged_def_t* d)
+{
+    rocke_ir_builder_t* b = st->b;
+    /* pinned (side-effecting no-op asm) so the SALU stays in this slot instead
+     * of sinking to its first use */
+    rocke_value_t* cst = rocke_b_const_i32(b, st->S * st->ctx->block_k);
+    rocke_value_t* add = rocke_b_add(b, d->k_i, cst);
+    d->k = rocke_b_pin_sgpr(b, add);
+    d->ok = rocke_b_cmp_lt(b, d->k, st->cur_kup != NULL ? st->cur_kup : st->k_up);
+    /* (dtl_clamp_k is a Python-engine-only lever) */
+    rocke_value_t* sel = rocke_b_select(b, d->ok, st->c_big, st->c_zero_rec);
+    d->nrec = rocke_b_pin_sgpr(b, sel);
+    staged_def_anc(st, d->nrec);
+    /* the DMA's K: k_stagger / dtl_clamp_k / stagger_u / k_stagger_rc are
+     * Python-engine-only levers, so it is the logical K */
+    d->ka = d->k;
+}
+
+static bool staged_def_soff0(const staged_state_t* st)
+{
+    return st->ctx->spec->trait.dtl_soff0 || st->tight;
+}
+
+static void staged_def_s_org(staged_state_t* st, staged_def_t* d, int o)
+{
+    rocke_ir_builder_t* b = st->b;
+    rocke_gemm_build_ctx_t* ctx = st->ctx;
+    if(d->k == NULL)
+        staged_def_s_k(st, d);
+    bool soff0 = staged_def_soff0(st);
+    rocke_value_t* by;
+    if(st->fold[o] != NULL && !d->tile0s && soff0)
+    {
+        /* _korg(nm, ka) */
+        rocke_value_t* kor = d->ka;
+        if(o == 0 ? ctx->has_mn_a : ctx->has_mn_b)
+            kor = rocke_b_mul(b, d->ka, o == 0 ? ctx->M : ctx->N);
+        by = rocke_b_mul(b, kor, st->c2s);
+    }
+    else
+    {
+        rocke_value_t* sum = staged_org(st, o == 0, d->t0[o], d->ka);
+        by = rocke_b_mul(b, sum, st->c2s);
+    }
+    if(soff0)
+    {
+        d->org[o] = rocke_b_to_sgpr_u32(b, by);
+        staged_def_anc(st, d->org[o]);
+    }
+    else
+    {
+        rocke_value_t* sel = rocke_b_select(b, d->ok, by, st->c_zero_rec);
+        d->soff[o] = rocke_b_to_sgpr_u32(b, sel);
+        staged_def_anc(st, d->soff[o]);
+    }
+}
+
+static void staged_def_s_rsrc(staged_state_t* st, staged_def_t* d, int o)
+{
+    rocke_ir_builder_t* b = st->b;
+    rocke_gemm_build_ctx_t* ctx = st->ctx;
+    rocke_value_t* ptr = o == 0 ? ctx->A : ctx->Bp;
+    if(d->k == NULL)
+        staged_def_s_k(st, d);
+    if(staged_def_soff0(st))
+    {
+        if(d->org[o] == NULL)
+            staged_def_s_org(st, d, o);
+        /* _tight_ops: the operands with exact bounds (dtl_tight_ragged_only:
+         * the operand whose row dimension is padded) */
+        bool tg = st->tight
+                  && (!ctx->spec->trait.dtl_tight_ragged_only
+                      || (o == 0 ? ctx->spec->trait.pad_m : ctx->spec->trait.pad_n));
+        rocke_value_t* nr;
+        if(tg)
+        {
+            rocke_value_t* nb = o == 0 ? st->a_bytes : st->b_bytes;
+            rocke_value_t* sub = rocke_b_sub(b, nb, d->org[o]);
+            rocke_value_t* left = rocke_b_smax(b, sub, st->c_zero_rec);
+            nr = rocke_b_select(b, d->ok, left, st->c_zero_rec);
+        }
+        else
+            nr = d->nrec;
+        rocke_value_t* bp = (st->fold[o] != NULL && !d->tile0s) ? st->fold[o] : ptr;
+        rocke_value_t* gp = rocke_b_global_ptr_add(b, bp, d->org[o]);
+        if(ctx->spec->trait.das_anchor)
+            staged_def_anc(st, rocke_b_global_ptr_to_i64(b, gp));
+        d->rs[o] = rocke_b_buffer_rsrc(b, gp, nr);
+        d->soff[o] = st->c_zero_rec;
+    }
+    else
+        d->rs[o] = rocke_b_buffer_rsrc(b, ptr, d->nrec);
+}
+
+/* prep step j: k, A origin, A resource, B origin, B resource */
+static void staged_def_prep(staged_state_t* st, staged_def_t* d, int j)
+{
+    switch(j)
+    {
+    case 0:
+        staged_def_s_k(st, d);
+        break;
+    case 1:
+        staged_def_s_org(st, d, 0);
+        break;
+    case 2:
+        staged_def_s_rsrc(st, d, 0);
+        break;
+    case 3:
+        staged_def_s_org(st, d, 1);
+        break;
+    default:
+        staged_def_s_rsrc(st, d, 1);
+        break;
+    }
+}
+
+/* issue idx: the A passes, then the B passes */
+static void staged_def_issue(staged_state_t* st, staged_def_t* d, int idx)
+{
+    rocke_ir_builder_t* b = st->b;
+    rocke_gemm_build_ctx_t* ctx = st->ctx;
+    int na = ctx->dtl_a_passes;
+    int o = idx < na ? 0 : 1;
+    int p = idx < na ? idx : idx - na;
+    if(d->soff[o] == NULL)
+        staged_def_s_org(st, d, o);
+    if(d->rs[o] == NULL)
+        staged_def_s_rsrc(st, d, o);
+    rocke_value_t* lds = o == 0 ? st->a_wbase[d->stage] : st->b_wbase[d->stage];
+    if(p)
+    {
+        rocke_value_t* cst = rocke_b_const_i32(b, p * st->op_pass_bytes[o]);
+        rocke_value_t* z = rocke_b_zext(b, cst, rocke_i64());
+        lds = rocke_b_smem_ptr_add(b, lds, z);
+    }
+    rocke_value_t* const* voffs = o == 0 ? st->a_voff : st->b_voff;
+    int coh = o == 0 ? ctx->spec->trait.dtl_cache_a : ctx->spec->trait.dtl_cache_b;
+    rocke_b_async_buffer_load_lds_addr(
+        b, d->rs[o], lds, voffs[p], d->soff[o], ctx->dtl_dwords, coh);
+}
+
+/* one event pinned after an MFMA slot of _tile_hb */
+enum
+{
+    HB_LOAD = 0, /* fragment load q of a loader set */
+    HB_RELEASE = 1, /* lgkmcnt(0) + barrier: this tile's stage is fully read */
+    HB_ACQUIRE = 2, /* vmcnt + barrier, then the next tile's first-atom reads */
+    HB_ACQUIRE_B = 3, /* hb_acq_b_slot: the B operand's own acquire */
+    HB_ISSUE = 4, /* DTL issue j */
+    HB_PREP = 5 /* dtl_addr_spread address step j */
+};
+
+typedef struct hb_ev
+{
+    int kind;
+    int idx;
+    staged_frag_loader_t* fl;
+} hb_ev_t;
+
+/* _tile_hb(s, k_i, acc, fr, vm_wait, with_load, tile0s): one K tile as a single
+ * MFMA stream with every ds_read, DTL issue, wait and barrier pinned after an
+ * MFMA slot (TraitSpec.hb_sched). acc and fr (the next tile's first-atom
+ * fragments) are updated in place. */
+static void staged_tile_hb(staged_state_t* st,
+                           int s,
+                           rocke_value_t* k_i,
+                           rocke_value_t** acc,
+                           rocke_value_t** fr,
+                           int vm_wait,
+                           bool with_load,
+                           rocke_value_t* const* tile0s)
+{
+    rocke_gemm_build_ctx_t* ctx = st->ctx;
+    rocke_ir_builder_t* b = st->b;
+    const rocke_gemm_trait_spec_t* tr = &ctx->spec->trait;
+    int S = st->S;
+    int mfmas_m = ctx->mfmas_m, mfmas_n = ctx->mfmas_n;
+    int n = mfmas_m * mfmas_n;
+    int nf = mfmas_m + mfmas_n;
+    int k_atoms = ctx->k_atoms;
+    int ntot = k_atoms * n;
+    int shift = st->hb_shift;
+    std::map<int, std::vector<hb_ev_t>> ops, pre;
+    /* frs[kk]: the fragments of K atom kk (frs[0] = fr, the others filled by
+     * the loader sets read during the tile) */
+    std::vector<std::vector<rocke_value_t*>> frs(k_atoms, std::vector<rocke_value_t*>(nf, nullptr));
+    for(int i = 0; i < nf; ++i)
+        frs[0][i] = fr[i];
+    std::vector<staged_frag_loader_t> fls(k_atoms + 1);
+    int e_rd = tr->hb_read_every > 1 ? tr->hb_read_every : 1;
+    bool split = tr->hb_split_rel;
+    int last_rd = -1, last_a = -1, last_b = -1;
+    for(int kk = 0; kk + 1 < k_atoms; ++kk)
+    {
+        staged_frag_loader_t* fl = &fls[kk + 1];
+        fl->stage = s;
+        fl->kk = kk + 1;
+        fl->col_base = NULL;
+        fl->out = frs[kk + 1].data();
+        /* the loader order (fa0, fb0 .. fb[n-1], fa1 ..); hb_split_rel: every A
+         * fragment first, then every B */
+        std::vector<int> order;
+        order.push_back(0);
+        if(split)
+        {
+            for(int q = 1 + mfmas_n; q < nf; ++q)
+                order.push_back(q);
+            for(int q = 1; q < 1 + mfmas_n; ++q)
+                order.push_back(q);
+        }
+        else
+            for(int q = 1; q < nf; ++q)
+                order.push_back(q);
+        for(size_t j = 0; j < order.size(); ++j)
+        {
+            int x = (int)j * e_rd + shift;
+            int at = kk * n + (n - 1 < x ? n - 1 : x);
+            ops[at].push_back(hb_ev_t{HB_LOAD, order[j], fl});
+            last_rd = last_rd > at ? last_rd : at;
+            if((int)j < mfmas_m)
+                last_a = last_a > at ? last_a : at;
+            else
+                last_b = last_b > at ? last_b : at;
+        }
+    }
+    int rel = st->hb_rel, acq = st->hb_acq, rel_b = 0;
+    if(split)
+    {
+        int gap = tr->hb_rel_gap > 1 ? tr->hb_rel_gap : 1;
+        rel = ntot - 1 < last_a + gap ? ntot - 1 : last_a + gap;
+        rel_b = ntot - 1 < last_b + gap ? ntot - 1 : last_b + gap;
+    }
+    if(!split && rel <= last_rd)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "hb_sched: release slot %d must follow the last fragment read (MFMA %d)",
+                        rel,
+                        last_rd);
+        return;
+    }
+    /* the DTL issues of tile k_i + S * block_k into stage s */
+    bool deferred = with_load && tr->dtl_addr_spread;
+    staged_def_t def;
+    memset(&def, 0, sizeof def);
+    staged_issue_set_t iss;
+    memset(&iss, 0, sizeof iss);
+    int n_issues = 0;
+    if(deferred)
+    {
+        def.stage = s;
+        def.k_i = k_i;
+        def.t0[0] = tile0s != NULL ? tile0s[0] : st->a_tile0;
+        def.t0[1] = tile0s != NULL ? tile0s[1] : st->b_tile0;
+        def.tile0s = tile0s != NULL;
+        n_issues = ctx->dtl_a_passes + ctx->dtl_b_passes;
+    }
+    else if(with_load)
+    {
+        rocke_value_t* cst = rocke_b_const_i32(b, S * ctx->block_k);
+        rocke_value_t* kld = rocke_b_add(b, k_i, cst);
+        iss = staged_dtl_issues(st, s, kld, tile0s, NULL);
+        n_issues = iss.count;
+    }
+    /* DTL issue slots: from the release on, evenly or every hb_dtl_every */
+    int every = tr->hb_dtl_every;
+    int dly = tr->hb_dtl_delay;
+    int span = ntot - rel - dly;
+    std::vector<int> iss_at;
+    if(split && n_issues)
+    {
+        int ev = every ? every : 3;
+        int na = ctx->dtl_a_passes;
+        for(int j = 0; j < n_issues; ++j)
+        {
+            if(j < na)
+            {
+                int v = rel + j * ev;
+                iss_at.push_back(ntot - 1 < v ? ntot - 1 : v);
+            }
+            else
+            {
+                int stt = rel_b;
+                if(na)
+                {
+                    int w = iss_at[na - 1] + ev;
+                    stt = rel_b > w ? rel_b : w;
+                }
+                int v = stt + (j - na) * ev;
+                iss_at.push_back(ntot - 1 < v ? ntot - 1 : v);
+            }
+        }
+    }
+    for(int j = 0; j < (split ? 0 : n_issues); ++j)
+    {
+        if(every)
+        {
+            int v = j * every;
+            iss_at.push_back(rel + dly + (span - 1 < v ? span - 1 : v));
+        }
+        else
+            iss_at.push_back(rel + dly + (j * span) / (n_issues > 1 ? n_issues : 1));
+    }
+    if(shift)
+    {
+        int dsh = tr->hb_skew_dtl ? tr->hb_skew_dtl : shift;
+        for(auto& a : iss_at)
+            a = ntot - 1 < a + dsh ? ntot - 1 : a + dsh;
+    }
+    int n_before_acq = 0;
+    for(int a : iss_at)
+        n_before_acq += a < acq;
+    int acq_b = tr->hb_acq_b_slot;
+    /* per slot, in order: release, acquire, DTL issues, then reads */
+    if(n_issues)
+    {
+        pre[rel].push_back(hb_ev_t{HB_RELEASE, 0, NULL});
+        if(split && rel_b != rel)
+            pre[rel_b].push_back(hb_ev_t{HB_RELEASE, 0, NULL});
+    }
+    pre[acq].push_back(hb_ev_t{HB_ACQUIRE, 0, NULL});
+    for(size_t j = 0; j < iss_at.size(); ++j)
+        pre[iss_at[j]].push_back(hb_ev_t{HB_ISSUE, (int)j, NULL});
+    if(deferred)
+    {
+        /* dtl_addr_spread: one address step per free MFMA slot (no fragment
+         * read, wait or DTL there) before the first DTL issue */
+        int first_iss = ntot;
+        for(int a : iss_at)
+            first_iss = a < first_iss ? a : first_iss;
+        auto free_in = [&](int lo, int hi) {
+            std::vector<int> f, g;
+            for(int x = lo; x < hi; ++x)
+                if(ops.find(x) == ops.end() && pre.find(x) == pre.end())
+                    f.push_back(x);
+            /* every other free slot first */
+            for(size_t i = 0; i < f.size(); i += 2)
+                g.push_back(f[i]);
+            for(size_t i = 1; i < f.size(); i += 2)
+                g.push_back(f[i]);
+            return g;
+        };
+        std::vector<int> fre = free_in(1 + shift, first_iss);
+        if(tr->das_late)
+        {
+            /* das_late: k + A steps after the last read, B steps between A's
+             * first DTL and the acquire */
+            int na_ = ctx->dtl_a_passes;
+            std::vector<int> fa_ = free_in(last_rd + 1, first_iss);
+            int fb_end = (int)iss_at.size() > na_ ? iss_at[na_] : ntot;
+            std::vector<int> fb_ = free_in(first_iss + 1, fb_end < acq ? fb_end : acq);
+            if(fa_.size() >= 3 && fb_.size() >= 2)
+            {
+                std::vector<int> x(fa_.begin(), fa_.begin() + 3), y(fb_.begin(), fb_.begin() + 2);
+                std::sort(x.begin(), x.end());
+                std::sort(y.begin(), y.end());
+                fre = x;
+                fre.insert(fre.end(), y.begin(), y.end());
+            }
+        }
+        for(int j = 0; j < 5; ++j)
+            if(j < (int)fre.size())
+                pre[fre[j]].push_back(hb_ev_t{HB_PREP, j, NULL});
+    }
+    /* the next tile's first-atom fragments (read after the acquire) */
+    std::vector<rocke_value_t*> nxt(nf, nullptr);
+    staged_frag_loader_t* fl_nxt = &fls[0];
+    fl_nxt->stage = (s + 1) % S;
+    fl_nxt->kk = 0;
+    fl_nxt->col_base = NULL;
+    fl_nxt->out = nxt.data();
+    int n_before_b = 0;
+    auto run = [&](const hb_ev_t& e) {
+        switch(e.kind)
+        {
+        case HB_LOAD:
+            staged_frag_one(st, e.fl, e.idx);
+            break;
+        case HB_RELEASE:
+            rocke_b_s_waitcnt(b, -1, 0, -1);
+            rocke_b_s_barrier_bare(b);
+            break;
+        case HB_ACQUIRE:
+            if(acq_b < 0)
+            {
+                rocke_b_s_waitcnt(b, vm_wait + n_before_acq, 0, -1);
+                rocke_b_s_barrier_bare(b);
+                for(int j = 0; j < nf; ++j)
+                {
+                    int x = acq + 1 + j * e_rd + shift;
+                    ops[ntot - 1 < x ? ntot - 1 : x].push_back(hb_ev_t{HB_LOAD, j, fl_nxt});
+                }
+                break;
+            }
+            /* split: A now (the previous tile's B loads may stay in flight) */
+            rocke_b_s_waitcnt(b, vm_wait + ctx->dtl_b_passes + n_before_acq, 0, -1);
+            rocke_b_s_barrier_bare(b);
+            {
+                /* ld_a = [ld[0]] + ld[1 + mfmas_n:] */
+                std::vector<int> ld_a;
+                ld_a.push_back(0);
+                for(int q = 1 + mfmas_n; q < nf; ++q)
+                    ld_a.push_back(q);
+                for(size_t j = 0; j < ld_a.size(); ++j)
+                {
+                    int x = acq + 1 + (int)j * e_rd;
+                    ops[ntot - 1 < x ? ntot - 1 : x].push_back(hb_ev_t{HB_LOAD, ld_a[j], fl_nxt});
+                }
+                for(int a : iss_at)
+                    n_before_b += a < acq_b;
+                auto& pb = pre[acq_b];
+                pb.insert(pb.begin(), hb_ev_t{HB_ACQUIRE_B, 0, NULL});
+            }
+            break;
+        case HB_ACQUIRE_B:
+            rocke_b_s_waitcnt(b, vm_wait + n_before_b, -1, -1);
+            rocke_b_s_barrier_bare(b);
+            for(int j = 0; j < mfmas_n; ++j)
+            {
+                int x = acq_b + 1 + j * e_rd;
+                ops[ntot - 1 < x ? ntot - 1 : x].push_back(hb_ev_t{HB_LOAD, 1 + j, fl_nxt});
+            }
+            break;
+        case HB_ISSUE:
+            if(deferred)
+                staged_def_issue(st, &def, e.idx);
+            else
+                staged_issue_one(st, &iss, e.idx);
+            break;
+        default:
+            staged_def_prep(st, &def, e.idx);
+            break;
+        }
+    };
+    if(ctx->interwave)
+    {
+        rocke_b_sched_barrier(b, 0);
+        rocke_b_s_setprio(b, 1);
+    }
+    for(int kk = 0; kk < k_atoms; ++kk)
+    {
+        rocke_value_t* const* fa = frs[kk].data();
+        rocke_value_t* const* fb = frs[kk].data() + mfmas_m;
+        /* MFMA issue order: slot x = kk * n + pos runs accumulator flat */
+        for(int pos = 0; pos < n; ++pos)
+        {
+            int flat = ctx->mo_perm[kk % 2][pos];
+            int mi = flat / mfmas_n, ni = flat % mfmas_n;
+            int x = kk * n + pos;
+            acc[flat] = staged_mma_ab(st, fa[mi], fb[ni], acc[flat], ni);
+            auto pit = pre.find(x);
+            if(pit != pre.end())
+                for(size_t i = 0; i < pit->second.size(); ++i)
+                {
+                    hb_ev_t e = pre[x][i];
+                    run(e);
+                }
+            auto oit = ops.find(x);
+            if(oit != ops.end())
+                for(size_t i = 0; i < ops[x].size(); ++i)
+                {
+                    hb_ev_t e = ops[x][i];
+                    run(e);
+                }
+            rocke_b_sched_barrier(b, 0);
+            if(!rocke_ir_builder_ok(b))
+                return;
+        }
+    }
+    if(ctx->interwave)
+    {
+        rocke_b_s_setprio(b, 0);
+        rocke_b_sched_barrier(b, 0);
+    }
+    if(tr->hb_tile_lgkm0)
+    {
+        /* hb_tile_lgkm0: the next tile's first-atom fragments (read after the
+         * acquire) have landed; LLVM then needs no per-MFMA lgkmcnt(N) at the
+         * next tile's start */
+        rocke_b_s_waitcnt(b, -1, 0, -1);
+        rocke_b_sched_barrier(b, 0);
+    }
+    for(int i = 0; i < nf; ++i)
+        fr[i] = nxt[i];
 }
 
 /* _tile(s, k_i, acc, fr, vm_wait, with_load, tile0s): acc / fr updated in place
@@ -1083,6 +1622,11 @@ static void staged_tile(staged_state_t* st,
     memset(&iss, 0, sizeof(iss));
     memset(&er_iss, 0, sizeof(er_iss));
 
+    if(ctx->spec->trait.hb_sched)
+    {
+        staged_tile_hb(st, s, k_i, acc, fr, vm_wait, with_load, tile0s);
+        return;
+    }
     if(st->iglp_set)
         rocke_b_iglp_opt(b, st->iglp);
     if(st->instream && !st->fprf)
@@ -1380,11 +1924,12 @@ static void staged_kloop(staged_state_t* st,
     rocke_value_t* T_ = Tn != NULL ? Tn : st->T;
     rocke_value_t* nm = st->n_main;
     rocke_value_t* save_kup = st->cur_kup;
+    int U = st->U;
     if(Tn != NULL)
     {
-        rocke_value_t* cs1 = rocke_b_const_i32(b, S);
+        rocke_value_t* cs1 = rocke_b_const_i32(b, U);
         rocke_value_t* dv = rocke_b_div(b, Tn, cs1);
-        rocke_value_t* cs2 = rocke_b_const_i32(b, S);
+        rocke_value_t* cs2 = rocke_b_const_i32(b, U);
         nm = rocke_b_mul(b, dv, cs2);
     }
     st->cur_kup = kup;
@@ -1395,7 +1940,15 @@ static void staged_kloop(staged_state_t* st,
         rocke_b_s_barrier_bare(b);
     }
     if(st->fprf)
+    {
         staged_frags(st, 0, 0, fr0);
+        if(ctx->spec->trait.hb_tile_lgkm0)
+        {
+            /* the loop header's waitcnt state then matches the back edge's (no
+             * outstanding LDS read) */
+            rocke_b_s_waitcnt(b, -1, 0, -1);
+        }
+    }
 
     for(i = 0; i < na; ++i)
     {
@@ -1416,53 +1969,127 @@ static void staged_kloop(staged_state_t* st,
         rocke_value_t* m = rocke_b_mul(b, nm, ctx->c_block_k);
         k_main_hi = rocke_b_add(b, kl, m);
     }
-    snprintf(ivn, sizeof(ivn), "%skg", tag);
+    /* hb_skew: two copies of the main loop; a wave runs the even copy or the odd
+     * one (the other has an empty range for it) */
+    struct LoopCopy
     {
-        rocke_value_t* step = rocke_b_const_i32(b, S * ctx->block_k);
-        loop = rocke_b_scf_for_iter(
-            b, kl, k_main_hi, step, args, nargs, rocke_arena_strdup(&b->arena, ivn), false, true);
-    }
-    rocke_b_region_enter(b, loop.body);
+        int shift; /* -1: no hb_skew (the shift is left alone) */
+        rocke_value_t* hi;
+        const char* sfx;
+    };
+    LoopCopy copies[2] = {{-1, k_main_hi, ""}, {-1, NULL, ""}};
+    int n_copies = 1;
+    int skew = ctx->spec->trait.hb_skew;
+    if(skew)
     {
-        rocke_value_t* yv[ROCKE_GEMM_MAX_ACCS + STG_MAX_FRAGS];
-        int ny = 0;
-        for(i = 0; i < na; ++i)
-            acc[i] = loop.iter_vars[i];
-        if(st->fprf)
-            for(i = 0; i < nf; ++i)
-                fr[i] = loop.iter_vars[na + i];
-        for(s_ = 0; s_ < S; ++s_)
+        rocke_value_t* par;
+        if(skew == 1)
         {
-            rocke_value_t* k_i = loop.iv;
-            if(s_)
-                k_i = rocke_b_add(b, loop.iv, rocke_b_const_i32(b, s_ * ctx->block_k));
-            staged_tile(st, s_, k_i, acc, fr, st->keep, true, tile0s);
-            if(ctx->gett != NULL)
+            rocke_inline_asm_opts_t o;
+            memset(&o, 0, sizeof o);
+            o.sideeffect = true;
+            o.sideeffect_set = true;
+            const rocke_type_t* i32 = rocke_i32();
+            rocke_op_t* op = rocke_b_inline_asm_named(b,
+                                                      "s_getreg_b32 $0, hwreg(HW_REG_HW_ID, 4, 1)",
+                                                      "=s",
+                                                      NULL,
+                                                      0,
+                                                      &i32,
+                                                      1,
+                                                      &o,
+                                                      "simdpar");
+            if(op == NULL)
+                return;
+            par = op->results[0];
+        }
+        else
+        {
+            rocke_value_t* wv = rocke_b_to_sgpr_u32(b, ctx->warp_id);
+            rocke_value_t* c2 = rocke_b_const_i32(b, 2);
+            par = rocke_b_mod(b, wv, c2);
+        }
+        rocke_value_t* odd = rocke_b_cmp_ne(b, par, ctx->c0);
+        rocke_value_t* s0 = rocke_b_select(b, odd, kl, k_main_hi);
+        rocke_value_t* hi0 = rocke_b_to_sgpr_u32(b, s0);
+        rocke_value_t* s1 = rocke_b_select(b, odd, k_main_hi, kl);
+        rocke_value_t* hi1 = rocke_b_to_sgpr_u32(b, s1);
+        copies[0] = LoopCopy{0, hi0, ""};
+        copies[1] = LoopCopy{1, hi1, "o"};
+        n_copies = 2;
+    }
+    for(int c = 0; c < n_copies; ++c)
+    {
+        if(copies[c].shift >= 0)
+            st->hb_shift = copies[c].shift;
+        if(c > 0)
+        {
+            /* the odd copy's iter args: the even copy's names with the suffix, its
+             * results as the initial values */
+            for(i = 0; i < nargs; ++i)
             {
-                std::vector<rocke_value_t*> av(acc, acc + na);
-                av = ctx->gett->tile_end(b, av);
-                for(i = 0; i < na; ++i)
-                    acc[i] = av[i];
+                char buf[160];
+                snprintf(buf, sizeof buf, "%s%s%s", tag, copies[c].sfx, args[i].name);
+                args[i].name = rocke_arena_strdup(&b->arena, buf);
+                args[i].init = loop.op->results[i];
             }
         }
-        for(i = 0; i < na; ++i)
-            yv[ny++] = acc[i];
-        if(st->fprf)
-            for(i = 0; i < nf; ++i)
-                yv[ny++] = fr[i];
-        rocke_b_scf_yield(b, yv, ny);
+        snprintf(ivn, sizeof(ivn), "%s%skg", tag, copies[c].sfx);
+        {
+            rocke_value_t* step = rocke_b_const_i32(b, U * ctx->block_k);
+            loop = rocke_b_scf_for_iter(b,
+                                        kl,
+                                        copies[c].hi,
+                                        step,
+                                        args,
+                                        nargs,
+                                        rocke_arena_strdup(&b->arena, ivn),
+                                        false,
+                                        true);
+        }
+        rocke_b_region_enter(b, loop.body);
+        {
+            rocke_value_t* yv[ROCKE_GEMM_MAX_ACCS + STG_MAX_FRAGS];
+            int ny = 0;
+            for(i = 0; i < na; ++i)
+                acc[i] = loop.iter_vars[i];
+            if(st->fprf)
+                for(i = 0; i < nf; ++i)
+                    fr[i] = loop.iter_vars[na + i];
+            for(s_ = 0; s_ < U; ++s_)
+            {
+                rocke_value_t* k_i = loop.iv;
+                if(s_)
+                    k_i = rocke_b_add(b, loop.iv, rocke_b_const_i32(b, s_ * ctx->block_k));
+                staged_tile(st, s_ % S, k_i, acc, fr, st->keep, true, tile0s);
+                if(ctx->gett != NULL)
+                {
+                    std::vector<rocke_value_t*> av(acc, acc + na);
+                    av = ctx->gett->tile_end(b, av);
+                    for(i = 0; i < na; ++i)
+                        acc[i] = av[i];
+                }
+            }
+            for(i = 0; i < na; ++i)
+                yv[ny++] = acc[i];
+            if(st->fprf)
+                for(i = 0; i < nf; ++i)
+                    yv[ny++] = fr[i];
+            rocke_b_scf_yield(b, yv, ny);
+        }
+        rocke_b_region_leave(b);
     }
-    rocke_b_region_leave(b);
+    st->hb_shift = 0;
     for(i = 0; i < na; ++i)
         acc[i] = loop.op->results[i];
     if(st->fprf)
         for(i = 0; i < nf; ++i)
             fr[i] = loop.op->results[na + i];
 
-    /* tail: T % S tiles (< S), each a 0/1-trip loop, static stage s */
+    /* tail: T % U tiles (< U), each a 0/1-trip loop, static stage s */
     {
         rocke_value_t* rem = rocke_b_sub(b, T_, nm);
-        for(s_ = 0; s_ < S - 1; ++s_)
+        for(s_ = 0; s_ < U - 1; ++s_)
         {
             rocke_iter_arg_t targs[ROCKE_GEMM_MAX_ACCS + STG_MAX_FRAGS];
             int nt = 0;
@@ -1489,7 +2116,7 @@ static void staged_kloop(staged_state_t* st,
             snprintf(ivn, sizeof(ivn), "%skt%d", tag, s_);
             {
                 rocke_value_t* lo = rocke_b_const_i32(b, s_);
-                rocke_value_t* step = rocke_b_const_i32(b, S);
+                rocke_value_t* step = rocke_b_const_i32(b, U);
                 tl = rocke_b_scf_for_iter(
                     b, lo, rem, step, targs, nt, rocke_arena_strdup(&b->arena, ivn), false, true);
             }
@@ -1511,7 +2138,14 @@ static void staged_kloop(staged_state_t* st,
                     rocke_value_t* mu = rocke_b_mul(b, ad, ctx->c_block_k);
                     k_i = rocke_b_add(b, kl, mu);
                 }
-                staged_tile(st, s_, k_i, a_, f_, (S - 2 - s_) * st->L, false, tile0s);
+                if(ctx->spec->trait.kloop_unroll > 1)
+                {
+                    /* tail tiles up to U - 1 > S - 1: tile i + S can still be in
+                     * range, so issue (the main loop's waits apply) */
+                    staged_tile(st, s_ % S, k_i, a_, f_, st->keep, true, tile0s);
+                }
+                else
+                    staged_tile(st, s_, k_i, a_, f_, (S - 2 - s_) * st->L, false, tile0s);
                 for(i = 0; i < na; ++i)
                     yv[ny++] = a_[i];
                 if(st->fprf)
@@ -2121,10 +2755,8 @@ void rocke_gemm_emit_kloop_staged(rocke_gemm_build_ctx_t* ctx)
         const rocke_gemm_mn_layout_t* lay = o == 0 ? &ctx->mn_lay_a : &ctx->mn_lay_b;
         if(rocke_gemm_mn_n_pass(lay) != (o == 0 ? ctx->dtl_a_passes : ctx->dtl_b_passes))
         {
-            rocke_i_set_err(b,
-                            ROCKE_ERR_VALUE,
-                            "MN operand %s: DTL pass count mismatch",
-                            o == 0 ? "A" : "B");
+            rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "MN operand %s: DTL pass count mismatch", o == 0 ? "A" : "B");
             return;
         }
         st->op_pass_bytes[o] = rocke_gemm_mn_pass_bytes(lay);
@@ -2184,7 +2816,8 @@ void rocke_gemm_emit_kloop_staged(rocke_gemm_build_ctx_t* ctx)
     else if(!st->pers)
     {
         /* (MN-contiguous operand: the tile origin is the MN offset itself) */
-        rocke_value_t* ma = ctx->has_mn_a ? ctx->block_m_off : rocke_b_mul(b, ctx->block_m_off, ctx->K);
+        rocke_value_t* ma
+            = ctx->has_mn_a ? ctx->block_m_off : rocke_b_mul(b, ctx->block_m_off, ctx->K);
         rocke_value_t* aa = rocke_b_add(b, ctx->batch_off_a, ma);
         rocke_value_t* mb;
         rocke_value_t* ab;
@@ -2298,8 +2931,11 @@ void rocke_gemm_emit_kloop_staged(rocke_gemm_build_ctx_t* ctx)
         bool has = o == 0 ? ctx->has_mn_a : ctx->has_mn_b;
         if(!has)
             continue;
-        rocke_value_t* lane_e = rocke_gemm_mn_emit_read_lane_elems(
-            b, o == 0 ? &ctx->mn_lay_a : &ctx->mn_lay_b, ctx->lane, o == 0 ? ctx->warp_m_idx : ctx->warp_n_idx);
+        rocke_value_t* lane_e
+            = rocke_gemm_mn_emit_read_lane_elems(b,
+                                                 o == 0 ? &ctx->mn_lay_a : &ctx->mn_lay_b,
+                                                 ctx->lane,
+                                                 o == 0 ? ctx->warp_m_idx : ctx->warp_n_idx);
         for(j = 0; j < st->S; ++j)
         {
             int off = o == 0 ? st->offs_a[j] : st->offs_b[j];
@@ -2354,12 +2990,14 @@ void rocke_gemm_emit_kloop_staged(rocke_gemm_build_ctx_t* ctx)
         for(j = 0; j < st->S; ++j)
         {
             st->roffs_a[j] = ro;
-            ro += ctx->has_mn_a ? rocke_gemm_mn_stage_bytes(&ctx->mn_lay_a) : (ctx->block_m / 8) * st->rb;
+            ro += ctx->has_mn_a ? rocke_gemm_mn_stage_bytes(&ctx->mn_lay_a)
+                                : (ctx->block_m / 8) * st->rb;
         }
         for(j = 0; j < st->S; ++j)
         {
             st->roffs_b[j] = ro;
-            ro += ctx->has_mn_b ? rocke_gemm_mn_stage_bytes(&ctx->mn_lay_b) : (ctx->block_n / 8) * st->rb;
+            ro += ctx->has_mn_b ? rocke_gemm_mn_stage_bytes(&ctx->mn_lay_b)
+                                : (ctx->block_n / 8) * st->rb;
         }
         for(int o = 0; o < 2; ++o)
         {
@@ -2400,10 +3038,15 @@ void rocke_gemm_emit_kloop_staged(rocke_gemm_build_ctx_t* ctx)
         rocke_value_t* dv = rocke_b_div(b, sb, ctx->c_block_k);
         st->T = rocke_b_to_sgpr_u32(b, dv);
     }
+    /* kloop_unroll: U tiles per main-loop trip */
+    st->U = st->S * (spec->trait.kloop_unroll > 1 ? spec->trait.kloop_unroll : 1);
+    if(spec->trait.hb_sched)
+        rocke_gemm_hb_slots(spec, &st->hb_rel, &st->hb_acq);
+    st->hb_shift = 0;
     {
-        rocke_value_t* cs1 = rocke_b_const_i32(b, st->S);
+        rocke_value_t* cs1 = rocke_b_const_i32(b, st->U);
         rocke_value_t* dv = rocke_b_div(b, st->T, cs1);
-        rocke_value_t* cs2 = rocke_b_const_i32(b, st->S);
+        rocke_value_t* cs2 = rocke_b_const_i32(b, st->U);
         st->n_main = rocke_b_mul(b, dv, cs2);
     }
     st->n_pro = st->instream ? st->S : st->S - 1;

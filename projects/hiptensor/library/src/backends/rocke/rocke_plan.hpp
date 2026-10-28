@@ -143,7 +143,8 @@ namespace hiptensor
         {
             // Contractions: only the F64 route (HIPTENSOR_ROCKE_CONTRACTION_ROUTE=f64).
             bool f64Only = false;
-            // Contractions: skip rocKE's tuned GETT route table (HIPTENSOR_ROCKE_DISABLE_TUNED).
+            // Contractions: skip rocKE's tuned and AOT GETT route tables
+            // (HIPTENSOR_ROCKE_DISABLE_TUNED).
             bool disableTuned = false;
             // Contractions of f32 / complex f32 data with the 32F / C32F compute type: the recipe
             // (HIPTENSOR_ROCKE_F32_RECIPE; native by default).

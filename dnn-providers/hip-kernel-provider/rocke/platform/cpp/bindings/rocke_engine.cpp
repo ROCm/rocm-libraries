@@ -326,7 +326,27 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
                               "wide_addr",
                               "mn_pad",
                               "mn_chunk",
-                              "mn_ld_any"};
+                              "mn_ld_any",
+                              "hb_sched",
+                              "hb_rel_slot",
+                              "hb_acq_slot",
+                              "hb_read_every",
+                              "hb_dtl_every",
+                              "hb_acq_b_slot",
+                              "hb_split_rel",
+                              "hb_rel_gap",
+                              "kloop_unroll",
+                              "dtl_addr_spread",
+                              "hb_dtl_delay",
+                              "hb_skew",
+                              "hb_skew_dtl",
+                              "hb_tile_lgkm0",
+                              "das_anchor",
+                              "das_late",
+                              "mfma_serpentine",
+                              "mfma_order",
+                              "rve_pad",
+                              "dtl_tight_ragged_only"};
         for(const char* k : keys)
         {
             py::dict got = pick(trait, k);
@@ -429,6 +449,27 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
         }
         spec->trait.mn_chunk = dict_int(tr, "mn_chunk", spec->trait.mn_chunk);
         spec->trait.mn_ld_any = dict_bool(tr, "mn_ld_any", spec->trait.mn_ld_any);
+        spec->trait.hb_sched = dict_bool(tr, "hb_sched", spec->trait.hb_sched);
+        spec->trait.hb_rel_slot = dict_int(tr, "hb_rel_slot", spec->trait.hb_rel_slot);
+        spec->trait.hb_acq_slot = dict_int(tr, "hb_acq_slot", spec->trait.hb_acq_slot);
+        spec->trait.hb_read_every = dict_int(tr, "hb_read_every", spec->trait.hb_read_every);
+        spec->trait.hb_dtl_every = dict_int(tr, "hb_dtl_every", spec->trait.hb_dtl_every);
+        spec->trait.hb_acq_b_slot = dict_int(tr, "hb_acq_b_slot", spec->trait.hb_acq_b_slot);
+        spec->trait.hb_split_rel = dict_bool(tr, "hb_split_rel", spec->trait.hb_split_rel);
+        spec->trait.hb_rel_gap = dict_int(tr, "hb_rel_gap", spec->trait.hb_rel_gap);
+        spec->trait.kloop_unroll = dict_int(tr, "kloop_unroll", spec->trait.kloop_unroll);
+        spec->trait.dtl_addr_spread = dict_bool(tr, "dtl_addr_spread", spec->trait.dtl_addr_spread);
+        spec->trait.hb_dtl_delay = dict_int(tr, "hb_dtl_delay", spec->trait.hb_dtl_delay);
+        spec->trait.hb_skew = dict_int(tr, "hb_skew", spec->trait.hb_skew);
+        spec->trait.hb_skew_dtl = dict_int(tr, "hb_skew_dtl", spec->trait.hb_skew_dtl);
+        spec->trait.hb_tile_lgkm0 = dict_int(tr, "hb_tile_lgkm0", spec->trait.hb_tile_lgkm0);
+        spec->trait.das_anchor = dict_bool(tr, "das_anchor", spec->trait.das_anchor);
+        spec->trait.das_late = dict_bool(tr, "das_late", spec->trait.das_late);
+        spec->trait.mfma_serpentine = dict_bool(tr, "mfma_serpentine", spec->trait.mfma_serpentine);
+        spec->trait.mfma_order = dict_int(tr, "mfma_order", spec->trait.mfma_order);
+        spec->trait.rve_pad = dict_int(tr, "rve_pad", spec->trait.rve_pad);
+        spec->trait.dtl_tight_ragged_only
+            = dict_bool(tr, "dtl_tight_ragged_only", spec->trait.dtl_tight_ragged_only);
     }
 
     /* ---- data ---- */
@@ -582,7 +623,27 @@ SpecHolder build_spec(const py::dict& root)
                               "wide_addr",
                               "mn_pad",
                               "mn_chunk",
-                              "mn_ld_any"};
+                              "mn_ld_any",
+                              "hb_sched",
+                              "hb_rel_slot",
+                              "hb_acq_slot",
+                              "hb_read_every",
+                              "hb_dtl_every",
+                              "hb_acq_b_slot",
+                              "hb_split_rel",
+                              "hb_rel_gap",
+                              "kloop_unroll",
+                              "dtl_addr_spread",
+                              "hb_dtl_delay",
+                              "hb_skew",
+                              "hb_skew_dtl",
+                              "hb_tile_lgkm0",
+                              "das_anchor",
+                              "das_late",
+                              "mfma_serpentine",
+                              "mfma_order",
+                              "rve_pad",
+                              "dtl_tight_ragged_only"};
         for(const char* k : keys)
         {
             py::dict got = pick(trait, k);
@@ -688,6 +749,29 @@ SpecHolder build_spec(const py::dict& root)
         }
         h.spec.trait.mn_chunk = dict_int(tr, "mn_chunk", h.spec.trait.mn_chunk);
         h.spec.trait.mn_ld_any = dict_bool(tr, "mn_ld_any", h.spec.trait.mn_ld_any);
+        h.spec.trait.hb_sched = dict_bool(tr, "hb_sched", h.spec.trait.hb_sched);
+        h.spec.trait.hb_rel_slot = dict_int(tr, "hb_rel_slot", h.spec.trait.hb_rel_slot);
+        h.spec.trait.hb_acq_slot = dict_int(tr, "hb_acq_slot", h.spec.trait.hb_acq_slot);
+        h.spec.trait.hb_read_every = dict_int(tr, "hb_read_every", h.spec.trait.hb_read_every);
+        h.spec.trait.hb_dtl_every = dict_int(tr, "hb_dtl_every", h.spec.trait.hb_dtl_every);
+        h.spec.trait.hb_acq_b_slot = dict_int(tr, "hb_acq_b_slot", h.spec.trait.hb_acq_b_slot);
+        h.spec.trait.hb_split_rel = dict_bool(tr, "hb_split_rel", h.spec.trait.hb_split_rel);
+        h.spec.trait.hb_rel_gap = dict_int(tr, "hb_rel_gap", h.spec.trait.hb_rel_gap);
+        h.spec.trait.kloop_unroll = dict_int(tr, "kloop_unroll", h.spec.trait.kloop_unroll);
+        h.spec.trait.dtl_addr_spread
+            = dict_bool(tr, "dtl_addr_spread", h.spec.trait.dtl_addr_spread);
+        h.spec.trait.hb_dtl_delay = dict_int(tr, "hb_dtl_delay", h.spec.trait.hb_dtl_delay);
+        h.spec.trait.hb_skew = dict_int(tr, "hb_skew", h.spec.trait.hb_skew);
+        h.spec.trait.hb_skew_dtl = dict_int(tr, "hb_skew_dtl", h.spec.trait.hb_skew_dtl);
+        h.spec.trait.hb_tile_lgkm0 = dict_int(tr, "hb_tile_lgkm0", h.spec.trait.hb_tile_lgkm0);
+        h.spec.trait.das_anchor = dict_bool(tr, "das_anchor", h.spec.trait.das_anchor);
+        h.spec.trait.das_late = dict_bool(tr, "das_late", h.spec.trait.das_late);
+        h.spec.trait.mfma_serpentine
+            = dict_bool(tr, "mfma_serpentine", h.spec.trait.mfma_serpentine);
+        h.spec.trait.mfma_order = dict_int(tr, "mfma_order", h.spec.trait.mfma_order);
+        h.spec.trait.rve_pad = dict_int(tr, "rve_pad", h.spec.trait.rve_pad);
+        h.spec.trait.dtl_tight_ragged_only
+            = dict_bool(tr, "dtl_tight_ragged_only", h.spec.trait.dtl_tight_ragged_only);
     }
 
     /* ---- data ---- */

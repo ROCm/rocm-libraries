@@ -88,7 +88,7 @@ These environment variables, read at every plan creation and workspace estimate,
             operands converted to f64 and the result rounded once to the output type.
     *   -   ``HIPTENSOR_ROCKE_DISABLE_TUNED``
         -   Any value, for debugging and testing: the rocKE backend does not use the launches it has for the
-            contractions of its tuned route table, and plans them like any other contraction.
+            contractions of its tuned and AOT route tables, and plans them like any other contraction.
     *   -   ``HIPTENSOR_ROCKE_SELECT``
         -   ``static``, for debugging and testing: the rocKE backend selects kernels by rocKE's rules instead of
             the selection model of its kernel pack.
@@ -132,7 +132,9 @@ for a reduction, the row and column kernels with several splits of the reduced m
 elementwise operation, the tiled kernel and the generic kernel), checking every capability on the host without
 launching anything. It then orders them:
 
-1. A contraction of rocKE's tuned route table takes the launches of that table.
+1. A contraction of rocKE's tuned or AOT route table (f16 and bf16 on gfx950) takes the launches of that
+   table: a GETT on one of rocKE's GEMM bodies reading the operands in place, optionally after packing one or
+   both operands into the workspace, or a GETT on K-contiguous copies of both operands made in the workspace.
 2. Otherwise, a contraction the ring GETT serves takes it (with the operands whose fastest free run is not a
    multiple of 8 elements first packed into the workspace when the limit allows, else read in place), and on a
    target without the GEMM routes (gfx90a, gfx942) the direct GETT of a 16-bit or f32 compute class takes it.
@@ -184,10 +186,10 @@ declined; the fallback backend serves what it supports of them. A contraction ru
 * The direct GETT (every target): one launch reads A, B and C and writes D through their own strides, with no
   workspace, for every data type, compute type, operator and layout.
 
-A plan created with a workspace limit of zero takes the ring GETT or the direct GETT. The ring GETT and rocKE's
-tuned plans run the direct GETT instead when alpha is zero, or beta is zero for a contraction with C (their
+A plan created with a workspace limit of zero takes the ring GETT or the direct GETT. The ring GETT and the
+plans of rocKE's route tables run the direct GETT instead when alpha is zero, or beta is zero for a contraction with C (their
 epilogue would combine the term of the zero scale, so that a NaN or an infinity of a tensor that is not read would
-reach D), and when a buffer is not aligned to their vector accesses.
+reach D), and when a buffer or the workspace is not aligned to their vector accesses.
 
 A permutation or an elementwise operation whose output is fastest along one mode and an input along another
 runs on a tiled kernel: the inputs that are fastest along the other mode are read with 16-byte loads into a tile
@@ -370,7 +372,9 @@ cache. Reading returns
 ``HIPTENSOR_STATUS_INVALID_VALUE`` for a file of a newer format, another device class or another kernel ABI,
 ``HIPTENSOR_STATUS_IO_ERROR`` for a file that is missing, damaged in its header, not a kernel cache file, not owned
 by the user (or root), or writable by others, and ``HIPTENSOR_STATUS_SUCCESS`` for an empty file. Damaged entries
-are skipped. Entries are used only by plans created with ``HIPTENSOR_JIT_MODE_DEFAULT``. A build without the JIT
+are skipped. Entries of a file written by an earlier version of the JIT are found again only by their identity
+(after the kernel is built, before it is compiled); writing leaves out the ones that weren't used since they were
+read. Entries are used only by plans created with ``HIPTENSOR_JIT_MODE_DEFAULT``. A build without the JIT
 keeps no kernel cache: both calls then succeed without touching the file.
 
 hipTensor tests and samples are consumers of the hipTensor library and demonstrate the usages of the API in different contexts, such as tensor contractions, permutations and reductions.

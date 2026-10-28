@@ -415,9 +415,9 @@ class TraitSpec:
     # fewer SALU moves between the loads.
     dtl_hoist: bool = False
     # ---- persistent / stream-K / pad levers (default-off; defaults keep every
-    # existing kernel byte-identical; streamk, dtl_tight_rsrc and pad_fast_tile
-    # are mirrored in the C++ engine, the others are Python-engine only, see
-    # core.backend._PYTHON_ONLY_GEMM_LEVERS) ----
+    # existing kernel byte-identical; streamk, dtl_tight_rsrc, pad_fast_tile
+    # and dtl_tight_ragged_only are mirrored in the C++ engine, the others are
+    # Python-engine only, see core.backend._PYTHON_ONLY_GEMM_LEVERS) ----
     # ``streamk`` (persistent_ctas = P): stream-K tail balancing in the
     # persistent tile loop (CK Tile's "DP + 2-tile SK" partition, resolved in
     # the kernel from M / N / K and P). When the output tiles do not divide P,
@@ -548,9 +548,9 @@ class TraitSpec:
     # (two partial-vmcnt barriers per tile). 0 (default): off.
     ilv_split_wait: int = 0
     # ---- row-interleave LDS layout and slot-schedule levers (default-off;
-    # the defaults keep every kernel byte-identical). ``lds_row_interleave``
-    # and ``rilv_pad`` are mirrored by the C++ engine, the ``hb_*`` levers are
-    # Python-engine only ----
+    # the defaults keep every kernel byte-identical). ``lds_row_interleave``,
+    # ``rilv_pad`` and the ``hb_*`` slot-schedule levers are mirrored by the
+    # C++ engine ----
     # ``lds_row_interleave`` (dtl_stages >= 2, gfx950 16-byte DTL, 16-bit data,
     # tile_k 64 = one 128-byte LDS row, 16x16x32 atom, mfmas_m / mfmas_n
     # multiples of 8, no ``lds_swizzle``): the LDS tile layout hipBLASLt uses
@@ -685,8 +685,8 @@ class TraitSpec:
     # ``rve_store_nt`` (rilv_vec_epilogue): write C with the streaming
     # (non-temporal) hint (the NT store bits).
     rve_store_nt: bool = False
-    # ---- DTL issue-economy levers (default-off; Python-engine only except
-    # ``dtl_soff0``, which the C++ engine mirrors) ----
+    # ---- DTL issue-economy levers (default-off; ``dtl_rsrc_word3`` is
+    # Python-engine only, the C++ engine mirrors the others) ----
     # ``dtl_rsrc_word3`` (direct_to_lds, dtl_stages >= 2): DWORD3 (flags) of
     # the DTL buffer resources; 0 (default) = the target default (CDNA
     # 0x00027000: DATA_FORMAT 32, NUM_FORMAT FLOAT). hipBLASLt / CK use
@@ -717,7 +717,7 @@ class TraitSpec:
     # ``hb_dtl_delay`` (hb_sched): MFMA slots between the release barrier
     # and the first DTL issue (0 = the DTL right behind the barrier).
     hb_dtl_delay: int = 0
-    # ---- SIMD-parity loop copies (Python-engine only, default-off) ----
+    # ---- SIMD-parity loop copies (default-off; mirrored by the C++ engine) ----
     # ``hb_skew`` (hb_sched, no asm_loop / pingpong): two copies of the main
     # loop (as ``asm_loop_skew``) on the computed hb_sched schedule: the
     # odd copy issues every fragment read, DTL issue and DTL address step one
@@ -725,7 +725,9 @@ class TraitSpec:
     # do not hit the LDS / TA in the same MFMA slot. 1: the copy is picked by the
     # SIMD parity (``s_getreg hwreg(HW_ID, 4, 1)``); 2: by the wave-index parity.
     hb_skew: int = 0
-    # ---- K start stagger and MFMA order (Python-engine only, default-off) ----
+    # ---- K start stagger and MFMA order (default-off; the ``stagger_u*``
+    # levers are Python-engine only, the C++ engine mirrors ``mfma_serpentine``
+    # and ``mfma_order``) ----
     # ``stagger_u`` (direct_to_lds, non-persistent, no split-K / stream-K /
     # pingpong; 0 = off, else a power of two 2..64): Tensile's StaggerU. Each
     # workgroup starts its K loop at a different K tile, ``((idx mod SU) *
@@ -808,6 +810,7 @@ class TraitSpec:
     # a per-store row branch); 2: branch-free -- buffer stores over C whose
     # out-of-range lanes get voffset = num_records (dropped by the hardware
     # range check; no non-temporal hint; needs M * N * 2 < 2^32, non-batched).
+    # Mirrored by the C++ engine.
     rve_pad: int = 0
     # ---- wave-specialized ping-pong (Python-engine only, default-off) ----
     # ``pingpong`` (dtl_stages >= 3, plain staged order): 8-wave-style ping-pong.
@@ -856,7 +859,9 @@ class TraitSpec:
     # MFMAs [k, n) instead of [0, n), i.e. after the other group's memory-phase
     # DMA burst has drained from the TA. 0 = whole phase.
     pp_spread_lo: int = 0
-    # ---- instruction-economy levers (Python-engine only, default-off) ----
+    # ---- instruction-economy levers (default-off; ``hb_tile_lgkm0``,
+    # ``hb_skew_dtl``, ``das_anchor`` and ``das_late`` are mirrored by the C++
+    # engine, the others are Python-engine only) ----
     # ``hb_tile_lgkm0`` (hb_sched + dtl_frag_prefetch, no asm_loop): one
     # explicit ``s_waitcnt lgkmcnt(0)`` after the last MFMA slot of every K
     # tile (and after the first fragments read before the main loop). The next

@@ -11,7 +11,16 @@ only those two strings may differ (decoded comparison).
 
 The cross-check needs the built C++ builder and the COMGR library it links; see
 ``builders/hiptensor/README.md`` for the environment variables. Without
-``ROCKE_HIPTENSOR_PACK_BUILDER`` it skips. The table checks run everywhere.
+``ROCKE_HIPTENSOR_PACK_BUILDER`` it skips.
+
+Always checked, with no build: the manifests of hipTensor's pack targets
+(``builders/hiptensor/manifests/<arch>.manifest``: every kernel with its attributes and argument
+names, the routes and the kernel classes of hipTensor's JIT) are the ones the Python writer
+writes for this tree (``make_rocke_pack.py --list``). hipTensor's test rocke_pack_manifest_test
+checks that its C++ builder writes the same manifests (``--list --check-manifests``), so a
+change of a kernel row, attribute, route or JIT class on either side fails a default test until
+both sides and the manifests agree. The kernel ABI names of rocKE's C header must equal the
+Python ones.
 """
 
 import json
@@ -27,6 +36,11 @@ import pytest
 
 _LIBROOT = Path(__file__).resolve().parents[1]
 _WRITER = _LIBROOT / "builders" / "hiptensor" / "make_rocke_pack.py"
+_MANIFESTS = _LIBROOT / "builders" / "hiptensor" / "manifests"
+# hipTensor's pack targets (HIPTENSOR_ROCKE_SUPPORTED_TARGETS of its hiptensorRockePack.cmake)
+_PACK_TARGETS = ("gfx90a", "gfx942", "gfx950")
+# hipTensor's tree in the rocm-libraries monorepo (absent in a standalone rocKE checkout)
+_HIPTENSOR = _LIBROOT.parents[3] / "projects" / "hiptensor"
 
 
 # ------------------------------------------------------------------------------------------------
@@ -156,8 +170,117 @@ def test_writer_descriptor_families():
     }, families
 
 
+@pytest.mark.parametrize("arch", _PACK_TARGETS)
+def test_manifest_is_current(arch, tmp_path):
+    """The committed manifest of ``arch`` is the one the Python writer writes for this tree."""
+    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(_WRITER),
+            "--list",
+            "--arch",
+            arch,
+            "--out",
+            str(tmp_path),
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, (r.stdout + r.stderr)[-4000:]
+    got = (tmp_path / f"{arch}.manifest").read_text().splitlines()
+    want = (_MANIFESTS / f"{arch}.manifest").read_text().splitlines()
+    if got != want:
+        missing = [line for line in want if line not in set(got)]
+        extra = [line for line in got if line not in set(want)]
+        pytest.fail(
+            f"{arch}: builders/hiptensor/manifests/{arch}.manifest is stale; regenerate it with "
+            "make_rocke_pack.py --list --arch gfx90a --arch gfx942 --arch gfx950 --out "
+            "library/builders/hiptensor/manifests, then make hipTensor's C++ pack builder agree "
+            "(its test rocke_pack_manifest_test)\n"
+            + "\n".join(f"  committed only: {line}" for line in missing[:20])
+            + "\n"
+            + "\n".join(f"  written only:   {line}" for line in extra[:20])
+            + (
+                "\n  (the same lines in another order)"
+                if not missing and not extra
+                else ""
+            )
+        )
+
+
+def test_manifests_cover_the_pack_targets():
+    """One manifest per pack target of hipTensor (and its CMake list, in the monorepo)."""
+    assert sorted(p.stem for p in _MANIFESTS.glob("*.manifest")) == list(_PACK_TARGETS)
+    for arch in _PACK_TARGETS:
+        text = (_MANIFESTS / f"{arch}.manifest").read_bytes()
+        assert b"\r" not in text, f"{arch}.manifest: LF line endings only"
+        lines = text.decode().splitlines()
+        assert lines[0] == f"# rocKE kernel pack manifest {arch}"
+        kinds = {line.split(" ", 1)[0] for line in lines[1:]}
+        assert kinds == {"kernel", "route", "jit"}, kinds
+    cmake = _HIPTENSOR / "cmake" / "Functions" / "hiptensorRockePack.cmake"
+    if not cmake.is_file():
+        pytest.skip(f"no hipTensor tree at {_HIPTENSOR}")
+    m = re.search(
+        r"set\(HIPTENSOR_ROCKE_SUPPORTED_TARGETS ([^)]*)\)", cmake.read_text()
+    )
+    assert m is not None, cmake
+    assert tuple(m.group(1).split()) == _PACK_TARGETS
+
+
+def test_jit_classes_are_the_jit_rows_classes():
+    """The JIT classes of the manifests: every class of jit_classes() of the rows of the API's
+    operations, 64-bit-offset math rows excluded (the rule hipTensor's jitClassAdmitted encodes;
+    its C++ builder lists the classes that rule admits)."""
+    mod = _load_writer()
+    from kernels.common.hiptensor_aot.ew import EwSpec
+    from kernels.common.hiptensor_aot.jit_ew import jit_classes
+
+    names = mod.hiptensor_jit_classes()
+    assert len(names) == len(set(names)) and names == sorted(names)
+    every = {
+        c.kernel_name()
+        for idx64 in (False, True)
+        for p in mod.ew_params(idx64)
+        for c in jit_classes([EwSpec(**p)])
+    }
+    assert set(names) < every
+    for p in mod.ew_params(True, mixed=False):
+        for c in jit_classes([EwSpec(**p)]):
+            assert (c.kernel_name() in names) == (not p.get("math")), c.kernel_name()
+    for arch in _PACK_TARGETS:
+        lines = (_MANIFESTS / f"{arch}.manifest").read_text().splitlines()
+        assert [line[4:] for line in lines if line.startswith("jit ")] == names
+
+
+def test_kernel_abi_names_match_the_c_header():
+    """rocke/instance_hiptensor_aot.h's ROCKE_HTAOT_*_ABI names are the Python ABI constants."""
+    from kernels.common.hiptensor_aot import dgett, ew, ewt, jit_ew, reduce, rgett
+
+    header = (
+        _LIBROOT.parent
+        / "platform"
+        / "cpp"
+        / "include"
+        / "rocke"
+        / "instance_hiptensor_aot.h"
+    ).read_text()
+    macros = dict(re.findall(r'#define ROCKE_HTAOT_(\w+)_ABI "([^"]*)"', header))
+    assert macros == {
+        "EW": ew.EW_ABI,
+        "REDUCE": reduce.REDUCE_ABI,
+        "EW_JIT": jit_ew.EW_JIT_ABI,
+        "EWV": jit_ew.EWV_ABI,
+        "EWT": ewt.EWT_ABI,
+        "DGETT": dgett.DGETT_ABI,
+        "RGETT": rgett.RGETT_ABI,
+    }
+
+
 # ------------------------------------------------------------------------------------------------
-# With the built C++ builder: the packs
+# With the built C++ builder: the manifests and the packs
 # ------------------------------------------------------------------------------------------------
 
 
@@ -197,12 +320,24 @@ def _run(cmd, env, log):
     return r.stdout
 
 
+def test_cpp_manifests_equal_the_committed_ones(tmp_path):
+    """The C++ builder lists the manifests this tree commits (hipTensor's
+    rocke_pack_manifest_test runs the same check from hipTensor's build)."""
+    tool = _builder()
+    cmd = [tool, "--list", "--check-manifests", str(_MANIFESTS), "--out", str(tmp_path)]
+    for arch in _PACK_TARGETS:
+        cmd += ["--arch", arch]
+    _run(cmd, dict(os.environ), tmp_path / "list.log")
+
+
 def test_cpp_pack_equals_python_pack(tmp_path):
     tool = _builder()
     comgr = _builder_comgr(tool)
     arches = [
         a
-        for a in os.environ.get("ROCKE_HIPTENSOR_PACK_ARCHS", "gfx950").split(":")
+        for a in os.environ.get(
+            "ROCKE_HIPTENSOR_PACK_ARCHS", ":".join(_PACK_TARGETS)
+        ).split(":")
         if a
     ]
     only = os.environ.get("ROCKE_HIPTENSOR_PACK_ONLY", "")

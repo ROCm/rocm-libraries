@@ -261,13 +261,21 @@ class StreamKTailTest(unittest.TestCase):
         self.assertTrue(ok, why)
 
 
-class PythonOnlyTest(unittest.TestCase):
-    def test_engine_refuses_mfma_order(self):
-        self.assertIn(("mfma_order", 0), _be._PYTHON_ONLY_GEMM_LEVERS)
-        self.assertIn(("mfma_serpentine", False), _be._PYTHON_ONLY_GEMM_LEVERS)
-        with self.assertRaises(NotImplementedError) as cm:
-            _be._refuse_python_only_levers(replace(TraitSpec(), mfma_order=3))
-        self.assertIn("mfma_order", str(cm.exception))
+class EngineMirrorTest(unittest.TestCase):
+    """mfma_order / mfma_serpentine are mirrored by the C++ engine (byte
+    identity: tests/instances/parity/gemm_hb_emit)."""
+
+    def test_engine_receives_mfma_order(self):
+        keys = {k for k, _ in _be._PYTHON_ONLY_GEMM_LEVERS}
+        self.assertNotIn("mfma_order", keys)
+        self.assertNotIn("mfma_serpentine", keys)
+        for kw in (
+            dict(mfma_order=1),
+            dict(mfma_order=2),
+            dict(mfma_order=3),
+            dict(mfma_serpentine=True),
+        ):
+            _be._refuse_python_only_levers(replace(TraitSpec(), **kw))
         _be._refuse_python_only_levers(TraitSpec())  # the default passes
 
 

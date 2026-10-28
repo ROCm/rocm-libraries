@@ -1413,6 +1413,16 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     /* ---- per-warp MFMA tile counts -- */
     ctx.mfmas_m = rocke_gemm_tile_mfmas_per_warp_m(t);
     ctx.mfmas_n = rocke_gemm_tile_mfmas_per_warp_n(t);
+    if(ctx.mfmas_m * ctx.mfmas_n > ROCKE_GEMM_MAX_ACCS)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "too many MFMA accumulators per wave");
+        return NULL;
+    }
+    rocke_gemm_mfma_order_perm(spec->trait.mfma_serpentine ? 1 : spec->trait.mfma_order,
+                               ctx.mfmas_m,
+                               ctx.mfmas_n,
+                               ctx.mo_perm[0],
+                               ctx.mo_perm[1]);
     ctx.k_atoms = rocke_gemm_tile_k_atoms_per_tile_k(t);
     ctx.kmul = 1;
     ctx.pe = NULL;

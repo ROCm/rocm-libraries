@@ -10,8 +10,8 @@ with arbitrary mode orders straight from the user's tensors. The GEMM body is
 absent -> every universal GEMM kernel is byte-identical). The C++ engine
 mirrors the ring and MN-layout bodies (``cpp/instances/common/tensor_gett_*.cpp``,
 ``rocke_gett_hooks``; the ``tensor_gett`` parity family keeps the two engines
-byte-identical); the K-contiguous bodies and ``knobs.llvm_opts`` are Python
-engine only. Three body kinds:
+byte-identical) and the K-contiguous bodies (``tensor_gett_kc`` parity family);
+``knobs.llvm_opts`` is Python engine only. Three body kinds:
 
 * the ring body (:data:`BODY_TRAIT`, the default ``TensorGettSpec``): the hook
   owns the operand addressing, the K-outer LDS layout below, the fragment

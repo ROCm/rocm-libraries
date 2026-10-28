@@ -371,3 +371,22 @@ def test_d_beyond_the_32bit_offsets_is_refused():
     # 65536 x 32768 f16 = 4 GiB: past MAX_D_BYTES
     ok, why = is_valid_spec(_canon(ext={"M": 65536, "N": 32768, "K": 64}))
     assert not ok and "D spans more than" in why
+
+
+def test_traitspec_fields_table_is_current():
+    """The C++ engine's table of TraitSpec fields (cpp/instances/common/gemm_traitspec_fields.inc,
+    which the C++ tensor GETT spec hashes into its kernel names) lists every field of the Python
+    TraitSpec with its default: a new field without a regenerated table would make the two
+    engines' tensor GETT kernel names differ."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    tool = Path(__file__).resolve().parents[2] / "tools" / "gen_traitspec_fields.py"
+    r = subprocess.run(
+        [sys.executable, str(tool), "--check"], capture_output=True, text=True
+    )
+    assert r.returncode == 0, (r.stdout + r.stderr) + (
+        "\nregenerate it: python tools/gen_traitspec_fields.py > "
+        "cpp/instances/common/gemm_traitspec_fields.inc"
+    )

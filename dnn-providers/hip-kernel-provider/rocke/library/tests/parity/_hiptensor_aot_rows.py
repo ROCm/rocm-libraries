@@ -155,3 +155,36 @@ def geometry(names, seed):
         state = (state * 6364136223846793005 + 1442695040888963407) % (1 << 64)
         out[n] = 1000 + (state >> 33) % ((1 << 30) - 1000)
     return out
+
+
+#: The geometry points of the JIT emitters, with the target each point is lowered for.
+GEOMETRY_POINTS = ("gfx950", "gfx942", "gfx90a")
+#: Point 2: the edges of the constants' types, taken in turn by the axes.
+_I32_EDGES = (-(1 << 31), -1, (1 << 31) - 1, 0, 1)
+_I64_EDGES = (1 << 31, (1 << 32) + 7, (1 << 40) + 3, (1 << 63) - 1, -(1 << 31) - 1)
+
+
+def geometry_point(axes, seed, point):
+    """Geometry values for ``axes`` (``(name, is_i64)`` pairs) at one of three points:
+
+    0. :func:`geometry`: distinct values in [1000, 2^30);
+    1. 0, 1, 2 in turn: unit extents, zero (broadcast) and unit strides, small magic numbers;
+    2. the edges of the constant types, each sixth axis the negative of a drawn value (an i32
+       axis: a magic number stored as its i32 bits) or 2^31 plus it (an i64 axis): i32 axes
+       INT32_MIN, -1, INT32_MAX, 0, 1; i64 axes 2^31, 2^32 + 7, 2^40 + 3, INT64_MAX,
+       -2^31 - 1 (the strides and offsets of tensors past 2^31 elements).
+
+    The C emitters compute the same values."""
+    names = [n for n, _ in axes]
+    drawn = geometry(names, seed)
+    if point == 0:
+        return drawn
+    out = {}
+    for j, (n, is64) in enumerate(axes):
+        if point == 1:
+            out[n] = j % 3
+        elif j % 6 == 5:
+            out[n] = (1 << 31) + drawn[n] if is64 else -drawn[n]
+        else:
+            out[n] = (_I64_EDGES if is64 else _I32_EDGES)[j % 6]
+    return out

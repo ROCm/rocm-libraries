@@ -30,10 +30,35 @@ builder (hipTensor's build target `hiptensor_rocke_pack_builder`) and the COMGR 
 |---|---|
 | `ROCKE_HIPTENSOR_PACK_BUILDER` | path of the built `hiptensor_rocke_pack_builder` (the test skips without it) |
 | `ROCKE_HIPTENSOR_PACK_COMGR` | COMGR library this script compiles with (default: the one the builder links, from `ldd`) |
-| `ROCKE_HIPTENSOR_PACK_ARCHS` | `:`-separated targets (default `gfx950`) |
+| `ROCKE_HIPTENSOR_PACK_ARCHS` | `:`-separated targets (default: hipTensor's pack targets, `gfx90a:gfx942:gfx950`) |
 | `ROCKE_HIPTENSOR_PACK_ONLY` | family filter, e.g. `ewt\|dgett` (default: every family) |
 | `ROCKE_HIPTENSOR_PACK_SELECT_MODELS` | selection model directory written into both packs (default: none) |
 | `ROCKE_HIPTENSOR_PACK_JOBS` | compile jobs of both writers (default: the CPUs of the process) |
+
+With the builder, the test also runs its `--list --check-manifests manifests` (below).
+
+## Manifests
+
+`manifests/<arch>.manifest` holds, for each of hipTensor's pack targets, what the pack contains
+apart from its code objects: every kernel with its attributes and argument names, the routes
+(without selection models) and the kernel classes of hipTensor's JIT. Both writers list it
+without lowering or compiling anything (`make_rocke_pack.py --list`, `hiptensor_rocke_pack_builder
+--list`). Two default tests keep the two sides together:
+
+- rocKE: `library/tests/test_hiptensor_pack_cross_check.py` (`test_manifest_is_current`) fails
+  when this tree's Python writer lists something else than the committed manifests;
+- hipTensor: `rocke_pack_manifest_test` (ctest, no GPU) fails when hipTensor's C++ builder lists
+  something else than this tree's committed manifests.
+
+After changing a kernel row, attribute, route or JIT class, regenerate them
+
+```bash
+python library/builders/hiptensor/make_rocke_pack.py --list \
+    --arch gfx90a --arch gfx942 --arch gfx950 --out library/builders/hiptensor/manifests
+```
+
+and make hipTensor's builder (`library/src/backends/rocke/pack/rocke_pack_builder.cpp`,
+`rocke_ew_rows.hpp`) agree.
 
 Neither writer produces anything for hipTensor's JIT (`HIPTENSOR_ENABLE_ROCKE_JIT`): hipTensor
 builds its problem-specialized kernels at run time with the C++ twin of

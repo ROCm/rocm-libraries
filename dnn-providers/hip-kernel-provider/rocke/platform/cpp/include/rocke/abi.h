@@ -82,8 +82,14 @@ extern "C" {
  *    mid-enum gfx1250 cluster/prefetch opcodes.
  * 3: rocke_mma_op_t gained emulation_recipe and emulation_physical_op_id at its
  *    end, which changes sizeof and with it the stride of every ops[] array a
- *    catalog hands out. */
-#define ROCKE_ABI_VERSION 3
+ *    catalog hands out.
+ * 4: rocke_gemm_trait_spec_t and rocke_gemm_universal_spec_t gained fields (the
+ *    trait levers of the hipTensor GEMM bodies, the MN-operand knobs and the
+ *    prologue / GETT hook pointers), which changes their sizeof and layout.
+ * 5: rocke_gemm_trait_spec_t gained the hb_sched slot-schedule levers, the MFMA
+ *    issue order, rve_pad and dtl_tight_ragged_only at its end, which changes the
+ *    sizeof of it and of rocke_gemm_universal_spec_t. */
+#define ROCKE_ABI_VERSION 5
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them. */

@@ -29,13 +29,18 @@
 // of the contractions' operand packing and epilogues. The kernel pack builder
 // (pack/rocke_pack_builder.cpp) adds the rows of mixed-type contractions to them; the JIT
 // (rocke_jit.cpp) specializes the launches of these rows only, the mixed-type rows keep their
-// kernel-pack kernels.
+// kernel-pack kernels. jitClassAdmitted() is the JIT's class rule; the pack builder lists the
+// classes it admits in its manifest (--list), which rocKE's manifest pins to the classes of
+// rocKE's jit_ew.jit_classes().
 
 #ifndef HIPTENSOR_BACKENDS_ROCKE_ROCKE_EW_ROWS_HPP
 #define HIPTENSOR_BACKENDS_ROCKE_ROCKE_EW_ROWS_HPP
 
+#include <algorithm>
 #include <array>
 #include <cstring>
+
+#include "rocke/instance_hiptensor_aot.h"
 
 namespace hiptensor
 {
@@ -101,6 +106,58 @@ namespace hiptensor
                 }
             }
             return false;
+        }
+
+        // The rows the JIT specializes: the rows above with the default block size, the math
+        // rows with 32-bit offsets only. The rows of mixed-type contractions and the
+        // 64-bit-offset math rows keep their pack kernels.
+        inline bool jitRow(rocke_htaot_ew_spec_t const& s)
+        {
+            auto const name = [](char const* dt) { return dt != nullptr ? dt : ""; };
+            if((s.math && s.idx64) || s.block != rocke_htaot_ew_spec_default().block)
+            {
+                return false;
+            }
+            if(s.cplx)
+            {
+                return s.arity == 1
+                           ? hasEwRow(kEwRowsC1, EwRow2{name(s.a), name(s.d)})
+                           : s.arity == 2
+                                 && hasEwRow(kEwRowsC2, EwRow3{name(s.a), name(s.c), name(s.d)});
+            }
+            switch(s.arity)
+            {
+            case 1:
+                return hasEwRow(kEwRows1, EwRow2{name(s.a), name(s.d)});
+            case 2:
+                return hasEwRow(kEwRows2, EwRow3{name(s.a), name(s.c), name(s.d)});
+            case 3:
+                return hasEwRow(kEwRows3, EwRow4{name(s.a), name(s.b), name(s.c), name(s.d)});
+            default:
+                return false;
+            }
+        }
+
+        // The JIT's kernel classes: a class of a row of jitRow() that rocKE's builder accepts;
+        // vec 1 (no vector access) except for the math rows, or the output's vector width
+        // (16-byte accesses), every input a vector for the 64-bit-offset and the math rows.
+        inline bool jitClassAdmitted(rocke_htaot_ew_jit_spec_t const& s)
+        {
+            char why[160] = {0};
+            if(!jitRow(s.base) || !rocke_htaot_ew_jit_check(&s, why, sizeof(why)))
+            {
+                return false;
+            }
+            if(s.vec == 1)
+            {
+                return !s.base.math;
+            }
+            if(s.vec != rocke_htaot_ew_jit_vec(s.base.d))
+            {
+                return false;
+            }
+            return !(s.base.idx64 || s.base.math)
+                   || std::all_of(s.unit, s.unit + s.n_unit, [](bool u) { return u; });
         }
     } // namespace rockebackend
 } // namespace hiptensor

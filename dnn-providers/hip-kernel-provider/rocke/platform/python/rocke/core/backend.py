@@ -462,16 +462,7 @@ def _import_engine():
 # that dropped one would make the cpp / both paths build a different kernel
 # than Python, so every converter refuses them instead.
 _PYTHON_ONLY_GEMM_LEVERS = (
-    # hb_sched slot schedule
-    ("hb_sched", False),
-    ("hb_rel_slot", -1),
-    ("hb_acq_slot", -1),
-    ("hb_read_every", 1),
-    ("hb_dtl_every", 0),
-    ("hb_acq_b_slot", -1),
-    ("hb_split_rel", False),
-    ("hb_rel_gap", 4),
-    # SIA-style K-tile schedule and vector epilogue
+    # SIA-style K-tile schedule
     ("sia_sched", False),
     ("sia_b_first", False),
     ("sia_plr", False),
@@ -491,23 +482,13 @@ _PYTHON_ONLY_GEMM_LEVERS = (
     ("sab_store_nt", False),
     # DTL issue economy
     ("dtl_rsrc_word3", 0),
-    ("kloop_unroll", 1),
-    ("dtl_addr_spread", False),
-    ("hb_dtl_delay", 0),
-    # hb_sched loop copies per SIMD parity
-    ("hb_skew", 0),
-    # StaggerU K start offset and MFMA issue order (mfma_serpentine is
-    # order 1, mfma_order the alternative orders)
+    # StaggerU K start offset
     ("stagger_u", 0),
     ("stagger_u_stride", 1),
     ("stagger_u_map", 0),
-    ("mfma_serpentine", False),
-    ("mfma_order", 0),
-    # vector-epilogue bounds and XCD-local stream-K
-    ("rve_pad", False),
+    # XCD-local stream-K
     ("sk_xcd_local", False),
     # ragged / pad class
-    ("dtl_tight_ragged_only", False),
     ("k_stagger_rc", 0),
     # early stage free / split wait
     ("ilv_early_free", 0),
@@ -526,11 +507,7 @@ _PYTHON_ONLY_GEMM_LEVERS = (
     ("fr0_loop_order", False),
     ("asm_loop_rawrd", False),
     # instruction economy
-    ("hb_tile_lgkm0", 0),
     ("dtl_base_fold", False),
-    ("hb_skew_dtl", 0),
-    ("das_anchor", False),
-    ("das_late", False),
     ("k_stagger", 0),
     ("k_stagger_tiles", 0),
     ("k_stagger_map", 0),
@@ -885,6 +862,28 @@ def _gemm_lever_keys(tr: Any) -> Dict[str, Any]:
         mn_pad=tr.mn_pad,
         mn_chunk=tr.mn_chunk,
         mn_ld_any=tr.mn_ld_any,
+        # the hb_sched slot schedule and its levers, the MFMA issue order, the
+        # vector epilogue on ragged tiles and the per-operand exact DTL bounds
+        hb_sched=tr.hb_sched,
+        hb_rel_slot=tr.hb_rel_slot,
+        hb_acq_slot=tr.hb_acq_slot,
+        hb_read_every=tr.hb_read_every,
+        hb_dtl_every=tr.hb_dtl_every,
+        hb_acq_b_slot=tr.hb_acq_b_slot,
+        hb_split_rel=tr.hb_split_rel,
+        hb_rel_gap=tr.hb_rel_gap,
+        kloop_unroll=tr.kloop_unroll,
+        dtl_addr_spread=tr.dtl_addr_spread,
+        hb_dtl_delay=tr.hb_dtl_delay,
+        hb_skew=tr.hb_skew,
+        hb_skew_dtl=tr.hb_skew_dtl,
+        hb_tile_lgkm0=tr.hb_tile_lgkm0,
+        das_anchor=tr.das_anchor,
+        das_late=tr.das_late,
+        mfma_serpentine=tr.mfma_serpentine,
+        mfma_order=tr.mfma_order,
+        rve_pad=tr.rve_pad,
+        dtl_tight_ragged_only=tr.dtl_tight_ragged_only,
     )
 
 

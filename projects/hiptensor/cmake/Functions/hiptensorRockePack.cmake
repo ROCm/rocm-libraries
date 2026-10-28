@@ -65,13 +65,23 @@ function(hiptensor_add_rocke_engine)
         return()
     endif()
     set(engine "${HIPTENSOR_ROCKE_SOURCE_DIR}/platform")
-    if(NOT EXISTS "${engine}/cpp/include/rocke/instance_hiptensor_aot.h"
-       OR NOT EXISTS "${engine}/cpp/instances/common/hiptensor_aot_jit_ew.cpp")
-        message(FATAL_ERROR "HIPTENSOR_ROCKE_SOURCE_DIR=${HIPTENSOR_ROCKE_SOURCE_DIR} is not a "
-                            "rocKE source tree with the C++ kernel builders (no "
-                            "platform/cpp/include/rocke/instance_hiptensor_aot.h or "
-                            "platform/cpp/instances/common/hiptensor_aot_jit_ew.cpp)")
-    endif()
+    # The C++ kernel builders, rocKE's tuned and AOT GETT route tables and its reduction route
+    # table: data files of rocKE's Python package tree (python/rocke/dispatch/families), which the
+    # engine compiles in. Nothing runs Python; the rocKE tree must still carry those files.
+    set(tuned_json "${engine}/python/rocke/dispatch/families/tensor_gett_tuned.json")
+    set(aot_json "${engine}/python/rocke/dispatch/families/tensor_gett_aot.json")
+    set(rreduce_json "${engine}/python/rocke/dispatch/families/hiptensor_rreduce.json")
+    foreach(required "${engine}/cpp/include/rocke/instance_hiptensor_aot.h"
+                     "${engine}/cpp/instances/common/hiptensor_aot_jit_ew.cpp"
+                     "${tuned_json}"
+                     "${aot_json}"
+                     "${rreduce_json}")
+        if(NOT EXISTS "${required}")
+            message(FATAL_ERROR "HIPTENSOR_ROCKE_SOURCE_DIR=${HIPTENSOR_ROCKE_SOURCE_DIR} is not a "
+                                "rocKE source tree with the C++ kernel builders and the GETT "
+                                "route tables: ${required} is missing")
+        endif()
+    endforeach()
     file(GLOB_RECURSE engine_sources CONFIGURE_DEPENDS "${engine}/cpp/*.cpp")
     list(FILTER engine_sources EXCLUDE REGEX "/cpp/bindings/")
 
@@ -89,9 +99,8 @@ function(hiptensor_add_rocke_engine)
         COMMENT "Stamping the rocKE engine build id"
         VERBATIM)
 
-    # rocKE's tuned GETT route table (a data file of the rocKE tree), compiled into the engine
+    # rocKE's tuned GETT route table (tuned_json above), compiled into the engine
     # (rocke_tensor_gett_tuned_json)
-    set(tuned_json "${engine}/python/rocke/dispatch/families/tensor_gett_tuned.json")
     set(tuned_source "${generated}/tensor_gett_tuned_table.cpp")
     add_custom_command(
         OUTPUT "${tuned_source}"
@@ -102,7 +111,33 @@ function(hiptensor_add_rocke_engine)
         COMMENT "Embedding rocKE's tuned GETT route table"
         VERBATIM)
 
-    add_library(hiptensor_rocke_core STATIC ${engine_sources} "${tuned_source}")
+    # rocKE's GETT AOT route table (aot_json above: the product routes of fixed problems, frozen
+    # for ahead-of-time kernel packs), compiled into the engine (rocke_tensor_gett_aot_json)
+    set(aot_source "${generated}/tensor_gett_aot_table.cpp")
+    add_custom_command(
+        OUTPUT "${aot_source}"
+        COMMAND "${CMAKE_COMMAND}" "-DIN=${aot_json}" "-DOUT=${aot_source}"
+                "-DSYMBOL=rocke_tensor_gett_aot_json"
+                -P "${engine}/cmake/rocke_embed_json.cmake"
+        DEPENDS "${aot_json}" "${engine}/cmake/rocke_embed_json.cmake"
+        COMMENT "Embedding rocKE's GETT AOT route table"
+        VERBATIM)
+
+    # rocKE's route table of the tuned reduction classes (rreduce_json above: the palette of the
+    # pack and the tuned reduction problems), compiled into the engine
+    # (rocke_htaot_rreduce_table_json)
+    set(rreduce_source "${generated}/hiptensor_rreduce_table.cpp")
+    add_custom_command(
+        OUTPUT "${rreduce_source}"
+        COMMAND "${CMAKE_COMMAND}" "-DIN=${rreduce_json}" "-DOUT=${rreduce_source}"
+                "-DSYMBOL=rocke_htaot_rreduce_table_json"
+                -P "${engine}/cmake/rocke_embed_json.cmake"
+        DEPENDS "${rreduce_json}" "${engine}/cmake/rocke_embed_json.cmake"
+        COMMENT "Embedding rocKE's reduction route table"
+        VERBATIM)
+
+    add_library(hiptensor_rocke_core STATIC ${engine_sources} "${tuned_source}" "${aot_source}"
+                "${rreduce_source}")
     add_dependencies(hiptensor_rocke_core hiptensor_rocke_build_id)
     set_target_properties(hiptensor_rocke_core PROPERTIES
         CXX_STANDARD 20

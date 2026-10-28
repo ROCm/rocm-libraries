@@ -265,12 +265,15 @@ class DispatchTest(unittest.TestCase):
 
 class PythonOnlyTest(unittest.TestCase):
     def test_engine_refuses_round3_levers(self):
-        for k, off in (("dtl_tight_ragged_only", False), ("k_stagger_rc", 0)):
-            self.assertIn((k, off), _be._PYTHON_ONLY_GEMM_LEVERS)
-        for kw in (dict(dtl_tight_ragged_only=True), dict(k_stagger_rc=16)):
-            with self.assertRaises(NotImplementedError) as cm:
-                _be._refuse_python_only_levers(replace(TraitSpec(), **kw))
-            self.assertIn(next(iter(kw)), str(cm.exception))
+        # k_stagger_rc stays Python-engine only; dtl_tight_ragged_only is
+        # mirrored by the C++ engine (parity: tensor_gett_kc_emit)
+        self.assertIn(("k_stagger_rc", 0), _be._PYTHON_ONLY_GEMM_LEVERS)
+        with self.assertRaises(NotImplementedError) as cm:
+            _be._refuse_python_only_levers(replace(TraitSpec(), k_stagger_rc=16))
+        self.assertIn("k_stagger_rc", str(cm.exception))
+        keys = {k for k, _ in _be._PYTHON_ONLY_GEMM_LEVERS}
+        self.assertNotIn("dtl_tight_ragged_only", keys)
+        _be._refuse_python_only_levers(replace(TraitSpec(), dtl_tight_ragged_only=True))
 
 
 if __name__ == "__main__":

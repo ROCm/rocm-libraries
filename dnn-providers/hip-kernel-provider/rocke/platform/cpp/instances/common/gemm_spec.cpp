@@ -278,6 +278,26 @@ rocke_gemm_universal_spec_t rocke_gemm_universal_spec_default(void)
     s.trait.mn_pad = 32;
     s.trait.mn_chunk = 0;
     s.trait.mn_ld_any = false;
+    s.trait.hb_sched = false; /* the hb_sched slot schedule and its levers: off */
+    s.trait.hb_rel_slot = -1;
+    s.trait.hb_acq_slot = -1;
+    s.trait.hb_read_every = 1;
+    s.trait.hb_dtl_every = 0;
+    s.trait.hb_acq_b_slot = -1;
+    s.trait.hb_split_rel = false;
+    s.trait.hb_rel_gap = 4;
+    s.trait.kloop_unroll = 1;
+    s.trait.dtl_addr_spread = false;
+    s.trait.hb_dtl_delay = 0;
+    s.trait.hb_skew = 0;
+    s.trait.hb_skew_dtl = 0;
+    s.trait.hb_tile_lgkm0 = 0;
+    s.trait.das_anchor = false;
+    s.trait.das_late = false;
+    s.trait.mfma_serpentine = false;
+    s.trait.mfma_order = 0;
+    s.trait.rve_pad = 0;
+    s.trait.dtl_tight_ragged_only = false;
     s._prologue = NULL; /* no fused operand prologue */
     s._gett = NULL; /* no tensor GETT hooks */
 
@@ -352,9 +372,22 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     char part_lay[32];
     char part_mnp[32];
     char part_mnc[32];
+    char part_hr[32];
+    char part_hq[32];
+    char part_he[32];
+    char part_hd[32];
+    char part_hqb[32];
+    char part_hg[32];
+    char part_rvp[32];
+    char part_ku[32];
+    char part_hdd[32];
+    char part_hsk[32];
+    char part_htl[32];
+    char part_hsd[32];
+    char part_mo[32];
     const char* parts[5];
-    const char* flag_names[49];
-    int flag_on[49];
+    const char* flag_names[69];
+    int flag_on[69];
     const rocke_gemm_tile_spec_t* t;
     const rocke_gemm_trait_spec_t* tr;
 
@@ -432,38 +465,71 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     flag_names[30] = "sk"; /* stream-K */
     flag_names[31] = "trs";
     flag_names[32] = "pft";
+    flag_names[33] = "tro"; /* dtl_tight_ragged_only */
     /* early-release interleave */
     snprintf(part_er, sizeof(part_er), "er%d", tr->ilv_early_release);
-    flag_names[33] = part_er;
+    flag_names[34] = part_er;
     snprintf(part_rl, sizeof(part_rl), "rl%d", tr->ilv_release_at);
-    flag_names[34] = part_rl;
+    flag_names[35] = part_rl;
     snprintf(part_aq, sizeof(part_aq), "aq%d", tr->ilv_acquire_at);
-    flag_names[35] = part_aq;
-    flag_names[36] = "aov";
+    flag_names[36] = part_aq;
+    flag_names[37] = "aov";
     snprintf(part_rs, sizeof(part_rs), "rs%d", tr->ilv_read_span);
-    flag_names[37] = part_rs;
+    flag_names[38] = part_rs;
     snprintf(part_ds, sizeof(part_ds), "ds%d", tr->ilv_dtl_span);
-    flag_names[38] = part_ds;
-    /* row interleave / vector epilogue / DTL origin levers (Python: "rilv",
-     * f"rp{rilv_pad}", "rve", "rvnt", "so0", "w64"; the Python-engine-only flags
-     * between them are never on here) */
-    flag_names[39] = "rilv";
+    flag_names[39] = part_ds;
+    /* row interleave, the hb_sched slot schedule, the vector epilogue and the
+     * DTL origin / issue levers in the Python order (the Python-engine-only
+     * flags between them are never on here) */
+    flag_names[40] = "rilv";
     snprintf(part_rp, sizeof(part_rp), "rp%d", tr->rilv_pad ? tr->rilv_pad : 16);
-    flag_names[40] = part_rp;
-    flag_names[41] = "rve";
-    flag_names[42] = "rvnt";
-    flag_names[43] = "so0";
-    flag_names[44] = "w64";
+    flag_names[41] = part_rp;
+    flag_names[42] = "hbs";
+    snprintf(part_hr, sizeof(part_hr), "hr%d", tr->hb_rel_slot);
+    flag_names[43] = part_hr;
+    snprintf(part_hq, sizeof(part_hq), "hq%d", tr->hb_acq_slot);
+    flag_names[44] = part_hq;
+    snprintf(part_he, sizeof(part_he), "he%d", tr->hb_read_every);
+    flag_names[45] = part_he;
+    snprintf(part_hd, sizeof(part_hd), "hd%d", tr->hb_dtl_every);
+    flag_names[46] = part_hd;
+    snprintf(part_hqb, sizeof(part_hqb), "hqb%d", tr->hb_acq_b_slot);
+    flag_names[47] = part_hqb;
+    flag_names[48] = "hsr";
+    snprintf(part_hg, sizeof(part_hg), "hg%d", tr->hb_rel_gap);
+    flag_names[49] = part_hg;
+    flag_names[50] = "rve";
+    snprintf(part_rvp, sizeof(part_rvp), "rvp%d", tr->rve_pad);
+    flag_names[51] = part_rvp;
+    flag_names[52] = "rvnt";
+    flag_names[53] = "so0";
+    snprintf(part_ku, sizeof(part_ku), "ku%d", tr->kloop_unroll);
+    flag_names[54] = part_ku;
+    flag_names[55] = "das";
+    snprintf(part_hdd, sizeof(part_hdd), "hdd%d", tr->hb_dtl_delay);
+    flag_names[56] = part_hdd;
+    snprintf(part_hsk, sizeof(part_hsk), "hsk%d", tr->hb_skew);
+    flag_names[57] = part_hsk;
+    snprintf(part_htl, sizeof(part_htl), "htl%d", tr->hb_tile_lgkm0);
+    flag_names[58] = part_htl;
+    flag_names[59] = "w64";
+    snprintf(part_hsd, sizeof(part_hsd), "hsd%d", tr->hb_skew_dtl);
+    flag_names[60] = part_hsd;
+    flag_names[61] = "dsa";
+    flag_names[62] = "dsl";
+    flag_names[63] = "msp";
+    snprintf(part_mo, sizeof(part_mo), "mo%d", tr->mfma_order);
+    flag_names[64] = part_mo;
     /* native NN / TN / TT (MN-contiguous operands): Python f"L{layout}",
      * f"mnp{mn_pad}", f"mnc{mn_chunk}", "mnla" (f"mnv{mn_vec}" is a Python-engine
      * lever, never on here) */
     snprintf(part_lay, sizeof(part_lay), "L%s", spec->data.layout);
-    flag_names[45] = part_lay;
+    flag_names[65] = part_lay;
     snprintf(part_mnp, sizeof(part_mnp), "mnp%d", tr->mn_pad_set ? tr->mn_pad : 32);
-    flag_names[46] = part_mnp;
+    flag_names[66] = part_mnp;
     snprintf(part_mnc, sizeof(part_mnc), "mnc%d", tr->mn_chunk);
-    flag_names[47] = part_mnc;
-    flag_names[48] = "mnla";
+    flag_names[67] = part_mnc;
+    flag_names[68] = "mnla";
 
     flag_on[0] = (tr->pad_m || tr->pad_n || tr->pad_k) ? 1 : 0;
     flag_on[1] = tr->persistent ? 1 : 0;
@@ -499,28 +565,48 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     flag_on[30] = tr->streamk ? 1 : 0;
     flag_on[31] = tr->dtl_tight_rsrc ? 1 : 0;
     flag_on[32] = tr->pad_fast_tile ? 1 : 0;
-    flag_on[33] = (tr->ilv_early_release > 0) ? 1 : 0;
-    flag_on[34] = (tr->ilv_release_at > 0) ? 1 : 0;
-    flag_on[35] = (tr->ilv_acquire_at > 0) ? 1 : 0;
-    flag_on[36] = tr->acc_out_vgpr ? 1 : 0;
-    flag_on[37] = (tr->ilv_read_span > 0) ? 1 : 0;
-    flag_on[38] = (tr->ilv_dtl_span > 0) ? 1 : 0;
-    flag_on[39] = tr->lds_row_interleave ? 1 : 0;
-    flag_on[40] = (tr->lds_row_interleave && tr->rilv_pad != 0 && tr->rilv_pad != 16) ? 1 : 0;
-    flag_on[41] = tr->rilv_vec_epilogue ? 1 : 0;
-    flag_on[42] = tr->rve_store_nt ? 1 : 0;
-    flag_on[43] = tr->dtl_soff0 ? 1 : 0;
-    flag_on[44] = tr->wide_addr ? 1 : 0;
+    flag_on[33] = tr->dtl_tight_ragged_only ? 1 : 0;
+    flag_on[34] = (tr->ilv_early_release > 0) ? 1 : 0;
+    flag_on[35] = (tr->ilv_release_at > 0) ? 1 : 0;
+    flag_on[36] = (tr->ilv_acquire_at > 0) ? 1 : 0;
+    flag_on[37] = tr->acc_out_vgpr ? 1 : 0;
+    flag_on[38] = (tr->ilv_read_span > 0) ? 1 : 0;
+    flag_on[39] = (tr->ilv_dtl_span > 0) ? 1 : 0;
+    flag_on[40] = tr->lds_row_interleave ? 1 : 0;
+    flag_on[41] = (tr->lds_row_interleave && tr->rilv_pad != 0 && tr->rilv_pad != 16) ? 1 : 0;
+    flag_on[42] = tr->hb_sched ? 1 : 0;
+    flag_on[43] = (tr->hb_sched && tr->hb_rel_slot >= 0) ? 1 : 0;
+    flag_on[44] = (tr->hb_sched && tr->hb_acq_slot >= 0) ? 1 : 0;
+    flag_on[45] = (tr->hb_sched && tr->hb_read_every != 1) ? 1 : 0;
+    flag_on[46] = (tr->hb_sched && tr->hb_dtl_every > 0) ? 1 : 0;
+    flag_on[47] = (tr->hb_sched && tr->hb_acq_b_slot >= 0) ? 1 : 0;
+    flag_on[48] = (tr->hb_sched && tr->hb_split_rel) ? 1 : 0;
+    flag_on[49] = (tr->hb_sched && tr->hb_rel_gap != 4) ? 1 : 0;
+    flag_on[50] = tr->rilv_vec_epilogue ? 1 : 0;
+    flag_on[51] = (tr->rve_pad > 0) ? 1 : 0;
+    flag_on[52] = tr->rve_store_nt ? 1 : 0;
+    flag_on[53] = tr->dtl_soff0 ? 1 : 0;
+    flag_on[54] = (tr->kloop_unroll != 1) ? 1 : 0;
+    flag_on[55] = tr->dtl_addr_spread ? 1 : 0;
+    flag_on[56] = (tr->hb_dtl_delay > 0) ? 1 : 0;
+    flag_on[57] = (tr->hb_skew > 0) ? 1 : 0;
+    flag_on[58] = (tr->hb_tile_lgkm0 > 0) ? 1 : 0;
+    flag_on[59] = tr->wide_addr ? 1 : 0;
+    flag_on[60] = (tr->hb_skew_dtl > 0) ? 1 : 0;
+    flag_on[61] = tr->das_anchor ? 1 : 0;
+    flag_on[62] = tr->das_late ? 1 : 0;
+    flag_on[63] = tr->mfma_serpentine ? 1 : 0;
+    flag_on[64] = (tr->mfma_order > 0) ? 1 : 0;
     {
         bool rcr = strcmp(spec->data.layout, "RCR") == 0;
-        flag_on[45] = !rcr ? 1 : 0;
-        flag_on[46] = (!rcr && (tr->mn_pad_set ? tr->mn_pad : 32) != 32) ? 1 : 0;
-        flag_on[47] = (!rcr && tr->mn_chunk > 0) ? 1 : 0;
-        flag_on[48] = tr->mn_ld_any ? 1 : 0;
+        flag_on[65] = !rcr ? 1 : 0;
+        flag_on[66] = (!rcr && (tr->mn_pad_set ? tr->mn_pad : 32) != 32) ? 1 : 0;
+        flag_on[67] = (!rcr && tr->mn_chunk > 0) ? 1 : 0;
+        flag_on[68] = tr->mn_ld_any ? 1 : 0;
     }
 
     return rocke_kernel_name_join(
-        spec->name, parts, 5, flag_names, flag_on, 49, out, out_cap, NULL);
+        spec->name, parts, 5, flag_names, flag_on, 69, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -798,6 +884,78 @@ static int ck_gemm_arch_num_cus(const char* arch)
             if(strcmp(arch, e.gfx) == 0)
                 return e.num_cus;
     return 256; /* _DEFAULT_NUM_CUS */
+}
+
+/* _hb_k_atoms(spec): K atoms of one K tile as the MFMA stream issues them (an
+ * operand prologue with an f32 pair view packs two 16-bit K atoms into one) */
+int rocke_gemm_hb_k_atoms(const rocke_gemm_universal_spec_t* spec)
+{
+    int ka = spec->tile.tile_k / spec->tile.warp_tile_k;
+    if(spec->_prologue != NULL)
+    {
+        int km = rocke_gemm_prologue_kmul(spec->_prologue);
+        if(km > 1)
+            ka /= km;
+    }
+    return ka < 1 ? 1 : ka;
+}
+
+/* hb_last_read_slot(spec): the MFMA index (within a K tile) of the last
+ * intra-tile fragment read (-1 with a single K atom) */
+int rocke_gemm_hb_last_read_slot(const rocke_gemm_universal_spec_t* spec)
+{
+    int mm = rocke_gemm_tile_mfmas_per_warp_m(&spec->tile);
+    int mn = rocke_gemm_tile_mfmas_per_warp_n(&spec->tile);
+    int n = mm * mn;
+    int ka = rocke_gemm_hb_k_atoms(spec);
+    if(ka < 2)
+        return -1;
+    int nrd = mm + mn;
+    int every = spec->trait.hb_read_every > 1 ? spec->trait.hb_read_every : 1;
+    int x = (nrd - 1) * every;
+    return (ka - 2) * n + (n - 1 < x ? n - 1 : x);
+}
+
+/* hb_slots(spec): the (release, acquire) MFMA slot of a K tile (auto-resolved) */
+void rocke_gemm_hb_slots(const rocke_gemm_universal_spec_t* spec, int* rel, int* acq)
+{
+    int n = rocke_gemm_tile_mfmas_per_warp_m(&spec->tile)
+            * rocke_gemm_tile_mfmas_per_warp_n(&spec->tile);
+    int ka = rocke_gemm_hb_k_atoms(spec);
+    int ntot = ka * n;
+    const rocke_gemm_trait_spec_t* tr = &spec->trait;
+    int gap = tr->hb_rel_gap > 1 ? tr->hb_rel_gap : 1;
+    int r = rocke_gemm_hb_last_read_slot(spec) + gap;
+    *rel = tr->hb_rel_slot >= 0 ? tr->hb_rel_slot : (ntot - 1 < r ? ntot - 1 : r);
+    int a = (ka - 1) * n + 3;
+    *acq = tr->hb_acq_slot >= 0 ? tr->hb_acq_slot : (ntot - 1 < a ? ntot - 1 : a);
+}
+
+/* mfma_order_perm(mo, mfmas_m, mfmas_n): the accumulator index issued at each
+ * MFMA slot of a K atom, for even (`even`) and odd (`odd`) K atoms */
+void rocke_gemm_mfma_order_perm(int mo, int mfmas_m, int mfmas_n, int* even, int* odd)
+{
+    int n = mfmas_m * mfmas_n;
+    int k = 0;
+    if(mo == 1 || mo == 2)
+    {
+        for(int mi = 0; mi < mfmas_m; ++mi)
+            for(int ni = 0; ni < mfmas_n; ++ni)
+                even[k++] = mi * mfmas_n + (mi % 2 == 0 ? ni : mfmas_n - 1 - ni);
+    }
+    else if(mo == 3)
+    {
+        for(int ni = 0; ni < mfmas_n; ++ni)
+            for(int mi = 0; mi < mfmas_m; ++mi)
+                even[k++] = (ni % 2 == 0 ? mi : mfmas_m - 1 - mi) * mfmas_n + ni;
+    }
+    else
+    {
+        for(int i = 0; i < n; ++i)
+            even[i] = i;
+    }
+    for(int i = 0; i < n; ++i)
+        odd[i] = mo == 2 ? even[n - 1 - i] : even[i];
 }
 
 bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
@@ -1239,20 +1397,173 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         }
         if(tr->rilv_vec_epilogue
            && !(tr->lds_row_interleave && strcmp(tr->epilogue, "default") == 0 && !tr->mfma_swap_ab
-                && !(tr->pad_m || tr->pad_n) && tr->split_k == 1))
+                && (tr->rve_pad || !(tr->pad_m || tr->pad_n)) && tr->split_k == 1))
         {
             CK_GEMM_REJECT("rilv_vec_epilogue requires lds_row_interleave, the default epilogue, "
                            "no mfma_swap_ab, split_k == 1 and no pad_m / pad_n unless rve_pad");
+        }
+        if(tr->rve_pad < 0 || tr->rve_pad > 2)
+        {
+            CK_GEMM_REJECT("rve_pad must be 0, 1 or 2 (got %d)", tr->rve_pad);
+        }
+        if(tr->rve_pad
+           && !(tr->rilv_vec_epilogue && (tr->pad_m || tr->pad_n) && tr->dtl_tight_rsrc))
+        {
+            CK_GEMM_REJECT("rve_pad requires rilv_vec_epilogue, pad_m or pad_n and dtl_tight_rsrc "
+                           "(exact DTL bounds for the rows past M / N)");
+        }
+        if(tr->rve_pad == 2 && spec->batched)
+        {
+            CK_GEMM_REJECT("rve_pad 2 (buffer stores over C) requires a non-batched body");
         }
         if(tr->rve_store_nt && !tr->rilv_vec_epilogue)
         {
             CK_GEMM_REJECT("rve_store_nt requires rilv_vec_epilogue");
         }
+        if(tr->dtl_addr_spread && !(tr->hb_sched && tr->dtl_hoist))
+        {
+            CK_GEMM_REJECT("dtl_addr_spread requires hb_sched and dtl_hoist");
+        }
+        if(tr->dtl_tight_ragged_only
+           && !(tr->dtl_tight_rsrc && tr->dtl_hoist && (tr->pad_m || tr->pad_n)))
+        {
+            CK_GEMM_REJECT(
+                "dtl_tight_ragged_only requires dtl_tight_rsrc, dtl_hoist and pad_m / pad_n");
+        }
+        /* asm_loop and pingpong are Python-engine-only levers (off here) */
+        if(tr->hb_skew && !((tr->hb_skew == 1 || tr->hb_skew == 2) && tr->hb_sched))
+        {
+            CK_GEMM_REJECT("hb_skew requires 1 or 2 with hb_sched, no asm_loop / pingpong (got %d)",
+                           tr->hb_skew);
+        }
+        if(tr->hb_tile_lgkm0
+           && !(tr->hb_tile_lgkm0 == 1 && tr->hb_sched && tr->dtl_frag_prefetch
+                && tr->mfma_interleave))
+        {
+            CK_GEMM_REJECT("hb_tile_lgkm0 requires 1 with hb_sched + dtl_frag_prefetch + "
+                           "mfma_interleave, no asm_loop / pingpong (got %d)",
+                           tr->hb_tile_lgkm0);
+        }
+        if(tr->das_late && !(tr->dtl_addr_spread && tr->hb_sched))
+        {
+            CK_GEMM_REJECT("das_late requires dtl_addr_spread (hb_sched)");
+        }
+        if(tr->das_anchor && !tr->dtl_addr_spread)
+        {
+            CK_GEMM_REJECT("das_anchor requires dtl_addr_spread");
+        }
+        if(tr->hb_skew_dtl && !(tr->hb_skew && 0 < tr->hb_skew_dtl && tr->hb_skew_dtl <= 8))
+        {
+            CK_GEMM_REJECT("hb_skew_dtl requires hb_skew and 1..8 slots (got %d)", tr->hb_skew_dtl);
+        }
+        /* sia_sched and asm_loop are Python-engine-only levers (off here) */
+        if(tr->mfma_serpentine && !(tr->hb_sched || tr->mfma_interleave))
+        {
+            CK_GEMM_REJECT("mfma_serpentine requires hb_sched / asm_loop / sia_sched / "
+                           "mfma_interleave");
+        }
+        if(tr->mfma_order
+           && !((tr->mfma_order == 2 || tr->mfma_order == 3)
+                && (tr->hb_sched || tr->mfma_interleave) && (tr->mfma_order != 2 || tr->hb_sched)
+                && !tr->mfma_serpentine))
+        {
+            CK_GEMM_REJECT("mfma_order requires 2 or 3 (order 1 is mfma_serpentine) with "
+                           "hb_sched / sia_sched / mfma_interleave (2: hb_sched / sia_sched "
+                           "only), no asm_loop and no mfma_serpentine (got %d)",
+                           tr->mfma_order);
+        }
+        if(tr->hb_dtl_delay && !(tr->hb_sched && 0 < tr->hb_dtl_delay && tr->hb_dtl_delay <= 16))
+        {
+            CK_GEMM_REJECT("hb_dtl_delay requires hb_sched and 1..16 slots (got %d)",
+                           tr->hb_dtl_delay);
+        }
+        /* STREAMK_KLOOP_UNROLL is on: stream-K bodies may unroll too */
+        if(tr->kloop_unroll != 1
+           && !((tr->kloop_unroll == 2 || tr->kloop_unroll == 4) && tr->direct_to_lds
+                && tr->dtl_stages >= 2))
+        {
+            CK_GEMM_REJECT("kloop_unroll requires 2 or 4 with direct_to_lds, dtl_stages >= 2, "
+                           "no pingpong / streamk (got %d)",
+                           tr->kloop_unroll);
+        }
+        if(tr->hb_sched)
+        {
+            int ntot = rocke_gemm_hb_k_atoms(spec) * rocke_gemm_tile_mfmas_per_warp_m(&spec->tile)
+                       * rocke_gemm_tile_mfmas_per_warp_n(&spec->tile);
+            int rel = 0, acq = 0;
+            if(!(tr->dtl_frag_prefetch && tr->mfma_interleave))
+            {
+                CK_GEMM_REJECT("hb_sched requires dtl_frag_prefetch and mfma_interleave");
+            }
+            if(tr->ilv_merge || tr->ilv_barrier_after || tr->ilv_dtl_every || tr->iglp_opt_set)
+            {
+                CK_GEMM_REJECT("hb_sched is its own MFMA-slot schedule: it excludes ilv_merge, "
+                               "ilv_barrier_after, ilv_dtl_every and iglp_opt");
+            }
+            if(tr->hb_split_rel && (tr->hb_rel_slot >= 0 || rocke_gemm_hb_k_atoms(spec) < 2))
+            {
+                CK_GEMM_REJECT("hb_split_rel places both releases itself (hb_rel_slot must stay "
+                               "-1) and needs >= 2 K atoms per tile");
+            }
+            if(tr->hb_rel_gap < 1)
+            {
+                CK_GEMM_REJECT("hb_rel_gap must be >= 1 (got %d)", tr->hb_rel_gap);
+            }
+            rocke_gemm_hb_slots(spec, &rel, &acq);
+            if(tr->hb_acq_b_slot >= 0 && !(acq < tr->hb_acq_b_slot && tr->hb_acq_b_slot < ntot))
+            {
+                CK_GEMM_REJECT("hb_acq_b_slot %d must lie after the A acquire (%d) and below %d",
+                               tr->hb_acq_b_slot,
+                               acq,
+                               ntot);
+            }
+            if(!(-1 <= tr->hb_rel_slot && tr->hb_rel_slot < ntot && -1 <= tr->hb_acq_slot
+                 && tr->hb_acq_slot < ntot))
+            {
+                CK_GEMM_REJECT("hb_rel_slot / hb_acq_slot must be -1 (auto) or an MFMA index < %d "
+                               "(got %d / %d)",
+                               ntot,
+                               tr->hb_rel_slot,
+                               tr->hb_acq_slot);
+            }
+            if(tr->hb_read_every < 1 || tr->hb_dtl_every < 0)
+            {
+                CK_GEMM_REJECT("hb_read_every must be >= 1 and hb_dtl_every >= 0 (got %d / %d)",
+                               tr->hb_read_every,
+                               tr->hb_dtl_every);
+            }
+            int last_rd = rocke_gemm_hb_last_read_slot(spec);
+            if(0 <= tr->hb_rel_slot && tr->hb_rel_slot <= last_rd)
+            {
+                CK_GEMM_REJECT("hb_rel_slot %d must come after the last intra-tile fragment read "
+                               "(MFMA %d): the release frees the stage",
+                               tr->hb_rel_slot,
+                               last_rd);
+            }
+        }
+        else if(tr->hb_rel_slot != -1 || tr->hb_acq_slot != -1 || tr->hb_read_every != 1
+                || tr->hb_dtl_every != 0 || tr->hb_acq_b_slot != -1 || tr->hb_split_rel
+                || tr->hb_rel_gap != 4)
+        {
+            CK_GEMM_REJECT(
+                "hb_rel_slot / hb_acq_slot / hb_read_every / hb_dtl_every require hb_sched");
+        }
+        /* the K-tile schedule families (ilv_early_free, ilv_split_wait, sia_sched
+         * and pingpong are Python-engine-only levers) */
+        if(tr->ilv_early_release && tr->hb_sched)
+        {
+            CK_GEMM_REJECT("at most one K-tile schedule family per kernel (got ilv_early_release, "
+                           "hb_sched)");
+        }
+        if(tr->hb_sched && (tr->ilv_read_span || tr->ilv_dtl_span))
+        {
+            CK_GEMM_REJECT(
+                "hb_sched places its own reads / DTL issues (no ilv_read_span / ilv_dtl_span)");
+        }
         if(tr->wide_addr
            && !(tr->direct_to_lds && tr->dtl_hoist && (tr->dtl_soff0 || tr->dtl_tight_rsrc)
                 && tr->rilv_vec_epilogue && !tr->persistent_ctas && !tr->streamk && tr->split_k <= 1
-                && strcmp(spec->data.layout, "RCR") == 0 && !spec->batched
-                && spec->_gett == NULL))
+                && strcmp(spec->data.layout, "RCR") == 0 && !spec->batched && spec->_gett == NULL))
         {
             CK_GEMM_REJECT("wide_addr requires the direct-to-LDS ring with dtl_hoist and "
                            "dtl_soff0 or dtl_tight_rsrc, the row-interleave vector epilogue, a "

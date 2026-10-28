@@ -193,15 +193,17 @@ class ComposeTest(unittest.TestCase):
             self.assertIn("llvm.amdgcn.mfma", _ir(tr))
 
 
-class PythonOnlyTest(unittest.TestCase):
-    def test_engine_refuses_hb_skew(self):
-        self.assertIn(("hb_skew", 0), _be._PYTHON_ONLY_GEMM_LEVERS)
-        with self.assertRaises(Exception):
-            _be._refuse_python_only_levers(replace(_HB, hb_skew=1))
-        # hb_skew alone (on an otherwise engine-supported trait) is refused too
-        with self.assertRaises(NotImplementedError) as cm:
-            _be._refuse_python_only_levers(replace(TraitSpec(), hb_skew=1))
-        self.assertIn("hb_skew", str(cm.exception))
+class EngineMirrorTest(unittest.TestCase):
+    """hb_sched and hb_skew are mirrored by the C++ engine (byte identity:
+    tests/instances/parity/gemm_hb_emit): the converter passes them through."""
+
+    def test_engine_receives_hb_skew(self):
+        keys = {k for k, _ in _be._PYTHON_ONLY_GEMM_LEVERS}
+        for k in ("hb_skew", "hb_skew_dtl", "hb_sched"):
+            self.assertNotIn(k, keys)
+        for v in (1, 2):
+            tr = replace(TraitSpec(), hb_skew=v)
+            _be._refuse_python_only_levers(tr)
         _be._refuse_python_only_levers(TraitSpec())
 
 

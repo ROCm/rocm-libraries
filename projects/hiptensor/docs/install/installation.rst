@@ -206,7 +206,12 @@ Here are the available options to build the hipTensor library, with or without c
         -   ``ON``
     *   -   ``HIPTENSOR_ROCKE_SOURCE_DIR``
         -   rocKE source tree whose C++ engine builds the rocKE kernel packs and the JIT (build time only). A C++ host
-            tool of the build writes the packs; the build runs no Python
+            tool of the build writes the packs; the build runs no Python. Besides ``platform/cpp``, the build reads
+            two data files of the tree, rocKE's tuned and AOT GETT route tables
+            (``platform/python/rocke/dispatch/families/tensor_gett_tuned.json`` and ``tensor_gett_aot.json``,
+            compiled into the engine), and,
+            with the tests, the pack manifests of ``library/builders/hiptensor/manifests`` (the test
+            ``rocke_pack_manifest_test`` checks that the C++ tool lists what rocKE's manifests list)
         -   ``../../dnn-providers/hip-kernel-provider/rocke``
     *   -   ``HIPTENSOR_ROCKE_PACK_DIR``
         -   Directory of prebuilt rocKE kernel packs (``<target>/rocke.htpk``, ``<target>/rocke.index.json``); when

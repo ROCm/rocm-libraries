@@ -23,8 +23,9 @@ Three forms (``form``, ``"auto"`` picks the first that applies):
 
 Offsets are mixed-radix digits of the destination indices (compile-time
 extents and strides). Elements past the tensor fall outside the buffer ranges
-(loads return zeros, stores drop), so there are no branches. f16 / bf16;
-Python engine only.
+(loads return zeros, stores drop), so there are no branches. f16 / bf16.
+The C++ engine mirrors the builder (``cpp/instances/common/tensor_gett_pack.cpp``;
+the ``tensor_pack`` parity family keeps the two engines byte-identical).
 """
 
 from __future__ import annotations

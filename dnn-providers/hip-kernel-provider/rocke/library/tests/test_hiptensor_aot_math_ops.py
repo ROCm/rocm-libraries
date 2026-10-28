@@ -131,7 +131,8 @@ def test_math_recipes_carry_exact_integers():
 
 @pytest.mark.parametrize("a,d", [("f32", "f64"), ("f16", "f16"), ("f64", "f64")])
 def test_math_recipe_replay_lowers_like_the_builder(a, d):
-    """The hipTensor JIT path (the recipe replayed and lowered by the C++ engine) prints the
+    """rocKE's recipe path (the class's recipe replayed and lowered by the C++ engine; hipTensor's
+    JIT builds with the C++ builder instead) prints the
     LLVM IR of the Python builder's kernel up to SSA value names (the replay numbers the
     values of loops with carried values differently), for every math operator (skipped
     without the portable engine library)."""

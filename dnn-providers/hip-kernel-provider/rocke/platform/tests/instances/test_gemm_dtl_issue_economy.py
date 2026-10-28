@@ -174,7 +174,7 @@ class EmissionTest(unittest.TestCase):
 
 
 # mirrored by the C++ engine (cpp/instances/common/gemm_build_staged.cpp)
-_MIRRORED = ("rilv_pad", "dtl_soff0")
+_MIRRORED = ("rilv_pad", "dtl_soff0", "kloop_unroll", "dtl_addr_spread", "hb_dtl_delay")
 
 
 class EngineGuardTest(unittest.TestCase):
@@ -200,6 +200,11 @@ class EngineGuardTest(unittest.TestCase):
         sd = _be.universal_gemm_spec_to_dict(_spec(ring))
         self.assertEqual(sd["rilv_pad"], 32)
         self.assertIs(sd["dtl_soff0"], True)
+        for k in _MIRRORED:
+            off, on = _NEW[k]
+            tr = replace(_HB, **{k: on})
+            _be._refuse_python_only_levers(tr)
+            self.assertEqual(_be.universal_gemm_spec_to_dict(_spec(tr))[k], on, k)
 
 
 if __name__ == "__main__":

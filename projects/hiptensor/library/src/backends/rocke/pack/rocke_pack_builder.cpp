@@ -44,19 +44,28 @@
 // Every kernel family is built with rocKE's C++ builders (the descriptor tables of the Python
 // reference): ew, reduce, ewt, ewv, dgett and rgett (rocke/instance_hiptensor_aot.h),
 // gemm (the emulated-f32 GEMM bodies with their operand prologue: rocke_gemm_cf32_body,
-// rocke_build_universal_gemm), gett (the tuned GETT route table the engine carries:
-// rocke/instance_tensor_gett.h) and gett64 / gett32 (rocke_build_gett_f64 through the gett_f64
-// spec policy, f64 and f32 words).
+// rocke_build_universal_gemm), gett (the launches of the tuned and AOT GETT route tables the
+// engine carries: the tensor pack and GETT kernels of rocke/instance_tensor_gett.h) and gett64 /
+// gett32 (rocke_build_gett_f64 through the gett_f64 spec policy, f64 and f32 words).
 //
 // hipTensor's build compiles this tool against rocke_core and the COMGR library and runs it to
 // write the packs it ships (cmake/Functions/hiptensorRockePack.cmake). The packs carry no JIT
 // input: the backend's JIT builds its kernels with the same C++ builders (rocke_jit.cpp).
+//
+// --list writes, instead of the packs, each target's manifest <out>/<arch>.manifest: the
+// kernels with their attributes and argument names, the routes (no selection models) and the
+// JIT's kernel classes (rocke_ew_rows.hpp), without lowering or compiling anything (no COMGR
+// needed). --check-manifests DIR compares the manifests with DIR/<arch>.manifest, the ones the
+// Python reference writes (make_rocke_pack.py --list), which rocKE keeps current in
+// library/builders/hiptensor/manifests (hipTensor's test rocke_pack_manifest_test).
 //
 // Usage:
 //     rocke_pack_builder --arch gfx950 [--arch gfx942 ...] --out DIR [--jobs N]
 //                        [--cache-dir DIR] [--compile-timeout S] [--num-cus N]
 //                        [--select-models DIR] [--only REGEX]
 //                        [--compiler-id STR] [--rocke-version STR]
+//     rocke_pack_builder --list --arch gfx950 [--arch ...] [--out DIR] [--check-manifests DIR]
+//                        [--num-cus N]
 
 #include <algorithm>
 #include <array>
@@ -76,6 +85,7 @@
 #include <string>
 #include <thread>
 #include <tuple>
+#include <variant>
 #include <vector>
 
 #if !defined(_WIN32)
@@ -162,6 +172,7 @@ namespace
     {
         std::string              name;
         Attrs                    attrs;
+        std::vector<std::string> params; // the kernel's argument names (its IR parameters)
         std::string              ll;
         std::vector<std::string> options;
         std::string              key; // content address of the compile
@@ -186,6 +197,7 @@ namespace
         std::string         isa;
         rocke_llvm_flavor_t flavor = ROCKE_LLVM_FLAVOR_AUTO;
         std::string         compilerId; // part of the compile cache key
+        bool                listOnly = false; // --list: build the kernels, lower nothing
     };
 
     // Lowers a built kernel and fills in its compile inputs. False with `why` set on failure.
@@ -195,6 +207,14 @@ namespace
         {
             why = k.name + " needs a fresh compile process (history-dependent codegen)";
             return false;
+        }
+        for(int i = 0; i < kd->num_params; ++i)
+        {
+            k.params.emplace_back(kd->params[i]->name);
+        }
+        if(ctx.listOnly)
+        {
+            return true;
         }
         char  err[ROCKE_ERR_MSG_CAP] = {0};
         char* text                   = nullptr;
@@ -925,7 +945,7 @@ namespace
                           rocke_build_htaot_ew_jit(&b.b, &s, nullptr, 0),
                           {
                               {"family", std::string("ewv")},
-                              {"abi", std::string("hiptensor-aot-ewv/v1")},
+                              {"abi", std::string(ROCKE_HTAOT_EWV_ABI)},
                               {"arity", int64_t(p.arity)},
                               {"cplx", int64_t(0)},
                               {"idx64", int64_t(0)},
@@ -1088,8 +1108,8 @@ namespace
         }
     }
 
-    // ---- gett_plan: the launches of rocKE's tuned GETT route table (the Python reference's
-    // build_gett_plan): per tuned problem the GETT kernel and its launch record ----
+    // ---- gett_plan: the launches of rocKE's GETT route tables (the Python reference's
+    // build_gett_plan): per table problem its pack and GETT kernels and its launch record ----
 
     std::string fnv1a64(std::string const& text)
     {
@@ -1145,119 +1165,189 @@ namespace
         return key;
     }
 
-    void gettPlanDescriptors(Context const& ctx, std::vector<Descriptor>& out)
+    // One route table entry's launches (the Python reference's build_gett_plan): the pack kernels
+    // and the GETT kernel of rocke::gett::table_plan, and the launch record
+    // "v1;ws=<bytes>;steps=<n>" then per launch "|k=<kernel>;g=<x>,<y>,<z>;b=<threads>;a=<name>=
+    // <value>,..." (values: <buffer>+<byte offset> with buffers A, B, C, O (the output) and W (the
+    // workspace), #<int>, or @a / @b (alpha / beta)). Pack outputs sit in the workspace at
+    // 256-byte multiples, in step order.
+    void gettPlanDescriptor(Context const&                 ctx,
+                            rocke::gett::TunedEntry const& e,
+                            char const*                    table,
+                            std::vector<Descriptor>&       out)
     {
-        std::vector<rocke::gett::TunedEntry> entries;
-        std::string                          why;
-        if(!rocke::gett::tuned_entries(rocke_tensor_gett_tuned_json(), ctx.arch, &entries, &why))
+        Descriptor d;
+        d.family                         = "gett_plan";
+        d.label                          = std::string(table) + " key=" + e.key;
+        rocke::gett::TensorGettSpec prob = rocke::gett::tuned_problem(e);
+        if(rocke::gett::route_key(prob) != e.key)
         {
-            throw std::runtime_error("gett_plan: " + why);
+            d.applies = false;
+            d.reason  = "the route table entry's key does not reproduce";
+            out.push_back(std::move(d));
+            return;
         }
-        for(auto const& e : entries)
+        rocke::gett::TablePlan plan;
+        std::string            why;
+        if(!rocke::gett::table_plan(e, ctx.arch, &plan, &why))
         {
-            Descriptor d;
-            d.family                         = "gett_plan";
-            d.label                          = "key=" + e.key;
-            rocke::gett::TensorGettSpec prob = rocke::gett::tuned_problem(e);
-            if(rocke::gett::route_key(prob) != e.key)
-            {
-                d.applies = false;
-                d.reason  = "the tuned entry's key does not reproduce";
-                out.push_back(std::move(d));
-                continue;
-            }
-            rocke::gett::TensorGettSpec spec;
-            if(!rocke::gett::tuned_plan(e, ctx.arch, &spec, &why))
-            {
-                // the Python planner would fall back to its untuned routes (pack hybrid / ring
-                // body): not mirrored, so the pack would differ
-                throw std::runtime_error("gett_plan " + d.label + ": " + why);
-            }
+            // the Python planner would fall back to its cost-model routes for a stale entry: not
+            // mirrored, so the pack would differ
+            throw std::runtime_error("gett_plan " + d.label + ": " + why);
+        }
+        struct Step
+        {
+            std::string                        kernel;
+            int                                grid[3];
+            int                                block;
+            std::map<std::string, std::string> binds;
+        };
+        std::vector<Step>              steps;
+        std::map<std::string, int64_t> wsOff;
+        int64_t                        off = 0;
+        auto                           addKernel
+            = [&](rocke_kernel_def_t* kd, Builder& b, std::set<std::string> const& want) {
+                  if(kd == nullptr)
+                  {
+                      throw std::runtime_error("gett_plan " + d.label + ": "
+                                               + rocke_ir_builder_error(&b.b));
+                  }
+                  std::set<std::string> params;
+                  for(int i = 0; i < kd->num_params; ++i)
+                  {
+                      params.insert(kd->params[i]->name);
+                  }
+                  if(params != want)
+                  {
+                      throw std::runtime_error("gett_plan " + d.label + ": kernel " + kd->name
+                                               + " params are not the bound ones");
+                  }
+                  Kernel k;
+                  k.name  = kd->name;
+                  k.attrs = {
+                      {"family", std::string("gett")},
+                      {"abi", std::string("rocke-tensor-gett/v1")},
+                  };
+                  if(!lower(ctx, kd, k, why))
+                  {
+                      throw std::runtime_error("gett_plan " + d.label + ": " + why);
+                  }
+                  d.kernels.push_back(std::move(k));
+              };
+        for(auto const& st : plan.packs)
+        {
             Builder             b;
-            rocke_kernel_def_t* kd = rocke::gett::build_tensor_gett(&b.b, spec, ctx.arch.c_str());
-            if(kd == nullptr)
-            {
-                throw std::runtime_error("gett_plan " + d.label + ": "
-                                         + rocke_ir_builder_error(&b.b));
-            }
-            rocke::gett::Plan pl;
-            if(!spec.plan(&pl, &why))
-            {
-                throw std::runtime_error("gett_plan " + d.label + ": " + why);
-            }
-            std::map<std::string, std::string> binds = {
+            rocke_kernel_def_t* kd
+                = rocke::gett::build_tensor_pack(&b.b, st.spec, ctx.arch.c_str());
+            addKernel(kd, b, {"X", "Y"});
+            wsOff[st.operand] = off;
+            Step s;
+            s.kernel = kd->name;
+            std::copy(st.grid, st.grid + 3, s.grid);
+            s.block = st.block;
+            s.binds = {{"X", st.operand + "+0"}, {"Y", "W+" + std::to_string(off)}};
+            steps.push_back(std::move(s));
+            off += (st.workspace_bytes + 255) / 256 * 256;
+        }
+        Builder             b;
+        rocke_kernel_def_t* kd = rocke::gett::build_tensor_gett(&b.b, plan.gett, ctx.arch.c_str());
+        rocke::gett::Plan   pl;
+        if(kd != nullptr && !plan.gett.plan(&pl, &why))
+        {
+            throw std::runtime_error("gett_plan " + d.label + ": " + why);
+        }
+        std::map<std::string, std::string> binds;
+        if(kd != nullptr)
+        {
+            binds = {
                 {"C", "O+0"},
                 {"M", "#" + std::to_string(pl.M)},
                 {"N", "#" + std::to_string(pl.N)},
                 {"K", "#" + std::to_string(pl.K)},
                 {"alpha", "@a"},
             };
-            if(spec.knobs.bilinear)
+            if(plan.gett.knobs.bilinear)
             {
                 binds["Cin"]  = "C+0";
                 binds["beta"] = "@b";
             }
-            auto ops   = rocke::gett::launch_operands(spec);
-            binds["A"] = ops.first + "+0";
-            binds["B"] = ops.second + "+0";
-            std::set<std::string> params;
-            for(int i = 0; i < kd->num_params; ++i)
+            int src[2];
+            rocke::gett::gett_operand_sources(plan, src);
+            auto ops   = rocke::gett::launch_operands(plan.gett);
+            binds["A"] = src[0] >= 0 ? "W+" + std::to_string(wsOff.at(plan.packs[src[0]].operand))
+                                     : ops.first + "+0";
+            binds["B"] = src[1] >= 0 ? "W+" + std::to_string(wsOff.at(plan.packs[src[1]].operand))
+                                     : ops.second + "+0";
+        }
+        std::set<std::string> want;
+        for(auto const& kv : binds)
+        {
+            want.insert(kv.first);
+        }
+        addKernel(kd, b, want);
+        Step g;
+        g.kernel = kd->name;
+        rocke::gett::tensor_gett_grid(plan.gett, g.grid);
+        g.block = rocke::gett::tensor_gett_block(plan.gett);
+        g.binds = binds;
+        steps.push_back(std::move(g));
+        // the canonical key with the packed row-major strides the entry's problem has (in
+        // hipTensor: the same memory layout, mode lists reversed and column-major strides)
+        std::vector<std::vector<ModeExt>> tensors;
+        for(auto const* modes : {&e.modes_d, &e.modes_a, &e.modes_b})
+        {
+            auto                 st = rocke::gett::packed_strides(*modes, e.extents);
+            std::vector<ModeExt> t;
+            for(auto const& m : *modes)
             {
-                params.insert(kd->params[i]->name);
+                t.emplace_back(m, e.extents.at(m), st.at(m));
             }
-            std::set<std::string> bound;
-            for(auto const& kv : binds)
-            {
-                bound.insert(kv.first);
-            }
-            if(params != bound)
-            {
-                throw std::runtime_error("gett_plan " + d.label
-                                         + ": the GETT kernel params are not the bound ones");
-            }
-            int grid[3];
-            rocke::gett::tensor_gett_grid(spec, grid);
-            int block = rocke::gett::tensor_gett_block(spec);
-            // the canonical key with the packed row-major strides the tuned problem was measured
-            // with (in hipTensor: the same memory layout, mode lists reversed and column-major
-            // strides)
-            std::vector<std::vector<ModeExt>> tensors;
-            for(auto const* modes : {&e.modes_d, &e.modes_a, &e.modes_b})
-            {
-                auto                 st = rocke::gett::packed_strides(*modes, e.extents);
-                std::vector<ModeExt> t;
-                for(auto const& m : *modes)
-                {
-                    t.emplace_back(m, e.extents.at(m), st.at(m));
-                }
-                tensors.push_back(std::move(t));
-            }
-            std::string pkey = gettProblemKey(
-                spec.dtype == "fp16" ? "f16" : spec.dtype, spec.knobs.bilinear, tensors);
-            std::string record = "v1;ws=0;steps=1|k=" + std::string(kd->name) + ";g="
-                                 + std::to_string(grid[0]) + "," + std::to_string(grid[1]) + ","
-                                 + std::to_string(grid[2]) + ";b=" + std::to_string(block) + ";a=";
+            tensors.push_back(std::move(t));
+        }
+        std::string pkey = gettProblemKey(
+            plan.gett.dtype == "fp16" ? "f16" : plan.gett.dtype, plan.gett.knobs.bilinear, tensors);
+        std::string record
+            = "v1;ws=" + std::to_string(off) + ";steps=" + std::to_string(steps.size());
+        for(auto const& s : steps)
+        {
+            record += "|k=" + s.kernel + ";g=" + std::to_string(s.grid[0]) + ","
+                      + std::to_string(s.grid[1]) + "," + std::to_string(s.grid[2])
+                      + ";b=" + std::to_string(s.block) + ";a=";
             bool first = true;
-            for(auto const& kv : binds)
+            for(auto const& kv : s.binds)
             {
                 record += (first ? "" : ",") + kv.first + "=" + kv.second;
                 first = false;
             }
-            Kernel k;
-            k.name  = kd->name;
-            k.attrs = {
-                {"family", std::string("gett")},
-                {"abi", std::string("rocke-tensor-gett/v1")},
-            };
-            if(!lower(ctx, kd, k, why))
+        }
+        std::string route                        = fnv1a64(pkey);
+        d.routes["gett.tuned." + route]          = record;
+        d.routes["gett.tuned." + route + ".key"] = pkey;
+        out.push_back(std::move(d));
+    }
+
+    // ---- gett_plan: per entry of rocKE's tuned GETT route table, then of its AOT route table, the
+    // launches of the entry's route ----
+    void gettPlanDescriptors(Context const& ctx, std::vector<Descriptor>& out)
+    {
+        struct Table
+        {
+            char const* name;
+            char const* json;
+        };
+        for(Table t : {Table{"tuned", rocke_tensor_gett_tuned_json()},
+                       Table{"aot", rocke_tensor_gett_aot_json()}})
+        {
+            std::vector<rocke::gett::TunedEntry> entries;
+            std::string                          why;
+            if(!rocke::gett::tuned_entries(t.json, ctx.arch, &entries, &why))
             {
-                throw std::runtime_error("gett_plan " + d.label + ": " + why);
+                throw std::runtime_error(std::string("gett_plan ") + t.name + ": " + why);
             }
-            d.kernels.push_back(std::move(k));
-            std::string route                        = fnv1a64(pkey);
-            d.routes["gett.tuned." + route]          = record;
-            d.routes["gett.tuned." + route + ".key"] = pkey;
-            out.push_back(std::move(d));
+            for(auto const& e : entries)
+            {
+                gettPlanDescriptor(ctx, e, t.name, out);
+            }
         }
     }
 
@@ -1495,6 +1585,137 @@ namespace
     }
 
     // ---------------------------------------------------------------------------------------------
+    // Manifest (--list)
+    // ---------------------------------------------------------------------------------------------
+
+    // Every descriptor of `ctx.arch`, in the Python reference's order.
+    void collectDescriptors(Context const& ctx, std::vector<Descriptor>& descs)
+    {
+        ewReduceDescriptors(ctx, descs);
+        ewtDescriptors(ctx, descs);
+        ewvDescriptors(ctx, descs);
+        gemmDescriptors(ctx, descs);
+        gettPlanDescriptors(ctx, descs);
+        dgettDescriptors(ctx, descs);
+        rgettDescriptors(ctx, descs);
+        gett64Descriptors(ctx, descs);
+        gett64Descriptors(ctx, descs, true);
+    }
+
+    // The kernel classes the JIT specializes (rocke_ew_rows.hpp jitClassAdmitted): every class of
+    // every elementwise row of the pack (vec 1, and the output's vector width with every
+    // combination of vector / gathered inputs) the JIT admits, by kernel name.
+    std::set<std::string> jitClassNames()
+    {
+        std::set<std::string> names;
+        for(bool idx64 : {false, true})
+        {
+            for(auto const& p : ewParams(idx64, true))
+            {
+                std::vector<rocke_htaot_ew_jit_spec_t> classes(1);
+                classes[0].base = p;
+                classes[0].vec  = 1;
+                for(int mask = 0; mask < (1 << p.arity); ++mask)
+                {
+                    rocke_htaot_ew_jit_spec_t s{};
+                    s.base   = p;
+                    s.vec    = rocke_htaot_ew_jit_vec(p.d);
+                    s.n_unit = p.arity;
+                    for(int i = 0; i < p.arity; ++i)
+                    {
+                        s.unit[i] = (mask >> i & 1) != 0;
+                    }
+                    classes.push_back(s);
+                }
+                for(auto const& s : classes)
+                {
+                    char name[256] = {0};
+                    if(hiptensor::rockebackend::jitClassAdmitted(s)
+                       && rocke_htaot_ew_jit_kernel_name(&s, name, sizeof(name)) == ROCKE_OK)
+                    {
+                        names.insert(name);
+                    }
+                }
+            }
+        }
+        return names;
+    }
+
+    // A manifest field: backslashes and line breaks escaped.
+    std::string escaped(std::string const& s)
+    {
+        std::string out;
+        for(char c : s)
+        {
+            out += c == '\\' ? "\\\\" : c == '\n' ? "\\n" : std::string(1, c);
+        }
+        return out;
+    }
+
+    // The manifest of the pack of `arch`: a comment line, then one line per kernel in pack order
+    // ("kernel <name> <attribute>=<value>... params=<count>:<digest>", strings quoted; the digest:
+    // the first 16 hex digits of the SHA-256 of the comma-joined argument names), one per route
+    // ("route <key>=<value>", sorted, no selection models) and one per JIT kernel class
+    // ("jit <kernel name>", sorted). The Python reference writes the same text.
+    std::string
+        manifestText(std::string const& arch, int numCus, std::vector<Descriptor> const& descs)
+    {
+        std::map<std::string, std::string> kernels;
+        auto                               routes = routesFor(arch, numCus);
+        for(auto const& d : descs)
+        {
+            if(!d.applies)
+            {
+                continue;
+            }
+            for(auto const& k : d.kernels)
+            {
+                std::string line = "kernel " + k.name;
+                for(auto const& kv : k.attrs)
+                {
+                    line += " " + kv.first + "=";
+                    if(auto const* i = std::get_if<int64_t>(&kv.second))
+                    {
+                        line += std::to_string(*i);
+                    }
+                    else
+                    {
+                        line += "\"" + escaped(std::get<std::string>(kv.second)) + "\"";
+                    }
+                }
+                std::string names;
+                for(size_t i = 0; i < k.params.size(); ++i)
+                {
+                    names += (i ? "," : "") + k.params[i];
+                }
+                auto const digest = hiptensor::rockepack::sha256(names.data(), names.size());
+                line += " params=" + std::to_string(k.params.size()) + ":"
+                        + hiptensor::rockepack::hex(digest.data(), digest.size()).substr(0, 16);
+                // a kernel several descriptors build keeps the first one's record, as in the pack
+                kernels.emplace(k.name, line);
+            }
+            for(auto const& kv : d.routes)
+            {
+                routes[kv.first] = kv.second;
+            }
+        }
+        std::string out = "# rocKE kernel pack manifest " + arch + "\n";
+        for(auto const& kv : kernels)
+        {
+            out += kv.second + "\n";
+        }
+        for(auto const& kv : routes)
+        {
+            out += "route " + escaped(kv.first) + "=" + escaped(kv.second) + "\n";
+        }
+        for(auto const& name : jitClassNames())
+        {
+            out += "jit " + name + "\n";
+        }
+        return out;
+    }
+
+    // ---------------------------------------------------------------------------------------------
     // main
     // ---------------------------------------------------------------------------------------------
 
@@ -1510,6 +1731,8 @@ namespace
         std::string              selectModels;
         std::string              compilerId;
         std::string              rockeVersion;
+        bool                     list = false; // --list
+        std::string              checkManifests;
     };
 
     [[noreturn]] void usage(char const* msg)
@@ -1519,7 +1742,9 @@ namespace
             "%s\nusage: rocke_pack_builder --arch GFX [--arch GFX ...] --out DIR [--jobs N]\n"
             "       [--cache-dir DIR] [--compile-timeout S] [--num-cus N]\n"
             "       [--select-models DIR] [--only REGEX]\n"
-            "       [--compiler-id STR] [--rocke-version STR]\n",
+            "       [--compiler-id STR] [--rocke-version STR]\n"
+            "       rocke_pack_builder --list --arch GFX [--arch GFX ...] [--out DIR]\n"
+            "       [--check-manifests DIR] [--num-cus N]\n",
             msg);
         std::exit(2);
     }
@@ -1557,18 +1782,127 @@ namespace
                 o.compilerId = val();
             else if(a == "--rocke-version")
                 o.rockeVersion = val();
+            else if(a == "--list")
+                o.list = true;
+            else if(a == "--check-manifests")
+                o.checkManifests = val();
             else
                 usage(("unknown argument " + a).c_str());
         }
-        if(o.arches.empty() || o.out.empty())
+        if(!o.checkManifests.empty() && !o.list)
         {
-            usage("--arch and --out are required");
+            usage("--check-manifests needs --list");
+        }
+        if(o.arches.empty() || (o.out.empty() && o.checkManifests.empty()))
+        {
+            usage(o.list ? "--arch and --out or --check-manifests are required"
+                         : "--arch and --out are required");
         }
         return o;
     }
 
+    // --list: writes and / or checks the manifests. 0, 1 when a manifest differs from the
+    // expected one, 2 on errors.
+    int runList(Options const& o)
+    {
+        int status = 0;
+        for(auto const& arch : o.arches)
+        {
+            Context ctx;
+            ctx.arch           = arch;
+            ctx.isa            = hiptensor::rockebackend::isaName(arch);
+            ctx.listOnly       = true;
+            int const   numCus = o.numCus > 0 ? o.numCus : rocke_arch_num_cus(arch.c_str());
+            std::string text;
+            try
+            {
+                std::vector<Descriptor> descs;
+                collectDescriptors(ctx, descs);
+                text = manifestText(arch, numCus, descs);
+            }
+            catch(std::exception const& e)
+            {
+                std::fprintf(stderr, "rocKE pack ERROR %s: %s\n", arch.c_str(), e.what());
+                status = 2;
+                continue;
+            }
+            if(!o.out.empty())
+            {
+                fs::create_directories(o.out);
+                writeFile(fs::path(o.out) / (arch + ".manifest"), text.data(), text.size());
+            }
+            if(o.checkManifests.empty())
+            {
+                continue;
+            }
+            fs::path    expectedPath = fs::path(o.checkManifests) / (arch + ".manifest");
+            std::string expected;
+            try
+            {
+                expected = slurp(expectedPath);
+            }
+            catch(std::exception const& e)
+            {
+                std::fprintf(stderr, "rocKE pack ERROR %s: %s\n", arch.c_str(), e.what());
+                status = 2;
+                continue;
+            }
+            if(expected == text)
+            {
+                std::printf("rocKE pack %s: manifest equals %s\n",
+                            arch.c_str(),
+                            expectedPath.string().c_str());
+                continue;
+            }
+            auto lines = [](std::string const& s) {
+                std::vector<std::string> out;
+                size_t                   b = 0;
+                for(size_t e = s.find('\n'); e != std::string::npos; e = s.find('\n', b))
+                {
+                    out.push_back(s.substr(b, e - b));
+                    b = e + 1;
+                }
+                return out;
+            };
+            auto const                  have = lines(text);
+            auto const                  want = lines(expected);
+            std::set<std::string> const haveSet(have.begin(), have.end());
+            std::set<std::string> const wantSet(want.begin(), want.end());
+            std::fprintf(stderr,
+                         "rocKE pack %s: the manifest differs from %s (rocKE's make_rocke_pack.py "
+                         "--list writes that one)\n",
+                         arch.c_str(),
+                         expectedPath.string().c_str());
+            int shown = 0;
+            for(auto const& l : want)
+            {
+                if(!haveSet.count(l) && shown++ < 20)
+                {
+                    std::fprintf(stderr, "  only in the expected manifest: %s\n", l.c_str());
+                }
+            }
+            for(auto const& l : have)
+            {
+                if(!wantSet.count(l) && shown++ < 40)
+                {
+                    std::fprintf(stderr, "  only in this builder's manifest: %s\n", l.c_str());
+                }
+            }
+            if(shown == 0)
+            {
+                std::fprintf(stderr, "  the same lines in another order\n");
+            }
+            status = std::max(status, 1);
+        }
+        return status;
+    }
+
     int run(Options const& o)
     {
+        if(o.list)
+        {
+            return runList(o);
+        }
         auto const& info = hiptensor::rockebackend::compilerInfo();
         if(!info.available)
         {
@@ -1627,16 +1961,7 @@ namespace
             std::vector<Descriptor> descs;
             try
             {
-                // the Python reference's descriptor order
-                ewReduceDescriptors(ctx, descs);
-                ewtDescriptors(ctx, descs);
-                ewvDescriptors(ctx, descs);
-                gemmDescriptors(ctx, descs);
-                gettPlanDescriptors(ctx, descs);
-                dgettDescriptors(ctx, descs);
-                rgettDescriptors(ctx, descs);
-                gett64Descriptors(ctx, descs);
-                gett64Descriptors(ctx, descs, true);
+                collectDescriptors(ctx, descs);
             }
             catch(std::exception const& e)
             {

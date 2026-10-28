@@ -45,6 +45,7 @@
 #include <hiptensor/hiptensor.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <complex>
 #include <cstdint>
@@ -1500,6 +1501,460 @@ namespace
         }
         EXPECT_EQ(bad, 0);
     }
+
+    // ---------------------------------------------------------------- AOT GETT route table
+
+    // Problems of rocKE's AOT GETT route table (one per route kind: the MN-layout GETT reading
+    // the operands in place, with B or both operands packed first, and the K-contiguous route
+    // with both operands packed, A's or B's pack first; f16 and bf16, scale and bilinear). Mode
+    // lists are rocKE's (row-major: the last mode is the fastest); the hipTensor tensors are the
+    // packed column-major tensors of the reversed lists. The plan must take the route of the
+    // pack (on gfx950, whose pack carries the table) and match the f64 loop reference bit for
+    // bit after one rounding (integer data: the f32 sums are exact) at sampled outputs, at
+    // outputs that read an infinity or a NaN (IEEE propagation), with alpha or beta zero (the
+    // operand whose scale is zero is not read: its NaN / infinity never reaches D), and with a
+    // workspace not aligned to 16 bytes (the plan's fallback).
+    struct AotGettCase
+    {
+        char const*                    name;
+        hiptensorDataType_t            type;
+        bool                           bilinear;
+        std::vector<std::string>       modesA, modesB, modesD;
+        std::map<std::string, int64_t> extents;
+    };
+
+    // A dense column-major 16-bit tensor in host memory (bits) with its hipTensor modes.
+    struct AotTensor
+    {
+        hiptensorDataType_t      type;
+        std::vector<int32_t>     modes;
+        std::vector<std::string> names;
+        std::vector<int64_t>     extents, strides;
+        std::vector<uint16_t>    bits;
+        int64_t                  size = 1;
+    };
+
+    uint16_t aotEncode(double v, hiptensorDataType_t t)
+    {
+        uint16_t out = 0;
+        if(t == HIPTENSOR_R_16F)
+        {
+            _Float16 h = static_cast<_Float16>(v);
+            std::memcpy(&out, &h, 2);
+        }
+        else
+        {
+            hip_bfloat16 h(static_cast<float>(v));
+            std::memcpy(&out, &h, 2);
+        }
+        return out;
+    }
+
+    double aotDecode(uint16_t b, hiptensorDataType_t t)
+    {
+        if(t == HIPTENSOR_R_16F)
+        {
+            _Float16 h;
+            std::memcpy(&h, &b, 2);
+            return static_cast<double>(h);
+        }
+        hip_bfloat16 h;
+        std::memcpy(&h, &b, 2);
+        return static_cast<double>(static_cast<float>(h));
+    }
+
+    int32_t aotModeId(std::string const& name)
+    {
+        return int32_t(name[0]) * 64 + std::stoi(name.substr(1));
+    }
+
+    AotTensor aotTensor(AotGettCase const& c, std::vector<std::string> const& rocke)
+    {
+        AotTensor t;
+        t.type  = c.type;
+        t.names = std::vector<std::string>(rocke.rbegin(), rocke.rend());
+        for(auto const& n : t.names)
+        {
+            t.modes.push_back(aotModeId(n));
+            t.extents.push_back(c.extents.at(n));
+            t.strides.push_back(t.size);
+            t.size *= c.extents.at(n);
+        }
+        return t;
+    }
+
+    // Integer values in [-2, 2], spread by a multiplicative hash of the storage index.
+    void aotFill(AotTensor& t, uint64_t seed)
+    {
+        t.bits.resize(size_t(t.size));
+        for(int64_t i = 0; i < t.size; i++)
+        {
+            uint64_t h        = (uint64_t(i) + seed) * 0x9E3779B97F4A7C15ull;
+            t.bits[size_t(i)] = aotEncode(double(int64_t((h >> 40) % 5) - 2), t.type);
+        }
+    }
+
+    int64_t aotOffset(AotTensor const& t, std::map<std::string, int64_t> const& index)
+    {
+        int64_t off = 0;
+        for(size_t i = 0; i < t.names.size(); i++)
+        {
+            auto it = index.find(t.names[i]);
+            if(it != index.end())
+            {
+                off += it->second * t.strides[i];
+            }
+        }
+        return off;
+    }
+
+    // Plans `c`, then runs it once per scale / poison / workspace variant and compares sampled
+    // outputs with the reference.
+    void runAotGettCase(AotGettCase const& c)
+    {
+        SCOPED_TRACE(c.name);
+        ApiObjects api;
+        LogCapture log;
+        AotTensor  A = aotTensor(c, c.modesA), B = aotTensor(c, c.modesB),
+                  D = aotTensor(c, c.modesD), C = aotTensor(c, c.modesD);
+        aotFill(A, 1);
+        aotFill(B, 2);
+        aotFill(C, 3);
+        std::vector<std::string> kmodes;
+        for(auto const& n : A.names)
+        {
+            if(std::find(D.names.begin(), D.names.end(), n) == D.names.end())
+            {
+                kmodes.push_back(n);
+            }
+        }
+        // every K index as (offset in A, offset in B)
+        std::vector<std::pair<int64_t, int64_t>> koffs = {{0, 0}};
+        for(auto const& k : kmodes)
+        {
+            std::map<std::string, int64_t>           one = {{k, 1}};
+            int64_t const                            sa = aotOffset(A, one), sb = aotOffset(B, one);
+            std::vector<std::pair<int64_t, int64_t>> next;
+            for(int64_t i = 0; i < c.extents.at(k); i++)
+            {
+                for(auto const& o : koffs)
+                {
+                    next.emplace_back(o.first + i * sa, o.second + i * sb);
+                }
+            }
+            koffs.swap(next);
+        }
+        auto dA = api.tensor(A.extents, A.strides, c.type);
+        auto dB = api.tensor(B.extents, B.strides, c.type);
+        auto dD = api.tensor(D.extents, D.strides, c.type);
+        auto dC = c.bilinear ? api.tensor(C.extents, C.strides, c.type) : nullptr;
+        hiptensorOperationDescriptor_t desc = nullptr;
+        ASSERT_EQ(hiptensorCreateContraction(api.handle,
+                                             &desc,
+                                             dA,
+                                             A.modes.data(),
+                                             HIPTENSOR_OP_IDENTITY,
+                                             dB,
+                                             B.modes.data(),
+                                             HIPTENSOR_OP_IDENTITY,
+                                             dC,
+                                             c.bilinear ? C.modes.data() : nullptr,
+                                             HIPTENSOR_OP_IDENTITY,
+                                             dD,
+                                             D.modes.data(),
+                                             HIPTENSOR_COMPUTE_DESC_32F),
+                  HIPTENSOR_STATUS_SUCCESS);
+        api.keep(desc);
+        uint64_t workspaceSize = 0;
+        auto     plan          = planOf(api, desc, workspaceSize, log);
+        ASSERT_NE(plan, nullptr);
+        if(!log.contains("tuned-gett"))
+        {
+            // gfx950's pack carries the AOT route table: the route must be there
+            ASSERT_NE(deviceArch(), "gfx950") << log.all();
+            GTEST_SKIP() << "the pack has no AOT GETT route for this problem";
+        }
+        EXPECT_TRUE(log.contains("Source: TUNED")) << log.all();
+
+        // poison: an infinity at A's first element and a NaN at B's last; C (bilinear) gets an
+        // infinity and a NaN in the variants that do not read it
+        std::vector<int64_t> outs;
+        {
+            std::mt19937                           rng(11);
+            std::uniform_int_distribution<int64_t> pick(0, D.size - 1);
+            for(int s = 0; s < 4096; s++)
+            {
+                outs.push_back(pick(rng));
+            }
+            // outputs reading A's first element (every M mode 0) or B's last (every N mode
+            // last)
+            for(int s = 0; s < 128; s++)
+            {
+                std::map<std::string, int64_t> index;
+                int64_t                        r = pick(rng);
+                for(size_t i = 0; i < D.names.size(); i++)
+                {
+                    int64_t v = r % D.extents[i];
+                    r /= D.extents[i];
+                    if(s % 2 == 0 && D.names[i][0] == 'M')
+                    {
+                        v = 0;
+                    }
+                    if(s % 2 == 1 && D.names[i][0] == 'N')
+                    {
+                        v = D.extents[i] - 1;
+                    }
+                    index[D.names[i]] = v;
+                }
+                outs.push_back(aotOffset(D, index));
+            }
+        }
+        double const inf = std::numeric_limits<double>::infinity();
+        double const nan = std::numeric_limits<double>::quiet_NaN();
+
+        Device dev;
+        auto   upload = [&](AotTensor const& t) {
+            void* p = nullptr;
+            EXPECT_EQ(hipMalloc(&p, size_t(t.size) * 2), hipSuccess);
+            EXPECT_EQ(hipMemcpy(p, t.bits.data(), size_t(t.size) * 2, hipMemcpyHostToDevice),
+                      hipSuccess);
+            dev.buffers.push_back(p);
+            return p;
+        };
+        void* pD = nullptr;
+        ASSERT_EQ(hipMalloc(&pD, size_t(D.size) * 2), hipSuccess);
+        dev.buffers.push_back(pD);
+        void* ws = nullptr;
+        ASSERT_EQ(hipMalloc(&ws, workspaceSize + 16), hipSuccess);
+        dev.buffers.push_back(ws);
+
+        struct Variant
+        {
+            char const* what;
+            double      alpha, beta;
+            bool        poisonAB, poisonC, misalignWs;
+        };
+        std::vector<Variant> variants = {
+            {"plain", 1.0, -2.0, false, false, false},
+            {"inf/nan operands", 2.0, -1.0, true, false, false},
+            {"alpha 0, A and B poisoned", 0.0, -2.0, true, false, false},
+            {"misaligned workspace", 1.0, 3.0, false, false, true},
+        };
+        if(c.bilinear)
+        {
+            variants.push_back({"beta 0, C poisoned", 2.0, 0.0, false, true, false});
+        }
+        for(auto const& v : variants)
+        {
+            SCOPED_TRACE(v.what);
+            AotTensor a = A, b = B, cc = C;
+            if(v.poisonAB)
+            {
+                a.bits[0]                  = aotEncode(inf, c.type);
+                b.bits[size_t(b.size - 1)] = aotEncode(nan, c.type);
+                a.bits[size_t(a.size / 2)] = aotEncode(-inf, c.type);
+            }
+            if(v.poisonC)
+            {
+                for(int64_t o : outs)
+                {
+                    cc.bits[size_t(o)] = aotEncode(o % 2 ? nan : inf, c.type);
+                }
+            }
+            void* pA = upload(a);
+            void* pB = upload(b);
+            void* pC = c.bilinear ? upload(cc) : nullptr;
+            ASSERT_EQ(hipMemset(pD, 0x7f, size_t(D.size) * 2), hipSuccess);
+            float  alpha = float(v.alpha), beta = float(v.beta);
+            Stream stream;
+            void*  w = v.misalignWs ? static_cast<uint8_t*>(ws) + 8 : ws;
+            ASSERT_EQ(
+                hiptensorContract(
+                    api.handle, plan, &alpha, pA, pB, &beta, pC, pD, w, workspaceSize, stream.s),
+                HIPTENSOR_STATUS_SUCCESS)
+                << log.all();
+            ASSERT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
+            std::vector<uint16_t> got(size_t(D.size));
+            ASSERT_EQ(hipMemcpy(got.data(), pD, got.size() * 2, hipMemcpyDeviceToHost), hipSuccess);
+            int64_t bad = 0, nonfinite = 0;
+            for(int64_t flat : outs)
+            {
+                std::map<std::string, int64_t> index;
+                int64_t                        rest = flat;
+                for(size_t i = 0; i < D.names.size(); i++)
+                {
+                    index[D.names[i]] = rest % D.extents[i];
+                    rest /= D.extents[i];
+                }
+                double sum = 0;
+                if(v.alpha != 0.0)
+                {
+                    int64_t const baseA = aotOffset(a, index), baseB = aotOffset(b, index);
+                    for(auto const& kk : koffs)
+                    {
+                        sum += aotDecode(a.bits[size_t(baseA + kk.first)], c.type)
+                               * aotDecode(b.bits[size_t(baseB + kk.second)], c.type);
+                    }
+                }
+                double want = v.alpha != 0.0 ? v.alpha * sum : 0.0;
+                if(c.bilinear && v.beta != 0.0)
+                {
+                    want += v.beta * aotDecode(cc.bits[size_t(flat)], c.type);
+                }
+                want       = roundTo(want, c.type);
+                double out = aotDecode(got[size_t(flat)], c.type);
+                nonfinite += !std::isfinite(want);
+                bool same = std::isnan(want) ? std::isnan(out) : out == want;
+                if(!same && bad++ < 5)
+                {
+                    ADD_FAILURE() << "element " << flat << " got " << out << " want " << want;
+                }
+            }
+            EXPECT_EQ(bad, 0);
+            // the infinity / NaN variants reach the outputs that read them; the zero-scale
+            // variants never do
+            if(v.poisonAB && v.alpha != 0.0)
+            {
+                EXPECT_GT(nonfinite, 0);
+            }
+            if(v.alpha == 0.0 || v.poisonC)
+            {
+                EXPECT_EQ(nonfinite, 0);
+            }
+        }
+    }
+
+    std::vector<AotGettCase> aotGettCases()
+    {
+        using M = std::map<std::string, int64_t>;
+        return {
+            {"mn f16 bilinear",
+             HIPTENSOR_R_16F,
+             true,
+             {"K1", "M1", "K0", "M0"},
+             {"K1", "N1", "K0", "N0"},
+             {"N1", "M1", "N0", "M0"},
+             M{{"K0", 24}, {"K1", 24}, {"M0", 48}, {"M1", 32}, {"N0", 40}, {"N1", 36}}},
+            {"mn + B pack, bf16 scale",
+             HIPTENSOR_R_16BF,
+             false,
+             {"K2", "M2", "K1", "M1", "K0", "M0"},
+             {"K2", "N2", "K1", "N1", "K0", "N0"},
+             {"N2", "M2", "N1", "M1", "N0", "M0"},
+             M{{"K0", 12},
+               {"K1", 8},
+               {"K2", 6},
+               {"M0", 24},
+               {"M1", 16},
+               {"M2", 8},
+               {"N0", 20},
+               {"N1", 12},
+               {"N2", 8}}},
+            {"mn + A, B packs, f16 bilinear",
+             HIPTENSOR_R_16F,
+             true,
+             {"K4", "M4", "K3", "M3", "K2", "M2", "K1", "M1", "K0", "M0"},
+             {"K4", "N4", "K3", "N3", "K2", "N2", "K1", "N1", "K0", "N0"},
+             {"N4", "M4", "N3", "M3", "N2", "M2", "N1", "M1", "N0", "M0"},
+             M{{"K0", 6},
+               {"K1", 4},
+               {"K2", 4},
+               {"K3", 4},
+               {"K4", 2},
+               {"M0", 10},
+               {"M1", 8},
+               {"M2", 8},
+               {"M3", 6},
+               {"M4", 4},
+               {"N0", 10},
+               {"N1", 8},
+               {"N2", 6},
+               {"N3", 8},
+               {"N4", 4}}},
+            {"K-contiguous A, B, bf16 bilinear",
+             HIPTENSOR_R_16BF,
+             true,
+             {"K3", "M3", "K2", "M2", "K1", "M1", "K0", "M0"},
+             {"K3", "N3", "K2", "N2", "K1", "N1", "K0", "N0"},
+             {"N3", "M3", "N2", "M2", "N1", "M1", "N0", "M0"},
+             M{{"K0", 6},
+               {"K1", 6},
+               {"K2", 4},
+               {"K3", 4},
+               {"M0", 12},
+               {"M1", 8},
+               {"M2", 8},
+               {"M3", 6},
+               {"N0", 10},
+               {"N1", 8},
+               {"N2", 6},
+               {"N3", 8}}},
+            {"K-contiguous A, B, f16 scale",
+             HIPTENSOR_R_16F,
+             false,
+             {"K3", "M3", "K2", "M2", "K1", "M1", "K0", "M0"},
+             {"K3", "N3", "K2", "N2", "K1", "N1", "K0", "N0"},
+             {"N3", "M3", "N2", "M2", "N1", "M1", "N0", "M0"},
+             M{{"K0", 6},
+               {"K1", 6},
+               {"K2", 4},
+               {"K3", 4},
+               {"M0", 12},
+               {"M1", 8},
+               {"M2", 8},
+               {"M3", 6},
+               {"N0", 10},
+               {"N1", 8},
+               {"N2", 6},
+               {"N3", 8}}},
+            {"K-contiguous B, A, f16 scale",
+             HIPTENSOR_R_16F,
+             false,
+             {"K3", "K2", "K1", "K0", "M3", "M2", "M1", "M0"},
+             {"K0", "K1", "K2", "K3", "N3", "N2", "N1", "N0"},
+             {"N3", "N2", "N1", "N0", "M3", "M2", "M1", "M0"},
+             M{{"K0", 8},
+               {"K1", 8},
+               {"K2", 6},
+               {"K3", 4},
+               {"M0", 16},
+               {"M1", 12},
+               {"M2", 10},
+               {"M3", 8},
+               {"N0", 14},
+               {"N1", 10},
+               {"N2", 12},
+               {"N3", 8}}},
+        };
+    }
+
+    class RockeAotGett : public ::testing::TestWithParam<int>
+    {
+    };
+
+    TEST_P(RockeAotGett, Outputs)
+    {
+        if(f64RouteOnly())
+        {
+            GTEST_SKIP() << "HIPTENSOR_ROCKE_CONTRACTION_ROUTE=f64";
+        }
+        runAotGettCase(aotGettCases()[size_t(GetParam())]);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(Routes,
+                             RockeAotGett,
+                             ::testing::Range(0, int(aotGettCases().size())),
+                             [](::testing::TestParamInfo<int> const& info) {
+                                 std::string n = aotGettCases()[size_t(info.param)].name;
+                                 for(auto& ch : n)
+                                 {
+                                     if(!std::isalnum(static_cast<unsigned char>(ch)))
+                                     {
+                                         ch = '_';
+                                     }
+                                 }
+                                 return n;
+                             });
 
     // ---------------------------------------------------------------------- elementwise
 

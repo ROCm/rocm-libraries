@@ -3221,7 +3221,7 @@ namespace hiptensor
                 return hash;
             }
 
-            // The canonical key of a contraction for rocKE's tuned GETT route table, as the pack
+            // The canonical key of a contraction for rocKE's GETT route tables, as the pack
             // builder writes it (pack/rocke_pack_builder.cpp gettProblemKey): D, A, B with
             // extent-1 modes dropped, modes ordered by stride and named by first appearance.
             std::string gettProblemKey(Problem const& p, std::string const& dtype, bool bilinear)
@@ -3274,8 +3274,8 @@ namespace hiptensor
                 }
             }
 
-            // A contraction of rocKE's tuned GETT route table: the launches of its record (see
-            // pack/rocke_pack_builder.cpp gettPlanDescriptors). False when the problem has no
+            // A contraction of rocKE's tuned or AOT GETT route table: the launches of its record
+            // (see pack/rocke_pack_builder.cpp gettPlanDescriptors). False when the problem has no
             // record or the record does not apply.
             bool planTunedGett(Problem const& p,
                                Pack const&    pack,
@@ -4981,6 +4981,12 @@ namespace hiptensor
                             {
                                 program.fallbackOnZero.push_back(ScalarRole::Beta);
                                 program.fallbackAlign.emplace_back(BufferRole::C, 16u);
+                            }
+                            // the pack steps' outputs (16-byte stores, read by the GETT's 16-byte
+                            // DMA loads) sit at 256-byte offsets of the workspace
+                            if(program.workspaceBytes > 0)
+                            {
+                                program.fallbackAlign.emplace_back(BufferRole::Workspace, 16u);
                             }
                         }
                         add("tuned:" + hex.substr(hex.find(':') + 1), std::move(program), facts);

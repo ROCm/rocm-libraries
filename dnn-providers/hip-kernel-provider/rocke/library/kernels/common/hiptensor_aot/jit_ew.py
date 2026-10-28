@@ -55,6 +55,9 @@ from .common import (
 from .ew import EwSpec
 
 EW_JIT_ABI = "hiptensor-jit-ew/v1"
+#: The ABI of the vector classes of the elementwise kernel (:func:`ewv_kernel_name`, the class
+#: kernels of hipTensor's kernel pack).
+EWV_ABI = "hiptensor-aot-ewv/v1"
 
 #: Widest vector access per element size (bytes -> elements) of the IR builder's vector ops.
 _MAX_VEC = {2: 8, 4: 4, 8: 2}

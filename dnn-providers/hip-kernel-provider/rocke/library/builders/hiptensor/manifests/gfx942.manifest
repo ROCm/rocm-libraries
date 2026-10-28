@@ -1,0 +1,909 @@
+# rocKE kernel pack manifest gfx942
+kernel hiptensor_aot_dgett_c_f32_ak_bk_i32 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f32" cplx=1 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=213:5578f9cbf2ed12d7
+kernel hiptensor_aot_dgett_c_f32_ak_bk_i64 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f32" cplx=1 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=213:5578f9cbf2ed12d7
+kernel hiptensor_aot_dgett_c_f32_ak_br_i32 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f32" cplx=1 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=213:5578f9cbf2ed12d7
+kernel hiptensor_aot_dgett_c_f32_ak_br_i64 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f32" cplx=1 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=213:5578f9cbf2ed12d7
+kernel hiptensor_aot_dgett_c_f32_ar_bk_i32 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f32" cplx=1 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=213:5578f9cbf2ed12d7
+kernel hiptensor_aot_dgett_c_f32_ar_bk_i64 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f32" cplx=1 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=213:5578f9cbf2ed12d7
+kernel hiptensor_aot_dgett_c_f32_ar_br_i32 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f32" cplx=1 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=213:5578f9cbf2ed12d7
+kernel hiptensor_aot_dgett_c_f32_ar_br_i64 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f32" cplx=1 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=213:5578f9cbf2ed12d7
+kernel hiptensor_aot_dgett_c_f64_ak_bk_i32 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f64" cplx=1 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=8 tile_m=64 tile_n=64 params=213:5578f9cbf2ed12d7
+kernel hiptensor_aot_dgett_c_f64_ak_bk_i64 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f64" cplx=1 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=8 tile_m=64 tile_n=64 params=213:5578f9cbf2ed12d7
+kernel hiptensor_aot_dgett_c_f64_ak_br_i32 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f64" cplx=1 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=8 tile_m=64 tile_n=64 params=213:5578f9cbf2ed12d7
+kernel hiptensor_aot_dgett_c_f64_ak_br_i64 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f64" cplx=1 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=8 tile_m=64 tile_n=64 params=213:5578f9cbf2ed12d7
+kernel hiptensor_aot_dgett_c_f64_ar_bk_i32 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f64" cplx=1 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=8 tile_m=64 tile_n=64 params=213:5578f9cbf2ed12d7
+kernel hiptensor_aot_dgett_c_f64_ar_bk_i64 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f64" cplx=1 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=8 tile_m=64 tile_n=64 params=213:5578f9cbf2ed12d7
+kernel hiptensor_aot_dgett_c_f64_ar_br_i32 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f64" cplx=1 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=8 tile_m=64 tile_n=64 params=213:5578f9cbf2ed12d7
+kernel hiptensor_aot_dgett_c_f64_ar_br_i64 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f64" cplx=1 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=8 tile_m=64 tile_n=64 params=213:5578f9cbf2ed12d7
+kernel hiptensor_aot_dgett_r_bf16_ak_bk_i32 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="bf16" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_bf16_ak_bk_i32_m a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="bf16" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_bf16_ak_bk_i64 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="bf16" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_bf16_ak_bk_i64_m a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="bf16" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_bf16_ak_br_i32 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="bf16" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_bf16_ak_br_i32_m a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="bf16" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_bf16_ak_br_i64 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="bf16" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_bf16_ak_br_i64_m a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="bf16" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_bf16_ar_bk_i32 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="bf16" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_bf16_ar_bk_i32_m a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="bf16" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_bf16_ar_bk_i64 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="bf16" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_bf16_ar_bk_i64_m a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="bf16" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_bf16_ar_br_i32 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="bf16" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_bf16_ar_br_i32_m a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="bf16" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_bf16_ar_br_i64 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="bf16" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_bf16_ar_br_i64_m a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="bf16" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f16_ak_bk_i32 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f16" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f16_ak_bk_i32_m a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f16" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f16_ak_bk_i64 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f16" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f16_ak_bk_i64_m a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f16" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f16_ak_br_i32 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f16" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f16_ak_br_i32_m a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f16" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f16_ak_br_i64 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f16" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f16_ak_br_i64_m a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f16" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f16_ar_bk_i32 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f16" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f16_ar_bk_i32_m a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f16" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f16_ar_bk_i64 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f16" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f16_ar_bk_i64_m a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f16" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f16_ar_br_i32 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f16" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f16_ar_br_i32_m a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f16" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f16_ar_br_i64 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f16" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f16_ar_br_i64_m a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f16" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=32 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f32_ak_bk_i32 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f32" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f32_ak_bk_i32_m a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f32" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f32_ak_bk_i64 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f32" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f32_ak_bk_i64_m a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f32" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f32_ak_br_i32 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f32" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f32_ak_br_i32_m a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f32" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f32_ak_br_i64 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f32" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f32_ak_br_i64_m a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f32" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f32_ar_bk_i32 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f32" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f32_ar_bk_i32_m a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f32" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f32_ar_bk_i64 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f32" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f32_ar_bk_i64_m a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f32" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f32_ar_br_i32 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f32" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f32_ar_br_i32_m a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f32" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f32_ar_br_i64 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f32" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f32_ar_br_i64_m a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f32" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=128 tile_n=128 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f64_ak_bk_i32 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f64" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f64_ak_bk_i32_m a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f64" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f64_ak_bk_i64 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f64" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f64_ak_bk_i64_m a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f64" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f64_ak_br_i32 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f64" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f64_ak_br_i32_m a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f64" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f64_ak_br_i64 a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f64" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f64_ak_br_i64_m a_fast="k" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f64" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f64_ar_bk_i32 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f64" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f64_ar_bk_i32_m a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f64" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f64_ar_bk_i64 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f64" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f64_ar_bk_i64_m a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="k" block=256 comp="f64" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f64_ar_br_i32 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f64" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f64_ar_br_i32_m a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f64" cplx=0 family="dgett" idx64=0 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f64_ar_br_i64 a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f64" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=0 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_dgett_r_f64_ar_br_i64_m a_fast="r" abi="hiptensor-aot-dgett/v1" b_fast="r" block=256 comp="f64" cplx=0 family="dgett" idx64=1 limit_grid_yz=65535 limit_index=2147483647 math=1 slots_kl=6 slots_kt=8 slots_l=4 slots_mn=8 tile_k=16 tile_m=64 tile_n=64 params=211:2800b1aba5879d6b
+kernel hiptensor_aot_ew1_c_f32_f32_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=1 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=52:85f00133bf3ef7c5
+kernel hiptensor_aot_ew1_c_f32_f32_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=1 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=52:85f00133bf3ef7c5
+kernel hiptensor_aot_ew1_c_f32_f64_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=1 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=52:85f00133bf3ef7c5
+kernel hiptensor_aot_ew1_c_f32_f64_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=1 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=52:85f00133bf3ef7c5
+kernel hiptensor_aot_ew1_c_f64_f64_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=1 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=52:85f00133bf3ef7c5
+kernel hiptensor_aot_ew1_c_f64_f64_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=1 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=52:85f00133bf3ef7c5
+kernel hiptensor_aot_ew1_r_bf16_bf16_i32_b256 a="bf16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_bf16_bf16_i32_b256_m a="bf16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_bf16_bf16_i64_b256 a="bf16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_bf16_bf16_i64_b256_m a="bf16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_bf16_f16_i32_b256 a="bf16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_bf16_f16_i32_b256_m a="bf16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_bf16_f16_i64_b256 a="bf16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_bf16_f16_i64_b256_m a="bf16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_bf16_f32_i32_b256 a="bf16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_bf16_f32_i32_b256_m a="bf16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_bf16_f32_i64_b256 a="bf16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_bf16_f32_i64_b256_m a="bf16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_bf16_f64_i32_b256 a="bf16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_bf16_f64_i32_b256_m a="bf16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_bf16_f64_i64_b256 a="bf16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_bf16_f64_i64_b256_m a="bf16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f16_bf16_i32_b256 a="f16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f16_bf16_i32_b256_m a="f16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f16_bf16_i64_b256 a="f16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f16_bf16_i64_b256_m a="f16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f16_f16_i32_b256 a="f16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f16_f16_i32_b256_m a="f16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f16_f16_i64_b256 a="f16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f16_f16_i64_b256_m a="f16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f16_f32_i32_b256 a="f16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f16_f32_i32_b256_m a="f16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f16_f32_i64_b256 a="f16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f16_f32_i64_b256_m a="f16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f16_f64_i32_b256 a="f16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f16_f64_i32_b256_m a="f16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f16_f64_i64_b256 a="f16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f16_f64_i64_b256_m a="f16" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f32_bf16_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f32_bf16_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f32_bf16_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f32_bf16_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f32_f16_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f32_f16_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f32_f16_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f32_f16_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f32_f32_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f32_f32_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f32_f32_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f32_f32_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f32_f64_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f32_f64_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f32_f64_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f32_f64_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f64_bf16_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f64_bf16_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f64_bf16_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f64_bf16_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f64_f16_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f64_f16_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f64_f16_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f64_f16_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f64_f64_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f64_f64_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f64_f64_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew1_r_f64_f64_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ew2_c_f32_f32_f32_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=1 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=57:41d42558583f1461
+kernel hiptensor_aot_ew2_c_f32_f32_f32_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=1 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=57:41d42558583f1461
+kernel hiptensor_aot_ew2_c_f32_f32_f64_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=1 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=57:41d42558583f1461
+kernel hiptensor_aot_ew2_c_f32_f32_f64_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=1 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=57:41d42558583f1461
+kernel hiptensor_aot_ew2_c_f32_f64_f32_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=1 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=57:41d42558583f1461
+kernel hiptensor_aot_ew2_c_f32_f64_f32_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=1 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=57:41d42558583f1461
+kernel hiptensor_aot_ew2_c_f32_f64_f64_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=1 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=57:41d42558583f1461
+kernel hiptensor_aot_ew2_c_f32_f64_f64_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=1 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=57:41d42558583f1461
+kernel hiptensor_aot_ew2_c_f64_f32_f32_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=1 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=57:41d42558583f1461
+kernel hiptensor_aot_ew2_c_f64_f32_f32_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=1 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=57:41d42558583f1461
+kernel hiptensor_aot_ew2_c_f64_f32_f64_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=1 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=57:41d42558583f1461
+kernel hiptensor_aot_ew2_c_f64_f32_f64_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=1 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=57:41d42558583f1461
+kernel hiptensor_aot_ew2_c_f64_f64_f32_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=1 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=57:41d42558583f1461
+kernel hiptensor_aot_ew2_c_f64_f64_f32_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=1 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=57:41d42558583f1461
+kernel hiptensor_aot_ew2_c_f64_f64_f64_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=1 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=57:41d42558583f1461
+kernel hiptensor_aot_ew2_c_f64_f64_f64_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=1 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=57:41d42558583f1461
+kernel hiptensor_aot_ew2_r_bf16_bf16_bf16_i32_b256 a="bf16" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_bf16_bf16_bf16_i32_b256_m a="bf16" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_bf16_bf16_bf16_i64_b256 a="bf16" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_bf16_bf16_bf16_i64_b256_m a="bf16" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_bf16_bf16_f32_i32_b256 a="bf16" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_bf16_bf16_f32_i32_b256_m a="bf16" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_bf16_bf16_f32_i64_b256 a="bf16" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_bf16_bf16_f32_i64_b256_m a="bf16" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f16_f16_f16_i32_b256 a="f16" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f16_f16_f16_i32_b256_m a="f16" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f16_f16_f16_i64_b256 a="f16" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f16_f16_f16_i64_b256_m a="f16" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f16_f16_f32_i32_b256 a="f16" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f16_f16_f32_i32_b256_m a="f16" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f16_f16_f32_i64_b256 a="f16" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f16_f16_f32_i64_b256_m a="f16" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_bf16_bf16_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_bf16_bf16_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_bf16_bf16_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_bf16_bf16_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_bf16_f16_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_bf16_f16_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_bf16_f16_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_bf16_f16_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_bf16_f32_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_bf16_f32_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_bf16_f32_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_bf16_f32_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_bf16_f64_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_bf16_f64_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_bf16_f64_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_bf16_f64_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f16_bf16_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f16_bf16_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f16_bf16_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f16_bf16_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f16_f16_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f16_f16_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f16_f16_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f16_f16_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f16_f32_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f16_f32_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f16_f32_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f16_f32_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f16_f64_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f16_f64_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f16_f64_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f16_f64_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f32_bf16_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f32_bf16_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f32_bf16_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f32_bf16_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f32_f16_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f32_f16_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f32_f16_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f32_f16_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f32_f32_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f32_f32_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f32_f32_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f32_f32_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f32_f64_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f32_f64_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f32_f64_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f32_f64_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f64_bf16_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f64_bf16_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f64_bf16_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f64_bf16_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f64_f16_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f64_f16_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f64_f16_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f64_f16_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f64_f32_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f64_f32_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f64_f32_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f64_f32_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f64_f64_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f64_f64_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f64_f64_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f32_f64_f64_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_bf16_bf16_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_bf16_bf16_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_bf16_bf16_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_bf16_bf16_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_bf16_f16_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_bf16_f16_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_bf16_f16_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_bf16_f16_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_bf16_f32_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_bf16_f32_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_bf16_f32_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_bf16_f32_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_bf16_f64_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_bf16_f64_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_bf16_f64_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_bf16_f64_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f16_bf16_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f16_bf16_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f16_bf16_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f16_bf16_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f16_f16_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f16_f16_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f16_f16_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f16_f16_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f16_f32_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f16_f32_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f16_f32_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f16_f32_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f16_f64_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f16_f64_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f16_f64_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f16_f64_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f32_bf16_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f32_bf16_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f32_bf16_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f32_bf16_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f32_f16_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f32_f16_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f32_f16_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f32_f16_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f32_f32_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f32_f32_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f32_f32_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f32_f32_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f32_f64_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f32_f64_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f32_f64_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f32_f64_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f64_bf16_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f64_bf16_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f64_bf16_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f64_bf16_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f64_f16_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f64_f16_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f64_f16_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f64_f16_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f64_f32_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f64_f32_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f64_f32_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f64_f32_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f64_f64_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f64_f64_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f64_f64_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew2_r_f64_f64_f64_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ew3_r_bf16_bf16_bf16_bf16_i32_b256 a="bf16" abi="hiptensor-aot-ew/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_bf16_bf16_bf16_bf16_i32_b256_m a="bf16" abi="hiptensor-aot-ew/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="bf16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_bf16_bf16_bf16_bf16_i64_b256 a="bf16" abi="hiptensor-aot-ew/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_bf16_bf16_bf16_bf16_i64_b256_m a="bf16" abi="hiptensor-aot-ew/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="bf16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_bf16_bf16_bf16_f32_i32_b256 a="bf16" abi="hiptensor-aot-ew/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_bf16_bf16_bf16_f32_i32_b256_m a="bf16" abi="hiptensor-aot-ew/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_bf16_bf16_bf16_f32_i64_b256 a="bf16" abi="hiptensor-aot-ew/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_bf16_bf16_bf16_f32_i64_b256_m a="bf16" abi="hiptensor-aot-ew/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_f16_f16_f16_f16_i32_b256 a="f16" abi="hiptensor-aot-ew/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_f16_f16_f16_f16_i32_b256_m a="f16" abi="hiptensor-aot-ew/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f16" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_f16_f16_f16_f16_i64_b256 a="f16" abi="hiptensor-aot-ew/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_f16_f16_f16_f16_i64_b256_m a="f16" abi="hiptensor-aot-ew/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f16" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_f16_f16_f16_f32_i32_b256 a="f16" abi="hiptensor-aot-ew/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_f16_f16_f16_f32_i32_b256_m a="f16" abi="hiptensor-aot-ew/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_f16_f16_f16_f32_i64_b256 a="f16" abi="hiptensor-aot-ew/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_f16_f16_f16_f32_i64_b256_m a="f16" abi="hiptensor-aot-ew/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_f32_f32_f32_f32_i32_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=3 b="f32" block=256 c="f32" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_f32_f32_f32_f32_i32_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=3 b="f32" block=256 c="f32" cplx=0 d="f32" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_f32_f32_f32_f32_i64_b256 a="f32" abi="hiptensor-aot-ew/v1" arity=3 b="f32" block=256 c="f32" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_f32_f32_f32_f32_i64_b256_m a="f32" abi="hiptensor-aot-ew/v1" arity=3 b="f32" block=256 c="f32" cplx=0 d="f32" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_f64_f64_f64_f64_i32_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=3 b="f64" block=256 c="f64" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=0 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_f64_f64_f64_f64_i32_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=3 b="f64" block=256 c="f64" cplx=0 d="f64" family="ew" idx64=0 limit_index=2147483647 math=1 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_f64_f64_f64_f64_i64_b256 a="f64" abi="hiptensor-aot-ew/v1" arity=3 b="f64" block=256 c="f64" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=0 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ew3_r_f64_f64_f64_f64_i64_b256_m a="f64" abi="hiptensor-aot-ew/v1" arity=3 b="f64" block=256 c="f64" cplx=0 d="f64" family="ew" idx64=1 limit_index=2147483647 math=1 max_rank=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewt1_bf16_bf16 a="bf16" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="bf16" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=64:44783198b41200fb
+kernel hiptensor_aot_ewt1_bf16_bf16_f a="bf16" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="bf16" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=71:efd69004c8451fcc
+kernel hiptensor_aot_ewt1_bf16_f32 a="bf16" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="f32" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=64:44783198b41200fb
+kernel hiptensor_aot_ewt1_bf16_f32_f a="bf16" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="f32" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=71:efd69004c8451fcc
+kernel hiptensor_aot_ewt1_bf16_f64 a="bf16" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="f64" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=64:44783198b41200fb
+kernel hiptensor_aot_ewt1_bf16_f64_f a="bf16" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="f64" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=71:efd69004c8451fcc
+kernel hiptensor_aot_ewt1_f16_f16 a="f16" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="f16" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=64:44783198b41200fb
+kernel hiptensor_aot_ewt1_f16_f16_f a="f16" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="f16" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=71:efd69004c8451fcc
+kernel hiptensor_aot_ewt1_f16_f32 a="f16" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="f32" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=64:44783198b41200fb
+kernel hiptensor_aot_ewt1_f16_f32_f a="f16" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="f32" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=71:efd69004c8451fcc
+kernel hiptensor_aot_ewt1_f16_f64 a="f16" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="f64" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=64:44783198b41200fb
+kernel hiptensor_aot_ewt1_f16_f64_f a="f16" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="f64" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=71:efd69004c8451fcc
+kernel hiptensor_aot_ewt1_f32_bf16 a="f32" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="bf16" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=64:44783198b41200fb
+kernel hiptensor_aot_ewt1_f32_bf16_f a="f32" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="bf16" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=71:efd69004c8451fcc
+kernel hiptensor_aot_ewt1_f32_f16 a="f32" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="f16" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=64:44783198b41200fb
+kernel hiptensor_aot_ewt1_f32_f16_f a="f32" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="f16" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=71:efd69004c8451fcc
+kernel hiptensor_aot_ewt1_f32_f32 a="f32" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="f32" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=64:44783198b41200fb
+kernel hiptensor_aot_ewt1_f32_f32_f a="f32" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="f32" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=71:efd69004c8451fcc
+kernel hiptensor_aot_ewt1_f32_f64 a="f32" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="f64" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=64:44783198b41200fb
+kernel hiptensor_aot_ewt1_f32_f64_f a="f32" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="f64" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=71:efd69004c8451fcc
+kernel hiptensor_aot_ewt1_f64_f64 a="f64" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="f64" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=32 params=64:44783198b41200fb
+kernel hiptensor_aot_ewt1_f64_f64_f a="f64" abi="hiptensor-aot-ewt/v2" arity=1 b="" block=256 c="" d="f64" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=32 params=71:efd69004c8451fcc
+kernel hiptensor_aot_ewt2_bf16_bf16_bf16 a="bf16" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="bf16" d="bf16" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=81:58509746209da093
+kernel hiptensor_aot_ewt2_bf16_bf16_bf16_f a="bf16" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="bf16" d="bf16" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=88:d0b276ebac047c72
+kernel hiptensor_aot_ewt2_bf16_bf16_f32 a="bf16" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="bf16" d="f32" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=81:58509746209da093
+kernel hiptensor_aot_ewt2_bf16_bf16_f32_f a="bf16" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="bf16" d="f32" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=88:d0b276ebac047c72
+kernel hiptensor_aot_ewt2_f16_f16_f16 a="f16" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="f16" d="f16" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=81:58509746209da093
+kernel hiptensor_aot_ewt2_f16_f16_f16_f a="f16" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="f16" d="f16" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=88:d0b276ebac047c72
+kernel hiptensor_aot_ewt2_f16_f16_f32 a="f16" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="f16" d="f32" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=81:58509746209da093
+kernel hiptensor_aot_ewt2_f16_f16_f32_f a="f16" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="f16" d="f32" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=88:d0b276ebac047c72
+kernel hiptensor_aot_ewt2_f32_bf16_bf16 a="f32" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="bf16" d="bf16" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=81:58509746209da093
+kernel hiptensor_aot_ewt2_f32_bf16_bf16_f a="f32" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="bf16" d="bf16" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=88:d0b276ebac047c72
+kernel hiptensor_aot_ewt2_f32_f16_f16 a="f32" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="f16" d="f16" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=81:58509746209da093
+kernel hiptensor_aot_ewt2_f32_f16_f16_f a="f32" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="f16" d="f16" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=88:d0b276ebac047c72
+kernel hiptensor_aot_ewt2_f32_f32_f32 a="f32" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="f32" d="f32" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=81:58509746209da093
+kernel hiptensor_aot_ewt2_f32_f32_f32_f a="f32" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="f32" d="f32" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=88:d0b276ebac047c72
+kernel hiptensor_aot_ewt2_f64_bf16_bf16 a="f64" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="bf16" d="bf16" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=32 params=81:58509746209da093
+kernel hiptensor_aot_ewt2_f64_bf16_bf16_f a="f64" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="bf16" d="bf16" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=32 params=88:d0b276ebac047c72
+kernel hiptensor_aot_ewt2_f64_f16_f16 a="f64" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="f16" d="f16" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=32 params=81:58509746209da093
+kernel hiptensor_aot_ewt2_f64_f16_f16_f a="f64" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="f16" d="f16" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=32 params=88:d0b276ebac047c72
+kernel hiptensor_aot_ewt2_f64_f32_f32 a="f64" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="f32" d="f32" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=32 params=81:58509746209da093
+kernel hiptensor_aot_ewt2_f64_f32_f32_f a="f64" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="f32" d="f32" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=32 params=88:d0b276ebac047c72
+kernel hiptensor_aot_ewt2_f64_f64_f64 a="f64" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="f64" d="f64" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=32 params=81:58509746209da093
+kernel hiptensor_aot_ewt2_f64_f64_f64_f a="f64" abi="hiptensor-aot-ewt/v2" arity=2 b="" block=256 c="f64" d="f64" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=32 params=88:d0b276ebac047c72
+kernel hiptensor_aot_ewt3_bf16_bf16_bf16_bf16 a="bf16" abi="hiptensor-aot-ewt/v2" arity=3 b="bf16" block=256 c="bf16" d="bf16" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=98:6ed30c8293cba259
+kernel hiptensor_aot_ewt3_bf16_bf16_bf16_bf16_f a="bf16" abi="hiptensor-aot-ewt/v2" arity=3 b="bf16" block=256 c="bf16" d="bf16" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=105:eb984b87df286356
+kernel hiptensor_aot_ewt3_bf16_bf16_bf16_f32 a="bf16" abi="hiptensor-aot-ewt/v2" arity=3 b="bf16" block=256 c="bf16" d="f32" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=98:6ed30c8293cba259
+kernel hiptensor_aot_ewt3_bf16_bf16_bf16_f32_f a="bf16" abi="hiptensor-aot-ewt/v2" arity=3 b="bf16" block=256 c="bf16" d="f32" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=105:eb984b87df286356
+kernel hiptensor_aot_ewt3_f16_f16_f16_f16 a="f16" abi="hiptensor-aot-ewt/v2" arity=3 b="f16" block=256 c="f16" d="f16" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=98:6ed30c8293cba259
+kernel hiptensor_aot_ewt3_f16_f16_f16_f16_f a="f16" abi="hiptensor-aot-ewt/v2" arity=3 b="f16" block=256 c="f16" d="f16" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=105:eb984b87df286356
+kernel hiptensor_aot_ewt3_f16_f16_f16_f32 a="f16" abi="hiptensor-aot-ewt/v2" arity=3 b="f16" block=256 c="f16" d="f32" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=98:6ed30c8293cba259
+kernel hiptensor_aot_ewt3_f16_f16_f16_f32_f a="f16" abi="hiptensor-aot-ewt/v2" arity=3 b="f16" block=256 c="f16" d="f32" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=105:eb984b87df286356
+kernel hiptensor_aot_ewt3_f32_f32_f32_f32 a="f32" abi="hiptensor-aot-ewt/v2" arity=3 b="f32" block=256 c="f32" d="f32" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=98:6ed30c8293cba259
+kernel hiptensor_aot_ewt3_f32_f32_f32_f32_f a="f32" abi="hiptensor-aot-ewt/v2" arity=3 b="f32" block=256 c="f32" d="f32" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=64 params=105:eb984b87df286356
+kernel hiptensor_aot_ewt3_f64_f64_f64_f64 a="f64" abi="hiptensor-aot-ewt/v2" arity=3 b="f64" block=256 c="f64" d="f64" family="ewt" fold=0 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=32 params=98:6ed30c8293cba259
+kernel hiptensor_aot_ewt3_f64_f64_f64_f64_f a="f64" abi="hiptensor-aot-ewt/v2" arity=3 b="f64" block=256 c="f64" d="f64" family="ewt" fold=1 limit_index=2147483647 max_planes=256 slots_b=10 tile_o=64 tile_t=32 params=105:eb984b87df286356
+kernel hiptensor_aot_ewv1_r_bf16_bf16_i32_b256_v8_g a="bf16" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="g" vec=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_bf16_bf16_i32_b256_v8_u a="bf16" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="u" vec=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_bf16_f32_i32_b256_v4_g a="bf16" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="g" vec=4 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_bf16_f32_i32_b256_v4_u a="bf16" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="u" vec=4 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_bf16_f64_i32_b256_v2_g a="bf16" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="g" vec=2 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_bf16_f64_i32_b256_v2_u a="bf16" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="u" vec=2 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_f16_f16_i32_b256_v8_g a="f16" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="g" vec=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_f16_f16_i32_b256_v8_u a="f16" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="u" vec=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_f16_f32_i32_b256_v4_g a="f16" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="g" vec=4 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_f16_f32_i32_b256_v4_u a="f16" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="u" vec=4 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_f16_f64_i32_b256_v2_g a="f16" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="g" vec=2 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_f16_f64_i32_b256_v2_u a="f16" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="u" vec=2 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_f32_bf16_i32_b256_v8_g a="f32" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="g" vec=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_f32_bf16_i32_b256_v8_u a="f32" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="u" vec=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_f32_f16_i32_b256_v8_g a="f32" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="g" vec=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_f32_f16_i32_b256_v8_u a="f32" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="u" vec=8 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_f32_f32_i32_b256_v4_g a="f32" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="g" vec=4 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_f32_f32_i32_b256_v4_u a="f32" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="u" vec=4 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_f32_f64_i32_b256_v2_g a="f32" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="g" vec=2 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_f32_f64_i32_b256_v2_u a="f32" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="u" vec=2 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_f64_f64_i32_b256_v2_g a="f64" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="g" vec=2 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv1_r_f64_f64_i32_b256_v2_u a="f64" abi="hiptensor-aot-ewv/v1" arity=1 b="" block=256 c="" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="u" vec=2 params=51:f4376b92e10878c3
+kernel hiptensor_aot_ewv2_r_bf16_bf16_bf16_i32_b256_v8_gg a="bf16" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gg" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_bf16_bf16_bf16_i32_b256_v8_gu a="bf16" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gu" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_bf16_bf16_bf16_i32_b256_v8_ug a="bf16" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ug" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_bf16_bf16_bf16_i32_b256_v8_uu a="bf16" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uu" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_bf16_bf16_f32_i32_b256_v4_gg a="bf16" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gg" vec=4 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_bf16_bf16_f32_i32_b256_v4_gu a="bf16" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gu" vec=4 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_bf16_bf16_f32_i32_b256_v4_ug a="bf16" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ug" vec=4 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_bf16_bf16_f32_i32_b256_v4_uu a="bf16" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uu" vec=4 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f16_f16_f16_i32_b256_v8_gg a="f16" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gg" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f16_f16_f16_i32_b256_v8_gu a="f16" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gu" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f16_f16_f16_i32_b256_v8_ug a="f16" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ug" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f16_f16_f16_i32_b256_v8_uu a="f16" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uu" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f16_f16_f32_i32_b256_v4_gg a="f16" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gg" vec=4 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f16_f16_f32_i32_b256_v4_gu a="f16" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gu" vec=4 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f16_f16_f32_i32_b256_v4_ug a="f16" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ug" vec=4 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f16_f16_f32_i32_b256_v4_uu a="f16" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uu" vec=4 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f32_bf16_bf16_i32_b256_v8_gg a="f32" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gg" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f32_bf16_bf16_i32_b256_v8_gu a="f32" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gu" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f32_bf16_bf16_i32_b256_v8_ug a="f32" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ug" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f32_bf16_bf16_i32_b256_v8_uu a="f32" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uu" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f32_f16_f16_i32_b256_v8_gg a="f32" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gg" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f32_f16_f16_i32_b256_v8_gu a="f32" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gu" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f32_f16_f16_i32_b256_v8_ug a="f32" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ug" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f32_f16_f16_i32_b256_v8_uu a="f32" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uu" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f32_f32_f32_i32_b256_v4_gg a="f32" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gg" vec=4 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f32_f32_f32_i32_b256_v4_gu a="f32" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gu" vec=4 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f32_f32_f32_i32_b256_v4_ug a="f32" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ug" vec=4 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f32_f32_f32_i32_b256_v4_uu a="f32" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uu" vec=4 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f64_bf16_bf16_i32_b256_v8_gg a="f64" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gg" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f64_bf16_bf16_i32_b256_v8_gu a="f64" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gu" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f64_bf16_bf16_i32_b256_v8_ug a="f64" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ug" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f64_bf16_bf16_i32_b256_v8_uu a="f64" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uu" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f64_f16_f16_i32_b256_v8_gg a="f64" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gg" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f64_f16_f16_i32_b256_v8_gu a="f64" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gu" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f64_f16_f16_i32_b256_v8_ug a="f64" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ug" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f64_f16_f16_i32_b256_v8_uu a="f64" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uu" vec=8 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f64_f32_f32_i32_b256_v4_gg a="f64" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gg" vec=4 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f64_f32_f32_i32_b256_v4_gu a="f64" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gu" vec=4 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f64_f32_f32_i32_b256_v4_ug a="f64" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ug" vec=4 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f64_f32_f32_i32_b256_v4_uu a="f64" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f32" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uu" vec=4 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f64_f64_f64_i32_b256_v2_gg a="f64" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gg" vec=2 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f64_f64_f64_i32_b256_v2_gu a="f64" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gu" vec=2 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f64_f64_f64_i32_b256_v2_ug a="f64" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ug" vec=2 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv2_r_f64_f64_f64_i32_b256_v2_uu a="f64" abi="hiptensor-aot-ewv/v1" arity=2 b="" block=256 c="f64" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uu" vec=2 params=55:3fcd01807ce232f0
+kernel hiptensor_aot_ewv3_r_bf16_bf16_bf16_bf16_i32_b256_v8_ggg a="bf16" abi="hiptensor-aot-ewv/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ggg" vec=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_bf16_bf16_bf16_bf16_i32_b256_v8_ggu a="bf16" abi="hiptensor-aot-ewv/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ggu" vec=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_bf16_bf16_bf16_bf16_i32_b256_v8_gug a="bf16" abi="hiptensor-aot-ewv/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gug" vec=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_bf16_bf16_bf16_bf16_i32_b256_v8_guu a="bf16" abi="hiptensor-aot-ewv/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="guu" vec=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_bf16_bf16_bf16_bf16_i32_b256_v8_ugg a="bf16" abi="hiptensor-aot-ewv/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ugg" vec=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_bf16_bf16_bf16_bf16_i32_b256_v8_ugu a="bf16" abi="hiptensor-aot-ewv/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ugu" vec=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_bf16_bf16_bf16_bf16_i32_b256_v8_uug a="bf16" abi="hiptensor-aot-ewv/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uug" vec=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_bf16_bf16_bf16_bf16_i32_b256_v8_uuu a="bf16" abi="hiptensor-aot-ewv/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="bf16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uuu" vec=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_bf16_bf16_bf16_f32_i32_b256_v4_ggg a="bf16" abi="hiptensor-aot-ewv/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ggg" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_bf16_bf16_bf16_f32_i32_b256_v4_ggu a="bf16" abi="hiptensor-aot-ewv/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ggu" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_bf16_bf16_bf16_f32_i32_b256_v4_gug a="bf16" abi="hiptensor-aot-ewv/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gug" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_bf16_bf16_bf16_f32_i32_b256_v4_guu a="bf16" abi="hiptensor-aot-ewv/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="guu" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_bf16_bf16_bf16_f32_i32_b256_v4_ugg a="bf16" abi="hiptensor-aot-ewv/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ugg" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_bf16_bf16_bf16_f32_i32_b256_v4_ugu a="bf16" abi="hiptensor-aot-ewv/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ugu" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_bf16_bf16_bf16_f32_i32_b256_v4_uug a="bf16" abi="hiptensor-aot-ewv/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uug" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_bf16_bf16_bf16_f32_i32_b256_v4_uuu a="bf16" abi="hiptensor-aot-ewv/v1" arity=3 b="bf16" block=256 c="bf16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uuu" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f16_f16_f16_f16_i32_b256_v8_ggg a="f16" abi="hiptensor-aot-ewv/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ggg" vec=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f16_f16_f16_f16_i32_b256_v8_ggu a="f16" abi="hiptensor-aot-ewv/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ggu" vec=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f16_f16_f16_f16_i32_b256_v8_gug a="f16" abi="hiptensor-aot-ewv/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gug" vec=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f16_f16_f16_f16_i32_b256_v8_guu a="f16" abi="hiptensor-aot-ewv/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="guu" vec=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f16_f16_f16_f16_i32_b256_v8_ugg a="f16" abi="hiptensor-aot-ewv/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ugg" vec=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f16_f16_f16_f16_i32_b256_v8_ugu a="f16" abi="hiptensor-aot-ewv/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ugu" vec=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f16_f16_f16_f16_i32_b256_v8_uug a="f16" abi="hiptensor-aot-ewv/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uug" vec=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f16_f16_f16_f16_i32_b256_v8_uuu a="f16" abi="hiptensor-aot-ewv/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f16" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uuu" vec=8 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f16_f16_f16_f32_i32_b256_v4_ggg a="f16" abi="hiptensor-aot-ewv/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ggg" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f16_f16_f16_f32_i32_b256_v4_ggu a="f16" abi="hiptensor-aot-ewv/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ggu" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f16_f16_f16_f32_i32_b256_v4_gug a="f16" abi="hiptensor-aot-ewv/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gug" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f16_f16_f16_f32_i32_b256_v4_guu a="f16" abi="hiptensor-aot-ewv/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="guu" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f16_f16_f16_f32_i32_b256_v4_ugg a="f16" abi="hiptensor-aot-ewv/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ugg" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f16_f16_f16_f32_i32_b256_v4_ugu a="f16" abi="hiptensor-aot-ewv/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ugu" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f16_f16_f16_f32_i32_b256_v4_uug a="f16" abi="hiptensor-aot-ewv/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uug" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f16_f16_f16_f32_i32_b256_v4_uuu a="f16" abi="hiptensor-aot-ewv/v1" arity=3 b="f16" block=256 c="f16" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uuu" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f32_f32_f32_f32_i32_b256_v4_ggg a="f32" abi="hiptensor-aot-ewv/v1" arity=3 b="f32" block=256 c="f32" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ggg" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f32_f32_f32_f32_i32_b256_v4_ggu a="f32" abi="hiptensor-aot-ewv/v1" arity=3 b="f32" block=256 c="f32" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ggu" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f32_f32_f32_f32_i32_b256_v4_gug a="f32" abi="hiptensor-aot-ewv/v1" arity=3 b="f32" block=256 c="f32" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gug" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f32_f32_f32_f32_i32_b256_v4_guu a="f32" abi="hiptensor-aot-ewv/v1" arity=3 b="f32" block=256 c="f32" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="guu" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f32_f32_f32_f32_i32_b256_v4_ugg a="f32" abi="hiptensor-aot-ewv/v1" arity=3 b="f32" block=256 c="f32" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ugg" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f32_f32_f32_f32_i32_b256_v4_ugu a="f32" abi="hiptensor-aot-ewv/v1" arity=3 b="f32" block=256 c="f32" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ugu" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f32_f32_f32_f32_i32_b256_v4_uug a="f32" abi="hiptensor-aot-ewv/v1" arity=3 b="f32" block=256 c="f32" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uug" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f32_f32_f32_f32_i32_b256_v4_uuu a="f32" abi="hiptensor-aot-ewv/v1" arity=3 b="f32" block=256 c="f32" cplx=0 d="f32" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uuu" vec=4 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f64_f64_f64_f64_i32_b256_v2_ggg a="f64" abi="hiptensor-aot-ewv/v1" arity=3 b="f64" block=256 c="f64" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ggg" vec=2 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f64_f64_f64_f64_i32_b256_v2_ggu a="f64" abi="hiptensor-aot-ewv/v1" arity=3 b="f64" block=256 c="f64" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ggu" vec=2 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f64_f64_f64_f64_i32_b256_v2_gug a="f64" abi="hiptensor-aot-ewv/v1" arity=3 b="f64" block=256 c="f64" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="gug" vec=2 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f64_f64_f64_f64_i32_b256_v2_guu a="f64" abi="hiptensor-aot-ewv/v1" arity=3 b="f64" block=256 c="f64" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="guu" vec=2 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f64_f64_f64_f64_i32_b256_v2_ugg a="f64" abi="hiptensor-aot-ewv/v1" arity=3 b="f64" block=256 c="f64" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ugg" vec=2 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f64_f64_f64_f64_i32_b256_v2_ugu a="f64" abi="hiptensor-aot-ewv/v1" arity=3 b="f64" block=256 c="f64" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="ugu" vec=2 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f64_f64_f64_f64_i32_b256_v2_uug a="f64" abi="hiptensor-aot-ewv/v1" arity=3 b="f64" block=256 c="f64" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uug" vec=2 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_ewv3_r_f64_f64_f64_f64_i32_b256_v2_uuu a="f64" abi="hiptensor-aot-ewv/v1" arity=3 b="f64" block=256 c="f64" cplx=0 d="f64" family="ewv" idx64=0 limit_index=2147483647 math=0 max_rank=8 unit="uuu" vec=2 params=67:d53b3c13155e77bc
+kernel hiptensor_aot_reduce_col_bf16_bf16_i32_b256 a="bf16" abi="hiptensor-aot-reduce/v1" block=256 d="bf16" family="reduce" idx64=0 limit_index=2147483647 math=0 max_rank=8 mode="col" params=91:687203cb73502be0
+kernel hiptensor_aot_reduce_col_bf16_bf16_i32_b256_m a="bf16" abi="hiptensor-aot-reduce/v1" block=256 d="bf16" family="reduce" idx64=0 limit_index=2147483647 math=1 max_rank=8 mode="col" params=91:687203cb73502be0
+kernel hiptensor_aot_reduce_col_bf16_bf16_i64_b256 a="bf16" abi="hiptensor-aot-reduce/v1" block=256 d="bf16" family="reduce" idx64=1 limit_index=2147483647 math=0 max_rank=8 mode="col" params=91:687203cb73502be0
+kernel hiptensor_aot_reduce_col_bf16_bf16_i64_b256_m a="bf16" abi="hiptensor-aot-reduce/v1" block=256 d="bf16" family="reduce" idx64=1 limit_index=2147483647 math=1 max_rank=8 mode="col" params=91:687203cb73502be0
+kernel hiptensor_aot_reduce_col_f16_f16_i32_b256 a="f16" abi="hiptensor-aot-reduce/v1" block=256 d="f16" family="reduce" idx64=0 limit_index=2147483647 math=0 max_rank=8 mode="col" params=91:687203cb73502be0
+kernel hiptensor_aot_reduce_col_f16_f16_i32_b256_m a="f16" abi="hiptensor-aot-reduce/v1" block=256 d="f16" family="reduce" idx64=0 limit_index=2147483647 math=1 max_rank=8 mode="col" params=91:687203cb73502be0
+kernel hiptensor_aot_reduce_col_f16_f16_i64_b256 a="f16" abi="hiptensor-aot-reduce/v1" block=256 d="f16" family="reduce" idx64=1 limit_index=2147483647 math=0 max_rank=8 mode="col" params=91:687203cb73502be0
+kernel hiptensor_aot_reduce_col_f16_f16_i64_b256_m a="f16" abi="hiptensor-aot-reduce/v1" block=256 d="f16" family="reduce" idx64=1 limit_index=2147483647 math=1 max_rank=8 mode="col" params=91:687203cb73502be0
+kernel hiptensor_aot_reduce_col_f32_f32_i32_b256 a="f32" abi="hiptensor-aot-reduce/v1" block=256 d="f32" family="reduce" idx64=0 limit_index=2147483647 math=0 max_rank=8 mode="col" params=91:687203cb73502be0
+kernel hiptensor_aot_reduce_col_f32_f32_i32_b256_m a="f32" abi="hiptensor-aot-reduce/v1" block=256 d="f32" family="reduce" idx64=0 limit_index=2147483647 math=1 max_rank=8 mode="col" params=91:687203cb73502be0
+kernel hiptensor_aot_reduce_col_f32_f32_i64_b256 a="f32" abi="hiptensor-aot-reduce/v1" block=256 d="f32" family="reduce" idx64=1 limit_index=2147483647 math=0 max_rank=8 mode="col" params=91:687203cb73502be0
+kernel hiptensor_aot_reduce_col_f32_f32_i64_b256_m a="f32" abi="hiptensor-aot-reduce/v1" block=256 d="f32" family="reduce" idx64=1 limit_index=2147483647 math=1 max_rank=8 mode="col" params=91:687203cb73502be0
+kernel hiptensor_aot_reduce_col_f64_f64_i32_b256 a="f64" abi="hiptensor-aot-reduce/v1" block=256 d="f64" family="reduce" idx64=0 limit_index=2147483647 math=0 max_rank=8 mode="col" params=91:687203cb73502be0
+kernel hiptensor_aot_reduce_col_f64_f64_i32_b256_m a="f64" abi="hiptensor-aot-reduce/v1" block=256 d="f64" family="reduce" idx64=0 limit_index=2147483647 math=1 max_rank=8 mode="col" params=91:687203cb73502be0
+kernel hiptensor_aot_reduce_col_f64_f64_i64_b256 a="f64" abi="hiptensor-aot-reduce/v1" block=256 d="f64" family="reduce" idx64=1 limit_index=2147483647 math=0 max_rank=8 mode="col" params=91:687203cb73502be0
+kernel hiptensor_aot_reduce_col_f64_f64_i64_b256_m a="f64" abi="hiptensor-aot-reduce/v1" block=256 d="f64" family="reduce" idx64=1 limit_index=2147483647 math=1 max_rank=8 mode="col" params=91:687203cb73502be0
+kernel hiptensor_aot_reduce_final_bf16_bf16_i32_b256 a="bf16" abi="hiptensor-aot-reduce/v1" block=256 d="bf16" family="reduce" idx64=0 limit_index=2147483647 math=0 max_rank=8 mode="final" params=47:5501572baad4a6c9
+kernel hiptensor_aot_reduce_final_bf16_bf16_i32_b256_m a="bf16" abi="hiptensor-aot-reduce/v1" block=256 d="bf16" family="reduce" idx64=0 limit_index=2147483647 math=1 max_rank=8 mode="final" params=47:5501572baad4a6c9
+kernel hiptensor_aot_reduce_final_bf16_bf16_i64_b256 a="bf16" abi="hiptensor-aot-reduce/v1" block=256 d="bf16" family="reduce" idx64=1 limit_index=2147483647 math=0 max_rank=8 mode="final" params=47:5501572baad4a6c9
+kernel hiptensor_aot_reduce_final_bf16_bf16_i64_b256_m a="bf16" abi="hiptensor-aot-reduce/v1" block=256 d="bf16" family="reduce" idx64=1 limit_index=2147483647 math=1 max_rank=8 mode="final" params=47:5501572baad4a6c9
+kernel hiptensor_aot_reduce_final_f16_f16_i32_b256 a="f16" abi="hiptensor-aot-reduce/v1" block=256 d="f16" family="reduce" idx64=0 limit_index=2147483647 math=0 max_rank=8 mode="final" params=47:5501572baad4a6c9
+kernel hiptensor_aot_reduce_final_f16_f16_i32_b256_m a="f16" abi="hiptensor-aot-reduce/v1" block=256 d="f16" family="reduce" idx64=0 limit_index=2147483647 math=1 max_rank=8 mode="final" params=47:5501572baad4a6c9
+kernel hiptensor_aot_reduce_final_f16_f16_i64_b256 a="f16" abi="hiptensor-aot-reduce/v1" block=256 d="f16" family="reduce" idx64=1 limit_index=2147483647 math=0 max_rank=8 mode="final" params=47:5501572baad4a6c9
+kernel hiptensor_aot_reduce_final_f16_f16_i64_b256_m a="f16" abi="hiptensor-aot-reduce/v1" block=256 d="f16" family="reduce" idx64=1 limit_index=2147483647 math=1 max_rank=8 mode="final" params=47:5501572baad4a6c9
+kernel hiptensor_aot_reduce_final_f32_f32_i32_b256 a="f32" abi="hiptensor-aot-reduce/v1" block=256 d="f32" family="reduce" idx64=0 limit_index=2147483647 math=0 max_rank=8 mode="final" params=47:5501572baad4a6c9
+kernel hiptensor_aot_reduce_final_f32_f32_i32_b256_m a="f32" abi="hiptensor-aot-reduce/v1" block=256 d="f32" family="reduce" idx64=0 limit_index=2147483647 math=1 max_rank=8 mode="final" params=47:5501572baad4a6c9
+kernel hiptensor_aot_reduce_final_f32_f32_i64_b256 a="f32" abi="hiptensor-aot-reduce/v1" block=256 d="f32" family="reduce" idx64=1 limit_index=2147483647 math=0 max_rank=8 mode="final" params=47:5501572baad4a6c9
+kernel hiptensor_aot_reduce_final_f32_f32_i64_b256_m a="f32" abi="hiptensor-aot-reduce/v1" block=256 d="f32" family="reduce" idx64=1 limit_index=2147483647 math=1 max_rank=8 mode="final" params=47:5501572baad4a6c9
+kernel hiptensor_aot_reduce_final_f64_f64_i32_b256 a="f64" abi="hiptensor-aot-reduce/v1" block=256 d="f64" family="reduce" idx64=0 limit_index=2147483647 math=0 max_rank=8 mode="final" params=47:5501572baad4a6c9
+kernel hiptensor_aot_reduce_final_f64_f64_i32_b256_m a="f64" abi="hiptensor-aot-reduce/v1" block=256 d="f64" family="reduce" idx64=0 limit_index=2147483647 math=1 max_rank=8 mode="final" params=47:5501572baad4a6c9
+kernel hiptensor_aot_reduce_final_f64_f64_i64_b256 a="f64" abi="hiptensor-aot-reduce/v1" block=256 d="f64" family="reduce" idx64=1 limit_index=2147483647 math=0 max_rank=8 mode="final" params=47:5501572baad4a6c9
+kernel hiptensor_aot_reduce_final_f64_f64_i64_b256_m a="f64" abi="hiptensor-aot-reduce/v1" block=256 d="f64" family="reduce" idx64=1 limit_index=2147483647 math=1 max_rank=8 mode="final" params=47:5501572baad4a6c9
+kernel hiptensor_aot_reduce_row_bf16_bf16_i32_b256 a="bf16" abi="hiptensor-aot-reduce/v1" block=256 d="bf16" family="reduce" idx64=0 limit_index=2147483647 math=0 max_rank=8 mode="row" params=91:530f4dd7253d55ad
+kernel hiptensor_aot_reduce_row_bf16_bf16_i32_b256_m a="bf16" abi="hiptensor-aot-reduce/v1" block=256 d="bf16" family="reduce" idx64=0 limit_index=2147483647 math=1 max_rank=8 mode="row" params=91:530f4dd7253d55ad
+kernel hiptensor_aot_reduce_row_bf16_bf16_i64_b256 a="bf16" abi="hiptensor-aot-reduce/v1" block=256 d="bf16" family="reduce" idx64=1 limit_index=2147483647 math=0 max_rank=8 mode="row" params=91:530f4dd7253d55ad
+kernel hiptensor_aot_reduce_row_bf16_bf16_i64_b256_m a="bf16" abi="hiptensor-aot-reduce/v1" block=256 d="bf16" family="reduce" idx64=1 limit_index=2147483647 math=1 max_rank=8 mode="row" params=91:530f4dd7253d55ad
+kernel hiptensor_aot_reduce_row_f16_f16_i32_b256 a="f16" abi="hiptensor-aot-reduce/v1" block=256 d="f16" family="reduce" idx64=0 limit_index=2147483647 math=0 max_rank=8 mode="row" params=91:530f4dd7253d55ad
+kernel hiptensor_aot_reduce_row_f16_f16_i32_b256_m a="f16" abi="hiptensor-aot-reduce/v1" block=256 d="f16" family="reduce" idx64=0 limit_index=2147483647 math=1 max_rank=8 mode="row" params=91:530f4dd7253d55ad
+kernel hiptensor_aot_reduce_row_f16_f16_i64_b256 a="f16" abi="hiptensor-aot-reduce/v1" block=256 d="f16" family="reduce" idx64=1 limit_index=2147483647 math=0 max_rank=8 mode="row" params=91:530f4dd7253d55ad
+kernel hiptensor_aot_reduce_row_f16_f16_i64_b256_m a="f16" abi="hiptensor-aot-reduce/v1" block=256 d="f16" family="reduce" idx64=1 limit_index=2147483647 math=1 max_rank=8 mode="row" params=91:530f4dd7253d55ad
+kernel hiptensor_aot_reduce_row_f32_f32_i32_b256 a="f32" abi="hiptensor-aot-reduce/v1" block=256 d="f32" family="reduce" idx64=0 limit_index=2147483647 math=0 max_rank=8 mode="row" params=91:530f4dd7253d55ad
+kernel hiptensor_aot_reduce_row_f32_f32_i32_b256_m a="f32" abi="hiptensor-aot-reduce/v1" block=256 d="f32" family="reduce" idx64=0 limit_index=2147483647 math=1 max_rank=8 mode="row" params=91:530f4dd7253d55ad
+kernel hiptensor_aot_reduce_row_f32_f32_i64_b256 a="f32" abi="hiptensor-aot-reduce/v1" block=256 d="f32" family="reduce" idx64=1 limit_index=2147483647 math=0 max_rank=8 mode="row" params=91:530f4dd7253d55ad
+kernel hiptensor_aot_reduce_row_f32_f32_i64_b256_m a="f32" abi="hiptensor-aot-reduce/v1" block=256 d="f32" family="reduce" idx64=1 limit_index=2147483647 math=1 max_rank=8 mode="row" params=91:530f4dd7253d55ad
+kernel hiptensor_aot_reduce_row_f64_f64_i32_b256 a="f64" abi="hiptensor-aot-reduce/v1" block=256 d="f64" family="reduce" idx64=0 limit_index=2147483647 math=0 max_rank=8 mode="row" params=91:530f4dd7253d55ad
+kernel hiptensor_aot_reduce_row_f64_f64_i32_b256_m a="f64" abi="hiptensor-aot-reduce/v1" block=256 d="f64" family="reduce" idx64=0 limit_index=2147483647 math=1 max_rank=8 mode="row" params=91:530f4dd7253d55ad
+kernel hiptensor_aot_reduce_row_f64_f64_i64_b256 a="f64" abi="hiptensor-aot-reduce/v1" block=256 d="f64" family="reduce" idx64=1 limit_index=2147483647 math=0 max_rank=8 mode="row" params=91:530f4dd7253d55ad
+kernel hiptensor_aot_reduce_row_f64_f64_i64_b256_m a="f64" abi="hiptensor-aot-reduce/v1" block=256 d="f64" family="reduce" idx64=1 limit_index=2147483647 math=1 max_rank=8 mode="row" params=91:530f4dd7253d55ad
+kernel rocke_gett_c64_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_b32_h57a155c95b_bil_nofence abi="rocke-gett-f32/v1" bilinear=1 block=512 cls="medium" cplx=1 dclass="n" family="gett32" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_c64_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_b32_h57a155c95b_nofence abi="rocke-gett-f32/v1" bilinear=0 block=512 cls="medium" cplx=1 dclass="n" family="gett32" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_c64_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_b32_h962ce96053_bil_nofence abi="rocke-gett-f32/v1" bilinear=1 block=512 cls="medium" cplx=1 dclass="m" family="gett32" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_c64_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_b32_h962ce96053_nofence abi="rocke-gett-f32/v1" bilinear=0 block=512 cls="medium" cplx=1 dclass="m" family="gett32" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_c64_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_b32_hc920007832_bil_nofence abi="rocke-gett-f32/v1" bilinear=1 block=512 cls="medium" cplx=1 dclass="x" family="gett32" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_c64_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_b32_hc920007832_nofence abi="rocke-gett-f32/v1" bilinear=0 block=512 cls="medium" cplx=1 dclass="x" family="gett32" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_c64_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_h57a155c95b_bil_nofence abi="rocke-gett-f32/v1" bilinear=1 block=512 cls="medium" cplx=1 dclass="n" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_c64_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_h57a155c95b_nofence abi="rocke-gett-f32/v1" bilinear=0 block=512 cls="medium" cplx=1 dclass="n" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_c64_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_h962ce96053_bil_nofence abi="rocke-gett-f32/v1" bilinear=1 block=512 cls="medium" cplx=1 dclass="m" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_c64_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_h962ce96053_nofence abi="rocke-gett-f32/v1" bilinear=0 block=512 cls="medium" cplx=1 dclass="m" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_c64_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_hc920007832_bil_nofence abi="rocke-gett-f32/v1" bilinear=1 block=512 cls="medium" cplx=1 dclass="x" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_c64_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_hc920007832_nofence abi="rocke-gett-f32/v1" bilinear=0 block=512 cls="medium" cplx=1 dclass="x" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_c64_rt_t64x64x8_w2x2_g8_e2_b32_h57a155c95b abi="rocke-gett-f32/v1" bilinear=0 block=256 cls="small" cplx=1 dclass="n" family="gett32" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_c64_rt_t64x64x8_w2x2_g8_e2_b32_h57a155c95b_bil abi="rocke-gett-f32/v1" bilinear=1 block=256 cls="small" cplx=1 dclass="n" family="gett32" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_c64_rt_t64x64x8_w2x2_g8_e2_b32_h962ce96053 abi="rocke-gett-f32/v1" bilinear=0 block=256 cls="small" cplx=1 dclass="m" family="gett32" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_c64_rt_t64x64x8_w2x2_g8_e2_b32_h962ce96053_bil abi="rocke-gett-f32/v1" bilinear=1 block=256 cls="small" cplx=1 dclass="m" family="gett32" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_c64_rt_t64x64x8_w2x2_g8_e2_b32_hc920007832 abi="rocke-gett-f32/v1" bilinear=0 block=256 cls="small" cplx=1 dclass="x" family="gett32" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_c64_rt_t64x64x8_w2x2_g8_e2_b32_hc920007832_bil abi="rocke-gett-f32/v1" bilinear=1 block=256 cls="small" cplx=1 dclass="x" family="gett32" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_c64_rt_t64x64x8_w2x2_g8_e2_h57a155c95b abi="rocke-gett-f32/v1" bilinear=0 block=256 cls="small" cplx=1 dclass="n" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_c64_rt_t64x64x8_w2x2_g8_e2_h57a155c95b_bil abi="rocke-gett-f32/v1" bilinear=1 block=256 cls="small" cplx=1 dclass="n" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_c64_rt_t64x64x8_w2x2_g8_e2_h962ce96053 abi="rocke-gett-f32/v1" bilinear=0 block=256 cls="small" cplx=1 dclass="m" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_c64_rt_t64x64x8_w2x2_g8_e2_h962ce96053_bil abi="rocke-gett-f32/v1" bilinear=1 block=256 cls="small" cplx=1 dclass="m" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_c64_rt_t64x64x8_w2x2_g8_e2_hc920007832 abi="rocke-gett-f32/v1" bilinear=0 block=256 cls="small" cplx=1 dclass="x" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_c64_rt_t64x64x8_w2x2_g8_e2_hc920007832_bil abi="rocke-gett-f32/v1" bilinear=1 block=256 cls="small" cplx=1 dclass="x" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_f32_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_b16_h2d29bd438c abi="rocke-gett-f32/v1" bilinear=0 block=256 cls="medium" cplx=0 dclass="n" family="gett32" kblock=16 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f32_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_b16_h2d29bd438c_bil abi="rocke-gett-f32/v1" bilinear=1 block=256 cls="medium" cplx=0 dclass="n" family="gett32" kblock=16 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f32_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_b16_h8ddc81ddaa abi="rocke-gett-f32/v1" bilinear=0 block=256 cls="medium" cplx=0 dclass="m" family="gett32" kblock=16 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f32_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_b16_h8ddc81ddaa_bil abi="rocke-gett-f32/v1" bilinear=1 block=256 cls="medium" cplx=0 dclass="m" family="gett32" kblock=16 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f32_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_b16_ha773ba8fbf abi="rocke-gett-f32/v1" bilinear=0 block=256 cls="medium" cplx=0 dclass="x" family="gett32" kblock=16 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f32_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_b16_ha773ba8fbf_bil abi="rocke-gett-f32/v1" bilinear=1 block=256 cls="medium" cplx=0 dclass="x" family="gett32" kblock=16 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f32_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_h2d29bd438c abi="rocke-gett-f32/v1" bilinear=0 block=256 cls="medium" cplx=0 dclass="n" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f32_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_h2d29bd438c_bil abi="rocke-gett-f32/v1" bilinear=1 block=256 cls="medium" cplx=0 dclass="n" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f32_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_h8ddc81ddaa abi="rocke-gett-f32/v1" bilinear=0 block=256 cls="medium" cplx=0 dclass="m" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f32_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_h8ddc81ddaa_bil abi="rocke-gett-f32/v1" bilinear=1 block=256 cls="medium" cplx=0 dclass="m" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f32_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_ha773ba8fbf abi="rocke-gett-f32/v1" bilinear=0 block=256 cls="medium" cplx=0 dclass="x" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f32_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_ha773ba8fbf_bil abi="rocke-gett-f32/v1" bilinear=1 block=256 cls="medium" cplx=0 dclass="x" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f32_rt_t128x128x8_w2x2_g8_e2_b32_h2d29bd438c abi="rocke-gett-f32/v1" bilinear=0 block=256 cls="default" cplx=0 dclass="n" family="gett32" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f32_rt_t128x128x8_w2x2_g8_e2_b32_h2d29bd438c_bil abi="rocke-gett-f32/v1" bilinear=1 block=256 cls="default" cplx=0 dclass="n" family="gett32" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f32_rt_t128x128x8_w2x2_g8_e2_b32_h8ddc81ddaa abi="rocke-gett-f32/v1" bilinear=0 block=256 cls="default" cplx=0 dclass="m" family="gett32" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f32_rt_t128x128x8_w2x2_g8_e2_b32_h8ddc81ddaa_bil abi="rocke-gett-f32/v1" bilinear=1 block=256 cls="default" cplx=0 dclass="m" family="gett32" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f32_rt_t128x128x8_w2x2_g8_e2_b32_ha773ba8fbf abi="rocke-gett-f32/v1" bilinear=0 block=256 cls="default" cplx=0 dclass="x" family="gett32" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f32_rt_t128x128x8_w2x2_g8_e2_b32_ha773ba8fbf_bil abi="rocke-gett-f32/v1" bilinear=1 block=256 cls="default" cplx=0 dclass="x" family="gett32" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f32_rt_t128x128x8_w2x2_g8_e2_h2d29bd438c abi="rocke-gett-f32/v1" bilinear=0 block=256 cls="default" cplx=0 dclass="n" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f32_rt_t128x128x8_w2x2_g8_e2_h2d29bd438c_bil abi="rocke-gett-f32/v1" bilinear=1 block=256 cls="default" cplx=0 dclass="n" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f32_rt_t128x128x8_w2x2_g8_e2_h8ddc81ddaa abi="rocke-gett-f32/v1" bilinear=0 block=256 cls="default" cplx=0 dclass="m" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f32_rt_t128x128x8_w2x2_g8_e2_h8ddc81ddaa_bil abi="rocke-gett-f32/v1" bilinear=1 block=256 cls="default" cplx=0 dclass="m" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f32_rt_t128x128x8_w2x2_g8_e2_ha773ba8fbf abi="rocke-gett-f32/v1" bilinear=0 block=256 cls="default" cplx=0 dclass="x" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f32_rt_t128x128x8_w2x2_g8_e2_ha773ba8fbf_bil abi="rocke-gett-f32/v1" bilinear=1 block=256 cls="default" cplx=0 dclass="x" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f32_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_b8_h2d29bd438c abi="rocke-gett-f32/v1" bilinear=0 block=512 cls="small" cplx=0 dclass="n" family="gett32" kblock=8 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f32_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_b8_h2d29bd438c_bil abi="rocke-gett-f32/v1" bilinear=1 block=512 cls="small" cplx=0 dclass="n" family="gett32" kblock=8 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f32_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_b8_h8ddc81ddaa abi="rocke-gett-f32/v1" bilinear=0 block=512 cls="small" cplx=0 dclass="m" family="gett32" kblock=8 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f32_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_b8_h8ddc81ddaa_bil abi="rocke-gett-f32/v1" bilinear=1 block=512 cls="small" cplx=0 dclass="m" family="gett32" kblock=8 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f32_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_b8_ha773ba8fbf abi="rocke-gett-f32/v1" bilinear=0 block=512 cls="small" cplx=0 dclass="x" family="gett32" kblock=8 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f32_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_b8_ha773ba8fbf_bil abi="rocke-gett-f32/v1" bilinear=1 block=512 cls="small" cplx=0 dclass="x" family="gett32" kblock=8 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f32_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_h2d29bd438c abi="rocke-gett-f32/v1" bilinear=0 block=512 cls="small" cplx=0 dclass="n" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f32_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_h2d29bd438c_bil abi="rocke-gett-f32/v1" bilinear=1 block=512 cls="small" cplx=0 dclass="n" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f32_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_h8ddc81ddaa abi="rocke-gett-f32/v1" bilinear=0 block=512 cls="small" cplx=0 dclass="m" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f32_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_h8ddc81ddaa_bil abi="rocke-gett-f32/v1" bilinear=1 block=512 cls="small" cplx=0 dclass="m" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f32_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_ha773ba8fbf abi="rocke-gett-f32/v1" bilinear=0 block=512 cls="small" cplx=0 dclass="x" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f32_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_ha773ba8fbf_bil abi="rocke-gett-f32/v1" bilinear=1 block=512 cls="small" cplx=0 dclass="x" family="gett32" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f64_c128_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_b32_h57a155c95b_bil_nofence abi="rocke-gett-f64/v2" bilinear=1 block=512 cls="medium" cplx=1 dclass="n" family="gett64" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_f64_c128_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_b32_h57a155c95b_nofence abi="rocke-gett-f64/v2" bilinear=0 block=512 cls="medium" cplx=1 dclass="n" family="gett64" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_f64_c128_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_b32_h962ce96053_bil_nofence abi="rocke-gett-f64/v2" bilinear=1 block=512 cls="medium" cplx=1 dclass="m" family="gett64" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_f64_c128_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_b32_h962ce96053_nofence abi="rocke-gett-f64/v2" bilinear=0 block=512 cls="medium" cplx=1 dclass="m" family="gett64" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_f64_c128_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_b32_hc920007832_bil_nofence abi="rocke-gett-f64/v2" bilinear=1 block=512 cls="medium" cplx=1 dclass="x" family="gett64" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_f64_c128_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_b32_hc920007832_nofence abi="rocke-gett-f64/v2" bilinear=0 block=512 cls="medium" cplx=1 dclass="x" family="gett64" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_f64_c128_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_h57a155c95b_bil_nofence abi="rocke-gett-f64/v2" bilinear=1 block=512 cls="medium" cplx=1 dclass="n" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_f64_c128_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_h57a155c95b_nofence abi="rocke-gett-f64/v2" bilinear=0 block=512 cls="medium" cplx=1 dclass="n" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_f64_c128_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_h962ce96053_bil_nofence abi="rocke-gett-f64/v2" bilinear=1 block=512 cls="medium" cplx=1 dclass="m" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_f64_c128_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_h962ce96053_nofence abi="rocke-gett-f64/v2" bilinear=0 block=512 cls="medium" cplx=1 dclass="m" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_f64_c128_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_hc920007832_bil_nofence abi="rocke-gett-f64/v2" bilinear=1 block=512 cls="medium" cplx=1 dclass="x" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_f64_c128_rt_t128x64x8_w4x2_g1_x8_p4_e4_s1_d2_hc920007832_nofence abi="rocke-gett-f64/v2" bilinear=0 block=512 cls="medium" cplx=1 dclass="x" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_f64_c128_rt_t64x64x8_w2x2_g8_e2_b32_h57a155c95b abi="rocke-gett-f64/v2" bilinear=0 block=256 cls="small" cplx=1 dclass="n" family="gett64" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_f64_c128_rt_t64x64x8_w2x2_g8_e2_b32_h57a155c95b_bil abi="rocke-gett-f64/v2" bilinear=1 block=256 cls="small" cplx=1 dclass="n" family="gett64" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_f64_c128_rt_t64x64x8_w2x2_g8_e2_b32_h962ce96053 abi="rocke-gett-f64/v2" bilinear=0 block=256 cls="small" cplx=1 dclass="m" family="gett64" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_f64_c128_rt_t64x64x8_w2x2_g8_e2_b32_h962ce96053_bil abi="rocke-gett-f64/v2" bilinear=1 block=256 cls="small" cplx=1 dclass="m" family="gett64" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_f64_c128_rt_t64x64x8_w2x2_g8_e2_b32_hc920007832 abi="rocke-gett-f64/v2" bilinear=0 block=256 cls="small" cplx=1 dclass="x" family="gett64" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_f64_c128_rt_t64x64x8_w2x2_g8_e2_b32_hc920007832_bil abi="rocke-gett-f64/v2" bilinear=1 block=256 cls="small" cplx=1 dclass="x" family="gett64" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_f64_c128_rt_t64x64x8_w2x2_g8_e2_h57a155c95b abi="rocke-gett-f64/v2" bilinear=0 block=256 cls="small" cplx=1 dclass="n" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_f64_c128_rt_t64x64x8_w2x2_g8_e2_h57a155c95b_bil abi="rocke-gett-f64/v2" bilinear=1 block=256 cls="small" cplx=1 dclass="n" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_f64_c128_rt_t64x64x8_w2x2_g8_e2_h962ce96053 abi="rocke-gett-f64/v2" bilinear=0 block=256 cls="small" cplx=1 dclass="m" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_f64_c128_rt_t64x64x8_w2x2_g8_e2_h962ce96053_bil abi="rocke-gett-f64/v2" bilinear=1 block=256 cls="small" cplx=1 dclass="m" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_f64_c128_rt_t64x64x8_w2x2_g8_e2_hc920007832 abi="rocke-gett-f64/v2" bilinear=0 block=256 cls="small" cplx=1 dclass="x" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=18:5fb890d17e478bcc
+kernel rocke_gett_f64_c128_rt_t64x64x8_w2x2_g8_e2_hc920007832_bil abi="rocke-gett-f64/v2" bilinear=1 block=256 cls="small" cplx=1 dclass="x" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=64 tile_n=64 params=24:9894c2d4367d4b30
+kernel rocke_gett_f64_f64_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_b16_h57a155c95b abi="rocke-gett-f64/v2" bilinear=0 block=256 cls="medium" cplx=0 dclass="n" family="gett64" kblock=16 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f64_f64_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_b16_h57a155c95b_bil abi="rocke-gett-f64/v2" bilinear=1 block=256 cls="medium" cplx=0 dclass="n" family="gett64" kblock=16 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f64_f64_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_b16_h962ce96053 abi="rocke-gett-f64/v2" bilinear=0 block=256 cls="medium" cplx=0 dclass="m" family="gett64" kblock=16 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f64_f64_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_b16_h962ce96053_bil abi="rocke-gett-f64/v2" bilinear=1 block=256 cls="medium" cplx=0 dclass="m" family="gett64" kblock=16 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f64_f64_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_b16_hc920007832 abi="rocke-gett-f64/v2" bilinear=0 block=256 cls="medium" cplx=0 dclass="x" family="gett64" kblock=16 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f64_f64_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_b16_hc920007832_bil abi="rocke-gett-f64/v2" bilinear=1 block=256 cls="medium" cplx=0 dclass="x" family="gett64" kblock=16 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f64_f64_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_h57a155c95b abi="rocke-gett-f64/v2" bilinear=0 block=256 cls="medium" cplx=0 dclass="n" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f64_f64_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_h57a155c95b_bil abi="rocke-gett-f64/v2" bilinear=1 block=256 cls="medium" cplx=0 dclass="n" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f64_f64_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_h962ce96053 abi="rocke-gett-f64/v2" bilinear=0 block=256 cls="medium" cplx=0 dclass="m" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f64_f64_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_h962ce96053_bil abi="rocke-gett-f64/v2" bilinear=1 block=256 cls="medium" cplx=0 dclass="m" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f64_f64_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_hc920007832 abi="rocke-gett-f64/v2" bilinear=0 block=256 cls="medium" cplx=0 dclass="x" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f64_f64_rt_t128x128x16_w2x2_g4_x8_z1_e2_s1_hc920007832_bil abi="rocke-gett-f64/v2" bilinear=1 block=256 cls="medium" cplx=0 dclass="x" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=16 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f64_f64_rt_t128x128x8_w2x2_g8_e2_b32_h57a155c95b abi="rocke-gett-f64/v2" bilinear=0 block=256 cls="default" cplx=0 dclass="n" family="gett64" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f64_f64_rt_t128x128x8_w2x2_g8_e2_b32_h57a155c95b_bil abi="rocke-gett-f64/v2" bilinear=1 block=256 cls="default" cplx=0 dclass="n" family="gett64" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f64_f64_rt_t128x128x8_w2x2_g8_e2_b32_h962ce96053 abi="rocke-gett-f64/v2" bilinear=0 block=256 cls="default" cplx=0 dclass="m" family="gett64" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f64_f64_rt_t128x128x8_w2x2_g8_e2_b32_h962ce96053_bil abi="rocke-gett-f64/v2" bilinear=1 block=256 cls="default" cplx=0 dclass="m" family="gett64" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f64_f64_rt_t128x128x8_w2x2_g8_e2_b32_hc920007832 abi="rocke-gett-f64/v2" bilinear=0 block=256 cls="default" cplx=0 dclass="x" family="gett64" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f64_f64_rt_t128x128x8_w2x2_g8_e2_b32_hc920007832_bil abi="rocke-gett-f64/v2" bilinear=1 block=256 cls="default" cplx=0 dclass="x" family="gett64" kblock=32 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f64_f64_rt_t128x128x8_w2x2_g8_e2_h57a155c95b abi="rocke-gett-f64/v2" bilinear=0 block=256 cls="default" cplx=0 dclass="n" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f64_f64_rt_t128x128x8_w2x2_g8_e2_h57a155c95b_bil abi="rocke-gett-f64/v2" bilinear=1 block=256 cls="default" cplx=0 dclass="n" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f64_f64_rt_t128x128x8_w2x2_g8_e2_h962ce96053 abi="rocke-gett-f64/v2" bilinear=0 block=256 cls="default" cplx=0 dclass="m" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f64_f64_rt_t128x128x8_w2x2_g8_e2_h962ce96053_bil abi="rocke-gett-f64/v2" bilinear=1 block=256 cls="default" cplx=0 dclass="m" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f64_f64_rt_t128x128x8_w2x2_g8_e2_hc920007832 abi="rocke-gett-f64/v2" bilinear=0 block=256 cls="default" cplx=0 dclass="x" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f64_f64_rt_t128x128x8_w2x2_g8_e2_hc920007832_bil abi="rocke-gett-f64/v2" bilinear=1 block=256 cls="default" cplx=0 dclass="x" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=8 tile_m=128 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f64_f64_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_b8_h57a155c95b abi="rocke-gett-f64/v2" bilinear=0 block=512 cls="small" cplx=0 dclass="n" family="gett64" kblock=8 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f64_f64_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_b8_h57a155c95b_bil abi="rocke-gett-f64/v2" bilinear=1 block=512 cls="small" cplx=0 dclass="n" family="gett64" kblock=8 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f64_f64_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_b8_h962ce96053 abi="rocke-gett-f64/v2" bilinear=0 block=512 cls="small" cplx=0 dclass="m" family="gett64" kblock=8 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f64_f64_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_b8_h962ce96053_bil abi="rocke-gett-f64/v2" bilinear=1 block=512 cls="small" cplx=0 dclass="m" family="gett64" kblock=8 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f64_f64_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_b8_hc920007832 abi="rocke-gett-f64/v2" bilinear=0 block=512 cls="small" cplx=0 dclass="x" family="gett64" kblock=8 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f64_f64_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_b8_hc920007832_bil abi="rocke-gett-f64/v2" bilinear=1 block=512 cls="small" cplx=0 dclass="x" family="gett64" kblock=8 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f64_f64_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_h57a155c95b abi="rocke-gett-f64/v2" bilinear=0 block=512 cls="small" cplx=0 dclass="n" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f64_f64_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_h57a155c95b_bil abi="rocke-gett-f64/v2" bilinear=1 block=512 cls="small" cplx=0 dclass="n" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f64_f64_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_h962ce96053 abi="rocke-gett-f64/v2" bilinear=0 block=512 cls="small" cplx=0 dclass="m" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f64_f64_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_h962ce96053_bil abi="rocke-gett-f64/v2" bilinear=1 block=512 cls="small" cplx=0 dclass="m" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=22:fce8027ba24a437a
+kernel rocke_gett_f64_f64_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_hc920007832 abi="rocke-gett-f64/v2" bilinear=0 block=512 cls="small" cplx=0 dclass="x" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=17:3f2fcd6b8832cde0
+kernel rocke_gett_f64_f64_rt_t64x128x32_w2x4_g4_z2_e3_s1_d2_hc920007832_bil abi="rocke-gett-f64/v2" bilinear=1 block=512 cls="small" cplx=0 dclass="x" family="gett64" kblock=0 limit_batch=65535 limit_span_bytes=2147483632 tile_k=32 tile_m=64 tile_n=128 params=22:fce8027ba24a437a
+route gett64.k_block_min_k=4096
+route num_cus=304
+jit hiptensor_jit_ew1_c_f32_f32_i32_b256_v1
+jit hiptensor_jit_ew1_c_f32_f32_i64_b256_v1
+jit hiptensor_jit_ew1_c_f32_f64_i32_b256_v1
+jit hiptensor_jit_ew1_c_f32_f64_i64_b256_v1
+jit hiptensor_jit_ew1_c_f64_f64_i32_b256_v1
+jit hiptensor_jit_ew1_c_f64_f64_i64_b256_v1
+jit hiptensor_jit_ew1_r_bf16_bf16_i32_b256_m_v8_u
+jit hiptensor_jit_ew1_r_bf16_bf16_i32_b256_v1
+jit hiptensor_jit_ew1_r_bf16_bf16_i32_b256_v8_g
+jit hiptensor_jit_ew1_r_bf16_bf16_i32_b256_v8_u
+jit hiptensor_jit_ew1_r_bf16_bf16_i64_b256_v1
+jit hiptensor_jit_ew1_r_bf16_bf16_i64_b256_v8_u
+jit hiptensor_jit_ew1_r_bf16_f32_i32_b256_m_v4_u
+jit hiptensor_jit_ew1_r_bf16_f32_i32_b256_v1
+jit hiptensor_jit_ew1_r_bf16_f32_i32_b256_v4_g
+jit hiptensor_jit_ew1_r_bf16_f32_i32_b256_v4_u
+jit hiptensor_jit_ew1_r_bf16_f32_i64_b256_v1
+jit hiptensor_jit_ew1_r_bf16_f32_i64_b256_v4_u
+jit hiptensor_jit_ew1_r_bf16_f64_i32_b256_m_v2_u
+jit hiptensor_jit_ew1_r_bf16_f64_i32_b256_v1
+jit hiptensor_jit_ew1_r_bf16_f64_i32_b256_v2_g
+jit hiptensor_jit_ew1_r_bf16_f64_i32_b256_v2_u
+jit hiptensor_jit_ew1_r_bf16_f64_i64_b256_v1
+jit hiptensor_jit_ew1_r_bf16_f64_i64_b256_v2_u
+jit hiptensor_jit_ew1_r_f16_f16_i32_b256_m_v8_u
+jit hiptensor_jit_ew1_r_f16_f16_i32_b256_v1
+jit hiptensor_jit_ew1_r_f16_f16_i32_b256_v8_g
+jit hiptensor_jit_ew1_r_f16_f16_i32_b256_v8_u
+jit hiptensor_jit_ew1_r_f16_f16_i64_b256_v1
+jit hiptensor_jit_ew1_r_f16_f16_i64_b256_v8_u
+jit hiptensor_jit_ew1_r_f16_f32_i32_b256_m_v4_u
+jit hiptensor_jit_ew1_r_f16_f32_i32_b256_v1
+jit hiptensor_jit_ew1_r_f16_f32_i32_b256_v4_g
+jit hiptensor_jit_ew1_r_f16_f32_i32_b256_v4_u
+jit hiptensor_jit_ew1_r_f16_f32_i64_b256_v1
+jit hiptensor_jit_ew1_r_f16_f32_i64_b256_v4_u
+jit hiptensor_jit_ew1_r_f16_f64_i32_b256_m_v2_u
+jit hiptensor_jit_ew1_r_f16_f64_i32_b256_v1
+jit hiptensor_jit_ew1_r_f16_f64_i32_b256_v2_g
+jit hiptensor_jit_ew1_r_f16_f64_i32_b256_v2_u
+jit hiptensor_jit_ew1_r_f16_f64_i64_b256_v1
+jit hiptensor_jit_ew1_r_f16_f64_i64_b256_v2_u
+jit hiptensor_jit_ew1_r_f32_bf16_i32_b256_m_v8_u
+jit hiptensor_jit_ew1_r_f32_bf16_i32_b256_v1
+jit hiptensor_jit_ew1_r_f32_bf16_i32_b256_v8_g
+jit hiptensor_jit_ew1_r_f32_bf16_i32_b256_v8_u
+jit hiptensor_jit_ew1_r_f32_bf16_i64_b256_v1
+jit hiptensor_jit_ew1_r_f32_bf16_i64_b256_v8_u
+jit hiptensor_jit_ew1_r_f32_f16_i32_b256_m_v8_u
+jit hiptensor_jit_ew1_r_f32_f16_i32_b256_v1
+jit hiptensor_jit_ew1_r_f32_f16_i32_b256_v8_g
+jit hiptensor_jit_ew1_r_f32_f16_i32_b256_v8_u
+jit hiptensor_jit_ew1_r_f32_f16_i64_b256_v1
+jit hiptensor_jit_ew1_r_f32_f16_i64_b256_v8_u
+jit hiptensor_jit_ew1_r_f32_f32_i32_b256_m_v4_u
+jit hiptensor_jit_ew1_r_f32_f32_i32_b256_v1
+jit hiptensor_jit_ew1_r_f32_f32_i32_b256_v4_g
+jit hiptensor_jit_ew1_r_f32_f32_i32_b256_v4_u
+jit hiptensor_jit_ew1_r_f32_f32_i64_b256_v1
+jit hiptensor_jit_ew1_r_f32_f32_i64_b256_v4_u
+jit hiptensor_jit_ew1_r_f32_f64_i32_b256_m_v2_u
+jit hiptensor_jit_ew1_r_f32_f64_i32_b256_v1
+jit hiptensor_jit_ew1_r_f32_f64_i32_b256_v2_g
+jit hiptensor_jit_ew1_r_f32_f64_i32_b256_v2_u
+jit hiptensor_jit_ew1_r_f32_f64_i64_b256_v1
+jit hiptensor_jit_ew1_r_f32_f64_i64_b256_v2_u
+jit hiptensor_jit_ew1_r_f64_f64_i32_b256_m_v2_u
+jit hiptensor_jit_ew1_r_f64_f64_i32_b256_v1
+jit hiptensor_jit_ew1_r_f64_f64_i32_b256_v2_g
+jit hiptensor_jit_ew1_r_f64_f64_i32_b256_v2_u
+jit hiptensor_jit_ew1_r_f64_f64_i64_b256_v1
+jit hiptensor_jit_ew1_r_f64_f64_i64_b256_v2_u
+jit hiptensor_jit_ew2_c_f32_f32_f32_i32_b256_v1
+jit hiptensor_jit_ew2_c_f32_f32_f32_i64_b256_v1
+jit hiptensor_jit_ew2_c_f64_f32_f32_i32_b256_v1
+jit hiptensor_jit_ew2_c_f64_f32_f32_i64_b256_v1
+jit hiptensor_jit_ew2_c_f64_f64_f64_i32_b256_v1
+jit hiptensor_jit_ew2_c_f64_f64_f64_i64_b256_v1
+jit hiptensor_jit_ew2_r_bf16_bf16_bf16_i32_b256_m_v8_uu
+jit hiptensor_jit_ew2_r_bf16_bf16_bf16_i32_b256_v1
+jit hiptensor_jit_ew2_r_bf16_bf16_bf16_i32_b256_v8_gg
+jit hiptensor_jit_ew2_r_bf16_bf16_bf16_i32_b256_v8_gu
+jit hiptensor_jit_ew2_r_bf16_bf16_bf16_i32_b256_v8_ug
+jit hiptensor_jit_ew2_r_bf16_bf16_bf16_i32_b256_v8_uu
+jit hiptensor_jit_ew2_r_bf16_bf16_bf16_i64_b256_v1
+jit hiptensor_jit_ew2_r_bf16_bf16_bf16_i64_b256_v8_uu
+jit hiptensor_jit_ew2_r_bf16_bf16_f32_i32_b256_m_v4_uu
+jit hiptensor_jit_ew2_r_bf16_bf16_f32_i32_b256_v1
+jit hiptensor_jit_ew2_r_bf16_bf16_f32_i32_b256_v4_gg
+jit hiptensor_jit_ew2_r_bf16_bf16_f32_i32_b256_v4_gu
+jit hiptensor_jit_ew2_r_bf16_bf16_f32_i32_b256_v4_ug
+jit hiptensor_jit_ew2_r_bf16_bf16_f32_i32_b256_v4_uu
+jit hiptensor_jit_ew2_r_bf16_bf16_f32_i64_b256_v1
+jit hiptensor_jit_ew2_r_bf16_bf16_f32_i64_b256_v4_uu
+jit hiptensor_jit_ew2_r_f16_f16_f16_i32_b256_m_v8_uu
+jit hiptensor_jit_ew2_r_f16_f16_f16_i32_b256_v1
+jit hiptensor_jit_ew2_r_f16_f16_f16_i32_b256_v8_gg
+jit hiptensor_jit_ew2_r_f16_f16_f16_i32_b256_v8_gu
+jit hiptensor_jit_ew2_r_f16_f16_f16_i32_b256_v8_ug
+jit hiptensor_jit_ew2_r_f16_f16_f16_i32_b256_v8_uu
+jit hiptensor_jit_ew2_r_f16_f16_f16_i64_b256_v1
+jit hiptensor_jit_ew2_r_f16_f16_f16_i64_b256_v8_uu
+jit hiptensor_jit_ew2_r_f16_f16_f32_i32_b256_m_v4_uu
+jit hiptensor_jit_ew2_r_f16_f16_f32_i32_b256_v1
+jit hiptensor_jit_ew2_r_f16_f16_f32_i32_b256_v4_gg
+jit hiptensor_jit_ew2_r_f16_f16_f32_i32_b256_v4_gu
+jit hiptensor_jit_ew2_r_f16_f16_f32_i32_b256_v4_ug
+jit hiptensor_jit_ew2_r_f16_f16_f32_i32_b256_v4_uu
+jit hiptensor_jit_ew2_r_f16_f16_f32_i64_b256_v1
+jit hiptensor_jit_ew2_r_f16_f16_f32_i64_b256_v4_uu
+jit hiptensor_jit_ew2_r_f32_bf16_bf16_i32_b256_m_v8_uu
+jit hiptensor_jit_ew2_r_f32_bf16_bf16_i32_b256_v1
+jit hiptensor_jit_ew2_r_f32_bf16_bf16_i32_b256_v8_gg
+jit hiptensor_jit_ew2_r_f32_bf16_bf16_i32_b256_v8_gu
+jit hiptensor_jit_ew2_r_f32_bf16_bf16_i32_b256_v8_ug
+jit hiptensor_jit_ew2_r_f32_bf16_bf16_i32_b256_v8_uu
+jit hiptensor_jit_ew2_r_f32_bf16_bf16_i64_b256_v1
+jit hiptensor_jit_ew2_r_f32_bf16_bf16_i64_b256_v8_uu
+jit hiptensor_jit_ew2_r_f32_f16_f16_i32_b256_m_v8_uu
+jit hiptensor_jit_ew2_r_f32_f16_f16_i32_b256_v1
+jit hiptensor_jit_ew2_r_f32_f16_f16_i32_b256_v8_gg
+jit hiptensor_jit_ew2_r_f32_f16_f16_i32_b256_v8_gu
+jit hiptensor_jit_ew2_r_f32_f16_f16_i32_b256_v8_ug
+jit hiptensor_jit_ew2_r_f32_f16_f16_i32_b256_v8_uu
+jit hiptensor_jit_ew2_r_f32_f16_f16_i64_b256_v1
+jit hiptensor_jit_ew2_r_f32_f16_f16_i64_b256_v8_uu
+jit hiptensor_jit_ew2_r_f32_f32_f32_i32_b256_m_v4_uu
+jit hiptensor_jit_ew2_r_f32_f32_f32_i32_b256_v1
+jit hiptensor_jit_ew2_r_f32_f32_f32_i32_b256_v4_gg
+jit hiptensor_jit_ew2_r_f32_f32_f32_i32_b256_v4_gu
+jit hiptensor_jit_ew2_r_f32_f32_f32_i32_b256_v4_ug
+jit hiptensor_jit_ew2_r_f32_f32_f32_i32_b256_v4_uu
+jit hiptensor_jit_ew2_r_f32_f32_f32_i64_b256_v1
+jit hiptensor_jit_ew2_r_f32_f32_f32_i64_b256_v4_uu
+jit hiptensor_jit_ew2_r_f64_bf16_bf16_i32_b256_m_v8_uu
+jit hiptensor_jit_ew2_r_f64_bf16_bf16_i32_b256_v1
+jit hiptensor_jit_ew2_r_f64_bf16_bf16_i32_b256_v8_gg
+jit hiptensor_jit_ew2_r_f64_bf16_bf16_i32_b256_v8_gu
+jit hiptensor_jit_ew2_r_f64_bf16_bf16_i32_b256_v8_ug
+jit hiptensor_jit_ew2_r_f64_bf16_bf16_i32_b256_v8_uu
+jit hiptensor_jit_ew2_r_f64_bf16_bf16_i64_b256_v1
+jit hiptensor_jit_ew2_r_f64_bf16_bf16_i64_b256_v8_uu
+jit hiptensor_jit_ew2_r_f64_f16_f16_i32_b256_m_v8_uu
+jit hiptensor_jit_ew2_r_f64_f16_f16_i32_b256_v1
+jit hiptensor_jit_ew2_r_f64_f16_f16_i32_b256_v8_gg
+jit hiptensor_jit_ew2_r_f64_f16_f16_i32_b256_v8_gu
+jit hiptensor_jit_ew2_r_f64_f16_f16_i32_b256_v8_ug
+jit hiptensor_jit_ew2_r_f64_f16_f16_i32_b256_v8_uu
+jit hiptensor_jit_ew2_r_f64_f16_f16_i64_b256_v1
+jit hiptensor_jit_ew2_r_f64_f16_f16_i64_b256_v8_uu
+jit hiptensor_jit_ew2_r_f64_f32_f32_i32_b256_m_v4_uu
+jit hiptensor_jit_ew2_r_f64_f32_f32_i32_b256_v1
+jit hiptensor_jit_ew2_r_f64_f32_f32_i32_b256_v4_gg
+jit hiptensor_jit_ew2_r_f64_f32_f32_i32_b256_v4_gu
+jit hiptensor_jit_ew2_r_f64_f32_f32_i32_b256_v4_ug
+jit hiptensor_jit_ew2_r_f64_f32_f32_i32_b256_v4_uu
+jit hiptensor_jit_ew2_r_f64_f32_f32_i64_b256_v1
+jit hiptensor_jit_ew2_r_f64_f32_f32_i64_b256_v4_uu
+jit hiptensor_jit_ew2_r_f64_f64_f64_i32_b256_m_v2_uu
+jit hiptensor_jit_ew2_r_f64_f64_f64_i32_b256_v1
+jit hiptensor_jit_ew2_r_f64_f64_f64_i32_b256_v2_gg
+jit hiptensor_jit_ew2_r_f64_f64_f64_i32_b256_v2_gu
+jit hiptensor_jit_ew2_r_f64_f64_f64_i32_b256_v2_ug
+jit hiptensor_jit_ew2_r_f64_f64_f64_i32_b256_v2_uu
+jit hiptensor_jit_ew2_r_f64_f64_f64_i64_b256_v1
+jit hiptensor_jit_ew2_r_f64_f64_f64_i64_b256_v2_uu
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_bf16_i32_b256_m_v8_uuu
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_bf16_i32_b256_v1
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_bf16_i32_b256_v8_ggg
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_bf16_i32_b256_v8_ggu
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_bf16_i32_b256_v8_gug
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_bf16_i32_b256_v8_guu
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_bf16_i32_b256_v8_ugg
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_bf16_i32_b256_v8_ugu
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_bf16_i32_b256_v8_uug
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_bf16_i32_b256_v8_uuu
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_bf16_i64_b256_v1
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_bf16_i64_b256_v8_uuu
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_f32_i32_b256_m_v4_uuu
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_f32_i32_b256_v1
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_f32_i32_b256_v4_ggg
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_f32_i32_b256_v4_ggu
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_f32_i32_b256_v4_gug
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_f32_i32_b256_v4_guu
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_f32_i32_b256_v4_ugg
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_f32_i32_b256_v4_ugu
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_f32_i32_b256_v4_uug
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_f32_i32_b256_v4_uuu
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_f32_i64_b256_v1
+jit hiptensor_jit_ew3_r_bf16_bf16_bf16_f32_i64_b256_v4_uuu
+jit hiptensor_jit_ew3_r_f16_f16_f16_f16_i32_b256_m_v8_uuu
+jit hiptensor_jit_ew3_r_f16_f16_f16_f16_i32_b256_v1
+jit hiptensor_jit_ew3_r_f16_f16_f16_f16_i32_b256_v8_ggg
+jit hiptensor_jit_ew3_r_f16_f16_f16_f16_i32_b256_v8_ggu
+jit hiptensor_jit_ew3_r_f16_f16_f16_f16_i32_b256_v8_gug
+jit hiptensor_jit_ew3_r_f16_f16_f16_f16_i32_b256_v8_guu
+jit hiptensor_jit_ew3_r_f16_f16_f16_f16_i32_b256_v8_ugg
+jit hiptensor_jit_ew3_r_f16_f16_f16_f16_i32_b256_v8_ugu
+jit hiptensor_jit_ew3_r_f16_f16_f16_f16_i32_b256_v8_uug
+jit hiptensor_jit_ew3_r_f16_f16_f16_f16_i32_b256_v8_uuu
+jit hiptensor_jit_ew3_r_f16_f16_f16_f16_i64_b256_v1
+jit hiptensor_jit_ew3_r_f16_f16_f16_f16_i64_b256_v8_uuu
+jit hiptensor_jit_ew3_r_f16_f16_f16_f32_i32_b256_m_v4_uuu
+jit hiptensor_jit_ew3_r_f16_f16_f16_f32_i32_b256_v1
+jit hiptensor_jit_ew3_r_f16_f16_f16_f32_i32_b256_v4_ggg
+jit hiptensor_jit_ew3_r_f16_f16_f16_f32_i32_b256_v4_ggu
+jit hiptensor_jit_ew3_r_f16_f16_f16_f32_i32_b256_v4_gug
+jit hiptensor_jit_ew3_r_f16_f16_f16_f32_i32_b256_v4_guu
+jit hiptensor_jit_ew3_r_f16_f16_f16_f32_i32_b256_v4_ugg
+jit hiptensor_jit_ew3_r_f16_f16_f16_f32_i32_b256_v4_ugu
+jit hiptensor_jit_ew3_r_f16_f16_f16_f32_i32_b256_v4_uug
+jit hiptensor_jit_ew3_r_f16_f16_f16_f32_i32_b256_v4_uuu
+jit hiptensor_jit_ew3_r_f16_f16_f16_f32_i64_b256_v1
+jit hiptensor_jit_ew3_r_f16_f16_f16_f32_i64_b256_v4_uuu
+jit hiptensor_jit_ew3_r_f32_f32_f32_f32_i32_b256_m_v4_uuu
+jit hiptensor_jit_ew3_r_f32_f32_f32_f32_i32_b256_v1
+jit hiptensor_jit_ew3_r_f32_f32_f32_f32_i32_b256_v4_ggg
+jit hiptensor_jit_ew3_r_f32_f32_f32_f32_i32_b256_v4_ggu
+jit hiptensor_jit_ew3_r_f32_f32_f32_f32_i32_b256_v4_gug
+jit hiptensor_jit_ew3_r_f32_f32_f32_f32_i32_b256_v4_guu
+jit hiptensor_jit_ew3_r_f32_f32_f32_f32_i32_b256_v4_ugg
+jit hiptensor_jit_ew3_r_f32_f32_f32_f32_i32_b256_v4_ugu
+jit hiptensor_jit_ew3_r_f32_f32_f32_f32_i32_b256_v4_uug
+jit hiptensor_jit_ew3_r_f32_f32_f32_f32_i32_b256_v4_uuu
+jit hiptensor_jit_ew3_r_f32_f32_f32_f32_i64_b256_v1
+jit hiptensor_jit_ew3_r_f32_f32_f32_f32_i64_b256_v4_uuu
+jit hiptensor_jit_ew3_r_f64_f64_f64_f64_i32_b256_m_v2_uuu
+jit hiptensor_jit_ew3_r_f64_f64_f64_f64_i32_b256_v1
+jit hiptensor_jit_ew3_r_f64_f64_f64_f64_i32_b256_v2_ggg
+jit hiptensor_jit_ew3_r_f64_f64_f64_f64_i32_b256_v2_ggu
+jit hiptensor_jit_ew3_r_f64_f64_f64_f64_i32_b256_v2_gug
+jit hiptensor_jit_ew3_r_f64_f64_f64_f64_i32_b256_v2_guu
+jit hiptensor_jit_ew3_r_f64_f64_f64_f64_i32_b256_v2_ugg
+jit hiptensor_jit_ew3_r_f64_f64_f64_f64_i32_b256_v2_ugu
+jit hiptensor_jit_ew3_r_f64_f64_f64_f64_i32_b256_v2_uug
+jit hiptensor_jit_ew3_r_f64_f64_f64_f64_i32_b256_v2_uuu
+jit hiptensor_jit_ew3_r_f64_f64_f64_f64_i64_b256_v1
+jit hiptensor_jit_ew3_r_f64_f64_f64_f64_i64_b256_v2_uuu

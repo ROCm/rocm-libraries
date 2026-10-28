@@ -170,8 +170,10 @@ class TestEmission(unittest.TestCase):
 
 class TestEngineGuard(unittest.TestCase):
     def test_levers_listed_python_only(self):
+        # rve_pad is mirrored by the C++ engine (parity: tensor_gett_kc_emit);
+        # sk_xcd_local stays Python-engine only
         keys = dict(_be._PYTHON_ONLY_GEMM_LEVERS)
-        self.assertEqual(keys.get("rve_pad"), 0)
+        self.assertNotIn("rve_pad", keys)
         self.assertIs(keys.get("sk_xcd_local"), False)
 
     def test_converter_refuses_sk_xcd_local_on_a_c_engine_body(self):

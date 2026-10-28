@@ -12,11 +12,14 @@
  * The hooks ride the universal GEMM spec as the `_gett` side channel (Python
  * spec._gett): NULL keeps every GEMM kernel unchanged. Mirrored bodies: the
  * ring body (the hook owns the operand addressing, the K-outer LDS layout, the
- * fragment reads and the epilogue) and the MN-layout (CRR) bodies (the hook
- * owns the operand addressing and the epilogue; gemm_mn_operand owns the LDS
- * stages). The K-contiguous bodies (kc_tile, epilogue_rve) and the store_nt
- * epilogue are implemented by the Python engine only: is_valid_spec refuses
- * them with that reason.
+ * fragment reads and the epilogue), the MN-layout (CRR) bodies (the hook owns
+ * the operand addressing and the epilogue; gemm_mn_operand owns the LDS
+ * stages) and the K-contiguous (RCR) bodies on packed operands (the hook owns
+ * the epilogue only: GettHooks.epilogue, or epilogue_rve on the row-interleave
+ * vector epilogue). The store_nt epilogue is implemented by the Python engine
+ * only: is_valid_spec refuses it with that reason. Also mirrored: the tensor
+ * pack (tensor/pack.py) and the launches of the tuned and AOT route tables
+ * (dispatch/families/tensor_gett.py _table_plan).
  */
 #ifndef ROCKE_INSTANCE_TENSOR_GETT_H
 #define ROCKE_INSTANCE_TENSOR_GETT_H
@@ -181,6 +184,17 @@ rocke_gemm_trait_spec_t body_trait();
 std::vector<std::string> body_trait_errors(const rocke_gemm_trait_spec_t& trait);
 std::vector<std::string> mn_body_errors(const rocke_gemm_universal_spec_t& spec);
 rocke_gemm_trait_spec_t mn_body_trait(const rocke_gemm_trait_spec_t& trait);
+/* kc_body_errors, kc_body_trait: the K-contiguous (RCR) GETT bodies */
+std::vector<std::string> kc_body_errors(const rocke_gemm_universal_spec_t& spec);
+rocke_gemm_trait_spec_t kc_body_trait(const rocke_gemm_trait_spec_t& trait);
+/* gemm_universal.launch_shape_error(spec, M, N, K) of an RCR body without an
+ * operand prologue (the K-contiguous GETT bodies); empty when the launch is
+ * inside the body's kernel contract. Another layout or a prologue is refused
+ * with that reason. */
+std::string gemm_launch_shape_error(const rocke_gemm_universal_spec_t& spec,
+                                    int64_t M,
+                                    int64_t N,
+                                    int64_t K);
 /* body_spec(dtype, tile_k, **trait_over): the overrides are applied by the
  * caller on the returned spec's trait (name "tensor_gett") */
 rocke_gemm_universal_spec_t body_spec(const char* dtype, int tile_k);
@@ -189,7 +203,8 @@ rocke_gemm_universal_spec_t body_spec(const char* dtype, int tile_k);
 using ModeMap = std::vector<std::pair<std::string, int64_t>>;
 
 /* gett.TensorGettSpec (mode lists row-major: the last mode is the fastest).
- * kc_tile / kc_trait (K-contiguous bodies) are Python-engine only. */
+ * kc_tile / kc_trait: a K-contiguous (RCR) body on packed operands
+ * (kc_operand_modes). */
 struct TensorGettSpec
 {
     std::vector<std::string> modes_a, modes_b, modes_d;
@@ -207,6 +222,10 @@ struct TensorGettSpec
     rocke_gemm_tile_spec_t mn_tile{};
     bool has_mn_trait = false;
     rocke_gemm_trait_spec_t mn_trait{};
+    bool has_kc_tile = false;
+    rocke_gemm_tile_spec_t kc_tile{};
+    bool has_kc_trait = false;
+    rocke_gemm_trait_spec_t kc_trait{};
 
     /* TensorGettSpec.make: sorted mode maps */
     static TensorGettSpec make(const std::vector<std::string>& modes_a,
@@ -220,6 +239,10 @@ struct TensorGettSpec
     bool mn_body() const
     {
         return has_mn_tile;
+    }
+    bool kc_body() const
+    {
+        return has_kc_tile;
     }
     /* plan(); false with the ValueError message */
     bool plan(Plan* out, std::string* why) const;
@@ -243,6 +266,10 @@ void tensor_gett_grid(const TensorGettSpec& spec, int grid[3]);
 int tensor_gett_block(const TensorGettSpec& spec);
 /* launch_operands(spec): the user operands bound to the kernel's A and B */
 std::pair<std::string, std::string> launch_operands(const TensorGettSpec& spec);
+/* kc_operand_modes(spec): the row-major mode orders of the K-contiguous packed
+ * copies the kernel's A and B params take ([GEMM rows, K modes]) */
+std::pair<std::vector<std::string>, std::vector<std::string>>
+    kc_operand_modes(const TensorGettSpec& spec);
 
 /* dispatch/gemm/selector.parse_config(cfg) into a tile + trait (over the
  * TraitSpec defaults); false with the reason (unknown or Python-engine-only
@@ -289,8 +316,103 @@ TensorGettSpec tuned_problem(const TunedEntry& entry);
 std::string sha1_hex(const std::string& s);
 std::string sha256_hex(const std::string& s);
 
+/* json.dumps text (ensure_ascii, sort_keys) of the values the kernel names
+ * hash: a string, a list of strings, a ModeMap (list of [name, value] pairs) */
+std::string json_str(const std::string& s);
+std::string json_modes(const std::vector<std::string>& v);
+std::string json_modemap(const ModeMap& m);
+
+/* ------------------------------------------------------------- tensor pack
+ * tensor/pack.py: Y[modes_dst] = X[modes_src], Y packed row-major in
+ * modes_dst order, X with arbitrary element strides (forms pairs / tiled /
+ * elements, "auto" = the first that applies). */
+
+constexpr int64_t MAX_PACK_BYTES = 0x7FFF0000;
+
+struct TensorPackSpec
+{
+    std::vector<std::string> modes_src, modes_dst;
+    ModeMap extents;
+    bool has_strides_src = false;
+    ModeMap strides_src;
+    std::string dtype = "fp16";
+    int groups = 2;
+    int block = 256;
+    std::string form = "auto";
+
+    /* TensorPackSpec.make: sorted mode maps; strides_src NULL = packed in
+     * modes_src order */
+    static TensorPackSpec make(const std::vector<std::string>& modes_src,
+                               const std::vector<std::string>& modes_dst,
+                               const std::map<std::string, int64_t>& extents,
+                               const std::map<std::string, int64_t>* strides_src,
+                               const std::string& dtype);
+    std::map<std::string, int64_t> ext() const;
+    /* false when a source mode has no stride (Python KeyError) */
+    bool src_strides(std::map<std::string, int64_t>* out) const;
+    int64_t numel() const;
+    std::vector<Digit> src_digits() const;
+    /* the source's unit-stride mode (extent > 1); false when there is none */
+    bool unit_mode(std::string* out) const;
+    bool pairs() const;
+    /* (O modes, I modes) of the tiled form; false when it does not apply */
+    bool tiled_groups(std::vector<std::string>* O, std::vector<std::string>* I) const;
+    std::string resolved_form() const;
+    std::string json_key() const;
+    std::string kernel_name() const;
+};
+
+bool pack_is_valid_spec(const TensorPackSpec& spec, const char* arch, std::string* why);
+/* build_tensor_pack(spec, arch) into the (uninitialised) builder `b`; NULL
+ * with the builder's error set on an invalid spec. Params X (source), Y
+ * (destination). */
+rocke_kernel_def_t*
+    build_tensor_pack(rocke_ir_builder_t* b, const TensorPackSpec& spec, const char* arch);
+void tensor_pack_grid(const TensorPackSpec& spec, int grid[3]);
+int tensor_pack_block(const TensorPackSpec& spec);
+
+/* -------------------------------------------- route tables: the launches
+ * dispatch/families/tensor_gett: TensorPackStep, TensorGettPlan and
+ * _table_plan (the plan of a tuned or AOT route table entry: the MN-layout
+ * GETT, single launch or pack hybrid, or the K-contiguous route with both
+ * operands packed). The pack steps use the tensor_pack kernel
+ * (TENSOR_GETT_PACK_KERNEL "tensor_pack") with the "local" pack order
+ * (TENSOR_GETT_PACK_ORDER), the shipped defaults. */
+
+struct PackStep
+{
+    std::string operand; /* the user operand copied: "A" or "B" */
+    TensorPackSpec spec;
+    int grid[3] = {1, 1, 1};
+    int block = 256;
+    int64_t workspace_bytes = 0;
+};
+
+struct TablePlan
+{
+    std::vector<PackStep> packs;
+    TensorGettSpec gett;
+    int64_t workspace_bytes = 0;
+};
+
+/* _table_plan(TensorGettRequest(tuned_problem(entry), arch), table): false
+ * with the reason when the entry gives no plan (Python returns None). */
+bool table_plan(const TunedEntry& entry, const std::string& arch, TablePlan* out, std::string* why);
+
+/* gett_operand_sources(plan): for the GETT launch's A and B params, the pack
+ * step index (>= 0) of a packed operand, or -1 for the user operand
+ * (launch_operands names it). */
+void gett_operand_sources(const TablePlan& plan, int src[2]);
+
 } // namespace gett
 } // namespace rocke
+
+extern "C" {
+/* The AOT route table (dispatch/families/tensor_gett_aot.json, compiled into
+ * the engine by CMake): NUL-terminated JSON text in the tuned table's format,
+ * the input of rocke::gett::tuned_entries. */
+const char* rocke_tensor_gett_aot_json(void);
+}
 
 /* gett.GettHooks: the `spec._gett` side channel consumed by the universal GEMM
  * builder. Subclassed by the shape-generic ring GETT (rocke::htaot). */
@@ -351,6 +473,18 @@ struct rocke_gett_hooks
                   V* warp_n_idx,
                   V* lane,
                   const std::function<V*(V*)>& acc_out);
+    /* epilogue_rve: the permuted alpha (/ beta) epilogue on the row-interleave
+     * vector epilogue's lane layout (K-contiguous bodies): lane (q, cn) holds
+     * rows row0 + v * mfmas_m + mi x columns col0 + ni (ni < mfmas_n = 8) as
+     * f32 accumulators accf[mi * mfmas_n + ni][v] */
+    void epilogue_rve(rocke_ir_builder_t* b,
+                      const std::vector<V*>& accf,
+                      V* row0,
+                      V* col0,
+                      int mfmas_m,
+                      int mfmas_n,
+                      int c_per_lane,
+                      V* C);
 
 protected:
     /* a D (C) offset part: the byte offset (narrow D) or the element offset
