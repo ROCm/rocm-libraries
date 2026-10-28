@@ -28,23 +28,32 @@ enum class MxScaleStorageLayout {
 struct MxScaleStoragePlan {
     MxScaleStorageLayout layout = MxScaleStorageLayout::Natural;
     std::array<size_t, 2> naturalShape{};  // [slow, fast] dimensions.
-    size_t blockSize = 0;
+    size_t blockSize = 0;                  // Used only by Gfx1250.
     size_t naturalByteCount = 0;
     size_t physicalByteCount = 0;
 };
 
-// Maps an AMD GPU architecture name, including feature suffixes such as
-// "gfx950:sramecc+:xnack-", to its required physical MX scale layout.
+// Maps an AMD GPU architecture name to its required physical MX scale layout.
+// The name must be exactly "gfx950", "gfx1250" or "gfx1250-strict", optionally
+// followed by ':' and feature flags such as "gfx950:sramecc+:xnack-". Any other
+// name, including a longer name that merely contains one of these, maps to
+// Natural.
 MxScaleStorageLayout mxScaleStorageLayoutForArchitectureName(std::string_view architectureName);
 
-// Computes both natural and padded physical storage sizes. Throws
-// std::runtime_error for an unsupported block size and std::runtime_error if
-// any byte-count calculation overflows size_t.
+// Computes the natural and padded physical storage sizes of one-byte scales.
+// `blockSize` is the number of data elements sharing each scale. Gfx1250 groups
+// 128 / blockSize scales along the fast dimension and requires a block size of
+// 16 or 32; Natural and Gfx950 do not depend on the block size and accept any
+// value. Throws std::runtime_error for an unsupported Gfx1250 block size, an
+// invalid layout, or a byte count that overflows size_t.
 MxScaleStoragePlan planMxScaleStorage(std::array<size_t, 2> naturalShape, size_t blockSize,
                                       MxScaleStorageLayout layout);
 
-// Copies natural [slow, fast] scale bytes into a plan's physical layout.
-// Throws std::runtime_error when the source size does not match the plan.
+// Copies natural [slow, fast] scale bytes into a plan's physical layout and
+// returns physicalByteCount bytes, with zero bytes in any padding. Throws
+// std::runtime_error if the plan differs from planMxScaleStorage's result for
+// its shape, block size and layout, if the source byte count differs from
+// naturalByteCount, or if the source is null with a nonzero byte count.
 std::vector<std::byte> copyMxScaleStorageToPhysicalLayout(const std::byte* naturalScaleStorage,
                                                           size_t naturalScaleByteCount,
                                                           const MxScaleStoragePlan& plan);
