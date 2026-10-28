@@ -10,39 +10,31 @@ This is the dgrad sibling of the ``Gfx950ConvFwdAot*`` pieces of
 the packaged IR is the swept kernel's byte for byte apart from its symbol name.
 
 The contract is 2-D cross-correlation, NHWK dY, KYXC W, NHWC dX, uniform fp16/bf16,
-fp32 accumulation, symmetric padding. Four families are packaged:
+fp32 accumulation, symmetric padding. Three families are packaged:
 
-* **Implicit GEMM** (``kernel_family`` 0): ``DgradConvSpec`` of
-  ``benchmarks/common/kernel_sweep.py``. One binary serves every stride and dilation:
-  the sweep builds the tilde (strided) kernel only, against a stride-2 probe, and the
-  kernel reads its sub-GEMM decomposition from a host-packed record table
-  (``sub_gemm_buf``, ``pack_sub_gemm_buffer``). The ABI is the 44-argument dgrad
-  block of ``kernels.common.conv_abi`` (``dY, W, dX``, byte sizes, extents, GEMM
-  dims, strides, the ``Hi``/``Wi`` magic pairs, tile counts, then the
-  ``sub_gemm_buf`` pointer and ``num_sub_gemms``). The grid is the flat tile total
-  over the sub-GEMMs by the group count. dX rows a strided problem never touches are
-  never written, so the caller zero-fills dX first when a stride exceeds 1.
-* **Direct depthwise dgrad** (``kernel_family`` 1, ``direct_variant``
-  ``depthwise_dgrad``): ``DirectDepthwiseDgradStreamSpec``, baked filter, stride and
-  padding, ``cpg == kpg == 1``; the 20-argument direct dgrad ABI.
-* **Direct grouped MFMA dgrad** (``kernel_family`` 1, ``direct_variant``
-  ``grouped_dgrad_mfma``): a three-step pipeline (weight transpose, an optional
-  reorganize, then a *forward* ``DirectConvSpec`` on the transposed problem launched
-  with the forward direct ABI), baked 3x3 / pad 1 / stride 1 and exact ``(cpg, kpg)``.
-* **MFMA helpers** (``kernel_family`` 2, ``direct_variant`` ``transpose`` or
-  ``reorganize``): the weight-transform kernels the MFMA pipeline launches. They are
-  packaged so the pipeline's handler can load them, and never serve a problem on
-  their own.
+* **Implicit GEMM** (``kernel_family`` 0): ``DgradConvSpec``. The kernel reads its
+  sub-GEMM decomposition from a host-packed record table (``sub_gemm_buf``,
+  ``pack_sub_gemm_buffer``): the tilde decomposition, or for a ``patch`` kernel the one
+  GEMM over the filter. A binary may bake its filter, stride and dilation, and the
+  dY-halo, tap-outer K loop and patch forms serve only the problems they compute. The
+  ABI is the 44-argument dgrad block of ``kernels.common.conv_abi``.
+* **Direct** (``kernel_family`` 1), every dgrad pipeline of rocKE's direct sweep:
+  ``depthwise_dgrad`` and ``depthwise_dgrad_win`` (the direct dgrad ABI),
+  ``grouped_dgrad_fused`` and ``grouped_dgrad_4c`` (one forward kernel over the
+  transposed problem reading the original weights), and the MFMA pipelines
+  ``grouped_dgrad_mfma`` / ``dgrad_mfma_rtc`` (weight transforms into the workspace,
+  then a forward kernel over the transposed problem).
+* **MFMA helpers** (``kernel_family`` 2): the weight transforms the MFMA pipelines
+  launch. They are packaged so the pipeline's handler can load them, and never serve a
+  problem on their own.
 
-:func:`gfx950_conv_dgrad_aot_serves` is rocKE's own offer (``KernelCache
-.supports_problem`` plus ``direct_kernel_sweep.plan_for``'s per-shape re-validation)
-plus the launch bounds the native pack enforces. The launch mirrors
-(:meth:`Gfx950ConvDgradAotSpec.grid`, ``launch_values``,
-``sub_gemm_buffer``, :func:`gfx950_conv_dgrad_aot_mfma_plan`) are what the native
-pack ports.
+:func:`gfx950_conv_dgrad_aot_plan` is the launch of one instance on one problem --
+rocKE's own offer (``identity_supports_problem``, ``direct_spec_for_problem``) plus the
+launch bounds, then its steps, workspace and dX zero-fill -- and is what the native
+pack (``Gfx950ConvDgradGeometry.hpp``) ports; the two are compared by
+:meth:`Gfx950ConvDgradPlan.digest`.
 
-``instance_id`` is ``KernelIdentity.stable_hash()``; this layer cannot import
-``benchmarks``, so the catalog tool computes it and ``library/tests`` checks it.
+``instance_id`` is ``KernelIdentity.stable_hash()``.
 """
 
 from __future__ import annotations
@@ -52,12 +44,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
 from dispatch.grouped_convolution import ConvGroupedRequest
-from rocke.core.ir import KernelDef
 from kernels.common import conv_direct_grouped as _direct
 from kernels.common import conv_implicit_gemm_dgrad as _dgrad
 from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
 from kernels.common.conv_abi import conv_args_signature, conv_direct_args_signature
 from kernels.common.conv_args import ConvArgs
+from rocke.core.ir import KernelDef
 
 _ARCH = "gfx950"
 _INT32_MAX = (1 << 31) - 1
@@ -65,10 +57,14 @@ _INT32_MAX = (1 << 31) - 1
 _MAX_GRID_DIM = 65535
 #: A dispatch's x extent in work-items is 32-bit.
 _MAX_DISPATCH_ITEMS = (1 << 32) - 1
+_MAX_BLOCK_THREADS = 1024
 _WAVE_SIZE = 64
 _DTYPES = ("fp16", "bf16")
 #: ``KernelIdentity.stable_hash()`` is a SHA-1 hex digest.
 _INSTANCE_ID_LENGTH = 40
+#: The LLVM flavor the catalog's instances were swept, hashed and measured under
+#: (every label of ``gfx950_conv_dgrad_aot.labels.txt`` ends in it).
+PACKAGED_LLVM_FLAVOR = "llvm22"
 
 #: ``kernel_family`` values; the metadata field is also an integer engine knob.
 KERNEL_FAMILY_IMPLICIT_GEMM = 0
@@ -297,11 +293,7 @@ _IMPLICIT_BAKEABLE = (
 _FAMILY_DEFAULTS = {
     "kernel_family": KERNEL_FAMILY_IMPLICIT_GEMM,
     "direct_variant": DIRECT_VARIANT_NONE,
-    **{
-        name: 0
-        for name in _DIRECT_CAPABILITY_FIELDS
-        if name not in _IMPLICIT_BAKEABLE
-    },
+    **{name: 0 for name in _DIRECT_CAPABILITY_FIELDS if name not in _IMPLICIT_BAKEABLE},
     **_KNOB_DEFAULTS,
 }
 
@@ -411,12 +403,14 @@ class Gfx950ConvDgradProblem:
             dil_w=self.dW,
         )
 
-    def tensor_bytes(self) -> tuple[int, int, int]:
-        """``(dY, W, dX)`` sizes in bytes (16-bit elements)."""
+    def tensor_bytes(self, images: int | None = None) -> tuple[int, int, int]:
+        """``(dY, W, dX)`` sizes in bytes (16-bit elements), for ``images`` images
+        (default the batch)."""
+        n = self.N if images is None else images
         return (
-            self.N * self.Ho * self.Wo * self.K * 2,
+            n * self.Ho * self.Wo * self.K * 2,
             self.K * self.Y * self.X * self.cpg * 2,
-            self.N * self.Hi * self.Wi * self.C * 2,
+            n * self.Hi * self.Wi * self.C * 2,
         )
 
 
@@ -450,9 +444,16 @@ def _problem_error(problem: Gfx950ConvDgradProblem) -> str:
             return f"{label} exceeds signed 32-bit descriptor arithmetic"
     if problem.Ho <= 0 or problem.Wo <= 0:
         return "convolution has nonpositive output (dY) spatial dimensions"
-    for label, size in zip(("dY", "W", "dX"), problem.tensor_bytes()):
+    # A batch whose dY or dX exceeds the 32-bit ABI runs as batch slices
+    # (gfx950_conv_dgrad_aot_batch_chunks), so one image of each, and the filter,
+    # must fit; the whole tensors stay addressable by a 64-bit offset.
+    for label, size in zip(("dY", "W", "dX"), problem.tensor_bytes(1)):
         if size > _INT32_MAX:
-            return f"{label} byte count exceeds the signed 32-bit kernel ABI"
+            return (
+                f"{label} byte count of one image exceeds the signed 32-bit kernel ABI"
+            )
+    if max(problem.tensor_bytes()) >= 1 << 62:
+        return "a tensor exceeds 2^62 bytes"
     return ""
 
 
@@ -679,19 +680,49 @@ class Gfx950ConvDgradAotSpec:
     # ---- the sweep's build ----
 
     def to_identity(self):
-        """The rocKE ``KernelIdentity`` this implicit-GEMM instance was packaged
-        from. Every field the packaging does not carry is at its KernelIdentity
-        default, which is exactly what supports_gfx950_conv_dgrad_aot enforces, so
-        this reconstructs the identity rather than approximating it.
+        """The rocKE ``KernelIdentity`` this instance was packaged from.
 
-        ``llvm_flavor`` comes from the ambient rocKE flavor: a catalog is built and
-        packaged under one, and the descriptor does not restate it.
+        Implicit GEMM: every field the packaging does not carry is at its
+        KernelIdentity default, which is exactly what supports_gfx950_conv_dgrad_aot
+        enforces, so this reconstructs the identity (its ``stable_hash()`` is the
+        ``instance_id``). Direct and helper instances: the identity
+        ``direct_aot_jobs`` builds, up to the spelling of the knobs JSON (a bool knob
+        left at false may or may not have been stated), so it decides what the
+        binary serves but is not hashed.
+
+        ``llvm_flavor`` is the catalog's, :data:`PACKAGED_LLVM_FLAVOR`.
         """
-        if self.is_direct:
-            raise ValueError("a direct instance has no implicit-GEMM identity")
-        from benchmarks.common.kernel_cache import KernelIdentity
-        from rocke.core.lower_llvm import _resolve_llvm_flavor
+        from kernels.conv.kernel_identity import KernelIdentity
 
+        common = {
+            "arch": _ARCH,
+            "dtype_a": self.dtype,
+            "dtype_b": self.dtype,
+            "dtype_d": self.dtype,
+            "wave_size": self.wave_size,
+            "llvm_flavor": PACKAGED_LLVM_FLAVOR,
+        }
+        if self.is_direct:
+            return KernelIdentity(
+                direction="direct_dgrad_helper" if self.is_helper else "direct_dgrad",
+                algorithm=self.algorithm,
+                tile_m=0,
+                tile_n=0,
+                tile_k=0,
+                warp_m=0,
+                warp_n=0,
+                warp_tile_m=0,
+                warp_tile_n=0,
+                warp_tile_k=0,
+                pipeline="direct",
+                epilogue="direct",
+                vector_size_a=0,
+                vector_size_b=0,
+                vector_size_c=0,
+                knobs=json.dumps(self.direct_knobs(), sort_keys=True),
+                **{name: getattr(self, name) for name in _DIRECT_CAPABILITY_FIELDS},
+                **common,
+            )
         carried = (
             "tile_m",
             "tile_n",
@@ -703,7 +734,6 @@ class Gfx950ConvDgradAotSpec:
             "warp_tile_k",
             "pipeline",
             "epilogue",
-            "wave_size",
             "vector_size_a",
             "vector_size_b",
             "vector_size_c",
@@ -721,15 +751,11 @@ class Gfx950ConvDgradAotSpec:
         )
         flags = ("lds_k_outer", "grouped", "patch", "tap_outer_k", "uniform_k_decode")
         return KernelIdentity(
-            arch=_ARCH,
             direction="dgrad",
             algorithm="implicit_gemm",
-            dtype_a=self.dtype,
-            dtype_b=self.dtype,
-            dtype_d=self.dtype,
-            llvm_flavor=_resolve_llvm_flavor(),
             **{name: getattr(self, name) for name in carried},
             **{name: bool(getattr(self, name)) for name in flags},
+            **common,
         )
 
     def probe_problem(self) -> ConvProblem | _direct.DirectConvProblem:
@@ -770,7 +796,6 @@ class Gfx950ConvDgradAotSpec:
                 variant=self.algorithm,
                 knobs=self.direct_knobs(),
             )
-        groups = 2 if self.grouped else 1
         # The probe carries the geometry the instance baked, where it baked any: a
         # kernel compiled for stride 1 must be built against a stride-1 problem, or
         # rocKE validates the emission it was never going to run (tap_outer_k is only
@@ -871,135 +896,6 @@ class Gfx950ConvDgradAotSpec:
             return self.to_direct_spec().kernel_name()
         return self.to_instance_spec().kernel_name()
 
-    # ---- launch mirrors ----
-
-    def block(self) -> tuple[int, int, int]:
-        """Workgroup size; for an MFMA pipeline, its compute pass's.
-
-        Taken from rocKE's own direct_launch_geometry for a direct kernel: the
-        block is problem-independent, so the probe problem answers for every one,
-        and a pipeline that changes its block shape needs no mirror here.
-        """
-        if self.is_helper:
-            return 64, 1, 1
-        if self.is_direct:
-            _, block = _direct.direct_launch_geometry(self.to_direct_spec())
-            return block
-        return self.warp_m * self.warp_n * self.wave_size, 1, 1
-
-    def sub_gemms(self, problem: Gfx950ConvDgradProblem) -> list:
-        """The non-empty tilde sub-GEMMs of ``problem`` for this implicit-GEMM tile."""
-        if self.is_direct:
-            raise ValueError("only an implicit-GEMM instance has sub-GEMMs")
-        p = problem.to_problem()
-        return _dgrad.enumerate_sub_gemms(
-            p, _dgrad.compute_tilde(p), self.tile_m, self.tile_n, tile_k=self.tile_k
-        )
-
-    def sub_gemm_buffer(self, problem: Gfx950ConvDgradProblem) -> list[int]:
-        """The ``sub_gemm_buf`` table of ``problem`` (signed i32 values): the
-        22-field records, then one 8-field magic entry per record."""
-        return _dgrad.pack_sub_gemm_buffer(
-            self.sub_gemms(problem), self.tile_m, self.tile_n
-        )
-
-    def workspace_bytes(self, problem: Gfx950ConvDgradProblem) -> int:
-        """Device scratch the launch needs: the record table for implicit GEMM, the
-        transformed weights for the MFMA pipeline, nothing otherwise."""
-        if self.is_mfma:
-            return gfx950_conv_dgrad_aot_mfma_plan(self, problem)["workspace_bytes"]
-        if self.is_direct:
-            return 0
-        return (
-            (SUB_GEMM_RECORD_FIELDS + SUB_GEMM_MAGIC_FIELDS)
-            * len(self.sub_gemms(problem))
-            * 4
-        )
-
-    def grid(self, problem: Gfx950ConvDgradProblem) -> tuple[int, int, int]:
-        """Launch grid for ``problem``. Implicit GEMM: ``(flat tiles over the
-        sub-GEMMs, groups, 1)``. Depthwise: rocKE's direct launch geometry. MFMA: its
-        compute pass's (see :func:`gfx950_conv_dgrad_aot_mfma_plan` for every step)."""
-        if self.is_helper:
-            raise ValueError("a helper is launched by its MFMA pipeline's plan")
-        if self.is_mfma:
-            return gfx950_conv_dgrad_aot_mfma_plan(self, problem)["steps"][-1]["grid"]
-        if self.is_depthwise:
-            spec = self.rocke_direct_spec(problem.to_direct_problem())
-            return _direct.direct_launch_geometry(spec)[0]
-        flat = sum(
-            _ceil_div(sg.gemm_m, self.tile_m) * _ceil_div(sg.gemm_n, self.tile_n)
-            for sg in self.sub_gemms(problem)
-        )
-        return flat, problem.groups, 1
-
-    def launch_signature(self) -> list[dict]:
-        """The ABI in ``kernels.common.conv_abi`` order: the 44-argument dgrad block
-        for implicit GEMM, the 20-argument direct dgrad block for depthwise, the
-        forward direct block for the MFMA compute pass, the 4-argument transform
-        block for a helper."""
-        if self.is_helper:
-            return _transform_signature(self.dtype)
-        if self.is_mfma:
-            return conv_direct_args_signature(self.dtype, direction="fwd")
-        if self.is_depthwise:
-            return conv_direct_args_signature(self.dtype, direction="dgrad")
-        return conv_args_signature(self.dtype, direction="dgrad")
-
-    def launch_values(
-        self,
-        problem: Gfx950ConvDgradProblem,
-        dy_ptr: int,
-        w_ptr: int,
-        dx_ptr: int,
-        dy_bytes: int,
-        w_bytes: int,
-        dx_bytes: int,
-        sub_gemm_buf: int = 0,
-    ) -> dict[str, int]:
-        """Every kernel argument of the single-launch families for ``problem``, from
-        rocKE's ``ConvArgs``; ``sub_gemm_buf`` is the device address of the packed
-        record table (implicit GEMM only). The MFMA pipeline's per-step values come
-        from :func:`gfx950_conv_dgrad_aot_mfma_plan`."""
-        if self.is_mfma or self.is_helper:
-            raise ValueError("the MFMA pipeline launches through its plan")
-        if self.is_depthwise:
-            return ConvArgs.from_problem(
-                problem.to_direct_problem(), direction="dgrad"
-            ).to_launch_values(dy_ptr, w_ptr, dx_ptr, dy_bytes, w_bytes, dx_bytes)
-        return ConvArgs.from_problem(
-            problem.to_problem(),
-            direction="dgrad",
-            tile_m=self.tile_m,
-            tile_n=self.tile_n,
-        ).to_launch_values(
-            dy_ptr,
-            w_ptr,
-            dx_ptr,
-            dy_bytes,
-            w_bytes,
-            dx_bytes,
-            sub_gemm_buf=sub_gemm_buf,
-            num_sub_gemms=len(self.sub_gemms(problem)),
-        )
-
-    def needs_zeroed_dx(self, problem: Gfx950ConvDgradProblem) -> bool:
-        """Whether dX must be zero-filled before the launch: a strided implicit-GEMM
-        problem leaves the dX rows and columns no tap reaches unwritten. The direct
-        kernels write every dX element."""
-        return not self.is_direct and (problem.sH > 1 or problem.sW > 1)
-
-
-def _transform_signature(dtype: str) -> list[dict]:
-    """The weight transforms' launch signature (``direct_kernel_sweep``'s)."""
-    elem = {"fp16": "f16", "bf16": "bf16"}[dtype]
-    return [
-        {"name": "A", "type": f"ptr<{elem}, global>", "size_bytes": 8},
-        {"name": "D", "type": f"ptr<{elem}, global>", "size_bytes": 8},
-        {"name": "A_bytes", "type": "i32", "size_bytes": 4},
-        {"name": "D_bytes", "type": "i32", "size_bytes": 4},
-    ]
-
 
 def gfx950_conv_dgrad_aot_helper_fields(
     spec: Gfx950ConvDgradAotSpec,
@@ -1042,95 +938,6 @@ def _uses_coalesced_weights(spec: Gfx950ConvDgradAotSpec) -> bool:
     return spec.waves_k > 1 or bool(spec.runtime_k_loop)
 
 
-def gfx950_conv_dgrad_aot_mfma_plan(
-    spec: Gfx950ConvDgradAotSpec, problem: Gfx950ConvDgradProblem
-) -> dict:
-    """The launch plan of an MFMA instance on ``problem``: ``direct_kernel_sweep
-    .plan_for``'s steps with the scratch laid out in one workspace.
-
-    Returns ``{"steps": [...], "workspace_bytes": int, "workspaces": {name:
-    (offset, bytes)}}``. Each step is ``{"kernel": "transpose" | "reorganize" |
-    "compute", "grid", "block", "buffers": (A, B, D), "signature"}`` with buffer
-    names ``dy``, ``w``, ``dx``, ``ws_t``, ``ws_coa`` (B is ``None`` for the
-    transforms). ``ws_t`` starts at offset 0 and ``ws_coa`` at ``ws_t``'s size
-    rounded up to :data:`MFMA_WORKSPACE_ALIGNMENT`. Values come from
-    :func:`gfx950_conv_dgrad_aot_mfma_launch_values`.
-    """
-    if not spec.is_mfma:
-        raise ValueError("not an MFMA instance")
-    direct = problem.to_direct_problem()
-    use_coalesced = _uses_coalesced_weights(spec)
-    steps = []
-    helpers = [(HELPER_VARIANT_TRANSPOSE, {}, "w", "ws_t")]
-    if use_coalesced:
-        helpers.append(
-            (
-                HELPER_VARIANT_REORGANIZE,
-                {"fold_k32": bool(spec.fold_k32)},
-                "ws_t",
-                "ws_coa",
-            )
-        )
-    for variant, knobs, src, dst in helpers:
-        if variant == HELPER_VARIANT_TRANSPOSE:
-            helper_spec = _direct.DirectTransposeWeightsDgradSpec(problem=direct)
-        else:
-            helper_spec = _direct.DirectReorganizeWeightsSpec(problem=direct, **knobs)
-        grid, block = _direct.direct_launch_geometry(helper_spec)
-        steps.append(
-            {
-                "kernel": variant,
-                "grid": grid,
-                "block": block,
-                "buffers": (src, None, dst),
-                "signature": _transform_signature(spec.dtype),
-            }
-        )
-    compute = spec.rocke_direct_spec(direct)
-    grid, block = _direct.direct_launch_geometry(compute)
-    weights = "ws_coa" if use_coalesced else "ws_t"
-    steps.append(
-        {
-            "kernel": "compute",
-            "grid": grid,
-            "block": block,
-            "buffers": ("dy", weights, "dx"),
-            "signature": conv_direct_args_signature(spec.dtype, direction="fwd"),
-        }
-    )
-    ws_t = _direct.direct_dgrad_workspace_bytes(direct)
-    workspaces = {"ws_t": (0, ws_t)}
-    total = ws_t
-    if use_coalesced:
-        ws_coa = _direct.direct_dgrad_coalesced_workspace_bytes(
-            direct, fold_k32=bool(spec.fold_k32)
-        )
-        offset = _align_up(ws_t, MFMA_WORKSPACE_ALIGNMENT)
-        workspaces["ws_coa"] = (offset, ws_coa)
-        total = offset + ws_coa
-    return {"steps": steps, "workspace_bytes": total, "workspaces": workspaces}
-
-
-def gfx950_conv_dgrad_aot_mfma_launch_values(
-    spec: Gfx950ConvDgradAotSpec,
-    problem: Gfx950ConvDgradProblem,
-    step: dict,
-    ptrs: dict,
-    sizes: dict,
-) -> dict[str, int]:
-    """Kernel arguments of one plan step, its buffers bound to ``ptrs``/``sizes``
-    (``direct_kernel_sweep.launch_values``). The compute pass takes the forward
-    direct ABI on the transposed problem (``H = Ho, W = Wo, cpg' = kpg, kpg' = cpg,
-    PAD' = KH - 1 - PAD``)."""
-    a, b, d = step["buffers"]
-    if step["kernel"] != "compute":
-        return {"A": ptrs[a], "D": ptrs[d], "A_bytes": sizes[a], "D_bytes": sizes[d]}
-    compute = spec.rocke_direct_spec(problem.to_direct_problem())
-    return ConvArgs.from_problem(compute.problem, direction="fwd").to_launch_values(
-        ptrs[a], ptrs[b], ptrs[d], sizes[a], sizes[b], sizes[d]
-    )
-
-
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
@@ -1159,9 +966,7 @@ def _mfma_knobs_reason(spec: Gfx950ConvDgradAotSpec, kpg: int) -> str:
     """
     if spec.is_runtime_channels:
         if spec.k_atoms == 0 or spec.k_atoms % spec.waves_k:
-            return (
-                f"k_atoms={spec.k_atoms} does not split over waves_k={spec.waves_k}"
-            )
+            return f"k_atoms={spec.k_atoms} does not split over waves_k={spec.waves_k}"
         return ""
     if spec.fold_k32:
         if kpg % 32:
@@ -1195,6 +1000,21 @@ def _coalesced_groups_reason(
     """
     if _uses_coalesced_weights(spec) and problem.groups != 1:
         return COALESCED_GROUPS_REASON
+    return ""
+
+
+def _persistent_cells_reason(rocke_spec) -> str:
+    """Why a persistent-grid compute pass cannot cover ``rocke_spec.problem``, or
+    ``""``. Its blocks walk at most ``persistent_rounds`` cells each, a bound baked
+    into the kernel, and a problem with more cells would lose its tail."""
+    if not getattr(rocke_spec, "persistent_grid", False):
+        return ""
+    cells = 1
+    for extent in _direct.direct_conv_grid(rocke_spec):
+        cells *= extent
+    budget = rocke_spec.persistent_rounds * _direct.DIRECT_PERSISTENT_BLOCKS
+    if cells > budget:
+        return f"{cells} persistent cells exceed {budget} (persistent_rounds * blocks)"
     return ""
 
 
@@ -1357,155 +1177,525 @@ def supports_gfx950_conv_dgrad_aot(
 
 
 # ---------------------------------------------------------------------------
-# Served problems
+# The launch plan
 # ---------------------------------------------------------------------------
 
+#: The kernel a plan step launches: the instance itself, or one of the helpers of
+#: its pack (named by their ``direct_variant``).
+KERNEL_SELF = "self"
+#: The ABI a plan step launches with.
+#: ``implicit_dgrad``: the 44-argument dgrad implicit-GEMM block (``dY, W, dX``, byte
+#: sizes, 36 problem values, ``sub_gemm_buf``, ``num_sub_gemms``).
+ABI_IMPLICIT = "implicit_dgrad"
+#: ``direct_dgrad``: the 20-argument direct dgrad block (the depthwise kernels).
+ABI_DIRECT_DGRAD = "direct_dgrad"
+#: ``direct_fwd``: the forward direct block, on the transposed problem (the fused,
+#: 4c and MFMA compute passes).
+ABI_DIRECT_FWD = "direct_fwd"
+#: ``transform`` / ``transform_rtc``: a weight transform's ``A, D, A_bytes, D_bytes``,
+#: then for the runtime-channel ones the original problem's ``p_cpg, p_kpg``.
+ABI_TRANSFORM = "transform"
+ABI_TRANSFORM_RTC = "transform_rtc"
+#: Buffers a step binds: the three graph tensors and the workspace regions.
+BUFFER_DY = "dy"
+BUFFER_W = "w"
+BUFFER_DX = "dx"
+#: The implicit-GEMM record table, uploaded into the workspace before the launch.
+BUFFER_SUB_GEMM = "sub_gemm"
+#: The MFMA pipelines' transposed and reorganized weights.
+BUFFER_WS_T = "ws_t"
+BUFFER_WS_COA = "ws_coa"
 
-def _implicit_serves(
+#: The integer codes :meth:`Gfx950ConvDgradPlan.serialize` writes; the native pack
+#: (Gfx950ConvDgradGeometry.hpp) serializes its plan with the same ones, so the two
+#: can be compared by digest.
+PLAN_KERNEL_CODES = {
+    KERNEL_SELF: 0,
+    HELPER_VARIANT_TRANSPOSE: 1,
+    HELPER_VARIANT_REORGANIZE: 2,
+    HELPER_VARIANT_TRANSPOSE_RTC: 3,
+    HELPER_VARIANT_REORGANIZE_RTC: 4,
+}
+PLAN_ABI_CODES = {
+    ABI_IMPLICIT: 0,
+    ABI_DIRECT_DGRAD: 1,
+    ABI_DIRECT_FWD: 2,
+    ABI_TRANSFORM: 3,
+    ABI_TRANSFORM_RTC: 4,
+}
+PLAN_BUFFER_CODES = {
+    None: -1,
+    BUFFER_DY: 0,
+    BUFFER_W: 1,
+    BUFFER_DX: 2,
+    BUFFER_SUB_GEMM: 3,
+    BUFFER_WS_T: 4,
+    BUFFER_WS_COA: 5,
+}
+
+#: The direct compute passes that are ``DirectConvSpec`` forward kernels: their
+#: grid is held to 65535 on every axis, as forward's direct kernels are.
+_DIRECT_CONV_SPEC_ALGORITHMS = (
+    "direct_grouped_dgrad_mfma",
+    "direct_dgrad_mfma_rtc",
+    "direct_grouped_dgrad_fused",
+)
+_FNV_OFFSET = 0xCBF29CE484222325
+_FNV_PRIME = 0x100000001B3
+_U64 = (1 << 64) - 1
+
+
+@dataclass(frozen=True)
+class Gfx950ConvDgradStep:
+    """One kernel launch of a plan.
+
+    ``kernel`` is :data:`KERNEL_SELF` or a helper's ``direct_variant``; ``buffers``
+    the ``A``, ``B`` and ``D`` operands (``B`` is ``None`` for a weight transform).
+    ``values`` are the by-value i32 arguments after the operands and their byte
+    sizes, in ABI order: for implicit GEMM the 36 problem values then
+    ``num_sub_gemms``. The workgroup is ``(block, 1, 1)``.
+
+    ``views`` is, per operand, the ``(byte offset, byte size)`` window of its buffer
+    the step binds, or ``None`` for the whole buffer: a batch-split launch sees only
+    its images. An implicit-GEMM step's ``sub_gemm_buf`` is its ``table``, uploaded
+    at ``table_offset`` bytes into the :data:`BUFFER_SUB_GEMM` region.
+    """
+
+    kernel: str
+    abi: str
+    grid: tuple[int, int, int]
+    block: int
+    buffers: tuple[str, str | None, str]
+    values: tuple[tuple[str, int], ...]
+    views: tuple[tuple[int, int] | None, ...] = (None, None, None)
+    table: tuple[int, ...] = ()
+    table_offset: int = 0
+
+
+@dataclass(frozen=True)
+class Gfx950ConvDgradPlan:
+    """Everything hipkernel:Gfx950ConvDgradAot does to run one instance on one
+    problem, in order: zero dX when ``zero_dx``, upload every step's record table,
+    then launch ``steps``.
+
+    ``launched`` is the problem the kernels see: the graph's own, or for implicit
+    GEMM its width folded into the channels (``fold_width``), which is the same
+    bytes in all three tensors. ``workspaces`` are ``(name, offset, bytes)`` regions
+    of the one workspace.
+    """
+
+    launched: Gfx950ConvDgradProblem
+    steps: tuple[Gfx950ConvDgradStep, ...]
+    workspaces: tuple[tuple[str, int, int], ...] = ()
+    zero_dx: bool = False
+
+    @property
+    def workspace_bytes(self) -> int:
+        return max((offset + size for _, offset, size in self.workspaces), default=0)
+
+    def buffer_bytes(self, name: str) -> int:
+        """The byte size of buffer ``name`` (a step with a view passes the view's)."""
+        tensors = dict(
+            zip((BUFFER_DY, BUFFER_W, BUFFER_DX), self.launched.tensor_bytes())
+        )
+        if name in tensors:
+            return tensors[name]
+        for region, _, size in self.workspaces:
+            if region == name:
+                return size
+        raise KeyError(f"the plan has no buffer {name!r}")
+
+    def serialize(self) -> list[int]:
+        """The plan as one integer sequence, the native pack's format."""
+        out = [int(self.zero_dx), self.workspace_bytes, len(self.workspaces)]
+        for name, offset, size in self.workspaces:
+            out += [PLAN_BUFFER_CODES[name], offset, size]
+        out.append(len(self.steps))
+        for step in self.steps:
+            out += [PLAN_KERNEL_CODES[step.kernel], PLAN_ABI_CODES[step.abi]]
+            out += list(step.grid) + [step.block]
+            out += [PLAN_BUFFER_CODES[b] for b in step.buffers]
+            for view in step.views:
+                out += list(view) if view is not None else [-1, -1]
+            out.append(len(step.values))
+            out += [value for _, value in step.values]
+            out += [step.table_offset, len(step.table)]
+            out += list(step.table)
+        return out
+
+    def digest(self) -> int:
+        """FNV-1a 64 over :meth:`serialize`, each value as 8 little-endian bytes."""
+        h = _FNV_OFFSET
+        for value in self.serialize():
+            for byte in (value & _U64).to_bytes(8, "little"):
+                h = ((h ^ byte) * _FNV_PRIME) & _U64
+        return h
+
+
+def gfx950_conv_dgrad_aot_step_signature(abi: str, dtype: str) -> list[dict]:
+    """The launch signature of a step of ABI ``abi`` (``kernels.common.conv_abi``)."""
+    from kernels.common.conv_abi import conv_direct_transform_signature
+
+    if abi == ABI_IMPLICIT:
+        return conv_args_signature(dtype, direction="dgrad")
+    if abi == ABI_DIRECT_DGRAD:
+        return conv_direct_args_signature(dtype, direction="dgrad")
+    if abi == ABI_DIRECT_FWD:
+        return conv_direct_args_signature(dtype, direction="fwd")
+    if abi in (ABI_TRANSFORM, ABI_TRANSFORM_RTC):
+        return conv_direct_transform_signature(dtype, abi == ABI_TRANSFORM_RTC)
+    raise ValueError(f"unknown step ABI {abi!r}")
+
+
+def gfx950_conv_dgrad_aot_launch_problem(
+    problem: Gfx950ConvDgradProblem,
+) -> Gfx950ConvDgradProblem:
+    """The problem the implicit-GEMM kernels run ``problem`` as.
+
+    A dgrad whose width folds into its channels (``fold_width``: ``f`` divides the
+    filter width, the W stride, the input width and the W padding, dilation 1,
+    ungrouped) runs folded -- the same bytes in all three tensors, in fewer and wider
+    sub-GEMMs -- exactly as rocKE's dispatch and its sweep launch it. Every other
+    problem launches as it is.
+    """
+    p = problem.to_problem()
+    f = _dgrad.width_fold(p)
+    if f == 1:
+        return problem
+    folded = _dgrad.fold_width(p, f)
+    return replace(
+        problem, Wi=folded.Wi, C=folded.C, X=folded.X, sW=folded.sW, pW=folded.pW
+    )
+
+
+def _fits_i32(values) -> bool:
+    return all(-_INT32_MAX - 1 <= v <= _INT32_MAX for v in values)
+
+
+def _launch_values(conv_args, bytes_: tuple[int, int, int], **extra) -> tuple:
+    """``ConvArgs.to_launch_values`` past the operands and their sizes, as
+    ``(name, value)`` pairs in ABI order; the record-table pointer is left out (the
+    plan binds it as a buffer)."""
+    values = conv_args.to_launch_values(0, 0, 0, *bytes_, **extra)
+    names = [name for name, _ in conv_args.arg_names()]
+    return tuple((name, values[name]) for name in names[6:] if name != "sub_gemm_buf")
+
+
+def _covered(extent: int, runs) -> bool:
+    """Whether the ``(offset, stride, count, width)`` runs -- ``width`` consecutive
+    positions from each of ``offset + stride * t``, ``t < count`` -- cover every
+    position in ``[0, extent)``."""
+    hit = bytearray(extent)
+    for offset, stride, count, width in runs:
+        for t in range(count):
+            start = offset + stride * t
+            for pos in range(max(start, 0), min(start + width, extent)):
+                hit[pos] = 1
+    return all(hit)
+
+
+def _dx_fully_written(problem: ConvProblem, sub_gemms, patch: bool) -> bool:
+    """Whether the implicit-GEMM kernel stores every dX element of ``problem``.
+
+    A tilde record stores dX rows ``d_h_offset + d_h_stride * t`` (``t <
+    h_tilde_slice``) by columns ``d_w_offset + d_w_stride * t`` (``t <
+    w_tilde_slice``), every pixel of that grid -- a pixel whose taps all fall outside
+    dY still stores the zero it sums to. Which records exist depends on each axis'
+    tilde residue alone, and every record of one residue has the same row (column)
+    set, so the records cover the rectangle exactly when the union of their rows
+    covers ``[0, Hi)`` and the union of their columns ``[0, Wi)``. A strided problem
+    whose filter misses a residue (a 1x1 filter at stride 2) leaves rows unwritten.
+
+    A patch kernel's one record stores a whole ``Y x X`` patch from each of its
+    pixels: it covers dX when the stride equals the filter and divides the extent.
+    """
+    width_h, width_w = (problem.Y, problem.X) if patch else (1, 1)
+    rows = [
+        (sg.d_h_offset, sg.d_h_stride, sg.h_tilde_slice, width_h) for sg in sub_gemms
+    ]
+    cols = [
+        (sg.d_w_offset, sg.d_w_stride, sg.w_tilde_slice, width_w) for sg in sub_gemms
+    ]
+    return _covered(problem.Hi, rows) and _covered(problem.Wi, cols)
+
+
+def _grid_reason(grid, block: int, x_cap: int) -> str:
+    """Why a ``grid`` of ``block``-thread workgroups cannot launch, or ``""``."""
+    if not 1 <= block <= _MAX_BLOCK_THREADS:
+        return f"block of {block} threads exceeds {_MAX_BLOCK_THREADS}"
+    if min(grid) < 1:
+        return f"empty grid {grid}"
+    if grid[0] > x_cap or grid[0] * block > _MAX_DISPATCH_ITEMS:
+        return f"grid x = {grid[0]} exceeds {x_cap}"
+    for axis, extent in zip("yz", grid[1:]):
+        if extent > _MAX_GRID_DIM:
+            return f"grid {axis} = {extent} exceeds {_MAX_GRID_DIM}"
+    return ""
+
+
+def gfx950_conv_dgrad_aot_batch_chunks(
+    problem: Gfx950ConvDgradProblem,
+) -> list[tuple[int, int]]:
+    """``[(n0, n), ...]``: the batch slices one implicit-GEMM launch each covers
+    (the benchmark's ``_batch_chunks``).
+
+    A kernel takes its operand byte sizes as i32 kernargs and addresses each operand
+    through a buffer resource whose sentinel is the i32 maximum, so no operand it is
+    launched on may exceed 2^31 - 1 bytes. dgrad computes every image on its own and
+    N is a kernarg: a batch whose dY or dX is larger runs as consecutive launches of
+    the same binary over equal slices of N, at offset pointers. Raises ``ValueError``
+    when one image is already too large.
+    """
+    dy_image, _, dx_image = problem.tensor_bytes(1)
+    per_image = max(dy_image, dx_image)
+    if per_image * problem.N <= _INT32_MAX:
+        return [(0, problem.N)]
+    if per_image > _INT32_MAX:
+        raise ValueError(
+            f"one image ({per_image} bytes) exceeds the kernels' 2^31-byte operand "
+            f"addressing"
+        )
+    n_chunks = _ceil_div(problem.N, _INT32_MAX // per_image)
+    step = _ceil_div(problem.N, n_chunks)
+    return [(n0, min(step, problem.N - n0)) for n0 in range(0, problem.N, step)]
+
+
+def _implicit_plan(
     spec: Gfx950ConvDgradAotSpec, problem: Gfx950ConvDgradProblem
-) -> tuple[bool, str]:
-    """The dgrad branch of ``KernelCache.supports_problem`` plus the launch bounds."""
-    # A tilde kernel reads stride and dilation from its sub-GEMM records, so 0 here
-    # means "serves every value". A kernel compiled for one geometry states it, and
-    # then only that geometry is correct: the emitted code indexes with the baked
-    # extents, so serving another problem would silently compute wrong dX.
-    for label, baked, actual in (
-        ("filter", (spec.filter_h, spec.filter_w), (problem.Y, problem.X)),
-        ("stride", (spec.stride_h, spec.stride_w), (problem.sH, problem.sW)),
-        ("dilation", (spec.dilation_h, spec.dilation_w), (problem.dH, problem.dW)),
-    ):
-        if baked != (0, 0) and baked != actual:
-            return False, (
-                f"kernel compiled for {label} {baked}, problem has {actual}"
+) -> tuple[Gfx950ConvDgradPlan | None, str]:
+    """rocKE's offer for an implicit-GEMM binary (``identity_supports_problem`` on
+    the launched problem) and the launch of its benchmark (``_extras_and_grid``,
+    ``_cached_bind_batch``), plus the bounds the 32-bit launch needs."""
+    from kernels.conv.kernel_identity import dgrad_sub_gemms, identity_supports_problem
+
+    launched = gfx950_conv_dgrad_aot_launch_problem(problem)
+    identity = spec.to_identity()
+    threads = spec.warp_m * spec.warp_n * spec.wave_size
+    chunks = gfx950_conv_dgrad_aot_batch_chunks(launched)
+    dy_image, _, dx_image = launched.tensor_bytes(1)
+    steps = []
+    table_bytes = 0
+    zero_dx = False
+    for n0, n in chunks:
+        chunk = replace(launched, N=n)
+        p = chunk.to_problem()
+        ok, why = identity_supports_problem(
+            identity, p, llvm_flavor=identity.llvm_flavor
+        )
+        if not ok:
+            return None, why
+        sub_gemms = dgrad_sub_gemms(identity, p)
+        if not sub_gemms:
+            return None, "the problem decomposes into no non-empty tilde sub-GEMM"
+        flat = sum(
+            _ceil_div(sg.gemm_m, spec.tile_m) * _ceil_div(sg.gemm_n, spec.tile_n)
+            for sg in sub_gemms
+        )
+        grid = (flat, chunk.groups, 1)
+        why = _grid_reason(grid, threads, _INT32_MAX)
+        if why:
+            return None, f"dgrad tile grid: {why}"
+        if chunk.N * chunk.Hi * chunk.Wi >= 1 << 31:
+            return None, "gemm_m = N*Hi*Wi must stay below 2^31 (magic division)"
+        table = tuple(_dgrad.pack_sub_gemm_buffer(sub_gemms, spec.tile_m, spec.tile_n))
+        values = _launch_values(
+            ConvArgs.from_problem(
+                p, direction="dgrad", tile_m=spec.tile_m, tile_n=spec.tile_n
+            ),
+            chunk.tensor_bytes(),
+            sub_gemm_buf=0,
+            num_sub_gemms=len(sub_gemms),
+        )
+        if not _fits_i32(table) or not _fits_i32(v for _, v in values):
+            return None, "a launch value leaves the signed 32-bit kernel ABI"
+        views = (None, None, None)
+        if len(chunks) > 1:
+            views = ((n0 * dy_image, n * dy_image), None, (n0 * dx_image, n * dx_image))
+        steps.append(
+            Gfx950ConvDgradStep(
+                KERNEL_SELF,
+                ABI_IMPLICIT,
+                grid,
+                threads,
+                (BUFFER_DY, BUFFER_W, BUFFER_DX),
+                values,
+                views=views,
+                table=table,
+                table_offset=table_bytes,
             )
-    cpg, kpg = problem.cpg, problem.kpg
-    for name, width, extent, label in (
-        ("vector_size_a", spec.vector_size_a, kpg, "kpg"),
-        ("vector_size_b", spec.vector_size_b, cpg, "cpg"),
-        ("vector_size_c", spec.vector_size_c, cpg, "cpg"),
-    ):
-        if extent % width:
-            return False, f"{label}={extent} not divisible by {name}={width}"
-    if problem.groups > 1 and not spec.grouped:
-        return False, "kernel is ungrouped, problem is grouped"
-    n_sub = len(spec.sub_gemms(problem))
-    if n_sub == 0:
-        return False, "the problem decomposes into no non-empty tilde sub-GEMM"
-    if n_sub > spec.max_sub_gemms:
-        return False, (
-            f"problem needs {n_sub} tilde sub-GEMMs, kernel's record table "
-            f"supports {spec.max_sub_gemms} (max_sub_gemms)"
         )
-    if problem.groups > 1 and cpg == 1:
-        return False, (
-            "depthwise dgrad (cpg == 1) is not supported by the implicit-GEMM "
-            "grouped path"
-        )
-    # groups <= 65535 (grid y) is a problem check. Grid x is the flat tile total.
-    flat, _, _ = spec.grid(problem)
-    if flat > _INT32_MAX or flat * spec.block()[0] > _MAX_DISPATCH_ITEMS:
-        return False, f"flat dgrad grid {flat} does not fit one dispatch"
-    if problem.N * problem.Hi * problem.Wi >= 1 << 31:
-        return False, "gemm_m = N*Hi*Wi must stay below 2^31 (magic division)"
-    return True, "ok"
+        table_bytes += 4 * len(table)
+        zero_dx = zero_dx or not _dx_fully_written(p, sub_gemms, bool(spec.patch))
+    return (
+        Gfx950ConvDgradPlan(
+            launched=launched,
+            steps=tuple(steps),
+            workspaces=((BUFFER_SUB_GEMM, 0, table_bytes),),
+            zero_dx=zero_dx,
+        ),
+        "ok",
+    )
 
 
-def _direct_serves(
+def _direct_plan(
     spec: Gfx950ConvDgradAotSpec, problem: Gfx950ConvDgradProblem
-) -> tuple[bool, str]:
-    """rocKE's offer for a direct instance (``KernelCache.supports_problem`` then
-    ``plan_for``), plus the launch bounds rocKE does not check."""
+) -> tuple[Gfx950ConvDgradPlan | None, str]:
+    """``direct_kernel_sweep.plan_for`` for a dgrad direct instance: rocKE's offer
+    (``identity_supports_problem``, then ``direct_spec_for_problem``'s per-shape
+    re-validation), its steps and scratch, plus the launch bounds rocKE does not
+    check and :func:`_coalesced_groups_reason`."""
+    from kernels.conv.direct_variants import (
+        DIRECT_DGRAD_FPROP_SINGLE,
+        direct_dgrad_weight_transforms,
+        direct_dgrad_workspaces,
+        direct_spec_for_problem,
+        make_direct_spec,
+    )
+    from kernels.conv.kernel_identity import identity_supports_problem
+
     if problem.sH != problem.sW or problem.pH != problem.pW:
-        return False, "the direct kernels compile one stride and one padding"
-    for label, baked, actual in (
-        ("filter", (spec.filter_h, spec.filter_w), (problem.Y, problem.X)),
-        ("stride", (spec.stride_h, spec.stride_w), (problem.sH, problem.sW)),
-        ("padding", (spec.pad_h, spec.pad_w), (problem.pH, problem.pW)),
-        ("dilation", (spec.dilation_h, spec.dilation_w), (problem.dH, problem.dW)),
-    ):
-        if baked != actual:
-            return (
-                False,
-                f"direct kernel compiled for {label} {baked}, problem has {actual}",
-            )
-    if (problem.cpg, problem.kpg) != (spec.cpg, spec.kpg):
-        return False, (
-            f"direct kernel compiled for cpg, kpg = {(spec.cpg, spec.kpg)}, problem "
-            f"has {(problem.cpg, problem.kpg)}"
-        )
+        return None, "the direct kernels compile one stride and one padding"
     direct = problem.to_direct_problem()
-    if spec.is_mfma:
-        why = _mfma_knobs_reason(spec, problem.kpg)
-        if why:
-            return False, why
-        why = _coalesced_groups_reason(spec, problem)
-        if why:
-            return False, why
-    try:
-        rocke_spec = spec.rocke_direct_spec(direct)
-    except (AssertionError, TypeError, ValueError) as exc:
-        return False, str(exc)
-    ok, why = _direct_validate(spec, rocke_spec, _ARCH)
+    identity = spec.to_identity()
+    ok, why = identity_supports_problem(
+        identity, direct, llvm_flavor=identity.llvm_flavor
+    )
     if not ok:
-        return False, why
-    if spec.is_depthwise:
-        grid = _direct.direct_launch_geometry(rocke_spec)[0]
-        if grid[0] > _INT32_MAX:
-            return False, f"direct grid x = {grid[0]} exceeds {_INT32_MAX}"
-        for axis, extent in zip("yz", grid[1:]):
-            if extent > _MAX_GRID_DIM:
-                return False, f"direct grid {axis} = {extent} exceeds {_MAX_GRID_DIM}"
-        return True, "ok"
-    plan = gfx950_conv_dgrad_aot_mfma_plan(spec, problem)
-    for step in plan["steps"]:
-        grid = step["grid"]
-        # The compute grid is held to 65535 on every axis, as for forward; the
-        # transforms' flat x axes to a 32-bit dispatch.
-        x_cap = _MAX_GRID_DIM if step["kernel"] == "compute" else _INT32_MAX
-        if grid[0] > x_cap or grid[0] * step["block"][0] > _MAX_DISPATCH_ITEMS:
-            return False, f"{step['kernel']} grid x = {grid[0]} exceeds {x_cap}"
-        for axis, extent in zip("yz", grid[1:]):
-            if extent > _MAX_GRID_DIM:
-                return False, (
-                    f"{step['kernel']} grid {axis} = {extent} exceeds {_MAX_GRID_DIM}"
-                )
-    for name, (_, size) in plan["workspaces"].items():
-        if size > _INT32_MAX:
-            return False, f"{name} workspace exceeds the signed 32-bit kernel ABI"
-    return True, "ok"
+        return None, why
+    knobs = spec.direct_knobs()
+    rocke_spec, why = direct_spec_for_problem(
+        spec.algorithm, direct, knobs, _ARCH, spec.wave_size
+    )
+    if rocke_spec is None:
+        return None, why
+    if spec.is_mfma:
+        why = _coalesced_groups_reason(spec, problem) or _persistent_cells_reason(
+            rocke_spec
+        )
+        if why:
+            return None, why
+    tensors = problem.tensor_bytes()
+    if max(tensors) > _INT32_MAX:
+        return None, "a tensor exceeds the direct kernels' 2^31-byte operand addressing"
+    x_cap = (
+        _MAX_GRID_DIM if spec.algorithm in _DIRECT_CONV_SPEC_ALGORITHMS else _INT32_MAX
+    )
+    if not spec.is_mfma:
+        grid, block = _direct.direct_launch_geometry(rocke_spec)
+        if spec.algorithm in DIRECT_DGRAD_FPROP_SINGLE:
+            # A forward kernel over the transposed problem that reads the original
+            # weights itself: the forward ABI, transposed extents.
+            abi = ABI_DIRECT_FWD
+            args = ConvArgs.from_problem(rocke_spec.problem, direction="fwd")
+        else:
+            abi = ABI_DIRECT_DGRAD
+            args = ConvArgs.from_problem(direct, direction="dgrad")
+        why = _grid_reason(grid, block[0], x_cap)
+        if why:
+            return None, why
+        step = Gfx950ConvDgradStep(
+            KERNEL_SELF,
+            abi,
+            grid,
+            block[0],
+            (BUFFER_DY, BUFFER_W, BUFFER_DX),
+            _launch_values(args, tensors),
+        )
+        return Gfx950ConvDgradPlan(launched=problem, steps=(step,)), "ok"
+
+    # MFMA pipeline: W -> ws_t (transpose), optionally ws_t -> ws_coa (reorganize),
+    # then a forward pass over the transposed problem.
+    runtime_channels = spec.is_runtime_channels
+    scalars = (
+        (("p_cpg", problem.cpg), ("p_kpg", problem.kpg)) if runtime_channels else ()
+    )
+    sizes = direct_dgrad_workspaces(direct, knobs)
+    workspaces = [(BUFFER_WS_T, 0, sizes[BUFFER_WS_T])]
+    if BUFFER_WS_COA in sizes:
+        offset = _align_up(sizes[BUFFER_WS_T], MFMA_WORKSPACE_ALIGNMENT)
+        workspaces.append((BUFFER_WS_COA, offset, sizes[BUFFER_WS_COA]))
+    if any(size > _INT32_MAX for _, _, size in workspaces):
+        return None, "an MFMA workspace exceeds the signed 32-bit kernel ABI"
+    steps = []
+    for helper, helper_knobs, src, dst in direct_dgrad_weight_transforms(
+        knobs, spec.algorithm
+    ):
+        helper_spec = make_direct_spec(helper, direct, helper_knobs)
+        grid, block = _direct.direct_launch_geometry(helper_spec)
+        why = _grid_reason(grid, block[0], _INT32_MAX)
+        if why:
+            return None, f"{helper}: {why}"
+        steps.append(
+            Gfx950ConvDgradStep(
+                AOT_DGRAD_DIRECT_ALGORITHMS[helper][1],
+                ABI_TRANSFORM_RTC if runtime_channels else ABI_TRANSFORM,
+                grid,
+                block[0],
+                (src, None, dst),
+                scalars,
+            )
+        )
+    weights = steps[-1].buffers[2]
+    grid, block = _direct.direct_launch_geometry(rocke_spec)
+    why = _grid_reason(grid, block[0], x_cap)
+    if why:
+        return None, f"compute pass: {why}"
+    steps.append(
+        Gfx950ConvDgradStep(
+            KERNEL_SELF,
+            ABI_DIRECT_FWD,
+            grid,
+            block[0],
+            (BUFFER_DY, weights, BUFFER_DX),
+            _launch_values(
+                ConvArgs.from_problem(rocke_spec.problem, direction="fwd"),
+                tensors,
+            ),
+        )
+    )
+    return (
+        Gfx950ConvDgradPlan(
+            launched=problem, steps=tuple(steps), workspaces=tuple(workspaces)
+        ),
+        "ok",
+    )
+
+
+def gfx950_conv_dgrad_aot_plan(
+    spec: Gfx950ConvDgradAotSpec, problem: Gfx950ConvDgradProblem
+) -> tuple[Gfx950ConvDgradPlan | None, str]:
+    """The launch of instance ``spec`` on ``problem``, or ``(None, why)`` when the
+    instance does not compute it.
+
+    The served predicate is rocKE's own offer, as its sweeps make it: implicit GEMM
+    through ``identity_supports_problem`` on the problem it launches (folded, see
+    :func:`gfx950_conv_dgrad_aot_launch_problem`), which holds the dY-halo, tap-outer
+    K loop and patch kernels to the problems they compute; the direct pipelines
+    through ``identity_supports_problem`` and ``direct_spec_for_problem``. On top come
+    the launch bounds of the 32-bit dispatch and :func:`_coalesced_groups_reason`.
+    The plan is what the native pack runs; it ports this function.
+    """
+    error = _problem_error(problem)
+    if error:
+        return None, error
+    if problem.dtype != spec.dtype:
+        return None, f"dtype {problem.dtype} != instance dtype {spec.dtype}"
+    if spec.is_helper:
+        return None, "a helper kernel is launched only by its MFMA pipeline"
+    try:
+        if spec.is_direct:
+            return _direct_plan(spec, problem)
+        return _implicit_plan(spec, problem)
+    except (AssertionError, KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
+        return None, f"{type(exc).__name__}: {exc}"
 
 
 def gfx950_conv_dgrad_aot_serves(
     spec: Gfx950ConvDgradAotSpec, problem: Gfx950ConvDgradProblem
 ) -> tuple[bool, str]:
-    """Whether instance ``spec`` computes ``problem``.
-
-    Implicit GEMM: the dgrad subset of ``KernelCache.supports_problem`` -- the A
-    (dY) width divides K/groups, the B (W) and D (dX) widths divide C/groups, a
-    grouped problem needs a grouped binary, the problem's non-empty tilde sub-GEMMs
-    fit ``max_sub_gemms``, depthwise (groups > 1, C/groups == 1) is refused, groups
-    fits grid y -- plus the launch bounds: the flat tile grid fits one dispatch and
-    ``N*Hi*Wi`` stays below 2^31.
-
-    Direct (depthwise and MFMA): the compiled filter, stride, padding, dilation and
-    channel counts are the problem's, the kernel's validator accepts the spec rebuilt
-    on the problem (for MFMA also ``_mfma_knobs_reason`` and ``groups %
-    block_groups``; an MFMA instance using the reorganize helper, ``waves_k > 1``
-    or ``runtime_k_loop``, serves ``groups == 1`` only), and every launch fits: grid y and z 65535 (and the MFMA compute
-    pass's x), the transforms' x a 32-bit dispatch, each workspace a 32-bit size.
-
-    A helper serves nothing on its own.
-    """
-    error = _problem_error(problem)
-    if error:
-        return False, error
-    if problem.dtype != spec.dtype:
-        return False, f"dtype {problem.dtype} != instance dtype {spec.dtype}"
-    if spec.is_helper:
-        return False, "a helper kernel is launched only by its MFMA pipeline"
-    if spec.is_direct:
-        return _direct_serves(spec, problem)
-    return _implicit_serves(spec, problem)
+    """Whether instance ``spec`` computes ``problem`` (a plan exists)."""
+    plan, why = gfx950_conv_dgrad_aot_plan(spec, problem)
+    return plan is not None, why
 
 
 def gfx950_conv_dgrad_aot_runtime_candidates(
@@ -1520,6 +1710,33 @@ def gfx950_conv_dgrad_aot_runtime_candidates(
 # ---------------------------------------------------------------------------
 # Build
 # ---------------------------------------------------------------------------
+
+
+def _flavor_rank(flavor: str) -> int:
+    return int(flavor.removeprefix("llvm"))
+
+
+def _require_packaged_flavor() -> None:
+    """Refuse to package under an LLVM older than the catalog's.
+
+    The catalog's instances are the kernels the rocKE sweep measured, lowered for
+    :data:`PACKAGED_LLVM_FLAVOR` and compiled by a COMGR of that LLVM or newer. A
+    pack step that resolves an older COMGR -- the ROCm the build found, rather than
+    the one the sweep ran -- lowers for its flavor and gets that LLVM's code
+    generation: the same configuration, but compiled to more registers and slower
+    code, shipped without a word. Point ``HIPKERNELPROVIDER_ROCKE_COMGR_LIB`` at a
+    COMGR of LLVM 22 or newer (and ``HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR`` at
+    ``llvm22`` to lower exactly as the sweep did).
+    """
+    from rocke.core.lower_llvm import _resolve_llvm_flavor
+
+    flavor = _resolve_llvm_flavor()
+    if _flavor_rank(flavor) < _flavor_rank(PACKAGED_LLVM_FLAVOR):
+        raise ValueError(
+            f"hipkernel:Gfx950ConvDgradAot packages {PACKAGED_LLVM_FLAVOR} kernels, "
+            f"but this process lowers to {flavor} (an older COMGR): set "
+            f"HIPKERNELPROVIDER_ROCKE_COMGR_LIB to a COMGR of LLVM 22 or newer"
+        )
 
 
 def build_gfx950_conv_dgrad_aot(
@@ -1541,6 +1758,13 @@ def build_gfx950_conv_dgrad_aot(
     ok, reason = supports_gfx950_conv_dgrad_aot(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid packaged AOT dgrad instance: {reason}")
+    _require_packaged_flavor()
+    if not spec.is_direct and spec.to_identity().stable_hash() != spec.instance_id:
+        raise ValueError(
+            f"instance {spec.instance_id} is not the identity its fields describe "
+            f"(hash {spec.to_identity().stable_hash()}): the catalog and this adapter "
+            f"disagree on a field"
+        )
     if spec.is_direct:
         from kernels.conv.direct_variants import select_direct_kernel_builder
 
@@ -1585,7 +1809,7 @@ def gfx950_conv_dgrad_aot_problem_for_request(
         )
     ):
         raise ValueError("the packaged dgrad contract supports 2D convolution only")
-    if request.vec_size_c is not None:
+    if getattr(request, "vec_size_c", None) is not None:
         raise ValueError("the packaged contract takes no vector-width override")
     problem = Gfx950ConvDgradProblem(
         N=request.N,
