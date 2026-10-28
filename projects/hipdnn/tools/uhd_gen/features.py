@@ -334,6 +334,8 @@ def run_evaluator(
         return json.loads(result.stdout)
     except ValueError as error:
         raise ValueError(f"invalid {EVALUATOR_NAME} response: {error}") from error
+# UhdFeatures.cpp refuses a request over 256 MiB; a chunk stays well under it.
+_REQUEST_CHUNK_BYTES = 64 * 1024 * 1024
 
 
 def _run_feature_evaluator(
@@ -345,14 +347,41 @@ def _run_feature_evaluator(
     """Features and digest of `signature` over `rows`, from FeatureExtractor, which owns both.
 
     Entries are parsed first only for a readable error; the evaluator does the hashing.
+    Rows are evaluated independently, so a large batch is split into requests under the
+    evaluator's size bound; every chunk must agree on the digest and revision.
     """
     parsed = [parse_signature_entry(entry) for entry in signature]
     request = {
         "signature": parsed,
         "categorical_encoding": categorical_encoding or {},
-        "rows": rows,
     }
-    response = run_evaluator(request, executable)
+    chunks: list[list] = [[]]
+    size = 0
+    for row in rows:
+        length = len(json.dumps(row, ensure_ascii=False, allow_nan=False)) + 1
+        if chunks[-1] and size + length > _REQUEST_CHUNK_BYTES:
+            chunks.append([])
+            size = 0
+        chunks[-1].append(row)
+        size += length
+    digest, values, revision = None, [], None
+    for chunk in chunks:
+        part = _parse_evaluator_response(
+            run_evaluator({**request, "rows": chunk}, executable), chunk, len(parsed)
+        )
+        if digest is not None and (part[0], part[2]) != (digest, revision):
+            raise ValueError(
+                f"invalid {EVALUATOR_NAME} response: digest or revision changed between chunks"
+            )
+        digest, revision = part[0], part[2]
+        values.extend(part[1])
+    return digest, values, revision
+
+
+def _parse_evaluator_response(
+    response: dict, rows: list, width: int
+) -> tuple[str, list[list[float]], int]:
+    """The digest, values and semantics revision of one evaluator answer for `rows`."""
     try:
         digest, values = response["features_hash"], response["values"]
         # An evaluator that omits it predates the field: revision 1 by definition.
@@ -363,7 +392,7 @@ def _run_feature_evaluator(
             )
         if not isinstance(digest, str) or not digest.startswith("sha256:"):
             raise ValueError("missing features_hash")
-        if len(values) != len(rows) or any(len(row) != len(parsed) for row in values):
+        if len(values) != len(rows) or any(len(row) != width for row in values):
             raise ValueError("feature matrix shape does not match the request")
         if any(
             not isinstance(value, (int, float)) or not math.isfinite(value)
