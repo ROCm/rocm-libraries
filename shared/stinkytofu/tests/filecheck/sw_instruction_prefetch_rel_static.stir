@@ -104,3 +104,23 @@ st.func @at_p11_k11_add_lshl() {
   "st.asm_directive"(".align", "77688")
   v914 = "st.v_add_lshl_u32"(v515, v516, 2) { issueCycles = 1, latencyCycles = 5 }
 }
+
+#--- P(2)=40832: branch target boundary after an open VMEM group. The branch is a control-flow
+# boundary, so the target-side prefetch must not inherit the prior VMEM replay group.
+# CHECK-LABEL: function "branch_target_boundary_no_xcnt"
+# CHECK: {{.*}}buffer_store_b128
+# CHECK: {{.*}}s_branch
+# CHECK-NOT: s_wait_xcnt
+# CHECK: {{.*}}total=40836 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=40840 bytes{{.*}}v_mov_b32
+# CHECK: [AccumulateInstructionSizePass] total size = 40840 bytes
+
+st.func @branch_target_boundary_no_xcnt() {
+^entry:
+  "st.buffer_store_b128"(v[624:627], v525, s[16:19], 0) { issueCycles = 1, latencyCycles = 1, mod.mubuf = { offen = true, offset12 = 608, glc = false, slc = false, nt = false, lds = false, scope = "SCOPE_CU" } }
+  "st.asm_directive"(".align", "40824")
+  "st.s_branch"("after") { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^after
+^after:
+  v0 = "st.v_mov_b32"(v1) { issueCycles = 1, latencyCycles = 5 }
+}
