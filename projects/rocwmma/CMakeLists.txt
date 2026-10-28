@@ -248,6 +248,11 @@ if(ROCWMMA_BUILD_TESTS)
       PATTERN "CMakeLists.txt"
       PATTERN "*.hip"
       PATTERN "*.cpp"
+      PATTERN "*.json"
+      PATTERN "*.cmake"
+      PATTERN "*.h"
+      PATTERN "*.hpp"
+      PATTERN "*.in"
       PATTERN "README.md"
   )
   add_subdirectory(test)
