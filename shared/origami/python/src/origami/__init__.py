@@ -64,6 +64,13 @@ try:
         # Latency functions
         compute_tile_latency,
         compute_timestep_latency,
+        # Intermediates
+        memory_latency_terms_t,
+        tile_latency_terms_t,
+        gemm_intermediates_t,
+        compute_memory_latency_terms,
+        compute_tile_latency_terms,
+        compute_gemm_intermediates,
         # StreamK functions
         select_grid_size,
         select_reduction,
@@ -154,6 +161,13 @@ __all__ = [
     # Latency functions
     "compute_tile_latency",
     "compute_timestep_latency",
+    # Intermediates
+    "memory_latency_terms_t",
+    "tile_latency_terms_t",
+    "gemm_intermediates_t",
+    "compute_memory_latency_terms",
+    "compute_tile_latency_terms",
+    "compute_gemm_intermediates",
     # StreamK functions
     "select_grid_size",
     "select_reduction",
