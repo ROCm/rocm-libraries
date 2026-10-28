@@ -567,6 +567,34 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
             "  TIMEOUT 180)\n")
 
+    # Library conv TF32 tests (no GPU required): validation, IR lowering on
+    # gfx942 and gfx950, comgr ISA checks (skipped without comgr/llvm-objdump),
+    # the benchmark/AOT dtype plumbing. Their own entry, not part of the quick
+    # conv lane: the build-and-lower matrices take tens of seconds. The GPU
+    # classes (all named *Gpu*) are deselected here and run in the GPU list.
+    set(_ROCKE_LIBRARY_CONV_TF32_TEST_RELPATHS
+        "tests/library/tests/test_conv_fwd_tf32.py"
+        "tests/library/tests/test_conv_dgrad_tf32.py"
+        "tests/library/tests/test_conv_wgrad_tf32.py"
+        "tests/library/tests/test_conv_tf32_register_guard.py"
+        "tests/library/tests/test_conv_direct_tf32_mfma.py"
+        "tests/library/tests/test_conv_direct_tf32_scalar.py"
+        "tests/library/tests/test_conv_direct_nongrouped_tf32.py"
+        "tests/library/tests/test_benchmark_tf32_plumbing.py"
+        "tests/library/tests/test_direct_tf32_plumbing.py")
+    set(_ROCKE_LIBRARY_CONV_TF32_TESTS "")
+    foreach(_rocke_conv_tf32_test ${_ROCKE_LIBRARY_CONV_TF32_TEST_RELPATHS})
+      string(APPEND _ROCKE_LIBRARY_CONV_TF32_TESTS
+             " \"${ROCKE_TEST_CTEST_REL}${_rocke_conv_tf32_test}\"")
+    endforeach()
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_conv_tf32_pytest python -m pytest${_ROCKE_LIBRARY_CONV_TF32_TESTS} -k \"not Gpu\" -v -rs --timeout=120)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_conv_tf32_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;conv\\;host\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 900)\n")
+
     # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
     # dense block-order decodes, spec-wrapper parity gate, and the 3D decode split
     # rule and K/V cache policy.
@@ -772,6 +800,12 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_dgrad_4c.py"
         "tests/library/tests/test_conv_dgrad_fused_weights.py"
         "tests/library/tests/test_direct_mfma_dgrad_correctness.py"
+        "tests/library/tests/test_conv_direct_tf32_mfma.py::TestDirectTf32Gpu"
+        "tests/library/tests/test_conv_direct_tf32_scalar.py::TestGpuCorrectness"
+        # The sweep sampler (test_sweep_candidates) compiles exact-fp32 grid
+        # specs for minutes; it stays a manual run.
+        "tests/library/tests/test_conv_direct_nongrouped_tf32.py::TestNongroupedF32Gpu::test_cases"
+        "tests/library/tests/test_conv_direct_nongrouped_tf32.py::TestNongroupedF32Gpu::test_one_binary_serves_every_shape"
         "tests/library/tests/test_attention_dense_gfx942_numeric.py"
         "tests/library/tests/test_attention_unified_lse_numeric.py"
         "tests/library/tests/test_attn_bf16_d128_ring.py"
