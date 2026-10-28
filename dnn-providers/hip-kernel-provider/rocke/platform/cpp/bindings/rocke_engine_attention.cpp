@@ -823,11 +823,55 @@ rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
     s.use_early_v_schedule = a_bool(d, "use_early_v_schedule", s.use_early_v_schedule);
     s.use_fast_paged_kv_desc = a_bool(d, "use_fast_paged_kv_desc", s.use_fast_paged_kv_desc);
     s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
+    /* Every other field the C struct shares with the Python spec. A field left
+     * out here silently keeps its C default, so the native builder would build
+     * a different kernel (e.g. gfx942 x8 transposed specs fail validation
+     * without use_mfma_32x32x8). */
+    s.use_mfma_32x32x8 = a_bool(d, "use_mfma_32x32x8", s.use_mfma_32x32x8);
+    s.use_q_major_grid = a_bool(d, "use_q_major_grid", s.use_q_major_grid);
+    s.use_transposed_half_local_pv
+        = a_bool(d, "use_transposed_half_local_pv", s.use_transposed_half_local_pv);
+    s.use_transposed_mask_limit
+        = a_bool(d, "use_transposed_mask_limit", s.use_transposed_mask_limit);
+    s.use_mfma32_skip_legacy_qreg
+        = a_bool(d, "use_mfma32_skip_legacy_qreg", s.use_mfma32_skip_legacy_qreg);
+    s.use_agpr_alloc_zero = a_bool(d, "use_agpr_alloc_zero", s.use_agpr_alloc_zero);
+    s.use_k_single_buffer = a_bool(d, "use_k_single_buffer", s.use_k_single_buffer);
+    s.use_conflict_free_v = a_bool(d, "use_conflict_free_v", s.use_conflict_free_v);
+    s.use_conflict_free_v_ck_vlds
+        = a_bool(d, "use_conflict_free_v_ck_vlds", s.use_conflict_free_v_ck_vlds);
+    s.use_conflict_free_v_store
+        = a_bool(d, "use_conflict_free_v_store", s.use_conflict_free_v_store);
+    s.use_conflict_free_v_store_split
+        = a_bool(d, "use_conflict_free_v_store_split", s.use_conflict_free_v_store_split);
+    s.use_global_load_lds_k = a_bool(d, "use_global_load_lds_k", s.use_global_load_lds_k);
+    s.use_iglp_opt = a_bool(d, "use_iglp_opt", s.use_iglp_opt);
+    s.use_k_sliced_ldsseq = a_bool(d, "use_k_sliced_ldsseq", s.use_k_sliced_ldsseq);
+    s.use_k_sliced_ring = a_bool(d, "use_k_sliced_ring", s.use_k_sliced_ring);
+    s.use_q_direct_global = a_bool(d, "use_q_direct_global", s.use_q_direct_global);
+    s.use_qk_pv_sched_group_barrier
+        = a_bool(d, "use_qk_pv_sched_group_barrier", s.use_qk_pv_sched_group_barrier);
+    s.k_slice_hd = a_int(d, "k_slice_hd", s.k_slice_hd);
+    s.ring_depth = a_int(d, "ring_depth", s.ring_depth);
+    s.use_q_direct_reg = a_bool(d, "use_q_direct_reg", s.use_q_direct_reg);
+    s.use_q_reread = a_bool(d, "use_q_reread", s.use_q_reread);
+    s.use_sched_barrier = a_bool(d, "use_sched_barrier", s.use_sched_barrier);
+    s.use_softmax_mfma_interleave
+        = a_bool(d, "use_softmax_mfma_interleave", s.use_softmax_mfma_interleave);
+    s.use_staggered_iter_wait = a_bool(d, "use_staggered_iter_wait", s.use_staggered_iter_wait);
+    s.use_v_double_buffer = a_bool(d, "use_v_double_buffer", s.use_v_double_buffer);
+    s.kv_ring_depth = a_int(d, "kv_ring_depth", s.kv_ring_depth);
+    s.sched_barrier_mask = a_int(d, "sched_barrier_mask", s.sched_barrier_mask);
+    s.softmax_interleave_groups
+        = a_int(d, "softmax_interleave_groups", s.softmax_interleave_groups);
+    s.softmax_interleave_mode = a_int(d, "softmax_interleave_mode", s.softmax_interleave_mode);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);
     if(a_str(d, "kv_storage_dtype", v))
         s.kv_storage_dtype = st.keep(v);
+    if(a_str(d, "kv_cache_policy", v))
+        s.kv_cache_policy = st.keep(v);
     return s;
 }
 
@@ -984,6 +1028,7 @@ rocke_attention_tiled_2d_spec_t fkv_build(const py::dict& d, Store& st)
         = a_bool(d, "use_mfma32_skip_legacy_qreg", s.use_mfma32_skip_legacy_qreg);
     s.use_agpr_alloc_zero = a_bool(d, "use_agpr_alloc_zero", s.use_agpr_alloc_zero);
     s.use_grouped_kv2_softmax = a_bool(d, "use_grouped_kv2_softmax", s.use_grouped_kv2_softmax);
+    s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);

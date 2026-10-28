@@ -1407,189 +1407,35 @@ def cfgs_fused_moe_e2e():
     ]
 
 
+def _emitter_configs(module):
+    """The Python parity emitter's own per-index spec kwargs, in index order.
+
+    The tiled 2D emitters (``library/tests/parity/<fam>_emit.py``) keep their
+    configs in ``_CONFIGS``; the C emitters mirror them index for index and
+    check_byte_identity proves the pair agrees. Reading them here keeps this
+    table complete (including the LSE-on configs) instead of a hand-copied,
+    drifting subset."""
+    import importlib
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    parity = os.path.normpath(
+        os.path.join(here, "..", "..", "..", "library", "tests", "parity")
+    )
+    library = os.path.dirname(os.path.dirname(parity))
+    for p in (parity, library):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+    configs = importlib.import_module(module)._CONFIGS
+    assert sorted(configs) == list(range(len(configs))), module
+    return [dict(configs[i]) for i in range(len(configs))]
+
+
 def cfgs_gfx942_attention_tiled_2d():
-    rows = [
-        (64, 32, 32, 32, "bf16", True, 2048, False),
-        (128, 32, 32, 32, "fp16", True, 0, True),
-        (64, 128, 16, 4, "bf16", False, 4096, False),
-        (128, 64, 32, 8, "fp16", True, 2048, True),
-        (256, 32, 32, 32, "bf16", False, 0, False),
-    ]
-    return [
-        dict(
-            head_size=h,
-            block_size=b,
-            num_query_heads=q,
-            num_kv_heads=k,
-            dtype=d,
-            use_sinks=s,
-            sliding_window=sw,
-            has_softcap=sc,
-        )
-        for (h, b, q, k, d, s, sw, sc) in rows
-    ]
+    return _emitter_configs("gfx942_attention_tiled_2d_emit")
 
 
 def cfgs_gfx950_attention_tiled_2d():
-    """Full 38-config table mirroring gfx950_attention_tiled_2d_emit.c make_spec."""
-
-    def base(h, b, q, k, dt, sink, sw, sc, **extra):
-        d = dict(
-            head_size=h,
-            block_size=b,
-            num_query_heads=q,
-            num_kv_heads=k,
-            dtype=dt,
-            use_sinks=sink,
-            sliding_window=sw,
-            has_softcap=sc,
-        )
-        d.update(extra)
-        return d
-
-    return [
-        base(64, 16, 1, 1, "bf16", False, 0, False),  # 0
-        base(128, 16, 1, 1, "bf16", False, 0, False),  # 1
-        base(256, 16, 1, 1, "bf16", False, 0, False),  # 2
-        base(64, 16, 16, 1, "bf16", False, 0, False),  # 3
-        base(64, 16, 2, 1, "bf16", False, 0, False),  # 4
-        base(64, 32, 32, 32, "bf16", False, 0, False),  # 5
-        base(64, 32, 32, 32, "fp16", True, 2048, True),  # 6
-        base(64, 32, 32, 32, "bf16", True, 1, False),  # 7
-        base(128, 32, 32, 32, "fp16", True, 0, True),  # 8
-        base(256, 32, 32, 32, "bf16", False, 0, False),  # 9
-        base(64, 64, 32, 32, "bf16", False, 0, False),  # 10
-        base(64, 32, 7, 7, "bf16", False, 0, False),  # 11
-        base(64, 32, 64, 8, "bf16", False, 0, False),  # 12
-        base(64, 32, 40, 8, "bf16", False, 0, False),  # 13
-        base(64, 32, 128, 1, "bf16", False, 0, False),  # 14
-        base(64, 32, 32, 32, "bf16", False, 0, False, use_qq_bias=True),  # 15
-        base(64, 32, 32, 32, "bf16", False, 0, False, use_alibi=True),  # 16
-        base(
-            64, 32, 32, 32, "fp16", True, 512, True, use_alibi=True, use_qq_bias=True
-        ),  # 17
-        base(64, 64, 64, 8, "bf16", False, 0, False, num_warps=8),  # 18
-        base(64, 32, 32, 32, "bf16", False, 0, False, num_warps=2),  # 19
-        base(64, 32, 64, 8, "bf16", False, 0, False, num_warps=4),  # 20
-        base(64, 32, 32, 32, "bf16", False, 0, False, tile_size=64),  # 21
-        base(64, 32, 32, 32, "bf16", False, 0, False, tile_size=128),  # 22
-        base(
-            128, 32, 32, 32, "fp16", False, 0, False, num_warps=2, tile_size=128
-        ),  # 23
-        base(64, 32, 32, 32, "bf16", False, 0, False, waves_per_eu=2),  # 24
-        base(64, 32, 32, 32, "bf16", False, 0, False, num_seqs=1),  # 25
-        base(64, 32, 32, 32, "bf16", False, 0, False, num_seqs=257),  # 26
-        base(
-            64,
-            32,
-            32,
-            32,
-            "bf16",
-            False,
-            0,
-            False,
-            kv_storage_dtype="fp8e4m3",
-            use_fp8_mfma_pv=True,
-        ),  # 27
-        base(64, 32, 32, 32, "bf16", False, 0, False, use_i64_kv_addr=True),  # 28
-        base(64, 32, 32, 32, "bf16", False, 0, False, use_register_pv=True),  # 29
-        base(64, 32, 32, 32, "bf16", False, 0, False, kv_storage_dtype="fp8e4m3"),  # 30
-        base(
-            64,
-            32,
-            32,
-            32,
-            "bf16",
-            False,
-            0,
-            False,
-            kv_storage_dtype="fp8e4m3",
-            use_fp8_mfma_qk=True,
-        ),  # 31
-        base(
-            128,
-            32,
-            32,
-            32,
-            "fp16",
-            False,
-            0,
-            False,
-            use_mfma_32x32=True,
-            block_m_per_warp=32,
-            tile_size=64,
-        ),  # 32
-        base(
-            64,
-            32,
-            32,
-            32,
-            "bf16",
-            False,
-            0,
-            False,
-            use_mfma_32x32=True,
-            use_transposed_qk_32x32=True,
-            use_transposed_scalar_state=True,
-            use_transposed_invariant_hoist=True,
-            use_transposed_mask_once=True,
-            use_grouped_kv2_softmax=True,
-            block_m_per_warp=32,
-            tile_size=64,
-        ),  # 33
-        base(
-            128,
-            32,
-            32,
-            32,
-            "bf16",
-            False,
-            0,
-            False,
-            use_mfma_32x32=True,
-            use_transposed_qk_32x32=True,
-            use_transposed_scalar_state=True,
-            use_transposed_invariant_hoist=True,
-            use_transposed_mask_once=True,
-            use_grouped_kv2_softmax=True,
-            block_m_per_warp=32,
-            tile_size=64,
-        ),  # 34
-        base(
-            64,
-            32,
-            64,
-            8,
-            "bf16",
-            False,
-            0,
-            False,
-            use_mfma_32x32=True,
-            use_transposed_qk_32x32=True,
-            use_transposed_scalar_state=True,
-            use_transposed_invariant_hoist=True,
-            use_transposed_mask_once=True,
-            use_grouped_kv2_softmax=True,
-            num_warps=4,
-            block_m_per_warp=32,
-            tile_size=64,
-        ),  # 35
-        base(64, 32, 32, 32, "bf16", False, 0, False, use_early_v_schedule=True),  # 36
-        base(
-            64,
-            32,
-            64,
-            8,
-            "bf16",
-            False,
-            0,
-            False,
-            num_warps=4,
-            block_m_per_warp=16,
-            tile_size=64,
-            use_fast_paged_kv_desc=True,
-        ),  # 37
-    ]
+    return _emitter_configs("gfx950_attention_tiled_2d_emit")
 
 
 def cfgs_gfx950_attention_tiled_2d_fastkv_regp():
@@ -1602,6 +1448,7 @@ def cfgs_gfx950_attention_tiled_2d_fastkv_regp():
         {"use_transposed_half_local_pv": True, "use_mfma32_skip_legacy_qreg": True},
         {"use_agpr_alloc_zero": True, "use_transposed_half_local_pv": True},
         {"use_grouped_kv2_softmax": True},
+        {"emit_lse": True},
     ]
     out = []
     for dl in deltas:
