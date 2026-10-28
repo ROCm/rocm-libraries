@@ -1,0 +1,45 @@
+hash,spec,pin_sha256,reason,evidence
+0b02308d3de7,"dkdv,f16,224,bias,bk,1,1,g1,0,1",b74118f27be86068616612cbf9f301a15bd7f14fdd093b7c4fe25de2384b5fe3,known-bad-fresh-build,rebuild spills registers (R-MIR); the pin is the validated allocation
+efef4089f5e7,"dq,bf16,128,causal,bk,0,0,tail,96,1",622554378dfefb67b5d2a85fb909edb8f2ee7cc1b289cafd552b820f082bc52e,flaky,rebuild nondeterministic across builds (LLVM backend)
+0aa835a1a315,"dq,bf16,128,causal,rt,1,1,tail,96,1",8a2e250d4ab5d56ea986011fe999692437a13da75e5be0bcc67e322995cb4bf5,flaky,rebuild nondeterministic across builds (LLVM backend)
+b58024392c9e,"dq,bf16,160,causal,bk,0,0,tail,128,1;num_waves=4;block_m=128",4edb6244f27bd3536b0438a6207732d3df43f1b0b8cd4b24bcafd6c849771961,flaky,rebuild nondeterministic; some builds spill (R-MIR)
+36f2ac018a72,"dq,bf16,160,causal,bk,0,1,g1,128,1",fa7d6ce342563bb52b572353f8308f68ee5ca9a803320ee1048fab55f1f6eb8e,flaky,rebuild nondeterministic across builds (LLVM backend)
+4691c39657a8,"dq,bf16,160,causal,rt,1,1,tail,128,1",7ce1f3429de38266e56e80ca6140d81c194546ed27a82e5573358dd5757903f0,known-bad-fresh-build,rebuild may draw the spilling register allocation; the pin is the validated one
+1aa1c8f88b1c,"dq,bf16,160,causal,rt,1,1,tail,128,1;num_waves=4;block_m=128",a917b79496169bc49909b00d7f4a16536f927b5dfd2d6b154d6f638733910c61,flaky,rebuild nondeterministic across builds (LLVM backend)
+ba2b2b8d4299,"dq,bf16,224,causal,bk,0,0,tail,192,1",b1d5819c1b45db792ea87b01c35268b5cbe5e0f827830e7e7917f702b82be935,flaky,rebuild nondeterministic across builds (LLVM backend)
+d19bcaefda7f,"dq,bf16,224,causal,bk,0,0,tail,192,1;num_waves=4;block_m=128",269581774febc17bef9562381ee0e04eb9e97d2ba0e73e7750f00edd1600059f,flaky,rebuild nondeterministic across builds (LLVM backend)
+039233081091,"dq,bf16,224,causal,rt,1,1,tail,192,1;num_waves=4;block_m=128",82a63afcb4245d12e700bc79193949ee3ec778491f4c383c5d250cb8a09965c4,flaky,rebuild nondeterministic; some builds spill (R-MIR)
+22e2993e1f73,"dq,bf16,64,causal,bk,0,0,tail,32,1",261035bdd8fa6e681948f7859b25586a0fe07249ed1f2f6291e79a38b65b0a1d,flaky,rebuild nondeterministic across builds (LLVM backend)
+d03741ea330b,"dq,bf16,64,causal,bk,0,0,tail,32,1;num_waves=2;block_m=64",3a68e7a6bc428de0ad56a1cd686a9b81f4535492bf9d7bc5d9da73237cbd1d0c,flaky,rebuild nondeterministic across builds (LLVM backend)
+a1898d819817,"dq,bf16,64,causal,bk,0,1,g1,32,1",72c32891f5b3593132dfb6b9f60a612fb11274d9afe5284942639b934dabb4b7,flaky,rebuild nondeterministic across builds (LLVM backend)
+dfee8acfd97f,"dq,bf16,64,causal,rt,1,0,tail,32,1;num_waves=2;block_m=64",1eaa29060e3c0a441024c45a465ea4a9da4e9280fa027805bad2a70b3f0af169,flaky,rebuild nondeterministic across builds (LLVM backend)
+57a276605051,"dq,bf16,64,causal,rt,1,1,tail,32,1",8a54243623dbb20680466491063372bf80886db43ae9da34e5085ec0b09fd6f2,flaky,rebuild nondeterministic; some builds spill (R-MIR)
+f05d9de71968,"dq,bf16,96,causal,bk,0,0,tail,64,1",4338080bca4e83a7488467a667dee6da8f20d908f73b5e39d0bf5fe69f55e693,flaky,rebuild nondeterministic; some builds spill (R-MIR)
+44a318e0adb0,"dq,bf16,96,causal,bk,0,1,tail,64,1",604b731435d9bbba62e7ca802ca4b9083f41673ee4c3ea65ad5249bb98a5db6d,no-build,rebuild produced two objects or none in three builds
+89e12dc4d686,"dq,bf16,96,causal,bk,0,1,tail,64,1;num_waves=2;block_m=64",9a8b3c68e64cf78b703c2f7745d5fe9e88f1336aa476a626153fc02e32cdf7c3,flaky,rebuild nondeterministic across builds (LLVM backend)
+8d26a13f0318,"dq,bf16,96,causal,rt,1,1,tail,64,1",0d69cae73fe7ac406f5155927862dbd0bb3befd2bc53df715c6bed8ca1d7276a,flaky,rebuild nondeterministic across builds (LLVM backend)
+5f6f40c7b88a,"dq,f16,160,causal,rt,1,1,tail,128,1;num_waves=4;block_m=128",ec52060bb1fe67274d2c96840eac8e2dbf22e5b8a85e5e7e2f4b56b80e268993,flaky,rebuild is bimodal (two object variants across builds)
+71924095fbc5,"dq,f16,192,causal,bk,0,0,tail,160,1",a73e6521ac6e0c7d8a23b2b06dfb0a7edf7269b5948b423d41465b0a63b9089f,flaky,rebuild nondeterministic across builds (LLVM backend)
+a7528f97e750,"dq,f16,192,causal,rt,1,1,tail,160,1;num_waves=4;block_m=128",a743fbcb9aa0df0da97ad6dfcefecb06a920949f89d58f09763c20563877514b,flaky,rebuild nondeterministic; some builds spill (R-MIR)
+065be7bccb37,"dq,f16,224,causal,rt,1,1,tail,192,1",3aa272d291ae9890d56f61b0e0d13e299aff053454167a6e9ef0103cf6c108c7,flaky,rebuild is bimodal (two object variants across builds)
+c6735fbe852b,"dq,f16,224,causal,rt,1,1,tail,192,1;num_waves=4;block_m=128",977d810deca97e585232807d4914ab659707f93d1d131b69c56c6a45fc2d372c,flaky,rebuild nondeterministic; some builds spill (R-MIR)
+f597c157bdba,"dq,f16,32,causal,bk,0,1,tail,0,1",945241cf09fbd484c5aba3647663c9e7dcb288894d54d27485a72ed17534b755,flaky,rebuild nondeterministic; some builds spill (R-MIR)
+3ba5b6f0fd2b,"dq,f16,32,causal,rt,1,0,tail,0,1;num_waves=2;block_m=64",bd7225afaccda5c037adf71aa42bd5a2df609ece3d59c78dca2c1e6b38f93b96,flaky,rebuild nondeterministic across builds (LLVM backend)
+66d5feb70508,"dq,f16,32,causal,rt,1,1,tail,0,1",2ab8cef0cbccf08cec4721394c051e535bf31c10cfae3a7d6d1b8bb69152861c,flaky,rebuild nondeterministic across builds (LLVM backend)
+1a114be37069,"dq,f16,32,causal,rt,1,1,tail,0,1;num_waves=2;block_m=64",b831c4243b69b86b16825fe7336a2c7f4facd38ad9e8a7d949782b2c58914710,known-bad-fresh-build,rebuild may draw the spilling register allocation; the pin is the validated one
+aeb9a803e805,"dq,f16,64,causal,bk,0,1,tail,32,1",e2ee804a10cdd8a245041b1627ad92abc1fa6b0d079fff7c9ded9e9e6614f370,no-build,rebuild produced two objects or none in three builds
+0da382abcff8,"dq,f16,64,causal,bk,0,1,tail,32,1;num_waves=2;block_m=64",47686f2d8b0e87c21698b50e6f8ab0198ff3e17bb4669a28dce1e85e1e5c6861,flaky,rebuild nondeterministic across builds (LLVM backend)
+bb80bb4932a4,"dq,f16,64,causal,rt,1,1,tail,32,1;num_waves=2;block_m=64",b70530774443140c49593b62377d2298b28cdbf820bb405a2e547810643af599,flaky,rebuild nondeterministic across builds (LLVM backend)
+be360cbb3bdf,"dq,f16,96,causal,bk,0,0,tail,64,1",c545b5ccb951e506e7673f72a19a4fe4dcd4baf34521397ec72c43a2b8408819,flaky,rebuild nondeterministic across builds (LLVM backend)
+ed3e04479228,"dq,f16,96,causal,bk,0,0,tail,64,1;num_waves=2;block_m=64",8a6b39e81f06d12c55a44702467dd86d2d03c0bd64bef695980d7f4e65c48bb7,flaky,rebuild nondeterministic across builds (LLVM backend)
+db8b97ace2c2,"dq,f16,96,causal,bk,0,1,tail,64,1",f9c376943b7d9bc057d1a997e348ae72a2323dd6a8f663249c05d562f0b2dae5,no-build,rebuild produced two objects or none in three builds
+d86ab8bde882,"dq,f16,96,causal,bk,0,1,tail,64,1;num_waves=2;block_m=64",c98201a88d7b6b6e592823b202ffcab87ae69695c48c3fdc265bd1f4f1a7a7b4,flaky,rebuild is bimodal (two object variants across builds)
+aeac0aca083b,"dq,fp32,32,causal,bk,0,0,tail,0,1;block_m=32;block_n=16",7af2b6926f4b039653a7ee6e81a2f5b0c6e389e31bed9eb24fdb4d4d243f7041,flaky,rebuild nondeterministic across builds (LLVM backend)
+69c2614cdbb2,"dq,fp32,32,causal,bk,1,0,tail,0,1;block_m=32;block_n=16",ad605fc8b87f786921fab06a599b3a8f1ffdfb9a1da6e9c195bde793220d924c,flaky,rebuild nondeterministic across builds (LLVM backend)
+9800ae213d3c,"dq,fp32,32,plain,bk,0,0,tail,0,1;block_m=32;block_n=16",fe6fe4a9675eaef56a3857d208c069bbcc6aac37992a0b70fd3f7b2a9c2837a7,flaky,rebuild nondeterministic across builds (LLVM backend)
+d8e5eb25df1c,"dq,fp32,32,plain,bk,1,0,tail,0,1;block_m=32;block_n=16",7952011837b5acd53614fbaf409be87a0b151fe166f282befb6e534f17bb593b,flaky,rebuild nondeterministic across builds (LLVM backend)
+179dd1c5f4a7,"dq,fp32,96,causal,bk,0,0,tail,64,1;block_m=32;block_n=16",72ae94050e793a7b8f185ae1c9ee07b25f5029fbd07278e5e9d3a87103339139,flaky,rebuild nondeterministic across builds (LLVM backend)
+1bcbc44d86ef,"dq,fp32,96,plain,bk,0,0,tail,64,1;block_m=32;block_n=16",ba3923afd0bb0af3bc5254ca4ae921e305ca298e2f90f85717ffeab943eb36e5,flaky,rebuild nondeterministic across builds (LLVM backend)
+a71a7c0a05f3,"dq,fp32,96,plain,bk,1,0,tail,64,1;block_m=32;block_n=16",b7a0aa86bc31dccb2a55388becb9334f1c97765512de72ff20df219598d037bc,flaky,rebuild nondeterministic across builds (LLVM backend)
+0935ad8fc909,"dq,fp32,96,causal,bk,1,0,tail,64,1;block_m=32;block_n=16",9e67677bb3aae60d579af9d3ffd0bd345f0e3ab099d48810e6ab67dcc709a576,flaky,rebuild nondeterministic across builds (LLVM backend)
+8b4f35a0409b,"dq,bf16,32,causal,rt,1,1,tail,0,1;num_waves=2;block_m=64",250fbbb20d07b6479160f4b0c778c66906eba5d7ee237757c5b5d7364dc076fa,no-build,rebuild produced two objects or none in three builds

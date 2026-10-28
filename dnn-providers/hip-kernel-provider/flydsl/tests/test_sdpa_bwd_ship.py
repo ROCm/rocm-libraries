@@ -3,10 +3,10 @@
 
 """Shipping the merged objects: which bytes a row ships, when the run stops, and the two-kernel `verify`.
 
-``generate("sdpa_bwd_merged", ...)`` ships the sweep's pins for the 265 gfx950 rows that never write dB (their
-rebuild only verifies) and the combined (merged + dBias reduce) rebuild for the 44 dB-storing
-bias rows, whose per-kernel gate must be green; a red gate or a row that does not build ships nothing. The compile
-and the toolchain are replaced by fixtures: nothing is compiled.
+``generate("sdpa_bwd_merged", ...)`` ships the rebuild of every gfx950 row except the rows of the pinned-exceptions list, which
+ship the sweep's pin; the combined (merged + dBias reduce) rebuilds of the 44 dB-storing bias rows also need a green
+per-kernel gate against the sweep's pin. A red gate, an R-MIR spill finding or a row that does not build ships nothing. The compile and the toolchain are replaced by fixtures:
+nothing is compiled.
 """
 
 from __future__ import annotations
@@ -107,7 +107,6 @@ def rig(tmp_path, monkeypatch):
     plain, bias, bias_no_db = _rows()
     reference_dir = tmp_path / "reference"
     reference_dir.mkdir()
-    (reference_dir / f"{to_spec(plain).hash()}.hsaco").write_bytes(PIN)
     (reference_dir / f"{to_spec(bias_no_db).hash()}.hsaco").write_bytes(PIN)
     reference = {
         to_spec(i).hash(): {
@@ -125,6 +124,16 @@ def rig(tmp_path, monkeypatch):
     rig.plain, rig.bias, rig.bias_no_db = plain, bias, bias_no_db
     rig.reference_dir = reference_dir
     rig.out = tmp_path / "content"
+    exceptions = {
+        to_spec(bias_no_db).hash(): {
+            "hash": to_spec(bias_no_db).hash(),
+            "spec": to_spec(bias_no_db).key(),
+            "pin_sha256": _sha(PIN),
+            "reason": "flaky",
+            "evidence": "test",
+        }
+    }
+    rig.shipped_gates = []
     rig.outcomes = {
         plain.name: build.Outcome(
             "ok", REBUILT, gate=_gate(REBUILT), geometry=GEOMETRY
@@ -136,10 +145,12 @@ def rig(tmp_path, monkeypatch):
             "ok", REBUILT, gate=_gate(REBUILT), geometry=GEOMETRY
         ),
     }
-    rig.shipped_gates = []
 
-    def compile_specs(specs, arch, reference_dir=None, reference_csv=None):
+    def compile_specs(
+        specs, arch, reference_dir=None, reference_csv=None, rebuild_unstable=False
+    ):
         assert reference_dir == rig.reference_dir
+        assert rebuild_unstable
         by_hash = {to_spec(i).hash(): i.name for i in (plain, bias, bias_no_db)}
         return [rig.outcomes[by_hash[s.hash()]] for s in specs]
 
@@ -159,8 +170,9 @@ def rig(tmp_path, monkeypatch):
         return facts
 
     monkeypatch.setattr(build, "compile_specs", compile_specs)
-    monkeypatch.setattr(build, "_run_gate", run_gate)
     monkeypatch.setattr(build, "verify", verify)
+    monkeypatch.setattr(build, "_run_gate", run_gate)
+    monkeypatch.setattr(build, "read_exceptions", lambda path=None: exceptions)
     monkeypatch.setattr(build, "read_reference", lambda path=None: reference)
     monkeypatch.setattr(
         build, "instances_for", lambda op, arch: [plain, bias, bias_no_db]
@@ -168,6 +180,7 @@ def rig(tmp_path, monkeypatch):
     monkeypatch.setattr(build.env, "assert_flydsl_version", lambda: None)
     monkeypatch.setattr(build.env, "prepare", lambda arch: None)
     monkeypatch.setattr(build.env, "provenance", lambda arch: {"flydsl": "test"})
+    monkeypatch.setattr(build.env, "rocm_version", lambda: "10.2.0")
 
     def generate():
         return build.generate(OP, ARCH, rig.out, None, rig.reference_dir)
@@ -182,26 +195,25 @@ def rig(tmp_path, monkeypatch):
     return rig
 
 
-def test_a_pinned_row_ships_the_pin_and_a_bias_row_the_combined_rebuild(rig) -> None:
+def test_every_row_ships_its_rebuild_and_a_bias_row_is_gated_against_its_pin(
+    rig,
+) -> None:
     assert rig.generate() == 0
     records = rig.records()
     op_dir = rig.out / OP / ARCH
 
     plain = records[rig.plain.name]
-    assert (op_dir / plain["file"]).read_bytes() == PIN
-    assert plain["sha256"] == plain["pin_sha256"] == _sha(PIN)
-    assert plain["rebuilt_sha256"] == _sha(REBUILT)
-    assert plain["ship"] == "pin"
-    # The shipped bytes are not the ones the rebuild's gates saw: they are analysed again, and R-MIR is not scanned.
-    assert plain["gates"]["rmir"]["verdict"] == "not scanned"
+    assert (op_dir / plain["file"]).read_bytes() == REBUILT
+    assert plain["sha256"] == _sha(REBUILT)
+    assert "ship" not in plain and "pin_sha256" not in plain
+    assert plain["gates"]["rmir"]["verdict"] == "ok"
     assert plain["gates"]["object_matches_delivered"]
-    assert plain["rebuilt_resources"] == ROW
     assert plain["knobs"]["reduce_symbol"] == ""
     assert {k: plain["knobs"][k] for k in GEOMETRY} == GEOMETRY
 
     bias = records[rig.bias.name]
     assert (op_dir / bias["file"]).read_bytes() == COMBINED
-    assert (bias["sha256"], bias["rebuilt_sha256"]) == (_sha(COMBINED), _sha(COMBINED))
+    assert bias["sha256"] == _sha(COMBINED)
     assert bias["pin_sha256"] == _sha(
         PIN
     )  # the standalone merged pin, which the object is gated against
@@ -212,37 +224,54 @@ def test_a_pinned_row_ships_the_pin_and_a_bias_row_the_combined_rebuild(rig) -> 
     assert [a["name"] for a in bias["reduce_args"]][:2] == ["DB", "DBias"]
     assert bias["reduce_resources"]["vgpr"] == 81
 
-    # A bias row that never stores dB carries no reduce kernel: it ships its pin like a plain row.
+    # A bias row that never stores dB carries no reduce kernel; this one is an exception row: it ships the pin.
     no_db = records[rig.bias_no_db.name]
     assert (op_dir / no_db["file"]).read_bytes() == PIN
-    assert no_db["ship"] == "pin"
+    assert no_db["sha256"] == no_db["pin_sha256"] == _sha(PIN)
+    assert (no_db["ship"], no_db["pin_reason"]) == ("pin", "flaky")
+    assert no_db["rebuilt_sha256"] == _sha(REBUILT)
+    assert no_db["gates"]["rmir"]["verdict"] == "not scanned"
     assert no_db["knobs"]["reduce_symbol"] == ""
     assert "pin_gate" not in no_db["gates"] and "reduce_args" not in no_db
+    # The bytes of an exception row are the pin's, whatever its rebuild does.
+    assert rig.shipped_gates == [f"{rig.bias_no_db.name}.hsaco"]
 
 
-def test_a_rebuild_equal_to_the_pin_keeps_its_rmir_verdict(rig) -> None:
-    rig.outcomes[rig.plain.name] = build.Outcome(
-        "ok", PIN, gate=_gate(PIN, verdict="ok"), geometry=GEOMETRY
-    )
+def test_source_md_gives_the_full_regenerate_line(
+    rig,
+) -> None:
     rig.generate()
-    plain = rig.records()[rig.plain.name]
-    assert plain["gates"]["rmir"]["verdict"] == "ok"
-    assert plain["rebuilt_sha256"] == plain["pin_sha256"]
+    source_md = (rig.out / OP / f"{ARCH}.SOURCE.md").read_text()
     assert (
-        f"{rig.plain.name}.hsaco" not in rig.shipped_gates
-    )  # the rebuild's own gates describe the shipped bytes
+        f"python -m generators.gen_{OP} --arch {ARCH} --out-dir <content root> "
+        "--reference-dir <S1 reference dir>\n"
+    ) in source_md
+    assert f"| `{rig.bias_no_db.name}` | flaky |" in source_md
 
 
-def test_a_pin_ships_when_its_rebuild_is_a_dual_object(rig) -> None:
-    rig.outcomes[rig.plain.name] = build.Outcome(
-        "dual_object", detail="embedded objects are not identical", geometry=GEOMETRY
+def test_an_exception_row_ships_its_pin_when_its_rebuild_is_a_dual_object(rig) -> None:
+    rig.outcomes[rig.bias_no_db.name] = build.Outcome(
+        "dual_object", detail="two objects", geometry=GEOMETRY
     )
     rig.generate()
-    plain = rig.records()[rig.plain.name]
-    assert plain["build_status"] == "dual_object"
-    assert plain["sha256"] == _sha(PIN) and plain["rebuilt_sha256"] == ""
-    assert plain["gates"]["rmir"]["verdict"] == "not scanned"
-    assert {k: plain["knobs"][k] for k in GEOMETRY} == GEOMETRY
+    no_db = rig.records()[rig.bias_no_db.name]
+    assert no_db["build_status"] == "dual_object"
+    assert no_db["sha256"] == _sha(PIN) and no_db["rebuilt_sha256"] == ""
+
+
+def test_an_exception_pin_that_is_not_its_reference_object_is_refused(rig) -> None:
+    (rig.reference_dir / f"{to_spec(rig.bias_no_db).hash()}.hsaco").write_bytes(
+        b"edited"
+    )
+    with pytest.raises(GeneratorError, match="not the pin its reference row names"):
+        rig.generate()
+
+
+def test_a_build_without_a_known_rocm_version_is_refused(rig, monkeypatch) -> None:
+    monkeypatch.setattr(build.env, "rocm_version", lambda: "unknown")
+    with pytest.raises(GeneratorError, match="ROCM_PATH"):
+        rig.generate()
+    assert not (rig.out / OP).exists()
 
 
 @pytest.mark.parametrize(
@@ -280,8 +309,28 @@ def test_a_pin_ships_when_its_rebuild_is_a_dual_object(rig) -> None:
             build.Outcome("error", detail="boom", geometry=GEOMETRY),
             "error: boom",
         ),
+        (
+            "plain",
+            build.Outcome("dual_object", detail="dual", geometry=GEOMETRY),
+            "dual_object: dual",
+        ),
+        (
+            "plain",
+            build.Outcome(
+                "ok", REBUILT, gate=_gate(REBUILT, verdict="red"), geometry=GEOMETRY
+            ),
+            "R-MIR spill finding",
+        ),
     ],
-    ids=["red-gate", "red-rmir", "combined-dual-object", "combined-error", "pin-error"],
+    ids=[
+        "red-gate",
+        "red-rmir",
+        "combined-dual-object",
+        "combined-error",
+        "plain-error",
+        "plain-dual-object",
+        "plain-red-rmir",
+    ],
 )
 def test_a_red_gate_or_a_row_that_does_not_build_ships_nothing(
     rig, row, outcome, reason
@@ -301,14 +350,6 @@ def test_a_combined_row_without_a_per_kernel_gate_stops_the_run(rig) -> None:
     with pytest.raises(GeneratorError, match="no per-kernel gate"):
         rig.generate()
     assert list((rig.out / OP / ARCH).iterdir()) == []
-
-
-def test_a_pin_that_is_not_its_reference_object_is_refused_before_compiling(
-    rig,
-) -> None:
-    (rig.reference_dir / f"{to_spec(rig.plain).hash()}.hsaco").write_bytes(b"edited")
-    with pytest.raises(GeneratorError, match="not the pin its reference row names"):
-        rig.generate()
 
 
 def test_the_merged_generator_needs_the_reference_dir(
@@ -391,3 +432,15 @@ def test_verify_of_a_merged_kernel_with_the_wrong_layout_is_refused(
     )
     with pytest.raises(GeneratorError, match="kernarg layout"):
         two_kernels()
+
+
+def test_every_pinned_exception_is_a_plain_reference_row() -> None:
+    reference = build.read_reference()
+    exceptions = build.read_exceptions()
+    assert exceptions
+    for h, row in exceptions.items():
+        assert (reference[h]["spec"], reference[h]["sha256"]) == (
+            row["spec"],
+            row["pin_sha256"],
+        )
+        assert not build.reduce_symbol_of(build.Spec.parse(row["spec"])), h

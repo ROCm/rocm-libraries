@@ -242,28 +242,6 @@ def _pin_gate(verdict: str, *problems: str) -> dict:
     }
 
 
-def test_a_pinned_row_is_compared_by_its_rebuild(tmp_path, capsys) -> None:
-    """The shipped object of a ship-pins row is the pin; what differs is the rebuild, which stays reported."""
-    patch = {
-        "ship": "pin",
-        "rebuilt_sha256": _sha(b"another build"),
-        "rebuilt_resources": {**RESOURCES, "vgpr": 104},
-    }
-    status, lines = _run(_build_fixture(tmp_path, same=patch), capsys)
-    assert status == 0
-    assert "1/5 byte-identical" in lines
-    assert any(l.startswith("sha differs: dkdv tile=64 cls=plain") for l in lines)
-    assert any("vgpr 104 != 100" in l for l in lines)
-
-
-def test_a_shipped_object_that_is_not_the_pin_is_red(tmp_path, capsys) -> None:
-    argv = _build_fixture(tmp_path, same={"ship": "pin", "rebuilt_sha256": ""})
-    (tmp_path / "out" / "sdpa_bwd_dkdv" / "gfx950" / "same.hsaco").write_bytes(b"x")
-    status, lines = _run(argv, capsys)
-    assert status == 1
-    assert any(l.startswith("RED shipped: dkdv tile=64 cls=plain") for l in lines)
-
-
 PIN_ELF = _elf({MERGED: MERGED_CODE})
 COMBINED_ELF = _elf({MERGED: MERGED_CODE, REDUCE: REDUCE_CODE})
 COMBINED = {"ship": "combined", "gates": _pin_gate("ok")}

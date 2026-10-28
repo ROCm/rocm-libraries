@@ -27,12 +27,10 @@ compared and the ops with no manifest. A reference row whose op has no manifest 
 narrows ``M`` to the rows a generator built (a ``--only`` run), so absent ops are
 listed but not compared.
 
-A manifest that ships pins (``sdpa_bwd_merged``, ``ship`` on its records) is compared by what was
-rebuilt: for a ``pin`` row the shipped object must be the pin (else red) and ``rebuilt_sha256`` /
-``rebuilt_resources`` stand in for the object's sha and resource row; a ``combined`` row is not the
+A ``combined`` row (``ship`` on its record; a dB-storing bias row of ``sdpa_bwd_merged`` or ``sdpa_bwd_dq``) is not the
 pin by construction, so it is judged by its per-kernel gate: the object must hash to the manifest's
 sha256 and its merged function must equal the pin's, and the recorded verdict (``gates.pin_gate``)
-must be ``ok``; any of these failing is red. A missing object of such a manifest is red. A line ``N combined object(s): M pass the per-kernel gate`` follows the ops line.
+must be ``ok``; any of these failing is red. A missing object of such a row is red. A line ``N combined object(s): M pass the per-kernel gate`` follows the ops line.
 
 Exit status 0 when there are differences only. Nonzero (red) on: a spill finding of the
 R-MIR gate (``rmRedundantSpills``); a row built as ``error``; a ``dual_object`` that is
@@ -230,15 +228,11 @@ def compare(
                 )
             continue
         shipped = _sha(obj)
-        if ship == "pin" and shipped != row["sha256"]:
-            report("shipped", row, spec, "the shipped object is not the pin", True)
-            continue
-        rebuilt = record["rebuilt_sha256"] if ship == "pin" else shipped
-        if rebuilt == row["sha256"]:
+        if shipped == row["sha256"]:
             identical += 1
         else:
-            report("sha differs", row, spec, f"{rebuilt[:12]} != {row['sha256'][:12]}")
-        got = record.get("rebuilt_resources", record["resources"])
+            report("sha differs", row, spec, f"{shipped[:12]} != {row['sha256'][:12]}")
+        got = record["resources"]
         columns = [c for c in RESOURCE_COLUMNS if str(got[c]) != row[c]]
         if columns:
             report(

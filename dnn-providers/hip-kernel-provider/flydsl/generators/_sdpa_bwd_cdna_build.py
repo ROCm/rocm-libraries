@@ -25,10 +25,11 @@ Per spec the outcome is:
 
 Rebuilding from identical sources can yield a different object, or a dump holding two
 different objects: LLVM's AMDGPU backend is not deterministic for some kernels
-(the dq-causal family and five known bimodal specs, ``tests/data/sdpa_bwd_known_flaky.csv``). Those outcomes are
-reported, never retried (one build per spec), except for a combined row (below), whose unstable build is rebuilt
-in a fresh process, at most three builds in all. Comparing an object against a pin, and
-deciding which outcomes are red, is the caller's job (``tools/sdpa_bwd_compare.py``).
+(the dq-causal family and the specs of ``tests/data/sdpa_bwd_known_flaky.csv``). ``generate`` ships the objects it builds, so a
+row whose dump holds two objects is rebuilt in a fresh process, at most three builds in all; a row that still has no
+object stops the run. The rows of ``tests/data/sdpa_bwd_pinned_exceptions.csv`` are the exception: their rebuild is nondeterministic or
+known bad, so they ship the sweep's pin and the manifest says so (``ship: pin``). ``tools/sdpa_bwd_compare.py`` compares the shipped objects with the sweep's pins
+(``tests/data/sdpa_bwd_reference.csv``) and decides which differences are red.
 
 The dB-storing ``bias`` rows of ``sdpa_bwd_merged`` and ``sdpa_bwd_dq`` (``store_db`` unset; every fp32 bias dQ row)
 build one object with two kernels: the merged or dQ kernel and the dBias reduce kernel (``reduce_symbol``); a
@@ -37,11 +38,9 @@ object's per-kernel gate (``tools/sdpa_bwd_gate.py``) holds the main kernel's fu
 standalone pin and the reduce kernel's resource row to the reduce pin; the reduce is compiled under the main
 module's LLVM options, so its bytes are not compared. For an fp32 dQ object those options differ from the
 standalone fp32 reduce's, so its reduce is gated against a standalone fp32 reduce built under the dQ module's
-options (``_fp32_reduce_reference``). ``generate`` for the merged, prep, dK/dV and dQ ops ships pins
-(``--reference-dir``): every other row ships its pin's bytes and its rebuild only verifies it; a combined
-row ships the combined rebuild. A row that does not build
-(``error``; for a combined row also ``dual_object``) or a red per-kernel gate stops the run, and nothing
-is shipped.
+options (``_fp32_reduce_reference``). Every op takes ``--reference-dir``, the directory of the sweep's pins. A row that
+ships its build and does not build (``error``, or ``dual_object`` after the rebuilds), a red R-MIR verdict
+or a red per-kernel gate stops the run, and nothing is shipped.
 
 The kernels are the ones under ``kernels_src/kernels/attention_bwd_cdna/``. Each is
 traced with no tensors: the launchers take raw pointers and integers, so the arguments
@@ -1134,16 +1133,17 @@ def _fp32_reduce_reference(arch: str, out: Path) -> Path:
     return out
 
 
-# Builds a combined row may take: the first, then fresh-process rebuilds while its per-kernel gate is red (LLVM backend nondeterminism).
-_COMBINED_ATTEMPTS = 3
+# Builds a shipped row may take: the first, then fresh-process rebuilds while it has no object or, for a combined row, its per-kernel gate is red (LLVM backend nondeterminism).
+_ATTEMPTS = 3
 
 
-def _combined_unstable(outcome: Outcome) -> bool:
-    """A combined row's build that a rebuild may change: its dump held two objects, or its per-kernel gate is red."""
+def _unstable(spec: Spec, outcome: Outcome) -> bool:
+    """A build that a rebuild may change: its dump held two objects, or it is a combined row whose per-kernel gate is red."""
     if outcome.status == "dual_object":
         return True
     return (
-        outcome.status == "ok"
+        bool(reduce_symbol_of(spec))
+        and outcome.status == "ok"
         and (outcome.gate or {}).get("pin_gate", {}).get("verdict") == "red"
     )
 
@@ -1153,11 +1153,12 @@ def compile_specs(
     arch: str,
     reference_dir: Path | None = None,
     reference_csv: Path = _REFERENCE_CSV,
+    rebuild_unstable: bool = False,
 ) -> list[Outcome]:
     """One build per spec, in order (``FLYDSL_GEN_JOBS`` workers); a dead worker raises ``GeneratorError``.
 
-    With @p reference_dir, a combined object is gated against the pins there (rows of @p reference_csv). A combined row whose build is
-    unstable (``_combined_unstable``) is rebuilt in a fresh worker process, up to ``_COMBINED_ATTEMPTS`` builds in all; its outcome is the last.
+    With @p reference_dir, a combined object is gated against the pins there (rows of @p reference_csv). With @p rebuild_unstable, a row whose
+    build is unstable (``_unstable``) is rebuilt in a fresh worker process, up to ``_ATTEMPTS`` builds in all; its outcome is the last.
     """
     reference = str(reference_dir) if reference_dir else ""
     csv_path = str(reference_csv) if reference_dir else ""
@@ -1175,17 +1176,15 @@ def compile_specs(
             ]
 
         outcomes = _compile_all(_compile_one, tasks(entries), arch, lambda t: t[1])
-        for attempt in range(2, _COMBINED_ATTEMPTS + 1):
+        for attempt in range(2, _ATTEMPTS + 1):
             again = [
                 i
                 for i, (spec, outcome) in enumerate(zip(entries, outcomes))
-                if reference_dir
-                and reduce_symbol_of(spec)
-                and _combined_unstable(outcome)
+                if rebuild_unstable and _unstable(spec, outcome)
             ]
             if not again:
                 break
-            print(f"attempt {attempt}: rebuilding {len(again)} combined row(s)")
+            print(f"attempt {attempt}: rebuilding {len(again)} row(s)")
             rebuilt = _compile_all(
                 _compile_one,
                 tasks([entries[i] for i in again]),
@@ -1405,23 +1404,54 @@ def run(argv: list[str] | None = None) -> int:
     return 1 if failed else 0
 
 
-# The ops that ship the sweep's pinned objects, not their rebuilds. The combined rows (a dB-storing ``bias`` row of the merged or dQ op) are
-# the exception: they ship their rebuild, gated per kernel.
-_SHIP_PINS_OPS = (
+# The ops that ship the objects they build and stop on a row that does not build (``_stop_reasons``).
+_SHIPPED_OPS = (
     "sdpa_bwd_prep",
     "sdpa_bwd_dkdv",
     "sdpa_bwd_dq",
     "sdpa_bwd_merged",
 )
 
+# Rows that ship the sweep's pin, not their build: ``tests/data/sdpa_bwd_pinned_exceptions.csv`` (hash, spec, pin_sha256, reason, evidence), append-only.
+_EXCEPTIONS_CSV = FLYDSL_DIR / "tests" / "data" / "sdpa_bwd_pinned_exceptions.csv"
+_PIN_REASONS = ("flaky", "known-bad-fresh-build", "no-build")
+
 
 @dataclass(frozen=True)
 class Pin:
-    """A pinned object: the sweep's bytes for a Spec, by the hash and sha256 its reference row gives."""
+    """The sweep's pin of a row, by its reference row: its sha256, and for a row that ships it the object's bytes and the reason."""
 
-    hash: str
     sha256: str
-    blob: bytes | None = None  # read only for a pin that ships
+    blob: bytes | None = None
+    reason: str = ""
+
+
+def _complete_source_md(
+    source_md: Path, op: str, arch: str, records: list[dict]
+) -> Path:
+    """Complete @p source_md: the arguments the generator of @p op needs on its regenerate line, and the rows that ship the sweep's pin."""
+    line = f"python -m generators.gen_{op} --arch {arch}"
+    args = " --out-dir <content root>"
+    if op in _SHIPPED_OPS:
+        args += " --reference-dir <S1 reference dir>"
+    text = source_md.read_text(encoding="utf-8")
+    if text.count(f"\n{line}\n") != 1:
+        raise GeneratorError(f"{source_md}: no regenerate line {line!r}")
+    text = text.replace(f"\n{line}\n", f"\n{line}{args}\n")
+    pinned = [r for r in records if r.get("ship") == "pin"]
+    if pinned:
+        text += (
+            "\n## Pinned objects\n\n"
+            "These objects are the sweep's pinned bytes, not built with the toolchain above; the rebuild of each is\n"
+            "nondeterministic or known bad (`flydsl/tests/data/sdpa_bwd_pinned_exceptions.csv`).\n\n"
+            "| Instance | Reason | SHA256 |\n| --- | --- | --- |\n"
+            + "".join(
+                f"| `{r['name']}` | {r['pin_reason']} | `{r['sha256'][:16]}` |\n"
+                for r in pinned
+            )
+        )
+    source_md.write_text(text, encoding="utf-8")
+    return source_md
 
 
 def read_reference(path: Path = _REFERENCE_CSV) -> dict[str, dict]:
@@ -1430,15 +1460,43 @@ def read_reference(path: Path = _REFERENCE_CSV) -> dict[str, dict]:
         return {row["hash"]: row for row in csv.DictReader(handle)}
 
 
+def read_exceptions(path: Path = _EXCEPTIONS_CSV) -> dict[str, dict]:
+    """The pinned-exception rows by Spec hash."""
+    with path.open(newline="", encoding="utf-8") as handle:
+        rows = {row["hash"]: row for row in csv.DictReader(handle)}
+    for row in rows.values():
+        if row["reason"] not in _PIN_REASONS or not row["evidence"]:
+            raise GeneratorError(
+                f"{path}: {row['hash']}: a reason of {_PIN_REASONS} and an evidence are required"
+            )
+    return rows
+
+
 def load_pin(
-    spec: Spec, reference_dir: Path, reference: dict[str, dict], *, ships: bool
-) -> Pin:
-    """The pin of @p spec, its object checked against its row; the bytes are read when @p ships."""
+    spec: Spec,
+    reference_dir: Path,
+    reference: dict[str, dict],
+    exceptions: dict[str, dict],
+) -> Pin | None:
+    """The pin of @p spec, by its reference row; none for a row that ships its build and is not combined.
+
+    A combined row's pin is the standalone pin it is gated against (its bytes are not read). A row of @p exceptions ships its pin:
+    the object is read and checked against its reference row.
+    """
     row = reference.get(spec.hash())
     if row is None or row["spec"] != spec.key():
         raise GeneratorError(f"the reference has no row for {spec.key()}")
-    if not ships:
-        return Pin(spec.hash(), row["sha256"])
+    exception = exceptions.get(spec.hash())
+    if exception is None:
+        return Pin(row["sha256"]) if reduce_symbol_of(spec) else None
+    if (exception["spec"], exception["pin_sha256"]) != (spec.key(), row["sha256"]):
+        raise GeneratorError(
+            f"the pinned exception {exception['hash']} is not the pin its reference row names"
+        )
+    if reduce_symbol_of(spec):
+        raise GeneratorError(
+            f"{spec.key()}: a combined row cannot ship a standalone pin"
+        )
     path = reference_dir / f"{spec.hash()}.hsaco"
     try:
         blob = path.read_bytes()
@@ -1446,7 +1504,7 @@ def load_pin(
         raise GeneratorError(f"{path}: {exc.strerror}") from exc
     if sha256(blob) != row["sha256"]:
         raise GeneratorError(f"{path} is not the pin its reference row names")
-    return Pin(spec.hash(), row["sha256"], blob)
+    return Pin(row["sha256"], blob, exception["reason"])
 
 
 def _record(
@@ -1459,11 +1517,9 @@ def _record(
 ) -> dict:
     """The manifest record of one row: its build status, and for an ``ok`` row the object and its gates.
 
-    With @p pin the row ships pinned objects: a row without a reduce symbol ships ``pin.blob`` and its rebuild only
-    verifies it; a row with one (a dB-storing bias row; ``pin`` is its merged pin, bytes unread) ships the combined rebuild. The record
-    adds ``pin_sha256``, ``rebuilt_sha256`` and ``ship`` (``pin`` | ``combined``); ``sha256`` is the shipped
-    bytes' and the resources are analysed from them. The R-MIR verdict is the rebuild's, and only when the
-    rebuilt object is the pin (else ``not scanned``).
+    A combined row (one with a reduce symbol) carries @p pin, its sweep pin, and ``ship: combined``: the shipped object is
+    not the pin, it is judged by its per-kernel gate. A row whose @p pin has bytes ships them (``ship: pin``, with ``pin_reason``
+    and the sha256 of its rebuild, if any): the object is analysed from those bytes and no toolchain is claimed for it.
     """
     record = instance.to_record()
     record.update(
@@ -1482,11 +1538,10 @@ def _record(
             f"{instance.name}: the row names reduce symbol {reduce_symbol!r}, its build has {reduce_symbol_of(spec)!r}"
         )
     shipped_pin = pin is not None and pin.blob is not None
-    if outcome.status != "ok" and not shipped_pin:
-        record["detail"] = outcome.detail
-        return record
     if outcome.status != "ok":
         record["detail"] = outcome.detail
+        if not shipped_pin:
+            return record
     blob = pin.blob if shipped_pin else outcome.blob
     filename = f"{instance.name}.hsaco"
     where = f"{arch}/{instance.op}/{filename}"
@@ -1501,8 +1556,7 @@ def _record(
         )
     (op_dir / filename).write_bytes(blob)
     delivered = sha256((op_dir / filename).read_bytes())
-    rebuilt = sha256(outcome.blob) if outcome.blob is not None else ""
-    if shipped_pin and rebuilt != pin.sha256:
+    if shipped_pin:
         # The pin is not the object the rebuild's gates saw: analyse the shipped bytes (R-MIR: the sweep's scan stands).
         gate = _run_gate(op_dir / filename, None, spec)
     else:
@@ -1545,35 +1599,40 @@ def _record(
                 "reduce_block": [reduce["block_threads"], 1, 1],
                 "reduce_args": arg_records(reduce_names, reduce["signature"]),
                 "reduce_resources": gate["per_kernel"][reduce_symbol]["resources"],
+                "pin_sha256": pin.sha256,
+                "ship": "combined",
             }
         )
         record["gates"]["pin_gate"] = gate["pin_gate"]
-    if pin is not None:
+    elif shipped_pin:
         record.update(
             {
                 "pin_sha256": pin.sha256,
-                "rebuilt_sha256": rebuilt,
-                "ship": "pin" if shipped_pin else "combined",
+                "ship": "pin",
+                "pin_reason": pin.reason,
+                "rebuilt_sha256": sha256(outcome.blob) if outcome.blob else "",
             }
         )
-        if shipped_pin and outcome.gate is not None:
-            record["rebuilt_resources"] = outcome.gate["resources"]
     return record
 
 
 def _stop_reasons(records: list[dict]) -> list[str]:
-    """Why a ship-pins run ships nothing: any ``error`` row, a row carrying the reduce kernel that did not build ``ok``, or such a row with a red per-kernel gate or a red R-MIR verdict."""
+    """Why a run ships nothing: a row that ships its build and did not build ``ok``, a red R-MIR verdict, or a combined row with a red per-kernel gate."""
     reasons = []
     for record in records:
-        combined = bool(record["knobs"].get("reduce_symbol"))
         status = record["build_status"]
-        if status == "error" or (combined and status != "ok"):
+        if record.get("ship") == "pin":
+            continue
+        if status != "ok":
             reasons.append(f"{record['name']}: {status}: {record.get('detail', '')}")
-        elif combined and record["gates"]["pin_gate"]["verdict"] != "ok":
+        elif record["gates"]["rmir"]["verdict"] == "red":
+            reasons.append(f"{record['name']}: R-MIR spill finding")
+        elif (
+            record.get("ship") == "combined"
+            and record["gates"]["pin_gate"]["verdict"] != "ok"
+        ):
             problems = "; ".join(record["gates"]["pin_gate"]["problems"])
             reasons.append(f"{record['name']}: per-kernel gate red: {problems}")
-        elif combined and record["gates"]["rmir"]["verdict"] == "red":
-            reasons.append(f"{record['name']}: R-MIR spill finding")
     return reasons
 
 
@@ -1584,26 +1643,33 @@ def generate(
     only: set[str] | None = None,
     reference_dir: Path | None = None,
     reference_csv: Path = _REFERENCE_CSV,
+    exceptions_csv: Path = _EXCEPTIONS_CSV,
 ) -> int:
     """Build every row of @p op (or the rows whose Spec hash is in @p only) for @p arch.
 
     Writes ``<out_root>/<op>/<arch>/``; returns the number of ``error`` rows. The
-    directory must not hold files already.
+    directory must not hold files already. The manifest records the toolchain, ROCm version
+    included (``ROCM_PATH`` or ``ROCM_VERSION`` must name it).
 
-    An op in ``_SHIP_PINS_OPS`` needs @p reference_dir (the sweep's pinned objects, checked
-    against the rows of @p reference_csv, ``tests/data/sdpa_bwd_reference.csv``) and ships pins (``_record``). It raises
-    ``GeneratorError``, with nothing left in the op directory, when a row has to stop the run
-    (``_stop_reasons``).
+    An op in ``_SHIPPED_OPS`` ships the objects it builds (a row with two objects is rebuilt, ``compile_specs``), except the rows of
+    ``tests/data/sdpa_bwd_pinned_exceptions.csv`` (@p exceptions_csv), which ship the sweep's pin; it raises ``GeneratorError``,
+    with nothing left in the op directory, when a row has to stop the run (``_stop_reasons``). It needs @p reference_dir (the sweep's
+    pins, ``<hash>.hsaco``, checked against the rows of @p reference_csv, ``tests/data/sdpa_bwd_reference.csv``): the
+    pins of the exception rows are shipped from it and the combined rows are gated against it. No other op takes one.
     """
     refusal = _refuse({op}, arch)
     if refusal:
         raise GeneratorError(refusal)
-    ship_pins = op in _SHIP_PINS_OPS
-    if ship_pins != (reference_dir is not None):
+    shipped = op in _SHIPPED_OPS
+    if shipped != (reference_dir is not None):
         raise GeneratorError(
-            f"{op} ships its pinned objects and needs --reference-dir"
-            if ship_pins
+            f"{op} ships the sweep's pins for its exception rows and needs --reference-dir"
+            if shipped
             else f"{op} takes no reference directory"
+        )
+    if env.rocm_version() == "unknown":
+        raise GeneratorError(
+            "the ROCm version is unknown: set ROCM_PATH to the ROCm install the build compiles against"
         )
     instances = instances_for(op, arch)
     if only is not None:
@@ -1616,15 +1682,15 @@ def generate(
         raise GeneratorError(f"{op_dir} is not empty")
     specs = [to_spec(instance) for instance in instances]
     pins: list[Pin | None] = [None] * len(specs)
-    if ship_pins:
+    if reference_dir is not None:
         reference = read_reference(reference_csv)
-        pins = [
-            load_pin(spec, reference_dir, reference, ships=not reduce_symbol_of(spec))
-            for spec in specs
-        ]
+        exceptions = read_exceptions(exceptions_csv)
+        pins = [load_pin(spec, reference_dir, reference, exceptions) for spec in specs]
     env.assert_flydsl_version()
     env.prepare(arch)
-    outcomes = compile_specs(specs, arch, reference_dir, reference_csv)
+    outcomes = compile_specs(
+        specs, arch, reference_dir, reference_csv, rebuild_unstable=shipped
+    )
 
     op_dir.mkdir(parents=True, exist_ok=True)
     records = []
@@ -1638,7 +1704,7 @@ def generate(
                 geometry=outcome.geometry,
             )
             records.append(_record(instance, spec, failed, op_dir, arch))
-    if ship_pins:
+    if shipped:
         reasons = _stop_reasons(records)
         if reasons:
             for written in op_dir.iterdir():
@@ -1651,7 +1717,7 @@ def generate(
     provenance = env.provenance(arch)
     provenance.pop("aiter_kernels_commit", None)
     write_op_manifest(op_dir, arch, op, provenance, records)
-    source_md = refresh_source_md(op_dir)
+    source_md = _complete_source_md(refresh_source_md(op_dir), op, arch, records)
 
     status = {
         s: sum(r["build_status"] == s for r in records)
@@ -1664,19 +1730,6 @@ def generate(
     for spec, outcome in zip(specs, outcomes):
         if outcome.attempts > 1:
             print(f"{spec.hash()}: built in {outcome.attempts} attempts")
-    if ship_pins:
-        shipped = {
-            kind: sum(r["ship"] == kind for r in records if "ship" in r)
-            for kind in ("pin", "combined")
-        }
-        differing = sum(
-            1
-            for r in records
-            if r.get("ship") == "pin" and r["rebuilt_sha256"] != r["pin_sha256"]
-        )
-        print(
-            f"shipped {shipped}; {differing} pinned row(s) rebuilt to other bytes (LLVM backend nondeterminism)"
-        )
     print(f"refreshed {source_md}")
     return status["error"]
 
@@ -1698,12 +1751,12 @@ def run_op(op: str, description: str, argv: list[str] | None = None) -> int:
         default=None,
         help="comma-separated Spec hashes: build just those rows (debugging)",
     )
-    if op in _SHIP_PINS_OPS:
+    if op in _SHIPPED_OPS:
         parser.add_argument(
             "--reference-dir",
             type=Path,
             default=None,
-            help="the sweep's pinned objects, <hash>.hsaco (required): the rows ship them",
+            help="the sweep's pinned objects, <hash>.hsaco (required): the exception rows ship them, the combined rows are gated against them",
         )
     args = parser.parse_args(argv)
     refusal = _refuse({op}, args.arch)
