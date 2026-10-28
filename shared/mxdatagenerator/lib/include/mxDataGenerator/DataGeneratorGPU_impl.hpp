@@ -1286,6 +1286,16 @@ namespace DGen
             hostGen.generate(sizes, strides, options);
             auto hostData  = hostGen.getDataBytes();
             auto hostScale = hostGen.getScaleBytes();
+            // The CPU generator lays out scale blocks per contiguous row, so a contiguous
+            // dimension that isn't a multiple of blockScaling needs more scale bytes (sizes
+            // {40, 4}, block 32: 2 per row, 8 in all) than the flat arraySize / blockScaling
+            // that getScaleBufferBytes promises the caller (5). Refuse rather than overrun.
+            if(hostData.size() > getDataBufferBytes(sizes, strides, options)
+               || hostScale.size() > getScaleBufferBytes(sizes, strides, options))
+                throw std::invalid_argument(
+                    "DataGeneratorGPU::generateInto: this init mode is generated on the host, "
+                    "and its scale-block layout for these sizes does not fit the device "
+                    "buffers; the contiguous dimension must be a multiple of blockScaling");
             DGEN_DETAIL_CHECK_HIP_(hipMemcpyAsync(
                 devData, hostData.data(), hostData.size(), hipMemcpyHostToDevice, stream));
             if(devScale != nullptr && !hostScale.empty())
