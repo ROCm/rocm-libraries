@@ -12,9 +12,11 @@ never instance state -- so the same driver drives every wave-tile call. The fron
 
 from __future__ import annotations
 
-from ...mma_io import storage_vector_type
-from ..fragments import Fragment, TileDesc, fragment_length
+from ....core.ir import F32, TF32
+from ...mma_io import mma_operand_ir_type, storage_vector_type
+from ..fragments import Fragment, TileDesc, fragment_length, storage_slots
 from ..register_mapper import RegisterMapper
+from ..register_moves import move_registers, move_registers_into
 from ..transforms import (
     mma_accumulator_flow_consistent,
     mma_operand_layout_sound,
@@ -26,6 +28,11 @@ from .warp_encoding import canonical_layouts
 # The catalog row families whose operands the driver supplies: it feeds A, B and C, so a scaled row
 # (which also takes scale operands) or a sparse row (which also takes a sparsity index) is not driven.
 _DRIVEN_FAMILIES = frozenset({"dense"})
+
+# Math dtypes whose instruction also reads a wider fragment dtype, dropping its low mantissa bits: a
+# TF32 MMA reads F32 registers as TF32 (truncation). An author who wants round-to-nearest-even
+# converts the fragment to TF32 first (the "why pre-convert?" note in the gfx942 arch doc, 21.1).
+_MMA_TRUNCATING_SOURCES = {TF32: F32}
 
 
 def _assert_atom_contiguous(
@@ -159,23 +166,38 @@ class TileMmaDriver:
         return self._plan
 
     @staticmethod
-    def _read_subvector(b, vec, start: int, length: int, dtype):
-        """Extract one atom's contiguous register slice ``[start:start+length]`` into a fresh
-        ``<length x dtype>`` vector for ``b.mma``."""
-        out = b.zero_vec(dtype, length)
-        for i in range(length):
-            out = b.vec_insert(out, b.vec_extract(vec, start + i), i)
-        return out
+    def _read_subvector(b, vec, start: int, length: int):
+        """Extract one atom's contiguous register slice ``[start:start+length]`` of ``vec`` into a
+        fresh ``length``-element vector of its element type (u8 included, through
+        :func:`~rocke.helpers.tiling.register_moves.move_registers`) for ``b.mma``."""
+        return move_registers(b, vec, [(start + i, i) for i in range(length)], length)
 
     @staticmethod
-    def _write_subvector(b, vec, sub, start: int, length: int):
-        """Write ``sub`` back into ``vec`` at ``[start:start+length]``, returning the new SSA
-        vector (accumulators are loop-carried SSA values, so this rebuilds the tile C).
+    def _as_operand(b, value, math_dtype, count: int):
+        """Return ``value`` (``count`` logical elements' registers) as the vector type ``b.mma``
+        takes for an operand of ``math_dtype`` (:func:`~rocke.helpers.mma_io.mma_operand_ir_type`),
+        bitcasting only when the types differ: TF32 storage ``i32`` and truncated F32 registers
+        become ``vec<tf32>``; every other operand, packed words included, is already that type.
         """
-        out = vec
-        for i in range(length):
-            out = b.vec_insert(out, b.vec_extract(sub, i), start + i)
-        return out
+        operand_type = mma_operand_ir_type(math_dtype.name, count)
+        if value.type == operand_type:
+            return value
+        return b.bitcast(value, operand_type)
+
+    def _read_operand_atom(
+        self, b, fragment: Fragment, start: int, length: int, math_dtype
+    ):
+        """Return one instruction's A or B operand: logical elements ``[start, start+length)`` of
+        ``fragment``, sliced from the storage registers that hold them
+        (:func:`~rocke.helpers.tiling.fragments.storage_slots`: the 32-bit words for a packed dtype,
+        the elements themselves otherwise), then given the operand type of ``math_dtype``
+        (:meth:`_as_operand`).
+        """
+        slots = storage_slots(
+            fragment.dtype, fragment.tile_desc.register_count, start, length
+        )
+        sub = self._read_subvector(b, fragment.value, slots.start, len(slots))
+        return self._as_operand(b, sub, math_dtype, length)
 
     def _subtile_triples(self):
         """The (mi, nj, ki) atom visitation order, per ``tiling.order`` (right-most fastest)."""
@@ -210,6 +232,11 @@ class TileMmaDriver:
         ``b.mma`` per atom and accumulating each C subtile. The fragments are
         subtile-contiguous (from the wave layouts), so every atom is a register slice.
 
+        Each A and B operand is fed from the fragment's storage registers: an atom's slice is the
+        32-bit words that hold it for a packed dtype, its logical elements otherwise, then given
+        the vector type ``b.mma`` takes for the plan's A or B dtype. A TF32 instruction reads a
+        TF32 fragment (held as ``i32``) or an F32 fragment, whose low mantissa bits it drops.
+
         Before any IR it checks, in order: the operand dtypes; that the instruction's family is
         one the driver feeds (A, B and C only); that a result of another dtype than the
         accumulator is never fed back as the next K step's accumulator; that rocke issues the
@@ -225,17 +252,24 @@ class TileMmaDriver:
         must be assigned (``acc = driver(b, a_frag, b_frag, acc)``).
         """
         plan = self._plan
-        for name, fragment in (
-            ("A", a_fragment),
-            ("B", b_fragment),
-            ("C", accumulator),
+        for name, fragment, want in (
+            ("A", a_fragment, plan.a_dtype),
+            ("B", b_fragment, plan.b_dtype),
+            ("C", accumulator, plan.c_dtype),
         ):
-            want = {"A": plan.a_dtype, "B": plan.b_dtype, "C": plan.c_dtype}[name]
-            if fragment.dtype != want:
-                raise ValueError(
-                    f"MMA operand dtype mismatch -- operand={name}, "
-                    f"fragment={fragment.dtype.name!r}, expected {want.name!r}"
+            source = _MMA_TRUNCATING_SOURCES.get(want) if name != "C" else None
+            if fragment.dtype == want or fragment.dtype == source:
+                continue
+            expected = want.name
+            if source is not None:
+                expected += (
+                    f" or {source.name} ({want.name} math also reads {source.name} "
+                    f"fragments, dropping their low mantissa bits)"
                 )
+            raise ValueError(
+                f"MMA operand dtype mismatch -- operand={name}, "
+                f"fragment={fragment.dtype.name}, expected {expected}"
+            )
 
         traits = plan.traits
         if traits.family not in _DRIVEN_FAMILIES:
@@ -267,10 +301,22 @@ class TileMmaDriver:
         if m_sub == 1 and n_sub == 1:
             acc_value = accumulator.value
             if k_sub == 1:
+                a_op = self._as_operand(
+                    b,
+                    a_fragment.value,
+                    plan.a_dtype,
+                    a_fragment.tile_desc.register_count,
+                )
+                b_op = self._as_operand(
+                    b,
+                    b_fragment.value,
+                    plan.b_dtype,
+                    b_fragment.tile_desc.register_count,
+                )
                 return Fragment(
                     accumulator.tile_desc,
                     plan.d_dtype,
-                    b.mma(op, a_fragment.value, b_fragment.value, acc_value),
+                    b.mma(op, a_op, b_op, acc_value),
                 )
             a_atom = fragment_length(a_fragment.tile_desc.layout) // k_sub
             b_atom = fragment_length(b_fragment.tile_desc.layout) // k_sub
@@ -278,11 +324,11 @@ class TileMmaDriver:
                 plan.tiling.mac_prio
             )  # raise AFTER the first atom (see grid-branch note below)
             for ki in range(k_sub):
-                a_sub = self._read_subvector(
-                    b, a_fragment.value, ki * a_atom, a_atom, a_fragment.dtype
+                a_sub = self._read_operand_atom(
+                    b, a_fragment, ki * a_atom, a_atom, plan.a_dtype
                 )
-                b_sub = self._read_subvector(
-                    b, b_fragment.value, ki * b_atom, b_atom, b_fragment.dtype
+                b_sub = self._read_operand_atom(
+                    b, b_fragment, ki * b_atom, b_atom, plan.b_dtype
                 )
                 acc_value = b.mma(op, a_sub, b_sub, acc_value)
                 if mac_prio and ki == 0:
@@ -302,9 +348,7 @@ class TileMmaDriver:
         b_atom = fragment_length(b_fragment.tile_desc.layout) // (n_sub * k_sub)
         c_atom = fragment_length(accumulator.tile_desc.layout) // (m_sub * n_sub)
         accs = [
-            self._read_subvector(
-                b, accumulator.value, idx * c_atom, c_atom, accumulator.dtype
-            )
+            self._read_subvector(b, accumulator.value, idx * c_atom, c_atom)
             for idx in range(m_sub * n_sub)
         ]
         # `mac_prio` raises wave issue priority for the matrix-dense body (MFMA or WMMA -- the driver is
@@ -316,28 +360,24 @@ class TileMmaDriver:
         mac_prio = plan.tiling.mac_prio
         for i, (mi, nj, ki) in enumerate(self._subtile_triples()):
             idx = mi * n_sub + nj
-            a_sub = self._read_subvector(
-                b,
-                a_fragment.value,
-                (mi * k_sub + ki) * a_atom,
-                a_atom,
-                a_fragment.dtype,
+            a_sub = self._read_operand_atom(
+                b, a_fragment, (mi * k_sub + ki) * a_atom, a_atom, plan.a_dtype
             )
-            b_sub = self._read_subvector(
-                b,
-                b_fragment.value,
-                (nj * k_sub + ki) * b_atom,
-                b_atom,
-                b_fragment.dtype,
+            b_sub = self._read_operand_atom(
+                b, b_fragment, (nj * k_sub + ki) * b_atom, b_atom, plan.b_dtype
             )
             accs[idx] = b.mma(op, a_sub, b_sub, accs[idx])
             if mac_prio and i == 0:
                 b.s_setprio(mac_prio)
         if mac_prio:
             b.s_setprio(0)
+        # Each subtile's result goes back to its contiguous C slice; the accumulator is a
+        # loop-carried SSA value, so this rebuilds the tile C.
         result = self._result_base(b, accumulator, plan.d_dtype)
         for idx in range(m_sub * n_sub):
-            result = self._write_subvector(b, result, accs[idx], idx * c_atom, c_atom)
+            start = idx * c_atom
+            moves = [(register, start + register) for register in range(c_atom)]
+            result = move_registers_into(b, result, accs[idx], moves)
         return Fragment(accumulator.tile_desc, plan.d_dtype, result)
 
     def __repr__(self) -> str:

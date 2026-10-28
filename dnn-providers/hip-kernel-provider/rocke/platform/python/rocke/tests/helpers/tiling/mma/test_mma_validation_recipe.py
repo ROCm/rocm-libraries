@@ -228,12 +228,12 @@ def test_soundness_gate_accepts_rectangular_wave():
 
 def test_driver_is_sole_fragment_slicer():
     # The atom-contiguity guard lives only in the driver because the driver is the ONLY site that
-    # hand-slices a fragment by atom (_read_subvector / _write_subvector / _subtile_triples). A new
-    # hand-slicer elsewhere would need its own contiguity guard -- this fails loud if one appears.
+    # hand-slices a fragment by atom (_read_subvector / _subtile_triples). A new hand-slicer
+    # elsewhere would need its own contiguity guard -- this fails loud if one appears.
     import rocke.helpers.tiling as tiling_pkg
 
     root = pathlib.Path(tiling_pkg.__file__).parent
-    slicers = ("_read_subvector", "_write_subvector", "_subtile_triples")
+    slicers = ("_read_subvector", "_subtile_triples")
     hits = {
         p.name
         for p in root.rglob("*.py")
