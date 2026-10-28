@@ -342,6 +342,38 @@ static int make_cfg_raw(int idx, rocke_implicit_gemm_conv_spec_t* spec, const ch
         *arch = "gfx1250";
         return 0;
     }
+    case 36:
+    case 37:
+    case 38:
+        /* Grouped pointwise (1x1, stride 1, no pad): the flat fast path with
+         * the group's channel slab on A, the within-group filter bound on B and
+         * the group's columns in D's K-wide rows. groups=4, cpg=kpg=16. 36:
+         * direct store, 37: cshuffle store, 38: async_dma loaders. Keep in
+         * lockstep with conv_implicit_gemm_emit.py. */
+        spec->problem = rocke_conv_problem_default(2, 14, 14, 64, 64, 1, 1);
+        spec->problem.groups = 4;
+        if(idx == 37)
+            spec->epilogue = "cshuffle";
+        if(idx == 38)
+            spec->async_dma = true;
+        *arch = "gfx950";
+        return 0;
+    case 39:
+        /* Grouped pointwise on the WMMA direct store, which spells the
+         * pointwise D offset out inline rather than through d_addr. */
+        spec->problem = rocke_conv_problem_default(2, 14, 14, 64, 64, 1, 1);
+        spec->problem.groups = 4;
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 2;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        *arch = "gfx1250";
+        return 0;
     default:
         return -1;
     }

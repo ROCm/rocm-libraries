@@ -197,6 +197,34 @@ TEST(DsSpreadPacer, AStageNotLaterThanItsPlanKeepsItsPlannedEnd) {
     EXPECT_TRUE(pending.empty());
 }
 
+TEST(DsSpreadPacer, AStageEndsWhereTheLdsRateFitsItsLoadsWhenThatIsBeforeItsPlannedEnd) {
+    // 64 loads from WMMA 0 to a barrier at 71 with 17 kept free: planned end 54. At 6 cycles per
+    // load and 8 cycles per WMMA the loads fit by 48, so the stage ends there: 12 batches, 6 loads
+    // in the first. Without the rate the stage ends at 54: 14 batches, 5 in the first.
+    for (bool rate : {false, true}) {
+        Loads v;
+        add(v, 64, 0, 0, 71);
+        v.back().earliest = 40;
+        DsSpreadPacer p;
+        p.plan(v, 128, 4, 0, 17, 0, rate ? 6 : 0, rate ? 8 : 0);
+        auto pending = ids(v);
+        EXPECT_EQ(issueBatch(p, 0, pending), rate ? 6 : 5) << "rate=" << rate;
+    }
+}
+
+TEST(DsSpreadPacer, ARateFloorAtOrAfterThePlannedEndChangesNothing) {
+    // 64 loads from WMMA 80 to the region end (128): the loads fit by 80 + 48 = 128, the planned
+    // end, so the stage keeps its 12 batches.
+    for (bool rate : {false, true}) {
+        Loads v;
+        add(v, 64, 0, 80);
+        DsSpreadPacer p;
+        p.plan(v, 128, 4, 0, 17, 0, rate ? 6 : 0, rate ? 8 : 0);
+        auto pending = ids(v);
+        EXPECT_EQ(issueBatch(p, 80, pending), 6) << "rate=" << rate;
+    }
+}
+
 TEST(DsSpreadPacer, ABatchBehindItsLineTakesWhatTheStageNeedsUpToTheHardware) {
     // 24 loads over 16 WMMAs: 6 per batch. Nothing issued in the first two batches (a dependency),
     // so the third begins behind its line. The stage needs 12 in the 2 batches left; the hardware
