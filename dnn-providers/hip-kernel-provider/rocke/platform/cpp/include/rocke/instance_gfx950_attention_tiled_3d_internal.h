@@ -92,6 +92,8 @@
 #include "rocke/helper_rocke.helpers.distribution.h" /* rocke_tile_distribution_t             */
 #include "rocke/helper_rocke.helpers.layouts.h" /* rocke_transpose_lds_reader_t (PV read)*/
 #include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t             */
+#include "rocke/instance_attention_kv_loader_internal.h"
+#include "rocke/instance_attention_paged_bounds_internal.h"
 #include "rocke/instance_attention_strided_kv_internal.h"
 #include "rocke/instance_gfx950_attention_tiled_3d.h"
 #include "rocke/ir.h"
@@ -124,7 +126,7 @@ typedef enum rocke_gfx950_attn_tiled_3d_kind
 typedef struct rocke_gfx950_attn_tiled_3d_config
 {
     int HD; /* spec.head_size                                       */
-    int T; /* spec.tile_size (== block_size)                       */
+    int T; /* spec.tile_size (logical compute tile)                       */
     int BS; /* spec.block_size                                      */
     int BLOCK_M; /* spec.block_m (== 16)                                 */
     int BLOCK_Q; /* spec.block_q                                         */
@@ -212,7 +214,10 @@ bool rocke_gfx950_attn_tiled_3d_reduce_config_from_spec(
  * ===================================================================== */
 typedef struct rocke_gfx950_attention_tiled_3d_build_ctx
 {
+    bool metadata_containment;
+    rocke_paged_bounds_t bounds;
     bool strided_kv;
+    rocke_attention_kv_loader_kind_t kv_loader_kind;
     rocke_strided_kv_params_t k_strides;
     rocke_strided_kv_params_t v_strides;
     /* ---------- inputs / configuration ---------- */

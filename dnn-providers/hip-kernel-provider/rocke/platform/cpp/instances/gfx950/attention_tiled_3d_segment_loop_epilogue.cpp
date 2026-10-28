@@ -447,10 +447,10 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
                 if(cfg->USE_QQ_BIAS)
                 {
                     rocke_value_t* krp = rocke_b_sub(b, col_abs, ctx->context_len);
-                    rocke_value_t* krp_ok
-                        = rocke_b_land(b,
-                                       rocke_b_cmp_ge(b, krp, rocke_b_const_i32(b, 0)),
-                                       rocke_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p));
+                    rocke_value_t* krp_nonnegative
+                        = rocke_b_cmp_ge(b, krp, rocke_b_const_i32(b, 0));
+                    rocke_value_t* krp_in_bias = rocke_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p);
+                    rocke_value_t* krp_ok = rocke_b_land(b, krp_nonnegative, krp_in_bias);
                     rocke_value_t* qq_ok = rocke_b_land(b, ctx->row_ok, krp_ok);
                     rocke_value_t* qp_safe
                         = rocke_b_select(b, ctx->row_ok, ctx->row_qp, rocke_b_const_i32(b, 0));
@@ -677,4 +677,9 @@ void rocke_gfx950_attention_tiled_3d_emit_epilogue(rocke_gfx950_attention_tiled_
     rocke_b_global_store(b, ctx->segm_max_ptr, ml_idx, ctx->m_final, 4);
     rocke_b_global_store(b, ctx->segm_expsum_ptr, ml_idx, ctx->l_final, 4);
     rocke_b_region_leave(b);
+    if(ctx->metadata_containment)
+    {
+        rocke_b_s_waitcnt(b, 0, 0, -1);
+        rocke_bounds_finish(b, &ctx->bounds);
+    }
 }

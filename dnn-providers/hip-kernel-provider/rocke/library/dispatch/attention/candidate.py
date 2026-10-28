@@ -81,7 +81,9 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
 
         if spec.path == "3d":
             return _3d_signature(
-                spec.kernel_spec.dtype, kv_dtype=spec.kernel_spec.kv_storage_dtype
+                spec.kernel_spec.dtype,
+                kv_dtype=spec.kernel_spec.kv_storage_dtype,
+                metadata_containment=spec.kernel_spec.metadata_containment,
             )
         return _attn_signature(
             spec.kernel_spec.dtype,

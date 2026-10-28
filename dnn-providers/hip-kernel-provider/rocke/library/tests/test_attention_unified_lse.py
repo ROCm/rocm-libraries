@@ -304,11 +304,12 @@ def test_runner_refuses_lse_for_strided_kv(runner):
 
 
 def _tuning_spec(*, reduce_emit_lse):
+    segment, reduce = au._default_3d_specs_from_problem(_problem(), arch="gfx942")
     spec = SimpleNamespace(
         arch="gfx942",
         path="3d",
-        kernel_spec=SimpleNamespace(num_segments=16),
-        reduce_spec=SimpleNamespace(emit_lse=reduce_emit_lse),
+        kernel_spec=segment,
+        reduce_spec=replace(reduce, emit_lse=reduce_emit_lse),
         compile_backend="llvm",
         allow_unsupported=False,
         cache_key=lambda: ("tuning", "gfx942"),

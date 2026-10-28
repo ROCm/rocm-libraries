@@ -19,8 +19,8 @@ reference is fp64 attention over the bf16 inputs.
 
 GPU lane: ``run_all.py --gpu`` (or ``pytest -m gpu``). The GPU tests launch
 the segment and reduce kernels through ``rocke.runtime`` from numpy arrays,
-since the CI GPU lane has no torch. Set ``ROCKE_REQUIRE_DECODE_GPU=gfx942``
-(or ``gfx950``) to fail instead of skip when that GPU is missing.
+since the CI GPU lane has no torch. Tests skip when no gfx942/gfx950 GPU is
+available.
 ``test_native_builder_matches_python`` needs the ``rocke_engine`` binding
 (``ROCKE_BUILD_PYBIND=ON``), which CI does not build, so it skips there and
 runs only where the binding is built: the C++ builders must emit the same IR
@@ -30,7 +30,6 @@ as the Python ones for these specs.
 from __future__ import annotations
 
 import math
-import os
 from dataclasses import asdict
 from importlib import import_module
 
@@ -61,10 +60,7 @@ ATOL, RTOL = 0.01, 0.02
 @pytest.fixture(scope="module")
 def gpu():
     """``(arch, CU count)`` of a gfx942 or gfx950 GPU."""
-    required = os.environ.get("ROCKE_REQUIRE_DECODE_GPU")
     arch = get_device_arch()
-    if required and arch != required:
-        pytest.fail(f"requested {required}, found {arch or 'no GPU'}")
     if arch not in ("gfx942", "gfx950"):
         pytest.skip("needs a gfx942 or gfx950 GPU")
     num_cus = get_device_num_cus()

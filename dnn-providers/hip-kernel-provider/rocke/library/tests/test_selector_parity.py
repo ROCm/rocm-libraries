@@ -54,7 +54,6 @@ from kernels.gfx1250.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec as Gfx1250TiledSpec,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -799,6 +798,8 @@ class TestKvAddrLimit(unittest.TestCase):
             "use_staggered_iter_wait",
             "use_sched_barrier",
             "use_softmax_mfma_interleave",
+            # Additive bias affects scores, never K/V addressing.
+            "use_additive_bias",
             # Q loads and grid order.
             "use_q_direct_global",
             "use_q_direct_reg",
@@ -1258,6 +1259,8 @@ class TestGfx942RouteGuard(_RouteGuardCase):
             _au, "_torch_stream_capturing", return_value=False
         ), mock.patch.object(
             _au, "_run_2d_graphed", side_effect=spy
+        ), mock.patch.dict(
+            "sys.modules", {"torch": SimpleNamespace()}
         ), mock.patch.dict(
             _au._2D_GRAPHS, clear=True
         ):

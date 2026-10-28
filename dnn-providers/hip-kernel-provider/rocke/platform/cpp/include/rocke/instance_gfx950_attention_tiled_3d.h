@@ -274,7 +274,7 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_block_m(
 /* block_q = block_m // num_queries_per_kv */
 int rocke_gfx950_unified_attention_3d_tiled_spec_block_q(
     const rocke_unified_attention_3d_tiled_spec_t* s);
-/* tile_size = block_size (the gfx950 @property ignores tile_size_override). */
+/* Override, otherwise block_size; one-token pages default to tile size 32. */
 int rocke_gfx950_unified_attention_3d_tiled_spec_tile_size(
     const rocke_unified_attention_3d_tiled_spec_t* s);
 /* dtype_ir: F16 for "fp16", BF16 otherwise (returns a rocke_type_t*). */

@@ -407,6 +407,13 @@ if(ROCKE_INSTALL_TESTS)
               "golden gate will fail on its library-kernel cases")
     endif()
 
+    # A declared native lane must carry the matching extension in the test
+    # artifact (the default site-packages install is outside its capture).
+    if(ROCKE_BUILD_PYBIND)
+      install(FILES "$<TARGET_FILE:rocke_engine>"
+              DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/native")
+    endif()
+
     # Keep the LDS skill CLI under tests/ so TheRock's test artifact includes it.
     install(PROGRAMS
             "${CMAKE_CURRENT_SOURCE_DIR}/dsl_docs/optimization/utilities/skills/lds-bank-conflict-expert/scripts/predict.py"
@@ -503,8 +510,12 @@ if(ROCKE_INSTALL_TESTS)
     # rather than executing the .py directly, so they work on Windows where
     # shebangs are not supported. The CI test environment activates a venv with
     # requirements-test.txt before running ctest.
+    set(_rocke_smoke_native_arg "")
+    if(ROCKE_BUILD_PYBIND)
+      set(_rocke_smoke_native_arg " --check-pybind")
+    endif()
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_python_import_smoke python \"${ROCKE_TEST_CTEST_REL}rocke_installed_smoke.py\")\n")
+           "add_test(rocke_python_import_smoke python \"${ROCKE_TEST_CTEST_REL}rocke_installed_smoke.py\"${_rocke_smoke_native_arg})\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;quick\")\n")
 
@@ -631,6 +642,14 @@ if(ROCKE_INSTALL_TESTS)
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
         "tests/library/tests/test_attention_dense_decode.py"
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
+        "tests/library/tests/test_attention_kv_loader.py"
+        "tests/library/tests/test_decode_numeric_support.py"
+        "tests/library/tests/test_paged_feature_admission.py"
+        "tests/library/tests/test_paged_kv_decode.py"
+        "tests/library/tests/test_paged_metadata_containment.py"
+        "tests/library/tests/test_paged_lse.py"
+        "tests/library/tests/test_strided_kv_decode.py"
+        "tests/library/tests/test_strided_kv_lds.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
         "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py")
@@ -830,6 +849,10 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_dgrad_fused_weights.py"
         "tests/library/tests/test_direct_mfma_dgrad_correctness.py"
         "tests/library/tests/test_attention_dense_gfx942_numeric.py"
+        "tests/library/tests/test_paged_kv_decode_numeric.py"
+        "tests/library/tests/test_paged_metadata_containment_numeric.py"
+        "tests/library/tests/test_paged_lse_numeric.py"
+        "tests/library/tests/test_strided_kv_decode_numeric.py"
         "tests/library/tests/test_attention_unified_lse_numeric.py"
         "tests/library/tests/test_attn_bf16_d128_ring.py"
         "tests/library/tests/test_dtype_dispatch.py"

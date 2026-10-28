@@ -56,6 +56,16 @@ _RDNA_WMMA_FEATURES = {
     "runtime_head_dims",
 }
 EXPECTED_FEATURES = {
+    "attention_paged_decode_t32": {
+        "causal",
+        "causal_bottom_right",
+        "sliding_window",
+        "sinks",
+        "softcap",
+        "alibi",
+        "qq_bias",
+        "lse",
+    },
     "attention_strided_decode": {
         "strided_kv",
         "causal",

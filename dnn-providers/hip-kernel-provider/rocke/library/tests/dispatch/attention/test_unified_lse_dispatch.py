@@ -87,8 +87,8 @@ def test_pinned_split_kv_spec_follows_the_request(arch):
 
 # What a long-lived cache stored for ``_decode_request`` before emit_lse existed:
 # the unpinned spec_hash, and the split-KV pin with its spec_hash. These are
-# develop's own values (gfx950's split-KV config_key moved with #13120's
-# additive-bias field); emit_lse must leave them exactly as develop computes them.
+# develop's values before the paged-loader defaults. LSE alone excludes its
+# false field; new loader/containment defaults require revalidation of these pins.
 _PRE_LSE_UNPINNED_SPEC_HASH = "65416b2a8b9ffa90"
 _PRE_LSE_PIN = {
     "gfx942": ("splitkv_seg16_t1xb_wpenone@d50574be81e67c73", "8dc6060ed42707f6"),
@@ -97,18 +97,26 @@ _PRE_LSE_PIN = {
 
 
 @pytest.mark.parametrize("arch", _ARCHES)
-def test_pre_lse_cache_entries_still_resolve_with_lse_off(arch):
-    """A cache replays a stored pin and treats a spec_hash mismatch as a miss.
-    The LSE field must leave every LSE-off identity as it was (spec payload,
-    tuning cache key, config defaults fingerprint), or every stored entry stops
-    resolving."""
+def test_pre_lse_cache_entries_require_revalidation_after_paged_fields(arch):
+    """The paged loader adds declared containment and loader defaults. Those
+    re-key old explicit pins independently of LSE; stale pins must refuse rather
+    than replay another kernel. A newly selected LSE-off pin still round-trips,
+    and the false LSE field stays out of the emitted-kernel cache payload."""
+    from rocke.dispatch.core import PinRefused
+
     unpinned = dispatch_attention(_decode_request(arch))
     assert unpinned.kernel_id.spec_hash == _PRE_LSE_UNPINNED_SPEC_HASH
-    tuning_id, spec_hash = _PRE_LSE_PIN[arch]
-    pinned = dataclasses.replace(
-        _pinned(_decode_request(arch), _SPLIT_KV_SPEC[arch]), tuning_id=tuning_id
+    tuning_id, _ = _PRE_LSE_PIN[arch]
+    base = _pinned(_decode_request(arch), _SPLIT_KV_SPEC[arch])
+    with pytest.raises(PinRefused, match="older defaults or an older identity schema"):
+        dispatch_attention(dataclasses.replace(base, tuning_id=tuning_id))
+    current = dispatch_attention(base)
+    replay = dispatch_attention(
+        dataclasses.replace(base, tuning_id=current.spec.tuning_id)
     )
-    assert dispatch_attention(pinned).kernel_id.spec_hash == spec_hash
+    assert replay.kernel_id.spec_hash == current.kernel_id.spec_hash
+    assert replay.spec.cache_key() == current.spec.cache_key()
+    assert "emit_lse" not in dict(current.spec.cache_key()[-1])
 
 
 @pytest.mark.parametrize("arch", _ARCHES)

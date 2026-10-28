@@ -35,6 +35,7 @@
  * individually.
  */
 
+#include "rocke/instance_attention_paged_kv_internal.h"
 #include <math.h> /* INFINITY */
 #include <stdio.h> /* snprintf */
 #include <string.h>
@@ -328,7 +329,9 @@ void rocke_gfx950_attention_tiled_3d_declare_params(
     ctx->num_seqs_p = rocke_b_param(B, "num_seqs", rocke_i32(), NULL);
     ctx->bt_stride_p = rocke_b_param(B, "block_table_stride", rocke_i32(), NULL);
     ctx->qq_bias_stride0_p = rocke_b_param(B, "qq_bias_stride_0", rocke_i32(), NULL);
-    if(ctx->strided_kv)
+    if(ctx->metadata_containment)
+        rocke_bounds_declare(B, &ctx->bounds, CFG.SLIDING_WINDOW);
+    if(ctx->kv_loader_kind == ROCKE_ATTN_KV_STRIDED)
     {
         ctx->k_strides = rocke_declare_strided_kv_params(B, "k");
         ctx->v_strides = rocke_declare_strided_kv_params(B, "v");
@@ -373,10 +376,23 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
     }
 
     /* ---- cu_q bounds / per-sequence geometry (lines 373-379) ---- */
+    if(ctx->metadata_containment)
+    {
+        rocke_bounds_checked_start(B,
+                                   &ctx->bounds,
+                                   ctx->seq_idx,
+                                   ctx->kv_head_idx,
+                                   ctx->seg_idx,
+                                   ctx->tid,
+                                   ctx->num_seqs_p,
+                                   CFG.NUM_KV,
+                                   CFG.NUM_SEG);
+    }
     ctx->cu_q_start = rocke_b_global_load_i32(B, ctx->cu_q, ctx->seq_idx, 0);
     ctx->cu_q_stop = rocke_b_global_load_i32(
         B, ctx->cu_q, rocke_b_add(B, ctx->seq_idx, rocke_b_const_i32(B, 1)), 0);
-    ctx->cur_batch_q_len = rocke_b_sub(B, ctx->cu_q_stop, ctx->cu_q_start);
+    ctx->cur_batch_q_len
+        = ctx->metadata_containment ? NULL : rocke_b_sub(B, ctx->cu_q_stop, ctx->cu_q_start);
     if(CFG.DECODE_GRID)
     {
         ctx->q_block_start_idx = NULL;
@@ -389,6 +405,28 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
         ctx->q_block_local_idx = rocke_b_sub(B, ctx->q_block_global_idx, ctx->q_block_start_idx);
     }
     ctx->seq_len = rocke_b_global_load_i32(B, ctx->seq_lens, ctx->seq_idx, 0);
+    if(ctx->metadata_containment)
+    {
+        rocke_bounds_row_t row = rocke_bounds_checked_metadata(B,
+                                                               &ctx->bounds,
+                                                               ctx->seq_idx,
+                                                               ctx->kv_head_idx,
+                                                               ctx->seg_idx,
+                                                               ctx->tid,
+                                                               ctx->cu_q_start,
+                                                               ctx->cu_q_stop,
+                                                               ctx->seq_len,
+                                                               ctx->segm_output_ptr,
+                                                               ctx->segm_max_ptr,
+                                                               ctx->segm_expsum_ptr,
+                                                               CFG.HD,
+                                                               CFG.NQK,
+                                                               CFG.NUM_QH,
+                                                               CFG.NUM_SEG);
+        ctx->cu_q_start = row.query_start;
+        ctx->cur_batch_q_len = row.query_length;
+        ctx->seq_len = row.sequence_length;
+    }
     ctx->context_len = rocke_b_sub(B, ctx->seq_len, ctx->cur_batch_q_len);
 
     /* qb_start_pos = q_block_local_idx * BLOCK_Q (line 381) */
@@ -436,6 +474,29 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
     }
 
     /* early-out zero-fill block (lines 416-461) */
+    if(ctx->metadata_containment)
+    {
+        rocke_value_t* t1 = rocke_b_cmp_ge(B, ctx->seg_start_tile_pos, ctx->seq_len);
+        {
+            rocke_if_t g2 = rocke_b_scf_if(B, t1);
+            rocke_b_region_enter(B, g2.then_region);
+            rocke_bounds_neutral(B,
+                                 ctx->seq_idx,
+                                 ctx->kv_head_idx,
+                                 ctx->seg_idx,
+                                 ctx->tid,
+                                 ctx->segm_output_ptr,
+                                 ctx->segm_max_ptr,
+                                 ctx->segm_expsum_ptr,
+                                 CFG.HD,
+                                 CFG.NQK,
+                                 CFG.NUM_QH,
+                                 CFG.NUM_SEG);
+            rocke_bounds_finish(B, &ctx->bounds);
+            rocke_b_ret(B);
+            rocke_b_region_leave(B);
+        }
+    }
     rocke_gfx950_attention_tiled_3d_emit_early_zero_fill(ctx);
 
     /* ---- LDS layout (lines 464-467) ---- */
@@ -523,7 +584,7 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
 
     /* ---- async DMA infra (lines 565-585) ---- */
     ctx->big_bytes = rocke_b_const_i32(B, 0x7FFF0000);
-    if(ctx->strided_kv)
+    if(ctx->kv_loader_kind == ROCKE_ATTN_KV_STRIDED)
     {
         ctx->key_rsrc = rocke_strided_kv_resource(
             B, ctx->key, &ctx->k_strides, ctx->seq_idx, ctx->kv_head_idx);
@@ -532,8 +593,10 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
     }
     else
     {
-        ctx->key_rsrc = rocke_b_buffer_rsrc(B, ctx->key, ctx->big_bytes);
-        ctx->value_rsrc = rocke_b_buffer_rsrc(B, ctx->value, ctx->big_bytes);
+        ctx->key_rsrc = rocke_b_buffer_rsrc(
+            B, ctx->key, ctx->metadata_containment ? ctx->bounds.k_bytes : ctx->big_bytes);
+        ctx->value_rsrc = rocke_b_buffer_rsrc(
+            B, ctx->value, ctx->metadata_containment ? ctx->bounds.v_bytes : ctx->big_bytes);
     }
     /* kv_block_bytes_c = const_i32(kv_stride_blk_b): one-block buffer bound for
      * the i64-addressing path (Python creates it unconditionally right after the
@@ -548,7 +611,7 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
     memset(ctx->lane_within_b, 0, sizeof(ctx->lane_within_b));
     ctx->paged_kv_desc = NULL;
     /* seq_base = seq_idx * bt_stride_p (line 592) */
-    if(ctx->strided_kv)
+    if(ctx->kv_loader_kind == ROCKE_ATTN_KV_STRIDED)
     {
         return;
     }
@@ -957,14 +1020,49 @@ static void rocke__issue_strided_tile(rocke_gfx950_attention_tiled_3d_build_ctx_
     {
         rocke_value_t* linear_half
             = rocke_b_add(B, rocke_b_const_i32(B, call * KV_HALVES_PER_CALL), ctx->lane_half_base);
-        rocke_value_t* voff = rocke_strided_kv_offset(
-            B,
-            strides,
-            kv_tile_idx,
-            rocke_gfx950_attention_tiled_3d_kv_src_linear(ctx, linear_half),
-            ctx->seq_len,
-            CFG.HD,
-            CFG.T);
+        rocke_value_t* voff;
+        if(ctx->metadata_containment)
+        {
+            voff = rocke_bounds_offset(
+                B,
+                &ctx->bounds,
+                ctx->block_tables,
+                ctx->seq_base,
+                ctx->kv_head_idx,
+                kv_tile_idx,
+                rocke_gfx950_attention_tiled_3d_kv_src_linear(ctx, linear_half),
+                ctx->seq_len,
+                CFG.HD,
+                CFG.BS,
+                CFG.T,
+                CFG.NUM_KV);
+        }
+        else if(ctx->kv_loader_kind == ROCKE_ATTN_KV_PAGED_TOKEN_GATHER)
+        {
+            voff = rocke_paged_kv_offset(
+                B,
+                ctx->block_tables,
+                ctx->seq_base,
+                ctx->kv_head_idx,
+                kv_tile_idx,
+                rocke_gfx950_attention_tiled_3d_kv_src_linear(ctx, linear_half),
+                ctx->seq_len,
+                CFG.HD,
+                CFG.BS,
+                CFG.T,
+                CFG.NUM_KV);
+        }
+        else
+        {
+            voff = rocke_strided_kv_offset(
+                B,
+                strides,
+                kv_tile_idx,
+                rocke_gfx950_attention_tiled_3d_kv_src_linear(ctx, linear_half),
+                ctx->seq_len,
+                CFG.HD,
+                CFG.T);
+        }
         rocke_value_t* dst = rocke_b_smem_ptr_add(
             B, buf_base, rocke_b_const_i64(B, (int64_t)call * bytes_per_call));
         rocke_b_async_buffer_load_lds_addr(
@@ -1037,7 +1135,8 @@ void rocke_gfx950_attention_tiled_3d_issue_k(rocke_gfx950_attention_tiled_3d_bui
     {
         rocke_gfx950_attention_tiled_3d_issue_fp8_dequant_loads(ctx, false, tile_idx, buf_idx);
     }
-    else if(ctx->strided_kv)
+    else if(ctx->metadata_containment || ctx->strided_kv
+            || ctx->kv_loader_kind == ROCKE_ATTN_KV_PAGED_TOKEN_GATHER)
     {
         rocke__issue_strided_tile(
             ctx, ctx->key_rsrc, &ctx->k_strides, ctx->K_lds_addr, tile_idx, buf_idx);
@@ -1058,7 +1157,8 @@ void rocke_gfx950_attention_tiled_3d_issue_v(rocke_gfx950_attention_tiled_3d_bui
     {
         rocke_gfx950_attention_tiled_3d_issue_fp8_dequant_loads(ctx, true, tile_idx, buf_idx);
     }
-    else if(ctx->strided_kv)
+    else if(ctx->metadata_containment || ctx->strided_kv
+            || ctx->kv_loader_kind == ROCKE_ATTN_KV_PAGED_TOKEN_GATHER)
     {
         rocke__issue_strided_tile(
             ctx, ctx->value_rsrc, &ctx->v_strides, ctx->V_lds_addr, tile_idx, buf_idx);

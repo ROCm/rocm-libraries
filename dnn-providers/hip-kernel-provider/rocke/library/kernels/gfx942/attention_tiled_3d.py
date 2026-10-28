@@ -30,10 +30,25 @@ See the gfx950 module docstring for the split-KV grid / workspace layout.
 
 from __future__ import annotations
 
+import math
+from ..common._attention_validation import validate_attention_3d_spec_types
+
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
+from kernels.common._attention_kv_loader import (
+    AttentionKVLoaderKind,
+    resolve_attention_kv_loader,
+)
+from kernels.common._attention_paged_kv import paged_kv_offset
+from kernels.common._attention_paged_bounds import (
+    PagedBounds,
+    neutral_segment,
+    bounded_reduce_params,
+    reject_failed_sequence,
+)
 from kernels.common._attention_strided_kv import (
+    StridedKvParams,
     declare_strided_kv_params,
     strided_kv_offset,
     strided_kv_resource,
@@ -164,8 +179,23 @@ class UnifiedAttention3DTiledSpec:
     # so no page-table load sits on the KV loop's critical path. Paged K/V;
     # implemented for fp16/bf16, which can be extended to the fp8 loader.
     use_wave_page_id_load: bool = False
+    metadata_containment: bool = False
 
     def __post_init__(self):
+        validate_attention_3d_spec_types(self, complete=True)
+        if self.block_size not in (1, 16, 32, 64) or self.tile_size not in (16, 32, 64):
+            raise ValueError(
+                "tiled decode requires page size 1/16/32/64 and tile size 16/32/64"
+            )
+        if self.uses_paged_gather and (
+            self.tile_size != 32
+            or self.kv_storage_dtype is not None
+            or self.use_i64_kv_addr
+            or self.use_wide_kv_load
+        ):
+            raise ValueError(
+                "paged gather requires tile 32 and fp16/bf16 bounded async loads"
+            )
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
         if self.kv_layout not in ("paged", "strided"):
@@ -200,6 +230,8 @@ class UnifiedAttention3DTiledSpec:
             )
         if self.use_kv_lds_swizzle and self.kv_storage_dtype is not None:
             raise ValueError("use_kv_lds_swizzle needs fp16/bf16 KV")
+        if self.uses_paged_gather and self.use_wave_page_id_load:
+            raise ValueError("paged gather does not support use_wave_page_id_load")
         if self.use_wave_page_id_load and (
             self.kv_layout != "paged" or self.kv_storage_dtype is not None
         ):
@@ -222,7 +254,16 @@ class UnifiedAttention3DTiledSpec:
         return (
             self.tile_size_override
             if self.tile_size_override is not None
-            else self.block_size
+            else (32 if self.block_size == 1 else self.block_size)
+        )
+
+    @property
+    def uses_paged_gather(self) -> bool:
+        return (
+            resolve_attention_kv_loader(
+                "gfx942", self.kv_layout, self.block_size, self.tile_size
+            )
+            is AttentionKVLoaderKind.PAGED_TOKEN_GATHER
         )
 
     @property
@@ -251,11 +292,13 @@ class UnifiedAttention3DTiledSpec:
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
             "wkv" if self.use_wide_kv_load else "",
+            f"t{self.tile_size}" if self.tile_size != self.block_size else "",
             "dg" if self.use_decode_grid else "",
             f"kvcp{self.kv_cache_policy}" if self.kv_cache_policy != "all" else "",
             "kvswz" if self.use_kv_lds_swizzle else "",
             "wpid" if self.use_wave_page_id_load else "",
             "stridedkv" if self.kv_layout == "strided" else "",
+            "bounds_v1" if self.metadata_containment else "",
         )
 
 
@@ -291,11 +334,13 @@ def supports_tiled_3d(
             False,
             f"tiled 3D kernel requires head_size divisible by 32 (got {head_size})",
         )
-    if block_size not in (16, 32, 64):
+    if block_size not in (1, 16, 32, 64):
         return (
             False,
-            f"tiled 3D kernel only supports block_size in {{16,32,64}} (got {block_size})",
+            f"tiled 3D kernel only supports block_size in {{1,16,32,64}} (got {block_size})",
         )
+    if block_size == 1 and (use_fp8 or kv_storage_dtype is not None):
+        return False, "one-token pages require fp16/bf16 KV storage"
     if kv_storage_dtype is not None and kv_storage_dtype != "fp8e4m3":
         return (
             False,
@@ -349,6 +394,9 @@ def build_unified_attention_3d_tiled(
     from ..common.attention_arch import require_tiled_attention_arch
 
     require_tiled_attention_arch(arch)
+    validate_attention_3d_spec_types(spec, complete=True)
+    if spec.metadata_containment and arch != "gfx942":
+        raise ValueError("bounded decode builder requires gfx942")
 
     if spec.dtype not in ("fp16", "bf16"):
         raise NotImplementedError("tiled 3D kernel supports fp16/bf16")
@@ -357,6 +405,7 @@ def build_unified_attention_3d_tiled(
     HD = spec.head_size
     T = spec.tile_size
     BS = spec.block_size
+    loader_kind = resolve_attention_kv_loader("gfx942", spec.kv_layout, BS, T)
     BLOCK_M = spec.block_m
     BLOCK_Q = spec.block_q
     NQK = spec.num_queries_per_kv
@@ -445,7 +494,13 @@ def build_unified_attention_3d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
-    if spec.kv_layout == "strided":
+    bounds = (
+        PagedBounds(b, sliding_window=SLIDING_WINDOW)
+        if spec.metadata_containment
+        else None
+    )
+    k_strides = v_strides = None
+    if loader_kind is AttentionKVLoaderKind.STRIDED:
         k_strides = declare_strided_kv_params(b, "k")
         v_strides = declare_strided_kv_params(b, "v")
 
@@ -466,15 +521,36 @@ def build_unified_attention_3d_tiled(
             block_q=BLOCK_Q,
             iterations=spec.binary_search_iters,
         )
+    if bounds is not None:
+        bounds.checked_start(
+            seq_idx, kv_head_idx, seg_idx, tid, num_seqs_p, NUM_KV, NUM_SEG
+        )
     cu_q_start = b.global_load_i32(cu_q, seq_idx)
     cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
-    cur_batch_q_len = b.sub(cu_q_stop, cu_q_start)
+    cur_batch_q_len = None if bounds is not None else b.sub(cu_q_stop, cu_q_start)
     if spec.use_decode_grid:
         q_block_local_idx = b.const_i32(0)
     else:
         q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BLOCK_Q)), seq_idx)
         q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
     seq_len = b.global_load_i32(seq_lens, seq_idx)
+    if bounds is not None:
+        cu_q_start, cur_batch_q_len, seq_len = bounds.checked_metadata(
+            seq_idx,
+            kv_head_idx,
+            seg_idx,
+            tid,
+            cu_q_start,
+            cu_q_stop,
+            seq_len,
+            segm_output_ptr,
+            segm_max_ptr,
+            segm_expsum_ptr,
+            HD,
+            NQK,
+            NUM_QH,
+            NUM_SEG,
+        )
     context_len = b.sub(seq_len, cur_batch_q_len)
 
     qb_start_pos = b.mul(q_block_local_idx, b.const_i32(BLOCK_Q))
@@ -501,6 +577,24 @@ def build_unified_attention_3d_tiled(
     )
 
     seg_start_tile_pos = b.mul(b.mul(seg_idx, tps), b.const_i32(T))
+    if bounds is not None:
+        with b.scf_if(b.cmp_ge(seg_start_tile_pos, seq_len)):
+            neutral_segment(
+                b,
+                seq_idx,
+                kv_head_idx,
+                seg_idx,
+                tid,
+                segm_output_ptr,
+                segm_max_ptr,
+                segm_expsum_ptr,
+                HD,
+                NQK,
+                NUM_QH,
+                NUM_SEG,
+            )
+            bounds.finish()
+            b.ret()
     with b.scf_if(b.cmp_ge(seg_start_tile_pos, seq_len)):
         neg_inf_local = b.const_f32(float("-inf"))
         zero_local = b.const_f32(0.0)
@@ -656,12 +750,16 @@ def build_unified_attention_3d_tiled(
     ASYNC_LDS_DWORDS = 1
     HALVES_PER_LANE = ASYNC_LDS_DWORDS * 2  # 4 bytes / 2 bytes-per-half
     big_bytes = b.const_i32(0x7FFF0000)
-    if spec.kv_layout == "strided":
+    if loader_kind is AttentionKVLoaderKind.STRIDED:
         key_rsrc = strided_kv_resource(b, key, k_strides, seq_idx, kv_head_idx)
         value_rsrc = strided_kv_resource(b, value, v_strides, seq_idx, kv_head_idx)
     else:
-        key_rsrc = b.buffer_rsrc(key, big_bytes)
-        value_rsrc = b.buffer_rsrc(value, big_bytes)
+        key_rsrc = b.buffer_rsrc(
+            key, bounds.k_bytes if bounds is not None else big_bytes
+        )
+        value_rsrc = b.buffer_rsrc(
+            value, bounds.v_bytes if bounds is not None else big_bytes
+        )
 
     KV_HALVES_PER_CALL = THREADS * HALVES_PER_LANE
     assert (T * HD) % KV_HALVES_PER_CALL == 0
@@ -677,7 +775,11 @@ def build_unified_attention_3d_tiled(
     V_lds_addr = b.smem_addr_of(V_lds)
     zero_soff = b.const_i32(0)
 
-    seq_base = b.mul(seq_idx, bt_stride_p) if spec.kv_layout == "paged" else None
+    seq_base = (
+        b.mul(seq_idx, bt_stride_p)
+        if loader_kind is not AttentionKVLoaderKind.STRIDED
+        else None
+    )
     _kv_base = TensorDescriptor.naive(
         "paged_kv_bytes",
         lengths=[1 << 24, BS, NUM_KV, HD],
@@ -691,7 +793,7 @@ def build_unified_attention_3d_tiled(
             ),
             unmerge("linear_half", into=("token", "dim"), dims=(T, HD)),
         )
-    else:
+    elif T < BS:
         assert BS % T == 0, "3D tile_size_override must divide block_size"
         BLOCKS_PER_CACHE_BLOCK = BS // T
         paged_kv_desc = _kv_base.transform(
@@ -726,7 +828,7 @@ def build_unified_attention_3d_tiled(
         K_buf_base = b.smem_ptr_add(K_lds_addr, buf_off_i64)
         for call in range(kv_calls_per_tile):
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
-            if spec.kv_layout == "strided":
+            if loader_kind is AttentionKVLoaderKind.STRIDED:
                 voff = strided_kv_offset(
                     b,
                     k_strides,
@@ -735,6 +837,23 @@ def build_unified_attention_3d_tiled(
                     seq_len,
                     HD,
                     T,
+                )
+            elif (
+                bounds is not None
+                or loader_kind is AttentionKVLoaderKind.PAGED_TOKEN_GATHER
+            ):
+                voff = (bounds.offset if bounds is not None else paged_kv_offset)(
+                    b,
+                    block_tables,
+                    seq_base,
+                    kv_head_idx,
+                    kv_tile_idx,
+                    _kv_src_linear(linear_half),
+                    seq_len,
+                    HD,
+                    BS,
+                    T,
+                    NUM_KV,
                 )
             elif page_id is not None:
                 src_half = _kv_src_linear(linear_half)
@@ -786,6 +905,23 @@ def build_unified_attention_3d_tiled(
                     seq_len,
                     HD,
                     T,
+                )
+            elif (
+                bounds is not None
+                or loader_kind is AttentionKVLoaderKind.PAGED_TOKEN_GATHER
+            ):
+                voff = (bounds.offset if bounds is not None else paged_kv_offset)(
+                    b,
+                    block_tables,
+                    seq_base,
+                    kv_head_idx,
+                    kv_tile_idx,
+                    _kv_src_linear(linear_half),
+                    seq_len,
+                    HD,
+                    BS,
+                    T,
+                    NUM_KV,
                 )
             elif page_id is not None:
                 src_half = _kv_src_linear(linear_half)
@@ -1145,9 +1281,9 @@ def build_unified_attention_3d_tiled(
                 if USE_QQ_BIAS:
                     # See attention_tiled_2d.py for the rationale on row_ok.
                     krp = b.sub(col_abs, context_len)
-                    krp_ok = b.land(
-                        b.cmp_ge(krp, b.const_i32(0)), b.cmp_lt(krp, qq_bias_stride0_p)
-                    )
+                    krp_nonnegative = b.cmp_ge(krp, b.const_i32(0))
+                    krp_in_bias = b.cmp_lt(krp, qq_bias_stride0_p)
+                    krp_ok = b.land(krp_nonnegative, krp_in_bias)
                     qq_ok = b.land(row_ok, krp_ok)
                     qp_safe = b.select(row_ok, qp_r, b.const_i32(0))
                     qq_idx = b.add(b.mul(qp_safe, qq_bias_stride0_p), krp)
@@ -1257,6 +1393,10 @@ def build_unified_attention_3d_tiled(
         b.global_store(segm_max_ptr, ml_idx, m_final, align=4)
         b.global_store(segm_expsum_ptr, ml_idx, l_final, align=4)
 
+    if bounds is not None:
+        b.s_waitcnt(vmcnt=0, lgkmcnt=0)
+        bounds.finish()
+
     return b.kernel
 
 
@@ -1273,18 +1413,12 @@ class UnifiedAttentionReduceTiledSpec:
     dtype: str
     num_segments: int
     waves_per_eu: Optional[int] = None
-    # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
-    #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
-    #   Off by default; off adds no LSE parameter and no LSE store. (The reduce IR
-    #   still differs from before LSE existed: the masked-segment merge fix below
-    #   applies with LSE on or off.)
+    metadata_containment: bool = False
+
     emit_lse: bool = field(default=False, kw_only=True)
 
-    def __post_init__(self) -> None:
-        if type(self.emit_lse) is not bool:
-            raise ValueError(
-                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
-            )
+    def __post_init__(self):
+        validate_attention_3d_spec_types(self, reducer=True, complete=True)
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
 
@@ -1301,6 +1435,8 @@ class UnifiedAttentionReduceTiledSpec:
             f"seg{self.num_segments}",
             self.dtype,
         ]
+        if self.metadata_containment:
+            parts.append("bounds_v1")
         if self.emit_lse:
             parts.append("lse")
         return kernel_name_join("rocke_uattn_reduce_tiled_gfx942", *parts)
@@ -1312,6 +1448,9 @@ def build_unified_attention_reduce_tiled(
     arch: str = "gfx942",
 ) -> KernelDef:
     """Combine the per-segment partial state into the final fp16/bf16 output."""
+    validate_attention_3d_spec_types(spec, reducer=True, complete=True)
+    if spec.metadata_containment and arch != "gfx942":
+        raise ValueError("bounded decode reducer requires gfx942")
     HD = spec.head_size
     NUM_SEG = spec.num_segments
     NUM_QH = spec.num_query_heads
@@ -1335,6 +1474,9 @@ def build_unified_attention_reduce_tiled(
     seg_max = b.param("segm_max_ptr", PtrType(F32, "global"), readonly=True, align=4)
     seg_l = b.param("segm_expsum_ptr", PtrType(F32, "global"), readonly=True, align=4)
     _seq_lens = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
+    if spec.metadata_containment:
+        status, num_seqs = bounded_reduce_params(b)
+
     lse = (
         b.param(
             "lse_ptr",
@@ -1350,6 +1492,26 @@ def build_unified_attention_reduce_tiled(
     q_token = b.block_id_x()
     q_head = b.block_id_y()
     tid = b.thread_id_x()
+
+    if spec.metadata_containment:
+        with b.scf_if(
+            b.lor(b.cmp_ge(q_token, num_seqs), b.cmp_ge(q_head, b.const_i32(NUM_QH)))
+        ):
+            b.ret()
+        reject_failed_sequence(
+            b,
+            status,
+            q_token,
+            q_head,
+            tid,
+            out,
+            dtype,
+            HD,
+            NUM_QH,
+            spec.num_kv_heads,
+            NUM_SEG,
+            lse=lse,
+        )
 
     neg_inf = b.const_f32(float("-inf"))
     zero_f = b.const_f32(0.0)
