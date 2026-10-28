@@ -518,8 +518,12 @@ namespace hiptensor
 
             ScalarData alphaBuf;
             ScalarData betaBuf;
-            writeVal(&alphaBuf, computeType, ScalarData(computeType, alpha[0], alpha[1]));
-            writeVal(&betaBuf, computeType, ScalarData(computeType, beta[0], beta[1]));
+            writeVal(&alphaBuf,
+                     computeType,
+                     ScalarData(computeType, alpha[0], alpha.size() > 1 ? alpha[1] : 0.0));
+            writeVal(&betaBuf,
+                     computeType,
+                     ScalarData(computeType, beta[0], beta.size() > 1 ? beta[1] : 0.0));
 
             CHECK_HIPTENSOR_ERROR(hiptensorCreatePlan(handle, &plan, desc, planPref, worksize));
 
