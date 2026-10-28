@@ -544,6 +544,34 @@ def test_reduction_work_is_configurable(tmp_path, blocks):
     assert library.choose_single_problem(17, reduction_blocks=blocks).k == blocks * 32 * 4
 
 
+def test_nondefault_scalars_reach_validation_input(tmp_path):
+    write_shard(tmp_path, [solution(split=4)])
+    problem = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(
+        17, reduction_blocks=3, alpha=2, beta=1
+    )
+    (row,) = yaml.safe_load(bench_yaml([problem]))
+    assert (row["K"], row["alpha"], row["beta"]) == (384, 2, 1)
+    assert row["norm_check_assert"] and row["allclose_check"]
+
+
+def test_scalar_values_respect_problem_capability(tmp_path):
+    record = solution()
+    record["problemType"]["useBeta"] = False
+    write_shard(tmp_path, [record])
+    library = load_library_metadata(tmp_path, target="gfx942")
+    with pytest.raises(UnsupportedSolution, match="nonzero beta"):
+        library.choose_single_problem(17, beta=1)
+    for alpha, beta in ((float("nan"), 0), (1, float("inf")), (True, 0), (10**1000, 0)):
+        with pytest.raises(ValueError, match="finite real numbers"):
+            library.choose_single_problem(17, alpha=alpha, beta=beta)
+    record["problemType"].update(useBeta=True, computeType="Int32")
+    write_shard(tmp_path, [record])
+    with pytest.raises(UnsupportedSolution, match="integer-compute scalar must fit Int32"):
+        load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17, alpha=0.5)
+    with pytest.raises(UnsupportedSolution, match="integer-compute scalar must fit Int32"):
+        load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17, alpha=2**31)
+
+
 @pytest.mark.parametrize("blocks", [0, -1, True, 8.0])
 def test_invalid_reduction_blocks_are_errors(tmp_path, blocks):
     write_shard(tmp_path, [solution()])

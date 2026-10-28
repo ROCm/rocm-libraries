@@ -58,13 +58,15 @@ def validate_profile(config, target):
         raise ValueError("Profile topology CU count disagrees with device resources")
 
 
-def regular_problem(solution, directory, target):
+def regular_problem(solution, directory, target, *, reduction_blocks=8, alpha=1, beta=0):
     record = {
         **solution,
         "sizePredicates": _size_predicates(solution["problemPredicate"]),
     }
     metadata = LibraryMetadata(directory, target, (solution["index"],), {solution["index"]: record})
-    return metadata.choose_single_problem(solution["index"], reduction_blocks=8)
+    return metadata.choose_single_problem(
+        solution["index"], reduction_blocks=reduction_blocks, alpha=alpha, beta=beta
+    )
 
 
 def sha256(path):
@@ -242,6 +244,9 @@ def make_plan(
     range_end=None,
     policy=POLICY,
     profiles=None,
+    reduction_blocks=8,
+    alpha=1,
+    beta=0,
 ):
     if type(range_begin) is not int or not 0 <= range_begin < (1 << 31):
         raise ValueError("Solution index range begin must be a nonnegative native index")
@@ -251,6 +256,23 @@ def make_plan(
         raise ValueError("Solution index range end must be greater than begin and at most 2**31")
     if policy not in (POLICY, REGULAR_POLICY):
         raise ValueError(f"Unknown case policy: {policy}")
+    if type(reduction_blocks) is not int or reduction_blocks <= 0:
+        raise ValueError("reduction_blocks must be a positive integer")
+    try:
+        finite_scalars = all(
+            type(value) in (int, float) and math.isfinite(value) for value in (alpha, beta)
+        )
+    except OverflowError:
+        finite_scalars = False
+    if not finite_scalars:
+        raise ValueError("alpha and beta must be finite real numbers")
+    if policy != REGULAR_POLICY and (reduction_blocks, alpha, beta) != (8, 1, 0):
+        raise ValueError("Reduction blocks and scalar overrides require regular-v1")
+    case_parameters = (
+        {"reduction_blocks": reduction_blocks, "alpha": alpha, "beta": beta}
+        if policy == REGULAR_POLICY
+        else None
+    )
     library_dir = library_dir / target if (library_dir / target).is_dir() else library_dir
     # Prefer compressed metadata just as the native loader does; do not inventory
     # both representations of a shard if an artifact happens to contain both.
@@ -296,7 +318,7 @@ def make_plan(
                     # Only explicitly unimplemented features are coverage gaps.
                     # Missing fields and malformed metadata must fail preparation.
                     try:
-                        problem = regular_problem(solution, library_dir, target)
+                        problem = regular_problem(solution, library_dir, target, **case_parameters)
                         bench_yaml([problem])
                     except (UnsupportedSolution, UnsupportedBenchProblem) as error:
                         counts["outside_adapter_scope"] += 1
@@ -337,7 +359,7 @@ def make_plan(
                 job["planning_outcome"] = "EXCLUDED_HARDWARE"
                 raise ValueError("Requested solution does not match the emulated hardware")
             if policy == REGULAR_POLICY:
-                problem = regular_problem(s, library_dir, target)
+                problem = regular_problem(s, library_dir, target, **case_parameters)
                 job["bench_yaml"] = bench_yaml([problem])
                 job["target_dispatches_per_case"] = 1
                 job["cases"] = [{"id": "regular", "shape": [problem.m, problem.n, 1, problem.k]}]
@@ -393,6 +415,7 @@ def make_plan(
     fingerprint = hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
     return {
         "policy": policy,
+        "case_parameters": case_parameters,
         "coverage_gaps": dict(coverage_gaps),
         "target": target,
         "selection": "solution-index-range",

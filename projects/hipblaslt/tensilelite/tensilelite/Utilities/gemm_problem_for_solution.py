@@ -11,7 +11,7 @@ an installed GPU. Execution and native solution support checks happen later.
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from math import lcm
+from math import isfinite, lcm
 from pathlib import Path
 from types import MappingProxyType
 
@@ -152,10 +152,8 @@ class GemmProblem:
     The index, solution/kernel names, library directory and GPU target identify
     the chosen solution within one library build.
 
-    Scalars are alpha=1 and beta=0, batch count is one, and optional epilogue
-    features are disabled. Native execution still checks solution support.
-    TODO(newling): Cover other scalar values, batches and optional output
-    operations for broader race detection (AIHPBLAS-3605).
+    Scalars default to alpha=1 and beta=0, batch count is one, and optional
+    epilogue features are disabled. Native execution still checks solution support.
     MX block sizes of zero mean unscaled operands. MX scale format is 0 for
     ordinary scales, 1 for host-preswizzled gfx950 scales, or 2 for gfx1250 TDM.
     """
@@ -185,6 +183,8 @@ class GemmProblem:
     mx_type_a: str = "E8"
     mx_type_b: str = "E8"
     mx_scale_format: int = 0
+    alpha: int | float = 1
+    beta: int | float = 0
 
     @property
     def leading_dimensions(self) -> tuple[int, int, int, int]:
@@ -224,7 +224,12 @@ class LibraryMetadata:
     _records: Mapping[int, dict] = field(repr=False)
 
     def choose_single_problem(
-        self, solution_index: int, *, reduction_blocks: int = 8
+        self,
+        solution_index: int,
+        *,
+        reduction_blocks: int = 8,
+        alpha: int | float = 1,
+        beta: int | float = 0,
     ) -> GemmProblem:
         """Choose one of the matrix multiplications this solution may support.
 
@@ -245,8 +250,22 @@ class LibraryMetadata:
             raise ValueError("solution_index must be a nonnegative integer")
         if type(reduction_blocks) is not int or reduction_blocks <= 0:
             raise ValueError("reduction_blocks must be a positive integer")
+        try:
+            finite_scalars = all(
+                type(value) in (int, float) and isfinite(value) for value in (alpha, beta)
+            )
+        except OverflowError:
+            finite_scalars = False
+        if not finite_scalars:
+            raise ValueError("alpha and beta must be finite real numbers")
         record = self._records[solution_index]
         p, mapping = record["problemType"], record["sizeMapping"]
+        if beta != 0 and not p.get("useBeta", True):
+            raise UnsupportedSolution(solution_index, ["nonzero beta without beta support"])
+        if p["computeType"] == "Int32" and any(
+            int(value) != value or not -(1 << 31) <= value < (1 << 31) for value in (alpha, beta)
+        ):
+            raise UnsupportedSolution(solution_index, ["integer-compute scalar must fit Int32"])
         m, n = mapping["macroTile"][:2]
         depth, split = mapping["depthU"], mapping["globalSplitU"]
         if any(type(value) is not int or value <= 0 for value in (m, n, depth)):
@@ -363,6 +382,8 @@ class LibraryMetadata:
             mx_type_a=mx_types[0],
             mx_type_b=mx_types[1],
             mx_scale_format=mx_format,
+            alpha=alpha,
+            beta=beta,
         )
 
 

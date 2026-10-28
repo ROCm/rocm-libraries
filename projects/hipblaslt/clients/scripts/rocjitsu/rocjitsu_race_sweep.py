@@ -154,6 +154,16 @@ def render_report(manifest, summary):
         f"Original index range: `{cell(manifest['solution_index_range']['begin'])}` "
         f"to `{cell(manifest['solution_index_range']['end'])}` (exclusive; None means catalogue end); "
         f"policy: `{cell(manifest['policy'])}`.",
+        *(
+            [
+                "Case parameters: "
+                f"reduction blocks `{cell(manifest['case_parameters']['reduction_blocks'])}`, "
+                f"alpha `{cell(manifest['case_parameters']['alpha'])}`, "
+                f"beta `{cell(manifest['case_parameters']['beta'])}`."
+            ]
+            if manifest.get("case_parameters") is not None
+            else []
+        ),
         f"Artifact fingerprint: `{manifest['artifact_fingerprint']}`.",
         f"Selected solutions: {len(manifest['jobs'])}; eligible/inventory solutions: "
         f"{inventory.get('eligible_solutions', '?')}/{inventory.get('solutions', '?')}; "
@@ -245,6 +255,9 @@ def prepare(args):
         args.solution_index_range_end,
         getattr(args, "policy", POLICY),
         profiles={name: profile["device"] for name, profile in profiles.items()},
+        reduction_blocks=getattr(args, "reduction_blocks", 8),
+        alpha=getattr(args, "alpha", 1),
+        beta=getattr(args, "beta", 0),
     )
     manifest.update(
         backend=args.backend,
@@ -1194,6 +1207,11 @@ def resume_results(directory, manifest):
     ):
         if previous[key] != manifest[key]:
             raise ValueError(f"Cannot resume: {key} changed")
+    prior_parameters = previous.get("case_parameters")
+    if "case_parameters" not in previous and previous["policy"] == REGULAR_POLICY:
+        prior_parameters = {"reduction_blocks": 8, "alpha": 1, "beta": 0}
+    if prior_parameters != manifest["case_parameters"]:
+        raise ValueError("Cannot resume: case_parameters changed")
     profile_hashes = lambda m: {k: p["sha256"] for k, p in m["profiles"].items()}
     if profile_hashes(previous) != profile_hashes(manifest):
         raise ValueError("Cannot resume: hardware profiles changed")
@@ -1802,6 +1820,24 @@ def main():
         help="GEMM construction policy (bench: regular-v1; tensile: tile-depth-v1)",
     )
     parser.add_argument(
+        "--reduction-blocks",
+        type=int,
+        default=8,
+        help="Preferred full DepthU blocks per split for regular-v1 (default: 8)",
+    )
+    parser.add_argument(
+        "--alpha",
+        type=float,
+        default=1,
+        help="Real alpha scalar for regular-v1; complex imaginary part remains zero (default: 1)",
+    )
+    parser.add_argument(
+        "--beta",
+        type=float,
+        default=0,
+        help="Real beta scalar for regular-v1; complex imaginary part remains zero (default: 0)",
+    )
+    parser.add_argument(
         "--known-failures",
         type=Path,
         default=None,
@@ -1843,6 +1879,12 @@ def main():
         parser.error("Batch size must be positive; tensile requires batch size 1")
     if args.policy == REGULAR_POLICY and args.backend != "bench":
         parser.error("regular-v1 requires the bench backend")
+    if args.policy != REGULAR_POLICY and (args.reduction_blocks, args.alpha, args.beta) != (
+        8,
+        1,
+        0,
+    ):
+        parser.error("Reduction blocks and scalar overrides require regular-v1")
     if (
         not 1 <= args.workers <= MAX_WORKERS
         or not 0 <= args.solution_index_range_begin < (1 << 31)
@@ -1852,6 +1894,9 @@ def main():
         )
         or not math.isfinite(args.timeout)
         or args.timeout <= 0
+        or args.reduction_blocks <= 0
+        or not math.isfinite(args.alpha)
+        or not math.isfinite(args.beta)
         or (
             args.suite_timeout is not None
             and (not math.isfinite(args.suite_timeout) or args.suite_timeout <= 0)
@@ -1859,7 +1904,7 @@ def main():
     ):
         parser.error(
             f"Require 1–{MAX_WORKERS} workers, 0 <= range begin < range end <= 2**31, "
-            "and finite positive timeouts"
+            "finite positive timeouts, positive reduction blocks, and finite scalars"
         )
     for key in ("rocjitsu", "client", "config", "library_dir", "reports", "resume_from"):
         if getattr(args, key) is not None:

@@ -415,6 +415,44 @@ class SweepTests(unittest.TestCase):
                 (row["solution_index"], row["M"], row["N"], row["K"]), (7, 64, 64, 128)
             )
 
+    def test_regular_variant_records_actual_shape_and_scalars(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            record = solution(7)
+            path = root / "library_gfx942.dat"
+            path.write_bytes(msgpack.packb({"solutions": [record]}, use_bin_type=True))
+            path.with_suffix(".co").write_bytes(b"object")
+            variant = plan.make_plan(
+                root,
+                "gfx942",
+                {},
+                7,
+                8,
+                policy=plan.REGULAR_POLICY,
+                reduction_blocks=3,
+                alpha=2,
+                beta=1,
+            )
+            self.assertEqual(
+                variant["case_parameters"],
+                {"reduction_blocks": 3, "alpha": 2, "beta": 1},
+            )
+            row = yaml.safe_load(variant["jobs"][0]["bench_yaml"])[0]
+            self.assertEqual((row["K"], row["alpha"], row["beta"]), (96, 2, 1))
+            self.assertEqual(variant["jobs"][0]["cases"][0]["shape"], [64, 96, 1, 96])
+            baseline = plan.make_plan(root, "gfx942", {}, 7, 8, policy=plan.REGULAR_POLICY)
+            self.assertNotEqual(baseline["jobs"], variant["jobs"])
+            for bad in (0, -1, True):
+                with (
+                    self.subTest(blocks=bad),
+                    self.assertRaisesRegex(ValueError, "reduction_blocks"),
+                ):
+                    plan.make_plan(
+                        root, "gfx942", {}, 7, 8, policy=plan.REGULAR_POLICY, reduction_blocks=bad
+                    )
+            with self.assertRaisesRegex(ValueError, "require regular-v1"):
+                plan.make_plan(root, "gfx942", {}, 7, 8, alpha=2)
+
     def test_cli_ranges_optional_deadline_and_retired_sampling_options(self):
         required = [
             "sweep",
@@ -463,6 +501,16 @@ class SweepTests(unittest.TestCase):
                     (begin, end, timeout, suite_timeout),
                 )
                 self.assertEqual(args.policy, plan.REGULAR_POLICY)
+                self.assertEqual((args.reduction_blocks, args.alpha, args.beta), (8, 1, 0))
+        with (
+            patch.object(
+                sys, "argv", required + ["--reduction-blocks", "3", "--alpha", "2", "--beta", "1"]
+            ),
+            patch.object(sweep, "run", return_value=0) as run,
+        ):
+            self.assertEqual(sweep.main(), 0)
+            args = run.call_args.args[0]
+            self.assertEqual((args.reduction_blocks, args.alpha, args.beta), (3, 2, 1))
         for flags in (
             ["--solutions", "20"],
             ["--seed", "0"],
@@ -475,6 +523,9 @@ class SweepTests(unittest.TestCase):
             ["--timeout", "0"],
             ["--suite-timeout", "inf"],
             ["--suite-timeout", "-1"],
+            ["--reduction-blocks", "0"],
+            ["--alpha", "nan"],
+            ["--beta", "inf"],
         ):
             with (
                 self.subTest(flags=flags),
@@ -1488,6 +1539,7 @@ class SweepTests(unittest.TestCase):
                 "solution_index_range": {"begin": 8, "end": 9},
                 "backend": "tensile",
                 "policy": "new policy",
+                "case_parameters": {"reduction_blocks": 3, "alpha": 2, "beta": 1},
                 "profiles": {"default": {"sha256": "new profile"}},
                 "jobs": [{**original["jobs"][0], "cases": []}],
             }
@@ -1497,6 +1549,29 @@ class SweepTests(unittest.TestCase):
                     manifest[key] = value
                     with self.assertRaisesRegex(ValueError, "Cannot resume"):
                         sweep.resume_results(reports, manifest)
+
+    def test_resume_old_regular_manifest_uses_its_fixed_default_scalars(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "library_gfx942.dat"
+            path.write_bytes(msgpack.packb({"solutions": [solution(7)]}, use_bin_type=True))
+            path.with_suffix(".co").write_bytes(b"object")
+            manifest = plan.make_plan(root, "gfx942", {}, 7, 8, policy=plan.REGULAR_POLICY)
+            manifest.update(
+                backend="bench",
+                tools={},
+                rocjitsu_revision="a" * 40,
+                known_failures={},
+                profiles={"default": {"sha256": "profile"}},
+            )
+            legacy = copy.deepcopy(manifest)
+            del legacy["case_parameters"]
+            (root / "manifest.json").write_text(json.dumps(legacy))
+            self.assertEqual(sweep.resume_results(root, manifest)[0], [])
+            variant = copy.deepcopy(manifest)
+            variant["case_parameters"]["beta"] = 1
+            with self.assertRaisesRegex(ValueError, "case_parameters changed"):
+                sweep.resume_results(root, variant)
 
     def test_resume_an_interrupted_continuation_retains_carried_and_retry_evidence(self):
         for failure in ("race", "partial"):

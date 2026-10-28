@@ -24,7 +24,8 @@ loaded indices, including features not implemented yet, such as grouped GEMM
 and required gradient operations. Repeating a choice with the same
 arguments returns an equal problem description, without more file reads or GPU
 work. `reduction_blocks` requests a number of complete K blocks;
-changing it changes the chosen K size as described below.
+changing it changes the chosen K size as described below. The optional `alpha`
+and `beta` arguments select real scalar values; they default to 1 and 0.
 
 If the indices are already known, load them together:
 
@@ -86,8 +87,10 @@ every Stream-K work-distribution or cross-workgroup reduction path executes;
 that needs additional shapes and runtime settings.
 
 Storage and compute types, transposes and conjugation come from the solution.
-The chosen problem uses one batch, alpha 1, beta 0 and no bias, activation or
-optional scales. Required MX operand scales are preserved. Storage is packed column-major: element `(row, col)` has offset
+The chosen problem uses one batch, real alpha 1 and beta 0 by default, and no
+bias, activation or optional scales. A nonzero beta requires a solution with
+beta support; integer computation requires integral scalars. Complex scalars
+have zero imaginary part. Required MX operand scales are preserved. Storage is packed column-major: element `(row, col)` has offset
 `row + col * leading_dimension`. Each leading dimension is the stored row
 count; transposing A or B changes that count. C and D are M-by-N and have no
 transpose operation in the hipBLASLt matmul descriptor.

@@ -49,8 +49,14 @@ Explicit selection does not bypass these checks or any native predicates.
 
 `--backend bench` defaults to `--policy regular-v1`: one full output tile from the
 shared [one-problem constructor](https://github.com/ROCm/rocm-libraries/blob/110bcff2684645f9a2b965e8dd6620115d92e5c0/projects/hipblaslt/docs/how-to/choose-gemm-for-solution.md).
-K is `8 * DepthU * fixed_split` for ordinary solutions and `8 * DepthU` for
-Stream-K or persistent DataParallel. The native runtime assigns persistent work;
+K defaults to `8 * DepthU * fixed_split` for ordinary solutions and `8 * DepthU`
+for Stream-K or persistent DataParallel. `--reduction-blocks` changes the requested
+number of DepthU blocks; serialized size constraints can adjust the actual K.
+`--alpha` and `--beta` set real scalars, defaulting to 1 and 0. They are applied to
+the same validation-only GEMM, not additional timed launches. The manifest and
+report record these parameters and each chosen shape; resume rejects a changed
+workload. Nonzero beta exercises reading C. Integer computation requires integral
+scalars, and complex imaginary parts remain zero. The native runtime assigns persistent work;
 this small shape does not exercise every Stream-K scheduling/reduction path.
 Optional epilogues are disabled. This supports double, complex, FNUZ and MX
 operands as well as the initial real types. MX block sizes, scale datatypes and

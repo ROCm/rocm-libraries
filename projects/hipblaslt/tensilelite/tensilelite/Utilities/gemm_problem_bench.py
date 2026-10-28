@@ -142,8 +142,8 @@ def bench_yaml(problems: Iterable[GemmProblem]) -> str:
             "d_type": _datatype_name(problem, problem.d_type),
             "compute_type": _COMPUTE_NAMES[problem.compute_type],
             "scale_type": _datatype_name(problem, problem.compute_type),
-            "alpha": 1,
-            "beta": 0,
+            "alpha": problem.alpha,
+            "beta": problem.beta,
             # Bounded MX inputs avoid overflowing FP16 outputs at large DepthU.
             "initialization": "hpl" if problem.mx_block_a or problem.mx_block_b else "rand_int",
             "bias_vector": False,
