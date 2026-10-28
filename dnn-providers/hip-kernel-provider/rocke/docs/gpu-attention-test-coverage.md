@@ -20,7 +20,10 @@ cases and three negative checks passed; the wider library GPU suite reported
 84 passes and 134 skips.
 Published artifact packaging was separately verified at run `36897764926`.
 The unified mask/band suites and the gfx942 dense cross-length/band rows were
-added from `pytest --co -m gpu` collection on 2026-10-20.
+added from `pytest --co -m gpu` collection on 2026-10-20. The Torch-free gfx942
+band suite (`test_attention_band_gfx942_numpy_numeric.py`) was added on
+2026-10-27: 29 cases passed with 0 skips on gfx942 (MI300A) with `import torch`
+blocked.
 A source-declared shape is not necessarily selected, executed, or passed in CI.
 One edit postdates that inventory: the `expected_spec_id` values of the
 `test_kda_dispatch_band_launches_selected_kernel` rows use the tile-named KDA
@@ -35,7 +38,7 @@ listed here.
 - [Full attention shape matrix](#full-attention-shape-matrix)
 - [Full recurrent shape matrix](#full-recurrent-shape-matrix)
 
-The matrices contain 902 attention and 109 recurrent configuration/shape rows.
+The matrices contain 931 attention and 109 recurrent configuration/shape rows.
 They describe source declarations, including cases that skip in the observed CI.
 
 Rows are not unique shapes or pytest pass counts. Binary-reuse tests have one
@@ -56,6 +59,7 @@ listed separately in the inventory, not added to the workload rows.
 | gfx942 binary reuse across shapes | 3 shapes in 1 test | No reuse assertion or larger shape | Skipped |
 | gfx942 dense cross-length and band (top-left; windows, lookahead, ragged, B2 empty rows, sinks/LSE, index truth table) | 138 | No: references are Sq=Sk=512 causal/full | Skipped (Torch-gated) |
 | gfx942 unified mask/band (paged varlen; top-left, no-mask, bands, per-body rows, dispatch, block-table over-read) | 325 | No: different path and masks | Skipped (Torch-gated) |
+| gfx942 band without Torch (unified tiled 2D/3D: top-left Sq<Sk and Sq>Sk, no mask, left-only and two-sided windows, empty rows, Sq=1 decode, varlen; 4-warp D128 SWA top-left; dense: top-left cross-length, full, B2 empty-row window, lookahead) | 29 | No: different paths and masks | Yes: runs in CI without Torch (NumPy reference) |
 | gfx942 non-default tile | 1 | No | Skipped |
 | gfx942 forced exp2 A/B | 2 | No A/B assertion | Skipped |
 | gfx942 paged D128 ring regression | 12 | No: different path | Skipped |
@@ -145,7 +149,7 @@ The historical source inventory below is unchanged by this new cohort.
 | Paged i64 K/V addressing | BF16 D128 decode, page size 16: B8 Sk1024 Hq/Hkv=(32,8),(64,4) and B8 ragged Sk≤1000 with a block-table tail (`num_kv_blocks` overstated to force i64); B4 Sk1024 Hq/Hkv=(32,8) on a cache just over 2 GiB with pages straddling 2^31 bytes | No reference case pages the cache or uses i64 K/V addressing |
 | Seeds/distributions | One fixed normally distributed recipe per configuration in required suite | Multiple runs test repeatability, not additional input coverage |
 | Additional dense combinations | No BF16 full-mask case; no D64 full-mask case; not every dtype × grid × head-ratio combination | The selected rows are not a Cartesian-product sweep |
-| Unequal query/KV lengths, bottom-right masks | gfx942 dense: 138 top-left cross-length/band rows (aligned and ragged, B1/B2); gfx942 unified: 325 paged varlen rows incl. bottom-right bands; gfx950: 11 dense rows plus 327 unified rows; see shape table | All required Sq=Sk=512; no cross-length, band, or ragged reference. gfx942 dense has no bottom-right body, and every gfx942 row here is Torch-gated, so it skips in CI without Torch |
+| Unequal query/KV lengths, bottom-right masks | gfx942 dense: 138 top-left cross-length/band rows (aligned and ragged, B1/B2); gfx942 unified: 325 paged varlen rows incl. bottom-right bands; gfx950: 11 dense rows plus 327 unified rows; see shape table | All required Sq=Sk=512; no cross-length, band, or ragged reference. gfx942 dense has no bottom-right body, and apart from 29 Torch-free band rows (`test_attention_band_gfx942_numpy_numeric.py`) every gfx942 row here is Torch-gated, so it skips in CI without Torch |
 | Decode / varlen / append / sparse / quantized / backward | Exact 15 extended-harness rows in shape table | Different operations, ABI layouts, and sometimes architectures |
 
 The paged ring test also checks for an external parity harness and can skip if
@@ -203,6 +207,7 @@ See [the SDPA guide](../library/tests/sdpa_reference/docs/sdpa-test-reference.md
 | [test_attention_dense_gfx942_numeric.py](../library/tests/test_attention_dense_gfx942_numeric.py) | 28 | Selected by library CTest file list |
 | [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) | 6 | Selected by library attention CTest list (`rocke_library_attention_gpu_pytest`) |
 | [test_attention_unified_mask_gfx942_numeric.py](../library/tests/test_attention_unified_mask_gfx942_numeric.py) | 14 | Selected by library CTest file list |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) | 3 | Selected by library CTest file list; no Torch dependency |
 | [test_attention_unified_mask_gfx950_numeric.py](../library/tests/test_attention_unified_mask_gfx950_numeric.py) | 9 | Selected by library attention CTest list (`rocke_library_attention_gpu_pytest`) |
 | [test_attn_bf16_d128_ring.py](../library/tests/test_attn_bf16_d128_ring.py) | 1 | Selected by library CTest file list |
 | [test_extended_parity_attention.py](../library/tests/test_extended_parity_attention.py) | 1 | Selected by library CTest file list |
@@ -216,7 +221,7 @@ See [the SDPA guide](../library/tests/sdpa_reference/docs/sdpa-test-reference.md
 | [test_kda_gdn_gfx950_numeric.py](../library/tests/test_kda_gdn_gfx950_numeric.py) | 2 | Selected by library CTest file list |
 | [test_sdpa_pinned_reference.py](../library/tests/test_sdpa_pinned_reference.py) | 3 | selected: required SDPA GPU |
 
-The inventory includes 14 files and 108 GPU-related test functions/methods,
+The inventory includes 15 files and 111 GPU-related test functions/methods,
 including separately identified harness controls. These are declaration counts,
 not executed GPU-kernel counts. All filenames below are relative to
 `library/tests/`. Function names identify the source declarations to inspect.
@@ -708,6 +713,35 @@ not executed GPU-kernel counts. All filenames below are relative to
 | [test_attention_unified_mask_gfx942_numeric.py](../library/tests/test_attention_unified_mask_gfx942_numeric.py) :: TestMask2DLevers::test_lever_matches_reference | gfx942 | fp16 | 2 | [1024,1024] | [2048,512] | 16 | 2 | 128 | fp16 flash body lever=causal_mask_phase_split; path=2d; top-left; right=16 | Missing |
 | [test_attention_unified_mask_gfx942_numeric.py](../library/tests/test_attention_unified_mask_gfx942_numeric.py) :: TestMask2DLevers::test_lever_matches_reference | gfx942 | fp16 | 2 | [1024,1024] | [2048,512] | 16 | 2 | 128 | fp16 flash body lever=causal_mask_phase_split; path=2d; bottom-right; no right bound; window=96 | Missing |
 | [test_attention_unified_mask_gfx942_numeric.py](../library/tests/test_attention_unified_mask_gfx942_numeric.py) :: TestMask2DLevers::test_lever_matches_reference | gfx942 | fp16 | 2 | [1024,1024] | [2048,512] | 16 | 2 | 128 | fp16 flash body lever=causal_mask_phase_split; path=2d; top-left; right=32; window=96 | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | fp16 | 2 | [96,64] | [300,200] | 16 | 2 | 128 | tl_q_lt_kv; NumPy reference, no Torch; path=2d; top-left; causal | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | fp16 | 2 | [96,64] | [300,200] | 16 | 2 | 128 | tl_q_lt_kv; NumPy reference, no Torch; path=3d; top-left; causal | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | bf16 | 2 | [96,64] | [300,200] | 16 | 2 | 128 | tl_q_lt_kv; NumPy reference, no Torch; path=2d; top-left; causal | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | bf16 | 2 | [96,64] | [300,200] | 16 | 2 | 128 | tl_q_lt_kv; NumPy reference, no Torch; path=3d; top-left; causal | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | fp16 | 2 | [300,200] | [96,64] | 16 | 2 | 128 | tl_q_gt_kv; NumPy reference, no Torch; path=2d; top-left; causal | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | fp16 | 2 | [300,200] | [96,64] | 16 | 2 | 128 | tl_q_gt_kv; NumPy reference, no Torch; path=3d; top-left; causal | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | fp16 | 2 | [96,200] | [300,64] | 16 | 2 | 128 | no_mask; NumPy reference, no Torch; path=2d; bottom-right; no mask | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | fp16 | 2 | [96,200] | [300,64] | 16 | 2 | 128 | no_mask; NumPy reference, no Torch; path=3d; bottom-right; no mask | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | fp16 | 2 | [128,300] | [300,128] | 16 | 2 | 128 | left_only_w64; NumPy reference, no Torch; path=2d; bottom-right; no right bound; window=64 | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | fp16 | 2 | [128,300] | [300,128] | 16 | 2 | 128 | left_only_w64; NumPy reference, no Torch; path=3d; bottom-right; no right bound; window=64 | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | fp16 | 2 | [128,300] | [300,128] | 16 | 2 | 128 | tl_two_sided_w64_r16; NumPy reference, no Torch; path=2d; top-left; right=16; window=64 | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | fp16 | 2 | [128,300] | [300,128] | 16 | 2 | 128 | tl_two_sided_w64_r16; NumPy reference, no Torch; path=3d; top-left; right=16; window=64 | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | bf16 | 2 | [128,300] | [300,128] | 16 | 2 | 128 | tl_two_sided_w64_r16; NumPy reference, no Torch; path=2d; top-left; right=16; window=64 | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | bf16 | 2 | [128,300] | [300,128] | 16 | 2 | 128 | tl_two_sided_w64_r16; NumPy reference, no Torch; path=3d; top-left; right=16; window=64 | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | fp16 | 2 | [200,40] | [64,100] | 16 | 2 | 128 | br_empty_rows; NumPy reference, no Torch; path=2d; bottom-right; causal; empty rows exactly 0 | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | fp16 | 2 | [200,40] | [64,100] | 16 | 2 | 128 | br_empty_rows; NumPy reference, no Torch; path=3d; bottom-right; causal; empty rows exactly 0 | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | fp16 | 3 | [1,1,1] | [300,77,16] | 16 | 2 | 128 | tl_decode; NumPy reference, no Torch; path=2d; top-left; causal | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | fp16 | 3 | [1,1,1] | [300,77,16] | 16 | 2 | 128 | tl_decode; NumPy reference, no Torch; path=3d; top-left; causal | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | fp16 | 4 | [1,64,200,17] | [300,64,120,513] | 16 | 2 | 128 | tl_varlen; NumPy reference, no Torch; path=2d; top-left; causal | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | fp16 | 4 | [1,64,200,17] | [300,64,120,513] | 16 | 2 | 128 | tl_varlen; NumPy reference, no Torch; path=3d; top-left; causal | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | bf16 | 4 | [1,64,200,17] | [300,64,120,513] | 16 | 2 | 128 | tl_varlen; NumPy reference, no Torch; path=2d; top-left; causal | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_unified_band_matches_numpy | gfx942 | bf16 | 4 | [1,64,200,17] | [300,64,120,513] | 16 | 2 | 128 | tl_varlen; NumPy reference, no Torch; path=3d; top-left; causal | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_d128_swa_4warp_top_left_reads_only_its_blocks | gfx942 | fp16 | 2 | [40,128] | [100,100] | 2 | 1 | 128 | 4-warp D128 SWA body; NumPy reference, no Torch; wild block indices after the table; path=2d; top-left; causal; window=16 | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_dense_band_matches_numpy | gfx942 | bf16 | 2 | 256 | 512 | 4 | 1 | 128 | direct spec; NumPy reference, no Torch; top-left; causal; grid | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_dense_band_matches_numpy | gfx942 | bf16 | 2 | 512 | 256 | 4 | 1 | 128 | direct spec; NumPy reference, no Torch; top-left; causal; grid | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_dense_band_matches_numpy | gfx942 | bf16 | 2 | 512 | 1024 | 4 | 1 | 128 | direct spec; NumPy reference, no Torch; top-left; no mask; grid | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_dense_band_matches_numpy | gfx942 | bf16 | 2 | 1024 | 512 | 4 | 1 | 128 | direct spec; NumPy reference, no Torch; empty rows exactly 0; top-left; no right bound; window=128; grid | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_dense_band_matches_numpy | gfx942 | bf16 | 2 | 1024 | 512 | 4 | 1 | 128 | direct spec; NumPy reference, no Torch; empty rows exactly 0; top-left; no right bound; window=128; persistent | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_dense_band_matches_numpy | gfx942 | bf16 | 2 | 512 | 1024 | 4 | 1 | 128 | direct spec; NumPy reference, no Torch; top-left; right=7; grid | Missing |
 | [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | fp16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=False; causal=True | Equivalent configuration (different inputs) |
 | [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | fp16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=True; causal=True | Equivalent configuration (different inputs) |
 | [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | bf16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=True; causal=True | Equivalent configuration (different inputs) |
