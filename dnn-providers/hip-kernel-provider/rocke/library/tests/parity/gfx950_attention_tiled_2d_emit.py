@@ -900,6 +900,18 @@ _CONFIGS = {
     ),
 }
 
+# --- idx56-59: emit_lse (trailing lse_ptr + FP32 LSE store), one per epilogue
+#     store site, each an existing config plus emit_lse=True.
+#   idx56: transposed32 scalar-state (idx55 + LSE).
+#   idx57: coalesced mfma32 Acc_lds epilogue (idx32 + LSE).
+#   idx58: striped16 epilogue, GQA-16 (idx3 + LSE).
+#   idx59: striped16 + ALiBi (idx5 + ALiBi + LSE): the LSE row index must use
+#          the query head, not the hoisted ALiBi slope.
+_CONFIGS[56] = {**_CONFIGS[55], "emit_lse": True}
+_CONFIGS[57] = {**_CONFIGS[32], "emit_lse": True}
+_CONFIGS[58] = {**_CONFIGS[3], "emit_lse": True}
+_CONFIGS[59] = {**_CONFIGS[5], "use_alibi": True, "emit_lse": True}
+
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:
     if idx not in _CONFIGS:

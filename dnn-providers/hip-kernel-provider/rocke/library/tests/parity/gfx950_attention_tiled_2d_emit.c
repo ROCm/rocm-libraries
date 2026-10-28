@@ -914,6 +914,28 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->tile_size = 64;
         break;
 
+    /* --- idx56-59: emit_lse, one per epilogue store site, each an existing
+     *     config plus emit_lse (lockstep with the Python _CONFIGS[56..59]).
+     *     56: transposed32 scalar-state (55); 57: coalesced mfma32 (32);
+     *     58: striped16 GQA-16 (3); 59: striped16 + ALiBi (5 + use_alibi). */
+    case 56:
+        make_spec(55, s);
+        s->emit_lse = true;
+        break;
+    case 57:
+        make_spec(32, s);
+        s->emit_lse = true;
+        break;
+    case 58:
+        make_spec(3, s);
+        s->emit_lse = true;
+        break;
+    case 59:
+        make_spec(5, s);
+        s->use_alibi = true;
+        s->emit_lse = true;
+        break;
+
     default:
         return -1;
     }

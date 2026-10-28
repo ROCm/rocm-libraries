@@ -261,6 +261,7 @@ void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
         ctx->hoist_in_warp_row[reg] = row;
         ctx->hoist_q_pos[reg] = qp_r;
         ctx->hoist_q_head[reg] = qh_r;
+        ctx->hoist_qh_r[reg] = qh_r;
         ctx->hoist_row_mask[reg] = row_ok;
         ctx->hoist_state_row[reg] = causal_lim;
     }

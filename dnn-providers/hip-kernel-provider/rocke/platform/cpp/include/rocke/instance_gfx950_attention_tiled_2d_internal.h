@@ -175,6 +175,7 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* num_seqs_p;
     rocke_value_t* bt_stride_p;
     rocke_value_t* qq_bias_stride0_p;
+    rocke_value_t* lse; /* lse_ptr (spec->emit_lse only, else NULL) */
 
     /* ---- grid ids + wave decomposition ---- */
     rocke_value_t* q_block_global_idx;
@@ -324,6 +325,9 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* hoist_q_pos[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* hoist_q_head[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* hoist_row_mask[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
+    /* Python hoist_qh_r: the query head, never replaced by the ALiBi slope
+     * (hoist_q_head is). Read by the emit_lse epilogue stores. */
+    rocke_value_t* hoist_qh_r[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
 
     /* ---- transposed-32x32 invariant-hoist state (Python 2446-2480) ---- *
      * Computed once in the LICM hoist when TRANSPOSED_INVARIANT_HOIST is set;
@@ -352,6 +356,7 @@ typedef struct rocke_gfx950_attn2d_build_ctx
 
     /* ---- final results read by the epilogue (lines 3585-3818) ---- */
     rocke_value_t* l_final[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
+    rocke_value_t* m_final[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE]; /* emit_lse only */
     rocke_value_t* acc_final[ROCKE_GFX950_ATTN2D_MAX_ACCS];
     rocke_value_t* rcp_l[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* l_zero[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
