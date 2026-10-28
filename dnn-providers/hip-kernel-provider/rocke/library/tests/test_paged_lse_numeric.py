@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from tests._decode_numeric_support import gpu
+from tests._decode_numeric_support import gpu, decode_launch_session
 from tests._decode_reference import reference
 
 
@@ -82,37 +82,21 @@ def test_bounded_lse_failure_empty_window_and_recovery(
         tuning_spec=selected.spec if selected else None,
         use_graph=mode == "graph",
     )
-    owner = graph = None
-    if mode in ("prepared", "external"):
-        owner = au.prepare_unified_attention_torch(**args)
-    if mode == "external":
-        graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
-            owner.launch()
+    with decode_launch_session(torch, au, args, mode) as launch:
 
-    def launch():
-        if graph is not None:
-            graph.replay()
-        elif owner is not None:
-            owner.launch()
-        else:
-            au.run_unified_attention_torch(**args)
-        torch.cuda.synchronize()
+        expected_o, expected_l = reference(
+            torch, qh, kh, vh, valid, [capacity] * batch, page, window
+        )
 
-    expected_o, expected_l = reference(
-        torch, qh, kh, vh, valid, [capacity] * batch, page, window
-    )
+        def reset():
+            table.copy_(valid)
+            used.copy_(torch.tensor([capacity, capacity], dtype=torch.int32))
+            cu.copy_(torch.arange(batch + 1, dtype=torch.int32))
 
-    def reset():
-        table.copy_(valid)
-        used.copy_(torch.tensor([capacity, capacity], dtype=torch.int32))
-        cu.copy_(torch.arange(batch + 1, dtype=torch.int32))
+        def compare(o, l):
+            torch.testing.assert_close(out.cpu().float(), o, atol=0.01, rtol=0.02)
+            torch.testing.assert_close(lse.cpu(), l, atol=0.004, rtol=0.004)
 
-    def compare(o, l):
-        torch.testing.assert_close(out.cpu().float(), o, atol=0.01, rtol=0.02)
-        torch.testing.assert_close(lse.cpu(), l, atol=0.004, rtol=0.004)
-
-    try:
         launch()
         compare(expected_o, expected_l)
         for kind, value in (
@@ -179,7 +163,3 @@ def test_bounded_lse_failure_empty_window_and_recovery(
             torch.cuda.synchronize()
             torch.testing.assert_close(other.cpu(), expected_l, atol=0.004, rtol=0.004)
             assert torch.equal(lse.cpu(), torch.full((batch, hq, 1), 37.0))
-    finally:
-        if owner is not None:
-            owner.close()
-        au.clear_attention_3d_graph_cache()
