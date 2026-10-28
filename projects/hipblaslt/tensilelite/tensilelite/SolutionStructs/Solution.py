@@ -5997,8 +5997,10 @@ class Solution(collections.abc.Mapping):
       state["1LDSBuffer"] = 0
     # MX case
     if (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
-      if (state["ProblemType"]["MXBlockA"] and state["DirectToLdsA"] != state["DirectToLdsMXSA"]) \
-          or (state["ProblemType"]["MXBlockB"] and state["DirectToLdsB"] != state["DirectToLdsMXSB"]):
+      # One-sided MX is handled on more than one wave only; one wave compares both pairs.
+      oneWave = state["NumWaves"] <= 1
+      if ((oneWave or state["ProblemType"]["MXBlockA"]) and state["DirectToLdsA"] != state["DirectToLdsMXSA"]) \
+          or ((oneWave or state["ProblemType"]["MXBlockB"]) and state["DirectToLdsB"] != state["DirectToLdsMXSB"]):
           reject(state, printRejectionReason, "DirectToLdsA/B and DirectToLdsMXSA/B should match")
       if state["DirectToLdsA"] != state["DirectToLdsB"]:
           reject(state, printRejectionReason, "DirectToLdsA and DirectToLdsB should match")
