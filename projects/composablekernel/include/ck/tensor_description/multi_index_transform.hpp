@@ -1766,6 +1766,153 @@ struct ConvBwdDataImplicitGemmOutTransform
     }
 };
 
+/**
+ * @brief Map forward-convolution implicit-GEMM input indices to tensor indices.
+ *
+ * The upper dimensions are M=(N, Ho, Wo) and K=(Y, X, C), flattened. The
+ * lower dimensions are the input tensor coordinates (N, Hi, Wi, C).
+ */
+struct ConvFwdDataImplicitGemmInTransform
+{
+    static constexpr auto I0 = Number<0>{};
+    static constexpr auto I1 = Number<1>{};
+    static constexpr auto I2 = Number<2>{};
+    static constexpr auto I3 = Number<3>{};
+
+    using LowerIndex = MultiIndex<4>;
+    using UpperIndex = MultiIndex<2>;
+    using UpLengths  = Tuple<index_t, index_t>;
+
+    index_t Hi_, Wi_, nC_;
+    index_t nX_, nHo_, nWo_;
+    index_t ConvStrideH_, ConvStrideW_;
+    index_t ConvDilationH_, ConvDilationW_;
+    index_t InLeftPadH_, InLeftPadW_;
+    UpLengths up_lengths_;
+    Tuple<index_t, index_t, index_t, index_t> magic_divisor_multiplier_;
+    Tuple<index_t, index_t, index_t, index_t> magic_divisor_shift_;
+
+    __host__ __device__ constexpr ConvFwdDataImplicitGemmInTransform() = default;
+
+    __host__ __device__ constexpr ConvFwdDataImplicitGemmInTransform(index_t N,
+                                                                     index_t Hi,
+                                                                     index_t Wi,
+                                                                     index_t C,
+                                                                     index_t Y,
+                                                                     index_t X,
+                                                                     index_t Ho,
+                                                                     index_t Wo,
+                                                                     index_t ConvStrideH,
+                                                                     index_t ConvStrideW,
+                                                                     index_t ConvDilationH,
+                                                                     index_t ConvDilationW,
+                                                                     index_t InLeftPadH,
+                                                                     index_t InLeftPadW)
+        : Hi_{Hi},
+          Wi_{Wi},
+          nC_{-C},
+          nX_{-X},
+          nHo_{-Ho},
+          nWo_{-Wo},
+          ConvStrideH_{ConvStrideH},
+          ConvStrideW_{ConvStrideW},
+          ConvDilationH_{ConvDilationH},
+          ConvDilationW_{ConvDilationW},
+          InLeftPadH_{InLeftPadH},
+          InLeftPadW_{InLeftPadW},
+          up_lengths_{make_tuple(N * Ho * Wo, Y * X * C)},
+          magic_divisor_multiplier_{MagicDivision::CalculateMagicMultiplier(Wo),
+                                    MagicDivision::CalculateMagicMultiplier(Ho),
+                                    MagicDivision::CalculateMagicMultiplier(C),
+                                    MagicDivision::CalculateMagicMultiplier(X)},
+          magic_divisor_shift_{MagicDivision::CalculateMagicShift(Wo),
+                               MagicDivision::CalculateMagicShift(Ho),
+                               MagicDivision::CalculateMagicShift(C),
+                               MagicDivision::CalculateMagicShift(X)}
+    {
+    }
+
+    __host__ __device__ static constexpr index_t GetNumOfLowerDimension() { return 4; }
+
+    __host__ __device__ static constexpr index_t GetNumOfUpperDimension() { return 2; }
+
+    __host__ __device__ constexpr const auto& GetUpperLengths() const [[clang::lifetimebound]]
+    {
+        return up_lengths_;
+    }
+
+    template <typename LowIdx, typename UpIdx>
+    __host__ __device__ constexpr void CalculateLowerIndex(LowIdx& idx_low,
+                                                           const UpIdx& idx_up) const
+    {
+        static_assert(LowIdx::Size() == 4 && UpIdx::Size() == 2,
+                      "wrong! inconsistent # of dimensions");
+
+        index_t output_position = idx_up[I0];
+        const index_t n_ho      = MagicDivision::DoMagicDivision(
+            output_position, magic_divisor_multiplier_[I0], magic_divisor_shift_[I0]);
+        const index_t wo = output_position + n_ho * nWo_;
+        const index_t n  = MagicDivision::DoMagicDivision(
+            n_ho, magic_divisor_multiplier_[I1], magic_divisor_shift_[I1]);
+        const index_t ho = n_ho + n * nHo_;
+
+        index_t filter_channel = idx_up[I1];
+        const index_t y_c      = MagicDivision::DoMagicDivision(
+            filter_channel, magic_divisor_multiplier_[I2], magic_divisor_shift_[I2]);
+        const index_t c = filter_channel + y_c * nC_;
+        const index_t y = MagicDivision::DoMagicDivision(
+            y_c, magic_divisor_multiplier_[I3], magic_divisor_shift_[I3]);
+        const index_t x = y_c + y * nX_;
+
+        idx_low(I0) = n;
+        idx_low(I1) = ho * ConvStrideH_ + y * ConvDilationH_ - InLeftPadH_;
+        idx_low(I2) = wo * ConvStrideW_ + x * ConvDilationW_ - InLeftPadW_;
+        idx_low(I3) = c;
+    }
+
+    template <typename LowIdxDiff,
+              typename UpIdxDiff,
+              typename LowIdx,
+              typename UpIdx,
+              index_t Hack>
+    __host__ __device__ void UpdateLowerIndex(LowIdxDiff& idx_diff_low,
+                                              const UpIdxDiff&,
+                                              LowIdx& idx_low,
+                                              const UpIdx& idx_up_new,
+                                              Number<Hack>) const
+    {
+        const LowIdx old_idx = idx_low;
+        CalculateLowerIndex(idx_low, idx_up_new);
+        idx_diff_low = idx_low - old_idx;
+    }
+
+    __host__ __device__ static constexpr bool IsLinearTransform() { return false; }
+
+    __host__ __device__ static constexpr bool IsValidUpperIndexAlwaysMappedToValidLowerIndex()
+    {
+        return false;
+    }
+
+    template <typename UpIdx>
+    __host__ __device__ constexpr bool
+    IsValidUpperIndexMappedToValidLowerIndex(const UpIdx& idx_up) const
+    {
+        LowerIndex idx_low;
+        CalculateLowerIndex(idx_low, idx_up);
+        return idx_low[I1] >= 0 && idx_low[I1] < Hi_ && idx_low[I2] >= 0 && idx_low[I2] < Wi_;
+    }
+
+    __host__ __device__ static constexpr bool IsKnownAtCompileTime() { return false; }
+
+    __host__ __device__ void Print() const
+    {
+        printf("{ConvFwdDataImplicitGemmInTransform, ");
+        printf("up_lengths_");
+        print_multi_index(up_lengths_);
+        printf("}");
+    }
+};
+
 template <typename LowerIndex>
 struct Freeze
 {

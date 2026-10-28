@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 #include "ck/tensor_description/tensor_descriptor.hpp"
 #include "ck/tensor_description/tensor_descriptor_helper.hpp"
+#include "ck/tensor_description/multi_index_transform_helper.hpp"
+#include "ck/tensor_operation/operator_transform/transform_conv_fwd_to_gemm.hpp"
 
 using namespace ck;
 
@@ -362,4 +364,148 @@ TEST(TensorDescriptorFunctorsIntegration, BatchConvertMatchesSingle)
     EXPECT_EQ(batch_result.At(Number<0>{}), single_functor(Number<0>{}));
     EXPECT_EQ(batch_result.At(Number<1>{}), single_functor(Number<1>{}));
     EXPECT_EQ(batch_result.At(Number<2>{}), single_functor(Number<2>{}));
+}
+
+TEST(TensorDescriptorFunctorsIntegration, ForwardConvInputTransformMatchesGeneric)
+{
+    constexpr index_t N         = 1;
+    constexpr index_t Hi        = 7;
+    constexpr index_t Wi        = 7;
+    constexpr index_t C         = 2;
+    constexpr index_t Y         = 3;
+    constexpr index_t X         = 3;
+    constexpr index_t Ho        = 5;
+    constexpr index_t Wo        = 5;
+    constexpr index_t StrideH   = 2;
+    constexpr index_t StrideW   = 2;
+    constexpr index_t DilationH = 2;
+    constexpr index_t DilationW = 2;
+    constexpr index_t PadHLeft  = 1;
+    constexpr index_t PadHRight = 5;
+    constexpr index_t PadWLeft  = 2;
+    constexpr index_t PadWRight = 4;
+
+    const auto input_desc = make_naive_tensor_descriptor_packed(make_tuple(N, Hi, Wi, C));
+    const auto custom_desc =
+        transform_tensor_descriptor(input_desc,
+                                    make_tuple(make_conv_fwd_data_in_transform(N,
+                                                                               Hi,
+                                                                               Wi,
+                                                                               C,
+                                                                               Y,
+                                                                               X,
+                                                                               Ho,
+                                                                               Wo,
+                                                                               StrideH,
+                                                                               StrideW,
+                                                                               DilationH,
+                                                                               DilationW,
+                                                                               PadHLeft,
+                                                                               PadWLeft)),
+                                    make_tuple(Sequence<0, 1, 2, 3>{}),
+                                    make_tuple(Sequence<0, 1>{}));
+
+    const auto padded_input_desc = transform_tensor_descriptor(
+        input_desc,
+        make_tuple(make_pass_through_transform(N),
+                   make_pad_transform(Hi, PadHLeft, PadHRight),
+                   make_pad_transform(Wi, PadWLeft, PadWRight),
+                   make_pass_through_transform(C)),
+        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
+
+    const auto embedded_input_desc = transform_tensor_descriptor(
+        padded_input_desc,
+        make_tuple(make_pass_through_transform(N),
+                   make_embed_transform(make_tuple(Y, Ho), make_tuple(DilationH, StrideH)),
+                   make_embed_transform(make_tuple(X, Wo), make_tuple(DilationW, StrideW)),
+                   make_pass_through_transform(C)),
+        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+        make_tuple(Sequence<0>{}, Sequence<1, 2>{}, Sequence<3, 4>{}, Sequence<5>{}));
+
+    const auto generic_desc =
+        transform_tensor_descriptor(embedded_input_desc,
+                                    make_tuple(make_merge_transform(make_tuple(N, Ho, Wo)),
+                                               make_merge_transform(make_tuple(Y, X, C))),
+                                    make_tuple(Sequence<0, 2, 4>{}, Sequence<1, 3, 5>{}),
+                                    make_tuple(Sequence<0>{}, Sequence<1>{}));
+
+    using FwdTransform = ck::tensor_operation::TransformConvFwdToGemm<
+        2,
+        ck::tensor_operation::device::ConvolutionForwardSpecialization::Default,
+        false,
+        float,
+        float,
+        1,
+        index_t,
+        false>;
+    using CustomFwdTransform = ck::tensor_operation::TransformConvFwdToGemm<
+        2,
+        ck::tensor_operation::device::ConvolutionForwardSpecialization::Default,
+        false,
+        float,
+        float,
+        1,
+        index_t,
+        false,
+        true>;
+
+    const std::array<index_t, 5> input_lengths{1, N, C, Hi, Wi};
+    const std::array<index_t, 5> input_strides{C, N * Hi * Wi * C, 1, Wi * C, C};
+    const std::array<index_t, 5> weight_lengths{1, 4, C, Y, X};
+    const std::array<index_t, 5> weight_strides{4 * Y * X * C, Y * X * C, 1, X * C, C};
+    const std::array<index_t, 5> output_lengths{1, N, 4, Ho, Wo};
+    const std::array<index_t, 5> output_strides{4, Ho * Wo * 4, 1, Wo * 4, 4};
+    const std::array<index_t, 2> conv_strides{StrideH, StrideW};
+    const std::array<index_t, 2> conv_dilations{DilationH, DilationW};
+    const std::array<index_t, 2> input_left_pads{PadHLeft, PadWLeft};
+    const std::array<index_t, 2> input_right_pads{PadHRight, PadWRight};
+
+    const FwdTransform default_transform{input_lengths,
+                                         input_strides,
+                                         weight_lengths,
+                                         weight_strides,
+                                         output_lengths,
+                                         output_strides,
+                                         conv_strides,
+                                         conv_dilations,
+                                         input_left_pads,
+                                         input_right_pads};
+    const CustomFwdTransform custom_transform{input_lengths,
+                                              input_strides,
+                                              weight_lengths,
+                                              weight_strides,
+                                              output_lengths,
+                                              output_strides,
+                                              conv_strides,
+                                              conv_dilations,
+                                              input_left_pads,
+                                              input_right_pads};
+    const auto default_fwd_desc =
+        default_transform.template MakeADescriptor_M_K<tensor_layout::convolution::NHWGC>();
+    const auto custom_fwd_desc =
+        custom_transform.template MakeADescriptor_M_K<tensor_layout::convolution::NHWGC>();
+
+    for(index_t m = 0; m < N * Ho * Wo; ++m)
+    {
+        for(index_t k = 0; k < Y * X * C; ++k)
+        {
+            const auto index                  = make_tuple(m, k);
+            const auto custom_coordinate      = make_tensor_coordinate(custom_desc, index);
+            const auto generic_coordinate     = make_tensor_coordinate(generic_desc, index);
+            const auto default_fwd_coordinate = make_tensor_coordinate(default_fwd_desc, index);
+            const auto custom_fwd_coordinate  = make_tensor_coordinate(custom_fwd_desc, index);
+
+            EXPECT_EQ(custom_coordinate.GetOffset(), generic_coordinate.GetOffset());
+            EXPECT_EQ(coordinate_has_valid_offset_assuming_visible_index_is_valid(
+                          custom_desc, custom_coordinate),
+                      coordinate_has_valid_offset_assuming_visible_index_is_valid(
+                          generic_desc, generic_coordinate));
+            EXPECT_EQ(default_fwd_coordinate.GetOffset(), custom_fwd_coordinate.GetOffset());
+            EXPECT_EQ(coordinate_has_valid_offset_assuming_visible_index_is_valid(
+                          default_fwd_desc, default_fwd_coordinate),
+                      coordinate_has_valid_offset_assuming_visible_index_is_valid(
+                          custom_fwd_desc, custom_fwd_coordinate));
+        }
+    }
 }

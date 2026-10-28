@@ -6,20 +6,21 @@
 #include "ck/utility/common_header.hpp"
 #include "ck/tensor_description/tensor_descriptor.hpp"
 #include "ck/tensor_description/tensor_descriptor_helper.hpp"
+#include "ck/tensor_description/multi_index_transform_helper.hpp"
 #include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
 #include "ck/tensor_operation/gpu/device/convolution_forward_specialization.hpp"
-
 namespace ck {
 namespace tensor_operation {
 
 template <index_t NDimSpatial,
           device::ConvolutionForwardSpecialization ConvForwardSpecialization,
-          bool SplitN              = false,
-          typename ADataType       = float,
-          typename CDataType       = float,
-          index_t NumGroupsToMerge = 1,
-          typename IndexType       = index_t,
-          bool CTranspose          = false>
+          bool SplitN                       = false,
+          typename ADataType                = float,
+          typename CDataType                = float,
+          index_t NumGroupsToMerge          = 1,
+          typename IndexType                = index_t,
+          bool CTranspose                   = false,
+          bool CustomTensorTransformFwdData = false>
 struct TransformConvFwdToGemm
 {
     private:
@@ -545,7 +546,6 @@ struct TransformConvFwdToGemm
         {
             if constexpr(NumGroupsToMerge == 1)
             {
-
                 const auto in_n_wi_c_desc = make_naive_tensor_descriptor(
                     make_tuple(N_, Wi_), make_tuple(NStrideTensorA_, WiStride_));
 
@@ -883,32 +883,60 @@ struct TransformConvFwdToGemm
                     make_tuple(N_, Hi_, Wi_, C_),
                     make_tuple(NStrideTensorA_, HiStride_, WiStride_, CStrideTensorA_));
 
-                const auto in_n_hip_wip_c_desc = transform_tensor_descriptor(
-                    in_n_hi_wi_c_desc,
-                    make_tuple(make_pass_through_transform(N_),
-                               make_pad_transform(Hi_, InLeftPadH_, InRightPadH_),
-                               make_pad_transform(Wi_, InLeftPadW_, InRightPadW_),
-                               make_pass_through_transform(C_)),
-                    make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
-                    make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
+                if constexpr(CustomTensorTransformFwdData &&
+                             ConvForwardSpecialization ==
+                                 device::ConvolutionForwardSpecialization::Default &&
+                             std::is_same_v<IndexType, index_t>)
+                {
+                    return transform_tensor_descriptor(
+                        in_n_hi_wi_c_desc,
+                        make_tuple(make_conv_fwd_data_in_transform(N_,
+                                                                   Hi_,
+                                                                   Wi_,
+                                                                   C_,
+                                                                   Y_,
+                                                                   X_,
+                                                                   Ho_,
+                                                                   Wo_,
+                                                                   ConvStrideH_,
+                                                                   ConvStrideW_,
+                                                                   ConvDilationH_,
+                                                                   ConvDilationW_,
+                                                                   InLeftPadH_,
+                                                                   InLeftPadW_)),
+                        make_tuple(Sequence<0, 1, 2, 3>{}),
+                        make_tuple(Sequence<0, 1>{}));
+                }
+                else
+                {
+                    const auto in_n_hip_wip_c_desc = transform_tensor_descriptor(
+                        in_n_hi_wi_c_desc,
+                        make_tuple(make_pass_through_transform(N_),
+                                   make_pad_transform(Hi_, InLeftPadH_, InRightPadH_),
+                                   make_pad_transform(Wi_, InLeftPadW_, InRightPadW_),
+                                   make_pass_through_transform(C_)),
+                        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+                        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
 
-                const auto in_n_y_ho_x_wo_c_desc = transform_tensor_descriptor(
-                    in_n_hip_wip_c_desc,
-                    make_tuple(make_pass_through_transform(N_),
-                               make_embed_transform(make_tuple(Y_, Ho_),
-                                                    make_tuple(ConvDilationH_, ConvStrideH_)),
-                               make_embed_transform(make_tuple(X_, Wo_),
-                                                    make_tuple(ConvDilationW_, ConvStrideW_)),
-                               make_pass_through_transform(C_)),
-                    make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
-                    make_tuple(Sequence<0>{}, Sequence<1, 2>{}, Sequence<3, 4>{}, Sequence<5>{}));
+                    const auto in_n_y_ho_x_wo_c_desc = transform_tensor_descriptor(
+                        in_n_hip_wip_c_desc,
+                        make_tuple(make_pass_through_transform(N_),
+                                   make_embed_transform(make_tuple(Y_, Ho_),
+                                                        make_tuple(ConvDilationH_, ConvStrideH_)),
+                                   make_embed_transform(make_tuple(X_, Wo_),
+                                                        make_tuple(ConvDilationW_, ConvStrideW_)),
+                                   make_pass_through_transform(C_)),
+                        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+                        make_tuple(
+                            Sequence<0>{}, Sequence<1, 2>{}, Sequence<3, 4>{}, Sequence<5>{}));
 
-                return transform_tensor_descriptor(
-                    in_n_y_ho_x_wo_c_desc,
-                    make_tuple(make_merge_transform(make_tuple(N_, Ho_, Wo_)),
-                               make_merge_transform(make_tuple(Y_, X_, C_))),
-                    make_tuple(Sequence<0, 2, 4>{}, Sequence<1, 3, 5>{}),
-                    make_tuple(Sequence<0>{}, Sequence<1>{}));
+                    return transform_tensor_descriptor(
+                        in_n_y_ho_x_wo_c_desc,
+                        make_tuple(make_merge_transform(make_tuple(N_, Ho_, Wo_)),
+                                   make_merge_transform(make_tuple(Y_, X_, C_))),
+                        make_tuple(Sequence<0, 2, 4>{}, Sequence<1, 3, 5>{}),
+                        make_tuple(Sequence<0>{}, Sequence<1>{}));
+                }
             }
             else
             {
@@ -1280,7 +1308,6 @@ struct TransformConvFwdToGemm
 
         const auto in_gemmm_gemmk_desc = make_naive_tensor_descriptor(
             make_tuple(N_, Wo_, C_), make_tuple(NStrideTensorA_, I1, CStrideTensorA_));
-
         return transform_tensor_descriptor(
             in_gemmm_gemmk_desc,
             make_tuple(make_merge_transform(make_tuple(N_, Wo_)), make_pass_through_transform(C_)),
