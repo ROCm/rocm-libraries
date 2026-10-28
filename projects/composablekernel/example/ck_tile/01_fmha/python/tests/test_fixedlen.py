@@ -9,7 +9,6 @@ from reference import (
     attention_qkvpacked_ref,
     attention_ref,
     attn_bias_from_alibi_slopes,
-    bias_reference,
     convert_flash_attn_S_to_softmax,
 )
 from utils import (
@@ -700,12 +699,22 @@ def test_bias_forward_backward(dtype, api, mask, dropout_p, bias_grad):
         out, lse, randval = flash_attn_kvpacked_func(q, torch.stack((k, v), dim=2), **kwargs)
     else:
         out, lse, randval = flash_attn_qkvpacked_func(torch.stack((q, k, v), dim=2), **kwargs)
-    out_ref, lse_ref, valid_rows = bias_reference(
-        q, k, v, bias, scale, causal, window, dropout_p, randval
+    dropout_mask = ck_randval_to_dropout_mask(randval, dropout_p) >= 0 if dropout_p else None
+    out_ref, _, lse_ref = attention_ref(
+        q.float(),
+        k.float(),
+        v.float(),
+        attn_bias=bias.float(),
+        softmax_scale=scale,
+        causal=causal,
+        window_size=window,
+        dropout_p=dropout_p,
+        dropout_mask=dropout_mask,
+        return_lse=True,
     )
     tol = 3e-3 if dtype == torch.float16 else 2e-2
     torch.testing.assert_close(out.float(), out_ref, atol=tol, rtol=tol)
-    torch.testing.assert_close(lse[..., valid_rows], lse_ref[..., valid_rows], atol=2e-3, rtol=2e-3)
+    torch.testing.assert_close(lse, lse_ref, atol=2e-3, rtol=2e-3)
     dout = torch.randn_like(out)
     inputs = (q, k, v, bias) if bias_grad else (q, k, v)
     grads = torch.autograd.grad(out, inputs, dout)
@@ -741,10 +750,12 @@ def test_bias_shapes_and_determinism(dtype, sq, sk, d, hk, deterministic):
     out, lse, randval = flash_attn_func(
         q, k, v, bias=bias, causal=True, deterministic=deterministic, return_attn_probs=True
     )
-    ref, lse_ref, valid = bias_reference(q, k, v, bias, d**-0.5, True, (-1, -1), 0, randval)
+    ref, _, lse_ref = attention_ref(
+        q.float(), k.float(), v.float(), attn_bias=bias.float(), causal=True, return_lse=True
+    )
     tol = 3e-3 if dtype == torch.float16 else 2e-2
     torch.testing.assert_close(out.float(), ref, atol=tol, rtol=tol)
-    torch.testing.assert_close(lse[..., valid], lse_ref[..., valid], atol=2e-3, rtol=2e-3)
+    torch.testing.assert_close(lse, lse_ref, atol=2e-3, rtol=2e-3)
     dout = torch.randn_like(out)
     inputs = (q, k, v, bias)
     grads = torch.autograd.grad(out, inputs, dout, retain_graph=deterministic)
@@ -767,7 +778,7 @@ def test_only_bias_requires_grad(api):
         out = flash_attn_kvpacked_func(q, torch.stack((k, v), dim=2), bias=bias)
     else:
         out = flash_attn_qkvpacked_func(torch.stack((q, k, v), dim=2), bias=bias)
-    ref, _, _ = bias_reference(q, k, v, bias, 0.125, False, (-1, -1), 0, None)
+    ref, _ = attention_ref(q.float(), k.float(), v.float(), attn_bias=bias.float())
     (actual,) = torch.autograd.grad(out.sum(), (bias,))
     (expected,) = torch.autograd.grad(ref.sum(), (bias,))
     torch.testing.assert_close(actual, expected, atol=3e-3, rtol=3e-3)

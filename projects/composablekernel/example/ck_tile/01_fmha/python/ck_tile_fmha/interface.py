@@ -54,6 +54,13 @@ def _flash_attn_forward(
     alibi_slopes: Optional[torch.Tensor],
     return_softmax: bool,
     bias: Optional[torch.Tensor] = None,
+    q_descale: Optional[torch.Tensor] = None,
+    k_descale: Optional[torch.Tensor] = None,
+    v_descale: Optional[torch.Tensor] = None,
+    qscale: str = "no_scale",
+    return_lse: bool = True,
+    block_size_q: int = 128,
+    block_size_kv: int = 128,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     q, k, v = [maybe_contiguous(x) for x in (q, k, v)]
     out, softmax_lse, S_dmask, rng_state = fmha_gpu.fwd(
@@ -71,6 +78,13 @@ def _flash_attn_forward(
         return_softmax,
         None,  # unused generator slot, kept for backwards-compat arg positioning
         bias,
+        q_descale,
+        k_descale,
+        v_descale,
+        qscale,
+        return_lse,
+        block_size_q,
+        block_size_kv,
     )
     return out, softmax_lse, S_dmask, rng_state
 
@@ -89,13 +103,26 @@ def _flash_attn_forward_fake(
     alibi_slopes: Optional[torch.Tensor],
     return_softmax: bool,
     bias: Optional[torch.Tensor] = None,
+    q_descale: Optional[torch.Tensor] = None,
+    k_descale: Optional[torch.Tensor] = None,
+    v_descale: Optional[torch.Tensor] = None,
+    qscale: str = "no_scale",
+    return_lse: bool = True,
+    block_size_q: int = 128,
+    block_size_kv: int = 128,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     q, k, v = [maybe_contiguous(x) for x in (q, k, v)]
     batch_size, seqlen_q, num_heads, head_size = q.shape
     seqlen_k = k.shape[1]
-    out = torch.empty_like(q)
+    out_dtype = (
+        torch.bfloat16 if q.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz) else q.dtype
+    )
+    out = torch.empty_like(q, dtype=out_dtype)
     softmax_lse = torch.empty(
-        (batch_size, num_heads, seqlen_q), dtype=torch.float32, device=q.device, layout=q.layout
+        (batch_size, num_heads, seqlen_q) if return_lse else (0,),
+        dtype=torch.float32,
+        device=q.device,
+        layout=q.layout,
     )
     p = torch.empty((0,), dtype=q.dtype, device=q.device, layout=q.layout)
     if return_softmax:
@@ -114,6 +141,78 @@ if tuple(int(part) for part in torch.__version__.split("+")[0].split(".")[:2]) >
     _wrapped_flash_attn_forward = torch.ops.ck_tile_fmha._flash_attn_forward
 else:
     _wrapped_flash_attn_forward = _flash_attn_forward
+
+
+def flash_attn_fp8_func(
+    q,
+    k,
+    v,
+    q_descale=None,
+    k_descale=None,
+    v_descale=None,
+    *,
+    qscale="pertensor",
+    causal=False,
+    window_size=(-1, -1),
+    softmax_scale=None,
+    return_lse=False,
+    block_size_q=128,
+    block_size_kv=128,
+):
+    """Fixed-length FP8 E4M3 attention; returns BF16 output, optionally FP32 LSE.
+
+    Q: [batch, seqlen_q, nheads, dim]; K/V: [batch, seqlen_k, nheads_kv, dim].
+    ``qscale`` selects the FP32 descale layout for each input:
+      - no_scale: no descales; input values are used directly.
+      - pertensor: one scale per tensor.
+      - perhead: [batch, heads], with K/V using nheads_kv.
+      - blockscale: [batch, heads, ceil(seqlen / block_size)]. The last
+        dimension must be contiguous; block_size_q / block_size_kv default to 128.
+        On gfx1250 V descales must be positive powers of two (E8M0); Q/K
+        descales can be general FP32 values.
+
+    Dequantized values are ``input.float() * descale``. Supports forward only,
+    MHA/GQA/MQA and causal/local masks. LSE has shape [batch, nheads, seqlen_q].
+    Use float8_e4m3fnuz on gfx94x and float8_e4m3fn on gfx950/gfx12. Per-head
+    requires gfx1250. All FP8 modes on gfx1250 require head dimension <= 128.
+    Other modes, block sizes and LSE availability depend on the target's CK kernels.
+    """
+    if q.dtype not in (torch.float8_e4m3fn, torch.float8_e4m3fnuz):
+        raise ValueError("FP8 attention requires float8_e4m3fn or float8_e4m3fnuz inputs")
+    if any(x.requires_grad for x in (q, k, v, q_descale, k_descale, v_descale) if x is not None):
+        raise ValueError("FP8 attention supports forward only")
+    if q.ndim != 4 or k.ndim != 4 or v.ndim != 4:
+        raise ValueError("query, key and value must be four-dimensional")
+    head_size = q.shape[-1]
+    if not 0 < head_size <= 256 or k.shape[-1] != head_size or v.shape[-1] != head_size:
+        raise ValueError("FP8 attention requires equal Q/K/V head dimensions in [1, 256]")
+    if softmax_scale is None:
+        softmax_scale = head_size ** (-0.5)
+    if head_size % 8:
+        q, k, v = (torch.nn.functional.pad(x, (0, 8 - head_size % 8)) for x in (q, k, v))
+    out, lse, _, _ = _wrapped_flash_attn_forward(
+        q,
+        k,
+        v,
+        0.0,
+        softmax_scale,
+        causal,
+        int(window_size[0]),
+        int(window_size[1]),
+        0.0,
+        None,
+        False,
+        None,
+        q_descale,
+        k_descale,
+        v_descale,
+        qscale,
+        return_lse,
+        block_size_q,
+        block_size_kv,
+    )
+    out = out[..., :head_size]
+    return (out, lse) if return_lse else out
 
 
 @_torch_custom_op_wrapper(

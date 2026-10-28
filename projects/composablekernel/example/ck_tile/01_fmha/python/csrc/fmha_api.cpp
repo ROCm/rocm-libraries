@@ -20,7 +20,14 @@ mha_fwd(at::Tensor& q,       // batch_size x seqlen_q x num_heads x round_multip
         const float softcap,
         const bool return_softmax,
         std::optional<at::Generator> gen_,
-        std::optional<at::Tensor> bias_);
+        std::optional<at::Tensor> bias_,
+        std::optional<at::Tensor> q_descale_,
+        std::optional<at::Tensor> k_descale_,
+        std::optional<at::Tensor> v_descale_,
+        std::string qscale,
+        bool return_lse,
+        int block_size_q,
+        int block_size_kv);
 
 std::vector<at::Tensor> mha_varlen_fwd(
     at::Tensor& q, // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
@@ -150,7 +157,14 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
           pybind11::arg("softcap"),
           pybind11::arg("return_softmax"),
           pybind11::arg("gen"),
-          pybind11::arg("bias") = pybind11::none());
+          pybind11::arg("bias")          = pybind11::none(),
+          pybind11::arg("q_descale")     = pybind11::none(),
+          pybind11::arg("k_descale")     = pybind11::none(),
+          pybind11::arg("v_descale")     = pybind11::none(),
+          pybind11::arg("qscale")        = "no_scale",
+          pybind11::arg("return_lse")    = true,
+          pybind11::arg("block_size_q")  = 128,
+          pybind11::arg("block_size_kv") = 128);
     m.def(
         "varlen_fwd", &ck_tile::fmha::torch_api::mha_varlen_fwd, "Forward pass (variable length)");
     m.def("bwd",

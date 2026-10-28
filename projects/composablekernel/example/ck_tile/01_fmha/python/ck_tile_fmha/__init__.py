@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 from .interface import (
+    flash_attn_fp8_func,
     flash_attn_func,
     flash_attn_kvpacked_func,
     flash_attn_qkvpacked_func,
@@ -14,6 +15,7 @@ from .interface import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "flash_attn_fp8_func",
     "flash_attn_func",
     "flash_attn_kvpacked_func",
     "flash_attn_qkvpacked_func",

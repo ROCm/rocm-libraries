@@ -245,6 +245,8 @@ def attention_ref(
     upcast=True,
     reorder_ops=False,
     key_leftpad=None,
+    softmax_scale=None,
+    return_lse=False,
 ):
     """
     Arguments:
@@ -263,9 +265,12 @@ def attention_ref(
         reorder_ops: whether to change the order of operations (scaling k instead of scaling q, etc.)
             without changing the math. This is to estimate the numerical error from operation
             reordering.
+        softmax_scale: defaults to 1/sqrt(head_dim).
+        return_lse: whether to also return FP32 logsumexp of the attention scores.
     Output:
         output: (batch_size, seqlen_q, nheads, head_dim)
-        attention: (batch_size, nheads, seqlen_q, seqlen_k), softmax after dropout
+        attention: (batch_size, nheads, seqlen_q, seqlen_k), softmax before dropout
+        lse (if return_lse): (batch_size, nheads, seqlen_q), -inf for masked rows.
     """
     if causal:
         window_size = (window_size[0], 0)
@@ -277,9 +282,13 @@ def attention_ref(
     v = repeat(v, "b s h d -> b s (h g) d", g=q.shape[2] // v.shape[2])
     d = q.shape[-1]
     if not reorder_ops:
-        scores = torch.einsum("bthd,bshd->bhts", q / math.sqrt(d), k)
+        scores = torch.einsum(
+            "bthd,bshd->bhts", q / math.sqrt(d) if softmax_scale is None else q * softmax_scale, k
+        )
     else:
-        scores = torch.einsum("bthd,bshd->bhts", q, k / math.sqrt(d))
+        scores = torch.einsum(
+            "bthd,bshd->bhts", q, k / math.sqrt(d) if softmax_scale is None else k * softmax_scale
+        )
     if softcap > 0:
         scores = scores / softcap
         scores = scores.tanh()
@@ -299,14 +308,12 @@ def attention_ref(
         scores.masked_fill_(local_mask, float("-inf"))
     if attn_bias is not None:
         scores = scores + attn_bias
-    attention = torch.softmax(scores, dim=-1).to(v.dtype)
-    # Some rows might be completely masked out so we fill them with zero instead of NaN
-    if window_size[0] >= 0 or window_size[1] >= 0:
-        attention = attention.masked_fill(torch.all(local_mask, dim=-1, keepdim=True), 0.0)
-    # We want to mask here so that the attention matrix doesn't have any NaNs
-    # Otherwise we'll get NaN in dV
     if query_padding_mask is not None:
-        attention = attention.masked_fill(rearrange(~query_padding_mask, "b s -> b 1 s 1"), 0.0)
+        scores = scores.masked_fill(rearrange(~query_padding_mask, "b s -> b 1 s 1"), -torch.inf)
+    all_masked = torch.isneginf(scores).all(dim=-1, keepdim=True)
+    # Avoid NaNs in both softmax and its backward for fully masked rows.
+    scores = scores.masked_fill(all_masked, 0.0)
+    attention = torch.softmax(scores, dim=-1).to(v.dtype).masked_fill(all_masked, 0.0)
     dropout_scaling = 1.0 / (1 - dropout_p)
     # attention_drop = attention.masked_fill(~dropout_mask, 0.0) * dropout_scaling
     # output = torch.einsum('bhts,bshd->bthd', attention_drop , v)
@@ -317,35 +324,11 @@ def attention_ref(
     output = torch.einsum("bhts,bshd->bthd", attention_drop, v * dropout_scaling)
     if query_padding_mask is not None:
         output.masked_fill_(rearrange(~query_padding_mask, "b s -> b s 1 1"), 0.0)
-    return output.to(dtype=dtype_og), attention.to(dtype=dtype_og)
-
-
-def bias_reference(q, k, v, bias, scale, causal, window, dropout_p, randval):
-    q, k, v, bias = (x.float() for x in (q, k, v, bias))
-    groups = q.shape[2] // k.shape[2]
-    k, v = (x.repeat_interleave(groups, dim=2) for x in (k, v))
-    scores = torch.einsum("bqhd,bkhd->bhqk", q, k) * scale + bias
-    sq, sk = q.shape[1], k.shape[1]
-    row = torch.arange(sq, device=q.device)[:, None] + sk - sq
-    col = torch.arange(sk, device=q.device)
-    mask = torch.zeros((sq, sk), device=q.device, dtype=torch.bool)
-    left, right = window
-    if causal:
-        right = 0
-    if left >= 0:
-        mask |= col < row - left
-    if right >= 0:
-        mask |= col > row + right
-    scores = scores.masked_fill(mask, -torch.inf)
-    all_masked = mask.all(dim=-1)
-    # Avoid NaNs in the reference's backward for fully masked rows.
-    scores = scores.masked_fill(all_masked[:, None], 0)
-    lse = scores.logsumexp(-1)
-    probs = scores.softmax(-1).masked_fill(all_masked[:, None], 0)
-    if dropout_p:
-        keep = randval.int() <= math.floor(255 * (1 - dropout_p))
-        probs = probs * keep / (1 - dropout_p)
-    return torch.einsum("bhqk,bkhd->bqhd", probs, v), lse, ~all_masked
+    result = (output.to(dtype=dtype_og), attention.to(dtype=dtype_og))
+    if return_lse:
+        lse = scores.float().logsumexp(dim=-1).masked_fill(all_masked.squeeze(-1), -torch.inf)
+        return *result, lse
+    return result
 
 
 def attention_kvpacked_ref(

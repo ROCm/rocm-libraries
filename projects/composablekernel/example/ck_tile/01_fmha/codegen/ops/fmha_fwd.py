@@ -2209,6 +2209,19 @@ def get_product(receipt: int) -> Product:
 
         def fit(problem_ctx: ProblemContext, kernel_ctx: KernelContext) -> bool:
             pipeline = kernel_ctx.pipeline
+            if problem_ctx.dtype == "fp8bf16":
+                return (
+                    problem_ctx.mode == "batch"
+                    and problem_ctx.hdim == problem_ctx.hdim_v <= 256
+                    and pipeline.F_vlayout == "row"
+                    and pipeline.F_qscale
+                    in ["no", "pertensor", "perhead", "blockscale"]
+                    and pipeline.F_bias == "no"
+                    and pipeline.F_dropout == "f"
+                    and pipeline.F_logits == "f"
+                    and pipeline.F_skip == "f"
+                    and pipeline.F_sink == "f"
+                )
             cond = problem_ctx.dtype in ["fp16", "bf16"]
             cond &= problem_ctx.hdim == problem_ctx.hdim_v <= 256
             cond &= pipeline.F_vlayout == "row"
