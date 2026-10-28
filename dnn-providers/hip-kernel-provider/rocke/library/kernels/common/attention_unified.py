@@ -1725,7 +1725,7 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     num_warps_2d = None if fp16_flash else _select_2d_num_warps(problem, arch)
     tile_size = _select_2d_tile_size(problem, arch)
     block_m_per_warp = _select_2d_block_m_per_warp(problem, arch)
-    return (
+    key = (
         "tiled",
         arch,
         _binary_search_iters(problem),
@@ -1864,6 +1864,11 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
             else None
         ),
     ) + _mask_key(problem)
+    if problem.emit_lse:
+        # Suffix only when on, so every LSE-off key is unchanged (same as the
+        # 3D key). The 4-warp exclusion is already keyed by _gfx942_4warp_fast.
+        key = key + ("lse",)
+    return key
 
 
 def _select_2d_waves_per_eu(
@@ -3377,6 +3382,9 @@ def _tiled_spec_from_problem(
     _spec = _impl(problem, arch)
     if overrides is not None:
         _spec = replace(_spec, **overrides)
+    if problem.emit_lse:
+        # Output contract, not a tuning choice; LSE-off specs stay as before.
+        _spec = replace(_spec, emit_lse=True)
     return _resolve_lds_budget(_spec, arch)
 
 
@@ -4201,6 +4209,7 @@ def _attn_signature(
     include_qq_bias_stride: bool = False,
     include_additive_bias: bool = False,
     kv_dtype: Optional[str] = None,
+    emit_lse: bool = False,
 ):
     from rocke.helpers.spec import SignatureBuilder
 
@@ -4232,9 +4241,13 @@ def _attn_signature(
         sb.scalar("block_table_stride", "i32")
     if include_qq_bias_stride:
         sb.scalar("qq_bias_stride_0", "i32")
-    # Appended last, matching the kernel's conditional param declarations.
+    # Appended last, matching the kernel's conditional param declarations:
+    # additive bias, then the LSE output (the tiled 2D builders declare
+    # lse_ptr after declare_additive_bias_params).
     if include_additive_bias:
         append_additive_bias_signature(sb)
+    if emit_lse:
+        sb.ptr("lse_ptr", "f32")
     return sb.build()
 
 
@@ -4265,6 +4278,7 @@ def _attn_values(
     k_scale: float = 1.0,
     v_scale: float = 1.0,
     out_scale: float = 1.0,
+    lse=None,
     kv_addr_limit: _KvAddrLimit | None,
 ):
     _require_additive_bias(problem, additive_bias)
@@ -4301,6 +4315,8 @@ def _attn_values(
         vals["additive_bias_batch_stride"] = int(additive_bias_batch_stride)
         vals["additive_bias_head_stride"] = int(additive_bias_head_stride)
         vals["additive_bias_sq_stride"] = int(additive_bias_sq_stride)
+    if problem.emit_lse:
+        vals["lse_ptr"] = lse
     return vals
 
 
@@ -5583,6 +5599,8 @@ def _get_2d_launcher(
                 if tuning_spec is not None
                 else _kv_storage_dtype(problem)
             ),
+            # The runner has already checked that an explicit spec agrees.
+            emit_lse=problem.emit_lse,
         ),
         cache_key=("2d",) + cache_key,
     )
