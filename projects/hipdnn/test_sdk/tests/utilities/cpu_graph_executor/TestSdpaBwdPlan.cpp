@@ -593,6 +593,70 @@ TEST(TestSdpaBwdPlan, RawBaselineGraphIsApplicable)
     EXPECT_TRUE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
 }
 
+// The runtime scale may be an ordinary FLOAT tensor (its host buffer is in the variant pack), as
+// on the GPU. It must give the same gradients as the same scale baked as attn_scale_value.
+TEST(TestSdpaBwdPlanScale, OrdinaryScaleTensorMatchesBakedScale)
+{
+    constexpr int64_t SCALE_UID = 20;
+    constexpr float SCALE = 0.5F;
+    SdpaBackwardAttributesT tensorScaleAttrs;
+    tensorScaleAttrs.scale_tensor_uid = SCALE_UID;
+    auto tensorScaleGraph
+        = makeRawSdpaBwdGraph(tensorScaleAttrs,
+                              std::nullopt,
+                              std::nullopt,
+                              {1, 2, 4, 1},
+                              DataType::FLOAT,
+                              {RawBwdExtraTensor{SCALE_UID, DataType::FLOAT, {1, 1, 1, 1}}});
+    SdpaBackwardAttributesT bakedScaleAttrs;
+    bakedScaleAttrs.attn_scale_value = SCALE;
+    auto bakedScaleGraph = makeRawSdpaBwdGraph(bakedScaleAttrs);
+    auto unscaledGraph = makeRawSdpaBwdGraph(SdpaBackwardAttributesT{});
+
+    CpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(
+        executor.isApplicable(tensorScaleGraph.GetBufferPointer(), tensorScaleGraph.GetSize()));
+
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    const unsigned int seed = getGlobalTestSeed();
+    SdpaBwdTensorBundle<float> tensorScale(dims, dims, dims, seed);
+    SdpaBwdTensorBundle<float> bakedScale(dims, dims, dims, seed);
+    SdpaBwdTensorBundle<float> unscaled(dims, dims, dims, seed);
+    hipdnn_data_sdk::utilities::Tensor<float> scale({1, 1, 1, 1});
+    scale.fillWithValue(SCALE);
+
+    // Fixed UIDs of makeRawSdpaBwdGraph: Q=1, K=2, V=3, O=4, dO=5, Stats=6, dQ=7, dK=8, dV=9.
+    const auto variantPack = [](SdpaBwdTensorBundle<float>& bundle) {
+        return std::unordered_map<int64_t, void*>{{1, bundle.qTensor.memory().hostData()},
+                                                  {2, bundle.kTensor.memory().hostData()},
+                                                  {3, bundle.vTensor.memory().hostData()},
+                                                  {4, bundle.oTensor.memory().hostData()},
+                                                  {5, bundle.doTensor.memory().hostData()},
+                                                  {6, bundle.statsTensor.memory().hostData()},
+                                                  {7, bundle.dqTensor.memory().hostData()},
+                                                  {8, bundle.dkTensor.memory().hostData()},
+                                                  {9, bundle.dvTensor.memory().hostData()}};
+    };
+    auto tensorScalePack = variantPack(tensorScale);
+    tensorScalePack[SCALE_UID] = scale.memory().hostData();
+
+    ASSERT_NO_THROW(executor.execute(
+        tensorScaleGraph.GetBufferPointer(), tensorScaleGraph.GetSize(), tensorScalePack));
+    ASSERT_NO_THROW(executor.execute(
+        bakedScaleGraph.GetBufferPointer(), bakedScaleGraph.GetSize(), variantPack(bakedScale)));
+    ASSERT_NO_THROW(executor.execute(
+        unscaledGraph.GetBufferPointer(), unscaledGraph.GetSize(), variantPack(unscaled)));
+
+    // Same arithmetic on the same inputs.
+    const CpuFpReferenceValidation<float> exact(0.0F, 0.0F);
+    EXPECT_TRUE(exact.allClose(bakedScale.dqTensor, tensorScale.dqTensor));
+    EXPECT_TRUE(exact.allClose(bakedScale.dkTensor, tensorScale.dkTensor));
+    EXPECT_TRUE(exact.allClose(bakedScale.dvTensor, tensorScale.dvTensor));
+
+    // The scale must change the gradients, otherwise the comparison is vacuous.
+    EXPECT_FALSE(exact.allClose(unscaled.dqTensor, tensorScale.dqTensor));
+}
+
 TEST_P(TestSdpaBwdPlanUnsupportedAttribute, IsNotApplicable)
 {
     SdpaBackwardAttributesT attrs;
