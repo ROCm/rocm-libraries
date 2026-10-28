@@ -93,6 +93,7 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
             include_bt_stride=True,
             include_qq_bias_stride=True,
             kv_dtype=spec.kernel_spec.kv_storage_dtype,
+            emit_lse=bool(getattr(spec.kernel_spec, "emit_lse", False)),
         )
 
     def bind_torch(request, spec, tensors, **kwargs):
@@ -117,11 +118,12 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
                 ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
                 ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
             ),
-            # Only split-KV variants write LSE; 2D variants refuse the feature.
+            # Every unified variant writes LSE except the gfx942 4-warp GQA
+            # builder (see _GFX942_4WARP_LSE_REFUSAL).
             supports_features=(
-                ATTENTION_FEATURES | {"lse"}
-                if variant.path == "3d"
-                else ATTENTION_FEATURES
+                ATTENTION_FEATURES
+                if variant.builder_kind == "gfx942_4warp_gqa"
+                else ATTENTION_FEATURES | {"lse"}
             ),
         ),
         space=unified_space(variant),

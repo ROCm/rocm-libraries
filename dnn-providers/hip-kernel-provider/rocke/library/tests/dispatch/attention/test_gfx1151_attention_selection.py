@@ -409,9 +409,13 @@ class TestRdnaAttentionSelection(unittest.TestCase):
                     plain = dispatch_attention(make(layout=layout)).spec
                     lse = dispatch_attention(make(layout=layout, emit_lse=True)).spec
                     self.assertEqual(plain, lse)
+        # On CDNA the same request routes to unified tiled 2D, whose LSE
+        # variant is a different binary (one more pointer argument).
         for arch in ("gfx950", "gfx942"):
-            with self.subTest(arch=arch), self.assertRaises(ValueError):
-                dispatch_attention(_request(arch=arch, emit_lse=True))
+            with self.subTest(arch=arch):
+                plain = dispatch_attention(_request(arch=arch)).spec
+                lse = dispatch_attention(_request(arch=arch, emit_lse=True)).spec
+                self.assertEqual(lse.kernel_name(), plain.kernel_name() + "_lse")
 
     def test_score_features_layouts_and_fp8_reach_both_kernels(self):
         features = dict(

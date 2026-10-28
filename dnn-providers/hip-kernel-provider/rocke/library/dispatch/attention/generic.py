@@ -64,9 +64,9 @@ _UNIFIED_CAPABILITY = Capability(
     # the scalar kernel elsewhere (tiled gates reject it off gfx950).
     supports_features=ATTENTION_FEATURES,
 )
-# Only the split-KV (3D) path writes the optional LSE output; its support check
-# (the 3D gate below) still refuses it on arches/features that cannot.
-_UNIFIED_3D_CAPABILITY = dataclasses.replace(
+# Both unified paths write the optional LSE output; each path's own gate (in
+# ``support`` below) still refuses it on arches/features that cannot.
+_UNIFIED_LSE_CAPABILITY = dataclasses.replace(
     _UNIFIED_CAPABILITY, supports_features=ATTENTION_FEATURES | {"lse"}
 )
 
@@ -139,7 +139,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=priority,
-        capability=_UNIFIED_3D_CAPABILITY if path == "3d" else _UNIFIED_CAPABILITY,
+        capability=_UNIFIED_LSE_CAPABILITY,
         _supports=support,
         select_spec=select,
         signature=lambda _spec: (),
