@@ -44,9 +44,7 @@
 #include _THRUST_LIBCXX_INCLUDE(__iterator/discard_iterator.h)
 #include _THRUST_LIBCXX_INCLUDE(__iterator/tabulate_output_iterator.h)
 #include _THRUST_LIBCXX_INCLUDE(__iterator/transform_input_output_iterator.h)
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(__new/device_new.h)
-#endif
+#include _THRUST_STD_INCLUDE(__new/device_new.h)
 
 #include _THRUST_STD_INCLUDE(type_traits)
 

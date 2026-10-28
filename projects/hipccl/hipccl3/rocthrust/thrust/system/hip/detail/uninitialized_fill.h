@@ -43,6 +43,8 @@
 #  include <thrust/system/hip/detail/parallel_for.h>
 #  include <thrust/system/hip/detail/util.h>
 
+#  include _THRUST_STD_INCLUDE(__new/device_new.h)
+
 #  include <iterator>
 
 THRUST_NAMESPACE_BEGIN
