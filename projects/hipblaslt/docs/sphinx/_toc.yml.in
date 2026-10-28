@@ -37,6 +37,8 @@ subtrees:
     title: Detect NaN in GEMM output
   - file: how-to/how-to-general-batched-gemm
     title: Use general batched GEMM
+  - file: how-to/choose-gemm-for-solution
+    title: Choose one GEMM from a solution index
 
 - caption: Examples
   entries:
