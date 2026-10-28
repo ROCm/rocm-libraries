@@ -1,0 +1,105 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Host-only IR tests for opt-in LSE output on the tiled 2D unified-attention
+kernels (gfx942 + gfx950). No GPU: specs are built and lowered to LLVM text."""
+
+import importlib
+
+import pytest
+
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+_BASE = dict(
+    head_size=128,
+    block_size=64,
+    num_query_heads=4,
+    num_kv_heads=2,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=False,
+)
+
+# Spec kwargs that select each epilogue branch of build_unified_attention_2d_tiled.
+BRANCH_SPEC_KW = {
+    "gfx950": {
+        "transposed32": dict(
+            use_mfma_32x32=True,
+            block_m_per_warp=32,
+            use_transposed_qk_32x32=True,
+            use_transposed_scalar_state=True,
+        ),
+        "mfma32": dict(use_mfma_32x32=True, block_m_per_warp=32),
+        "striped16": {},
+    },
+}
+
+# One FP32 LSE store per (writer lane, softmax-state slot), Python-unrolled.
+_EXPECTED_LSE_STORES = {
+    "gfx950": {"transposed32": 1, "mfma32": 16, "striped16": 4},
+}
+
+# sha256 of lower_kernel_to_llvm(...) text for the LSE-off build, keyed by the
+# resolved LLVM flavor (the text differs per flavor, like the flavor-keyed IR
+# golden). A flavor with no recorded hashes skips only the hash pin; the IR
+# harness --check still gates it. Recorded after the running-max carry fix
+# (#14542) was merged into this branch, before any LSE store existed.
+_OFF_SHA256 = {
+    "llvm20": {
+        "gfx950": {
+            "transposed32": "b9632fa4fedd6f73aeab033e682e1c7bf5e981dc5638b07a8c686d01ab0c51fe",
+            "mfma32": "75c49deabc455a47c596709cab31c2434cf7dc0a9903f292f0178ab96bc2ed57",
+            "striped16": "2581bfec6efe59e48aec76a867d28d53a26ef41066d7df4a9b050529b983aad5",
+        },
+    },
+}
+
+_CASES = [("gfx950", b) for b in ("transposed32", "mfma32", "striped16")]
+_SPEC_ARCHES = ["gfx950"]
+
+
+def _module(arch):
+    return importlib.import_module(f"kernels.{arch}.attention_tiled_2d")
+
+
+def _spec(arch, branch, **kw):
+    return _module(arch).UnifiedAttention2DTiledSpec(
+        **_BASE, **BRANCH_SPEC_KW[arch][branch], **kw
+    )
+
+
+def _lower(spec, arch):
+    kernel = _module(arch).build_unified_attention_2d_tiled(spec, arch=arch)
+    return lower_kernel_to_llvm(kernel, arch=arch)
+
+
+def _lse_store_count(ir):
+    """FP32 global stores. The LSE-off 2D kernels have none (bf16/fp16 O)."""
+    return sum(
+        1
+        for line in ir.splitlines()
+        if "store float" in line and "ptr addrspace(1)" in line
+    )
+
+
+def _define_line(ir):
+    return next(line for line in ir.splitlines() if line.startswith("define"))
+
+
+@pytest.mark.parametrize("arch", _SPEC_ARCHES)
+@pytest.mark.parametrize("bad", ["false", 0, 1, None])
+def test_2d_spec_rejects_non_boolean_emit_lse(arch, bad):
+    with pytest.raises(ValueError, match="emit_lse must be a bool"):
+        _spec(arch, "striped16", emit_lse=bad)
+
+
+@pytest.mark.parametrize("arch,branch", _CASES)
+def test_2d_kernel_name_gains_lse_suffix_only_when_on(arch, branch):
+    default = _spec(arch, branch)
+    off = _spec(arch, branch, emit_lse=False)
+    on = _spec(arch, branch, emit_lse=True)
+    assert default.emit_lse is False
+    assert off.kernel_name() == default.kernel_name()
+    assert not default.kernel_name().endswith("_lse")
+    assert on.kernel_name() == default.kernel_name() + "_lse"

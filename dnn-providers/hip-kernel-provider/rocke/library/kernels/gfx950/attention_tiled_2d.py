@@ -39,7 +39,7 @@ Correctness contract (validated against `aiter.op_tests.triton_tests.attention`
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 from kernels.common._attention_additive_bias import (
@@ -494,8 +494,16 @@ class UnifiedAttention2DTiledSpec:
     # to the alignment chosen by ``causal_top_left``. Not combinable with ALiBi /
     # QQ-bias, whose offsets are defined on the causal diagonal.
     right_bound: int = 0
+    # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
+    #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
+    #   Off by default; off emits no new IR, so shipped kernels are unchanged.
+    emit_lse: bool = field(default=False, kw_only=True)
 
     def __post_init__(self):
+        if type(self.emit_lse) is not bool:
+            raise ValueError(
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+            )
         if type(self.use_additive_bias) is not bool:
             raise ValueError(
                 "use_additive_bias must be a bool, got "
@@ -955,6 +963,7 @@ class UnifiedAttention2DTiledSpec:
             "fp8mfma" if self.use_fp8_mfma_qk else "",
             "fp8pv" if self.use_fp8_mfma_pv else "",
             "regpv" if self.use_register_pv else "",
+            "lse" if self.emit_lse else "",
         )
 
 

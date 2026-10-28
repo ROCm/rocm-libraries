@@ -387,14 +387,15 @@ class UnifiedSpace(WavesPerEuSpace):
         recorded = self.recorded(base)
         return {
             "codepath": dict(self.fixed(base)),
+            # ``emit_lse`` is an output the problem selects, not a default that
+            # knobs are a delta against: keeping it out of both the 2D kernel
+            # and the split-KV reduce defaults leaves every config_key, and so
+            # every stored pin, as before the field existed.
             "kernel": {
                 name: value
                 for name, value in _declared_defaults(type(kernel.kernel_spec))
-                if name not in recorded
+                if name not in recorded and name != "emit_lse"
             },
-            # ``emit_lse`` is an output the problem selects, not a default that
-            # knobs are a delta against: keeping it out leaves every split-KV
-            # config_key, and so every stored pin, as before the field existed.
             "reduce": (
                 None
                 if reduce is None
