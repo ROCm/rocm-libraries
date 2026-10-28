@@ -34,8 +34,10 @@ set(MIOPEN_WINDOWS_SDK_ROOT
 )
 
 set(MIOPEN_RC_PROBE_DIR "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/miopen-rc-probe")
+# /nologo suppresses the resource compiler's two-line banner, which would otherwise print on every
+# .rc compile. Accepted by both Microsoft rc.exe and llvm-rc.
 set(MIOPEN_RC_SINGLE_STAGE_RULE
-    "<CMAKE_RC_COMPILER> <DEFINES> <INCLUDES> <FLAGS> /fo <OBJECT> <SOURCE>"
+    "<CMAKE_RC_COMPILER> /nologo <DEFINES> <INCLUDES> <FLAGS> /fo <OBJECT> <SOURCE>"
 )
 
 # Writes the probe resource. The SDK include is what drags in the line markers that break llvm-rc, so

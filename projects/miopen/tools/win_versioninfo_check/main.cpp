@@ -13,7 +13,11 @@
 // Uses wmain/wchar_t paths throughout: build directories routinely contain non-ASCII characters,
 // and narrowing them would corrupt the path and surface as a bogus "no VERSIONINFO" failure.
 //
-// Usage: win_versioninfo_check.exe <expected-major.minor.patch> <dll-path> [<dll-path> ...]
+// Silent on success: this runs as a POST_BUILD step on every DLL link, so printing the whole
+// resource each time would bury the build output. On failure it dumps every field it read, which
+// is what you actually want for diagnosis. Pass --verbose to dump them on success too.
+//
+// Usage: win_versioninfo_check.exe [--verbose] <expected-major.minor.patch> <dll-path> [...]
 
 #include <windows.h>
 
@@ -27,31 +31,49 @@ namespace {
 // VS_FIXEDFILEINFO, so the formatted length is bounded and cannot overflow this.
 constexpr size_t kVersionBufferChars = 64;
 
-bool CheckNonEmptyStringField(void* block,
-                              const wchar_t* field_name,
-                              const std::wstring& dll_path,
-                              bool& ok)
+const wchar_t* const kRequiredFields[] = {
+    L"CompanyName", L"FileDescription", L"FileVersion", L"ProductName", L"ProductVersion"};
+
+// Returns the StringFileInfo field's value, or an empty string if it is absent or blank.
+std::wstring QueryStringField(void* block, const wchar_t* field_name)
 {
     void* value            = nullptr;
     UINT value_len         = 0;
     std::wstring sub_block = L"\\StringFileInfo\\040904B0\\" + std::wstring(field_name);
-    if(!VerQueryValueW(block, sub_block.c_str(), &value, &value_len) || value_len == 0 ||
-       static_cast<const wchar_t*>(value)[0] == L'\0')
+    if(!VerQueryValueW(block, sub_block.c_str(), &value, &value_len) || value_len == 0)
     {
-        fwprintf(stderr,
-                 L"FAIL %ls: missing or empty StringFileInfo field '%ls'\n",
-                 dll_path.c_str(),
-                 field_name);
-        ok = false;
-        return false;
+        return {};
     }
-    fwprintf(stdout, L"  %ls = %ls\n", field_name, static_cast<const wchar_t*>(value));
-    return true;
+    return std::wstring(static_cast<const wchar_t*>(value));
 }
 
-bool CheckOneDll(const std::wstring& dll_path,
-                 const std::wstring& expected_version,
-                 bool& any_failed)
+void FormatVersion(wchar_t (&out)[kVersionBufferChars], DWORD ms, DWORD ls)
+{
+    swprintf(out, kVersionBufferChars, L"%u.%u.%u", HIWORD(ms), LOWORD(ms), HIWORD(ls));
+}
+
+// Dumps everything read from the resource. Used on failure, and on success under --verbose.
+void DumpResource(const std::wstring& dll_path,
+                  const wchar_t* actual_version,
+                  const wchar_t* expected_version,
+                  const std::vector<std::wstring>& values,
+                  FILE* out)
+{
+    fwprintf(out,
+             L"%ls: FILEVERSION = %ls (expected %ls)\n",
+             dll_path.c_str(),
+             actual_version,
+             expected_version);
+    for(size_t i = 0; i < values.size(); ++i)
+    {
+        fwprintf(out,
+                 L"  %ls = %ls\n",
+                 kRequiredFields[i],
+                 values[i].empty() ? L"<missing or empty>" : values[i].c_str());
+    }
+}
+
+bool CheckOneDll(const std::wstring& dll_path, const std::wstring& expected_version, bool verbose)
 {
     DWORD handle    = 0;
     DWORD info_size = GetFileVersionInfoSizeW(dll_path.c_str(), &handle);
@@ -62,7 +84,6 @@ bool CheckOneDll(const std::wstring& dll_path,
                  L"resource embedded\n",
                  dll_path.c_str(),
                  GetLastError());
-        any_failed = true;
         return false;
     }
 
@@ -73,7 +94,6 @@ bool CheckOneDll(const std::wstring& dll_path,
                  L"FAIL %ls: GetFileVersionInfoW failed (error %lu)\n",
                  dll_path.c_str(),
                  GetLastError());
-        any_failed = true;
         return false;
     }
 
@@ -86,33 +106,25 @@ bool CheckOneDll(const std::wstring& dll_path,
         fwprintf(stderr,
                  L"FAIL %ls: VerQueryValueW(root) failed - no VS_FIXEDFILEINFO\n",
                  dll_path.c_str());
-        any_failed = true;
         return false;
     }
 
     wchar_t actual_version[kVersionBufferChars];
-    swprintf(actual_version,
-             kVersionBufferChars,
-             L"%u.%u.%u",
-             HIWORD(fixed_info->dwFileVersionMS),
-             LOWORD(fixed_info->dwFileVersionMS),
-             HIWORD(fixed_info->dwFileVersionLS));
+    FormatVersion(actual_version, fixed_info->dwFileVersionMS, fixed_info->dwFileVersionLS);
 
-    fwprintf(stdout,
-             L"%ls: FILEVERSION = %ls (expected %ls)\n",
-             dll_path.c_str(),
-             actual_version,
-             expected_version.c_str());
+    std::vector<std::wstring> values;
+    values.reserve(std::size(kRequiredFields));
+    for(const wchar_t* field : kRequiredFields)
+    {
+        values.push_back(QueryStringField(buffer.data(), field));
+    }
 
-    bool ok = true;
+    // Collect every problem before reporting, so one run shows all of them rather than making the
+    // caller rebuild to discover the next.
+    std::vector<std::wstring> problems;
     if(expected_version != actual_version)
     {
-        fwprintf(stderr,
-                 L"FAIL %ls: FILEVERSION '%ls' does not match expected '%ls'\n",
-                 dll_path.c_str(),
-                 actual_version,
-                 expected_version.c_str());
-        ok = false;
+        problems.push_back(L"FILEVERSION does not match the configured project version");
     }
 
     // PRODUCTVERSION is a separate pair of DWORDs in VS_FIXEDFILEINFO and nothing in the .rc
@@ -121,54 +133,72 @@ bool CheckOneDll(const std::wstring& dll_path,
     if(fixed_info->dwProductVersionMS != fixed_info->dwFileVersionMS ||
        fixed_info->dwProductVersionLS != fixed_info->dwFileVersionLS)
     {
-        fwprintf(stderr,
-                 L"FAIL %ls: PRODUCTVERSION %u.%u.%u.%u does not match FILEVERSION %u.%u.%u.%u\n",
-                 dll_path.c_str(),
-                 HIWORD(fixed_info->dwProductVersionMS),
-                 LOWORD(fixed_info->dwProductVersionMS),
-                 HIWORD(fixed_info->dwProductVersionLS),
-                 LOWORD(fixed_info->dwProductVersionLS),
-                 HIWORD(fixed_info->dwFileVersionMS),
-                 LOWORD(fixed_info->dwFileVersionMS),
-                 HIWORD(fixed_info->dwFileVersionLS),
-                 LOWORD(fixed_info->dwFileVersionLS));
-        ok = false;
+        wchar_t product_version[kVersionBufferChars];
+        FormatVersion(
+            product_version, fixed_info->dwProductVersionMS, fixed_info->dwProductVersionLS);
+        problems.push_back(std::wstring(L"PRODUCTVERSION (") + product_version +
+                           L") does not match FILEVERSION");
     }
 
-    static const wchar_t* kRequiredFields[] = {
-        L"CompanyName", L"FileDescription", L"FileVersion", L"ProductName", L"ProductVersion"};
-    for(const wchar_t* field : kRequiredFields)
+    for(size_t i = 0; i < values.size(); ++i)
     {
-        CheckNonEmptyStringField(buffer.data(), field, dll_path, ok);
+        if(values[i].empty())
+        {
+            problems.push_back(std::wstring(L"StringFileInfo field '") + kRequiredFields[i] +
+                               L"' is missing or empty");
+        }
     }
 
-    if(!ok)
+    if(problems.empty())
     {
-        any_failed = true;
+        if(verbose)
+        {
+            DumpResource(dll_path, actual_version, expected_version.c_str(), values, stdout);
+        }
+        return true;
     }
-    return ok;
+
+    fwprintf(stderr, L"FAIL %ls: embedded VERSIONINFO is not valid\n", dll_path.c_str());
+    for(const std::wstring& problem : problems)
+    {
+        fwprintf(stderr, L"  - %ls\n", problem.c_str());
+    }
+    DumpResource(dll_path, actual_version, expected_version.c_str(), values, stderr);
+    return false;
 }
 
 } // namespace
 
 int wmain(int argc, wchar_t** argv)
 {
-    if(argc < 3)
+    int arg      = 1;
+    bool verbose = false;
+    if(arg < argc && std::wstring(argv[arg]) == L"--verbose")
     {
-        fwprintf(stderr,
-                 L"usage: %ls <expected-major.minor.patch> <dll-path> [<dll-path> ...]\n"
-                 L"(need at least one DLL path - zero DLLs is a configuration bug, not a pass)\n",
-                 argc > 0 ? argv[0] : L"win_versioninfo_check");
+        verbose = true;
+        ++arg;
+    }
+
+    if(argc - arg < 2)
+    {
+        fwprintf(
+            stderr,
+            L"usage: %ls [--verbose] <expected-major.minor.patch> <dll-path> [<dll-path> ...]\n"
+            L"(need at least one DLL path - zero DLLs is a configuration bug, not a pass)\n",
+            argc > 0 ? argv[0] : L"win_versioninfo_check");
         return 1;
     }
 
-    const std::wstring expected_version = argv[1];
+    const std::wstring expected_version = argv[arg++];
     bool any_failed                     = false;
     int checked                         = 0;
 
-    for(int i = 2; i < argc; ++i)
+    for(int i = arg; i < argc; ++i)
     {
-        CheckOneDll(argv[i], expected_version, any_failed);
+        if(!CheckOneDll(argv[i], expected_version, verbose))
+        {
+            any_failed = true;
+        }
         ++checked;
     }
 
@@ -178,6 +208,9 @@ int wmain(int argc, wchar_t** argv)
         return 1;
     }
 
-    fwprintf(stdout, L"win_versioninfo_check: PASSED (%d file(s) checked)\n", checked);
+    if(verbose)
+    {
+        fwprintf(stdout, L"win_versioninfo_check: PASSED (%d file(s) checked)\n", checked);
+    }
     return 0;
 }
