@@ -690,7 +690,8 @@ try
         ("api_method",
          value<std::string>(&api_method_str)->default_value("c"),
          "Use extension API. c: C style API. mix: declaration with C hipblasLtMatmul Layout/Desc but set, initialize, and run the problem with C++ extension API. cpp: Using C++ extension API only. "
-         "Options: c, mix, cpp.")
+         "grouped_gemm_c: with --grouped_gemm, grouped matrix layouts and hipblasLtMatmul instead of the C++ GroupedGemm class. "
+         "Options: c, mix, cpp, grouped_gemm_c.")
 
         ("print_kernel_info",
          value<bool>(&arg.print_kernel_info)->default_value(false),
@@ -839,6 +840,9 @@ try
         return 0;
     }
 
+    if(!hipblaslt_timing_allowed_with_adaptive_sm_count())
+        return EXIT_FAILURE;
+
     if(api_method_str.compare("c") == 0)
     {
         api_method = 0;
@@ -850,6 +854,10 @@ try
     else if(api_method_str.compare("cpp") == 0)
     {
         api_method = 2;
+    }
+    else if(api_method_str.compare("grouped_gemm_c") == 0)
+    {
+        api_method = kApiMethodGroupedC;
     }
     else
     {
@@ -1328,9 +1336,11 @@ try
         arg.ulp_check = 1;
     }
 
+    arg.api_method = api_method;
     switch(api_method)
     {
     case 0:
+    case kApiMethodGroupedC:
         arg.use_ext            = false;
         arg.use_ext_setproblem = false;
         break;

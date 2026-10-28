@@ -22,6 +22,7 @@
 *
 * ************************************************************************ */
 #include "hipsparse_routine.hpp"
+#include "utility.hpp"
 
 constexpr const char* hipsparse_routine::s_routine_names[hipsparse_routine::num_routines];
 
@@ -45,7 +46,7 @@ hipsparse_routine::hipsparse_routine(const char* function)
         std::cerr << "//    - " << str << std::endl;
     }
 
-    throw HIPSPARSE_STATUS_INVALID_VALUE;
+    throw_hipsparse_error("hipsparse_routine", HIPSPARSE_STATUS_INVALID_VALUE);
 }
 
 hipsparse_routine::hipsparse_routine()
@@ -71,7 +72,7 @@ hipsparse_routine& hipsparse_routine::operator()(const char* function)
         std::cerr << "//    - " << str << std::endl;
     }
 
-    throw HIPSPARSE_STATUS_INVALID_VALUE;
+    throw_hipsparse_error("hipsparse_routine", HIPSPARSE_STATUS_INVALID_VALUE);
 }
 
 constexpr hipsparse_routine::value_type hipsparse_routine::all_routines[];
@@ -537,89 +538,95 @@ hipsparseStatus_t hipsparse_routine::dispatch_call(const Arguments& arg)
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
-#define DEFINE_CASE_T_X(value, testingf)       \
-    case value:                                \
-    {                                          \
-        try                                    \
-        {                                      \
-            testingf<T>(arg);                  \
-            return HIPSPARSE_STATUS_SUCCESS;   \
-        }                                      \
-        catch(const hipsparseStatus_t& status) \
-        {                                      \
-            return status;                     \
-        }                                      \
+#define DEFINE_CASE_T_X(value, testingf)            \
+    case value:                                     \
+    {                                               \
+        try                                         \
+        {                                           \
+            testingf<T>(arg);                       \
+            return HIPSPARSE_STATUS_SUCCESS;        \
+        }                                           \
+        catch(const std::exception& e)              \
+        {                                           \
+            std::cerr << e.what() << std::endl;     \
+            return HIPSPARSE_STATUS_INTERNAL_ERROR; \
+        }                                           \
     }
 
-#define DEFINE_CASE_IT_X(value, testingf)      \
-    case value:                                \
-    {                                          \
-        try                                    \
-        {                                      \
-            testingf<I, T>(arg);               \
-            return HIPSPARSE_STATUS_SUCCESS;   \
-        }                                      \
-        catch(const hipsparseStatus_t& status) \
-        {                                      \
-            return status;                     \
-        }                                      \
+#define DEFINE_CASE_IT_X(value, testingf)           \
+    case value:                                     \
+    {                                               \
+        try                                         \
+        {                                           \
+            testingf<I, T>(arg);                    \
+            return HIPSPARSE_STATUS_SUCCESS;        \
+        }                                           \
+        catch(const std::exception& e)              \
+        {                                           \
+            std::cerr << e.what() << std::endl;     \
+            return HIPSPARSE_STATUS_INTERNAL_ERROR; \
+        }                                           \
     }
 
-#define DEFINE_CASE_IJT_X(value, testingf)     \
-    case value:                                \
-    {                                          \
-        try                                    \
-        {                                      \
-            testingf<I, J, T>(arg);            \
-            return HIPSPARSE_STATUS_SUCCESS;   \
-        }                                      \
-        catch(const hipsparseStatus_t& status) \
-        {                                      \
-            return status;                     \
-        }                                      \
+#define DEFINE_CASE_IJT_X(value, testingf)          \
+    case value:                                     \
+    {                                               \
+        try                                         \
+        {                                           \
+            testingf<I, J, T>(arg);                 \
+            return HIPSPARSE_STATUS_SUCCESS;        \
+        }                                           \
+        catch(const std::exception& e)              \
+        {                                           \
+            std::cerr << e.what() << std::endl;     \
+            return HIPSPARSE_STATUS_INTERNAL_ERROR; \
+        }                                           \
     }
 
-#define DEFINE_CASE_IXYT_X(value, testingf)    \
-    case value:                                \
-    {                                          \
-        try                                    \
-        {                                      \
-            testingf<I, T, T, T>(arg);         \
-            return HIPSPARSE_STATUS_SUCCESS;   \
-        }                                      \
-        catch(const hipsparseStatus_t& status) \
-        {                                      \
-            return status;                     \
-        }                                      \
+#define DEFINE_CASE_IXYT_X(value, testingf)         \
+    case value:                                     \
+    {                                               \
+        try                                         \
+        {                                           \
+            testingf<I, T, T, T>(arg);              \
+            return HIPSPARSE_STATUS_SUCCESS;        \
+        }                                           \
+        catch(const std::exception& e)              \
+        {                                           \
+            std::cerr << e.what() << std::endl;     \
+            return HIPSPARSE_STATUS_INTERNAL_ERROR; \
+        }                                           \
     }
 
-#define DEFINE_CASE_IAXYT_X(value, testingf)   \
-    case value:                                \
-    {                                          \
-        try                                    \
-        {                                      \
-            testingf<I, T, T, T, T>(arg);      \
-            return HIPSPARSE_STATUS_SUCCESS;   \
-        }                                      \
-        catch(const hipsparseStatus_t& status) \
-        {                                      \
-            return status;                     \
-        }                                      \
+#define DEFINE_CASE_IAXYT_X(value, testingf)        \
+    case value:                                     \
+    {                                               \
+        try                                         \
+        {                                           \
+            testingf<I, T, T, T, T>(arg);           \
+            return HIPSPARSE_STATUS_SUCCESS;        \
+        }                                           \
+        catch(const std::exception& e)              \
+        {                                           \
+            std::cerr << e.what() << std::endl;     \
+            return HIPSPARSE_STATUS_INTERNAL_ERROR; \
+        }                                           \
     }
 #define DEFINE_CASE_IABCT_X(value, testingf) DEFINE_CASE_IAXYT_X(value, testingf)
 
-#define DEFINE_CASE_IJAXYT_X(value, testingf)  \
-    case value:                                \
-    {                                          \
-        try                                    \
-        {                                      \
-            testingf<I, J, T, T, T, T>(arg);   \
-            return HIPSPARSE_STATUS_SUCCESS;   \
-        }                                      \
-        catch(const hipsparseStatus_t& status) \
-        {                                      \
-            return status;                     \
-        }                                      \
+#define DEFINE_CASE_IJAXYT_X(value, testingf)       \
+    case value:                                     \
+    {                                               \
+        try                                         \
+        {                                           \
+            testingf<I, J, T, T, T, T>(arg);        \
+            return HIPSPARSE_STATUS_SUCCESS;        \
+        }                                           \
+        catch(const std::exception& e)              \
+        {                                           \
+            std::cerr << e.what() << std::endl;     \
+            return HIPSPARSE_STATUS_INTERNAL_ERROR; \
+        }                                           \
     }
 #define DEFINE_CASE_IJABCT_X(value, testingf) DEFINE_CASE_IJAXYT_X(value, testingf)
 
@@ -630,37 +637,39 @@ hipsparseStatus_t hipsparse_routine::dispatch_call(const Arguments& arg)
 #define IS_T_COMPLEX_FLOAT (std::is_same<T, hipComplex>())
 #define IS_T_COMPLEX_DOUBLE (std::is_same<T, hipDoubleComplex>())
 
-#define DEFINE_CASE_T_REAL_ONLY(value)              \
-    case value:                                     \
-    {                                               \
-        if(IS_T_FLOAT)                              \
-        {                                           \
-            try                                     \
-            {                                       \
-                testing_##value<float>(arg);        \
-                return HIPSPARSE_STATUS_SUCCESS;    \
-            }                                       \
-            catch(const hipsparseStatus_t& status)  \
-            {                                       \
-                return status;                      \
-            }                                       \
-        }                                           \
-        else if(IS_T_DOUBLE)                        \
-        {                                           \
-            try                                     \
-            {                                       \
-                testing_##value<double>(arg);       \
-                return HIPSPARSE_STATUS_SUCCESS;    \
-            }                                       \
-            catch(const hipsparseStatus_t& status)  \
-            {                                       \
-                return status;                      \
-            }                                       \
-        }                                           \
-        else                                        \
-        {                                           \
-            return HIPSPARSE_STATUS_INTERNAL_ERROR; \
-        }                                           \
+#define DEFINE_CASE_T_REAL_ONLY(value)                  \
+    case value:                                         \
+    {                                                   \
+        if(IS_T_FLOAT)                                  \
+        {                                               \
+            try                                         \
+            {                                           \
+                testing_##value<float>(arg);            \
+                return HIPSPARSE_STATUS_SUCCESS;        \
+            }                                           \
+            catch(const std::exception& e)              \
+            {                                           \
+                std::cerr << e.what() << std::endl;     \
+                return HIPSPARSE_STATUS_INTERNAL_ERROR; \
+            }                                           \
+        }                                               \
+        else if(IS_T_DOUBLE)                            \
+        {                                               \
+            try                                         \
+            {                                           \
+                testing_##value<double>(arg);           \
+                return HIPSPARSE_STATUS_SUCCESS;        \
+            }                                           \
+            catch(const std::exception& e)              \
+            {                                           \
+                std::cerr << e.what() << std::endl;     \
+                return HIPSPARSE_STATUS_INTERNAL_ERROR; \
+            }                                           \
+        }                                               \
+        else                                            \
+        {                                               \
+            return HIPSPARSE_STATUS_INTERNAL_ERROR;     \
+        }                                               \
     }
 
 #define DEFINE_CASE_T_REAL_VS_COMPLEX(value, rtestingf, ctestingf) \
@@ -689,9 +698,10 @@ hipsparseStatus_t hipsparse_routine::dispatch_call(const Arguments& arg)
                 return HIPSPARSE_STATUS_INTERNAL_ERROR;            \
             }                                                      \
         }                                                          \
-        catch(const hipsparseStatus_t& status)                     \
+        catch(const std::exception& e)                             \
         {                                                          \
-            return status;                                         \
+            std::cerr << e.what() << std::endl;                    \
+            return HIPSPARSE_STATUS_INTERNAL_ERROR;                \
         }                                                          \
     }
 

@@ -46,12 +46,13 @@
 #include "mxDataGen.hpp"
 #endif
 // Ungated: generateW4A16Input is used even without the MX data generator.
-#include "w4a16_datagen.hpp"
 #include "near.hpp"
 #include "norm.hpp"
+#include "testing_matmul_grouped_c.hpp"
 #include "ulp.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
+#include "w4a16_datagen.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
@@ -1970,6 +1971,14 @@ void testing_matmul(const Arguments& arg)
             return;
 #endif
         }
+    }
+
+    if(arg.api_method == kApiMethodGroupedC)
+    {
+        const std::string reason = groupedCApiUnsupportedReason(arg);
+        if(!reason.empty())
+            hipblaslt_cerr << "api_method grouped_gemm_c " << reason << std::endl;
+        CHECK_SUCCESS(reason.empty());
     }
 
     // for all f8/bf8 cases including mix mode
@@ -4335,6 +4344,7 @@ void testing_matmul_with_bias(const Arguments& arg,
     int     returnedAlgoCount = 0;
     std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResult;
     std::vector<size_t>                           heuristicTuningIndex;
+    std::unique_ptr<GroupedCApiProblem>           groupedC;
 
     // Cpp API
     hipblaslt_ext::GemmPreference gemmPref;
@@ -5260,6 +5270,32 @@ void testing_matmul_with_bias(const Arguments& arg,
                 workspace_size = std::max(workspace_size, heuristicResult[i].workspaceSize);
             CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
         }
+        else if(arg.api_method == kApiMethodGroupedC)
+        {
+            groupedC = std::make_unique<GroupedCApiProblem>(handle,
+                                                            arg,
+                                                            transA,
+                                                            transB,
+                                                            M,
+                                                            N,
+                                                            K,
+                                                            lda,
+                                                            ldb,
+                                                            ldc,
+                                                            ldd,
+                                                            da,
+                                                            db,
+                                                            dc,
+                                                            dd,
+                                                            max_workspace_size);
+            EXPECT_HIPBLAS_STATUS(groupedC->status(), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_HIPBLAS_STATUS(groupedC->heuristic(requestAlgoCount, heuristicResult),
+                                  HIPBLAS_STATUS_SUCCESS);
+            heuristicTuningIndex.assign(heuristicResult.size(), 0);
+            for(auto& result : heuristicResult)
+                workspace_size = std::max(workspace_size, result.workspaceSize);
+            CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
+        }
         else
         {
             if(arg.use_ext_setproblem)
@@ -6062,7 +6098,18 @@ void testing_matmul_with_bias(const Arguments& arg,
             else
             {
                 //grouped gemm
-                if(arg.use_user_args)
+                if(groupedC)
+                {
+                    EXPECT_HIPBLAS_STATUS(groupedC->run(0,
+                                                        heuristicResult[sol].algo,
+                                                        &h_alpha[0],
+                                                        &h_beta[0],
+                                                        *dWorkspace,
+                                                        workspace_size,
+                                                        stream),
+                                          HIPBLAS_STATUS_SUCCESS);
+                }
+                else if(arg.use_user_args)
                 {
                     groupedGemmVec[0].setMaxWorkspaceBytes(workspace_size);
                     CHECK_HIPBLASLT_ERROR(
@@ -6900,7 +6947,47 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
             // Grouped GEMM launches are timed back to back, with no flush between them.
             searchCfg.flush = false;
-            if(arg.use_user_args)
+            if(groupedC)
+            {
+                auto runBlock = [&](size_t sol, int b) {
+                    EXPECT_HIPBLAS_STATUS(
+                        groupedC->run(b,
+                                      heuristicResult[sol].algo,
+                                      &h_alpha[0],
+                                      &h_beta[0],
+                                      (unsigned char*)(*dWorkspace) + b * workspace_size,
+                                      workspace_size,
+                                      stream),
+                        HIPBLAS_STATUS_SUCCESS);
+                };
+                search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
+                    heuristicResult.size(),
+                    searchCfg,
+                    timingCfg,
+                    event_gpu_time_start,
+                    event_gpu_time_end,
+                    stream,
+                    reporting
+                        .prepare([&](size_t sol) {
+                            prepareCandidate(sol);
+                            // A descriptor sets up its launch on its first hipblasLtMatmul.
+                            // Block 0's first run is the first cold call, which the
+                            // result check reads.
+                            for(int32_t b = 1; b < block_count; b++)
+                                runBlock(sol, b);
+                            startCotenant();
+                        })
+                        .cold([&](size_t sol, int32_t i) {
+                            runBlock(sol, i % block_count);
+                            if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
+                                copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                        })
+                        .launch([&](size_t sol, int64_t i) {
+                            runBlock(sol, static_cast<int>(i % block_count));
+                        }),
+                    timingAbort);
+            }
+            else if(arg.use_user_args)
             {
                 std::vector<unsigned char*> d_userArgsVec(block_count);
                 search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(

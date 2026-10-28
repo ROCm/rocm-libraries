@@ -133,7 +133,7 @@ For more information, run the command with the ``--help`` option. The output of 
    --workspace <value>                Set fixed workspace memory size (bytes) instead of using hipblaslt managed memory   (Default value is: 134217728)
    --log_function_name                Function name precedes other items.
    --function_filter <value>          Simple strstr filter on function name only without wildcards
-   --api_method <value>               Use extension API. c: C style API. mix: declaration with C hipblasLtMatmul Layout/Desc but set, initialize, and run the problem with C++ extension API. cpp: Using C++ extension API only. Options: c, mix, cpp.  (Default value is: c)
+   --api_method <value>               Use extension API. c: C style API. mix: declaration with C hipblasLtMatmul Layout/Desc but set, initialize, and run the problem with C++ extension API. cpp: Using C++ extension API only. grouped_gemm_c: with --grouped_gemm, grouped matrix layouts and hipblasLtMatmul instead of the C++ GroupedGemm class. Options: c, mix, cpp, grouped_gemm_c.  (Default value is: c)
    --print_kernel_info                Print solution, kernel name and solution index.
    --rotating <value>                 Use rotating memory blocks for each iteration, size in MB.                          (Default value is: 0)
    --use_gpu_timer                    Use hipEventElapsedTime to profile elapsed time.
@@ -149,7 +149,7 @@ For more information, run the command with the ``--help`` option. The output of 
 Building clients with prebuilt libraries
 ========================================
 
-Sometimes it is desirable to build or rebuild the clients without having to conduct a full build of the library. This can be done by passing ``--no-tensile`` to ``inv build``. For example, ``inv build --clients --architecture gfx942 --no-tensile`` will build the clients and host code, but will not build Tensile libraries.
+Sometimes it is desirable to build or rebuild the clients without having to conduct a full build of the library. This can be done by passing ``--no-tensile`` to ``inv build``. For example, ``inv build --clients --architecture gfx942 --no-tensile`` will build the clients and host code, but will not build TensileLite libraries.
 
 Internally, this passes the ``-DHIPBLASLT_ENABLE_DEVICE=OFF`` option to CMake. If you prefer to build hipBLASLt with CMake directly instead of through invoke, the same effect can be achieved with the following steps:
 
@@ -163,7 +163,7 @@ Internally, this passes the ``-DHIPBLASLT_ENABLE_DEVICE=OFF`` option to CMake. I
        -DTensile_SKIP_BUILD=ON ..
    make
 
-To run the clients with existing Tensile libraries, you must set the environment variable ``HIPBLASLT_TENSILE_LIBPATH`` to the path of the Tensile libraries. For example, if the Tensile libraries are in ``/mnt/build/release/Tensile/library/``, you would run the clients as follows:
+To run the clients with existing TensileLite libraries, you must set the environment variable ``HIPBLASLT_TENSILE_LIBPATH`` to the path of the TensileLite libraries. For example, if the TensileLite libraries are in ``/mnt/build/release/Tensile/library/``, you would run the clients as follows:
 
 .. code-block:: bash
 
