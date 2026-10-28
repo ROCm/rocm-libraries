@@ -72,7 +72,7 @@ struct pointer_base
 {
   // void pointers should have no element type
   // note that we remove_cv from the Element type to get the value_type
-  using value_type = typename eval_if<_THRUST_STD::is_void_v<::internal::remove_cvref_t<Element>>,
+  using value_type = typename eval_if<_THRUST_STD::is_void_v<_THRUST_STD::remove_cvref_t<Element>>,
                                       _THRUST_STD::type_identity<void>,
                                       _THRUST_STD::remove_cv<Element>>::type;
 
@@ -85,7 +85,7 @@ struct pointer_base
   // void pointers should have no reference type
   // if no Reference type is given, just use reference
   using reference_type =
-    typename eval_if<_THRUST_STD::is_void_v<::internal::remove_cvref_t<Element>>,
+    typename eval_if<_THRUST_STD::is_void_v<_THRUST_STD::remove_cvref_t<Element>>,
                      _THRUST_STD::type_identity<void>,
                      eval_if<_THRUST_STD::is_same_v<Reference, use_default>,
                              _THRUST_STD::type_identity<reference<Element, derived_type>>,
