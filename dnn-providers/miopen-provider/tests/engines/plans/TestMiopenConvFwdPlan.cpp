@@ -346,8 +346,8 @@ TEST_F(TestGpuConvFwdPlan, CreatesPlanWithValidGraph)
 TEST_F(TestGpuConvFwdPlan, BenchmarkingSelectsNormalFindMode)
 {
     // Benchmarking matches PyTorch's cudnn.benchmark=True: Find runs in Normal mode, so
-    // MIOpen measures every applicable solver instead of returning a find-db entry or
-    // skipping non-dynamic solvers. Without benchmarking MIOpen's default is kept.
+    // MIOpen neither returns an installed find-db entry unmeasured nor skips non-dynamic
+    // solvers. Without benchmarking MIOpen's default is kept.
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());

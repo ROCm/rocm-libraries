@@ -53,8 +53,9 @@
 /// - Search (3): Uses cached results if available, searches only on cache miss
 /// - SearchDbUpdate (4): Always re-searches, ignoring cached results
 ///
-/// The policy only controls per-solver perf-db tuning. It does not change the
-/// convolution find mode; see setBenchmarkingFindMode() for that.
+/// Batchnorm and fused convolution plans use this guard. Plain convolution plans do
+/// not: they request tuning through Find's exhaustiveSearch argument, as PyTorch does,
+/// so an MIOPEN_FIND_ENFORCE environment setting still applies to them.
 
 class ScopedTuningPolicy
 {
@@ -197,9 +198,11 @@ constexpr size_t paddedConvSpatialDimCount(size_t spatialDimCount)
 /// @brief Matches PyTorch's torch.backends.cudnn.benchmark=True for convolution Find.
 ///
 /// When benchmarking is enabled, sets the descriptor's find mode to
-/// miopenConvolutionFindModeNormal. The default (DYNAMIC_HYBRID) returns a find-db
-/// entry without measuring it and, on a find-db miss, considers only dynamic
-/// solvers. Normal mode measures every applicable solver. Callers also pass
+/// miopenConvolutionFindModeNormal. The default (DYNAMIC_HYBRID) returns an installed
+/// find-db entry without measuring it and, on a miss, considers only dynamic solvers.
+/// Normal mode skips the installed find-db and, on a user find-db miss, measures every
+/// applicable solver. An existing user find-db entry is reused unmeasured, including one
+/// written by a non-benchmarking run; PyTorch behaves the same. Callers also pass
 /// exhaustiveSearch=true to Find so that solvers without a perf-db entry are tuned.
 /// When benchmarking is disabled the descriptor keeps MIOpen's default find mode.
 void setBenchmarkingFindMode(miopenConvolutionDescriptor_t convDescriptor,

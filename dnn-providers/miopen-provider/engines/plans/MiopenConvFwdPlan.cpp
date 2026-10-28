@@ -179,9 +179,6 @@ void ConvFwdPlan::execute(const HipdnnMiopenHandle& handle,
         workspaceSize = _workspaceSize;
     }
 
-    const ScopedTuningPolicy tuningGuard(handle.miopenHandle,
-                                         _executionSettings.benchmarkingEnabled());
-
     // Algorithm selection is performed on first execute() call rather than in constructor
     // because miopenFindConvolutionForwardAlgorithm requires device memory buffers.
     // These buffers are only available during execute(), not during plan construction.
