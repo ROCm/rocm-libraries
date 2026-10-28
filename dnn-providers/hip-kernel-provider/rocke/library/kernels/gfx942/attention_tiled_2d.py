@@ -38,6 +38,8 @@ from dataclasses import dataclass, field
 import os
 from typing import Optional, Tuple
 
+from kernels.common._lse_store import lse_row_has_mass, lse_store
+
 from rocke.core.ir import (
     BF16,
     CACHE_POLICY_NAMES,
@@ -1578,6 +1580,14 @@ def build_unified_attention_2d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    # Appended LAST and only when requested, so the LSE-off ABI is unchanged.
+    lse = (
+        b.param(
+            "lse_ptr", PtrType(F32, "global"), noalias=True, writeonly=True, align=4
+        )
+        if spec.emit_lse
+        else None
+    )
 
     if spec.use_q_major_grid:
         q_block_global_idx = b.block_id_x()
@@ -5513,6 +5523,12 @@ def build_unified_attention_2d_tiled(
 
     final = kvloop.results
     l_final = [final[2 * r + 1] for r in range(SOFTMAX_STATE_SLOTS)]
+    # Loop carry is (m0, l0, m1, l1, ..., acc...); m is in log2 units
+    # (qk_scale = scale * log2(e)). Read only for LSE so the LSE-off IR is
+    # unchanged.
+    m_final = (
+        [final[2 * r] for r in range(SOFTMAX_STATE_SLOTS)] if spec.emit_lse else None
+    )
     ml_count_final = 2 * SOFTMAX_STATE_SLOTS
     # acc_final indexed by (n * ACC_M_ATOMS + atom)
     acc_final = [
@@ -5528,6 +5544,30 @@ def build_unified_attention_2d_tiled(
     # exact-zero L marks a keyless row (stored as 0); a NaN L stays NaN in O.
     rcp_l = [b.rcp(l_final[r]) for r in range(SOFTMAX_STATE_SLOTS)]
     l_zero = [b.fcmp("oeq", l_final[r], zero_f) for r in range(SOFTMAX_STATE_SLOTS)]
+
+    def _store_row_lse(row: Value, slot: int, writer: Value) -> None:
+        """Write LSE for CTA row ``row`` from softmax state ``slot``.
+
+        Same token/head/validity mapping as the O stores below. ``writer``
+        picks one lane among the lanes that hold a replicated copy of the
+        row's (m, l). ``!(l == 0)`` is the row-has-mass test, the inverse of
+        the O guard: all-masked rows end with l == 0, a zero-trip loop with
+        m == -inf (lse_store writes -inf for both), and a NaN l gives NaN LSE.
+        """
+        pos = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
+        qh = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK)))
+        ok = b.land(b.cmp_lt(pos, cur_batch_q_len), b.cmp_lt(qh, b.const_i32(NUM_QH)))
+        if VALID_ROWS < BLOCK_M:
+            ok = b.land(ok, b.cmp_lt(row, b.const_i32(VALID_ROWS)))
+        with b.scf_if(b.land(writer, ok)):
+            lse_store(
+                b,
+                lse,
+                b.add(b.mul(b.add(cu_q_start, pos), b.const_i32(NUM_QH)), qh),
+                m_final[slot],
+                l_final[slot],
+                row_has_mass=lse_row_has_mass(b, l_final[slot]),
+            )
 
     if USE_MFMA_32X32:
         if TRANSPOSED_QK_32X32:
@@ -5563,6 +5603,23 @@ def build_unified_attention_2d_tiled(
             )
             inv_l_t = b.rcp(l_final[0])
             l_zero_t = b.fcmp("oeq", l_final[0], zero_f)
+            if spec.emit_lse:
+                # One query row per lane (lane % 32); lanes l and l^32 hold the
+                # same state (xor-32 reductions). The lower half writes. Slot 0:
+                # scalar state has 1 slot; without it all 16 slots are
+                # identical and O also reads slot 0.
+                with b.scf_if(b.land(b.cmp_eq(lane_half32, b.const_i32(0)), op_mask_t)):
+                    lse_store(
+                        b,
+                        lse,
+                        b.add(
+                            b.mul(b.add(cu_q_start, op_pos_t), b.const_i32(NUM_QH)),
+                            op_qh_t,
+                        ),
+                        m_final[0],
+                        l_final[0],
+                        row_has_mass=lse_row_has_mass(b, l_final[0]),
+                    )
             for n in range(ACC_N_TILES):
                 acc32 = _acc_final_get(n, 0)
                 for reg in range(REGS_PER_LANE):
@@ -5614,6 +5671,17 @@ def build_unified_attention_2d_tiled(
             head=op_qh32_base,
             dim=b.const_i32(0),
         )
+        if spec.emit_lse:
+            # Slot r is C-row wave_row_base + _mfma_32x32_c_row(lane, r); the
+            # 32 lanes of a half share it (_warp_xor_reduce_sum_32lane). Lanes
+            # 0 and 32 write; together they cover the warp's 32 rows. These
+            # stores come before the first Acc_lds b.sync(), so the barrier
+            # pattern is unchanged.
+            writer32 = b.cmp_eq(lane_col32, b.const_i32(0))
+            for r in range(SOFTMAX_STATE_SLOTS):
+                _store_row_lse(
+                    b.add(wave_row_base, _mfma_32x32_c_row(b, lane, r)), r, writer32
+                )
         for n in range(ACC_N_TILES):
             acc32 = _acc_final_get(n, 0)
             for reg in range(REGS_PER_LANE):
@@ -5714,6 +5782,13 @@ def build_unified_attention_2d_tiled(
         dim=b.const_i32(0),
     )
 
+    if spec.emit_lse:
+        # Slot r is row wave_row_base + _in_warp_row(r), shared by the 16
+        # lane_col lanes (_warp_xor_reduce_sum). Lanes 0/16/32/48
+        # (lane_col == 0) write; each owns REGS_PER_LANE rows.
+        writer16 = b.cmp_eq(lane_col, b.const_i32(0))
+        for r in range(SOFTMAX_STATE_SLOTS):
+            _store_row_lse(b.add(wave_row_base, _in_warp_row(r)), r, writer16)
     for stripe in range(OUT_STRIPES):
         n_start = stripe * N_TILES_PER_STRIPE
         # ---- stage 1: write this stripe's N-tiles into Acc_lds ----

@@ -47,6 +47,7 @@ BRANCH_SPEC_KW = {
 # One FP32 LSE store per (writer lane, softmax-state slot), Python-unrolled.
 _EXPECTED_LSE_STORES = {
     "gfx950": {"transposed32": 1, "mfma32": 16, "striped16": 4},
+    "gfx942": {"transposed32": 1, "mfma32": 16, "striped16": 4},
 }
 
 # sha256 of lower_kernel_to_llvm(...) text for the LSE-off build, keyed by the
@@ -69,7 +70,11 @@ _OFF_SHA256 = {
     },
 }
 
-_CASES = [("gfx950", b) for b in ("transposed32", "mfma32", "striped16")]
+_CASES = [
+    (arch, branch)
+    for arch in ("gfx950", "gfx942")
+    for branch in ("transposed32", "mfma32", "striped16")
+]
 _SPEC_ARCHES = ["gfx950", "gfx942"]
 
 
@@ -175,3 +180,71 @@ def test_2d_lse_ptr_stays_last_with_additive_bias(arch, branch):
     )
     assert "%additive_bias_sq_stride, ptr addrspace(1)" in define, define
     assert re.search(r"%lse_ptr\) #\d+ \{$", define), define
+
+
+@pytest.mark.parametrize(
+    "branch,extra,stores",
+    [
+        # Production flash specs set use_transposed_scalar_state (1 state slot).
+        ("transposed32", {"use_transposed_scalar_state": True}, 1),
+        # Swapped launch grid: same kv_head_idx / q_block names, same index.
+        ("striped16", {"use_q_major_grid": True}, 4),
+        ("transposed32", {"use_q_major_grid": True}, 1),
+        # Two 16-row atoms per warp: 8 state slots per lane.
+        ("striped16", {"block_m_per_warp": 32}, 8),
+    ],
+)
+def test_gfx942_lse_variants_store_once_per_row_slot(branch, extra, stores):
+    off_ir = _lower(_spec("gfx942", branch, **extra), "gfx942")
+    on_ir = _lower(_spec("gfx942", branch, emit_lse=True, **extra), "gfx942")
+    assert "lse_ptr" not in off_ir
+    assert _lse_store_count(off_ir) == 0
+    assert _lse_store_count(on_ir) == stores
+    assert "@llvm.log2.f32" in on_ir
+
+
+def _gfx942_branch_of(spec):
+    if spec.use_mfma_32x32x8:
+        return "transposed32" if spec.use_transposed_qk_32x32 else "mfma32"
+    return "striped16"
+
+
+@pytest.mark.parametrize(
+    "fields,branch",
+    [
+        # Mandate shape, bf16 flash (_spec_gfx942_bf16_flash).
+        (
+            dict(dtype="bf16", total_q=8192, num_seqs=1, max_seqlen_q=8192),
+            "transposed32",
+        ),
+        # fp16 flash (_spec_gfx942_fp16_flash).
+        (
+            dict(dtype="fp16", total_q=8192, num_seqs=1, max_seqlen_q=8192),
+            "transposed32",
+        ),
+        # Decode-like 2D shape: generic narrow (_spec_generic_2d_non_gfx950).
+        (dict(dtype="bf16", total_q=4, num_seqs=4, max_seqlen_q=1), "striped16"),
+        # D256 bf16 prefill: generic narrow when the 4-warp cohort is not used.
+        (
+            dict(
+                dtype="bf16", head_size=256, total_q=8192, num_seqs=1, max_seqlen_q=8192
+            ),
+            "striped16",
+        ),
+    ],
+)
+def test_gfx942_production_specs_use_branches_the_numeric_gate_covers(fields, branch):
+    """Production gfx942 2D specs land on branch A or C, the branches the GPU
+    numeric gate runs by default. Branch B (non-transposed x8) is reachable
+    only through explicit or tuning specs, which the gate pins separately."""
+    from kernels.common import attention_unified as au
+
+    base = dict(
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        block_size=16,
+        max_seqlen_k=8192,
+    )
+    problem = au.UnifiedAttentionProblem(**{**base, **fields})
+    assert _gfx942_branch_of(au._tiled_spec_from_problem(problem, "gfx942")) == branch
