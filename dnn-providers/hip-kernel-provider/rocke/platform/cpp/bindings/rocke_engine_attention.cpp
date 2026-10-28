@@ -1154,16 +1154,16 @@ bool t3d_strided(const py::dict& d)
     return layout == "strided";
 }
 
-/* gfx942 3d: emitter lowers only the segment via the family convenience. */
-std::string t3d942_lower(const py::dict& d, const std::string& arch)
+/* gfx942 3d: the emitter prints the segment, then the reduce derived from it
+ * (head_size / num_query_heads / num_kv_heads / dtype / num_segments, plus
+ * emit_lse), concatenated. */
+static std::string t3d942_segment_ll(const py::dict& d,
+                                     const rocke_unified_attention_3d_tiled_spec_t& s,
+                                     const char* target)
 {
-    require_arch(arch);
-    Store st;
-    rocke_unified_attention_3d_tiled_spec_t s = t3d_build(d, st);
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    const char* target = arch.c_str();
     if(!t3d_strided(d))
     {
         rocke_status_t status = rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
@@ -1184,6 +1184,30 @@ std::string t3d942_lower(const py::dict& d, const std::string& arch)
         k, resolve_python_llvm_flavor(), target, &ll, err, sizeof err);
     guard.reset();
     return take_ll(status, ll, err, "rocke_engine.gfx942_attention_tiled_3d_lower_llvm");
+}
+
+std::string t3d942_lower(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    Store st;
+    rocke_unified_attention_3d_tiled_spec_t s = t3d_build(d, st);
+    const char* target = arch.c_str();
+    std::string out = t3d942_segment_ll(d, s, target);
+    rocke_unified_attention_reduce_tiled_spec_t r
+        = rocke_unified_attention_reduce_tiled_spec_default();
+    r.head_size = s.head_size;
+    r.num_query_heads = s.num_query_heads;
+    r.num_kv_heads = s.num_kv_heads;
+    r.dtype = s.dtype;
+    r.num_segments = s.num_segments;
+    r.emit_lse = a_bool(d, "emit_lse", r.emit_lse);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t status = rocke_build_unified_attention_reduce_tiled_gfx942_lower_to_llvm(
+        &r, target, resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    out += take_ll(status, ll, err, "rocke_engine.gfx942_attention_tiled_3d_lower_llvm");
+    return out;
 }
 std::string t3d942_serialize(const py::dict& d, const std::string& arch)
 {

@@ -1430,6 +1430,17 @@ def _emitter_configs(module):
     return [dict(configs[i]) for i in range(len(configs))]
 
 
+def _emitter_3d_configs(module):
+    """3D configs from the emitter; the reduce of each ``_REDUCE_LSE`` index is
+    built with ``emit_lse`` (the binding reads it for the derived reduce)."""
+    import importlib
+
+    cfgs = _emitter_configs(module)
+    for idx in importlib.import_module(module)._REDUCE_LSE:
+        cfgs[idx]["emit_lse"] = True
+    return cfgs
+
+
 def cfgs_gfx942_attention_tiled_2d():
     return _emitter_configs("gfx942_attention_tiled_2d_emit")
 
@@ -1751,36 +1762,11 @@ def run_selector_parity(arch, problems):
 
 
 def cfgs_gfx942_attention_tiled_3d():
-    rows = [
-        (64, 16, 8, 8, "fp16", 8, False, 0, False, None, False, False),
-        (128, 32, 16, 16, "bf16", 16, False, 0, False, None, False, False),
-        (256, 64, 32, 8, "fp16", 8, False, 4096, False, None, False, False),
-        (128, 32, 32, 8, "bf16", 16, True, 0, True, "fp8e4m3", False, False),
-        (64, 16, 16, 4, "fp16", 8, False, 2048, False, None, True, False),
-    ]
-    out = []
-    for h, b, q, k, dt, seg, sink, sw, sc, kv, alibi, qqb in rows:
-        d = dict(
-            head_size=h,
-            block_size=b,
-            num_query_heads=q,
-            num_kv_heads=k,
-            dtype=dt,
-            num_segments=seg,
-            use_sinks=sink,
-            sliding_window=sw,
-            has_softcap=sc,
-            use_alibi=alibi,
-            use_qq_bias=qqb,
-        )
-        if kv is not None:
-            d["kv_storage_dtype"] = kv
-        out.append(d)
-    return out
+    return _emitter_3d_configs("gfx942_attention_tiled_3d_emit")
 
 
 def cfgs_gfx950_attention_tiled_3d():
-    return cfgs_gfx942_attention_tiled_3d()
+    return _emitter_3d_configs("gfx950_attention_tiled_3d_emit")
 
 
 def cfgs_deep_fused_conv_pool():
