@@ -11,11 +11,12 @@
 // miopen_private_rename.h; this is the matching declaration set for callers.
 //
 // It is the single declaration source for the wrapper's stubs (wrapper.cpp,
-// wrapper_passthrough.cpp) and for the hipDNN routing code that falls back to
-// MIOpen (hipdnn_conv.cpp, hipdnn_graph.cpp). The _impl names have C linkage, so
-// a signature that differed from the definition would link cleanly and corrupt
-// arguments at run time. Each declaration is generated from the miopen.h
-// declaration the definition is compiled from, so the two cannot differ.
+// wrapper_passthrough.cpp) and for the hipDNN code that reads MIOpen state
+// through the _impl getters (hipdnn_conv.cpp, hipdnn_graph.cpp). The _impl names
+// have C linkage, so a signature that differed from the definition would link
+// cleanly and corrupt arguments at run time. Each declaration is generated from
+// the miopen.h declaration the definition is compiled from, so the two cannot
+// differ.
 //
 // This header is not installed, and the hipDNN provider does not use it; it
 // force-includes its own copy of the rename list instead.

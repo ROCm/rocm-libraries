@@ -23,7 +23,7 @@ fails on any difference from what is committed.
     generate_wrapper_sources.py --check    exit 1 and print a diff on drift
 
 Exit codes: 0 in sync (or written), 1 drift (--check only), 2 bad input, a
-parse error, or the wrong clang-format.
+parse error, no usable clang-format, or a refused write (see below).
 
 To give an entry point custom behaviour, move its stub from
 wrapper_passthrough.cpp into wrapper.cpp, edit it, and rerun this script; it
@@ -36,10 +36,14 @@ build exports them and they have no _impl, so nothing is generated for them.
 This script reads that header only to accept those stubs, and refuses a name
 that both headers declare.
 
-The output is formatted with clang-format, so the committed text depends on its
-version. The version is pinned in .pre-commit-config.yaml and any other is
-refused: different versions wrap lines differently, so the gate could pass on
-one machine and fail on another.
+The output is formatted with clang-format, and releases can wrap lines
+differently. The committed text is what the release pinned in
+.pre-commit-config.yaml produces, so that release is used when it can be found.
+Another release is accepted while its output matches the committed files, so a
+moved pin or a lagging CI image breaks nothing as long as the wrapping is the
+same. When its output differs, --check reports the drift with a note that the
+release is not the pinned one, and a write is refused: a change in wrapping
+cannot be told from a real change.
 
 Python standard library only, plus the sibling check_public_abi.py, whose
 parsing helpers this reuses rather than keeping a second copy.
@@ -59,29 +63,18 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from check_public_abi import (
-    TYPE_TAIL_KEYWORDS,
     AbiError,
-    drop_top_level_const,
+    EntryPoint,
+    Param,
     parse_prototype,
+    parse_public_header,
     parse_wrapper,
     read_tracked_source,
     render_signature,
-    split_params,
     squash,
+    strip_comments,
+    stub_signature,
 )
-
-# The value each macro has while miopen.h and hipdnn_forwarding.h are read, as
-# the library's build sees it. Conditionals are evaluated against this table rather than flattened, so an
-# #else branch cannot contribute declarations. MIOPEN_BETA_API is defined for the
-# whole build in CMakeLists.txt. The include guard reads as undefined because
-# this is the first time the header is seen. __cplusplus and __clang__ only
-# guard text that declares no entry point.
-KNOWN_MACROS = {
-    "MIOPEN_BETA_API": True,
-    "__cplusplus": True,
-    "__clang__": True,
-    "MIOPEN_GUARD_MIOPEN_H_": False,
-}
 
 STATUS_TYPE = "miopenStatus_t"
 
@@ -156,11 +149,12 @@ IMPL_EXPLANATION = """\
 // miopen_private_rename.h; this is the matching declaration set for callers.
 //
 // It is the single declaration source for the wrapper's stubs (wrapper.cpp,
-// wrapper_passthrough.cpp) and for the hipDNN routing code that falls back to
-// MIOpen (hipdnn_conv.cpp, hipdnn_graph.cpp). The _impl names have C linkage, so
-// a signature that differed from the definition would link cleanly and corrupt
-// arguments at run time. Each declaration is generated from the miopen.h
-// declaration the definition is compiled from, so the two cannot differ.
+// wrapper_passthrough.cpp) and for the hipDNN code that reads MIOpen state
+// through the _impl getters (hipdnn_conv.cpp, hipdnn_graph.cpp). The _impl names
+// have C linkage, so a signature that differed from the definition would link
+// cleanly and corrupt arguments at run time. Each declaration is generated from
+// the miopen.h declaration the definition is compiled from, so the two cannot
+// differ.
 //
 // This header is not installed, and the hipDNN provider does not use it; it
 // force-includes its own copy of the rename list instead.
@@ -232,209 +226,9 @@ PROVIDER_EXPLANATION = """\
 
 
 # --------------------------------------------------------------------------
-# Reading miopen.h
+# Reading wrapper.cpp and the wrapper-only header. miopen.h is read by the
+# shared parser in check_public_abi.py.
 # --------------------------------------------------------------------------
-
-_COMMENT_OR_LITERAL_RE = re.compile(
-    r"/\*.*?\*/|//[^\n]*|\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'", re.S
-)
-_DIRECTIVE_RE = re.compile(r"^\s*#\s*(?P<kw>\w*)\s*(?P<rest>.*)$")
-_IDENT_TAIL_RE = re.compile(r"([A-Za-z_]\w*)\s*$")
-_DECL_RE = re.compile(
-    r"(?P<ret>[^()]*?)\s*(?P<name>[A-Za-z_]\w*)\s*\((?P<params>.*)\)", re.S
-)
-
-
-def strip_comments_keep_lines(text: str, what: str) -> str:
-    """Blank out comments without moving any line, so errors can name one.
-
-    Strings are matched too, so a ``//`` inside one is not taken for a comment.
-    """
-
-    def blank(match: re.Match) -> str:
-        found = match.group(0)
-        if found[0] in "\"'":
-            return found
-        return " " + "\n" * found.count("\n")
-
-    stripped = _COMMENT_OR_LITERAL_RE.sub(blank, text)
-    start = stripped.find("/*")
-    if start >= 0:
-        raise AbiError(
-            f"{what}:{stripped.count(chr(10), 0, start) + 1}: unterminated /* comment"
-        )
-    return stripped
-
-
-def active_text(text: str, what: str) -> str:
-    """Return ``text`` with comments, directives and inactive branches blanked.
-
-    Only #ifdef, #ifndef, #else and #endif are understood. Anything that would
-    need a real preprocessor is refused rather than guessed at, because a
-    declaration dropped by a wrong guess is an entry point that silently has no
-    stub.
-    """
-    lines = strip_comments_keep_lines(text, what).split("\n")
-    out: list[str] = []
-    # One entry per open conditional: [branch is taken, #else seen, opening line].
-    stack: list[list] = []
-    continued = False
-
-    for number, line in enumerate(lines, start=1):
-        if continued:
-            continued = line.rstrip().endswith("\\")
-            out.append("")
-            continue
-        directive = _DIRECTIVE_RE.match(line)
-        if directive is None:
-            out.append(line if all(entry[0] for entry in stack) else "")
-            continue
-
-        out.append("")
-        continued = line.rstrip().endswith("\\")
-        keyword, rest = directive.group("kw"), directive.group("rest").strip()
-        if keyword in ("if", "elif", "elifdef", "elifndef"):
-            raise AbiError(
-                f"{what}:{number}: #{keyword} is not supported. Only #ifdef, #ifndef,"
-                " #else and #endif are evaluated, against KNOWN_MACROS in"
-                " generate_wrapper_sources.py"
-            )
-        if keyword in ("ifdef", "ifndef"):
-            macro = rest.split()[0] if rest else ""
-            if macro not in KNOWN_MACROS:
-                raise AbiError(
-                    f"{what}:{number}: #{keyword} {macro or '(nothing)'}: this macro is"
-                    " not in KNOWN_MACROS in generate_wrapper_sources.py, so it is not"
-                    " known whether the declarations it guards belong in the wrapper."
-                    " Add it with the value the library build gives it"
-                )
-            defined = KNOWN_MACROS[macro]
-            stack.append(
-                [defined if keyword == "ifdef" else not defined, False, number]
-            )
-        elif keyword == "else":
-            if not stack or stack[-1][1]:
-                raise AbiError(f"{what}:{number}: #else without a matching #ifdef")
-            stack[-1][0] = not stack[-1][0]
-            stack[-1][1] = True
-        elif keyword == "endif":
-            if not stack:
-                raise AbiError(f"{what}:{number}: #endif without a matching #ifdef")
-            stack.pop()
-
-    if stack:
-        raise AbiError(f"{what}:{stack[-1][2]}: conditional is never closed by #endif")
-    return "\n".join(out)
-
-
-@dataclass(frozen=True)
-class Param:
-    type: str
-    name: str
-    default: str | None
-
-    def declaration_text(self) -> str:
-        """The parameter as an _impl declaration spells it.
-
-        A top-level const is dropped: it is not part of the function's type, and
-        clang-tidy's readability-avoid-const-params-in-decls rejects it in a
-        declaration. A default argument stays, as the public header has it.
-        """
-        text = f"{drop_top_level_const(self.type)} {self.name}"
-        return f"{text} = {self.default}" if self.default is not None else text
-
-    def definition_text(self) -> str:
-        """The parameter as written in miopen.h, minus the default argument.
-
-        Repeating a default argument in a definition is a compile error.
-        """
-        return f"{self.type} {self.name}"
-
-
-@dataclass(frozen=True)
-class EntryPoint:
-    name: str
-    ret: str
-    params: tuple[Param, ...]
-    line: int
-
-
-def parse_param(text: str, function: str, where: str) -> Param:
-    if "..." in text:
-        raise AbiError(f"{where}: {function}: variadic parameters are not supported")
-    if "(" in text or "[" in text:
-        raise AbiError(
-            f"{where}: {function}: cannot parse parameter {text.strip()!r}; a function"
-            " pointer or array parameter must be given a typedef"
-        )
-    declared, equals, default = text.partition("=")
-    declared = " ".join(declared.split())
-    tail = _IDENT_TAIL_RE.search(declared)
-    type_text = declared[: tail.start()].strip() if tail else ""
-    name = tail.group(1) if tail else ""
-    # A trailing identifier that is a type word, or spelled like a typedef, is
-    # the end of an unnamed parameter's type rather than a name. The call into
-    # the _impl function needs every name, so an unnamed one cannot be generated.
-    if not type_text or name in TYPE_TAIL_KEYWORDS or name.endswith("_t"):
-        raise AbiError(
-            f"{where}: {function}: parameter {declared!r} has no name; name every"
-            " parameter in miopen.h"
-        )
-    return Param(
-        type=squash(type_text),
-        name=name,
-        default=default.strip() if equals else None,
-    )
-
-
-def parse_public_header(
-    source: str, what: str = "miopen.h", allow_empty: bool = False
-) -> list[EntryPoint]:
-    """Collect every MIOPEN_EXPORT declaration, in declaration order."""
-    text = active_text(source, what)
-    entries: dict[str, EntryPoint] = {}
-    for match in re.finditer(r"\bMIOPEN_EXPORT\b", text):
-        line = text.count("\n", 0, match.start()) + 1
-        where = f"{what}:{line}"
-        end = text.find(";", match.end())
-        brace = text.find("{", match.end())
-        if end < 0:
-            raise AbiError(f"{where}: MIOPEN_EXPORT declaration is never terminated")
-        if 0 <= brace < end:
-            raise AbiError(
-                f"{where}: a '{{' comes before the ';' of this MIOPEN_EXPORT"
-                " declaration; only plain function declarations are supported"
-            )
-        declaration = " ".join(text[match.end() : end].split())
-        parsed = _DECL_RE.fullmatch(declaration)
-        if parsed is None or not parsed.group("ret").strip():
-            raise AbiError(
-                f"{where}: cannot parse {declaration!r} as"
-                " '<return type> <name>(<parameters>)'"
-            )
-        name = parsed.group("name")
-        if name in entries:
-            raise AbiError(
-                f"{where}: {name} is declared again; first declared at line"
-                f" {entries[name].line}"
-            )
-        params_text = parsed.group("params")
-        if "(" in params_text or ")" in params_text:
-            raise AbiError(
-                f"{where}: {name}: a function-pointer parameter must be given a typedef"
-            )
-        params: list[Param] = []
-        if params_text.strip() not in ("", "void"):
-            for piece in split_params(params_text):
-                if not piece.strip():
-                    raise AbiError(f"{where}: {name}: empty parameter")
-                params.append(parse_param(piece, name, where))
-        entries[name] = EntryPoint(
-            name=name, ret=squash(parsed.group("ret")), params=tuple(params), line=line
-        )
-    if not entries and not allow_empty:
-        raise AbiError(f"no MIOPEN_EXPORT declarations found in {what}")
-    return list(entries.values())
 
 
 def wrapper_only_names(source: str | None, entries: list[EntryPoint]) -> set[str]:
@@ -473,7 +267,7 @@ def hand_written_stubs(
     # parse_wrapper cannot see a body that contains a nested block. Leaving such
     # a stub out would generate a second definition of it, so count the
     # definitions independently and refuse when the two disagree.
-    stripped = strip_comments_keep_lines(wrapper_source, "wrapper.cpp")
+    stripped = strip_comments(wrapper_source, "wrapper.cpp")
     defined = len(re.findall(r'\bextern\s+"C"(?!\s*\{)', stripped))
     if defined != len(protos):
         raise AbiError(
@@ -506,16 +300,6 @@ def hand_written_stubs(
             + "\n".join(mismatched)
         )
     return set(protos)
-
-
-def stub_signature(entry: EntryPoint) -> tuple[str, ...]:
-    """``entry`` reduced the way parse_wrapper reduces a stub, so the two compare.
-
-    Parameter names, default arguments and a top-level const drop out: none of
-    them changes the type.
-    """
-    params = ", ".join(p.definition_text() for p in entry.params)
-    return parse_prototype(f"{entry.ret} {entry.name}({params})", "miopen.h")[1]
 
 
 def check_dispatchable(entries: list[EntryPoint], hand_written: set[str]) -> None:
@@ -614,13 +398,14 @@ _VERSION_RE = re.compile(r"clang-format version (\d+\.\d+\.\d+)")
 _PIN_RE = re.compile(r"mirrors-clang-format\s*\n\s*rev:\s*v?(\d+\.\d+\.\d+)")
 
 
-def pinned_clang_format_version(pre_commit_config: str) -> str:
-    match = _PIN_RE.search(pre_commit_config)
-    if match is None:
-        raise AbiError(
-            f"no mirrors-clang-format 'rev:' line found in {PRE_COMMIT_CONFIG_RELPATH}"
-        )
-    return match.group(1)
+def pinned_clang_format_version(pre_commit_config: str | None) -> str | None:
+    """The release pinned for the clang-format hook, or None if it cannot be read.
+
+    The pin only chooses a binary and words a note, so a config edit that hides it
+    from the pattern must not fail the check.
+    """
+    match = _PIN_RE.search(pre_commit_config) if pre_commit_config else None
+    return match.group(1) if match else None
 
 
 def clang_format_version(binary: str) -> str | None:
@@ -634,36 +419,61 @@ def clang_format_version(binary: str) -> str | None:
     return match.group(1) if match else None
 
 
-def wrong_clang_format_message(pinned: str, found: list[str]) -> str:
-    seen = "; ".join(found) if found else "none found"
+def install_hint(pinned: str | None) -> str:
+    package = (
+        f"clang-format=={pinned}" if pinned else "clang-format==<the pinned release>"
+    )
     return (
-        f"clang-format {pinned} is required (the version pinned in"
-        f" {PRE_COMMIT_CONFIG_RELPATH}); other versions wrap lines differently, so"
-        f" the generated files would not match what CI produces. Found: {seen}.\n"
-        f"Get it with `pip install clang-format=={pinned}` and pass --clang-format"
-        f" or set CLANG_FORMAT, or run the manual pre-commit hook, which installs"
-        f" it for you:\n  {REGENERATE_HOOK_COMMAND}"
+        f"Get the release pinned in {PRE_COMMIT_CONFIG_RELPATH} with `pip install"
+        f" {package}` and pass --clang-format or set CLANG_FORMAT, or run the manual"
+        f" pre-commit hook, which installs it for you:\n  {REGENERATE_HOOK_COMMAND}"
     )
 
 
-def find_clang_format(explicit: str | None, pinned: str) -> str:
+def not_pinned_note(version: str, pinned: str | None) -> str | None:
+    if version == pinned:
+        return None
+    if pinned is None:
+        return (
+            f"clang-format {version} was used, and the release pinned in"
+            f" {PRE_COMMIT_CONFIG_RELPATH} could not be read, so a difference may"
+            " be formatting only."
+        )
+    return (
+        f"clang-format {version} was used, not the pinned {pinned}. Releases can wrap"
+        " lines differently, so a difference may be formatting only."
+    )
+
+
+def find_clang_format(explicit: str | None, pinned: str | None) -> tuple[str, str]:
+    """The binary to format with, and its release.
+
+    A named binary is used as given. Otherwise prefer the pinned release but take
+    any that runs: only a difference in output needs explaining.
+    """
     requested = explicit or os.environ.get("CLANG_FORMAT")
     if requested:
         version = clang_format_version(requested)
-        if version != pinned:
-            found = [f"{requested}: {version or 'not runnable'}"]
-            raise AbiError(wrong_clang_format_message(pinned, found))
-        return requested
+        if version is None:
+            raise AbiError(f"{requested} is not a runnable clang-format")
+        return requested, version
 
-    found = []
+    found: list[tuple[str, str]] = []
     for candidate in (shutil.which("clang-format"), FALLBACK_CLANG_FORMAT):
         if not candidate or not Path(candidate).is_file():
             continue
         version = clang_format_version(candidate)
+        if version is not None:
+            found.append((candidate, version))
+    for candidate, version in found:
         if version == pinned:
-            return candidate
-        found.append(f"{candidate}: {version or 'unknown version'}")
-    raise AbiError(wrong_clang_format_message(pinned, found))
+            return candidate, version
+    if found:
+        return found[0]
+    raise AbiError(
+        f"no clang-format found on PATH or at {FALLBACK_CLANG_FORMAT}. "
+        + install_hint(pinned)
+    )
 
 
 def format_text(text: str, style: str, assume_filename: str, binary: str) -> str:
@@ -793,15 +603,9 @@ def run(args: argparse.Namespace) -> int:
     check_dispatchable(entries, hand_written)
     texts = build_texts(entries, hand_written)
 
-    pre_commit_config = read(PRE_COMMIT_CONFIG_RELPATH)
-    if pre_commit_config is None:
-        raise AbiError(
-            f"{PRE_COMMIT_CONFIG_RELPATH} is needed to learn which clang-format"
-            f" version to use: {reasons.get(PRE_COMMIT_CONFIG_RELPATH, 'unreadable')}"
-        )
-    binary = find_clang_format(
-        args.clang_format, pinned_clang_format_version(pre_commit_config)
-    )
+    pinned = pinned_clang_format_version(read(PRE_COMMIT_CONFIG_RELPATH, optional=True))
+    binary, version = find_clang_format(args.clang_format, pinned)
+    note = not_pinned_note(version, pinned)
 
     generated: dict[str, str] = {}
     committed: dict[str, str | None] = {}
@@ -829,6 +633,19 @@ def run(args: argparse.Namespace) -> int:
         committed[key] = current
 
     if not args.check:
+        changing = [
+            outputs[key].relpath
+            for key, text in generated.items()
+            if committed[key] != text
+        ]
+        if changing and note:
+            raise AbiError(
+                f"{note} Nothing was written, because a change in wrapping cannot be"
+                " told from a real change. These files would have changed:\n  "
+                + "\n  ".join(changing)
+                + "\n"
+                + install_hint(pinned)
+            )
         for key, text in generated.items():
             path = repo_root / outputs[key].relpath
             if committed[key] == text:
@@ -857,6 +674,8 @@ def run(args: argparse.Namespace) -> int:
             f" ({reasons.get(relpath, 'unreadable')})"
         )
     if drifted:
+        if note:
+            print(f"\n{note}")
         print(
             "\nThese files are generated from include/miopen/miopen.h and the stubs"
             " in src/private/wrapper.cpp. Do not edit them by hand. Regenerate and"
@@ -888,9 +707,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--clang-format",
-        help="clang-format binary to use; it must be the pinned version (default: "
-        "$CLANG_FORMAT, else the first of clang-format on PATH and "
-        f"{FALLBACK_CLANG_FORMAT} with the pinned version)",
+        help="clang-format binary to use (default: $CLANG_FORMAT, else the pinned "
+        f"release on PATH or at {FALLBACK_CLANG_FORMAT}, else any release found there)",
     )
     parser.add_argument(
         "--source-root",

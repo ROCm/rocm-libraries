@@ -127,6 +127,7 @@ import re
 import struct
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 EXPECTED_SONAME = "libMIOpen.so.1"
@@ -471,9 +472,6 @@ DISPATCH_EXEMPT = {
 # skipped, so adding one fails loudly rather than leaving a silent coverage hole.
 # --------------------------------------------------------------------------
 
-BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
-LINE_COMMENT_RE = re.compile(r"//[^\n]*")
-EXPORT_ANCHOR_RE = re.compile(r"\bMIOPEN_EXPORT\b")
 WRAPPER_DEF_RE = re.compile(
     r'\bextern\s+"C"\s+(?P<decl>[^;{}]*?)\s*\{(?P<body>[^{}]*)\}', re.S
 )
@@ -531,10 +529,6 @@ TYPE_TAIL_KEYWORDS = frozenset(
 )
 
 
-def strip_comments(text: str) -> str:
-    return LINE_COMMENT_RE.sub("", BLOCK_COMMENT_RE.sub(" ", text))
-
-
 def squash(text: str) -> str:
     """Collapse whitespace and normalise pointer spelling to ``T* x``."""
     text = " ".join(text.split())
@@ -585,6 +579,10 @@ def normalise_param(param: str) -> str:
     declaration, not of the type, so a wrapper stub that omits it -- as a
     definition must -- is not drift.
     """
+    if "[" in param:
+        raise AbiError(
+            f"cannot parse array parameter {param.strip()!r}; give it a typedef"
+        )
     text = squash(param.split("=", 1)[0])
     if not text or text == "void":
         return "void"
@@ -612,22 +610,236 @@ def render_signature(sig: tuple[str, ...]) -> str:
     return f"{sig[0]}({', '.join(sig[1:])})"
 
 
-def parse_exports(source: str, what: str) -> dict[str, tuple[str, ...]]:
-    """Collect every MIOPEN_EXPORT prototype in a header, keyed by name."""
-    text = strip_comments(source)
-    out: dict[str, tuple[str, ...]] = {}
-    for match in EXPORT_ANCHOR_RE.finditer(text):
+# The value each macro has while miopen.h and hipdnn_forwarding.h are read, as
+# the library's build sees it. Conditionals are evaluated against this table
+# rather than flattened, so an #else branch cannot contribute declarations.
+# MIOPEN_BETA_API is defined for the whole build in CMakeLists.txt. The include
+# guard reads as undefined because this is the first time the header is seen.
+# __cplusplus and __clang__ only guard text that declares no entry point.
+KNOWN_MACROS = {
+    "MIOPEN_BETA_API": True,
+    "__cplusplus": True,
+    "__clang__": True,
+    "MIOPEN_GUARD_MIOPEN_H_": False,
+}
+
+_COMMENT_OR_LITERAL_RE = re.compile(
+    r"/\*.*?\*/|//[^\n]*|\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'|(?P<open>/\*)",
+    re.S,
+)
+# Words that qualify or introduce a type name without being part of its spelling.
+_TYPE_KEYWORDS = frozenset({"const", "volatile", "struct", "enum", "union"})
+_DIRECTIVE_RE = re.compile(r"^\s*#\s*(?P<kw>\w*)\s*(?P<rest>.*)$")
+_IDENT_TAIL_RE = re.compile(r"([A-Za-z_]\w*)\s*$")
+_HEADER_DECL_RE = re.compile(
+    r"(?P<ret>[^()]*?)\s*(?P<name>[A-Za-z_]\w*)\s*\((?P<params>.*)\)", re.S
+)
+
+
+def strip_comments(text: str, what: str) -> str:
+    """Blank out comments without moving any line, so errors can name one.
+
+    Strings are matched too, so a ``//`` or ``/*`` inside one is not taken for a
+    comment.
+    """
+
+    def blank(match: re.Match) -> str:
+        if match.group("open"):
+            line = text.count("\n", 0, match.start()) + 1
+            raise AbiError(f"{what}:{line}: unterminated /* comment")
+        found = match.group(0)
+        if found[0] in "\"'":
+            return found
+        return " " + "\n" * found.count("\n")
+
+    return _COMMENT_OR_LITERAL_RE.sub(blank, text)
+
+
+def active_text(text: str, what: str) -> str:
+    """Return ``text`` with comments, directives and inactive branches blanked.
+
+    Only #ifdef, #ifndef, #else and #endif are understood. Anything that would
+    need a real preprocessor is refused rather than guessed at, because a
+    declaration dropped by a wrong guess is an entry point that silently has no
+    stub.
+    """
+    lines = strip_comments(text, what).split("\n")
+    out: list[str] = []
+    # One entry per open conditional: [branch is taken, #else seen, opening line].
+    stack: list[list] = []
+    continued = False
+
+    for number, line in enumerate(lines, start=1):
+        if continued:
+            continued = line.rstrip().endswith("\\")
+            out.append("")
+            continue
+        directive = _DIRECTIVE_RE.match(line)
+        if directive is None:
+            out.append(line if all(entry[0] for entry in stack) else "")
+            continue
+
+        out.append("")
+        continued = line.rstrip().endswith("\\")
+        keyword, rest = directive.group("kw"), directive.group("rest").strip()
+        if keyword in ("if", "elif", "elifdef", "elifndef"):
+            raise AbiError(
+                f"{what}:{number}: #{keyword} is not supported. Only #ifdef, #ifndef,"
+                " #else and #endif are evaluated, against KNOWN_MACROS in"
+                " check_public_abi.py"
+            )
+        if keyword in ("ifdef", "ifndef"):
+            macro = rest.split()[0] if rest else ""
+            if macro not in KNOWN_MACROS:
+                raise AbiError(
+                    f"{what}:{number}: #{keyword} {macro or '(nothing)'}: this macro is"
+                    " not in KNOWN_MACROS in check_public_abi.py, so it is not"
+                    " known whether the declarations it guards belong in the wrapper."
+                    " Add it with the value the library build gives it"
+                )
+            defined = KNOWN_MACROS[macro]
+            stack.append(
+                [defined if keyword == "ifdef" else not defined, False, number]
+            )
+        elif keyword == "else":
+            if not stack or stack[-1][1]:
+                raise AbiError(f"{what}:{number}: #else without a matching #ifdef")
+            stack[-1][0] = not stack[-1][0]
+            stack[-1][1] = True
+        elif keyword == "endif":
+            if not stack:
+                raise AbiError(f"{what}:{number}: #endif without a matching #ifdef")
+            stack.pop()
+
+    if stack:
+        raise AbiError(f"{what}:{stack[-1][2]}: conditional is never closed by #endif")
+    return "\n".join(out)
+
+
+@dataclass(frozen=True)
+class Param:
+    type: str
+    name: str
+    default: str | None
+
+    def declaration_text(self) -> str:
+        """The parameter as an _impl declaration spells it.
+
+        A top-level const is dropped: it is not part of the function's type, and
+        clang-tidy's readability-avoid-const-params-in-decls rejects it in a
+        declaration. A default argument stays, as the public header has it.
+        """
+        text = f"{drop_top_level_const(self.type)} {self.name}"
+        return f"{text} = {self.default}" if self.default is not None else text
+
+    def definition_text(self) -> str:
+        """The parameter as written in miopen.h, minus the default argument.
+
+        Repeating a default argument in a definition is a compile error.
+        """
+        return f"{self.type} {self.name}"
+
+
+@dataclass(frozen=True)
+class EntryPoint:
+    name: str
+    ret: str
+    params: tuple[Param, ...]
+    line: int
+
+
+def parse_param(text: str, function: str, where: str) -> Param:
+    if "..." in text:
+        raise AbiError(f"{where}: {function}: variadic parameters are not supported")
+    if "(" in text or "[" in text:
+        raise AbiError(
+            f"{where}: {function}: cannot parse parameter {text.strip()!r}; a function"
+            " pointer or array parameter must be given a typedef"
+        )
+    declared, equals, default = text.partition("=")
+    declared = " ".join(declared.split())
+    tail = _IDENT_TAIL_RE.search(declared)
+    type_text = declared[: tail.start()].strip() if tail else ""
+    name = tail.group(1) if tail else ""
+    # A trailing identifier that is a type word, is spelled like a typedef, or
+    # follows only qualifiers and struct/enum/union keywords is part of an unnamed
+    # parameter's type, not a name. The call into the _impl function needs every
+    # name, so an unnamed one cannot be generated.
+    if (
+        not type_text
+        or name in TYPE_TAIL_KEYWORDS
+        or name.endswith("_t")
+        or set(type_text.split()) <= _TYPE_KEYWORDS
+    ):
+        raise AbiError(
+            f"{where}: {function}: parameter {declared!r} has no name; name every"
+            " parameter in miopen.h"
+        )
+    return Param(
+        type=squash(type_text),
+        name=name,
+        default=default.strip() if equals else None,
+    )
+
+
+def parse_public_header(
+    source: str, what: str = "miopen.h", allow_empty: bool = False
+) -> list[EntryPoint]:
+    """Collect every MIOPEN_EXPORT declaration, in declaration order."""
+    text = active_text(source, what)
+    entries: dict[str, EntryPoint] = {}
+    for match in re.finditer(r"\bMIOPEN_EXPORT\b", text):
+        line = text.count("\n", 0, match.start()) + 1
+        where = f"{what}:{line}"
         end = text.find(";", match.end())
+        brace = text.find("{", match.end())
         if end < 0:
-            raise AbiError(f"unterminated declaration in {what}")
-        decl = text[match.end() : end]
-        if "{" in decl:
-            raise AbiError(f"unexpected block after MIOPEN_EXPORT in {what}")
-        name, sig = parse_prototype(decl, what)
-        if name in out:
-            raise AbiError(f"duplicate declaration of {name} in {what}")
-        out[name] = sig
-    return out
+            raise AbiError(f"{where}: MIOPEN_EXPORT declaration is never terminated")
+        if 0 <= brace < end:
+            raise AbiError(
+                f"{where}: a '{{' comes before the ';' of this MIOPEN_EXPORT"
+                " declaration; only plain function declarations are supported"
+            )
+        declaration = " ".join(text[match.end() : end].split())
+        parsed = _HEADER_DECL_RE.fullmatch(declaration)
+        if parsed is None or not parsed.group("ret").strip():
+            raise AbiError(
+                f"{where}: cannot parse {declaration!r} as"
+                " '<return type> <name>(<parameters>)'"
+            )
+        name = parsed.group("name")
+        if name in entries:
+            raise AbiError(
+                f"{where}: {name} is declared again; first declared at line"
+                f" {entries[name].line}"
+            )
+        params_text = parsed.group("params")
+        if "(" in params_text or ")" in params_text:
+            raise AbiError(
+                f"{where}: {name}: a function-pointer parameter must be given a typedef"
+            )
+        params: list[Param] = []
+        if params_text.strip() not in ("", "void"):
+            for piece in split_params(params_text):
+                if not piece.strip():
+                    raise AbiError(f"{where}: {name}: empty parameter")
+                params.append(parse_param(piece, name, where))
+        entries[name] = EntryPoint(
+            name=name, ret=squash(parsed.group("ret")), params=tuple(params), line=line
+        )
+    if not entries and not allow_empty:
+        raise AbiError(f"no MIOPEN_EXPORT declarations found in {what}")
+    return list(entries.values())
+
+
+def stub_signature(entry: EntryPoint) -> tuple[str, ...]:
+    """``entry`` reduced the way parse_wrapper reduces a stub, so the two compare.
+
+    Parameter names, default arguments and a top-level const drop out: none of
+    them changes the type.
+    """
+    params = ", ".join(p.definition_text() for p in entry.params)
+    return parse_prototype(f"{entry.ret} {entry.name}({params})", "miopen.h")[1]
 
 
 def parse_range_prototypes(source: str, what: str) -> dict[str, tuple[str, ...]]:
@@ -639,7 +851,7 @@ def parse_range_prototypes(source: str, what: str) -> dict[str, tuple[str, ...]]
     by name, and a call is rejected because no return type sits between the name
     and the punctuation before it.
     """
-    text = strip_comments(source)
+    text = strip_comments(source, what)
     out: dict[str, tuple[str, ...]] = {}
     for match in RANGE_DECL_RE.finditer(text):
         start = max(text.rfind(ch, 0, match.start()) for ch in DECLARATOR_STOPS)
@@ -660,7 +872,7 @@ def parse_range_prototypes(source: str, what: str) -> dict[str, tuple[str, ...]]
 
 
 def parse_wrapper(
-    source: str,
+    source: str, what: str = "wrapper.cpp"
 ) -> tuple[dict[str, tuple[str, ...]], dict[str, set[str]], dict[str, list[str]]]:
     """Collect each stub's prototype, the _impl symbols it calls, and the entry
     point named by its MIOPEN_WRAPPER_DISPATCH / MIOPEN_WRAPPER_FORWARD macros.
@@ -669,7 +881,7 @@ def parse_wrapper(
     dispatch macro twice is visible as such instead of collapsing into a
     correct-looking single entry.
     """
-    text = strip_comments(source)
+    text = strip_comments(source, what)
     protos: dict[str, tuple[str, ...]] = {}
     forwards: dict[str, set[str]] = {}
     dispatches: dict[str, list[str]] = {}
@@ -892,7 +1104,7 @@ def check_wrapper_only_not_public(wrapper_only: set[str], header_path: str) -> b
         raise AbiError(f"public header not found: {path}")
     # Comments are stripped so miopen.h docs can mention a wrapper-only function
     # without it counting as a declaration.
-    text = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
+    text = strip_comments(path.read_text(encoding="utf-8", errors="replace"), path.name)
     offenders = sorted(
         s for s in wrapper_only if re.search(rf"\b{re.escape(s)}\b", text)
     )
@@ -1399,7 +1611,8 @@ def cmd_check_headers(args) -> int:
     # Not part of the skip above: either file can be removed on its own (the
     # function moves into miopen.h, or the list empties), and skipping then would
     # switch off every other check. An untracked one means no wrapper-only
-    # functions, so a stub in wrapper.cpp that nothing declares still fails below.
+    # functions, so such a stub is judged as a forwarding stub here; the generator
+    # refuses a stub that neither header declares.
     for rel, source in (
         (
             f"{miopen_rel}/include_wrapper/miopen/hipdnn_forwarding.h",
@@ -1413,7 +1626,12 @@ def cmd_check_headers(args) -> int:
                 " treating it as empty"
             )
     wrapper_only = (
-        parse_exports(wrapper_header_source, "hipdnn_forwarding.h")
+        {
+            entry.name: stub_signature(entry)
+            for entry in parse_public_header(
+                wrapper_header_source, "hipdnn_forwarding.h", allow_empty=True
+            )
+        }
         if wrapper_header_source is not None
         else {}
     )

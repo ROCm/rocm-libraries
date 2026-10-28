@@ -943,10 +943,11 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         ${PROJECT_SOURCE_DIR}/src/private/hipdnn_types.cpp)
     target_link_libraries(MIOpen PRIVATE hipdnn_frontend_dynamic)
 
-    # Deliberately excludes src/include: the wrapper must see only the public
-    # header and its own _impl declarations. Without that restriction a stub
-    # could include an internal C++ header and re-couple the public shim to
-    # types that are supposed to live behind libMIOpen_private.so.
+    # The wrapper is meant to see only the public header and its own _impl
+    # declarations: a stub that included an internal C++ header would re-couple
+    # the public shim to types that live behind libMIOpen_private.so. This
+    # target adds no src/include, but the PUBLIC link to the private target above
+    # brings it in, so the build does not enforce that rule.
     # CMAKE_BINARY_DIR/include holds the generated export.h and is listed here
     # rather than relied on from miopen_generate_export_header() further down,
     # so the target is complete at its point of definition even in a superbuild
@@ -963,10 +964,12 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include_wrapper>)
 
     # The wrapper's only dependency is the private library, so every symbol it
-    # references must resolve at link time. This turns "new API added, generated
-    # files not regenerated" from a runtime failure into a link error -- the
-    # exported symbol set is unchanged in that case, so the public-ABI gate
-    # cannot catch it.
+    # references must resolve at link time. This turns a stub that calls an _impl
+    # function the private library does not define (a hand-written stub for a
+    # name missing from the rename list, say) from a runtime failure into a link
+    # error. A miopen.h entry point whose generated files are stale is not caught
+    # here, because no stub refers to it; generate_wrapper_sources.py --check and
+    # check_public_abi.py check-wrapper catch that.
     if(NOT WIN32 AND NOT APPLE)
         target_link_options(MIOpen PRIVATE "LINKER:--no-undefined")
     endif()

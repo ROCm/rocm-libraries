@@ -112,7 +112,7 @@ def test_error_lines_survive_block_comments():
     source = header(
         "/* one", "two", "three */", "MIOPEN_EXPORT miopenStatus_t miopenFoo(int);"
     )
-    # The declaration is on line 11 of the fixture: 6 lines of preamble, the
+    # The declaration is on line 10 of the fixture: 6 lines of preamble, the
     # three-line comment, then the declaration.
     with pytest.raises(abi.AbiError, match=r"miopen\.h:10:.*miopenFoo"):
         gen.parse_public_header(source)
@@ -121,6 +121,16 @@ def test_error_lines_survive_block_comments():
 def test_an_unterminated_comment_is_rejected():
     with pytest.raises(abi.AbiError, match="unterminated /\\* comment"):
         gen.parse_public_header(header(entry("miopenCreate"), "/* never closed"))
+
+
+def test_a_comment_opener_inside_a_string_is_not_a_comment():
+    entries = parse(
+        'static const char* kGlob = "plugins/*.so";',
+        "static const char kStar = '*'; /* a real comment */",
+        'static const char* kUrl = "http://example";',
+        entry("miopenCreate"),
+    )
+    assert [e.name for e in entries] == ["miopenCreate"]
 
 
 # --------------------------------------------------------------------------
@@ -235,6 +245,27 @@ def test_an_unknown_ifndef_is_rejected_too():
         gen.parse_public_header(source)
 
 
+def test_a_declaration_in_an_inactive_outer_branch_is_not_read():
+    entries = parse(
+        "#ifndef MIOPEN_BETA_API",
+        "#ifdef __cplusplus",
+        entry("miopenGhost"),
+        "#endif",
+        "#endif",
+        entry("miopenCreate"),
+    )
+    assert [e.name for e in entries] == ["miopenCreate"]
+
+
+def test_a_continued_define_adds_no_entry_point():
+    entries = parse(
+        "#define MIOPEN_ALIAS \\",
+        "    " + entry("miopenPhantom"),
+        entry("miopenCreate"),
+    )
+    assert [e.name for e in entries] == ["miopenCreate"]
+
+
 def test_unbalanced_conditionals_are_rejected():
     with pytest.raises(abi.AbiError, match="#endif without"):
         gen.parse_public_header(header(entry("miopenA"), "#endif"))
@@ -278,11 +309,31 @@ def test_an_unterminated_declaration_is_rejected():
 
 @pytest.mark.parametrize(
     "unnamed",
-    ["miopenHandle_t", "int*", "unsigned int", "const miopenHandle_t", "const void*"],
+    [
+        "miopenHandle_t",
+        "int*",
+        "unsigned int",
+        "const miopenHandle_t",
+        "const void*",
+        "struct miopenProblem",
+        "enum miopenThing",
+        "const miopenProblem",
+        "volatile miopenThing",
+    ],
 )
 def test_an_unnamed_parameter_is_rejected_naming_the_function(unnamed):
     with pytest.raises(abi.AbiError, match=r"miopenFoo: parameter .* has no name"):
         parse(entry("miopenFoo", f"miopenHandle_t handle, {unnamed}"))
+
+
+def test_a_named_struct_enum_or_unsigned_parameter_is_accepted():
+    entries = parse(
+        entry(
+            "miopenFoo",
+            "struct miopenProblem* problem, enum miopenThing thing, unsigned n",
+        )
+    )
+    assert [p.name for p in entries[0].params] == ["problem", "thing", "n"]
 
 
 def test_a_function_pointer_parameter_is_rejected_with_advice():
@@ -603,9 +654,12 @@ PRE_COMMIT = textwrap.dedent(
 
 
 def fake_clang_format(
-    tmp_path: Path, version: str = PIN, name: str = "clang-format"
+    tmp_path: Path, version: str = PIN, name: str = "clang-format", fail: bool = False
 ) -> Path:
-    """A stand-in that reports ``version`` and echoes stdin; logs how it was called."""
+    """A stand-in that reports ``version`` and echoes stdin; logs how it was called.
+
+    With ``fail`` it rejects every format request, as clang-format does for a
+    .clang-format it cannot read."""
     log = tmp_path / f"{name}.log"
     script = tmp_path / name
     script.write_text(
@@ -616,6 +670,9 @@ def fake_clang_format(
             if "--version" in sys.argv:
                 print("clang-format version {version}")
                 raise SystemExit(0)
+            if {fail}:
+                sys.stderr.write("unknown key in .clang-format")
+                raise SystemExit(1)
             style = next(a for a in sys.argv if a.startswith("--style=file:"))
             assumed = next(a for a in sys.argv if a.startswith("--assume-filename="))
             with open({str(log)!r}, "a") as out:
@@ -633,9 +690,9 @@ def test_the_pin_is_read_from_the_pre_commit_config():
     assert gen.pinned_clang_format_version(PRE_COMMIT) == PIN
 
 
-def test_a_config_without_the_pin_is_an_error():
-    with pytest.raises(abi.AbiError, match="mirrors-clang-format"):
-        gen.pinned_clang_format_version("repos: []\n")
+def test_a_config_without_a_readable_pin_gives_none():
+    assert gen.pinned_clang_format_version("repos: []\n") is None
+    assert gen.pinned_clang_format_version(None) is None
 
 
 def test_the_real_pre_commit_config_carries_a_readable_pin():
@@ -645,24 +702,25 @@ def test_the_real_pre_commit_config_carries_a_readable_pin():
     assert gen.pinned_clang_format_version(config.read_text(encoding="utf-8"))
 
 
-def test_a_clang_format_of_the_wrong_version_is_refused_with_the_fix(tmp_path):
-    wrong = fake_clang_format(tmp_path, "18.1.3")
-    with pytest.raises(abi.AbiError) as caught:
-        gen.find_clang_format(str(wrong), PIN)
-    message = str(caught.value)
-    assert PIN in message
-    assert "18.1.3" in message
-    assert f"pip install clang-format=={PIN}" in message
-    assert "miopen-wrapper-sources-regenerate" in message
+def test_a_named_clang_format_of_another_release_is_used_as_it_is(tmp_path):
+    other = fake_clang_format(tmp_path, "18.1.3")
+    assert gen.find_clang_format(str(other), PIN) == (str(other), "18.1.3")
 
 
-def test_the_environment_variable_is_held_to_the_pin_too(tmp_path, monkeypatch):
-    monkeypatch.setenv("CLANG_FORMAT", str(fake_clang_format(tmp_path, "18.1.3")))
-    with pytest.raises(abi.AbiError, match="18.1.3"):
-        gen.find_clang_format(None, PIN)
+def test_a_named_clang_format_that_does_not_run_is_an_error(tmp_path):
+    with pytest.raises(abi.AbiError, match="not a runnable clang-format"):
+        gen.find_clang_format(str(tmp_path / "absent"), PIN)
 
 
-def test_discovery_takes_the_first_candidate_with_the_pinned_version(
+def test_the_environment_variable_names_the_binary_whatever_its_release(
+    tmp_path, monkeypatch
+):
+    other = fake_clang_format(tmp_path, "18.1.3")
+    monkeypatch.setenv("CLANG_FORMAT", str(other))
+    assert gen.find_clang_format(None, PIN) == (str(other), "18.1.3")
+
+
+def test_discovery_takes_the_first_candidate_with_the_pinned_release(
     tmp_path, monkeypatch
 ):
     monkeypatch.delenv("CLANG_FORMAT", raising=False)
@@ -670,18 +728,38 @@ def test_discovery_takes_the_first_candidate_with_the_pinned_version(
     right = fake_clang_format(tmp_path, PIN, name="fallback")
     monkeypatch.setattr(gen.shutil, "which", lambda _name: str(wrong))
     monkeypatch.setattr(gen, "FALLBACK_CLANG_FORMAT", str(right))
-    assert gen.find_clang_format(None, PIN) == str(right)
+    assert gen.find_clang_format(None, PIN) == (str(right), PIN)
 
 
-def test_discovery_with_no_matching_candidate_lists_what_it_found(
+def test_discovery_without_the_pinned_release_takes_the_first_one_that_runs(
     tmp_path, monkeypatch
 ):
     monkeypatch.delenv("CLANG_FORMAT", raising=False)
     wrong = fake_clang_format(tmp_path, "18.1.3")
     monkeypatch.setattr(gen.shutil, "which", lambda _name: str(wrong))
     monkeypatch.setattr(gen, "FALLBACK_CLANG_FORMAT", str(tmp_path / "absent"))
-    with pytest.raises(abi.AbiError, match="18.1.3"):
+    assert gen.find_clang_format(None, PIN) == (str(wrong), "18.1.3")
+    assert gen.find_clang_format(None, None) == (str(wrong), "18.1.3")
+
+
+def test_discovery_with_no_clang_format_says_how_to_get_the_pinned_one(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("CLANG_FORMAT", raising=False)
+    monkeypatch.setattr(gen.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(gen, "FALLBACK_CLANG_FORMAT", str(tmp_path / "absent"))
+    with pytest.raises(abi.AbiError) as caught:
         gen.find_clang_format(None, PIN)
+    message = str(caught.value)
+    assert f"pip install clang-format=={PIN}" in message
+    assert "miopen-wrapper-sources-regenerate" in message
+
+
+def test_the_note_names_both_releases_or_the_unreadable_pin():
+    assert gen.not_pinned_note(PIN, PIN) is None
+    note = gen.not_pinned_note("18.1.3", PIN)
+    assert "18.1.3" in note and PIN in note
+    assert "could not be read" in gen.not_pinned_note("18.1.3", None)
 
 
 # --------------------------------------------------------------------------
@@ -884,12 +962,105 @@ def test_the_formatter_is_given_each_files_own_style_and_path(tmp_path):
     )
 
 
-def test_the_wrong_clang_format_exits_2_without_touching_a_file(tmp_path, capsys):
+def test_a_write_that_another_release_would_change_exits_2_without_touching_a_file(
+    tmp_path, capsys
+):
     tree = Tree(tmp_path)
     tree.cf = fake_clang_format(tmp_path, "18.1.3", name="old")
     assert tree.run() == 2
-    assert "18.1.3" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "18.1.3" in err
+    assert "Nothing was written" in err
+    assert GENERATED[3] in err
+    assert f"pip install clang-format=={PIN}" in err
     assert tree.path(GENERATED[3]).read_text(encoding="utf-8") == "// stale\n"
+    assert not tree.path(GENERATED[2]).exists()
+
+
+def test_another_release_passes_when_its_output_matches_the_committed_files(
+    tmp_path, capsys
+):
+    tree = Tree(tmp_path)
+    assert tree.run() == 0
+    tree.cf = fake_clang_format(tmp_path, "18.1.3", name="other")
+    capsys.readouterr()
+
+    assert tree.run("--check", "--require-provider") == 0
+    assert "wrapper source generation check: PASS" in capsys.readouterr().out
+    assert tree.run() == 0
+    assert "wrote:" not in capsys.readouterr().out
+
+
+def test_another_release_reports_drift_with_a_note_next_to_the_diff(tmp_path, capsys):
+    tree = Tree(tmp_path)
+    assert tree.run() == 0
+    tree.path(GENERATED[1]).write_text("// emptied\n", encoding="utf-8")
+    tree.cf = fake_clang_format(tmp_path, "18.1.3", name="other")
+    capsys.readouterr()
+
+    assert tree.run("--check") == 1
+    out = capsys.readouterr().out
+    assert f"FAIL: {GENERATED[1]} differs" in out
+    assert f"clang-format 18.1.3 was used, not the pinned {PIN}" in out
+
+
+def test_the_pinned_release_adds_no_note_to_a_drift_report(tree, capsys):
+    assert tree.run() == 0
+    tree.path(GENERATED[1]).write_text("// emptied\n", encoding="utf-8")
+    capsys.readouterr()
+
+    assert tree.run("--check") == 1
+    assert "was used" not in capsys.readouterr().out
+
+
+def test_a_config_without_a_readable_pin_does_not_stop_the_check(tmp_path, capsys):
+    tree = Tree(tmp_path)
+    assert tree.run() == 0
+    tree.write(tree.repo / ".pre-commit-config.yaml", "repos: []\n")
+    assert tree.run("--check", "--require-provider") == 0
+
+    tree.path(GENERATED[1]).write_text("// emptied\n", encoding="utf-8")
+    capsys.readouterr()
+    assert tree.run("--check") == 1
+    assert "could not be read" in capsys.readouterr().out
+
+
+def test_a_tree_without_the_pre_commit_config_still_checks_and_writes(
+    tmp_path, monkeypatch, capsys
+):
+    tree = Tree(tmp_path)
+    assert tree.run() == 0
+    tree.path(".pre-commit-config.yaml").unlink()
+    assert tree.run() == 0
+
+    sparse(monkeypatch, {})
+    capsys.readouterr()
+    assert tree.run("--check", "--require-provider") == 0
+    assert "wrapper source generation check: PASS" in capsys.readouterr().out
+
+
+def test_a_failing_clang_format_exits_2_and_leaves_every_file_alone(tmp_path, capsys):
+    tree = Tree(tmp_path)
+    tree.cf = fake_clang_format(tmp_path, PIN, name="failing", fail=True)
+    assert tree.run() == 2
+    assert "clang-format failed on" in capsys.readouterr().err
+    assert tree.path(GENERATED[3]).read_text(encoding="utf-8") == "// stale\n"
+    assert not tree.path(GENERATED[2]).exists()
+
+
+def test_an_entry_point_that_cannot_be_dispatched_exits_2_without_writing(tree, capsys):
+    public = tree.miopen / "include/miopen/miopen.h"
+    public.write_text(
+        header(
+            entry("miopenCreate", "miopenHandle_t* handle"),
+            entry("miopenDestroy"),
+            entry("miopenCount", "void", ret="size_t"),
+        ),
+        encoding="utf-8",
+    )
+    assert tree.run() == 2
+    assert "only works for miopenStatus_t" in capsys.readouterr().err
+    assert not tree.path(GENERATED[2]).exists()
 
 
 def test_a_parse_error_exits_2_and_names_the_line(tree, capsys):

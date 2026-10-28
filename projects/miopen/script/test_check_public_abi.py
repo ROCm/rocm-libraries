@@ -1370,3 +1370,46 @@ def test_check_headers_still_fails_a_tracked_but_unreadable_wrapper_header(
     flags = headers_inputs(tmp_path, wrapper_header=False)
     assert run_check_headers(tmp_path, flags) == 2
     assert "hipdnn_forwarding.h" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------
+# The reader the checks share with the generator
+# --------------------------------------------------------------------------
+
+INACTIVE_ACCESSOR_HEADER = f"""#pragma once
+#include <miopen/miopen.h>
+#ifndef MIOPEN_BETA_API
+MIOPEN_EXPORT miopenStatus_t {ACCESSOR}(miopenStatus_t* forwardedStatus);
+#endif
+"""
+
+
+def test_check_headers_reads_a_conditional_header_the_way_the_generator_does(
+    tmp_path, capsys
+):
+    """MIOPEN_BETA_API is defined in every library build, so this branch is dead."""
+    inputs = with_accessor(wrapper_header=INACTIVE_ACCESSOR_HEADER)
+    assert run_check_headers(tmp_path, headers_inputs(tmp_path, **inputs)) == 1
+    out = capsys.readouterr().out
+    assert f"+ listed, not declared in hipdnn_forwarding.h: {ACCESSOR}" in out
+
+
+def test_a_comment_opener_inside_a_string_does_not_hide_a_stub(tmp_path, capsys):
+    literal = 'static const char* const kGlob = "hipdnn_plugins/*.so";\n'
+    wrapper = literal + create_wrapper() + "\n/* a later comment */\n"
+    assert run_check_headers(tmp_path, headers_inputs(tmp_path, wrapper=wrapper)) == 0
+    out = capsys.readouterr().out
+    assert "all 2 wrapper stubs forward to their own _impl symbol" in out
+    assert "header consistency check: PASS" in out
+
+
+def test_an_unterminated_comment_in_a_source_is_an_error(tmp_path, capsys):
+    wrapper = create_wrapper() + "\n/* never closed\n"
+    assert run_check_headers(tmp_path, headers_inputs(tmp_path, wrapper=wrapper)) == 2
+    assert "wrapper.cpp:" in capsys.readouterr().err
+
+
+def test_an_array_parameter_is_rejected_rather_than_compared_by_name():
+    source = consumer(declaration(FWD, "miopenHandle_t, size_t lens[2]"))
+    with pytest.raises(abi.AbiError, match="array parameter"):
+        abi.parse_range_prototypes(source, "consumer.cpp")

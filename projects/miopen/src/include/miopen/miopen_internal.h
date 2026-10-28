@@ -76,9 +76,10 @@ miopenConvolutionABBackwardWeightsGetWorkSpaceSize(const miopenAlphaBetaCase_t a
  * They are exported but deliberately not part of miopen.h, so the public/private
  * split does not rename them: with MIOPEN_ENABLE_HIPDNN_WRAPPER=ON they stay on
  * libMIOpen_private.so under these names. They are declared once here so that
- * the compiler checks every definition and caller against the same prototype.
- * The parameters carry no top-level const: it does not change the type, and
- * clang-tidy rejects it in a declaration.
+ * the compiler checks MIOpen's definitions and callers against the same
+ * prototype. The hipDNN provider cannot include this header, so it keeps its own
+ * copy, which check_public_abi.py check-headers compares with the definitions.
+ * The parameters carry no top-level const, which does not change the type.
  */
 MIOPEN_EXPORT extern "C" miopenStatus_t
 miopenConvolutionForwardGetWorkSpaceSizeRange(miopenHandle_t handle,
