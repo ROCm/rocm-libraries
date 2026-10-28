@@ -224,9 +224,14 @@ The scaled backend requires exact integer `(16, 16, 128)` shape fields and
 positive integer A/B carrier widths, checked independently before signatures are
 constructed. Accumulator and result widths must each be exactly eight.
 
-Both object and raw-ID forms of `IRBuilder.mma` require supported FP32 or I32
-result dtypes. A registered operation absent from the catalog retains its
-historical FP32 default; a present unsupported result dtype is rejected.
+[`IRBuilder.mma`](../../python/rocke/core/ir.py) resolves the result element
+type through [`dtype_to_ir_type`](../../python/rocke/core/ir.py), using
+[`dst.dtype`](../../python/rocke/core/arch/target.py) for an object or the
+catalog destination dtype for a raw ID.
+This includes FP64 for supported MFMA atoms. A raw ID absent from the catalog
+retains its historical FP32 dtype default; an unrecognized destination dtype
+is rejected. Lowering enforces the selected instruction's operand and result
+types.
 Existing `wmma_scale*_f32_*` and dotted `wmma.scaled.*` IDs are retired, as are
 the dedicated scaled builder wrappers; serialized IR using those IDs must be regenerated.
 Use `tile.mma` with a resolved catalog atom. Other MMA operation IDs retain

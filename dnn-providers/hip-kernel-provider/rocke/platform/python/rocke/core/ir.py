@@ -2914,11 +2914,16 @@ class IRBuilder:
         matching MFMA call on CDNA or the WMMA call on RDNA. **One kernel body,
         two ISAs.**
 
-        The result vector type is ``<dst.frag_len x float>`` (the per-lane
-        result length the atom produces). When ``op`` is an ``op_id``
-        string, or its destination length is zero (unspecified), the frag length
+        The result is a vector of the resolved destination length and element type.
+        For an ``MmaOp``, the element type is resolved from ``dst.dtype`` through
+        ``dtype_to_ir_type``; for a raw ``op_id``, it comes from the catalog's
+        destination dtype, with the historical FP32 default when no catalog entry
+        exists. This includes F64 for supported FP64 MFMA atoms. When ``op`` is a
+        raw ``op_id``, or its destination length is zero (unspecified), the length
         is resolved from the static MMA fragment table. Supplied lengths must be
-        nonnegative integers; destination dtypes must normalize to fp32 or i32.
+        nonnegative integers, and destination dtypes must be recognized by
+        ``dtype_to_ir_type``. Lowering enforces the selected instruction's operand
+        and result types.
 
         The ISA-named helpers (:meth:`mfma_f32_16x16x16_f16`,
         :meth:`wmma_f32_16x16x16_f16`, …) are thin wrappers over this method,
