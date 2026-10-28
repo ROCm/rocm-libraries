@@ -378,3 +378,39 @@ class TestSetCompileTimeConstant:
 
         with pytest.raises(ValueError, match="one element"):
             tensor.set_compile_time_constant(1.0)
+
+
+class TestGraphTensorScalar:
+    """Graph.tensor_scalar() creates a scalar tensor; the Python value picks the type."""
+
+    @pytest.mark.parametrize(
+        "value, data_type",
+        [
+            (0.5, hipdnn.DataType.FLOAT),
+            (0.1, hipdnn.DataType.DOUBLE),
+            (3, hipdnn.DataType.INT32),
+            (2**40, hipdnn.DataType.INT64),
+        ],
+    )
+    def test_data_type_follows_the_python_value(self, value, data_type):
+        kind = hipdnn.ScalarType.COMPILE_TIME_CONST
+
+        scalar = hipdnn.Graph.tensor_scalar(value, kind)
+
+        assert scalar.get_data_type() == data_type
+
+    def test_compile_time_constant_keeps_the_value(self):
+        kind = hipdnn.ScalarType.COMPILE_TIME_CONST
+
+        scalar = hipdnn.Graph.tensor_scalar(0.5, kind)
+
+        assert scalar.get_compile_time_constant() == 0.5
+        assert not scalar.get_is_runtime_pass_by_value()
+
+    def test_runtime_param_is_runtime_with_default(self):
+        kind = hipdnn.ScalarType.RUNTIME_PARAM
+
+        scalar = hipdnn.Graph.tensor_scalar(0.5, kind)
+
+        assert scalar.get_pass_by_value() == 0.5
+        assert scalar.get_is_runtime_pass_by_value()

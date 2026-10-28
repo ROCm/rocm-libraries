@@ -160,6 +160,12 @@ std::pair<std::vector<AutotuneResult>, AutotuneCacheWriteOutcome>
     return {results, outcome};
 }
 
+template <typename T>
+std::shared_ptr<graph::TensorAttributes> tensorScalar(T value, graph::ScalarType scalarType)
+{
+    return graph::Graph::tensor(value, scalarType);
+}
+
 } // namespace
 
 void graphBindings(nb::module_& m)
@@ -782,6 +788,24 @@ void graphBindings(nb::module_& m)
             "Create a tensor with the metadata of a hipdnn Tensor or a __dlpack__ producer. "
             "A host (cpu) producer becomes a runtime pass-by-value tensor "
             "whose value is passed to execute() as a host tensor.")
+        .def_static("tensor_scalar",
+                    &tensorScalar<float>,
+                    nb::arg("value"),
+                    nb::arg("scalar_type"),
+                    "Create a pass-by-value scalar tensor. scalar_type selects a compile-time "
+                    "constant or a runtime parameter with a default value.")
+        .def_static("tensor_scalar",
+                    &tensorScalar<double>,
+                    nb::arg("value"),
+                    nb::arg("scalar_type"))
+        .def_static("tensor_scalar",
+                    &tensorScalar<int32_t>,
+                    nb::arg("value"),
+                    nb::arg("scalar_type"))
+        .def_static("tensor_scalar",
+                    &tensorScalar<int64_t>,
+                    nb::arg("value"),
+                    nb::arg("scalar_type"))
         .def(
             "to_json",
             [](graph::Graph& g) {

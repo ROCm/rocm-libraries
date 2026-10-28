@@ -142,6 +142,9 @@ nb::object valueToPython(const TensorAttributes::ValueVariant& value)
 
 void tensorBindings(nb::module_& m)
 {
+    nb::enum_<ScalarType>(m, "ScalarType")
+        .value("RUNTIME_PARAM", ScalarType::RUNTIME_PARAM)
+        .value("COMPILE_TIME_CONST", ScalarType::COMPILE_TIME_CONST);
     nb::class_<TensorAttributes>(m, "Tensor")
         .def(nb::init<>())
         .def_static(
