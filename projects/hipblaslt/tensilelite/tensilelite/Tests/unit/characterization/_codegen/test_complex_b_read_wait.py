@@ -120,12 +120,15 @@ def _check_complex_b_reads_complete_before_use(
         # At a wait, its younger LDS operations determine the safe counter value.
         younger_ds = 0
         b_ready = False
+        wait_after_product = False
         offset = 0
         for line in before_later_b.splitlines(keepends=True):
             if re.match(r"ds_(?:read|write)_", line):
                 younger_ds += 1
             second_wait = re.match(r"s_waitcnt lgkmcnt\((\d+)\)", line)
-            if second_wait and offset >= product_end and int(second_wait[1]) <= younger_ds:
+            if second_wait and int(second_wait[1]) <= younger_ds:
                 b_ready = True
+                wait_after_product |= offset >= product_end
             offset += len(line)
-        assert b_ready
+        assert b_ready, "Prefetched B reads are still outstanding when B[1] is consumed"
+        assert wait_after_product, "The B wait does not follow the complete first complex product"
