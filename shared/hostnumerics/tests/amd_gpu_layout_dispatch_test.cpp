@@ -31,16 +31,17 @@ TEST(AmdGpuLayoutTutorial, PlanAndCopyGfx950Scales) {
     EXPECT_EQ(physical, expected);
 }
 
-// preSwizzle with only a pre-tile configuration makes each tile contiguous.
-// Dimension 0 of `sizes` is the contiguous one, in the input and within each
-// output tile. Here a 4 x 4 operand with K fastest is split into 2 x 2 tiles.
-TEST(AmdGpuLayoutTutorial, PreTileOperand) {
+// An operand tile stores each tile contiguously. K is the contiguous extent, in
+// the input and within each output tile. Here a 4 x 4 operand is split into
+// 2 x 2 tiles; no swizzle is requested.
+TEST(AmdGpuLayoutTutorial, TileOperand) {
     // Element (k, mn) is stored at k + 4 * mn and holds 10 * mn + k.
     std::vector<int> operand(16);
     for (int mn = 0; mn < 4; ++mn)
         for (int k = 0; k < 4; ++k) operand[k + 4 * mn] = 10 * mn + k;
 
-    const std::vector<int> tiled = preSwizzle(operand, {4, 4}, {}, {2, 2});
+    const std::vector<int> tiled = copyOperandToPhysicalLayout(
+        operand, OperandExtents{/*k=*/4, /*mn=*/4}, std::nullopt, OperandTile{/*k=*/2, /*mn=*/2});
     // Tiles follow the same order as elements: the tile holding k 0-1, mn 0-1,
     // then k 2-3, mn 0-1, then k 0-1, mn 2-3, and so on.
     EXPECT_EQ(tiled,

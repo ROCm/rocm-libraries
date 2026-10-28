@@ -13,7 +13,9 @@
 #include "GPUContextFixture.hpp"
 
 #include <common/GEMMProblem.hpp>
-#include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
+#include <roc/hostnumerics/amd_gpu_layout/operand.hpp>
+
+#include <optional>
 
 namespace GEMMTests
 {
@@ -295,8 +297,8 @@ namespace GEMMTests
             }
 
             // Pre-tile A on the host when pretileA is set (kernel expects pre-tiled layout).
-            // pretileA is only supported for transA == "T"; A is stored in memory as KxM, so we
-            // pass (K, M) and (tileK, tileM) to preSwizzle to match the client (gemm.cpp).
+            // pretileA is only supported for transA == "T", where A is stored with K
+            // contiguous, matching the client (gemm.cpp).
             std::vector<PackedTypeA> hostAForKernel(hostA);
             if(!gemm.pretileA.empty() && gemm.pretileA.size() == 2)
             {
@@ -326,11 +328,12 @@ namespace GEMMTests
                     preTileSize[1] /= packing;
                 }
 
-                // The preSwizzle helper assumes column-major; so we swap sizes here.
-                std::vector<size_t> swappedSizes       = {sizes[1], sizes[0]};
-                std::vector<size_t> swappedPreTileSize = {preTileSize[1], preTileSize[0]};
-                hostAForKernel = roc::hostnumerics::amd_gpu_layout::preSwizzle(
-                    hostA, swappedSizes, {}, swappedPreTileSize);
+                hostAForKernel = roc::hostnumerics::amd_gpu_layout::copyOperandToPhysicalLayout(
+                    hostA,
+                    {.k = sizes[1], .mn = sizes[0]},
+                    std::nullopt,
+                    roc::hostnumerics::amd_gpu_layout::OperandTile{.k  = preTileSize[1],
+                                                                   .mn = preTileSize[0]});
             }
 
             // Pre-tile B on the host when pretileB is set (kernel expects pre-tiled layout)
@@ -361,8 +364,13 @@ namespace GEMMTests
                     sizes[0] /= packing;
                     preTileSize[0] /= packing;
                 }
-                hostBForKernel
-                    = roc::hostnumerics::amd_gpu_layout::preSwizzle(hostB, sizes, {}, preTileSize);
+                // B is K x N with K contiguous.
+                hostBForKernel = roc::hostnumerics::amd_gpu_layout::copyOperandToPhysicalLayout(
+                    hostB,
+                    {.k = sizes[0], .mn = sizes[1]},
+                    std::nullopt,
+                    roc::hostnumerics::amd_gpu_layout::OperandTile{.k  = preTileSize[0],
+                                                                   .mn = preTileSize[1]});
             }
 
             auto deviceA = make_shared_device<TA>(hostAForKernel);
@@ -384,21 +392,29 @@ namespace GEMMTests
                         scaleSizes[0] /= gemm.scaleBlockSize;
                         descScaleA = TensorDescriptor(descScaleA.dataType(), std::move(scaleSizes));
                     }
-                    std::vector<size_t> preSwizzleSize;
+                    std::optional<roc::hostnumerics::amd_gpu_layout::OperandSwizzle> scaleSwizzle;
                     if(gemm.scaleSkipPermlane == ScaleSkipPermlaneMode::PreSwizzleScale)
                     {
-                        AssertFatal(gemm.scaleShuffleTileA.size() == 3);
-                        preSwizzleSize = gemm.scaleShuffleTileA;
+                        auto const& shuffleTile = gemm.scaleShuffleTileA;
+                        AssertFatal(shuffleTile.size() == 3);
+                        scaleSwizzle = roc::hostnumerics::amd_gpu_layout::OperandSwizzle{
+                            .tileK    = shuffleTile[1],
+                            .tileMN   = shuffleTile[0],
+                            .subTileK = shuffleTile[2]};
                     }
-                    std::vector<size_t> preTileSize;
+                    std::optional<roc::hostnumerics::amd_gpu_layout::OperandTile> scaleTile;
                     if(!gemm.scalePretileA.empty())
                     {
                         AssertFatal(gemm.transA == "T",
                                     "Can only pre-tile scale A if A is TransposeType::T");
-                        preTileSize = {gemm.scalePretileA[1], gemm.scalePretileA[0]};
+                        scaleTile = roc::hostnumerics::amd_gpu_layout::OperandTile{
+                            .k = gemm.scalePretileA[1], .mn = gemm.scalePretileA[0]};
                     }
-                    auto tmpScaleA = roc::hostnumerics::amd_gpu_layout::preSwizzle(
-                        hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
+                    auto tmpScaleA = roc::hostnumerics::amd_gpu_layout::copyOperandToPhysicalLayout(
+                        hostScaleA,
+                        {.k = descScaleA.sizes()[0], .mn = descScaleA.sizes()[1]},
+                        scaleSwizzle,
+                        scaleTile);
                     deviceScaleA = make_shared_device(tmpScaleA);
                 }
                 else
@@ -417,21 +433,29 @@ namespace GEMMTests
                         scaleSizes[0] /= gemm.scaleBlockSize;
                         descScaleB = TensorDescriptor(descScaleB.dataType(), std::move(scaleSizes));
                     }
-                    std::vector<size_t> preSwizzleSize;
+                    std::optional<roc::hostnumerics::amd_gpu_layout::OperandSwizzle> scaleSwizzle;
                     if(gemm.scaleSkipPermlane == ScaleSkipPermlaneMode::PreSwizzleScale)
                     {
-                        AssertFatal(gemm.scaleShuffleTileB.size() == 3);
-                        preSwizzleSize = gemm.scaleShuffleTileB;
+                        auto const& shuffleTile = gemm.scaleShuffleTileB;
+                        AssertFatal(shuffleTile.size() == 3);
+                        scaleSwizzle = roc::hostnumerics::amd_gpu_layout::OperandSwizzle{
+                            .tileK    = shuffleTile[1],
+                            .tileMN   = shuffleTile[0],
+                            .subTileK = shuffleTile[2]};
                     }
-                    std::vector<size_t> preTileSize;
+                    std::optional<roc::hostnumerics::amd_gpu_layout::OperandTile> scaleTile;
                     if(!gemm.scalePretileB.empty())
                     {
                         AssertFatal(gemm.transB == "N",
                                     "Can only pre-tile scale B if B is TransposeType::N");
-                        preTileSize = {gemm.scalePretileB[0], gemm.scalePretileB[1]};
+                        scaleTile = roc::hostnumerics::amd_gpu_layout::OperandTile{
+                            .k = gemm.scalePretileB[0], .mn = gemm.scalePretileB[1]};
                     }
-                    auto tmpScaleB = roc::hostnumerics::amd_gpu_layout::preSwizzle(
-                        hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
+                    auto tmpScaleB = roc::hostnumerics::amd_gpu_layout::copyOperandToPhysicalLayout(
+                        hostScaleB,
+                        {.k = descScaleB.sizes()[0], .mn = descScaleB.sizes()[1]},
+                        scaleSwizzle,
+                        scaleTile);
                     deviceScaleB = make_shared_device(tmpScaleB);
                 }
                 else
