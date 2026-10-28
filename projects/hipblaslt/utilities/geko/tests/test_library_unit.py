@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -216,6 +217,57 @@ def test_dict_library_supports_property_access_and_dump(tmp_path: Path) -> None:
     assert dumped["ExactLogic"] == [[[8, 8, 1, 8], [1, 100.0]]]
     assert dumped["PerfMetric"] == "OtherMetric"
     assert dumped["LibraryType"] == "GridBased"
+
+
+@pytest.mark.parametrize("version", [None, 0, 1, 2, 3])
+@pytest.mark.parametrize("with_uid", [False, True])
+@pytest.mark.parametrize("logic_format", ["dict", "list"])
+def test_dump_orders_only_dict_format_without_mutating_input(
+    tmp_path: Path, version, with_uid, logic_format
+) -> None:
+    """Writing changes only dict-format key order, preserving all solution values."""
+    solution = {
+        "tailLoopOptB": 1,
+        "SolutionNameMin": "solution",
+        "InternalSupportParams": {"UseUniversalArgs": True, "PersistentLoopArgsVersion": 0},
+        "KernelNameMin": "kernel",
+        "SolutionIndex": 0,
+        "ActivationFuncCall": False,
+    }
+    if version is not None:
+        solution["InternalSupportParams"]["KernArgsVersion"] = version
+    if with_uid:
+        solution["SolutionUID"] = "uid"
+    if logic_format == "list":
+        lib = _mk_lib(solutions=[solution])
+    else:
+        lib = Library({
+            "ArchitectureName": "gfx950", "ProblemType": {}, "DefaultSolution": {},
+            "Solutions": [solution], "LibraryType": "Equality",
+        }, "lib.yaml")
+    before = deepcopy(lib.data)
+    solutions = lib.solutions
+    original_keys = list(solution)
+    original_support_keys = list(solution["InternalSupportParams"])
+
+    lib.dump(tmp_path)
+
+    dumped = yaml.safe_load((tmp_path / "lib.yaml").read_text())
+    assert dumped == before
+    assert lib.data == before
+    assert lib.solutions is solutions
+    assert lib.solutions[0] is solution
+    assert list(solution) == original_keys
+    assert list(solution["InternalSupportParams"]) == original_support_keys
+    written = dumped[5][0] if logic_format == "list" else dumped["Solutions"][0]
+    if logic_format == "list":
+        assert list(written) == original_keys
+        assert list(written["InternalSupportParams"]) == original_support_keys
+    else:
+        lead = ["SolutionIndex"] + (["SolutionUID"] if with_uid else [])
+        lead += ["KernelNameMin", "SolutionNameMin"]
+        assert list(written) == lead + sorted(set(written) - set(lead))
+        assert list(written["InternalSupportParams"]) == sorted(original_support_keys)
 
 
 @pytest.mark.parametrize(
