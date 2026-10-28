@@ -48,7 +48,7 @@ THRUST_NAMESPACE_BEGIN
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename InputIterator1, typename InputIterator2>
-THRUST_HOST_DEVICE thrust::pair<InputIterator1, InputIterator2>
+THRUST_HOST_DEVICE _THRUST_STD::pair<InputIterator1, InputIterator2>
 mismatch(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
          InputIterator1 first1,
          InputIterator1 last1,
@@ -60,7 +60,7 @@ mismatch(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename BinaryPredicate>
-THRUST_HOST_DEVICE thrust::pair<InputIterator1, InputIterator2> mismatch(
+THRUST_HOST_DEVICE _THRUST_STD::pair<InputIterator1, InputIterator2> mismatch(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   InputIterator1 first1,
   InputIterator1 last1,
@@ -72,7 +72,7 @@ THRUST_HOST_DEVICE thrust::pair<InputIterator1, InputIterator2> mismatch(
 } // end mismatch()
 
 template <typename InputIterator1, typename InputIterator2>
-thrust::pair<InputIterator1, InputIterator2> mismatch(InputIterator1 first1, InputIterator1 last1, InputIterator2 first2)
+_THRUST_STD::pair<InputIterator1, InputIterator2> mismatch(InputIterator1 first1, InputIterator1 last1, InputIterator2 first2)
 {
   using thrust::system::detail::generic::select_system;
 
@@ -86,7 +86,7 @@ thrust::pair<InputIterator1, InputIterator2> mismatch(InputIterator1 first1, Inp
 } // end mismatch()
 
 template <typename InputIterator1, typename InputIterator2, typename BinaryPredicate>
-thrust::pair<InputIterator1, InputIterator2>
+_THRUST_STD::pair<InputIterator1, InputIterator2>
 mismatch(InputIterator1 first1, InputIterator1 last1, InputIterator2 first2, BinaryPredicate pred)
 {
   using thrust::system::detail::generic::select_system;

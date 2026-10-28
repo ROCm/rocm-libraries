@@ -30,8 +30,9 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/function.h>
-#include <thrust/pair.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
+
+#include _THRUST_STD_INCLUDE(__utility/pair.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::sequential
@@ -80,7 +81,7 @@ THRUST_HOST_DEVICE ForwardIterator max_element(
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename ForwardIterator, typename BinaryPredicate>
-THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> minmax_element(
+THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator, ForwardIterator> minmax_element(
   sequential::execution_policy<DerivedPolicy>&, ForwardIterator first, ForwardIterator last, BinaryPredicate comp)
 {
   // wrap comp
@@ -102,7 +103,7 @@ THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> minmax_element
     }
   }
 
-  return thrust::make_pair(imin, imax);
+  return _THRUST_STD::make_pair(imin, imax);
 }
 } // namespace system::detail::sequential
 THRUST_NAMESPACE_END

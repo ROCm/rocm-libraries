@@ -29,8 +29,9 @@
 
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/reference_forward_declaration.h>
-#include <thrust/pair.h>
 #include <thrust/tuple.h>
+
+#include _THRUST_STD_INCLUDE(__utility/pair.h)
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(tuple)
@@ -98,7 +99,7 @@ public:
   // XXX might be worthwhile to guard this with an enable_if is_assignable
   THRUST_EXEC_CHECK_DISABLE
   template <typename U1, typename U2>
-  THRUST_HOST_DEVICE tuple_of_iterator_references& operator=(const pair<U1, U2>& other)
+  THRUST_HOST_DEVICE tuple_of_iterator_references& operator=(const _THRUST_STD::pair<U1, U2>& other)
   {
     super_t::operator=(other);
     return *this;

@@ -61,7 +61,7 @@ template <typename InputIterator1,
           typename InputIterator4,
           typename OutputIterator1,
           typename OutputIterator2>
-thrust::pair<OutputIterator1, OutputIterator2> merge_by_key(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> merge_by_key(
   my_system& system,
   InputIterator1,
   InputIterator1,
@@ -73,7 +73,7 @@ thrust::pair<OutputIterator1, OutputIterator2> merge_by_key(
   OutputIterator2 values_result)
 {
   system.validate_dispatch();
-  return thrust::make_pair(keys_result, values_result);
+  return _THRUST_STD::make_pair(keys_result, values_result);
 }
 
 void TestMergeByKeyDispatchExplicit()
@@ -94,7 +94,7 @@ template <typename InputIterator1,
           typename InputIterator4,
           typename OutputIterator1,
           typename OutputIterator2>
-thrust::pair<OutputIterator1, OutputIterator2> merge_by_key(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> merge_by_key(
   my_tag,
   InputIterator1,
   InputIterator1,
@@ -106,7 +106,7 @@ thrust::pair<OutputIterator1, OutputIterator2> merge_by_key(
   OutputIterator2 values_result)
 {
   *keys_result = 13;
-  return thrust::make_pair(keys_result, values_result);
+  return _THRUST_STD::make_pair(keys_result, values_result);
 }
 
 void TestMergeByKeyDispatchImplicit()
@@ -239,7 +239,7 @@ void TestMergeByKeyToDiscardIterator(size_t n)
   const thrust::device_vector<T> d_a_vals = h_a_vals;
   const thrust::device_vector<T> d_b_vals = h_b_vals;
 
-  using discard_pair = thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>>;
+  using discard_pair = _THRUST_STD::pair<thrust::discard_iterator<>, thrust::discard_iterator<>>;
 
   const discard_pair h_result = thrust::merge_by_key(
     h_a_keys.begin(),

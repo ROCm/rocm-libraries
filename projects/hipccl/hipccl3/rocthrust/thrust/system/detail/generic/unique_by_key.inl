@@ -39,7 +39,7 @@ THRUST_NAMESPACE_BEGIN
 namespace system::detail::generic
 {
 template <typename ExecutionPolicy, typename ForwardIterator1, typename ForwardIterator2>
-THRUST_HOST_DEVICE thrust::pair<ForwardIterator1, ForwardIterator2> unique_by_key(
+THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator1, ForwardIterator2> unique_by_key(
   thrust::execution_policy<ExecutionPolicy>& exec,
   ForwardIterator1 keys_first,
   ForwardIterator1 keys_last,
@@ -50,7 +50,7 @@ THRUST_HOST_DEVICE thrust::pair<ForwardIterator1, ForwardIterator2> unique_by_ke
 } // end unique_by_key()
 
 template <typename ExecutionPolicy, typename ForwardIterator1, typename ForwardIterator2, typename BinaryPredicate>
-THRUST_HOST_DEVICE thrust::pair<ForwardIterator1, ForwardIterator2> unique_by_key(
+THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator1, ForwardIterator2> unique_by_key(
   thrust::execution_policy<ExecutionPolicy>& exec,
   ForwardIterator1 keys_first,
   ForwardIterator1 keys_last,
@@ -73,7 +73,7 @@ template <typename ExecutionPolicy,
           typename InputIterator2,
           typename OutputIterator1,
           typename OutputIterator2>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(
   thrust::execution_policy<ExecutionPolicy>& exec,
   InputIterator1 keys_first,
   InputIterator1 keys_last,
@@ -92,7 +92,7 @@ template <typename ExecutionPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename BinaryPredicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(
   thrust::execution_policy<ExecutionPolicy>& exec,
   InputIterator1 keys_first,
   InputIterator1 keys_last,
@@ -118,7 +118,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> unique_by_key_
 
   difference_type output_size = result - thrust::make_zip_iterator(keys_output, values_output);
 
-  return thrust::make_pair(keys_output + output_size, values_output + output_size);
+  return _THRUST_STD::make_pair(keys_output + output_size, values_output + output_size);
 } // end unique_by_key_copy()
 } // namespace system::detail::generic
 THRUST_NAMESPACE_END

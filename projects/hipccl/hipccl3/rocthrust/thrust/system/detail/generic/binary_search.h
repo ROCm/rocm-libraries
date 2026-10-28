@@ -140,14 +140,14 @@ THRUST_HOST_DEVICE OutputIterator binary_search(
   StrictWeakOrdering comp);
 
 template <typename DerivedPolicy, typename ForwardIterator, typename LessThanComparable>
-THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> equal_range(
+THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator, ForwardIterator> equal_range(
   thrust::execution_policy<DerivedPolicy>& exec,
   ForwardIterator first,
   ForwardIterator last,
   const LessThanComparable& value);
 
 template <typename DerivedPolicy, typename ForwardIterator, typename LessThanComparable, typename StrictWeakOrdering>
-THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> equal_range(
+THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator, ForwardIterator> equal_range(
   thrust::execution_policy<DerivedPolicy>& exec,
   ForwardIterator first,
   ForwardIterator last,

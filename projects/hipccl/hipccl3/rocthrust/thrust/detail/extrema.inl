@@ -90,7 +90,7 @@ THRUST_HOST_DEVICE ForwardIterator max_element(
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename ForwardIterator>
-THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> minmax_element(
+THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator, ForwardIterator> minmax_element(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last)
 {
   using thrust::system::detail::generic::minmax_element;
@@ -99,7 +99,7 @@ THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> minmax_element
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename ForwardIterator, typename BinaryPredicate>
-THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> minmax_element(
+THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator, ForwardIterator> minmax_element(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   ForwardIterator first,
   ForwardIterator last,
@@ -158,7 +158,7 @@ ForwardIterator max_element(ForwardIterator first, ForwardIterator last, BinaryP
 } // end max_element()
 
 template <typename ForwardIterator>
-thrust::pair<ForwardIterator, ForwardIterator> minmax_element(ForwardIterator first, ForwardIterator last)
+_THRUST_STD::pair<ForwardIterator, ForwardIterator> minmax_element(ForwardIterator first, ForwardIterator last)
 {
   using thrust::system::detail::generic::select_system;
 
@@ -170,7 +170,7 @@ thrust::pair<ForwardIterator, ForwardIterator> minmax_element(ForwardIterator fi
 } // end minmax_element()
 
 template <typename ForwardIterator, typename BinaryPredicate>
-thrust::pair<ForwardIterator, ForwardIterator>
+_THRUST_STD::pair<ForwardIterator, ForwardIterator>
 minmax_element(ForwardIterator first, ForwardIterator last, BinaryPredicate comp)
 {
   using thrust::system::detail::generic::select_system;

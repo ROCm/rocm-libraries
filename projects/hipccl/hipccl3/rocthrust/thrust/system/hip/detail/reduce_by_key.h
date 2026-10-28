@@ -72,7 +72,7 @@ template <typename DerivedPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename BinaryPredicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   InputIterator1 keys_first,
   InputIterator1 keys_last,
@@ -170,7 +170,7 @@ template <typename Derived,
           typename ValuesOutputIt,
           typename EqualityOp,
           typename ReductionOp>
-THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ValuesOutputIt> reduce_by_key(
+THRUST_HIP_RUNTIME_FUNCTION _THRUST_STD::pair<KeysOutputIt, ValuesOutputIt> reduce_by_key(
   execution_policy<Derived>& policy,
   KeysInputIt keys_first,
   KeysInputIt keys_last,
@@ -191,7 +191,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ValuesOutputIt> reduce_by_key(
 
   if (num_items == 0)
   {
-    return thrust::make_pair(keys_output, values_output);
+    return _THRUST_STD::make_pair(keys_output, values_output);
   }
 
   hip_rocprim::throw_on_error(
@@ -248,7 +248,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ValuesOutputIt> reduce_by_key(
 
   const auto num_runs_out = hip_rocprim::get_value(policy, d_num_runs_out);
 
-  return thrust::make_pair(keys_output + num_runs_out, values_output + num_runs_out);
+  return _THRUST_STD::make_pair(keys_output + num_runs_out, values_output + num_runs_out);
 }
 
 } // namespace __reduce_by_key
@@ -265,7 +265,7 @@ template <class Derived,
           class ValOutputIt,
           class BinaryPred,
           class BinaryOp>
-pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
+_THRUST_STD::pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
   execution_policy<Derived>& policy,
   KeyInputIt keys_first,
   KeyInputIt keys_last,
@@ -278,7 +278,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
   // struct workaround is required for HIP-clang
   struct workaround
   {
-    THRUST_HOST static pair<KeyOutputIt, ValOutputIt>
+    THRUST_HOST static _THRUST_STD::pair<KeyOutputIt, ValOutputIt>
     par(execution_policy<Derived>& policy,
         KeyInputIt keys_first,
         KeyInputIt keys_last,
@@ -293,7 +293,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
     }
 
 #  if defined(__HIP_DEVICE_COMPILE__)
-    THRUST_DEVICE static pair<KeyOutputIt, ValOutputIt>
+    THRUST_DEVICE static _THRUST_STD::pair<KeyOutputIt, ValOutputIt>
     seq(execution_policy<Derived>& policy,
         KeyInputIt keys_first,
         KeyInputIt keys_last,
@@ -325,7 +325,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class KeyOutputIt, class ValOutputIt, class BinaryPred>
-pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
+_THRUST_STD::pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
   execution_policy<Derived>& policy,
   KeyInputIt keys_first,
   KeyInputIt keys_last,
@@ -342,7 +342,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class KeyOutputIt, class ValOutputIt>
-pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
+_THRUST_STD::pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
   execution_policy<Derived>& policy,
   KeyInputIt keys_first,
   KeyInputIt keys_last,

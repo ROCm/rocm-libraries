@@ -31,7 +31,7 @@ template <typename DerivedPolicy,
           typename OutputIterator2,
           typename BinaryPredicate,
           typename BinaryFunction>
-thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   execution_policy<DerivedPolicy>& exec,
   InputIterator1 keys_first,
   InputIterator1 keys_last,
