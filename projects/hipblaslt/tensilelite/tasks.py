@@ -312,6 +312,7 @@ def _maybe_rebuild_rocisa(c, rocisa_dir=None):
         "enable_asan": "Enable AddressSanitizer.",
         "enable_tsan": "Enable ThreadSanitizer.",
         "enable_sdma": "Build the GPU-initiated SDMA transport path; needs hsakmt and hsa-runtime64.",
+        "enable_jit_python": "Build the tensilelite_jit and tensilelite_codegen nanobind Python modules.",
     }
 )
 def build_client(
@@ -332,13 +333,17 @@ def build_client(
     enable_asan=False,
     enable_tsan=False,
     enable_sdma=False,
+    enable_jit_python=False,
 ):
     """Build the tensilelite-client C++ executable.
 
     To run Tensile after building, use: tensilelite/bin/Tensile <args>
     CMake builds rocisa in the client build directory. When rocisa is
     installed editable, the bindings are refreshed to pick up C++ edits
-    (disable with --no-rebuild-rocisa).
+    (disable with --no-rebuild-rocisa). With --enable-jit-python, the
+    tensilelite_jit and tensilelite_codegen Python modules are built under
+    <build_dir>/src/tensilelite/bindings; add that directory to PYTHONPATH
+    to import them.
     """
 
     if enable_asan and enable_tsan:
@@ -407,6 +412,8 @@ def build_client(
             cmake_cmd.append("-DTENSILELITE_ENABLE_HOST_TSAN=ON")
         if enable_sdma:
             cmake_cmd.append("-DTENSILELITE_ENABLE_SDMA=ON")
+        if enable_jit_python:
+            cmake_cmd.append("-DTENSILELITE_ENABLE_JIT_PYTHON=ON")
         c.run(shlex.join(cmake_cmd))
 
     if build:
