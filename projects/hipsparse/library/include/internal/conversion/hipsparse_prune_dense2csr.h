@@ -171,9 +171,11 @@ hipsparseStatus_t hipsparseDpruneDense2csr_bufferSize(hipsparseHandle_t         
                                                       const int*                csrColInd,
                                                       size_t*                   pBufferSizeInBytes);
 
+/**@}*/
+
 /*! \ingroup conv_module
 *  \brief
-*  \p hipsparseXpruneDense2csr_bufferSize computes the the size of the user-allocated temporary storage buffer
+*  \p hipsparseXpruneDense2csr_bufferSizeExt computes the the size of the user-allocated temporary storage buffer
 *  used when converting a dense matrix to a pruned CSR matrix.
 *
 *  \details
@@ -184,7 +186,7 @@ hipsparseStatus_t hipsparseDpruneDense2csr_bufferSize(hipsparseHandle_t         
 *  \f]
 *
 *  The first step in this conversion is to determine the required user-allocated buffer size
-*  using \p hipsparseXpruneDense2csr_bufferSize() that will be passed to the subsequent steps of the conversion.
+*  using \p hipsparseXpruneDense2csr_bufferSizeExt() that will be passed to the subsequent steps of the conversion.
 *  After the buffer size has been determined, the user must allocate it. This user-allocated buffer is then passed
 *  to \ref hipsparseSpruneDense2csrNnz "hipsparseXpruneDense2csrNnz()" and \ref hipsparseSpruneDense2csr
 *  "hipsparseXpruneDense2csr()" to complete the conversion. The user is responsible for then freeing the buffer after
@@ -228,6 +230,7 @@ hipsparseStatus_t hipsparseDpruneDense2csr_bufferSize(hipsparseHandle_t         
 *          or \p m or \p n is negative.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
+/**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpruneDense2csr_bufferSizeExt(hipsparseHandle_t         handle,
