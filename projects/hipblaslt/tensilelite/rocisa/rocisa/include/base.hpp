@@ -103,13 +103,7 @@ namespace rocisa
                 = {nb::cast<int>(arch[0]), nb::cast<int>(arch[1]), nb::cast<int>(arch[2])};
             if(m_isainfo.find(isaVersion) != m_isainfo.end())
                 return;
-            // Init ISA
-            IsaInfo isainfo;
-            isainfo.asm_caps      = initAsmCaps(isaVersion, assemblerPath, debug);
-            isainfo.arch_caps     = initArchCaps(isaVersion);
-            isainfo.reg_caps      = initRegisterCaps(isaVersion, isainfo.arch_caps);
-            isainfo.asm_bugs      = initAsmBugs(isainfo.asm_caps);
-            m_isainfo[isaVersion] = isainfo;
+            addIsaInfo(isaVersion, initAsmCaps(isaVersion, assemblerPath, debug));
         }
 
         // Same as calling init() for each arch, but probes the assembler
@@ -151,14 +145,7 @@ namespace rocisa
                 if(e)
                     std::rethrow_exception(e);
             for(size_t i = 0; i < isaVersions.size(); ++i)
-            {
-                IsaInfo isainfo;
-                isainfo.asm_caps            = std::move(asmCaps[i]);
-                isainfo.arch_caps           = initArchCaps(isaVersions[i]);
-                isainfo.reg_caps            = initRegisterCaps(isaVersions[i], isainfo.arch_caps);
-                isainfo.asm_bugs            = initAsmBugs(isainfo.asm_caps);
-                m_isainfo[isaVersions[i]] = isainfo;
-            }
+                addIsaInfo(isaVersions[i], std::move(asmCaps[i]));
         }
 
         bool isInit()
@@ -293,6 +280,16 @@ namespace rocisa
 
     private:
         rocIsa() = default;
+
+        void addIsaInfo(const IsaVersion& isaVersion, std::map<std::string, int> asmCaps)
+        {
+            IsaInfo isainfo;
+            isainfo.asm_caps      = std::move(asmCaps);
+            isainfo.arch_caps     = initArchCaps(isaVersion);
+            isainfo.reg_caps      = initRegisterCaps(isaVersion, isainfo.arch_caps);
+            isainfo.asm_bugs      = initAsmBugs(isainfo.asm_caps);
+            m_isainfo[isaVersion] = std::move(isainfo);
+        }
 
         std::mutex                            m_mutex;
         std::map<std::thread::id, KernelInfo> m_threads;
