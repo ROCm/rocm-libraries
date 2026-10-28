@@ -47,7 +47,9 @@ template <typename SrcDatas,
           index_t ScatterDim       = 1,
           bool OutputScatter       = true,
           index_t ScatterWeightIdx = 3,
-          index_t NumThreadScratch = 1>
+          index_t NumThreadScratch = 1,
+          // Also skip the stores outside the padded destination, such as columns past a padded N.
+          bool CheckDstValidity = false>
 struct ThreadwiseTensorSliceTransfer_v7r3_scatter
 {
     static constexpr auto I0 = Number<0>{};
@@ -400,7 +402,13 @@ struct ThreadwiseTensorSliceTransfer_v7r3_scatter
             static_for<0, nDst, 1>{}([&](auto i) {
                 using dst_vector_t      = typename remove_cvref_t<decltype(dst_vectors[i])>::type;
                 IndexType dst_offset    = scatter_offset + (dst_coords_[i].GetOffset());
-                const bool is_dst_valid = dst_offset < dst_descs[i].GetElementSpaceSize();
+                bool is_dst_valid = dst_offset < dst_descs[i].GetElementSpaceSize();
+                if constexpr(CheckDstValidity)
+                {
+                    is_dst_valid = is_dst_valid &&
+                                   coordinate_has_valid_offset_assuming_visible_index_is_valid(
+                                       dst_descs[i], dst_coords_[i]);
+                }
                 constexpr InMemoryDataOperationEnum DstInMemOp =
                     static_cast<InMemoryDataOperationEnum>(DstInMemOps::At(i.value));
                 dst_bufs(i).template Update<DstInMemOp, dst_vector_t>(

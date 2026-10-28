@@ -91,31 +91,22 @@ struct MulABScaleExpertWeight
 
 using CDEElementOp = MulABScaleExpertWeight;
 
+// MOE_KVEC=8 tests weights preshuffled in 8-element K vectors.
+#ifndef MOE_KVEC
+#define MOE_KVEC 16
+#endif
+
 void preShuffleBuffer(const B0DataType* src, B0DataType* dst, int N, int K, int NXdl)
 {
-    int KPack = 16 / sizeof(B0DataType);
+    int KPack = MOE_KVEC / sizeof(B0DataType);
     int NLane = NXdl;
-    int KLane = 64 / NLane;
-
-    int K0 = K / (KLane * KPack);
-    // K -> K0 KLane KPack
-    // N -> N0 NLane
-    // N, K -> N0 K0 KLane NLane KPack
-    int tempk;
+    // N, K -> N0 K0 NLane KPack, which also holds for a K that no KPerBlock divides.
     for(int n = 0; n < N; ++n)
     {
         for(int k = 0; k < K; ++k)
         {
-            int n0 = n / NLane;
-            int n1 = n % NLane;
-
-            int k0 = k / (KLane * KPack);
-            tempk  = k % (KLane * KPack);
-            int k1 = tempk / KPack;
-            int k2 = tempk % KPack;
-
-            int outputIndex = n0 * KPack * NLane * KLane * K0 + k0 * KPack * NLane * KLane +
-                              k1 * KPack * NLane + n1 * KPack + k2;
+            int outputIndex = (n / NLane) * NLane * K + (k / KPack) * NLane * KPack +
+                              (n % NLane) * KPack + k % KPack;
 
             dst[outputIndex] = src[n * K + k];
         }
@@ -127,19 +118,24 @@ using AElementOp   = PassThrough;
 using BElementOp   = PassThrough;
 using CDEElementOp = MulABScaleExpertWeight;
 
-static constexpr auto GemmSpec         = ck::tensor_operation::device::GemmSpecialization::Default;
+// MOE_PADDING tests a K that no KPerBlock divides.
+#ifdef MOE_PADDING
+static constexpr auto GemmSpec = ck::tensor_operation::device::GemmSpecialization::NKPadding;
+#else
+static constexpr auto GemmSpec = ck::tensor_operation::device::GemmSpecialization::Default;
+#endif
 static constexpr ck::index_t MPerBlock = 256;
 static constexpr ck::index_t BLOCKSIZE = 256;
 static constexpr ck::index_t MXDLPerWave = 16;
 static constexpr ck::index_t NXDLPerWave = 4;
 static constexpr ck::index_t NPerBlock   = 256;
 static constexpr ck::index_t MNPerXDL    = 16;
-static constexpr ck::index_t KPerBlock   = 128 / sizeof(A0DataType);
+static constexpr ck::index_t KPerBlock   = (MOE_KVEC == 8 ? 64 : 128) / sizeof(A0DataType);
 
 static constexpr ck::index_t CShuffleNLane = 32;
 static constexpr ck::index_t CShuffleMLane = BLOCKSIZE / CShuffleNLane;
-static constexpr ck::index_t AK1           = 16 / sizeof(A0DataType);
-static constexpr ck::index_t BK1           = 16 / sizeof(B0DataType);
+static constexpr ck::index_t AK1           = MOE_KVEC / sizeof(A0DataType);
+static constexpr ck::index_t BK1           = MOE_KVEC / sizeof(B0DataType);
 static constexpr ck::index_t EVec          = 2;
 static constexpr ck::index_t D0Vec         = 1;
 static constexpr ck::index_t D1Vec         = 1;
