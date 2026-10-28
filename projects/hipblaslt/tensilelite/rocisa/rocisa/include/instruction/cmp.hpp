@@ -755,6 +755,29 @@ namespace rocisa
         }
     };
 
+    struct VCmpEQU64 : public VCmpInstruction
+    {
+        VCmpEQU64(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  std::optional<SDWAModifiers>      sdwa    = std::nullopt,
+                  const std::string&                comment = "")
+            : VCmpInstruction(InstType::INST_U64, dst, src0, src1, sdwa, comment)
+        {
+            setInst("v_cmp_eq_u64");
+        }
+
+        VCmpEQU64(const VCmpEQU64& other)
+            : VCmpInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VCmpEQU64>(*this);
+        }
+    };
+
     struct VCmpEQI32 : public VCmpInstruction
     {
         VCmpEQI32(const std::shared_ptr<Container>& dst,
@@ -939,6 +962,29 @@ namespace rocisa
         }
     };
 
+    struct VCmpGEI64 : public VCmpInstruction
+    {
+        VCmpGEI64(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  std::optional<SDWAModifiers>      sdwa    = std::nullopt,
+                  const std::string&                comment = "")
+            : VCmpInstruction(InstType::INST_U64, dst, src0, src1, sdwa, comment)
+        {
+            setInst("v_cmp_ge_i64");
+        }
+
+        VCmpGEI64(const VCmpGEI64& other)
+            : VCmpInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VCmpGEI64>(*this);
+        }
+    };
+
     struct VCmpGTI32 : public VCmpInstruction
     {
         VCmpGTI32(const std::shared_ptr<Container>& dst,
@@ -959,6 +1005,29 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VCmpGTI32>(*this);
+        }
+    };
+
+    struct VCmpGTI64 : public VCmpInstruction
+    {
+        VCmpGTI64(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  std::optional<SDWAModifiers>      sdwa    = std::nullopt,
+                  const std::string&                comment = "")
+            : VCmpInstruction(InstType::INST_U64, dst, src0, src1, sdwa, comment)
+        {
+            setInst("v_cmp_gt_i64");
+        }
+
+        VCmpGTI64(const VCmpGTI64& other)
+            : VCmpInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VCmpGTI64>(*this);
         }
     };
 
@@ -985,6 +1054,29 @@ namespace rocisa
         }
     };
 
+    struct VCmpGEU64 : public VCmpInstruction
+    {
+        VCmpGEU64(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  std::optional<SDWAModifiers>      sdwa    = std::nullopt,
+                  const std::string&                comment = "")
+            : VCmpInstruction(InstType::INST_U64, dst, src0, src1, sdwa, comment)
+        {
+            setInst("v_cmp_ge_u64");
+        }
+
+        VCmpGEU64(const VCmpGEU64& other)
+            : VCmpInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VCmpGEU64>(*this);
+        }
+    };
+
     struct VCmpGtU32 : public VCmpInstruction
     {
         VCmpGtU32(const std::shared_ptr<Container>& dst,
@@ -1005,6 +1097,29 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VCmpGtU32>(*this);
+        }
+    };
+
+    struct VCmpGtU64 : public VCmpInstruction
+    {
+        VCmpGtU64(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  std::optional<SDWAModifiers>      sdwa    = std::nullopt,
+                  const std::string&                comment = "")
+            : VCmpInstruction(InstType::INST_U64, dst, src0, src1, sdwa, comment)
+        {
+            setInst("v_cmp_gt_u64");
+        }
+
+        VCmpGtU64(const VCmpGtU64& other)
+            : VCmpInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VCmpGtU64>(*this);
         }
     };
 
@@ -1031,6 +1146,29 @@ namespace rocisa
         }
     };
 
+    struct VCmpLeU64 : public VCmpInstruction
+    {
+        VCmpLeU64(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  std::optional<SDWAModifiers>      sdwa    = std::nullopt,
+                  const std::string&                comment = "")
+            : VCmpInstruction(InstType::INST_U64, dst, src0, src1, sdwa, comment)
+        {
+            setInst("v_cmp_le_u64");
+        }
+
+        VCmpLeU64(const VCmpLeU64& other)
+            : VCmpInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VCmpLeU64>(*this);
+        }
+    };
+
     struct VCmpLeI32 : public VCmpInstruction
     {
         VCmpLeI32(const std::shared_ptr<Container>& dst,
@@ -1051,6 +1189,29 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VCmpLeI32>(*this);
+        }
+    };
+
+    struct VCmpLeI64 : public VCmpInstruction
+    {
+        VCmpLeI64(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  std::optional<SDWAModifiers>      sdwa    = std::nullopt,
+                  const std::string&                comment = "")
+            : VCmpInstruction(InstType::INST_U64, dst, src0, src1, sdwa, comment)
+        {
+            setInst("v_cmp_le_i64");
+        }
+
+        VCmpLeI64(const VCmpLeI64& other)
+            : VCmpInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VCmpLeI64>(*this);
         }
     };
 
@@ -1077,6 +1238,29 @@ namespace rocisa
         }
     };
 
+    struct VCmpLtI64 : public VCmpInstruction
+    {
+        VCmpLtI64(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  std::optional<SDWAModifiers>      sdwa    = std::nullopt,
+                  const std::string&                comment = "")
+            : VCmpInstruction(InstType::INST_U64, dst, src0, src1, sdwa, comment)
+        {
+            setInst("v_cmp_lt_i64");
+        }
+
+        VCmpLtI64(const VCmpLtI64& other)
+            : VCmpInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VCmpLtI64>(*this);
+        }
+    };
+
     struct VCmpLtU32 : public VCmpInstruction
     {
         VCmpLtU32(const std::shared_ptr<Container>& dst,
@@ -1097,6 +1281,29 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VCmpLtU32>(*this);
+        }
+    };
+
+    struct VCmpLtU64 : public VCmpInstruction
+    {
+        VCmpLtU64(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  std::optional<SDWAModifiers>      sdwa    = std::nullopt,
+                  const std::string&                comment = "")
+            : VCmpInstruction(InstType::INST_U64, dst, src0, src1, sdwa, comment)
+        {
+            setInst("v_cmp_lt_u64");
+        }
+
+        VCmpLtU64(const VCmpLtU64& other)
+            : VCmpInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VCmpLtU64>(*this);
         }
     };
 

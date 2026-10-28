@@ -277,6 +277,20 @@ void cmp_inst(nb::module_ m_cmp)
         .def("__deepcopy__",
              [](const rocisa::VCmpEQU32& self, nb::dict&) { return new rocisa::VCmpEQU32(self); });
 
+    nb::class_<rocisa::VCmpEQU64, rocisa::VCmpInstruction>(m_cmp, "VCmpEQU64")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SDWAModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("sdwa")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VCmpEQU64& self, nb::dict&) { return new rocisa::VCmpEQU64(self); });
+
     nb::class_<rocisa::VCmpEQI32, rocisa::VCmpInstruction>(m_cmp, "VCmpEQI32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
@@ -389,6 +403,20 @@ void cmp_inst(nb::module_ m_cmp)
         .def("__deepcopy__",
              [](const rocisa::VCmpGEI32& self, nb::dict&) { return new rocisa::VCmpGEI32(self); });
 
+    nb::class_<rocisa::VCmpGEI64, rocisa::VCmpInstruction>(m_cmp, "VCmpGEI64")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SDWAModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("sdwa")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VCmpGEI64& self, nb::dict&) { return new rocisa::VCmpGEI64(self); });
+
     nb::class_<rocisa::VCmpGTI32, rocisa::VCmpInstruction>(m_cmp, "VCmpGTI32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
@@ -402,6 +430,20 @@ void cmp_inst(nb::module_ m_cmp)
              nb::arg("comment") = "")
         .def("__deepcopy__",
              [](const rocisa::VCmpGTI32& self, nb::dict&) { return new rocisa::VCmpGTI32(self); });
+
+    nb::class_<rocisa::VCmpGTI64, rocisa::VCmpInstruction>(m_cmp, "VCmpGTI64")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SDWAModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("sdwa")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VCmpGTI64& self, nb::dict&) { return new rocisa::VCmpGTI64(self); });
 
     nb::class_<rocisa::VCmpGEU32, rocisa::VCmpInstruction>(m_cmp, "VCmpGEU32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
@@ -417,6 +459,20 @@ void cmp_inst(nb::module_ m_cmp)
         .def("__deepcopy__",
              [](const rocisa::VCmpGEU32& self, nb::dict&) { return new rocisa::VCmpGEU32(self); });
 
+    nb::class_<rocisa::VCmpGEU64, rocisa::VCmpInstruction>(m_cmp, "VCmpGEU64")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SDWAModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("sdwa")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VCmpGEU64& self, nb::dict&) { return new rocisa::VCmpGEU64(self); });
+
     nb::class_<rocisa::VCmpGtU32, rocisa::VCmpInstruction>(m_cmp, "VCmpGtU32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
@@ -430,6 +486,20 @@ void cmp_inst(nb::module_ m_cmp)
              nb::arg("comment") = "")
         .def("__deepcopy__",
              [](const rocisa::VCmpGtU32& self, nb::dict&) { return new rocisa::VCmpGtU32(self); });
+
+    nb::class_<rocisa::VCmpGtU64, rocisa::VCmpInstruction>(m_cmp, "VCmpGtU64")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SDWAModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("sdwa")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VCmpGtU64& self, nb::dict&) { return new rocisa::VCmpGtU64(self); });
 
     nb::class_<rocisa::VCmpLeU32, rocisa::VCmpInstruction>(m_cmp, "VCmpLeU32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
@@ -445,6 +515,20 @@ void cmp_inst(nb::module_ m_cmp)
         .def("__deepcopy__",
              [](const rocisa::VCmpLeU32& self, nb::dict&) { return new rocisa::VCmpLeU32(self); });
 
+    nb::class_<rocisa::VCmpLeU64, rocisa::VCmpInstruction>(m_cmp, "VCmpLeU64")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SDWAModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("sdwa")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VCmpLeU64& self, nb::dict&) { return new rocisa::VCmpLeU64(self); });
+
     nb::class_<rocisa::VCmpLeI32, rocisa::VCmpInstruction>(m_cmp, "VCmpLeI32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
@@ -458,6 +542,20 @@ void cmp_inst(nb::module_ m_cmp)
              nb::arg("comment") = "")
         .def("__deepcopy__",
              [](const rocisa::VCmpLeI32& self, nb::dict&) { return new rocisa::VCmpLeI32(self); });
+
+    nb::class_<rocisa::VCmpLeI64, rocisa::VCmpInstruction>(m_cmp, "VCmpLeI64")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SDWAModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("sdwa")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VCmpLeI64& self, nb::dict&) { return new rocisa::VCmpLeI64(self); });
 
     nb::class_<rocisa::VCmpLtI32, rocisa::VCmpInstruction>(m_cmp, "VCmpLtI32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
@@ -473,6 +571,20 @@ void cmp_inst(nb::module_ m_cmp)
         .def("__deepcopy__",
              [](const rocisa::VCmpLtI32& self, nb::dict&) { return new rocisa::VCmpLtI32(self); });
 
+    nb::class_<rocisa::VCmpLtI64, rocisa::VCmpInstruction>(m_cmp, "VCmpLtI64")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SDWAModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("sdwa")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VCmpLtI64& self, nb::dict&) { return new rocisa::VCmpLtI64(self); });
+
     nb::class_<rocisa::VCmpLtU32, rocisa::VCmpInstruction>(m_cmp, "VCmpLtU32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
@@ -486,6 +598,20 @@ void cmp_inst(nb::module_ m_cmp)
              nb::arg("comment") = "")
         .def("__deepcopy__",
              [](const rocisa::VCmpLtU32& self, nb::dict&) { return new rocisa::VCmpLtU32(self); });
+
+    nb::class_<rocisa::VCmpLtU64, rocisa::VCmpInstruction>(m_cmp, "VCmpLtU64")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SDWAModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("sdwa")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VCmpLtU64& self, nb::dict&) { return new rocisa::VCmpLtU64(self); });
 
     nb::class_<rocisa::VCmpUF32, rocisa::VCmpInstruction>(m_cmp, "VCmpUF32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
