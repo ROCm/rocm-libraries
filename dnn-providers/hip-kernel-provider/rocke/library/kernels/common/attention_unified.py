@@ -582,6 +582,12 @@ def _reject_lse(
     return None
 
 
+_GFX942_4WARP_LSE_REFUSAL = (
+    "LSE output is not implemented on the gfx942 4-warp GQA builder (finite "
+    "-1e30 max sentinel, no l == 0 guard, fixed 17-argument ABI)"
+)
+
+
 def supports_native_unified_attention(
     problem: UnifiedAttentionProblem,
     arch: str,
@@ -6161,9 +6167,9 @@ def run_unified_attention_torch(
         # Explicit specs are initially selected before framework tensors exist.
         # Refresh address-width state and tuning identity from the real cache.
         tuning_spec = tuning_spec.with_num_kv_blocks(int(k.shape[0]))
-        # A path that cannot write LSE (a 2D spec, or a split-KV reduce without
-        # the output, e.g. gfx1250) is refused as NotImplementedError, the same
-        # error as the backend refusals below.
+        # A path that cannot write LSE (gfx1250, sinks, the gfx942 4-warp GQA
+        # builder) is refused as NotImplementedError, the same error as the
+        # backend refusals below.
         if problem.emit_lse:
             rejected = _reject_lse(
                 problem,
@@ -6172,14 +6178,19 @@ def run_unified_attention_torch(
             )
             if rejected is not None:
                 raise NotImplementedError(rejected[1])
-        # Otherwise the explicit spec owns the reduce kernel, so it must agree
-        # with the problem on the LSE output: a mismatch would either drop the
-        # output or launch a kernel whose argument list differs from the
-        # signature. A reduce spec without the field cannot emit LSE.
-        reduce_lse = tuning_spec.path == "3d" and bool(
-            getattr(tuning_spec.reduce_spec, "emit_lse", False)
+            if getattr(tuning_spec, "builder_kind", None) == "gfx942_4warp_gqa":
+                raise NotImplementedError(_GFX942_4WARP_LSE_REFUSAL)
+        # Otherwise the explicit spec owns the kernel that writes LSE (the 3D
+        # reduce, or the 2D kernel itself), so it must agree with the problem:
+        # a mismatch would either drop the output or launch a kernel whose
+        # argument list differs from the signature. A spec without the field
+        # cannot emit LSE.
+        lse_owner = (
+            tuning_spec.reduce_spec
+            if tuning_spec.path == "3d"
+            else tuning_spec.kernel_spec
         )
-        if reduce_lse != problem.emit_lse:
+        if bool(getattr(lse_owner, "emit_lse", False)) != problem.emit_lse:
             raise ValueError("tuning_spec LSE output disagrees with problem.emit_lse")
 
     # Auto path selection. Historically we *always* preferred 3D when
@@ -6206,6 +6217,7 @@ def run_unified_attention_torch(
     # wins on the parity harness (those shapes still satisfy the "3D
     # is fine" branch of ``use_2d_kernel``).
     prefer_2d = backend == "auto" and problem.select_path() == "2d"
+    reason_3d = None  # split-KV verdict, named by the auto LSE refusal below
     if backend == "3d" or (backend == "auto" and not prefer_2d):
         ok_3d, reason_3d = _explicit_path_supported(
             problem, tuning_spec, "3d", _launch_arch
@@ -6244,37 +6256,6 @@ def run_unified_attention_torch(
         if backend == "3d":
             raise NotImplementedError(reason_3d)
 
-    if problem.emit_lse:
-        # Every remaining path (2D graph replay, tiled 2D, scalar) writes no LSE.
-        # Refuse here, BEFORE the 2D graph fast path: _run_2d_graphed replays a
-        # cache hit before any support gate, and _cheap_2d_sig does not encode
-        # emit_lse, so an LSE-off graph captured on the same buffers would
-        # otherwise serve this request and leave lse unwritten. In order: a
-        # split-KV LSE reason (sinks, arch); for ``auto``, the split-KV gate's
-        # verdict (name the backend='3d' way out only when that gate admits the
-        # problem); otherwise the explicitly requested 2D path.
-        rejected = _reject_lse(problem, _launch_arch, "3d")
-        if rejected is not None:
-            raise NotImplementedError(rejected[1])
-        if backend == "auto":
-            if prefer_2d:
-                ok_3d, reason_3d = _explicit_path_supported(
-                    problem, tuning_spec, "3d", _launch_arch
-                )
-                if ok_3d:
-                    raise NotImplementedError(
-                        "LSE output is not implemented on the tiled 2D attention "
-                        "path, which backend='auto' chose for this shape; the "
-                        "split-KV path can serve it: pass backend='3d' or pin a "
-                        "'*_u3d_*' tuning spec (it can be slower for this shape)"
-                    )
-            raise NotImplementedError(
-                "LSE output needs the split-KV attention path, which declined "
-                f"this problem: {reason_3d}"
-            )
-        _, why = _reject_lse(problem, _launch_arch, "tiled 2D")
-        raise NotImplementedError(why)
-
     if backend in ("tiled", "auto"):
         # Graphed fast path FIRST: for the short-context regime the launch is
         # auto-graphed (heuristic: _recommend_graph_replay). The graph is looked
@@ -6282,8 +6263,12 @@ def run_unified_attention_torch(
         # a replay skips supports + cache_key + the kernarg pack -- the host
         # overhead that otherwise dominates tiny-shape latency. Skipped when the
         # caller is already capturing the forward (they take precedence).
+        # Never for LSE: _run_2d_graphed replays a cache hit before any gate,
+        # and _cheap_2d_sig / the graph key / its refs carry no LSE, so an
+        # LSE-off graph on the same buffers would serve the request unwritten.
         if (
             tuning_spec is None
+            and not problem.emit_lse
             and _enable_2d_graph_replay(problem, _launch_arch)
             and not _torch_stream_capturing()
         ):
@@ -6363,6 +6348,7 @@ def run_unified_attention_torch(
                 v_scale=v_scale,
                 out_scale=out_scale,
                 kv_addr_limit=meta.kv_addr_limit,
+                lse=lse,
             )
             return launcher(
                 vals,
@@ -6374,6 +6360,17 @@ def run_unified_attention_torch(
             )
         if backend == "tiled":
             raise NotImplementedError(reason_t)
+
+    if problem.emit_lse and backend == "auto":
+        # Only split-KV and tiled 2D write LSE; the scalar fallback below does
+        # not (its gate refuses LSE), so name why each LSE path declined.
+        declined = f"tiled 2D: {reason_t}"
+        if reason_3d is not None:
+            declined = f"split-KV: {reason_3d}; {declined}"
+        raise NotImplementedError(
+            "LSE output needs the split-KV or tiled 2D attention path, which "
+            f"declined this problem ({declined})"
+        )
 
     # Scalar fallback. Uses the same KernelLauncher infrastructure as
     # the tiled paths so module load + arg lifetime + stream resolution
