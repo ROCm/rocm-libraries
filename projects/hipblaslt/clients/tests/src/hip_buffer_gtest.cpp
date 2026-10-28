@@ -165,6 +165,26 @@ TEST(HipBuffer, smoke_TransfersAndBroadcastsNormally)
     }
 }
 
+TEST(HipBuffer, smoke_TransfersPreserveTruncatedBlockOffsets)
+{
+    constexpr std::array<uint8_t, 11> expected{11, 22, 33, 11, 22, 33, 0xa5, 11, 22, 33, 0xa5};
+    for(bool hmm : {false, true})
+    {
+        SCOPED_TRACE(hmm);
+        HipHostBuffer input(HIP_R_8U, expected.size());
+        std::fill_n(input.as<uint8_t>(), expected.size(), 0xa5);
+        std::copy_n(expected.begin(), 3, input.as<uint8_t>());
+        HipDeviceBuffer device(HIP_R_8U, expected.size(), hmm);
+        ASSERT_EQ(device.memcheck(), hipSuccess);
+        ASSERT_EQ(synchronize(device, input), hipSuccess);
+        ASSERT_EQ(synchronize(device, input, 3), hipSuccess);
+        HipHostBuffer observed(HIP_R_8U, expected.size());
+        ASSERT_EQ(synchronize(observed, device), hipSuccess);
+        for(std::size_t i = 0; i < expected.size(); ++i)
+            EXPECT_EQ(observed.as<uint8_t>()[i], expected[i]) << "mismatch at byte " << i;
+    }
+}
+
 TEST(HipBuffer, smoke_TransfersValidSwizzleGeometry)
 {
     constexpr std::size_t             row = 2;
