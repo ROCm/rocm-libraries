@@ -4,6 +4,7 @@
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HKP_TEST_GFX950_CONV_DGRAD_AOT)
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -51,9 +52,11 @@
 //
 // The engine ships a curated list of rocKE dgrad sweep kernels
 // (IngestorGenerator/configs/gfx950_conv_dgrad_aot.labels.txt): per dtype implicit-GEMM
-// instances, direct depthwise instances and grouped MFMA instances (kernel_family 1), plus
-// the MFMA helper kernels the engine never offers as candidates. Each kernel is built
-// once against rocKE's probe problem and matched to a graph by capability.
+// instances (tilde, dY-halo, tap-outer K and patch forms) and every direct dgrad pipeline
+// (kernel_family 1: streaming and windowed depthwise, fused, 4c, and the MFMA pipelines with
+// baked and runtime channels), plus the MFMA helper kernels the engine never offers as
+// candidates. Each kernel is built once against rocKE's probe problem and matched to a
+// graph by its launch plan.
 //
 // The UED knobs make every per-graph candidate tuple unique, so pinning all of a kernel's
 // knobs selects exactly that kernel. The catalog suite pins every selectable instance of a
@@ -81,9 +84,29 @@ constexpr const char* DIRECT_VARIANT_KNOB = "direct_variant";
 constexpr int64_t IMPLICIT_GEMM_FAMILY = 0;
 constexpr int64_t DIRECT_FAMILY = 1;
 constexpr int64_t HELPER_FAMILY = 2;
-constexpr const char* DEPTHWISE_VARIANT = "depthwise_dgrad";
-constexpr const char* MFMA_VARIANT = "grouped_dgrad_mfma";
+/// Every direct_variant a selectable kernel carries, "none" being implicit GEMM; the order
+/// of DgradGraph's counts.
+constexpr std::array<const char*, 7> VARIANTS{"none",
+                                              "depthwise_dgrad",
+                                              "depthwise_dgrad_win",
+                                              "grouped_dgrad_fused",
+                                              "grouped_dgrad_4c",
+                                              "grouped_dgrad_mfma",
+                                              "dgrad_mfma_rtc"};
+/// The single-kernel direct pipelines, which the fallback score ranks first.
+constexpr std::array<const char*, 4> SINGLE_KERNEL_VARIANTS{
+    "depthwise_dgrad", "depthwise_dgrad_win", "grouped_dgrad_fused", "grouped_dgrad_4c"};
+/// The MFMA pipelines, which launch weight transforms before their compute pass.
+constexpr std::array<const char*, 2> MFMA_VARIANTS{"grouped_dgrad_mfma", "dgrad_mfma_rtc"};
 constexpr size_t BENCHMARK_LIMIT = 64;
+
+template <size_t Count>
+bool among(const std::array<const char*, Count>& names, const std::string& name)
+{
+    return std::find_if(
+               names.begin(), names.end(), [&](const char* entry) { return name == entry; })
+           != names.end();
+}
 
 /// Whether a plan build failed because no candidate carries the requested knob values: the
 /// frontend checks each value against the values the engine advertises for the graph, and
@@ -141,76 +164,114 @@ struct DgradProblem
     }
 };
 
-/// One graph and how many catalog instances of each family serve it, as
-/// gfx950_conv_dgrad_aot_serves in rocke/library/builders/common/convolution_backward_data.py
-/// counts them over gfx950_conv_dgrad_aot_{fp16,bf16}.instances.json (the same in both
-/// dtypes). The native kernel matcher is checked against these counts.
+/// One graph and how many catalog instances of each direct_variant (VARIANTS order) serve
+/// it in each dtype, as gfx950_conv_dgrad_aot_plan in
+/// rocke/library/builders/common/convolution_backward_data.py counts them over
+/// gfx950_conv_dgrad_aot_{fp16,bf16}.instances.json. The native kernel matcher is checked
+/// against these counts.
 struct DgradGraph
 {
     std::string name;
     DgradProblem problem;
-    size_t implicitGemm;
-    size_t depthwise;
-    size_t mfma;
+    std::array<size_t, VARIANTS.size()> fp16;
+    std::array<size_t, VARIANTS.size()> bf16;
     /// The graph has an MFMA tuple whose every catalog row uses the reorganize helper
     /// (waves_k > 1) at groups > 1, which the engine must refuse: rocKE's reorganize
     /// kernel mis-addresses every group but the first.
     bool refusesCoalescedMfma = false;
 
-    size_t total() const
+    const std::array<size_t, VARIANTS.size()>& counts(DataType dtype) const
     {
-        return implicitGemm + depthwise + mfma;
+        return dtype == DataType::HALF ? fp16 : bf16;
+    }
+    size_t count(DataType dtype, const std::string& variant) const
+    {
+        for(size_t i = 0; i < VARIANTS.size(); ++i)
+        {
+            if(variant == VARIANTS[i])
+            {
+                return counts(dtype)[i];
+            }
+        }
+        return 0;
+    }
+    template <size_t Count>
+    size_t count(DataType dtype, const std::array<const char*, Count>& variants) const
+    {
+        size_t total = 0;
+        for(const auto* variant : variants)
+        {
+            total += count(dtype, variant);
+        }
+        return total;
+    }
+    size_t total(DataType dtype) const
+    {
+        return count(dtype, VARIANTS);
     }
 };
 
 // N is 2 wherever the kernel's grid allows it, so a write past the last dX row of an image
-// lands in the next one and fails. Odd spatial sizes leave partial tiles.
+// lands in the next one and fails. Odd spatial sizes leave partial tiles. Together the
+// graphs reach every selectable instance of the catalog.
 // clang-format off
 const std::vector<DgradGraph>& dgradGraphs()
 {
     static const std::vector<DgradGraph> s_graphs{
-        // Implicit GEMM: unit stride (one sub-GEMM), strides 2, 3x2 and 8 (several tilde
-        // sub-GEMMs and the dX zero-fill), dilation, a 1x1 strided filter whose sub-GEMMs
-        // leave dX holes, a nonsquare filter, grouped and strided grouped.
-        {"Dense", {1, 32, 32, 10, 9, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 235, 0, 0},
-        {"Strided", {2, 32, 48, 15, 13, 3, 3, 2, 2, 1, 1, 1, 1, 1}, 235, 0, 0},
-        {"Stride3x2Dilation2x1", {1, 16, 24, 17, 13, 3, 3, 3, 2, 2, 1, 2, 1, 1}, 235, 0, 0},
-        {"PatchEmbedStride8", {2, 16, 32, 24, 16, 8, 8, 8, 8, 0, 0, 1, 1, 1}, 235, 0, 0},
-        {"PointwiseStride2", {2, 32, 64, 14, 13, 1, 1, 2, 2, 0, 0, 1, 1, 1}, 235, 0, 0},
-        {"Dilated2", {2, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2, 1}, 235, 0, 0},
-        {"Stride4Pad3Filter7", {1, 16, 16, 23, 21, 7, 7, 4, 4, 3, 3, 1, 1, 1}, 235, 0, 0},
-        {"NonsquareFilterStride1x2", {2, 24, 40, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1, 1}, 235, 0, 0},
-        {"GroupedG4", {2, 64, 96, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 235, 0, 0},
-        {"GroupedG3Strided", {2, 48, 96, 15, 15, 3, 3, 2, 2, 1, 1, 1, 1, 3}, 235, 0, 0},
-        // Channel counts that admit only narrower vector widths: 3 per group (load and
-        // store width 1), 12 (up to 4), 6 (up to 2, strided), and K/groups of 20 and 5
-        // (A width 4 and 1).
-        {"GroupedG4Cpg3", {2, 12, 32, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 22, 0, 0},
-        {"C12K24", {2, 12, 24, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 29, 0, 0},
-        {"C6K8Strided", {2, 6, 8, 13, 12, 3, 3, 2, 2, 1, 1, 1, 1, 1}, 27, 0, 0},
-        {"C3K16", {2, 3, 16, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 22, 0, 0},
-        {"C16K20", {2, 16, 20, 11, 13, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 10, 0, 0},
-        {"C16K5", {2, 16, 5, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 5, 0, 0},
-        // Depthwise (C = K = groups): every direct capability, 3x3 p1 s1 and s2 and 7x7 p3
-        // s1. Implicit GEMM declines depthwise. 96 and 200 groups leave a partial 64-lane
-        // channel tile; odd and even H under stride 2.
-        {"DepthwiseG96", {2, 96, 96, 14, 15, 3, 3, 1, 1, 1, 1, 1, 1, 96}, 0, 12, 0},
-        {"DepthwiseG200N1", {1, 200, 200, 9, 7, 3, 3, 1, 1, 1, 1, 1, 1, 200}, 0, 12, 0},
-        {"DepthwiseStridedG40OddH", {2, 40, 40, 17, 15, 3, 3, 2, 2, 1, 1, 1, 1, 40}, 0, 10, 0},
-        {"DepthwiseStridedG8EvenH", {2, 8, 8, 16, 18, 3, 3, 2, 2, 1, 1, 1, 1, 8}, 0, 10, 0},
-        {"Depthwise7x7G72", {2, 72, 72, 13, 11, 7, 7, 1, 1, 3, 3, 1, 1, 72}, 0, 8, 0},
-        {"Depthwise7x7G5", {2, 5, 5, 9, 9, 7, 7, 1, 1, 3, 3, 1, 1, 5}, 0, 8, 0},
-        // Grouped MFMA, 3x3 p1 s1, one graph per catalog (C/groups, K/groups) tuple. Eight
-        // groups is a multiple of every block_groups. The c48k192 and c4k320 rows all
-        // reorganize their weights, so they serve only groups == 1.
-        {"MfmaC4K4G8", {2, 32, 32, 13, 17, 3, 3, 1, 1, 1, 1, 1, 1, 8}, 0, 0, 5},
-        {"MfmaC8K8G8", {2, 64, 64, 14, 15, 3, 3, 1, 1, 1, 1, 1, 1, 8}, 235, 0, 5},
-        {"MfmaC16K16G8", {2, 128, 128, 13, 14, 3, 3, 1, 1, 1, 1, 1, 1, 8}, 235, 0, 5},
-        {"MfmaC24K24G8", {2, 192, 192, 14, 13, 3, 3, 1, 1, 1, 1, 1, 1, 8}, 235, 0, 2},
-        {"MfmaC48K192Dense", {2, 48, 192, 13, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 235, 0, 4},
-        {"MfmaC4K320Dense", {1, 4, 320, 14, 13, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 29, 0, 5},
-        {"MfmaC48K192G2Refused", {1, 96, 384, 10, 11, 3, 3, 1, 1, 1, 1, 1, 1, 2}, 235, 0, 0, true},
-        {"MfmaC4K320G2Refused", {1, 8, 640, 10, 11, 3, 3, 1, 1, 1, 1, 1, 1, 2}, 29, 0, 0, true},
+        // Implicit GEMM: unit stride (one sub-GEMM), strides 2, 3x2 and 4 (several tilde
+        // sub-GEMMs), dilation, a 1x1 strided filter whose sub-GEMMs leave dX holes (the
+        // zero-fill), a nonsquare filter, patch embeddings (a folded width, a stride past
+        // the filter), the dY-halo widths, grouped and strided grouped.
+        {"Dense", {1, 32, 32, 10, 9, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {160, 0, 0, 6, 0, 0, 0}, {160, 0, 0, 6, 0, 0, 0}},
+        {"Strided", {2, 32, 48, 15, 13, 3, 3, 2, 2, 1, 1, 1, 1, 1}, {146, 0, 0, 0, 0, 0, 0}, {146, 0, 0, 0, 0, 0, 0}},
+        {"Stride3x2Dilation2x1", {1, 16, 24, 17, 13, 3, 3, 3, 2, 2, 1, 2, 1, 1}, {146, 0, 0, 0, 0, 0, 0}, {146, 0, 0, 0, 0, 0, 0}},
+        {"PatchEmbedStride8", {2, 16, 32, 24, 16, 8, 8, 8, 8, 0, 0, 1, 1, 1}, {155, 0, 0, 0, 0, 0, 0}, {155, 0, 0, 0, 0, 0, 0}},
+        {"PatchEmbedC3Stride4", {2, 3, 64, 32, 32, 4, 4, 4, 4, 0, 0, 1, 1, 1}, {19, 0, 0, 0, 0, 0, 0}, {19, 0, 0, 0, 0, 0, 0}},
+        {"PatchEmbedC3Stride16", {2, 3, 64, 64, 64, 16, 16, 16, 16, 0, 0, 1, 1, 1}, {155, 0, 0, 0, 0, 0, 0}, {155, 0, 0, 0, 0, 0, 0}},
+        {"PatchEmbedGapStride5", {2, 8, 64, 30, 30, 4, 4, 5, 5, 0, 0, 1, 1, 1}, {155, 0, 0, 0, 0, 0, 0}, {155, 0, 0, 0, 0, 0, 0}},
+        {"FoldedStride2", {2, 64, 128, 16, 16, 2, 2, 2, 2, 0, 0, 1, 1, 1}, {155, 0, 0, 0, 0, 0, 0}, {155, 0, 0, 0, 0, 0, 0}},
+        {"PointwiseStride2", {2, 32, 64, 14, 13, 1, 1, 2, 2, 0, 0, 1, 1, 1}, {155, 0, 0, 0, 0, 0, 0}, {155, 0, 0, 0, 0, 0, 0}},
+        {"Dilated2", {2, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2, 1}, {146, 0, 0, 0, 0, 0, 0}, {146, 0, 0, 0, 0, 0, 0}},
+        {"Stride4Pad3Filter7", {1, 16, 16, 23, 21, 7, 7, 4, 4, 3, 3, 1, 1, 1}, {146, 0, 0, 0, 0, 0, 0}, {146, 0, 0, 0, 0, 0, 0}},
+        {"NonsquareFilterStride1x2", {2, 24, 40, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1, 1}, {146, 0, 0, 0, 0, 0, 0}, {146, 0, 0, 0, 0, 0, 0}},
+        {"HaloWo32", {2, 128, 128, 12, 32, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {229, 0, 0, 0, 0, 0, 0}, {229, 0, 0, 0, 0, 0, 0}},
+        {"HaloWo8", {2, 128, 128, 12, 8, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {237, 0, 0, 0, 0, 0, 0}, {237, 0, 0, 0, 0, 0, 0}},
+        {"HaloWo16", {2, 128, 128, 12, 16, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {234, 0, 0, 0, 0, 0, 0}, {234, 0, 0, 0, 0, 0, 0}},
+        {"HaloFilter5Wo48", {1, 128, 128, 10, 48, 5, 5, 1, 1, 2, 2, 1, 1, 1}, {196, 0, 0, 0, 0, 0, 0}, {196, 0, 0, 0, 0, 0, 0}},
+        {"Filter1x7", {2, 128, 128, 9, 17, 1, 7, 1, 1, 0, 3, 1, 1, 1}, {195, 0, 0, 0, 0, 0, 0}, {195, 0, 0, 0, 0, 0, 0}},
+        // Channel counts that admit only narrower vector widths.
+        {"GroupedG4", {2, 64, 96, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1, 4}, {146, 0, 0, 0, 0, 0, 0}, {146, 0, 0, 0, 0, 0, 0}},
+        {"GroupedG3Strided", {2, 48, 96, 15, 15, 3, 3, 2, 2, 1, 1, 1, 1, 3}, {146, 0, 0, 0, 0, 0, 0}, {146, 0, 0, 0, 0, 0, 0}},
+        {"GroupedG4Cpg3", {2, 12, 32, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, {17, 0, 0, 0, 0, 0, 0}, {17, 0, 0, 0, 0, 0, 0}},
+        {"C12K24", {2, 12, 24, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {17, 0, 0, 0, 0, 0, 0}, {17, 0, 0, 0, 0, 0, 0}},
+        {"C6K8Strided", {2, 6, 8, 13, 12, 3, 3, 2, 2, 1, 1, 1, 1, 1}, {17, 0, 0, 0, 0, 0, 0}, {17, 0, 0, 0, 0, 0, 0}},
+        {"C3K16", {2, 3, 16, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {17, 0, 0, 0, 0, 0, 0}, {17, 0, 0, 0, 0, 0, 0}},
+        {"C16K20", {2, 16, 20, 11, 13, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {16, 0, 0, 0, 0, 0, 0}, {16, 0, 0, 0, 0, 0, 0}},
+        {"C16K5", {2, 16, 5, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {9, 0, 0, 0, 0, 0, 0}, {9, 0, 0, 0, 0, 0, 0}},
+        // Depthwise (C = K = groups): the streaming and windowed kernels' filters, strides
+        // and paddings. 96 and 200 groups leave a partial 64-lane channel tile; odd and even
+        // H under stride 2.
+        {"DepthwiseG96", {2, 96, 96, 14, 15, 3, 3, 1, 1, 1, 1, 1, 1, 96}, {0, 2, 19, 0, 0, 0, 0}, {0, 2, 19, 0, 0, 0, 0}},
+        {"DepthwiseG200N1", {1, 200, 200, 9, 7, 3, 3, 1, 1, 1, 1, 1, 1, 200}, {0, 2, 19, 0, 0, 0, 0}, {0, 2, 19, 0, 0, 0, 0}},
+        {"DepthwiseStridedG40OddH", {2, 40, 40, 17, 15, 3, 3, 2, 2, 1, 1, 1, 1, 40}, {0, 7, 0, 0, 0, 0, 0}, {0, 7, 0, 0, 0, 0, 0}},
+        {"DepthwiseStridedG8EvenH", {2, 8, 8, 16, 18, 3, 3, 2, 2, 1, 1, 1, 1, 8}, {0, 7, 0, 0, 0, 0, 0}, {0, 7, 0, 0, 0, 0, 0}},
+        {"Depthwise5x5G64", {3, 64, 64, 13, 11, 5, 5, 1, 1, 2, 2, 1, 1, 64}, {0, 0, 6, 0, 0, 0, 0}, {0, 0, 6, 0, 0, 0, 0}},
+        {"Depthwise5x5StridedG32", {2, 32, 32, 15, 15, 5, 5, 2, 2, 2, 2, 1, 1, 32}, {0, 3, 0, 0, 0, 0, 0}, {0, 3, 0, 0, 0, 0, 0}},
+        {"Depthwise7x7Pad0G64", {2, 64, 64, 16, 16, 7, 7, 1, 1, 0, 0, 1, 1, 64}, {0, 0, 2, 0, 0, 0, 0}, {0, 0, 2, 0, 0, 0, 0}},
+        {"Depthwise7x7G72", {2, 72, 72, 13, 11, 7, 7, 1, 1, 3, 3, 1, 1, 72}, {0, 0, 10, 0, 0, 0, 0}, {0, 0, 10, 0, 0, 0, 0}},
+        // The fused and 4c pipelines, 3x3 p1 s1 at each (C/groups, K/groups) they bake,
+        // with N * ceil(Ho / block_h) at least the eight row bands an xcd_tiles row needs.
+        {"FusedC4G8", {8, 32, 32, 16, 15, 3, 3, 1, 1, 1, 1, 1, 1, 8}, {0, 0, 0, 1, 0, 0, 0}, {0, 0, 0, 1, 0, 0, 0}},
+        {"FusedC8G8", {8, 64, 64, 16, 13, 3, 3, 1, 1, 1, 1, 1, 1, 8}, {146, 0, 0, 3, 0, 0, 0}, {146, 0, 0, 3, 0, 0, 0}},
+        {"FusedC16G4", {8, 64, 64, 14, 16, 3, 3, 1, 1, 1, 1, 1, 1, 4}, {146, 0, 0, 4, 0, 0, 0}, {146, 0, 0, 4, 0, 0, 0}},
+        {"FusedC24Dense", {8, 24, 24, 16, 16, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {146, 0, 0, 4, 0, 0, 0}, {146, 0, 0, 4, 0, 0, 0}},
+        {"FusedC32G2", {8, 64, 64, 13, 16, 3, 3, 1, 1, 1, 1, 1, 1, 2}, {160, 0, 0, 6, 0, 0, 0}, {160, 0, 0, 6, 0, 0, 0}},
+        {"FourCG64", {2, 256, 256, 14, 13, 3, 3, 1, 1, 1, 1, 1, 1, 64}, {0, 0, 0, 0, 2, 0, 0}, {0, 0, 0, 0, 2, 0, 0}},
+        // The MFMA pipelines: the dense c4k320 rows (coalesced weights, so groups == 1
+        // only) and the runtime-channel row.
+        {"MfmaC4K320Dense", {1, 4, 320, 14, 13, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {24, 0, 0, 0, 0, 3, 1}, {24, 0, 0, 0, 0, 3, 1}},
+        {"MfmaRtcC12K320Dense", {1, 12, 320, 14, 13, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {24, 0, 0, 0, 0, 0, 1}, {24, 0, 0, 0, 0, 0, 1}},
+        {"MfmaC4K320G2Refused", {1, 8, 640, 10, 11, 3, 3, 1, 1, 1, 1, 1, 1, 2}, {24, 0, 0, 0, 0, 0, 0}, {24, 0, 0, 0, 0, 0, 0}, true},
     };
     return s_graphs;
 }
@@ -363,30 +424,36 @@ struct CatalogKernel
 
     bool isMfma() const
     {
-        return family == DIRECT_FAMILY && variant == MFMA_VARIANT;
+        return family == DIRECT_FAMILY && among(MFMA_VARIANTS, variant);
     }
-    bool isDepthwise() const
+    bool isSingleKernelDirect() const
     {
-        return family == DIRECT_FAMILY && variant == DEPTHWISE_VARIANT;
+        return family == DIRECT_FAMILY && among(SINGLE_KERNEL_VARIANTS, variant);
     }
     bool usesCoalescedWeights() const
     {
         return isMfma() && (wavesK > 1 || runtimeKLoop != 0);
     }
 
-    /// Whether the kernel's pinned build-time capability (direct kernels only) is the
-    /// graph's. Implicit GEMM pins none, so the engine alone judges it.
+    /// Whether the kernel's pinned build-time capability is the graph's. A direct kernel
+    /// bakes its whole geometry (0 channel counts are runtime); an implicit GEMM kernel at
+    /// most its filter and stride (0 is runtime), and the engine judges the rest. Kernels
+    /// that differ only in baked geometry share every knob, so pinning one on a graph it
+    /// cannot serve would select its sibling.
     bool capabilityAdmits(const DgradProblem& problem) const
     {
         if(family == IMPLICIT_GEMM_FAMILY)
         {
-            return true;
+            const auto admits
+                = [](int64_t baked, int64_t actual) { return baked == 0 || baked == actual; };
+            return admits(filterH, problem.y) && admits(filterW, problem.x)
+                   && admits(strideH, problem.strideH) && admits(strideW, problem.strideW);
         }
         const bool geometry = filterH == problem.y && filterW == problem.x
                               && strideH == problem.strideH && strideW == problem.strideW
                               && padH == problem.padH && padW == problem.padW
                               && problem.dilationH == 1 && problem.dilationW == 1;
-        return geometry && cpg == problem.cpg() && kpg == problem.kpg();
+        return geometry && (cpg == 0 || cpg == problem.cpg()) && (kpg == 0 || kpg == problem.kpg());
     }
 };
 
@@ -831,19 +898,24 @@ class IntegrationGpuGfx950ConvDgradAot : public IntegrationGpuGfx950ConvDgrad
 {
 };
 
-// The whole catalog's count, each family's count through the kernel_family and
-// direct_variant knobs, and the family an unbenchmarked plan prefers when the fallback
-// score decides: depthwise, then MFMA, then implicit GEMM (aotInstanceScore).
+// The whole catalog's count, each family's and each pipeline's count through the
+// kernel_family and direct_variant knobs, and the family an unbenchmarked plan prefers when
+// the fallback score decides: a single-kernel direct pipeline, then an MFMA pipeline, then
+// implicit GEMM (planScore).
 TEST_P(IntegrationGpuGfx950ConvDgradAot, UnbenchmarkedPlanServesFromTheWholeCatalog)
 {
     const auto& variant = GetParam();
     const auto& graphCase = graphOf(variant);
     const auto& catalog = shippedCatalog();
     ASSERT_FALSE(catalog.kernels.empty()) << "the shipped dgrad bundle was not found";
+    const auto total = graphCase.total(variant.dtype);
+    if(total == 0)
+    {
+        GTEST_SKIP() << "no catalog instance serves " << graphCase.name;
+    }
     const ScopedPluginLogCapture capture(this);
     auto& recorder = capture.recorder();
     auto reference = makeReference(variant, graphCase.problem, 53);
-    const auto total = graphCase.total();
 
     auto graph = buildDgradGraph(variant.dtype, graphCase.problem);
     ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {benchmarkingKnob(false)}));
@@ -854,16 +926,17 @@ TEST_P(IntegrationGpuGfx950ConvDgradAot, UnbenchmarkedPlanServesFromTheWholeCata
     ASSERT_NE(selected, nullptr) << recorder.getRecordedLogsAsString();
     EXPECT_EQ(selected->dtype, dtypeToken(variant.dtype));
     EXPECT_NE(selected->family, HELPER_FAMILY);
-    // The family order is the fallback score's (aotInstanceScore); a trained model installed
-    // in the arch root decides by its own ranking, so then only require that the selected
-    // kernel comes from a family that serves this graph.
+    EXPECT_GT(graphCase.count(variant.dtype, selected->variant), 0U) << selected->name;
+    // The family order is the fallback score's (planScore); a trained model installed in the
+    // arch root decides by its own ranking, so then only require that the selected kernel
+    // comes from a pipeline that serves this graph (above).
     if(recorder.hasLogContaining("decided_by=native"))
     {
-        if(graphCase.depthwise > 0)
+        if(graphCase.count(variant.dtype, SINGLE_KERNEL_VARIANTS) > 0)
         {
-            EXPECT_TRUE(selected->isDepthwise()) << selected->name;
+            EXPECT_TRUE(selected->isSingleKernelDirect()) << selected->name;
         }
-        else if(graphCase.mfma > 0)
+        else if(graphCase.count(variant.dtype, MFMA_VARIANTS) > 0)
         {
             EXPECT_TRUE(selected->isMfma()) << selected->name;
         }
@@ -872,37 +945,27 @@ TEST_P(IntegrationGpuGfx950ConvDgradAot, UnbenchmarkedPlanServesFromTheWholeCata
             EXPECT_EQ(selected->family, IMPLICIT_GEMM_FAMILY) << selected->name;
         }
     }
-    else if(selected->isDepthwise())
-    {
-        EXPECT_GT(graphCase.depthwise, 0U) << selected->name;
-    }
-    else if(selected->isMfma())
-    {
-        EXPECT_GT(graphCase.mfma, 0U) << selected->name;
-    }
-    else
-    {
-        EXPECT_EQ(selected->family, IMPLICIT_GEMM_FAMILY) << selected->name;
-        EXPECT_GT(graphCase.implicitGemm, 0U) << selected->name;
-    }
     ASSERT_NO_FATAL_FAILURE(executeAndVerify(*graph, variant.dtype, reference));
     graph.reset();
 
-    const auto depthwiseOrdinal = catalog.ordinal(DIRECT_VARIANT_KNOB, DEPTHWISE_VARIANT);
-    const auto mfmaOrdinal = catalog.ordinal(DIRECT_VARIANT_KNOB, MFMA_VARIANT);
-    ASSERT_TRUE(depthwiseOrdinal && mfmaOrdinal);
-    const std::vector<std::pair<KnobSetting, size_t>> forcedFamilies{
-        {KnobSetting(KERNEL_FAMILY_KNOB, IMPLICIT_GEMM_FAMILY), graphCase.implicitGemm},
-        {KnobSetting(KERNEL_FAMILY_KNOB, DIRECT_FAMILY), graphCase.depthwise + graphCase.mfma},
-        {KnobSetting(DIRECT_VARIANT_KNOB, *depthwiseOrdinal), graphCase.depthwise},
-        {KnobSetting(DIRECT_VARIANT_KNOB, *mfmaOrdinal), graphCase.mfma},
+    const auto implicitGemm = graphCase.count(variant.dtype, "none");
+    std::vector<std::pair<KnobSetting, size_t>> forced{
+        {KnobSetting(KERNEL_FAMILY_KNOB, IMPLICIT_GEMM_FAMILY), implicitGemm},
+        {KnobSetting(KERNEL_FAMILY_KNOB, DIRECT_FAMILY), total - implicitGemm},
         // Helpers are never candidates.
         {KnobSetting(KERNEL_FAMILY_KNOB, HELPER_FAMILY), 0}};
-    for(const auto& [knob, count] : forcedFamilies)
+    for(size_t i = 1; i < VARIANTS.size(); ++i)
+    {
+        const auto ordinal = catalog.ordinal(DIRECT_VARIANT_KNOB, VARIANTS[i]);
+        ASSERT_TRUE(ordinal) << VARIANTS[i];
+        forced.emplace_back(KnobSetting(DIRECT_VARIANT_KNOB, *ordinal),
+                            graphCase.counts(variant.dtype)[i]);
+    }
+    for(const auto& [knob, count] : forced)
     {
         recorder.clearLogs();
-        auto forced = buildDgradGraph(variant.dtype, graphCase.problem);
-        const auto error = tryBuild(*forced, {knob, benchmarkingKnob(false)});
+        auto pinned = buildDgradGraph(variant.dtype, graphCase.problem);
+        const auto error = tryBuild(*pinned, {knob, benchmarkingKnob(false)});
         if(count == 0)
         {
             EXPECT_TRUE(knobsUnsatisfiable(error, recorder)) << knob.knobId() << ": " << error;
@@ -912,7 +975,7 @@ TEST_P(IntegrationGpuGfx950ConvDgradAot, UnbenchmarkedPlanServesFromTheWholeCata
         EXPECT_TRUE(recorder.hasLogContaining("at rank 0 from " + candidateCount(count) + " ("
                                               + std::to_string(total) + " before knob filtering)"))
             << knob.knobId() << ": " << recorder.getRecordedLogsAsString();
-        ASSERT_NO_FATAL_FAILURE(executeAndVerify(*forced, variant.dtype, reference));
+        ASSERT_NO_FATAL_FAILURE(executeAndVerify(*pinned, variant.dtype, reference));
     }
 }
 
@@ -924,8 +987,12 @@ TEST_P(IntegrationGpuGfx950ConvDgradAot, CappedBenchmarkMatchesCpuReference)
     const auto& graphCase = graphOf(variant);
     const ScopedPluginLogCapture capture(this);
     auto& recorder = capture.recorder();
+    const auto total = graphCase.total(variant.dtype);
+    if(total == 0)
+    {
+        GTEST_SKIP() << "no catalog instance serves " << graphCase.name;
+    }
     auto reference = makeReference(variant, graphCase.problem, 71);
-    const auto total = graphCase.total();
     const auto capped = std::min(BENCHMARK_LIMIT, total);
     _candidateLimit.setValue(std::to_string(BENCHMARK_LIMIT));
 
@@ -991,8 +1058,8 @@ TEST_P(IntegrationGpuGfx950ConvDgradAotCatalog, EveryInstanceMatchesCpuReference
         }
         selectable.push_back(&kernel);
     }
-    EXPECT_EQ(selectable.size(), 291U);
-    EXPECT_EQ(helpers, 9U);
+    EXPECT_EQ(selectable.size(), 320U);
+    EXPECT_EQ(helpers, 4U);
 
     const ScopedPluginLogCapture capture(this);
     auto& recorder = capture.recorder();
@@ -1003,9 +1070,7 @@ TEST_P(IntegrationGpuGfx950ConvDgradAotCatalog, EveryInstanceMatchesCpuReference
     {
         SCOPED_TRACE(graphCase.name);
         auto reference = makeReference(variant, graphCase.problem, seed++);
-        size_t implicitGemm = 0;
-        size_t depthwise = 0;
-        size_t mfma = 0;
+        std::map<std::string, size_t> served;
         size_t coalescedAttempted = 0;
         for(const auto* kernel : selectable)
         {
@@ -1017,30 +1082,24 @@ TEST_P(IntegrationGpuGfx950ConvDgradAotCatalog, EveryInstanceMatchesCpuReference
             {
                 ++coalescedAttempted;
             }
-            const auto outcome = pinAndVerify(
-                variant, graphCase.problem, *kernel, reference, recorder, graphCase.total());
+            const auto outcome = pinAndVerify(variant,
+                                              graphCase.problem,
+                                              *kernel,
+                                              reference,
+                                              recorder,
+                                              graphCase.total(variant.dtype));
             if(outcome != PinOutcome::SERVED)
             {
                 continue;
             }
             ++executions;
             covered.insert(kernel->id);
-            if(kernel->family == IMPLICIT_GEMM_FAMILY)
-            {
-                ++implicitGemm;
-            }
-            else if(kernel->isDepthwise())
-            {
-                ++depthwise;
-            }
-            else if(kernel->isMfma())
-            {
-                ++mfma;
-            }
+            ++served[kernel->variant];
         }
-        EXPECT_EQ(implicitGemm, graphCase.implicitGemm);
-        EXPECT_EQ(depthwise, graphCase.depthwise);
-        EXPECT_EQ(mfma, graphCase.mfma);
+        for(const auto* name : VARIANTS)
+        {
+            EXPECT_EQ(served[name], graphCase.count(variant.dtype, name)) << name;
+        }
         if(graphCase.refusesCoalescedMfma)
         {
             EXPECT_GT(coalescedAttempted, 0U) << "no coalesced MFMA row has this tuple";
