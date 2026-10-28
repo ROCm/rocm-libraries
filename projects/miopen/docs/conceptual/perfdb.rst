@@ -106,6 +106,28 @@ instead if they want ``DB_UPDATE`` behavior).
 
 If both the API method and environment variable are used, then the API method takes precedence.
 
+Batchnorm configuration and verification
+----------------------------------------
+
+Batchnorm kernel builds propagate the library's ``MIOPEN_USE_RNE_BFLOAT16``
+configuration as an explicit numeric value. ``ON`` selects round-to-nearest,
+ties-to-even for FP32-to-BF16 conversion; ``OFF`` selects truncation. The value is
+part of the kernel compile options and cache key, keeping device conversion
+consistent with host verification in either configuration.
+
+For NHWC spatial batchnorm with FP16 or BF16 input and FP32 intermediate
+statistics, scratch-storage eligibility depends on the number of channel
+vectors, ``C / vectorsize``, rather than raw ``C``. An odd channel-vector count
+requires enough space in the final batch tile for split intermediate stores.
+Configurations without that space are rejected so that a valid fallback can be
+selected. Backward spatial kernels use the device-reported wavefront width when
+constructing their reduction workgroups.
+
+Spatial CPU backward verification includes ``epsilon`` when recomputing inverse
+standard deviation, both with and without activation. When saved statistics are
+supplied, their inverse standard deviation is used directly without adding epsilon
+again.
+
 Updating MIOpen and User PerfDb
 ==========================================================
 
