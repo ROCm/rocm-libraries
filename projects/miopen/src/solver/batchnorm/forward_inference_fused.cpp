@@ -114,6 +114,7 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext&,
     const auto& activ_op =
         dynamic_cast<ActivFwdFusionOpDescriptor&>(*problem.fusion_plan_desc->op_map[1]);
     const auto build_params = KernelBuildParameters{
+        {"MIOPEN_USE_RNE_BFLOAT16", MIOPEN_USE_RNE_BFLOAT16},
         {"MIO_BN_CHW", static_cast<int>(c * h * w)},
         {"MIO_BN_HW", static_cast<int>(h * w)},
         {"MIO_BN_N", static_cast<int>(n)},

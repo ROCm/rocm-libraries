@@ -303,6 +303,7 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
 
         auto build_params =
             KernelBuildParameters{{"MIOPEN_USE_FP16", static_cast<int>(bfp16parm)},
+                                  {"MIOPEN_USE_RNE_BFLOAT16", MIOPEN_USE_RNE_BFLOAT16},
                                   {"MIOPEN_USE_FP32", static_cast<int>(bfp32parm)},
                                   {"MIOPEN_USE_FPMIX", static_cast<int>(bfpmixparm)},
                                   {"MIOPEN_USE_BFPMIX", static_cast<int>(bbfpmixparam)},
@@ -345,10 +346,6 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
             };
 
             build_params.Define("HIP_ENABLE_EXTRA_WARP_SYNC_TYPES");
-            if(MIOPEN_USE_RNE_BFLOAT16)
-            {
-                build_params.Define("MIOPEN_USE_RNE_BFLOAT16");
-            }
 
             kernel.comp_options = build_params.GenerateFor(kbp::HIP());
 
