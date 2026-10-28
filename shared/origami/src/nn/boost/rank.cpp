@@ -25,24 +25,29 @@ status_t booster_t::check_problem(const problem_t&  problem,
   // The model's dtype class: bf16 = A and B BFloat16; tf32 = A/B/C/D Float with XFloat32
   // math (strict f32 is a different problem and never uses a tf32 model); fp8 = F8BS, A and B
   // Float8 into Float8 math with BFloat16 C and D and no MX blocks. Any other class is refused.
-  const std::string& dtype = model_->head_string("dtype");
-  const char*        not_in_class = nullptr;
-  if (dtype == "bf16") {
-    if (!(problem.a_dtype == data_type_t::BFloat16 && problem.b_dtype == data_type_t::BFloat16))
-      not_in_class = "problem is not bf16";
-  } else if (dtype == "tf32") {
-    if (!(problem.a_dtype == data_type_t::Float && problem.b_dtype == data_type_t::Float &&
-          problem.c_dtype == data_type_t::Float && problem.d_dtype == data_type_t::Float &&
-          problem.mi_dtype == data_type_t::XFloat32))
-      not_in_class = "problem is not tf32 (A/B/C/D f32 with xf32 math)";
-  } else if (dtype == "fp8") {
-    if (!(problem.a_dtype == data_type_t::Float8 && problem.b_dtype == data_type_t::Float8 &&
-          problem.c_dtype == data_type_t::BFloat16 && problem.d_dtype == data_type_t::BFloat16 &&
-          problem.mi_dtype == data_type_t::Float8 && problem.a_mx_block_size == 0 &&
-          problem.b_mx_block_size == 0))
-      not_in_class = "problem is not fp8 (F8BS: A/B Float8 with Float8 math, C/D BFloat16, no MX)";
-  } else {
-    not_in_class = "unknown dtype class";
+  const char* not_in_class = nullptr;
+  switch (dtype_class_) {
+    case dtype_class_t::bf16:
+      if (!(problem.a_dtype == data_type_t::BFloat16 && problem.b_dtype == data_type_t::BFloat16))
+        not_in_class = "problem is not bf16";
+      break;
+    case dtype_class_t::tf32:
+      if (!(problem.a_dtype == data_type_t::Float && problem.b_dtype == data_type_t::Float &&
+            problem.c_dtype == data_type_t::Float && problem.d_dtype == data_type_t::Float &&
+            problem.mi_dtype == data_type_t::XFloat32))
+        not_in_class = "problem is not tf32 (A/B/C/D f32 with xf32 math)";
+      break;
+    case dtype_class_t::fp8:
+      if (!(problem.a_dtype == data_type_t::Float8 && problem.b_dtype == data_type_t::Float8 &&
+            problem.c_dtype == data_type_t::BFloat16 && problem.d_dtype == data_type_t::BFloat16 &&
+            problem.mi_dtype == data_type_t::Float8 && problem.a_mx_block_size == 0 &&
+            problem.b_mx_block_size == 0))
+        not_in_class =
+            "problem is not fp8 (F8BS: A/B Float8 with Float8 math, C/D BFloat16, no MX)";
+      break;
+    case dtype_class_t::unknown:
+      not_in_class = "unknown dtype class";
+      break;
   }
   if (not_in_class) {
     if (detail) *detail = not_in_class;
@@ -55,12 +60,11 @@ status_t booster_t::check_problem(const problem_t&  problem,
   }
   // The loader admits exactly M, N, K and batch. A CU budget is not a training range: the
   // features carry it (f_cu_util, sk_*).
-  for (const auto& rg : model_->ranges()) {
-    double v;
-    if (rg.name == "M") v = static_cast<double>(problem.size.m);
-    else if (rg.name == "N") v = static_cast<double>(problem.size.n);
-    else if (rg.name == "K") v = static_cast<double>(problem.size.k);
-    else v = static_cast<double>(problem.batch);
+  const double dims[] = {static_cast<double>(problem.size.m), static_cast<double>(problem.size.n),
+                         static_cast<double>(problem.size.k), static_cast<double>(problem.batch)};
+  for (const auto& rc : range_checks_) {
+    const auto&  rg = *rc.range;
+    const double v  = dims[rc.dim];
     if (v < rg.min || v > rg.max) {
       if (detail) {
         std::ostringstream os;
@@ -77,7 +81,7 @@ bool booster_t::model_features(const problem_t& problem, const hardware_t& hardw
                                const candidate_t& candidate, double* row, std::string* why) const {
   thread_local std::vector<double>       all;
   thread_local std::vector<std::uint8_t> available;
-  all.resize(features::slot_names().size());
+  all.resize(features::num_columns);
   available.resize(all.size());
   if (!features::extract(problem, hardware, candidate, all.data(), why, available.data()))
     return false;
@@ -94,19 +98,45 @@ bool booster_t::model_features(const problem_t& problem, const hardware_t& hardw
 boost_result_t booster_t::rank(const problem_t& problem, const hardware_t& hardware,
                                const candidate_t* candidates, std::size_t num_candidates) const {
   boost_result_t res;
+  const std::size_t n = std::min(num_candidates, model_->top_n());
+  if (n < 2) {
+    res.order.resize(num_candidates);
+    std::iota(res.order.begin(), res.order.end(), std::size_t{0});
+    res.status = status_t::too_few_candidates;
+    return res;
+  }
+  res.status = check_problem(problem, hardware, &res.detail);
+  if (res.status != status_t::ok) {
+    res.order.resize(num_candidates);
+    std::iota(res.order.begin(), res.order.end(), std::size_t{0});
+    return res;
+  }
+  rank_checked(problem, hardware, candidates, num_candidates, true, res);
+  return res;
+}
+
+void booster_t::rank_checked(const problem_t& problem, const hardware_t& hardware,
+                             const candidate_t* candidates, std::size_t num_candidates,
+                             bool corrected, boost_result_t& res) const {
+  res.status = status_t::ok;
+  res.detail.clear();
+  res.yhat.clear();
+  res.corrected.clear();
   res.order.resize(num_candidates);
   std::iota(res.order.begin(), res.order.end(), std::size_t{0});
   const std::size_t n = std::min(num_candidates, model_->top_n());
   if (n < 2) {
     res.status = status_t::too_few_candidates;
-    return res;
+    return;
   }
-  res.status = check_problem(problem, hardware, &res.detail);
-  if (res.status != status_t::ok) return res;
 
-  const std::size_t                nf = slot_.size();
-  thread_local std::vector<double> rows;
+  const std::size_t                      nf = slot_.size();
+  thread_local std::vector<double>       rows;
+  thread_local std::vector<double>       all;
+  thread_local std::vector<std::uint8_t> available;
   rows.resize(n * nf);
+  all.resize(features::num_columns);
+  available.resize(features::num_columns);
   for (std::size_t i = 0; i < n; ++i) {
     const candidate_t& c   = candidates[i];
     double*            row = rows.data() + i * nf;
@@ -115,27 +145,40 @@ boost_result_t booster_t::rank(const problem_t& problem, const hardware_t& hardw
         c.origami_latency >= std::numeric_limits<double>::max()) {
       res.status = status_t::missing_feature;
       res.detail = "candidate " + std::to_string(i) + " has no Origami latency";
-      return res;
+      return;
     }
-    if (!model_features(problem, hardware, c, row, &why)) {
+    // model_features and prepare() in one pass over the model's columns.
+    if (!features::extract(problem, hardware, c, all.data(), &why, available.data())) {
       res.status = status_t::missing_feature;
       res.detail = "candidate " + std::to_string(i) + ": " + why;
-      return res;
+      return;
     }
-    model_->prepare(row);
+    for (std::size_t j = 0; j < nf; ++j) {
+      const std::size_t s = slot_[j];
+      if (!available[s]) {
+        res.status = status_t::missing_feature;
+        res.detail = "candidate " + std::to_string(i) +
+                     ": caller did not provide the kernel field behind " +
+                     model_->features()[j].name;
+        return;
+      }
+      row[j] = std::isfinite(all[s]) ? all[s] : 0.0;
+    }
   }
   res.yhat.resize(n);
-  res.corrected.resize(n);
   model_->evaluate_batch(rows.data(), n, res.yhat.data());
-  for (std::size_t i = 0; i < n; ++i)
-    res.corrected[i] = candidates[i].origami_latency * std::exp(res.yhat[i]);
+  if (corrected) {
+    res.corrected.resize(n);
+    for (std::size_t i = 0; i < n; ++i)
+      res.corrected[i] = candidates[i].origami_latency * std::exp(res.yhat[i]);
+  }
   // Same key and rounding as training's argmin(log(cycles) + yhat); this orders exactly like
   // origami_latency * exp(yhat) without overflow.
-  std::vector<double> key(n);
+  thread_local std::vector<double> key;
+  key.resize(n);
   for (std::size_t i = 0; i < n; ++i) key[i] = std::log(candidates[i].origami_latency) + res.yhat[i];
   std::stable_sort(res.order.begin(), res.order.begin() + static_cast<std::ptrdiff_t>(n),
                    [&](std::size_t a, std::size_t b) { return key[a] < key[b]; });
-  return res;
 }
 
 bool rerank_configs(const booster_t&                  booster,
@@ -165,7 +208,9 @@ bool rerank_configs(const booster_t&                  booster,
     candidates.push_back(c);
     positions.push_back(i);
   }
-  const boost_result_t res = booster.rank(problem, hardware, candidates.data(), candidates.size());
+  // check_problem passed above.
+  thread_local boost_result_t res;
+  booster.rank_checked(problem, hardware, candidates.data(), candidates.size(), false, res);
   if (res.status != status_t::ok) {
     if (source) source->outcome(res.status, res.detail, kNoOrder);
     return false;

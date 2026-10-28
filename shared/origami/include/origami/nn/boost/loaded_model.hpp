@@ -74,7 +74,6 @@ class ORIGAMI_EXPORT ensemble_t {
   std::vector<std::pair<std::string, std::string>> head_strings_;
   std::vector<feature_t>                          features_;
   std::vector<range_t>                            ranges_;
-  std::vector<double>                             values_;  // leaf value per node position
   std::vector<std::int32_t>                       tree_root_;
   std::vector<std::uint32_t>                      tree_depth_;
   std::shared_ptr<const detail::forest_t>         forest_;  // quantized trees
@@ -134,10 +133,35 @@ class ORIGAMI_EXPORT booster_t {
   const ensemble_t& model() const { return *model_; }
 
  private:
+  friend bool rerank_configs(const booster_t&,
+                             const problem_t&,
+                             const hardware_t&,
+                             std::vector<prediction_result_t>&,
+                             rerank_source_t*);
   booster_t() = default;
+
+  /// The model's dtype class, read from HEAD once (check_problem runs on every call).
+  enum class dtype_class_t { bf16, tf32, fp8, unknown };
+  /// A training range with the problem dimension it bounds, in the model's RNGE order.
+  struct range_check_t {
+    const ensemble_t::range_t* range;
+    int                        dim;  // 0 M, 1 N, 2 K, 3 batch
+  };
+
+  /// rank() after check_problem passed, into @p res (its vectors keep their capacity across
+  /// calls). @p corrected: also fill res.corrected (rerank_configs does not read it).
+  void rank_checked(const problem_t&   problem,
+                    const hardware_t&  hardware,
+                    const candidate_t* candidates,
+                    std::size_t        num_candidates,
+                    bool               corrected,
+                    boost_result_t&    res) const;
+
   std::shared_ptr<const ensemble_t> model_;
   std::vector<std::size_t>          slot_;  // model column -> extractor slot
   std::vector<data_type_t>          d_dtypes_;
+  dtype_class_t                     dtype_class_ = dtype_class_t::unknown;
+  std::vector<range_check_t>        range_checks_;
 };
 
 }  // namespace origami::nn::boost

@@ -160,6 +160,16 @@ std::shared_ptr<const booster_t> booster_t::create(std::shared_ptr<const ensembl
     status = status_t::bad_file;
     return nullptr;
   }
+  const std::string dtype = b->model_->head_string("dtype");
+  b->dtype_class_         = dtype == "bf16"   ? dtype_class_t::bf16
+                            : dtype == "tf32" ? dtype_class_t::tf32
+                            : dtype == "fp8"  ? dtype_class_t::fp8
+                                              : dtype_class_t::unknown;
+  // The loader admits exactly M, N, K and batch, each once.
+  for (const auto& rg : b->model_->ranges()) {
+    const int dim = rg.name == "M" ? 0 : rg.name == "N" ? 1 : rg.name == "K" ? 2 : 3;
+    b->range_checks_.push_back({&rg, dim});
+  }
   status = status_t::ok;
   // The commit is provenance only: the source hash decides, so a build from an uncommitted
   // tree with identical sources is accepted.
