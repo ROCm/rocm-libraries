@@ -4956,6 +4956,34 @@ namespace rocisa
         }
     };
 
+    struct VDot4CI32I8 : public CommonInstruction
+    {
+        VDot4CI32I8(const std::shared_ptr<Container>& dst,
+                    const InstructionInput&           src0,
+                    const InstructionInput&           src1,
+                    const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_I32,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("v_dot4c_i32_i8");
+        }
+
+        VDot4CI32I8(const VDot4CI32I8& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VDot4CI32I8>(*this);
+        }
+    };
+
     struct VExpF16 : public CommonInstruction
     {
         VExpF16(const std::shared_ptr<Container>& dst,

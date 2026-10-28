@@ -25,10 +25,62 @@
 from rocisa.code import Module
 from rocisa.container import vgpr
 from rocisa.enum import DataTypeEnum
-from rocisa.instruction import VAShiftRightI32, VLShiftLeftB32, VMadI32I24
+from rocisa.instruction import VAShiftRightI32, VLShiftLeftB32, VMadI32I24, VDot4CI32I8, VDot4I32I8
 
 from ..Common.DataType import DataType
 from ..Component import Component, MAC
+
+class FMA_I8_HPA_DOT4(MAC):
+    @staticmethod
+    def asmCaps(caps):
+        return caps['v_dot4c_i32_i8'] or caps['v_dot4_i32_i8']
+
+    kernel = {
+        "ProblemType": {"MacDataTypeA": DataType(DataTypeEnum.Int8),
+                        "MacDataTypeB": DataType(DataTypeEnum.Int8),
+                        "HighPrecisionAccumulate": True},
+        "UseDotInstruction": True,
+    }
+
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
+        kernel   = writer.states.kernel
+        priority = Component.Priority.find(writer)
+
+        module = Module("FMA_I8_HPA_DOT4")
+        module.addComment(self.commentHeader())
+
+        # v_dot4c_i32_i8 accumulates into its destination (dst = dst + dot4(src0,src1)),
+        # v_dot4_i32_i8 takes the accumulator as an explicit third source.
+        accumulate  = writer.states.asmCaps["v_dot4c_i32_i8"]
+        ThreadTile0 = kernel["ThreadTile0"]
+        ThreadTile1 = kernel["ThreadTile1"]
+
+        for b in range(ThreadTile1):
+            for a in range(ThreadTile0):
+                for iui in range(innerUnroll):
+                    cStr = f'ValuC+{a + b*ThreadTile0}'
+                    aStr = f'ValuA_X{m}_I{iui}+{a}'
+                    bStr = f'ValuB_X{m}_I{iui}+{b}'
+                    if accumulate:
+                        module.add(VDot4CI32I8(dst=vgpr(cStr),
+                                               src0=vgpr(aStr),
+                                               src1=vgpr(bStr),
+                                               comment="Accumulate"))
+                    else:
+                        module.add(VDot4I32I8(dst=vgpr(cStr),
+                                               src0=vgpr(aStr),
+                                               src1=vgpr(bStr),
+                                               src2=vgpr(cStr),
+                                               comment="Accumulate"))
+                    prio = priority(writer, 1, "Raise priority while processing macs")
+                    if prio:
+                        module.add(prio)
+
+        prio = priority(writer, 0, "Reset priority after processing macs")
+        if prio:
+            module.add(prio)
+
+        return module
 
 class FMA_I8_HPA(MAC):
     @staticmethod
@@ -39,6 +91,7 @@ class FMA_I8_HPA(MAC):
         "ProblemType": {"MacDataTypeA": DataType(DataTypeEnum.Int8),
                         "MacDataTypeB": DataType(DataTypeEnum.Int8),
                         "HighPrecisionAccumulate": True},
+        "UseDotInstruction": False,
     }
 
     def __call__(self, writer, tPA, tPB, m, innerUnroll):
