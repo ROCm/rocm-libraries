@@ -10,7 +10,7 @@ from __future__ import annotations
 import struct
 
 import pytest
-from rocke.core.ir import F16, F32, IRBuilder, PtrType
+from rocke.core.ir import F32, IRBuilder, PtrType
 from rocke.helpers.compile import compile_kernel
 from rocke.runtime import code_object
 from rocke.runtime.code_object import CodeObjectError, DirectUnsupported
@@ -112,16 +112,16 @@ def _scale_kernel():
     return b.kernel
 
 
-def _dot_kernel():
-    # arith.fdot2: COMGR selects v_dot2c_f32_f16 on gfx950; the direct
-    # compiler does not lower it there yet.
-    b = IRBuilder("direct_target_dot")
+def _asm_kernel():
+    # tile.inline_asm with an instruction in it: COMGR assembles it; the
+    # direct compiler takes only the empty "=v,0" barrier.
+    b = IRBuilder("direct_target_asm")
     b.kernel.attrs["max_workgroup_size"] = 64
-    a = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
+    x = b.param("X", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
     y = b.param("Y", PtrType(F32, "global"), noalias=True, writeonly=True, align=16)
     tid = b.thread_id_x()
-    pair = b.global_load_vN_f16(a, b.mul(tid, b.const_i32(2)), 2)
-    b.global_store(y, tid, b.fdot2(pair, pair, b.const_f32(0.0)), align=4)
+    moved = b.inline_asm("v_mov_b32 $0, $1", "=v,v", [b.global_load_f32(x, tid)], F32)
+    b.global_store(y, tid, moved, align=4)
     return b.kernel
 
 
@@ -135,11 +135,11 @@ def test_compile_kernel_falls_back_to_comgr_for_what_direct_refuses() -> None:
     assert (direct.code_object_backend, direct.direct_fallback) == ("direct", "")
     assert _e_flags(direct.hsaco) == 0x54F
     fallback = compile_kernel(
-        _dot_kernel(), arch="gfx950", code_object_backend="direct"
+        _asm_kernel(), arch="gfx950", code_object_backend="direct"
     )
     assert fallback.code_object_backend == "comgr"
     assert "ROCKE_DIRECT_UNSUPPORTED" in fallback.direct_fallback
-    assert fallback.llvm_text and b"direct_target_dot" in fallback.hsaco
+    assert fallback.llvm_text and b"direct_target_asm" in fallback.hsaco
     assert _e_flags(fallback.hsaco) & 0xFF == 0x4F
     # A target the library does not compile for goes to COMGR too.
     other = compile_kernel(_scale_kernel(), arch="gfx942", code_object_backend="direct")

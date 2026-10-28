@@ -352,9 +352,13 @@ pub struct MFunc {
     /// The target the function is compiled for, from instruction selection
     /// on (gfx1151 by default).
     pub target: crate::target::Target,
-    /// VGPRs the allocation may use when fewer than the target's: set only
-    /// by `rir::compile_any_target_limited`, which tests spilling with it.
+    /// VGPRs the allocation may use when fewer than the target's: set by
+    /// `rir::compile_any_target_limited`, which tests spilling with it, and
+    /// on gfx950 to what one workgroup's waves leave each.
     pub vgpr_limit: Option<u32>,
+    /// AGPRs the allocation may use when fewer than the target's (the
+    /// kernel's `agpr_alloc`).
+    pub agpr_limit: Option<u32>,
 }
 
 impl MFunc {

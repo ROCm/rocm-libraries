@@ -7,6 +7,7 @@
 use super::gen_isa::Gfx9Op;
 use crate::error::CompileError;
 use crate::rir::mir::{MInst, Opc};
+use crate::target::Target;
 
 /// A memory fence at `scope` on gfx950, as its memory model writes it
 /// outside threadgroup-split mode: `buffer_wbl2` writes L2 back at agent
@@ -31,6 +32,15 @@ pub fn fence(scope: &str, acquire: bool) -> Result<Vec<MInst>, CompileError> {
         out.push(MInst::new(Opc::Gfx9(Gfx9Op::BufferInv), [], []).with_imm(c));
     }
     Ok(out)
+}
+
+/// Whether a d16 load on `target` keeps the other half of its destination,
+/// which selection relies on to load two 16-bit values into the halves of
+/// one register. gfx950 code objects run in either SRAM ECC mode (`sramecc
+/// any`), and with ECC on a d16 load does not keep it (LLVM's
+/// `d16PreservesUnusedBits`): the halves are loaded whole and packed.
+pub fn d16_keeps_other_half(target: Target) -> bool {
+    target != Target::Gfx950
 }
 
 /// The wave64 form of the wave32 lane-mask opcode `op`: lane masks, EXEC and
@@ -213,6 +223,55 @@ mod tests {
                     }
                 };
                 assert_eq!(read, lane ^ mask, "mask {mask} lane {lane}");
+            }
+        }
+    }
+
+    #[test]
+    fn gfx950_loads_both_halves_whole() {
+        // Two f16 loads into the halves of one register: gfx1151 loads them
+        // straight into the halves (d16), gfx950 loads each whole and packs.
+        let text = "ckdsl.ir v1\nkernel @halves {\n  attrs { max_workgroup_size = i:64 }\n  params {\n    %X : ptr<f16,global>\n    \
+                    %Y : ptr<i32,global>\n  }\n  region @entry {\n    %tid : i32 = gpu.thread_id (  ) { axis = s:\"x\" }\n    \
+                    %c1 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:64 }\n    %t1 : i32 = arith.add ( %tid, %c1 )\n    \
+                    %z : vec<f16x2> = arith.constant_vec (  ) { elem = s:\"f16\", fill = f:0.0, vec = i:2 }\n    \
+                    %a : f16 = memref.global_load_typed ( %X, %tid ) { align = i:2, elem_type = s:\"f16\" }\n    \
+                    %v0 : vec<f16x2> = vector.insert ( %z, %a ) { index = i:0 }\n    \
+                    %b : f16 = memref.global_load_typed ( %X, %t1 ) { align = i:2, elem_type = s:\"f16\" }\n    \
+                    %v1 : vec<f16x2> = vector.insert ( %v0, %b ) { index = i:1 }\n    \
+                    %w : i32 = arith.bitcast ( %v1 )\n    \
+                    memref.global_store_typed ( %Y, %tid, %w ) { align = i:4, elem_type = s:\"i32\" }\n    cf.return (  )\n  }\n}\n";
+        let d16 = |code: &[MInst]| count(code, Opc::GLoadD16B16) + count(code, Opc::GLoadD16HiB16);
+        assert!(d16(&insts(text, Target::Gfx1151)) > 0);
+        let wave64 = insts(text, Target::Gfx950);
+        assert_eq!((d16(&wave64), count(&wave64, Opc::GLoadU16)), (0, 2));
+    }
+
+    #[test]
+    fn byte_inserts_keep_every_byte() {
+        // Eight loaded bytes inserted into a vec<i8x8> and stored: on either
+        // target each byte is merged into its dword by a v_perm_b32.
+        let mut text = String::from(
+            "ckdsl.ir v1\nkernel @bytes {\n  attrs { max_workgroup_size = i:64 }\n  params {\n    %X : ptr<i8,global>\n    \
+             %Y : ptr<i8,global>\n  }\n  region @entry {\n    %tid : i32 = gpu.thread_id (  ) { axis = s:\"x\" }\n    \
+             %c8 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:8 }\n    %o : i32 = arith.mul ( %tid, %c8 )\n    \
+             %v0 : vec<i8x8> = arith.constant_vec (  ) { elem = s:\"i8\", fill = i:0, vec = i:8 }\n",
+        );
+        for k in 0..8 {
+            text += &format!(
+                "    %c{k}k : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{k} }}\n    %a{k} : i32 = arith.add ( %o, %c{k}k )\n    \
+                 %b{k} : i8 = memref.global_load_typed ( %X, %a{k} ) {{ align = i:1, elem_type = s:\"i8\" }}\n    \
+                 %v{} : vec<i8x8> = vector.insert ( %v{k}, %b{k} ) {{ index = i:{k} }}\n",
+                k + 1
+            );
+        }
+        text += "    memref.global_store_vN ( %Y, %o, %v8 ) { align = i:8, elem_type = s:\"i8\", vec = i:8 }\n    cf.return (  )\n  }\n}\n";
+        for target in [Target::Gfx1151, Target::Gfx950] {
+            let code = insts(&text, target);
+            let loads: Vec<Opnd> = code.iter().filter(|i| i.op == Opc::GLoadU8).map(|i| i.defs[0]).collect();
+            assert_eq!(loads.len(), 8, "{target:?}");
+            for byte in loads {
+                assert!(code.iter().any(|i| i.op == Opc::VPermB32 && i.uses.contains(&byte)), "{target:?}: {byte:?} is not merged");
             }
         }
     }

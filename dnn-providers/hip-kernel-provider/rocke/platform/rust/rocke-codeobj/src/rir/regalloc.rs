@@ -698,14 +698,176 @@ fn pressure_of(f: &MFunc, live: &Live) -> Pressure {
 /// uses at least that many registers. Counts the live units slot by slot,
 /// as `profile` does over `analyze`'s segments, without building them.
 pub fn pressure(f: &MFunc) -> Result<Pressure, CompileError> {
-    let (live, live_out) = dataflow(f)?;
-    let nunits = *live.base.last().expect("non-empty");
-    let mut is_v = Bits::new(nunits);
-    for v in (0..f.vregs.len()).filter(|&v| f.vregs[v].class == Class::V) {
-        for u in live.base[v]..live.base[v + 1] {
-            is_v.set(u);
+    Ok(Liveness::new(f)?.pressure(f, None))
+}
+
+/// What `pressure` reads of a function besides the order of each block's
+/// instructions: the units of each register, the block offsets, the units
+/// live out of each block, and which units are VGPRs. Scheduling and load
+/// sinking change only that order, and keep the order of every unit's
+/// definitions and uses within it, so each block reads the same units before
+/// writing them and these hold for every schedule of the function.
+pub(super) struct Liveness {
+    live: Live,
+    live_out: LiveOut,
+    is_v: Bits,
+}
+
+impl Liveness {
+    pub(super) fn new(f: &MFunc) -> Result<Liveness, CompileError> {
+        let (live, live_out) = dataflow(f)?;
+        let nunits = *live.base.last().expect("non-empty");
+        let mut is_v = Bits::new(nunits);
+        for v in (0..f.vregs.len()).filter(|&v| f.vregs[v].class == Class::V) {
+            for u in live.base[v]..live.base[v + 1] {
+                is_v.set(u);
+            }
         }
+        Ok(Liveness { live, live_out, is_v })
     }
+
+    /// `pressure` of `f`, a reordering of the function these are of, with
+    /// the instructions of each block in `orders`, or as they stand.
+    pub(super) fn pressure(&self, f: &MFunc, orders: Option<&[Vec<u32>]>) -> Pressure {
+        pressure_in(f, &self.live, &self.live_out, &self.is_v, orders)
+    }
+
+    /// The units each instruction of `f`, the function these are of, writes
+    /// and reads.
+    pub(super) fn unit_lists(&self, f: &MFunc) -> UnitLists {
+        let n: usize = f.blocks.iter().map(|b| b.insts.len()).sum();
+        let mut lists = UnitLists { start: Vec::with_capacity(n + 1), uses: Vec::with_capacity(n), early: Vec::with_capacity(n), units: Vec::with_capacity(3 * n) };
+        let base = &self.live.base;
+        // A register's units are of its class (`is_v`).
+        let push = |units: &mut Vec<u32>, opnds: &[Opnd]| {
+            for o in opnds {
+                if let Opnd::R(v) = o {
+                    let start = base[v.reg as usize] + v.off as usize;
+                    let sgpr = u32::from(f.vregs[v.reg as usize].class != Class::V);
+                    units.extend((start..start + v.n as usize).map(|u| (u as u32) << 1 | sgpr));
+                }
+            }
+        };
+        for inst in f.blocks.iter().flat_map(|b| b.insts.iter()) {
+            lists.start.push(lists.units.len() as u32);
+            push(&mut lists.units, &inst.defs);
+            lists.uses.push(lists.units.len() as u32);
+            push(&mut lists.units, &inst.uses);
+            lists.early.push(inst.op.flags() & F_EARLY != 0);
+        }
+        lists.start.push(lists.units.len() as u32);
+        lists
+    }
+
+    /// `pressure` of the function `lists` are of with the instructions of
+    /// each block in `orders`, or as they stand: `pressure_in` over the lists.
+    pub(super) fn pressure_listed(&self, lists: &UnitLists, orders: Option<&[Vec<u32>]>) -> Pressure {
+        let nunits = *self.live.base.last().expect("non-empty");
+        let mut cur = Bits::new(nunits);
+        let mut most = Pressure::default();
+        for b in 0..self.live.first.len() - 1 {
+            let p = self.block_pressure_listed(lists, b, orders.map(|orders| &orders[b][..]), &mut cur);
+            most = Pressure { vgprs: most.vgprs.max(p.vgprs), sgprs: most.sgprs.max(p.sgprs) };
+        }
+        most
+    }
+
+    /// `pressure_listed` with block `b` in `order_of(b)`, taking the blocks
+    /// largest first, or `None` as soon as one has more units of a class live
+    /// at once than `cap` allows: the function as a whole then has too.
+    pub(super) fn pressure_capped(
+        &self,
+        lists: &UnitLists,
+        cap: Limits,
+        mut order_of: impl FnMut(usize) -> Vec<u32>,
+    ) -> Option<(Vec<Vec<u32>>, Pressure)> {
+        let nblocks = self.live.first.len() - 1;
+        let mut by_size: Vec<usize> = (0..nblocks).collect();
+        by_size.sort_by_key(|&b| std::cmp::Reverse(self.live.first[b + 1] - self.live.first[b]));
+        let mut cur = Bits::new(*self.live.base.last().expect("non-empty"));
+        let (mut orders, mut most) = (vec![Vec::new(); nblocks], Pressure::default());
+        for b in by_size {
+            orders[b] = order_of(b);
+            let p = self.block_pressure_listed(lists, b, Some(&orders[b]), &mut cur);
+            most = Pressure { vgprs: most.vgprs.max(p.vgprs), sgprs: most.sgprs.max(p.sgprs) };
+            if most.vgprs > cap.vgprs || most.sgprs > cap.sgprs {
+                return None;
+            }
+        }
+        Some((orders, most))
+    }
+
+    /// `pressure_listed` of block `b` alone, with its instructions in
+    /// `order`, or as they stand; `cur` is a set of every unit to work in.
+    fn block_pressure_listed(&self, lists: &UnitLists, b: usize, order: Option<&[u32]>, cur: &mut Bits) -> Pressure {
+        let (live, is_v) = (&self.live, &self.is_v);
+        let mut most = Pressure::default();
+        cur.0.fill(0);
+        let mut n = [0u32; 2];
+        for u in self.live_out.of(b) {
+            cur.set(u);
+            n[!is_v.get(u) as usize] += 1;
+        }
+        let first = live.first[b] as usize;
+        for k in (0..live.first[b + 1] as usize - first).rev() {
+            let i = first + order.map_or(k, |order| order[k] as usize);
+            let (start, uses, end) = (lists.start[i] as usize, lists.uses[i] as usize, lists.start[i + 1] as usize);
+            let (defs, used) = (&lists.units[start..uses], &lists.units[uses..end]);
+            let unlive = |cur: &Bits, extra: &mut [u32; 2]| {
+                for &x in defs {
+                    if !cur.get((x >> 1) as usize) {
+                        extra[(x & 1) as usize] += 1;
+                    }
+                }
+            };
+            // Write slot: the units live after, plus results nothing reads.
+            let mut extra = [0u32; 2];
+            if !lists.early[i] {
+                unlive(cur, &mut extra);
+            }
+            most.vgprs = most.vgprs.max(n[0] + extra[0]);
+            most.sgprs = most.sgprs.max(n[1] + extra[1]);
+            for &x in defs {
+                if cur.get((x >> 1) as usize) {
+                    cur.clear((x >> 1) as usize);
+                    n[(x & 1) as usize] -= 1;
+                }
+            }
+            for &x in used {
+                if !cur.get((x >> 1) as usize) {
+                    cur.set((x >> 1) as usize);
+                    n[(x & 1) as usize] += 1;
+                }
+            }
+            // Read slot: the units live before, plus early-clobber results.
+            let mut extra = [0u32; 2];
+            if lists.early[i] {
+                unlive(cur, &mut extra);
+            }
+            most.vgprs = most.vgprs.max(n[0] + extra[0]);
+            most.sgprs = most.sgprs.max(n[1] + extra[1]);
+        }
+        most
+    }
+}
+
+/// The units each instruction of a function writes and then reads, in
+/// operand order, as `unit << 1` with the low bit set for an SGPR unit;
+/// whether it writes early. Built once for the walks of all of the
+/// function's schedules (`Liveness::pressure_listed`).
+pub(super) struct UnitLists {
+    /// Per instruction, in block order: where its units start; one more
+    /// entry ends the last.
+    start: Vec<u32>,
+    /// Where each instruction's read units start.
+    uses: Vec<u32>,
+    early: Vec<bool>,
+    units: Vec<u32>,
+}
+
+/// `Liveness::pressure`.
+fn pressure_in(f: &MFunc, live: &Live, live_out: &LiveOut, is_v: &Bits, orders: Option<&[Vec<u32>]>) -> Pressure {
+    let nunits = *live.base.last().expect("non-empty");
     let mut most = Pressure::default();
     let mut cur = Bits::new(nunits);
     for (b, block) in f.blocks.iter().enumerate() {
@@ -715,7 +877,8 @@ pub fn pressure(f: &MFunc) -> Result<Pressure, CompileError> {
             cur.set(u);
             n[!is_v.get(u) as usize] += 1;
         }
-        for inst in block.insts.iter().rev() {
+        for k in (0..block.insts.len()).rev() {
+            let inst = &block.insts[orders.map_or(k, |orders| orders[b][k] as usize)];
             let early = inst.op.flags() & F_EARLY != 0;
             let units = |o: &Opnd| live.of(o).into_iter().flatten();
             // Write slot: the units live after, plus results nothing reads.
@@ -754,7 +917,7 @@ pub fn pressure(f: &MFunc) -> Result<Pressure, CompileError> {
             most.sgprs = most.sgprs.max(n[1] + extra[1]);
         }
     }
-    Ok(most)
+    most
 }
 
 /// Registers an allocation may use: VGPRs past `vgprs` would lower the
@@ -928,7 +1091,19 @@ pub fn allocate(f: &mut MFunc) -> Result<Allocation, CompileError> {
 /// assignment packs tuples first, and the one using fewer VGPRs is kept.
 /// The result may exceed the budget; only past the hardware does this fail.
 pub fn allocate_within(f: &mut MFunc, budget: Limits) -> Result<Allocation, CompileError> {
-    let mut live = analyze(f)?;
+    let live = analyze(f)?;
+    allocate_analyzed(f, live, budget)
+}
+
+/// `allocate_within` of `f`, a reordering of the function `known` is of,
+/// without the dataflow: the units live out of each block are `known`'s.
+pub(super) fn allocate_within_known(f: &mut MFunc, budget: Limits, known: &Liveness) -> Result<Allocation, CompileError> {
+    let live = analyze_given(f, &known.live_out, &mut LiveScratch::default());
+    allocate_analyzed(f, live, budget)
+}
+
+/// The rest of `allocate_within` once `f`'s liveness is `live`.
+fn allocate_analyzed(f: &mut MFunc, mut live: Live, budget: Limits) -> Result<Allocation, CompileError> {
     let groups = coalesce(f, &mut live);
     let hw = Limits::for_func(f);
     let hard = Limits { vgprs: budget.vgprs.max(hw.vgprs), sgprs: budget.sgprs.max(hw.sgprs) };
@@ -1245,8 +1420,8 @@ fn assign(
         let bucket = if gfixed[v as usize].is_some() { &mut fixed } else { &mut free };
         bucket.push(key(v));
     }
-    fixed.sort_unstable();
-    free.sort_unstable();
+    sort_root_keys(&mut fixed);
+    sort_root_keys(&mut free);
     let roots = fixed.into_iter().chain(free).map(|key| key as u32);
     let mut occ_s = Occupancy::new(limits.sgprs.max(MAX_SGPRS), slots);
     let mut occ_v = Occupancy::new(limits.vgprs.max(MAX_VGPRS), slots);
@@ -1308,6 +1483,48 @@ fn assign(
         })
         .collect();
     Ok((phys, used))
+}
+
+/// Sorts `keys` as `sort_unstable` does, by a stable counting sort on each
+/// 32-bit field from the lowest up (skipped where the keys are already in
+/// that field's order), in time linear in their number while each field's
+/// values, `u32::MAX` aside, span a range not much wider; a field spread
+/// wider falls back to `sort_unstable`.
+fn sort_root_keys(keys: &mut Vec<u128>) {
+    let n = keys.len();
+    let (mut out, mut counts) = (Vec::new(), Vec::<u32>::new());
+    for shift in [0u32, 32, 64, 96] {
+        let field = |k: u128| (k >> shift) as u32;
+        if keys.windows(2).all(|w| field(w[0]) <= field(w[1])) {
+            continue;
+        }
+        let (lo, hi) = keys
+            .iter()
+            .map(|&k| field(k))
+            .filter(|&x| x != u32::MAX)
+            .fold((u32::MAX, 0), |(lo, hi), x| (lo.min(x), hi.max(x)));
+        let width = hi.saturating_sub(lo) as usize + 2;
+        if width > 16 * n + 1024 {
+            keys.sort_unstable();
+            return;
+        }
+        let bucket = |x: u32| if x == u32::MAX { width - 1 } else { (x - lo) as usize };
+        counts.clear();
+        counts.resize(width + 1, 0);
+        for &k in keys.iter() {
+            counts[bucket(field(k)) + 1] += 1;
+        }
+        for b in 1..width {
+            counts[b] += counts[b - 1];
+        }
+        out.resize(n, 0);
+        for &k in keys.iter() {
+            let b = bucket(field(k));
+            out[counts[b] as usize] = k;
+            counts[b] += 1;
+        }
+        std::mem::swap(keys, &mut out);
+    }
 }
 
 /// Replaces virtual registers by `phys[reg] + off` and drops identity copies.
@@ -1523,6 +1740,192 @@ mod tests {
                     assert_eq!(occ.free(r, &[probe]), !overlaps(&[probe], &held[r as usize]), "{r} {probe:?}");
                 }
             }
+        }
+    }
+
+    /// `pressure` before `Liveness`: the reference `Liveness::pressure` is
+    /// checked against.
+    fn pressure_reference(f: &MFunc) -> Result<Pressure, CompileError> {
+        let (live, live_out) = dataflow(f)?;
+        let nunits = *live.base.last().expect("non-empty");
+        let mut is_v = Bits::new(nunits);
+        for v in (0..f.vregs.len()).filter(|&v| f.vregs[v].class == Class::V) {
+            for u in live.base[v]..live.base[v + 1] {
+                is_v.set(u);
+            }
+        }
+        let mut most = Pressure::default();
+        let mut cur = Bits::new(nunits);
+        for (b, block) in f.blocks.iter().enumerate() {
+            cur.0.fill(0);
+            let mut n = [0u32; 2];
+            for u in live_out.of(b) {
+                cur.set(u);
+                n[!is_v.get(u) as usize] += 1;
+            }
+            for inst in block.insts.iter().rev() {
+                let early = inst.op.flags() & F_EARLY != 0;
+                let units = |o: &Opnd| live.of(o).into_iter().flatten();
+                // Write slot: the units live after, plus results nothing reads.
+                let mut extra = [0u32; 2];
+                if !early {
+                    for u in inst.defs.iter().flat_map(units) {
+                        if !cur.get(u) {
+                            extra[!is_v.get(u) as usize] += 1;
+                        }
+                    }
+                }
+                most.vgprs = most.vgprs.max(n[0] + extra[0]);
+                most.sgprs = most.sgprs.max(n[1] + extra[1]);
+                for u in inst.defs.iter().flat_map(units) {
+                    if cur.get(u) {
+                        cur.clear(u);
+                        n[!is_v.get(u) as usize] -= 1;
+                    }
+                }
+                for u in inst.uses.iter().flat_map(units) {
+                    if !cur.get(u) {
+                        cur.set(u);
+                        n[!is_v.get(u) as usize] += 1;
+                    }
+                }
+                // Read slot: the units live before, plus early-clobber results.
+                let mut extra = [0u32; 2];
+                if early {
+                    for u in inst.defs.iter().flat_map(units) {
+                        if !cur.get(u) {
+                            extra[!is_v.get(u) as usize] += 1;
+                        }
+                    }
+                }
+                most.vgprs = most.vgprs.max(n[0] + extra[0]);
+                most.sgprs = most.sgprs.max(n[1] + extra[1]);
+            }
+        }
+        Ok(most)
+    }
+
+    #[test]
+    fn liveness_gives_the_pressure_of_every_schedule() {
+        let random = (0..60u64).map(|seed| super::super::post::tests::random_function(seed, 1 + seed as usize % 4, 10 + 9 * seed as usize % 300));
+        let looping = (0..40u64).map(|seed| super::super::spill::tests::random_kernel(seed, 20 + seed as usize, 5 + seed as usize % 30));
+        for (k, f) in random.chain(looping).enumerate() {
+            let known = Liveness::new(&f).expect("analyzes");
+            assert_eq!(known.pressure(&f, None), pressure_reference(&f).expect("analyzes"), "function {k}");
+            let mut sunk = f.clone();
+            super::super::post::sink_load_uses(&mut sunk, 32);
+            assert_eq!(known.pressure(&sunk, None), pressure_reference(&sunk).expect("analyzes"), "function {k}, sunk");
+            let dags = super::super::post::Dags::new(&sunk);
+            for window in [1, 4, 16, 64, 512] {
+                let orders = dags.orders(window);
+                let scheduled = super::super::post::reordered(&sunk, &orders);
+                assert_eq!(known.pressure(&sunk, Some(&orders)), pressure_reference(&scheduled).expect("analyzes"), "function {k}, window {window}");
+                assert_eq!(known.pressure(&scheduled, None), pressure(&scheduled).expect("analyzes"), "function {k}, window {window}");
+            }
+        }
+    }
+
+    #[test]
+    fn known_liveness_allocates_as_the_dataflow_does() {
+        let random = (0..40u64).map(|seed| super::super::post::tests::random_function(seed, 1 + seed as usize % 4, 10 + 9 * seed as usize % 200));
+        let looping = (0..30u64).map(|seed| super::super::spill::tests::random_kernel(seed, 20 + seed as usize, 5 + seed as usize % 30));
+        for (k, f) in random.chain(looping).enumerate() {
+            let known = Liveness::new(&f).expect("analyzes");
+            let dags = super::super::post::Dags::new(&f);
+            for window in [1, 16, 64] {
+                let scheduled = super::super::post::reordered(&f, &dags.orders(window));
+                for budget in [Limits { vgprs: 12, sgprs: 10 }, Limits::default()] {
+                    let (mut a, mut b) = (scheduled.clone(), scheduled.clone());
+                    let (x, y) = (allocate_within(&mut a, budget), allocate_within_known(&mut b, budget, &known));
+                    assert_eq!(format!("{x:?}"), format!("{y:?}"), "function {k}, window {window}");
+                    assert_eq!(format!("{:?}", a.blocks), format!("{:?}", b.blocks), "function {k}, window {window}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unit_lists_give_the_pressure_of_every_schedule() {
+        let random = (0..60u64).map(|seed| super::super::post::tests::random_function(seed, 1 + seed as usize % 5, 10 + 9 * seed as usize % 300));
+        let looping = (0..40u64).map(|seed| super::super::spill::tests::random_kernel(seed, 20 + seed as usize, 5 + seed as usize % 30));
+        for (k, f) in random.chain(looping).enumerate() {
+            let mut sunk = f.clone();
+            super::super::post::sink_load_uses(&mut sunk, 32);
+            let known = Liveness::new(&sunk).expect("analyzes");
+            let lists = known.unit_lists(&sunk);
+            assert_eq!(known.pressure_listed(&lists, None), pressure_reference(&sunk).expect("analyzes"), "function {k}");
+            let dags = super::super::post::Dags::new(&sunk);
+            for window in [1, 4, 16, 64, 512] {
+                let orders = dags.orders(window);
+                let scheduled = super::super::post::reordered(&sunk, &orders);
+                assert_eq!(known.pressure_listed(&lists, Some(&orders)), pressure_reference(&scheduled).expect("analyzes"), "function {k}, window {window}");
+            }
+        }
+    }
+
+    #[test]
+    fn capped_pressure_stops_only_past_the_cap() {
+        let random = (0..60u64).map(|seed| super::super::post::tests::random_function(seed, 1 + seed as usize % 5, 10 + 9 * seed as usize % 300));
+        let looping = (0..40u64).map(|seed| super::super::spill::tests::random_kernel(seed, 20 + seed as usize, 5 + seed as usize % 30));
+        let (mut stopped, mut kept) = (0, 0);
+        for (k, f) in random.chain(looping).enumerate() {
+            let known = Liveness::new(&f).expect("analyzes");
+            let lists = known.unit_lists(&f);
+            let dags = super::super::post::Dags::new(&f);
+            for window in [1, 16, 64] {
+                let orders = dags.orders(window);
+                let full = known.pressure_listed(&lists, Some(&orders));
+                let caps = [(full.vgprs, full.sgprs), (full.vgprs.saturating_sub(1), full.sgprs), (full.vgprs, full.sgprs / 2), (0, 0)];
+                for (vgprs, sgprs) in caps {
+                    let cap = Limits { vgprs, sgprs };
+                    match known.pressure_capped(&lists, cap, |b| dags.block_order(b, window)) {
+                        Some((got, p)) => {
+                            assert!(got == orders && p == full, "function {k}, window {window}");
+                            kept += 1;
+                        }
+                        None => {
+                            assert!(full.vgprs > cap.vgprs || full.sgprs > cap.sgprs, "function {k}, window {window}: stopped within {cap:?}");
+                            stopped += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(stopped > 100 && kept > 100, "{stopped} stopped, {kept} kept");
+    }
+
+    #[test]
+    fn root_keys_sort_as_sort_unstable_does() {
+        let mut seed = 0x0dd5_0b1e_c7a5_5e7du64;
+        let mut next = |n: u64| {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 16) % n.max(1)
+        };
+        for round in 0..600u64 {
+            let n = next(if round % 4 == 0 { 20 } else { 4000 });
+            let big_first = round % 2 == 1;
+            let mut keys: Vec<u128> = (0..n)
+                .map(|v| {
+                    let size = 1 + next(if round % 3 == 0 { 64 } else { 8 }) as u32;
+                    let start = match next(12) {
+                        0 => u32::MAX,
+                        _ if round % 5 == 4 => next(1 << 32) as u32,
+                        _ => next(2 * n + 1) as u32,
+                    };
+                    let rank = if big_first { u32::MAX - size } else { 0 };
+                    let v = if round % 6 == 5 { next(n) } else { v } as u32;
+                    (rank as u128) << 96 | (start as u128) << 64 | ((u32::MAX - size) as u128) << 32 | v as u128
+                })
+                .collect();
+            match round % 7 {
+                3 => keys.reverse(),
+                6 => keys.iter_mut().for_each(|k| *k = (*k as u64 as u128) << 64 | next(1 << 40) as u128),
+                _ => {}
+            }
+            let mut expected = keys.clone();
+            expected.sort_unstable();
+            sort_root_keys(&mut keys);
+            assert_eq!(keys, expected, "round {round}");
         }
     }
 }

@@ -31,7 +31,7 @@ from rocke.core.ir_serialize import (
     parse,
     serialize,
 )
-from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.core.lower_llvm import _lower_kernel_to_llvm_python, lower_kernel_to_llvm
 from rocke.core.verify import ERROR, verify, verify_or_raise
 
 
@@ -230,6 +230,23 @@ class TestAttrEncoding(unittest.TestCase):
         self.assertIs(k2.body.ops[0].attrs["flag"], True)
         self.assertEqual(k2.body.ops[0].attrs["scale"], 0.5)
         self.assertIsInstance(k2.body.ops[0].attrs["scale"], float)
+
+    def test_waves_per_eu_pair_lowers_the_same_after_round_trip(self):
+        """A ``(min, max)`` pair comes back from the text as a list."""
+        from rocke.core.ir import IRBuilder
+
+        b = IRBuilder("waves_per_eu_pair")
+        x = b.param("X", PtrType(F32, "global"))
+        i = b.const_i32(0)
+        b.global_store(x, i, b.global_load_f32(x, i))
+        b.ret()
+        k = b.kernel
+        k.attrs["waves_per_eu"] = (2, 4)
+        ll = _lower_kernel_to_llvm_python(k, arch="gfx950")
+        self.assertIn('"amdgpu-waves-per-eu"="2,4"', ll)
+        self.assertEqual(
+            _lower_kernel_to_llvm_python(parse(serialize(k)), arch="gfx950"), ll
+        )
 
 
 class TestVerifier(unittest.TestCase):

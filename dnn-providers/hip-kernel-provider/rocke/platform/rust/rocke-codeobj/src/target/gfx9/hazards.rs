@@ -60,8 +60,8 @@
 //!
 //! | H12 | SALU writes M0 -> LDS DMA, `s_sendmsg`, `ds_*_addtid` | 1 |
 //!
-//! H12's consumers are not among the instructions the gfx950 back end emits
-//! yet (the corpus test reads them in COMGR's code); H13 (`s_setreg`) and
+//! H12's consumers the gfx950 back end emits are the LDS DMA loads
+//! (`buffer_load_dword* ... lds`, form `lds`); H13 (`s_setreg`) and
 //! H16 (inline asm) have no consumer or producer there either
 //! (`rules_without_instructions_on_gfx950` checks the description); H15,
 //! the 64-bit shift bug, is `fix_shift64`.
@@ -187,6 +187,7 @@ pub fn mfma_kind(op: Opc) -> Option<(MfmaClass, u32)> {
         t::Lat::MfmaXdl2 => (Xdl, 2),
         t::Lat::MfmaXdl4 => (Xdl, 4),
         t::Lat::MfmaXdl8 => (Xdl, 8),
+        t::Lat::MfmaXdl16 => (Xdl, 16),
         t::Lat::MfmaSmfma8 => (Smfma, 8),
         t::Lat::MfmaSmfma16 => (Smfma, 16),
         t::Lat::MfmaDgemm4 => (Dgemm, 4),
@@ -198,7 +199,7 @@ pub fn mfma_kind(op: Opc) -> Option<(MfmaClass, u32)> {
 /// Wait states an MFMA of `kind` leaves before its result is read by a VALU
 /// instruction (`memory`: a VMEM or LDS one) or overwritten (M5, M6, M4's
 /// A and B for XDL and SMFMA producers).
-fn mfma_result_waits(kind: (MfmaClass, u32), memory: bool, overwrite: bool) -> u32 {
+pub(crate) fn mfma_result_waits(kind: (MfmaClass, u32), memory: bool, overwrite: bool) -> u32 {
     match kind {
         (MfmaClass::Xdl, p) => p + 3 + u32::from(p > 2),
         (MfmaClass::Smfma, p) => p + 2,
@@ -217,7 +218,7 @@ pub fn mfma_result_latency(op: Opc) -> Option<u32> {
 
 /// M3: an MFMA of `consumer` class reading as C what an MFMA of `producer`
 /// kind wrote, the same registers (`full`) or overlapping them.
-fn mfma_srcc_waits(producer: (MfmaClass, u32), consumer: MfmaClass, full: bool) -> u32 {
+pub(crate) fn mfma_srcc_waits(producer: (MfmaClass, u32), consumer: MfmaClass, full: bool) -> u32 {
     use MfmaClass::*;
     match (producer, full) {
         ((Dgemm, 4), true) if consumer == Dgemm => 4,
@@ -232,7 +233,7 @@ fn mfma_srcc_waits(producer: (MfmaClass, u32), consumer: MfmaClass, full: bool) 
 }
 
 /// M4: an MFMA reading as A or B what an MFMA of `producer` kind wrote.
-fn mfma_srcab_waits(producer: (MfmaClass, u32)) -> u32 {
+pub(crate) fn mfma_srcab_waits(producer: (MfmaClass, u32)) -> u32 {
     match producer {
         (MfmaClass::Dgemm, 4) => 6,
         (MfmaClass::Dgemm, _) => 19,
@@ -316,7 +317,7 @@ pub fn fact(inst: &MInst) -> Fact {
         srcab: if mfma.is_some() { [src(0), src(1)] } else { [None, None] },
         dot,
         fma64: op == Opc::VFmaF64,
-        m0_reader: op == Opc::SSendmsg,
+        m0_reader: op == Opc::SSendmsg || form == Form::Lds,
     }
 }
 
@@ -922,7 +923,10 @@ mod tests {
         for op in t::ALL {
             let Some(name) = t::mnemonic(op) else { continue };
             let emitted = !matches!(op, Opc::SSendmsg);
-            if emitted {
+            // The LDS DMA loads are emitted, with H12 as their rule.
+            let dma = t::info(op).is_some_and(|i| i.form == Form::Lds);
+            assert_eq!(fact(&MInst::new(op, [], [])).m0_reader, dma || op == Opc::SSendmsg, "{name}");
+            if emitted && !dma {
                 assert!(!unruled.iter().any(|u| name.contains(u)), "{name} needs its hazard rule");
             }
         }

@@ -120,11 +120,18 @@ fn push_type(words: &mut Vec<u32>, ty: &Type) {
 }
 
 fn push_str(words: &mut Vec<u32>, text: &str) {
-    words.push(text.len() as u32);
-    for chunk in text.as_bytes().chunks(4) {
-        let mut word = [0u8; 4];
-        word[..chunk.len()].copy_from_slice(chunk);
-        words.push(u32::from_le_bytes(word));
+    let bytes = text.as_bytes();
+    words.reserve(1 + bytes.len().div_ceil(4));
+    words.push(bytes.len() as u32);
+    let mut chunks = bytes.chunks_exact(4);
+    for chunk in &mut chunks {
+        words.push(u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+    }
+    // The last word holds the 1 to 3 bytes left, zero-padded.
+    let rest = chunks.remainder();
+    if !rest.is_empty() {
+        let byte = |i: usize| rest.get(i).copied().unwrap_or(0);
+        words.push(u32::from_le_bytes([byte(0), byte(1), byte(2), 0]));
     }
 }
 
@@ -327,6 +334,9 @@ struct Simplifier<'k> {
     /// What the driver does after `visit` left an op with regions or a
     /// known branch; `Done` otherwise.
     step: Step,
+    /// The attribute list of the constant op just visited, for the canonical
+    /// one `constant` makes.
+    spare_attrs: Vec<(Text, Attr)>,
 }
 
 /// Deepest nesting of rewrites while simplifying one op. Every rule's output
@@ -417,12 +427,10 @@ impl<'k> Simplifier<'k> {
             (_, Konst::Int(v)) => ("i32", Attr::Int(v)),
             (_, Konst::F32(b)) => ("f32", Attr::Float(f32::from_bits(b) as f64)),
         };
-        let op = mk_op(
-            OpKind::Constant,
-            [value],
-            [],
-            [("ity".into(), Attr::Str(ity.into())), ("value".into(), attr)],
-        );
+        let mut attrs = std::mem::take(&mut self.spare_attrs);
+        attrs.clear();
+        attrs.extend([("ity".into(), Attr::Str(ity.into())), ("value".into(), attr)]);
+        let op = mk_op(OpKind::Constant, [value], [], attrs);
         if self.depth <= 1 {
             self.top_constants.push(op);
         } else {
@@ -685,7 +693,9 @@ impl<'k> Simplifier<'k> {
     /// Simplifies `op` into `out`, or leaves in `self.step` what the driver
     /// does with it.
     fn visit(&mut self, mut op: Op, out: &mut Vec<Op>) -> Result<(), CompileError> {
-        self.sync_len();
+        // `new`, `constant` and `emit`, which make every value of a sweep,
+        // size the tables after making one.
+        debug_assert!(self.repl.len() >= self.kernel.values.len() && self.facts.konst.len() >= self.kernel.values.len());
         for operand in op.operands.iter_mut() {
             *operand = self.resolve(*operand);
         }
@@ -715,6 +725,7 @@ impl<'k> Simplifier<'k> {
                         ))
                     }
                 };
+                self.spare_attrs = std::mem::take(&mut op.attrs);
                 let canonical = self.constant(ty, konst);
                 self.replace(result, canonical);
                 Ok(())
@@ -1612,6 +1623,7 @@ fn may_clobber_lds(kind: OpKind) -> bool {
                 | OpKind::WaitCnt
                 | OpKind::SchedBarrier
                 | OpKind::SchedGroupBarrier
+                | OpKind::IglpOpt
                 | OpKind::DppXor
                 | OpKind::QuadPerm
                 | OpKind::MovDpp8
@@ -1625,6 +1637,11 @@ fn may_clobber_lds(kind: OpKind) -> bool {
                 | OpKind::DsBpermute
                 | OpKind::WaveAny
                 | OpKind::WaveAll
+                | OpKind::DsReadTr16
+                | OpKind::DsReadTr8
+                | OpKind::LdsReadTr
+                | OpKind::Permlane32Swap
+                | OpKind::ReadLane
         ))
 }
 
@@ -1795,6 +1812,7 @@ impl<'k> Simplifier<'k> {
             rewrite_depth: 0,
             failure: None,
             step: Step::Done,
+            spare_attrs: Vec::new(),
         };
         s.sync_len();
         for param in &s.kernel.params {
@@ -2640,10 +2658,14 @@ impl<'k> Legalizer<'k> {
                     let (addr, offset) = self.global_address(op.operands[0], op.operands[1], step, out);
                     // Defaults mirror the LLVM lowering.
                     let default = if op.kind == OpKind::GlobalLoadVec { vec * 2 } else { 1 };
+                    let nt = op.bool_attr("nt") == Some(true);
                     let mut attrs = std::mem::take(&mut op.attrs);
                     attrs.clear();
                     attrs.push(("offset".into(), Attr::Int(offset)));
                     attrs.push(("align".into(), Attr::Int(align.unwrap_or(default))));
+                    if nt {
+                        attrs.push(("nt".into(), Attr::Bool(true)));
+                    }
                     out.push(mk_op(OpKind::GLoad, op.results, addr, attrs));
                 }
                 OpKind::GlobalStore | OpKind::GlobalStoreVec | OpKind::GlobalAtomicAddF32 => {
@@ -2656,10 +2678,14 @@ impl<'k> Legalizer<'k> {
                         OpKind::GlobalAtomicAddF32 => 4,
                         _ => 1,
                     };
+                    let nt = op.bool_attr("nt") == Some(true);
                     let mut attrs = std::mem::take(&mut op.attrs);
                     attrs.clear();
                     attrs.push(("offset".into(), Attr::Int(offset)));
                     attrs.push(("align".into(), Attr::Int(align.unwrap_or(default))));
+                    if nt {
+                        attrs.push(("nt".into(), Attr::Bool(true)));
+                    }
                     let kind = if op.kind == OpKind::GlobalAtomicAddF32 { OpKind::GAtomicAddF32 } else { OpKind::GStore };
                     let mut operands = addr;
                     operands.push(value);
@@ -2685,6 +2711,13 @@ impl<'k> Legalizer<'k> {
                     attrs.push(("offset".into(), Attr::Int(offset)));
                     attrs.push(("align".into(), Attr::Int(natural)));
                     out.push(mk_op(OpKind::LLoad, op.results, [smem, addr], attrs));
+                }
+                OpKind::DsReadTr16 | OpKind::DsReadTr8 => {
+                    let smem = op.operands[0];
+                    let (addr, offset) = self.lds_address(smem, &op.operands[1..], out)?;
+                    let bits = if op.kind == OpKind::DsReadTr16 { 16 } else { 8 };
+                    let attrs = vec![("offset".into(), Attr::Int(offset)), ("bits".into(), Attr::Int(bits))];
+                    out.push(mk_op(OpKind::LdsReadTr, op.results, [smem, addr], attrs));
                 }
                 OpKind::SmemStore | OpKind::SmemStoreVec => {
                     let smem = op.operands[0];
@@ -2940,6 +2973,11 @@ fn optimize_with(kernel: &mut Kernel, lds: &mut FxHashMap<ValueId, u32>, mut ws:
     licm(kernel);
     sweep(kernel, &mut ws)?;
     dce(kernel);
+    if kernel.wave == 64 {
+        crate::target::gfx9::vectorize::combine_global_loads(kernel);
+        crate::target::gfx9::vectorize::pair_f16_ops(kernel);
+        crate::target::gfx9::vectorize::pack_mfma_operands(kernel);
+    }
     place_kernargs(kernel);
     sweep(kernel, &mut ws)?;
     dce(kernel);
@@ -3648,5 +3686,26 @@ kernel @smem_offset_probe {
             assert_eq!((once + 0.0).to_bits(), once.to_bits(), "{c}");
         }
         assert!(0.0f32.mul_add(0.0, f32::NAN).is_nan() && (f32::NAN + 0.0).is_nan());
+    }
+
+    /// `push_str` before it took whole chunks: the reference.
+    fn push_str_reference(words: &mut Vec<u32>, text: &str) {
+        words.push(text.len() as u32);
+        for chunk in text.as_bytes().chunks(4) {
+            let mut word = [0u8; 4];
+            word[..chunk.len()].copy_from_slice(chunk);
+            words.push(u32::from_le_bytes(word));
+        }
+    }
+
+    #[test]
+    fn push_str_encodes_as_it_did() {
+        let texts = ["", "a", "ab", "abc", "abcd", "index", "nsw", "pred", "elem_type", "é", "aé", "日本語", "x\0y", "exactly8", "abcdefghijklm"];
+        for text in texts {
+            let (mut got, mut want) = (vec![7u32], vec![7u32]);
+            push_str(&mut got, text);
+            push_str_reference(&mut want, text);
+            assert_eq!(got, want, "{text:?}");
+        }
     }
 }

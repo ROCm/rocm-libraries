@@ -38,7 +38,7 @@ import numpy as np
 from rocke.core.arch import ArchTarget
 from rocke.core.backend import BackendError, _lower_via_cpp_engine
 from rocke.core.ir import F32, TF32, IRBuilder, KernelDef, VectorType
-from rocke.core.ir_serialize import serialize
+from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import _flavor_for_llvm, _lower_kernel_to_llvm_python
 
 _ARCH = "gfx950"
@@ -660,6 +660,22 @@ class TestBareOpIdForm(unittest.TestCase):
                 self.assertEqual(
                     serialize(_mma_kernel(op_id, bare=True)),
                     serialize(_mma_kernel(op_id)),
+                )
+
+
+class TestTextRoundTrip(unittest.TestCase):
+    def test_an_emulated_mma_read_back_from_text_lowers_the_same(self):
+        """The parser builds its own ``tf32`` type: equal to ``TF32``, not the same object."""
+        for op_id in _EMULATED:
+            with self.subTest(op_id=op_id):
+                kernel = _mma_kernel(op_id)
+                self.assertEqual(
+                    _lower_kernel_to_llvm_python(
+                        parse(serialize(kernel)), arch=_ARCH, llvm_flavor="llvm20"
+                    ),
+                    _lower_kernel_to_llvm_python(
+                        kernel, arch=_ARCH, llvm_flavor="llvm20"
+                    ),
                 )
 
 

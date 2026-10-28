@@ -17,7 +17,7 @@
 //! everything `ANY`.
 
 use super::ast::{Kernel, Op, OpKind, Type};
-use super::mir::{MFunc, F_VMEM_LOAD, F_VMEM_STORE};
+use super::mir::{MFunc, F_LDS, F_VMEM_LOAD, F_VMEM_STORE};
 
 /// The tag of an access that may touch any global memory: its address is
 /// not traced to exactly one `noalias` argument.
@@ -110,13 +110,14 @@ pub fn op_tag(tags: &[u16], op: &Op) -> u16 {
 
 /// Whether the tags of `f` leave a pair of one block's global accesses
 /// unordered that `ANY` tags order: a block with a tagged write and accesses
-/// of two different tags. Otherwise the facts change no order.
+/// of two different tags. Otherwise the facts change no order. An LDS
+/// instruction's tag is an LDS range (gfx950's LDS DMA loads), not one of these.
 pub fn relaxes(f: &MFunc) -> bool {
     f.blocks.iter().any(|block| {
         let (mut first, mut two, mut written) = (ANY, false, false);
         for inst in &block.insts {
             let flags = inst.op.flags();
-            if flags & (F_VMEM_LOAD | F_VMEM_STORE) == 0 || inst.mem == ANY {
+            if flags & (F_VMEM_LOAD | F_VMEM_STORE) == 0 || flags & F_LDS != 0 || inst.mem == ANY {
                 continue;
             }
             written |= flags & F_VMEM_STORE != 0;
@@ -131,10 +132,13 @@ pub fn relaxes(f: &MFunc) -> bool {
 }
 
 /// `f` with every global access `ANY`: in the order it had without the facts.
+/// LDS instructions keep their LDS ranges.
 pub fn without_facts(f: &MFunc) -> MFunc {
     let mut g = f.clone();
     for inst in g.blocks.iter_mut().flat_map(|b| b.insts.iter_mut()) {
-        inst.mem = ANY;
+        if inst.op.flags() & F_LDS == 0 {
+            inst.mem = ANY;
+        }
     }
     g
 }

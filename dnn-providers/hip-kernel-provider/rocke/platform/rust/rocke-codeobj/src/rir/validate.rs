@@ -152,6 +152,9 @@ pub fn uniformity(kernel: &Kernel, uniform: &[bool]) -> Result<(), CompileError>
             {
                 return Err(unsupported(format!("{:?} with a divergent resource or soffset", op.kind)));
             }
+            OpKind::BufferLoadLds if !(op.operands.first().is_some_and(uni) && op.operands.get(3).is_some_and(uni)) => {
+                return Err(unsupported(format!("{:?} with a divergent resource or soffset", op.kind)));
+            }
             OpKind::If | OpKind::IfElse => {
                 let cond = op.operands.first().is_some_and(uni);
                 stack.extend(op.regions.iter().map(|r| (r.ops.iter(), divergent || !cond)));
@@ -534,14 +537,62 @@ impl Checker<'_> {
                     return Err(mismatch());
                 }
                 let data = if loads { res.expect("one result") } else { types[3] };
+                // `tile.buffer_store_vN_f32` stores its dwords as the 16-bit forms do.
                 let dwords = match data {
-                    Type::Vec(Scalar::F16 | Scalar::BF16, _) => data.dwords(),
+                    Type::Vec(Scalar::F16 | Scalar::BF16 | Scalar::F32, _) => data.dwords(),
                     Type::Vec(_, _) if loads => data.dwords(),
                     _ => return Err(mismatch()),
                 };
                 let declared = self.int(op, "dwords")?;
                 if !matches!(dwords, 1 | 2 | 4) || declared.is_some_and(|d| d != dwords as i64) || (loads && declared.is_none() && dwords != 4) {
                     return Err(malformed(format!("a buffer access of {dwords} dwords declared as {declared:?}")));
+                }
+            }
+            // LDS addresses are i64, as the LLVM lowering's `ptrtoint` makes them.
+            SmemAddrOf => {
+                arity(1, 1)?;
+                if !matches!(types[0], Type::Smem(..)) || *res.expect("one result") != Type::Scalar(Scalar::I64) {
+                    return Err(mismatch());
+                }
+            }
+            SmemPtrAdd => {
+                let i64t = Type::Scalar(Scalar::I64);
+                if *same(2)? != i64t {
+                    return Err(mismatch());
+                }
+            }
+            // `raw.ptr.buffer.load.lds` of 4 or 16 bytes per lane; `aux` is its
+            // cache policy (sc0 1, nt 2, sc1 16). `uniformity` checks the
+            // resource and soffset.
+            BufferLoadLds => {
+                arity(0, 4)?;
+                if *types[0] != rsrc || *types[1] != Type::Scalar(Scalar::I64) || *types[2] != i32t || *types[3] != i32t {
+                    return Err(mismatch());
+                }
+                match self.int(op, "dwords")? {
+                    Some(1 | 4) => {}
+                    other => return Err(unsupported(format!("an LDS DMA load of {other:?} dwords per lane"))),
+                }
+                match self.int(op, "aux")? {
+                    None => {}
+                    Some(aux) if aux & !(1 | 2 | 16) == 0 => {}
+                    Some(aux) => return Err(unsupported(format!("LDS DMA cache policy {aux:#x}"))),
+                }
+            }
+            // `global.load.lds` from `ptr + byte_offset` (an i8 GEP).
+            GlobalLoadLds => {
+                arity(0, 3)?;
+                if !matches!(types[0], Type::Ptr(_)) || *types[1] != i32t || *types[2] != Type::Scalar(Scalar::I64) {
+                    return Err(mismatch());
+                }
+                match self.int(op, "size_bytes")? {
+                    Some(4 | 16) => {}
+                    other => return Err(unsupported(format!("an LDS DMA load of {other:?} bytes per lane"))),
+                }
+                match self.int(op, "aux")? {
+                    None => {}
+                    Some(aux) if aux & !(1 | 2 | 16) == 0 => {}
+                    Some(aux) => return Err(unsupported(format!("LDS DMA cache policy {aux:#x}"))),
                 }
             }
             DsSwizzleXor => {
@@ -555,7 +606,9 @@ impl Checker<'_> {
                 }
             }
             Mma => {
-                arity(1, 3)?;
+                // gfx950's block-scaled atoms also take the A and B scales.
+                let scaled = self.str(op, "op_id")?.is_some_and(crate::target::gfx9::mfma::is_scaled);
+                arity(1, if scaled { 5 } else { 3 })?;
                 // C and D as the gfx11 WMMA intrinsics take them; A and B in
                 // their register type or, as the LLVM lowering reinterprets
                 // them, the same bits of the instruction's element type
@@ -584,13 +637,22 @@ impl Checker<'_> {
                     return Err(invalid(format!("the LLVM lowering reads the first lane of an i32 or i64, not {:?}", types[0])));
                 }
             }
+            // An LDS read written as inline asm: an i32 address, an integer result of its size.
+            InlineAsmIdentity if crate::target::gfx9::lds_dma::asm_lds_read(op).is_some() => {
+                arity(1, 1)?;
+                let dwords = crate::target::gfx9::lds_dma::asm_lds_read(op).map_or(0, |(d, _)| d as u32);
+                let t = res.expect("one result");
+                if *types[0] != i32t || !matches!(t, Type::Scalar(Scalar::I32) | Type::Vec(Scalar::I32, _)) || t.dwords() != dwords {
+                    return Err(mismatch());
+                }
+            }
             InlineAsmIdentity => {
                 arity(1, 1)?;
                 if res != Some(types[0]) || !matches!(types[0], Type::Scalar(s) if *s != Scalar::I1) && !matches!(types[0], Type::Ptr(_)) {
                     return Err(mismatch());
                 }
             }
-            KernArg | GLoad | GStore | GAtomicAddF32 | GAtomicAdd | LLoad | LStore | LAtomicAdd => {
+            KernArg | GLoad | GStore | GAtomicAddF32 | GAtomicAdd | LLoad | LStore | LAtomicAdd | LdsReadTr => {
                 return Err(malformed("an internal op in the input"));
             }
             Fneg | Fdiv => {
@@ -642,6 +704,34 @@ impl Checker<'_> {
                 };
                 if !ok {
                     return Err(mismatch());
+                }
+            }
+            VecAnd => {
+                if !matches!(same(2)?, Type::Vec(Scalar::I32, _)) {
+                    return Err(mismatch());
+                }
+            }
+            // An i32 flag of a global array; the reference lowering requires
+            // the scope, and the store's ordering, from these values.
+            FlagWaitEq | FlagStore => {
+                arity(0, 3)?;
+                let i32t = Type::Scalar(Scalar::I32);
+                if !matches!(types[0], Type::Ptr(Scalar::I32)) || *types[1] != i32t || *types[2] != i32t {
+                    return Err(mismatch());
+                }
+                if !matches!(self.str(op, "scope")?, Some("workgroup" | "agent" | "system")) {
+                    return Err(invalid(format!("{:?} scope {:?}", op.kind, op.attr("scope"))));
+                }
+                if op.kind == FlagStore && !matches!(self.str(op, "ordering")?, Some("monotonic" | "release" | "seq_cst")) {
+                    return Err(invalid(format!("memref.global_flag_store ordering {:?}", op.attr("ordering"))));
+                }
+            }
+            WaitAsyncCnt => {
+                arity(0, 0)?;
+                match self.int(op, "n")? {
+                    None => {}
+                    Some(n) if (0..=u16::MAX as i64).contains(&n) => {}
+                    Some(n) => return Err(malformed(format!("n {n} is not a u16"))),
                 }
             }
             VecSplat => {
@@ -701,7 +791,8 @@ impl Checker<'_> {
             GlobalAtomicAdd => {
                 arity(1, 3)?;
                 let value = types[2];
-                if !matches!(types[0], Type::Ptr(_)) || !index(types[1]) || !matches!(value, Type::Scalar(_)) || res != Some(value) {
+                let packed = *value == Type::Vec(Scalar::F16, 2);
+                if !matches!(types[0], Type::Ptr(_)) || !index(types[1]) || !(matches!(value, Type::Scalar(_)) || packed) || res != Some(value) {
                     return Err(mismatch());
                 }
                 self.str(op, "ordering")?;
@@ -784,11 +875,61 @@ impl Checker<'_> {
                     }
                 }
             }
+            // LLVM defines strategies 0 to 3 and has no meaning for others.
+            IglpOpt => {
+                arity(0, 0)?;
+                match self.int(op, "level")? {
+                    Some(0..=3) => {}
+                    other => return Err(malformed(format!("level {other:?} names no strategy"))),
+                }
+            }
             // The lowering indexes a rank-2 allocation and reads four halves.
             SmemLoadV4 => {
                 arity(1, 3)?;
                 let Type::Smem(_, shape) = types[0] else { return Err(mismatch()) };
                 if shape.len() != 2 || *types[1] != i32t || *types[2] != i32t || *res.expect("one result") != Type::Vec(Scalar::F16, 4) {
+                    return Err(mismatch());
+                }
+            }
+            Permlane32Swap => {
+                arity(2, 2)?;
+                let results = op.results.iter().map(|&v| self.ty(v)).collect::<Result<Vec<_>, _>>()?;
+                if *types[0] != i32t || *types[1] != i32t || results.iter().any(|t| **t != i32t) {
+                    return Err(mismatch());
+                }
+            }
+            // `llvm.amdgcn.readlane` of an i32 or f32.
+            ReadLane => {
+                arity(1, 2)?;
+                if !matches!(types[0], Type::Scalar(Scalar::I32 | Scalar::F32)) || *types[1] != i32t || res != Some(types[0]) {
+                    return Err(mismatch());
+                }
+            }
+            CvtFp8ToF32 | CvtBf8ToF32 | CvtPkF32Fp8 | CvtPkF32Bf8 | CvtF32ToFp8 | CvtF32ToBf8 | CvtPkFp8F32 | CvtPkBf8F32 => {
+                arity(1, 1)?;
+                let e = if matches!(op.kind, CvtFp8ToF32 | CvtPkF32Fp8 | CvtF32ToFp8 | CvtPkFp8F32) { Scalar::FP8E4M3 } else { Scalar::BF8E5M2 };
+                let (from, to) = match op.kind {
+                    CvtFp8ToF32 | CvtBf8ToF32 => (Type::Scalar(e), f32t.clone()),
+                    CvtPkF32Fp8 | CvtPkF32Bf8 => (Type::Vec(e, 4), Type::Vec(Scalar::F32, 4)),
+                    CvtF32ToFp8 | CvtF32ToBf8 => (f32t.clone(), Type::Scalar(e)),
+                    _ => (Type::Vec(Scalar::F32, 4), Type::Vec(e, 4)),
+                };
+                if *types[0] != from || *res.expect("one result") != to {
+                    return Err(mismatch());
+                }
+            }
+            // The LLVM lowering indexes the allocation (a GEP of its element
+            // type) and reads 64 bits of 16- or 8-bit elements there.
+            DsReadTr16 | DsReadTr8 => {
+                let Some(Type::Smem(elem, shape)) = types.first().copied() else { return Err(mismatch()) };
+                arity(1, 1 + shape.len())?;
+                let bytes = if op.kind == DsReadTr16 { 2 } else { 1 };
+                let lanes_ok = match res.expect("one result") {
+                    Type::Vec(e, 4) if op.kind == DsReadTr16 => e.bytes() == 2,
+                    Type::Vec(e, 8) if op.kind == DsReadTr8 => e.bytes() == 1 && *e != Scalar::I1,
+                    _ => false,
+                };
+                if types[1..].iter().any(|t| **t != i32t) || elem.bytes() != bytes || !lanes_ok {
                     return Err(mismatch());
                 }
             }

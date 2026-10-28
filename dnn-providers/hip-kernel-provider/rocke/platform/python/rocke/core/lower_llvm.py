@@ -4612,7 +4612,7 @@ class _Lowerer:
             ("a", a, atom.a_frag_len),
             ("b", b, atom.b_frag_len),
         ):
-            if not isinstance(v.type, VectorType) or v.type.elem is not TF32:
+            if not isinstance(v.type, VectorType) or v.type.elem != TF32:
                 raise ValueError(
                     f"tile.mma {atom.op_id}: BF16x3 emulation needs a TF32 "
                     f"vector for operand {name}, got {v.type.name}; wrap fp32 "
@@ -7865,7 +7865,7 @@ class _Lowerer:
         if waves_per_eu is not None:
             lo, hi = (
                 waves_per_eu
-                if isinstance(waves_per_eu, tuple)
+                if isinstance(waves_per_eu, (tuple, list))
                 else (waves_per_eu, waves_per_eu)
             )
             attr_parts.append(f'"amdgpu-waves-per-eu"="{int(lo)},{int(hi)}"')

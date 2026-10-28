@@ -901,7 +901,7 @@ impl Shared {
         let _guard = FailOnPanic(self);
         self.scan_all(src)?;
         let w = self.walk()?;
-        let Header { name, max_workgroup_size, waves_per_eu, params, mut values, mut names } = header;
+        let Header { name, max_workgroup_size, waves_per_eu, agpr_limit, params, mut values, mut names } = header;
         let n = self.chunks();
         values.reserve_exact(w.vbase[n + 1] as usize - values.len());
         names.reserve_exact(w.nbase[n + 1] - names.len());
@@ -970,7 +970,7 @@ impl Shared {
         if !stack.is_empty() || values.len() != w.vbase[n + 1] as usize {
             return None;
         }
-        Some(Kernel { name, max_workgroup_size, waves_per_eu, wave: 32, vgpr_limit: None, params, body: body?, values, names })
+        Some(Kernel { name, max_workgroup_size, waves_per_eu, wave: 32, vgpr_limit: None, agpr_limit, params, body: body?, values, names })
     }
 }
 
@@ -979,6 +979,7 @@ pub(super) struct Header {
     name: String,
     max_workgroup_size: u32,
     waves_per_eu: (u32, u32),
+    agpr_limit: Option<u32>,
     params: Vec<Param>,
     values: Vec<ValueDef>,
     names: String,
@@ -997,6 +998,7 @@ pub(super) fn header(text: &str) -> Option<(Header, Info, usize)> {
         name: prologue.name,
         max_workgroup_size: prologue.max_workgroup_size,
         waves_per_eu: prologue.waves_per_eu,
+        agpr_limit: prologue.agpr_limit,
         params: Vec::with_capacity(prologue.params.len()),
         values: Vec::new(),
         names: String::new(),

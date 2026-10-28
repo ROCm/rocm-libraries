@@ -197,10 +197,18 @@ fn may_pass(x: &MInst, k: &MInst) -> bool {
 /// physical registers after wait insertion, which it leaves valid because no
 /// instruction moves past a wait; the hazard and ALU-delay passes follow it.
 pub fn form_pairs(f: &mut MFunc) {
+    form_pairs_with(f, &mut Vec::new());
+}
+
+/// `form_pairs`, building blocks in `spare`, which comes and goes emptied
+/// (`post::expand_pseudos_with`).
+pub(super) fn form_pairs_with(f: &mut MFunc, spare: &mut Vec<MInst>) {
     for block in f.blocks.iter_mut() {
-        let insts = std::mem::take(&mut block.insts);
+        let mut insts = std::mem::take(&mut block.insts);
         let mut moved = vec![false; insts.len()];
-        let mut out: Vec<MInst> = Vec::with_capacity(insts.len());
+        let mut out: Vec<MInst> = std::mem::take(spare);
+        out.clear();
+        out.reserve(insts.len());
         for i in 0..insts.len() {
             if moved[i] {
                 continue;
@@ -236,6 +244,8 @@ pub fn form_pairs(f: &mut MFunc) {
             }
         }
         block.insts = out;
+        insts.clear();
+        *spare = insts;
     }
 }
 

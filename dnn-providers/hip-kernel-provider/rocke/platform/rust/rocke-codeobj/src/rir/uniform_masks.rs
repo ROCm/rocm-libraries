@@ -163,9 +163,8 @@ pub(crate) fn reuse_masks(f: &mut MFunc) -> usize {
             }
             if !insts[i].defs.is_empty() {
                 let inst = &insts[i];
-                let (stale, live): (Vec<_>, Vec<_>) = open.drain(..).partition(|e| redefines(inst, &e.key));
-                open = live;
-                for e in stale {
+                // In place: the stale ones in order, the rest kept in order.
+                for e in open.extract_if(.., |e| redefines(inst, &e.key)) {
                     dropped += settle(e, &mut dead, &mut renamed, &guards);
                 }
             }

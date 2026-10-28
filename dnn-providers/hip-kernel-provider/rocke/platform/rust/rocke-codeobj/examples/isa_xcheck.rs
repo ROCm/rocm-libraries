@@ -353,6 +353,8 @@ mod gfx950 {
             Imm::Off2x8 => vec![0x0201, 0xff00],
             Imm::Off13s => vec![0, 8, 4095, -8, -4096],
             Imm::Off12 => vec![0, 2, 4095],
+            // The offset, then each cache policy bit (sc0, nt, sc1) and all of them.
+            Imm::Off12cpol => vec![0, 4095, 1 << 12, 2 << 12, 4 << 12, 7 << 12 | 16],
             // quad_perm with bound_ctrl, row_mirror, row_half_mirror, row_ror:8, row_shr:1,
             // row_bcast:15/31, wave_shr:1, and row_xmask:1 (gfx10+, refused).
             Imm::Dpp16 => vec![0x00ff_08b1, 0x00ff_0140, 0x00ff_0141, 0x00ff_0128, 0x00ff_0111, 0x00ff_0142, 0x00ff_0143, 0x00ff_0138, 0x00ff_0161],

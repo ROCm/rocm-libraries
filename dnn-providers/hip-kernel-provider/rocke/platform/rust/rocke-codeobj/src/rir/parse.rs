@@ -93,6 +93,7 @@ fn parse_scalar(text: &str) -> Result<Scalar, CompileError> {
         "fp8e4m3" => Ok(Scalar::FP8E4M3),
         "bf8e5m2" => Ok(Scalar::BF8E5M2),
         "f64" => Ok(Scalar::F64),
+        "tf32" => Ok(Scalar::TF32),
         other => Err(err(format!("unsupported element type {other:?}"))),
     }
 }
@@ -110,6 +111,7 @@ fn scalar_of(text: &[u8]) -> Option<Scalar> {
         b"fp8e4m3" => Scalar::FP8E4M3,
         b"bf8e5m2" => Scalar::BF8E5M2,
         b"f64" => Scalar::F64,
+        b"tf32" => Scalar::TF32,
         _ => return None,
     })
 }
@@ -835,6 +837,7 @@ pub(super) struct Prologue<'a> {
     pub name: String,
     pub max_workgroup_size: u32,
     pub waves_per_eu: (u32, u32),
+    pub agpr_limit: Option<u32>,
     /// Parameter names without the `%`, their types, and whether they are
     /// `noalias` and `readonly`.
     pub params: Vec<(&'a str, Type, bool, bool)>,
@@ -872,6 +875,7 @@ pub(super) fn prologue<'a>(lines: &mut Lines<'a>) -> Result<Prologue<'a>, Compil
 
     let mut max_workgroup_size = 1024u32;
     let mut waves_per_eu = (0u32, 0u32);
+    let mut agpr_limit = None;
     if let Some(attrs_line) = lines.peek().filter(|line| line.starts_with("attrs ")) {
         lines.next()?;
         let mut scanner = Scanner::new(&attrs_line["attrs ".len()..]);
@@ -880,6 +884,9 @@ pub(super) fn prologue<'a>(lines: &mut Lines<'a>) -> Result<Prologue<'a>, Compil
                 ("max_workgroup_size", Attr::Int(size)) => max_workgroup_size = u32::try_from(size).unwrap_or(0),
                 // Selects LLVM's machine scheduler only; it carries no semantics.
                 ("scheduler_strategy", Attr::Str(_)) => {}
+                // Tells the LLVM lowering to scope LDS accesses per allocation, so that a read waits only
+                // for the LDS DMA into its own allocation; the gfx950 waitcnt pass's LDS tags always do.
+                ("lds_alias_scopes", Attr::Bool(_)) => {}
                 // An occupancy hint, `n` or `[min, max]` waves per SIMD.
                 ("waves_per_eu", Attr::Int(n)) if (0..=16).contains(&n) => waves_per_eu = (n as u32, n as u32),
                 ("waves_per_eu", Attr::List(range)) => match range[..] {
@@ -887,6 +894,11 @@ pub(super) fn prologue<'a>(lines: &mut Lines<'a>) -> Result<Prologue<'a>, Compil
                         waves_per_eu = (lo as u32, hi as u32)
                     }
                     _ => return Err(err(format!("malformed kernel attribute waves_per_eu {range:?}"))),
+                },
+                // `[min, max]` AGPRs (LLVM's `amdgpu-agpr-alloc`); `[0, 0]`: none.
+                ("agpr_alloc", Attr::List(range)) => match range[..] {
+                    [Attr::Int(0), Attr::Int(0)] => agpr_limit = Some(0),
+                    _ => return Err(err(format!("kernel attribute agpr_alloc {range:?} is not supported by the direct backend"))),
                 },
                 (other, _) => {
                     return Err(err(format!(
@@ -918,7 +930,7 @@ pub(super) fn prologue<'a>(lines: &mut Lines<'a>) -> Result<Prologue<'a>, Compil
         }
         params.push((pname, ty, noalias, readonly));
     }
-    Ok(Prologue { name, max_workgroup_size, waves_per_eu, params })
+    Ok(Prologue { name, max_workgroup_size, waves_per_eu, agpr_limit, params })
 }
 
 /// One definition of a name: the value, the scope it was made in, the
@@ -1091,8 +1103,8 @@ impl Names {
     }
 }
 
-/// An op whose regions are being parsed: its index in the enclosing region,
-/// and where its pending results start in `Parser::pending`.
+/// An op whose regions are being parsed: its index in `Parser::ops`, and
+/// where its pending results start in `Parser::pending`.
 struct OpenOp<'a> {
     index: usize,
     opname: &'a str,
@@ -1106,8 +1118,11 @@ struct Parser<'a> {
     names: Names,
     /// Result names and types of the ops being parsed, innermost last.
     pending: Vec<(&'a str, Type)>,
-    /// Regions being filled, innermost last; `open[i]` owns `regions[i + 1]`.
-    regions: Vec<Region>,
+    /// The ops of the regions being filled, each region's from its start in
+    /// `starts` to the next one's, innermost last; `open[i]` owns the region
+    /// from `starts[i + 1]`. A closed region takes its ops out.
+    ops: Vec<Op>,
+    starts: Vec<usize>,
     open: Vec<OpenOp<'a>>,
     consts: ConstTable<'a>,
     /// Repeated constants are bound to the earlier one (see `hashcons`).
@@ -1130,7 +1145,7 @@ impl<'a> Parser<'a> {
             return Err(err(format!("expected 'region @<label> {{', got {header:?}")));
         }
         self.names.enter();
-        self.regions.push(Region::default());
+        self.starts.push(self.ops.len());
         Ok(())
     }
 
@@ -1143,12 +1158,12 @@ impl<'a> Parser<'a> {
                 Some("}") => {
                     lines.next()?;
                     self.names.leave();
-                    let region = self.regions.pop().expect("an open region");
+                    let start = self.starts.pop().expect("an open region");
                     let Some(owner) = self.open.last() else {
-                        return Ok(region);
+                        return Ok(Region { ops: std::mem::take(&mut self.ops) });
                     };
-                    let parent = self.regions.last_mut().expect("the owner's region");
-                    parent.ops[owner.index].regions.push(region);
+                    let region = Region { ops: self.ops.drain(start..).collect() };
+                    self.ops[owner.index].regions.push(region);
                     if lines.region_follows() {
                         self.open_region(lines)?;
                     } else {
@@ -1187,7 +1202,7 @@ impl<'a> Parser<'a> {
         }
         let op = self.op(line, masks)?;
         self.finish(op)?;
-        let value = self.regions.last().and_then(|r| r.ops.last()).map(|op| op.results[0]).expect("the constant");
+        let value = self.ops.last().map(|op| op.results[0]).expect("the constant");
         self.consts.insert(key, hash, value, self.names.scope());
         Ok(())
     }
@@ -1218,14 +1233,13 @@ impl<'a> Parser<'a> {
                 op.block_args.push(self.names.define(&name, ty));
             }
         }
-        let region = self.regions.last_mut().expect("an open region");
-        region.ops.push(op);
-        Ok(OpenOp { index: region.ops.len() - 1, opname: scanned.opname, pending, results })
+        self.ops.push(op);
+        Ok(OpenOp { index: self.ops.len() - 1, opname: scanned.opname, pending, results })
     }
 
     /// Ends the op: its scope closes and its results are defined.
     fn finish(&mut self, open: OpenOp<'a>) -> Result<(), CompileError> {
-        let op = &mut self.regions.last_mut().expect("an open region").ops[open.index];
+        let op = &mut self.ops[open.index];
         if op.kind == OpKind::For {
             self.names.leave();
         }
@@ -1253,7 +1267,9 @@ fn parse_sequential(text: &str, hashcons: bool) -> Result<Kernel, CompileError> 
     let mut parser = Parser {
         names: Names::new(text.len()),
         pending: Vec::new(),
-        regions: Vec::new(),
+        // About one op per 48 bytes, at most, when lines are short.
+        ops: Vec::with_capacity(text.len() / 48),
+        starts: Vec::new(),
         open: Vec::new(),
         consts: ConstTable::new(),
         hashcons,
@@ -1278,6 +1294,7 @@ fn parse_sequential(text: &str, hashcons: bool) -> Result<Kernel, CompileError> 
         waves_per_eu: prologue.waves_per_eu,
         wave: 32,
         vgpr_limit: None,
+        agpr_limit: prologue.agpr_limit,
         params,
         body,
         values: parser.names.values,
@@ -1560,5 +1577,235 @@ mod tests {
                 regions.append(&mut op.regions);
             }
         }
+    }
+
+    /// The sequential parser before its regions shared one op stack: the
+    /// reference it is checked against.
+    struct ParserReference<'a> {
+        names: Names,
+        /// Result names and types of the ops being parsed, innermost last.
+        pending: Vec<(&'a str, Type)>,
+        /// Regions being filled, innermost last; `open[i]` owns `regions[i + 1]`.
+        regions: Vec<Region>,
+        open: Vec<OpenOp<'a>>,
+        consts: ConstTable<'a>,
+        /// Repeated constants are bound to the earlier one (see `hashcons`).
+        hashcons: bool,
+        /// Vector level of the line scans (`scan`).
+        level: Level,
+    }
+
+    impl<'a> ParserReference<'a> {
+        fn open_region(&mut self, lines: &mut Lines<'a>) -> Result<(), CompileError> {
+            let header = lines.next()?;
+            if !(header.starts_with("region @") && header.ends_with('{')) {
+                return Err(err(format!("expected 'region @<label> {{', got {header:?}")));
+            }
+            self.names.enter();
+            self.regions.push(Region::default());
+            Ok(())
+        }
+
+        /// The region at the bottom of the stack: the kernel body.
+        fn body(&mut self, lines: &mut Lines<'a>) -> Result<Region, CompileError> {
+            self.open_region(lines)?;
+            loop {
+                match lines.peek() {
+                    None => return Err(err("unterminated region")),
+                    Some("}") => {
+                        lines.next()?;
+                        self.names.leave();
+                        let region = self.regions.pop().expect("an open region");
+                        let Some(owner) = self.open.last() else {
+                            return Ok(region);
+                        };
+                        let parent = self.regions.last_mut().expect("the owner's region");
+                        parent.ops[owner.index].regions.push(region);
+                        if lines.region_follows() {
+                            self.open_region(lines)?;
+                        } else {
+                            let owner = self.open.pop().expect("an open op");
+                            self.finish(owner)?;
+                        }
+                    }
+                    Some(_) => {
+                        let line = lines.next()?;
+                        let masks = super::super::scan_line::masks(self.level, line);
+                        let constant = if self.hashcons { const_key_with(line, masks.as_ref()) } else { None };
+                        if let Some((name, key)) = constant.filter(|_| shareable_before(lines.peek())) {
+                            self.constant(line, masks.as_ref(), name, key)?;
+                            continue;
+                        }
+                        let op = self.op(line, masks.as_ref())?;
+                        if lines.region_follows() {
+                            self.open.push(op);
+                            self.open_region(lines)?;
+                        } else {
+                            self.finish(op)?;
+                        }
+                    }
+                }
+            }
+        }
+
+        /// A constant line without regions: bound to the visible constant with the
+        /// same key (see `hashcons`), or parsed and entered as one.
+        fn constant(&mut self, line: &'a str, masks: Option<&Masks>, name: &'a str, key: &'a str) -> Result<(), CompileError> {
+            let hash = key_hash(key);
+            let names = &self.names;
+            if let Some(value) = self.consts.lookup(key, hash, |scope| names.is_open(scope)) {
+                self.names.alias(name, value);
+                return Ok(());
+            }
+            let op = self.op(line, masks)?;
+            self.finish(op)?;
+            let value = self.regions.last().and_then(|r| r.ops.last()).map(|op| op.results[0]).expect("the constant");
+            self.consts.insert(key, hash, value, self.names.scope());
+            Ok(())
+        }
+
+        /// Parses an op line into the innermost region. The loop body sees the
+        /// induction variable and iteration arguments; the results become visible
+        /// after the op (`finish`).
+        fn op(&mut self, line: &'a str, masks: Option<&Masks>) -> Result<OpenOp<'a>, CompileError> {
+            let pending = self.pending.len();
+            let mut operands = Operands::new();
+            let names = &self.names;
+            let lookup = |name, opname| names.lookup(name, opname);
+            let scanned = scan_op(line, masks, &mut operands, &mut self.pending, lookup, MAX_ATTR_NESTING)?;
+            let results = self.pending.len() - pending;
+            let mut op = Op {
+                kind: scanned.kind,
+                results: Results::new(),
+                operands,
+                attrs: scanned.attrs,
+                regions: Vec::new(),
+                block_args: Vec::new(),
+            };
+            if op.kind == OpKind::For {
+                self.names.enter();
+                let (iv_name, iter_args) = for_args(&op, results)?;
+                op.block_args.push(self.names.define(&iv_name, Type::Scalar(Scalar::I32)));
+                for (name, ty) in iter_args {
+                    op.block_args.push(self.names.define(&name, ty));
+                }
+            }
+            let region = self.regions.last_mut().expect("an open region");
+            region.ops.push(op);
+            Ok(OpenOp { index: region.ops.len() - 1, opname: scanned.opname, pending, results })
+        }
+
+        /// Ends the op: its scope closes and its results are defined.
+        fn finish(&mut self, open: OpenOp<'a>) -> Result<(), CompileError> {
+            let op = &mut self.regions.last_mut().expect("an open region").ops[open.index];
+            if op.kind == OpKind::For {
+                self.names.leave();
+            }
+            for i in open.pending..open.pending + open.results {
+                let (name, ty) = std::mem::replace(&mut self.pending[i], ("", Type::Scalar(Scalar::I1)));
+                op.results.push(self.names.define(name, ty));
+            }
+            self.pending.truncate(open.pending);
+            let expected = expected_regions(op.kind);
+            if op.regions.len() != expected {
+                return Err(err(format!(
+                    "{} expects {expected} region(s), found {}",
+                    open.opname,
+                    op.regions.len()
+                )));
+            }
+            Ok(())
+        }
+    }
+
+    fn parse_sequential_reference(text: &str, hashcons: bool) -> Result<Kernel, CompileError> {
+        let level = Level::detect();
+        let mut lines = Lines::new(text, 0, text.len()).scanning(level);
+        let prologue = prologue(&mut lines)?;
+        let mut parser = ParserReference {
+            names: Names::new(text.len()),
+            pending: Vec::new(),
+            regions: Vec::new(),
+            open: Vec::new(),
+            consts: ConstTable::new(),
+            hashcons,
+            level,
+        };
+        parser.names.enter();
+        let mut params = Vec::with_capacity(prologue.params.len());
+        for (pname, ty, noalias, readonly) in prologue.params {
+            let value = parser.names.define(&format!("%{pname}"), ty.clone());
+            params.push(Param { value, name: pname.to_string(), ty, noalias, readonly });
+        }
+        let body = parser.body(&mut lines)?;
+        if lines.next()? != "}" {
+            return Err(err("expected closing kernel '}'"));
+        }
+        if lines.peek().is_some() {
+            return Err(err("trailing text after kernel"));
+        }
+        Ok(Kernel {
+            name: prologue.name,
+            max_workgroup_size: prologue.max_workgroup_size,
+            waves_per_eu: prologue.waves_per_eu,
+            wave: 32,
+            vgpr_limit: None,
+            agpr_limit: prologue.agpr_limit,
+            params,
+            body,
+            values: parser.names.values,
+            names: parser.names.names,
+        })
+    }
+
+    /// Every `.ir` file under `ROCKE_PARSER_CHECK_DIR`, when it is set (the
+    /// corpus, a census sample).
+    fn parser_check_texts() -> Vec<String> {
+        let Some(dir) = std::env::var_os("ROCKE_PARSER_CHECK_DIR") else {
+            return Vec::new();
+        };
+        let mut paths: Vec<_> = std::fs::read_dir(dir).expect("reads the directory").filter_map(|e| e.ok().map(|e| e.path())).collect();
+        paths.retain(|p| p.extension().is_some_and(|x| x == "ir"));
+        paths.sort();
+        paths.iter().map(|p| std::fs::read_to_string(p).expect("reads the file")).collect()
+    }
+
+    #[test]
+    fn sequential_parser_builds_what_its_reference_built() {
+        let nested = super::super::parse_par::tests::kernel(4);
+        let lines: Vec<&str> = nested.lines().collect();
+        let mut texts = vec![super::super::parse_par::tests::kernel(1), include_str!("../gfx1151_wmma_gemm.ir").to_string()];
+        for i in 0..lines.len() {
+            let mut deleted = lines.clone();
+            deleted.remove(i);
+            texts.push(deleted.join("\n"));
+            let mut duplicated = lines.clone();
+            duplicated.insert(i, lines[i]);
+            texts.push(duplicated.join("\n"));
+            if i + 1 < lines.len() {
+                let mut swapped = lines.clone();
+                swapped.swap(i, i + 1);
+                texts.push(swapped.join("\n"));
+            }
+        }
+        texts.push(nested);
+        let external = parser_check_texts();
+        let (mut accepted, mut rejected) = (0, 0);
+        for (k, text) in texts.iter().chain(&external).enumerate() {
+            for hashcons in [true, false] {
+                match (parse_sequential(text, hashcons), parse_sequential_reference(text, hashcons)) {
+                    (Ok(a), Ok(b)) => {
+                        assert_eq!(format!("{a:?}"), format!("{b:?}"), "text {k}");
+                        accepted += 1;
+                    }
+                    (Err(a), Err(b)) => {
+                        assert_eq!((a.kind, &a.message), (b.kind, &b.message), "text {k}");
+                        rejected += 1;
+                    }
+                    _ => panic!("text {k}: one parser accepts what the other rejects"),
+                }
+            }
+        }
+        assert!(accepted > 2 * external.len() && rejected > 0, "{accepted} accepted, {rejected} rejected");
     }
 }

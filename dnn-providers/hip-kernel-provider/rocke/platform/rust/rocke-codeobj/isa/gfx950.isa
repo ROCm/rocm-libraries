@@ -69,6 +69,8 @@ modset opsel_dst "op_sel: the high half of the destination" bits=7
 modset saddr "global address through saddr: SGPR base plus 32-bit VGPR offset" bits=8
 modset mix "v_fma_mix: f16 sources (op_sel_hi)" bits=9,10,11
 modset glc "sc0: an atomic returns the old value" bits=12
+modset sc1 "sc1: coherent at agent scope (target/gfx9/cpol.rs M_SC1)" bits=13
+modset nt "nt: nontemporal, streaming (target/gfx9/cpol.rs M_NT)" bits=14
 
 [fmt]
 # Rust formats (mir.rs Fmt) and their gfx9 encodings; vop3: opcode offset of the VOP3 form.
@@ -152,6 +154,7 @@ imm dpp16 "DPP control: bits 31:8 of the DPP word (gfx9 controls only; no fi bit
 imm pksel "lane selects of a packed 32-bit instruction: op_sel in bits 2:0, the op_sel_hi bits cleared in 6:4 (0: each lane reads its own half)"
 imm cpol "cache policy: sc0 in bit 0, sc1 in bit 1"
 imm mai "MFMA controls: cbsz in bits 2:0, abid in bits 6:3, blgp in bits 9:7"
+imm off12cpol "12-bit unsigned byte offset in bits 11:0, then the cache policy: sc0 in bit 12, nt in bit 13, sc1 in bit 14"
 form plain "the format's general encoding"
 form noshort "a VOP2 opcode always encoded as VOP3 (its lane mask is explicit)"
 form dpp16 "VOP1 with a DPP source: imm holds bits 31:8 of the DPP word"
@@ -171,9 +174,11 @@ form pk32 "VOP3P on two 32-bit lanes: register sources at even registers, imm ho
 form swap "VOP1 exchanging lanes of two VGPRs, both read and written: defs and uses are (vdst, vsrc)"
 form nodata "MUBUF cache control with no address or data: imm holds the cache policy"
 form mai "VOP3P-MAI: AGPR vdst and src2 set acc_cd, an AGPR src0 or src1 its acc bit; imm holds the MFMA controls"
+form mai_scale "VOP3PX2: v_mfma_ld_scale_b32 reading the scale pair, then the MFMA as in mai (abid refused)"
 form acc_read "VOP3P v_accvgpr_read: src0 is an AGPR, encoded by its index"
 form acc_write "VOP3P v_accvgpr_write: vdst is an AGPR, encoded by its index"
 form acc_mov "VOP1 v_accvgpr_mov: vdst is an AGPR encoded by its index, src0 an AGPR encoded as 256 + index"
+form lds "load into LDS (MUBUF with the lds bit, GLOBAL's global_load_lds): no data register, M0 the LDS address; imm holds the offset and the cache policy"
 
 [unit]
 # Execution units.
@@ -207,6 +212,7 @@ lat cache "cache control (buffer_inv, buffer_wbl2): no result and no counter the
 lat mfma_xdl2 "MFMA on the XDL pipe, 2 passes" sched=20 delay=other
 lat mfma_xdl4 "MFMA on the XDL pipe, 4 passes" sched=32 delay=other
 lat mfma_xdl8 "MFMA on the XDL pipe, 8 passes" sched=48 delay=other
+lat mfma_xdl16 "MFMA on the XDL pipe, 16 passes (the block-scaled f8f6f4 form with fp8 or bf8 operands; the rules take 16 for every format)" sched=80 delay=other
 lat mfma_smfma8 "MFMA off the XDL pipe (f32 inputs), 8 passes" sched=40 delay=other
 lat mfma_smfma16 "MFMA off the XDL pipe (f32 inputs), 16 passes" sched=72 delay=other
 lat mfma_dgemm4 "f64 MFMA, 4x4 blocks (DGEMM)" sched=36 delay=other
@@ -499,19 +505,19 @@ inst   DsLoadU8          ds_read_u8                DS      0x3a   flags=LDS d=vd
 inst   DsStoreB8         ds_write_b8               DS      0x1e   flags=LDS u=addr:v1,data0:v1 imm=off16 imp=use:exec unit=LDS lat=lds
 inst   DsStoreB8D16Hi    ds_write_b8_d16_hi        DS      0x54   flags=LDS u=addr:v1,data0:v1 imm=off16 imp=use:exec unit=LDS lat=lds
 group GLOBAL
-inst   GLoadU16          global_load_ushort        GLOBAL  0x12   flags=VMEM_LOAD d=vdst:v1 u=vaddr:v2 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_load
-inst   GLoadB32          global_load_dword         GLOBAL  0x14   flags=VMEM_LOAD d=vdst:v1 u=vaddr:v2 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_load
-inst   GLoadB64          global_load_dwordx2       GLOBAL  0x15   flags=VMEM_LOAD d=vdst:v2 u=vaddr:v2 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_load
-inst   GLoadB96          global_load_dwordx3       GLOBAL  0x16   flags=VMEM_LOAD d=vdst:v3 u=vaddr:v2 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_load
-inst   GLoadB128         global_load_dwordx4       GLOBAL  0x17   flags=VMEM_LOAD d=vdst:v4 u=vaddr:v2 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_load
-inst   GStoreB16         global_store_short        GLOBAL  0x1a   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
-inst   GStoreB32         global_store_dword        GLOBAL  0x1c   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
-inst   GStoreB64         global_store_dwordx2      GLOBAL  0x1d   flags=VMEM_STORE u=vaddr:v2,vdata:v2 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
-inst   GStoreB96         global_store_dwordx3      GLOBAL  0x1e   flags=VMEM_STORE u=vaddr:v2,vdata:v3 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
-inst   GStoreB128        global_store_dwordx4      GLOBAL  0x1f   flags=VMEM_STORE u=vaddr:v2,vdata:v4 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
-inst   GLoadD16B16       global_load_short_d16     GLOBAL  0x24   flags=VMEM_LOAD|TIED d=vdst:v1 u=vaddr:v2,vdst:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_load
-inst   GLoadD16HiB16     global_load_short_d16_hi  GLOBAL  0x25   flags=VMEM_LOAD|TIED d=vdst:v1 u=vaddr:v2,vdst:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_load
-inst   GStoreD16HiB16    global_store_short_d16_hi GLOBAL  0x1b   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
+inst   GLoadU16          global_load_ushort        GLOBAL  0x12   flags=VMEM_LOAD d=vdst:v1 u=vaddr:v2 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
+inst   GLoadB32          global_load_dword         GLOBAL  0x14   flags=VMEM_LOAD d=vdst:v1 u=vaddr:v2 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
+inst   GLoadB64          global_load_dwordx2       GLOBAL  0x15   flags=VMEM_LOAD d=vdst:v2 u=vaddr:v2 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
+inst   GLoadB96          global_load_dwordx3       GLOBAL  0x16   flags=VMEM_LOAD d=vdst:v3 u=vaddr:v2 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
+inst   GLoadB128         global_load_dwordx4       GLOBAL  0x17   flags=VMEM_LOAD d=vdst:v4 u=vaddr:v2 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
+inst   GStoreB16         global_store_short        GLOBAL  0x1a   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
+inst   GStoreB32         global_store_dword        GLOBAL  0x1c   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
+inst   GStoreB64         global_store_dwordx2      GLOBAL  0x1d   flags=VMEM_STORE u=vaddr:v2,vdata:v2 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
+inst   GStoreB96         global_store_dwordx3      GLOBAL  0x1e   flags=VMEM_STORE u=vaddr:v2,vdata:v3 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
+inst   GStoreB128        global_store_dwordx4      GLOBAL  0x1f   flags=VMEM_STORE u=vaddr:v2,vdata:v4 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
+inst   GLoadD16B16       global_load_short_d16     GLOBAL  0x24   flags=VMEM_LOAD|TIED d=vdst:v1 u=vaddr:v2,vdst:v1 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
+inst   GLoadD16HiB16     global_load_short_d16_hi  GLOBAL  0x25   flags=VMEM_LOAD|TIED d=vdst:v1 u=vaddr:v2,vdst:v1 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
+inst   GStoreD16HiB16    global_store_short_d16_hi GLOBAL  0x1b   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
 inst   GAtomicAddU32     global_atomic_add         GLOBAL  0x42   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
 inst   GAtomicAddF32     global_atomic_add_f32     GLOBAL  0x4d   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
 inst   ScratchLoadB32    scratch_load_dword        SCRATCH 0x14   fmt=Global flags=VMEM_LOAD d=vdst:v1 imm=off13s imp=use:exec unit=VMEM lat=vmem_load form=scratch
@@ -524,9 +530,9 @@ inst   ScratchStoreB96   scratch_store_dwordx3     SCRATCH 0x1e   fmt=Global fla
 inst   ScratchStoreB128  scratch_store_dwordx4     SCRATCH 0x1f   fmt=Global flags=VMEM_STORE u=vdata:v4 imm=off13s imp=use:exec unit=VMEM lat=vmem_store form=scratch
 inst   GAtomicAddU32Rtn  global_atomic_add         GLOBAL  0x42   flags=VMEM_LOAD|VMEM_STORE d=vdst:v1 u=vaddr:v2,vdata:v1 imm=off13s m=saddr,glc imp=use:exec unit=VMEM lat=vmem_load
 inst   GAtomicAddF32Rtn  global_atomic_add_f32     GLOBAL  0x4d   flags=VMEM_LOAD|VMEM_STORE d=vdst:v1 u=vaddr:v2,vdata:v1 imm=off13s m=saddr,glc imp=use:exec unit=VMEM lat=vmem_load
-inst   GLoadU8           global_load_ubyte         GLOBAL  0x10   flags=VMEM_LOAD d=vdst:v1 u=vaddr:v2 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_load
-inst   GStoreB8          global_store_byte         GLOBAL  0x18   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
-inst   GStoreD16HiB8     global_store_byte_d16_hi  GLOBAL  0x19   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
+inst   GLoadU8           global_load_ubyte         GLOBAL  0x10   flags=VMEM_LOAD d=vdst:v1 u=vaddr:v2 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_load
+inst   GStoreB8          global_store_byte         GLOBAL  0x18   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
+inst   GStoreD16HiB8     global_store_byte_d16_hi  GLOBAL  0x19   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr,sc1,nt imp=use:exec unit=VMEM lat=vmem_store
 group MUBUF
 inst   BufLoadB32        buffer_load_dword         MUBUF   0x14   flags=VMEM_LOAD d=vdata:v1 u=vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_load
 inst   BufLoadB64        buffer_load_dwordx2       MUBUF   0x15   flags=VMEM_LOAD d=vdata:v2 u=vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_load
@@ -560,6 +566,10 @@ inst   BufferWbl2        buffer_wbl2               MUBUF   0x28   opc=gfx9 flags
 inst   VAccvgprReadB32   v_accvgpr_read_b32        VOP3P   0x58   opc=gfx9 flags=VALU d=vdst:v1 u=src0:acc1 imp=use:exec unit=VALU lat=valu form=acc_read
 inst   VAccvgprWriteB32  v_accvgpr_write_b32       VOP3P   0x59   opc=gfx9 flags=VALU d=vdst:acc1 u=src0:vi1 imp=use:exec unit=VALU lat=valu form=acc_write
 inst   VAccvgprMovB32    v_accvgpr_mov_b32         VOP1    0x52   opc=gfx9 flags=VALU d=vdst:acc1 u=src0:acc1 imp=use:exec unit=VALU lat=valu form=acc_mov
+# The lane scan of a wave-reduced atomic (target/gfx9/atomics.rs): a lane mask's population count and its
+# lowest set lane (-1 for none).
+inst   SBcnt1I32B64      s_bcnt1_i32_b64           SOP1    0xd    opc=gfx9 flags=DEF_SCC d=sdst:s1 u=ssrc0:ss2 imp=def:scc unit=SALU lat=salu form=b64
+inst   SFf1I32B64        s_ff1_i32_b64             SOP1    0x11   opc=gfx9 flags=0 d=sdst:s1 u=ssrc0:ss2 unit=SALU lat=salu form=b64
 # The plain MFMAs (VOP3P-MAI): D and C in one bank (acc_cd), A and B in either; v_mfma_f32_16x16x128_f8f6f4's
 # A and B are 8 dwords for fp8 and bf8 (cbsz and blgp name f6 and f4 formats, which read fewer).
 inst   VMfma16x16x32Bf16 v_mfma_f32_16x16x32_bf16  VOP3P   0x35   opc=gfx9 flags=VALU d=vdst:av4 u=src0:av4,src1:av4,src2:avi4 imm=mai imp=use:exec unit=VALU lat=mfma_xdl4 form=mai haz=m1,m2,m3,m4,m5,m6,m7
@@ -581,4 +591,33 @@ inst   VMfma16x16x4F32   v_mfma_f32_16x16x4_f32    VOP3P   0x45   opc=gfx9 flags
 inst   VMfma32x32x2F32   v_mfma_f32_32x32x2_f32    VOP3P   0x44   opc=gfx9 flags=VALU d=vdst:av16 u=src0:av1,src1:av1,src2:avi16 imm=mai imp=use:exec unit=VALU lat=mfma_smfma16 form=mai haz=m1,m2,m3,m4,m5,m6,m7
 inst   VMfma16x16x4F64   v_mfma_f64_16x16x4_f64    VOP3P   0x6e   opc=gfx9 flags=VALU d=vdst:av8 u=src0:av2,src1:av2,src2:avi8 imm=mai imp=use:exec unit=VALU lat=mfma_dgemm16 form=mai haz=m1,m2,m3,m4,m5,m6,m7,m9
 inst   VMfma4x4x4F64     v_mfma_f64_4x4x4_4b_f64   VOP3P   0x6f   opc=gfx9 flags=VALU d=vdst:av2 u=src0:av2,src1:av2,src2:avi2 imm=mai imp=use:exec unit=VALU lat=mfma_dgemm4 form=mai haz=m1,m2,m3,m4,m5,m6,m7,m9
+# The block-scaled MFMA (VOP3PX2, four words): v_mfma_ld_scale_b32 (op 0x2c) with the A and B E8M0 scales,
+# then this MFMA. The scales are one VGPR pair, A's in the low register and B's in the high one, each read
+# from its low byte; cbsz and blgp name the A and B formats, which fix their sizes (8 dwords for fp8 and
+# bf8, 6 for fp6 and bf6, 4 for fp4).
+inst   VMfmaScale32x32x64F8f6f4 v_mfma_scale_f32_32x32x64_f8f6f4 VOP3P 0x2e opc=gfx9 flags=VALU d=vdst:av16 u=src0:av8,src1:av8,src2:avi16,scale:v2 imm=mai imp=use:exec unit=VALU lat=mfma_xdl16 form=mai_scale haz=m1,m2,m3,m4,m5,m6,m7
+# LDS DMA: each lane's dwords at its buffer offset go to LDS at M0 + offset + 4 * dwords * lane, counted on vmcnt.
+# M0 is implicit, so the rows are fences: no instruction is scheduled across one (it reads M0 and writes LDS).
+inst   BufLoadLdsB32     buffer_load_dword         MUBUF   0x14   opc=gfx9 flags=VMEM_LOAD|LDS|FENCE u=vaddr:v1,srsrc:s4,soffset:ss1 imm=off12cpol imp=use:exec,use:m0 unit=VMEM lat=vmem_load form=lds haz=h12
+inst   BufLoadLdsB128    buffer_load_dwordx4       MUBUF   0x17   opc=gfx9 flags=VMEM_LOAD|LDS|FENCE u=vaddr:v1,srsrc:s4,soffset:ss1 imm=off12cpol imp=use:exec,use:m0 unit=VMEM lat=vmem_load form=lds haz=h12
+inst   GLoadLdsB32       global_load_lds_dword     GLOBAL  0x2a   opc=gfx9 flags=VMEM_LOAD|LDS|FENCE u=vaddr:v2 imm=off12cpol imp=use:exec,use:m0 unit=VMEM lat=vmem_load form=lds haz=h12
+inst   GLoadLdsB128      global_load_lds_dwordx4   GLOBAL  0x7d   opc=gfx9 flags=VMEM_LOAD|LDS|FENCE u=vaddr:v2 imm=off12cpol imp=use:exec,use:m0 unit=VMEM lat=vmem_load form=lds haz=h12
+# Transposing LDS reads: 64 bits per lane, gathered across the lanes of a group in 16-bit (b16) or 8-bit (b8)
+# elements, so a lane's result depends on the other lanes' addresses.
+inst   DsReadB64TrB16    ds_read_b64_tr_b16        DS      0xe3   opc=gfx9 flags=LDS d=vdst:v2 u=addr:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsReadB64TrB8     ds_read_b64_tr_b8         DS      0xe2   opc=gfx9 flags=LDS d=vdst:v2 u=addr:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+# fp8 and bf8 conversions (OCP e4m3 and e5m2): v_cvt_f32_fp8 and _bf8 convert byte 0 of the source; v_cvt_pk_f32_fp8
+# and _bf8 the two bytes of a word into an f32 pair, the low word or, through SDWA src0_sel:WORD_1 (op_sel on
+# source 0), the high one; v_cvt_pk_fp8_f32 and _bf8_f32 round two f32 into the bytes of one word of the
+# destination, the low word or with op_sel[3] the high one, and keep the other word: the destination's old value
+# is a third use, tied and not encoded.
+inst   VCvtF32Fp8        v_cvt_f32_fp8             VOP1    0x54   opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1 imp=use:exec unit=VALU lat=valu
+inst   VCvtF32Bf8        v_cvt_f32_bf8             VOP1    0x55   opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1 imp=use:exec unit=VALU lat=valu
+inst   VCvtPkF32Fp8      v_cvt_pk_f32_fp8          VOP1    0x56   opc=gfx9 flags=VALU d=vdst:v2 u=src0:vs1 m=opsel imp=use:exec unit=VALU lat=valu form=sdwa_hi
+inst   VCvtPkF32Bf8      v_cvt_pk_f32_bf8          VOP1    0x57   opc=gfx9 flags=VALU d=vdst:v2 u=src0:vs1 m=opsel imp=use:exec unit=VALU lat=valu form=sdwa_hi
+inst   VCvtPkFp8F32      v_cvt_pk_fp8_f32          VOP3    0x2a2  opc=gfx9 flags=VALU|TIED d=vdst:v1 u=src0:vs1,src1:vs1,old:v1 m=opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VCvtPkBf8F32      v_cvt_pk_bf8_f32          VOP3    0x2a3  opc=gfx9 flags=VALU|TIED d=vdst:v1 u=src0:vs1,src1:vs1,old:v1 m=opsel_dst imp=use:exec unit=VALU lat=valu
+# The packed f16 atomic add (llvm.amdgcn.global.atomic.fadd.v2f16): each half of the dword adds its f16.
+inst   GAtomicPkAddF16   global_atomic_pk_add_f16  GLOBAL  0x4e   opc=gfx9 flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
+inst   GAtomicPkAddF16Rtn global_atomic_pk_add_f16 GLOBAL  0x4e   opc=gfx9 flags=VMEM_LOAD|VMEM_STORE d=vdst:v1 u=vaddr:v2,vdata:v1 imm=off13s m=saddr,glc imp=use:exec unit=VMEM lat=vmem_load
 family VCmp              v_cmp_*                   VOPC    code   flags=macro d=sdst:s2 u=src0:vs1,src1:vs1 m=neg imp=use:exec unit=VALU lat=valu

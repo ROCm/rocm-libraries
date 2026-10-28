@@ -103,6 +103,10 @@ struct SinkFacts {
     mem: u16,
     defs: u64,
     uses: u64,
+    /// A VMEM or LDS load with a result, and the dwords it loads, as
+    /// `sink_load_uses` counts them.
+    load: bool,
+    load_dwords: u16,
 }
 
 fn unit_signature(opnds: &[Opnd]) -> u64 {
@@ -122,6 +126,8 @@ impl SinkFacts {
             mem: x.mem,
             defs: unit_signature(&x.defs),
             uses: unit_signature(&x.uses),
+            load: flags & (F_VMEM_LOAD | F_LDS) != 0 && !x.defs.is_empty(),
+            load_dwords: x.defs.iter().map(|d| vunits(d).count() as u16).sum(),
         }
     }
 }
@@ -373,18 +379,17 @@ pub fn sink_load_uses(f: &mut MFunc, budget: u32) {
             if !candidate[i] || c.op.flags() & fixed != 0 || has_phys(c) || c.op == Opc::SBarrier {
                 continue;
             }
-            let is_load = |inst: &MInst| inst.op.flags() & (F_VMEM_LOAD | F_LDS) != 0 && !inst.defs.is_empty();
             let cs = facts[i];
             let mut j = i + 1;
             let mut passed = 0u32;
             while j < insts.len() && may_sink_past(c, &cs, &insts[j], &facts[j]) {
-                if is_load(&insts[j]) {
+                if facts[j].load {
                     // Delayed loads keep their order, so each still waits
                     // on the oldest outstanding load.
-                    if is_load(c) && candidate[j] {
+                    if cs.load && candidate[j] {
                         break;
                     }
-                    passed += insts[j].defs.iter().map(|d| vunits(d).count() as u32).sum::<u32>();
+                    passed += u32::from(facts[j].load_dwords);
                     if passed > budget {
                         break;
                     }
@@ -423,22 +428,63 @@ pub fn schedule_window(f: &mut MFunc, window: usize) {
 const NO_INST: u32 = u32::MAX;
 
 fn schedule_block(insts: Vec<MInst>, window: usize, units: &UnitIndex, target: crate::target::Target) -> Vec<MInst> {
+    let order = block_dag(&insts, units, target, &mut DagScratch::default()).order(window);
+    order.iter().map(|&i| insts[i as usize].clone()).collect()
+}
+
+/// Tables `block_dag` fills for a block, kept for the next block of the
+/// function: the per-unit ones are back to unset for every unit when it
+/// returns.
+#[derive(Default)]
+struct DagScratch {
+    edges: Vec<(u32, u32, u32)>,
+    last_def: Vec<u32>,
+    reader_head: Vec<u32>,
+    readers: Vec<(u32, u32)>,
+}
+
+/// The dependence graph `schedule_block` schedules a block by: each
+/// instruction's successors with their latencies (in no particular order),
+/// its predecessor count, its longest latency path to the end of the block,
+/// and whether it takes an issue cycle. It depends on the block, not on the
+/// window, so one graph serves every window.
+pub(super) struct BlockDag {
+    succ_start: Vec<u32>,
+    succs: Vec<(u32, u32)>,
+    preds: Vec<u32>,
+    height: Vec<u32>,
+    issues: Vec<bool>,
+    /// Per instruction, the slots it holds gfx950's matrix pipe for; empty
+    /// when the block has no MFMA.
+    pipe: Vec<u8>,
+}
+
+fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, scratch: &mut DagScratch) -> BlockDag {
     let result_latency = |inst: &MInst| match target {
         crate::target::Target::Gfx1151 => result_latency(inst),
         crate::target::Target::Gfx950 => crate::target::gfx9::model::result_latency(inst),
     };
+    let mut mfma = match target {
+        crate::target::Target::Gfx1151 => None,
+        crate::target::Target::Gfx950 => crate::target::gfx9::sched::MfmaEdges::new(insts),
+    };
     let n = insts.len();
+    let DagScratch { edges, last_def, reader_head, readers } = scratch;
     // Dependence edges (from, to, latency); successor order does not matter.
-    let mut edges: Vec<(u32, u32, u32)> = Vec::with_capacity(4 * n);
+    edges.clear();
+    edges.reserve(4 * n);
     let mut preds = vec![0u32; n];
     let mut edge = |from: usize, to: usize, latency: u32| {
         edges.push((from as u32, to as u32, latency));
         preds[to] += 1;
     };
-    let mut last_def = vec![NO_INST; units.len()];
+    if last_def.len() < units.len() {
+        last_def.resize(units.len(), NO_INST);
+        reader_head.resize(units.len(), NO_INST);
+    }
     // Readers of each unit since its last def, as linked lists of (inst, next).
-    let mut reader_head = vec![NO_INST; units.len()];
-    let mut readers: Vec<(u32, u32)> = Vec::with_capacity(2 * n);
+    readers.clear();
+    readers.reserve(2 * n);
     let (mut scc_def, mut scc_readers) = (None, Vec::new());
     let (mut barrier, mut since_barrier) = (None, Vec::new());
     // Last write and the reads since, of LDS and of global memory (by
@@ -476,13 +522,18 @@ fn schedule_block(insts: Vec<MInst>, window: usize, units: &UnitIndex, target: c
         } else {
             0
         };
-        for o in &inst.uses {
+        for (k, o) in inst.uses.iter().enumerate() {
             let tied = inst.defs.contains(o);
             for u in units.of(o) {
                 if last_def[u] != NO_INST {
                     let d = last_def[u] as usize;
                     let ordered = tied && insts[d].op.flags() & in_order != 0;
-                    edge(d, i, if ordered { 0 } else { result_latency(&insts[d]) });
+                    let latency = match mfma.as_mut().and_then(|m| m.raw(insts, d, i, k)) {
+                        _ if ordered => 0,
+                        Some(latency) => latency,
+                        None => result_latency(&insts[d]),
+                    };
+                    edge(d, i, latency);
                 }
                 readers.push((i as u32, reader_head[u]));
                 reader_head[u] = readers.len() as u32 - 1;
@@ -541,8 +592,12 @@ fn schedule_block(insts: Vec<MInst>, window: usize, units: &UnitIndex, target: c
             }
         }
     }
+    for u in insts.iter().flat_map(|inst| inst.defs.iter().chain(&inst.uses)).flat_map(|o| units.of(o)) {
+        last_def[u] = NO_INST;
+        reader_head[u] = NO_INST;
+    }
     let mut succ_start = vec![0u32; n + 1];
-    for &(from, _, _) in &edges {
+    for &(from, _, _) in edges.iter() {
         succ_start[from as usize + 1] += 1;
     }
     for i in 0..n {
@@ -550,16 +605,9 @@ fn schedule_block(insts: Vec<MInst>, window: usize, units: &UnitIndex, target: c
     }
     let mut succs = vec![(0u32, 0u32); edges.len()];
     let mut fill = succ_start.clone();
-    for &(from, to, latency) in &edges {
+    for &(from, to, latency) in edges.iter() {
         succs[fill[from as usize] as usize] = (to, latency);
         fill[from as usize] += 1;
-    }
-    let mut ready_at = vec![0u32; n];
-    let mut done = vec![false; n];
-    // Unscheduled instructions whose predecessors have all issued.
-    let mut ready = vec![0u64; n.div_ceil(64)];
-    for (i, _) in preds.iter().enumerate().filter(|(_, &p)| p == 0) {
-        ready[i / 64] |= 1 << (i % 64);
     }
     // Longest latency path from each instruction to the end of the block; a
     // result read only in later blocks counts its own latency.
@@ -571,49 +619,138 @@ fn schedule_block(insts: Vec<MInst>, window: usize, units: &UnitIndex, target: c
             .map(|&(j, latency)| latency + height[j as usize])
             .fold(own, u32::max);
     }
-    let mut order = Vec::with_capacity(n);
-    let (mut cycle, mut first) = (0u32, 0usize);
-    while order.len() < n {
-        while done[first] {
-            first += 1;
+    let issues = insts.iter().map(|inst| inst.op.fmt() != Fmt::Pseudo || inst.op.flags() & F_USE_EXEC != 0).collect();
+    let pipe = mfma.map_or_else(Vec::new, |_| insts.iter().map(|inst| crate::target::gfx9::sched::pipe_slots(inst.op)).collect());
+    BlockDag { succ_start, succs, preds, height, issues, pipe }
+}
+
+impl BlockDag {
+    /// The order `schedule_block` issues the block in with `window`: each
+    /// step takes the first unscheduled instruction or a ready one less than
+    /// `window` places after it, whichever starts soonest, then has the
+    /// longest path, then comes first.
+    fn order(&self, window: usize) -> Vec<u32> {
+        if self.pipe.is_empty() {
+            self.order_with::<false>(window)
+        } else {
+            self.order_with::<true>(window)
         }
-        // The first unscheduled instruction's predecessors all precede it, so
-        // it is always a candidate.
-        let mut pick = (first, ready_at[first].max(cycle));
-        let (begin, end) = (first + 1, n.min(first + window));
-        for w in begin / 64..end.div_ceil(64) {
-            let mut bits = ready[w];
-            if w == begin / 64 {
-                bits &= !0u64 << (begin % 64);
+    }
+
+    /// The rank of MFMA `i`, `k` with its start raised to `cycle`, when the
+    /// matrix pipe frees at `free`: it starts no sooner, and if it can start
+    /// at `cycle` it goes before any other instruction that can.
+    fn piped(&self, i: usize, k: u64, free: u32, cycle: u32) -> u64 {
+        if self.pipe[i] == 0 {
+            return k;
+        }
+        let k = k.max(u64::from(free) << 32 | (k & 0xffff_ffff));
+        if k >> 32 == u64::from(cycle) {
+            k & !(1 << 31)
+        } else {
+            k
+        }
+    }
+
+    /// `order`, with the matrix pipe of `pipe` when `PIPE`.
+    fn order_with<const PIPE: bool>(&self, window: usize) -> Vec<u32> {
+        let n = self.preds.len();
+        let mut preds = self.preds.clone();
+        // Each instruction's rank, smallest first, as one integer: the cycle
+        // its operands are ready at, then its path, longest first. Compared
+        // with its start raised to the current cycle.
+        let mut key: Vec<u64> = self.height.iter().map(|&h| u64::from(!h)).collect();
+        let mut done = vec![false; n];
+        // Unscheduled instructions whose predecessors have all issued.
+        let mut ready = vec![0u64; n.div_ceil(64)];
+        for (i, _) in preds.iter().enumerate().filter(|(_, &p)| p == 0) {
+            ready[i / 64] |= 1 << (i % 64);
+        }
+        let mut order = Vec::with_capacity(n);
+        let (mut cycle, mut first) = (0u32, 0usize);
+        // The cycle the matrix pipe frees at.
+        let mut free = 0u32;
+        while order.len() < n {
+            while done[first] {
+                first += 1;
             }
-            if end < (w + 1) * 64 {
-                bits &= (1u64 << (end % 64)) - 1;
+            let now = u64::from(cycle) << 32;
+            let at = |k: u64| k.max(now | (k & 0xffff_ffff));
+            let rank = |i: usize| if PIPE { self.piped(i, at(key[i]), free, cycle) } else { at(key[i]) };
+            // The first unscheduled instruction's predecessors all precede
+            // it, so it is always a candidate.
+            let (mut pick, mut best) = (first, rank(first));
+            let (begin, end) = (first + 1, n.min(first + window));
+            for w in begin / 64..end.div_ceil(64) {
+                let mut bits = ready[w];
+                if w == begin / 64 {
+                    bits &= !0u64 << (begin % 64);
+                }
+                if end < (w + 1) * 64 {
+                    bits &= (1u64 << (end % 64)) - 1;
+                }
+                while bits != 0 {
+                    let i = w * 64 + bits.trailing_zeros() as usize;
+                    bits &= bits - 1;
+                    let k = rank(i);
+                    if k < best {
+                        (pick, best) = (i, k);
+                    }
+                }
             }
-            while bits != 0 {
-                let i = w * 64 + bits.trailing_zeros() as usize;
-                bits &= bits - 1;
-                let start = ready_at[i].max(cycle);
-                if (start, std::cmp::Reverse(height[i])) < (pick.1, std::cmp::Reverse(height[pick.0])) {
-                    pick = (i, start);
+            let (i, start) = (pick, (best >> 32) as u32);
+            done[i] = true;
+            ready[i / 64] &= !(1 << (i % 64));
+            order.push(i as u32);
+            cycle = start + u32::from(self.issues[i]);
+            if PIPE && self.pipe[i] != 0 {
+                free = start + u32::from(self.pipe[i]);
+            }
+            for &(j, latency) in &self.succs[self.succ_start[i] as usize..self.succ_start[i + 1] as usize] {
+                let j = j as usize;
+                preds[j] -= 1;
+                key[j] = key[j].max(u64::from(start + latency) << 32 | (key[j] & 0xffff_ffff));
+                if preds[j] == 0 && !done[j] {
+                    ready[j / 64] |= 1 << (j % 64);
                 }
             }
         }
-        let (i, start) = pick;
-        done[i] = true;
-        ready[i / 64] &= !(1 << (i % 64));
-        order.push(i);
-        cycle = start + u32::from(insts[i].op.fmt() != Fmt::Pseudo || insts[i].op.flags() & F_USE_EXEC != 0);
-        for &(j, latency) in &succs[succ_start[i] as usize..succ_start[i + 1] as usize] {
-            let j = j as usize;
-            preds[j] -= 1;
-            ready_at[j] = ready_at[j].max(start + latency);
-            if preds[j] == 0 && !done[j] {
-                ready[j / 64] |= 1 << (j % 64);
-            }
-        }
+        order
     }
-    let mut slots: Vec<Option<MInst>> = insts.into_iter().map(Some).collect();
-    order.into_iter().map(|i| slots[i].take().expect("each instruction is scheduled once")).collect()
+}
+
+/// The dependence graphs of the blocks of one function, built once for all
+/// the windows it is scheduled with.
+pub(super) struct Dags(Vec<BlockDag>);
+
+impl Dags {
+    pub(super) fn new(f: &MFunc) -> Dags {
+        let units = UnitIndex::new(f.blocks.iter().flat_map(|b| b.insts.iter()));
+        let mut scratch = DagScratch::default();
+        Dags(f.blocks.iter().map(|block| block_dag(&block.insts, &units, f.target, &mut scratch)).collect())
+    }
+
+    /// The order of each block's instructions in `schedule_window` with
+    /// `window` of the function the graphs are of.
+    pub(super) fn orders(&self, window: usize) -> Vec<Vec<u32>> {
+        self.0.iter().map(|dag| dag.order(window)).collect()
+    }
+
+    /// `orders(window)` of block `block` alone.
+    pub(super) fn block_order(&self, block: usize, window: usize) -> Vec<u32> {
+        self.0[block].order(window)
+    }
+}
+
+/// `f` with the instructions of each block in `orders`.
+pub(super) fn reordered(f: &MFunc, orders: &[Vec<u32>]) -> MFunc {
+    let blocks = f
+        .blocks
+        .iter()
+        .zip(orders)
+        .map(|(block, order)| MBlock { insts: order.iter().map(|&i| block.insts[i as usize].clone()).collect(), loop_depth: block.loop_depth })
+        .collect();
+    MFunc { blocks, vregs: f.vregs.clone(), target: f.target, vgpr_limit: f.vgpr_limit, agpr_limit: f.agpr_limit }
 }
 
 /// How long a schedule keeps a SIMD busy, for choosing between schedules
@@ -890,14 +1027,20 @@ impl AluState {
 /// themselves. A second dependency within five instructions is packed into
 /// the previous `s_delay_alu`.
 pub fn insert_delay_alu(f: &mut MFunc) {
+    insert_delay_alu_with(f, &mut Vec::new());
+}
+
+/// `insert_delay_alu`, building blocks in `spare` (see `reuse`).
+pub(super) fn insert_delay_alu_with(f: &mut MFunc, spare: &mut Vec<MInst>) {
     let mut state = AluState::new();
     for block in f.blocks.iter_mut() {
         state.clear();
-        let mut out = Vec::with_capacity(block.insts.len() * 5 / 4);
+        let mut out = reuse(spare, block.insts.len() * 5 / 4);
         let mut open: Option<usize> = None;
         // Non-pseudo instructions emitted after the open `s_delay_alu`.
         let mut since_open = 0usize;
-        for inst in std::mem::take(&mut block.insts) {
+        let mut insts = std::mem::take(&mut block.insts);
+        for inst in insts.drain(..) {
             let fmt = inst.op.fmt();
             if fmt == Fmt::Pseudo {
                 out.push(inst);
@@ -949,6 +1092,7 @@ pub fn insert_delay_alu(f: &mut MFunc) {
             since_open += 1;
         }
         block.insts = out;
+        *spare = insts;
     }
 }
 
@@ -985,8 +1129,23 @@ pub fn remove_dead_copies(f: &mut MFunc) {
 
 /// Expands `Copy` and `PackF16` into real instructions.
 pub fn expand_pseudos(f: &mut MFunc) -> Result<(), CompileError> {
+    expand_pseudos_with(f, &mut Vec::new())
+}
+
+/// An empty vector with room for `len` instructions, made of `spare`: the
+/// instructions of a block a pass rebuilt, which the passes after
+/// allocation (`rir::finish`) hand from one to the next.
+fn reuse(spare: &mut Vec<MInst>, len: usize) -> Vec<MInst> {
+    let mut out = std::mem::take(spare);
+    out.clear();
+    out.reserve(len);
+    out
+}
+
+/// `expand_pseudos`, building blocks in `spare` (see `reuse`).
+pub(super) fn expand_pseudos_with(f: &mut MFunc, spare: &mut Vec<MInst>) -> Result<(), CompileError> {
     for block in f.blocks.iter_mut() {
-        let mut out = Vec::with_capacity(block.insts.len());
+        let mut out = reuse(spare, block.insts.len());
         for inst in block.insts.drain(..) {
             match inst.op {
                 Opc::Copy => {
@@ -1019,7 +1178,7 @@ pub fn expand_pseudos(f: &mut MFunc) -> Result<(), CompileError> {
                 _ => out.push(inst),
             }
         }
-        block.insts = out;
+        *spare = std::mem::replace(&mut block.insts, out);
     }
     Ok(())
 }
@@ -1250,19 +1409,40 @@ fn waitcnt_imm(vm: u8, lgkm: u8) -> i64 {
 /// Inserts `s_waitcnt` before every instruction that needs an outstanding
 /// load, and before barriers.
 pub fn insert_waitcnt(f: &mut MFunc) {
+    insert_waitcnt_with(f, &mut Vec::new());
+}
+
+/// `insert_waitcnt`, building blocks in `spare` (see `reuse`).
+pub(super) fn insert_waitcnt_with(f: &mut MFunc, spare: &mut Vec<MInst>) {
     let n = f.blocks.len();
     let succs: Vec<Vec<usize>> = (0..n).map(|b| f.successors(b)).collect();
     let mut entry: Vec<Option<WaitState>> = vec![None; n];
     entry[0] = Some(WaitState::new());
+    // Blocks whose entry state changed since they were last stepped through:
+    // stepping any other again would merge into its successors what they
+    // already hold.
+    let mut stale = vec![false; n];
+    stale[0] = true;
+    // The waits each block's last stepping found, by instruction: once the
+    // entry states settle, every block was last stepped from its own.
+    let mut found: Vec<Option<Vec<(u32, (u8, u8))>>> = vec![None; n];
     loop {
         let mut changed = false;
         for b in 0..n {
+            if !stale[b] {
+                continue;
+            }
             let Some(start) = &entry[b] else {
                 continue;
             };
+            stale[b] = false;
             let mut waits = Waits::new(start);
-            for inst in &f.blocks[b].insts {
-                step(&mut waits, inst);
+            let at = found[b].get_or_insert_with(Vec::new);
+            at.clear();
+            for (k, inst) in f.blocks[b].insts.iter().enumerate() {
+                if let Some(wait) = step(&mut waits, inst) {
+                    at.push((k as u32, wait));
+                }
             }
             let state = waits.state();
             for &s in &succs[b] {
@@ -1276,6 +1456,7 @@ pub fn insert_waitcnt(f: &mut MFunc) {
                 };
                 if entry[s].as_ref() != Some(&merged) {
                     entry[s] = Some(merged);
+                    stale[s] = true;
                     changed = true;
                 }
             }
@@ -1286,11 +1467,18 @@ pub fn insert_waitcnt(f: &mut MFunc) {
     }
     let wait_all = super::debug_flag("waitall");
     for b in 0..n {
-        let mut waits = Waits::new(entry[b].as_ref().unwrap_or(&WaitState::new()));
-        let insts = std::mem::take(&mut f.blocks[b].insts);
-        let mut out = Vec::with_capacity(insts.len() + 8);
-        for inst in insts {
-            if let Some((vm, lgkm)) = step(&mut waits, &inst) {
+        // Blocks never stepped (unreachable ones) start from nothing pending.
+        let mut known = found[b].as_deref().map(|at| at.iter().peekable());
+        let mut waits = known.is_none().then(|| Waits::new(entry[b].as_ref().unwrap_or(&WaitState::new())));
+        let mut insts = std::mem::take(&mut f.blocks[b].insts);
+        let mut out = reuse(spare, insts.len() + insts.len() / 4 + 8);
+        for (k, inst) in insts.drain(..).enumerate() {
+            let wait = match (known.as_mut(), waits.as_mut()) {
+                (Some(at), _) => at.next_if(|&&(i, _)| i as usize == k).map(|&(_, wait)| wait),
+                (None, Some(waits)) => step(waits, &inst),
+                (None, None) => unreachable!("a block is stepped or has its waits"),
+            };
+            if let Some((vm, lgkm)) = wait {
                 out.push(MInst::new(Opc::SWaitcnt, [], []).with_imm(waitcnt_imm(vm, lgkm)));
             }
             let loads = inst.op.flags() & (F_VMEM_LOAD | F_LDS | F_SMEM) != 0;
@@ -1300,6 +1488,7 @@ pub fn insert_waitcnt(f: &mut MFunc) {
             }
         }
         f.blocks[b].insts = out;
+        *spare = insts;
     }
 }
 
@@ -1330,6 +1519,9 @@ pub fn fix_wmma_hazards(f: &mut MFunc) {
         .map(|b| b.insts.iter().rev().find(|i| is_valu(i.op)).cloned())
         .collect();
     for b in 0..n {
+        if !needs_wmma_nop(&f.blocks[b].insts, &preds[b], &last_valu) {
+            continue;
+        }
         let insts = std::mem::take(&mut f.blocks[b].insts);
         let mut out: Vec<MInst> = Vec::with_capacity(insts.len());
         for inst in insts {
@@ -1351,6 +1543,32 @@ pub fn fix_wmma_hazards(f: &mut MFunc) {
         }
         f.blocks[b].insts = out;
     }
+}
+
+/// Whether `fix_wmma_hazards` puts a `v_nop` in the block `insts`, whose
+/// predecessors are `preds`: up to its first, the instructions it has put
+/// out are the block's own.
+fn needs_wmma_nop(insts: &[MInst], preds: &[usize], last_valu: &[Option<MInst>]) -> bool {
+    let mut prev: Option<&MInst> = None;
+    for inst in insts {
+        if super::gen_isa::hazards(inst.op) & super::gen_isa::HZ_WMMA_AB != 0 {
+            let hazard = |p: &MInst| {
+                super::gen_isa::hazards(p.op) & super::gen_isa::HZ_WMMA_D != 0
+                    && (ranges_overlap(&p.defs[0], &inst.uses[0]) || ranges_overlap(&p.defs[0], &inst.uses[1]))
+            };
+            let needs = match prev {
+                Some(p) => hazard(p),
+                None => preds.iter().any(|&p| last_valu[p].as_ref().is_none_or(&hazard)),
+            };
+            if needs {
+                return true;
+            }
+        }
+        if is_valu(inst.op) {
+            prev = Some(inst);
+        }
+    }
+    false
 }
 
 /// What one `s_clause` may group: gfx11 hard clauses hold VMEM loads, stores
@@ -1388,9 +1606,12 @@ const MAX_CLAUSE: usize = 32;
 /// instructions in between. A wait, SALU or VALU instruction ends a run.
 /// Loads and atomics stay unclaused: their clauses run no faster on gfx1151.
 pub fn form_clauses(f: &mut MFunc) {
+    let mut kinds = Vec::new();
     for block in f.blocks.iter_mut() {
-        let kind_of: Vec<Option<ClauseKind>> =
-            block.insts.iter().map(|i| clause_kind(i.op).filter(|k| matches!(k, ClauseKind::Store(_)))).collect();
+        let kind_of: Vec<Option<ClauseKind>> = block.insts.iter().map(|i| store_kind(&mut kinds, i.op)).collect();
+        if !forms_clause(&kind_of) {
+            continue;
+        }
         let mut out = Vec::with_capacity(block.insts.len() + 8);
         let mut run = 0;
         for (i, inst) in std::mem::take(&mut block.insts).into_iter().enumerate() {
@@ -1409,6 +1630,26 @@ pub fn form_clauses(f: &mut MFunc) {
     }
 }
 
+/// `clause_kind(op)` if it is a store's, as `form_clauses` reads it, through
+/// `kinds`, those found so far (`clause_kind` spells the mnemonic out).
+fn store_kind(kinds: &mut Vec<(Opc, Option<ClauseKind>)>, op: Opc) -> Option<ClauseKind> {
+    if !matches!(op.fmt(), Fmt::Global | Fmt::Mubuf) || op.flags() & (F_VMEM_LOAD | F_VMEM_STORE) == 0 {
+        return None;
+    }
+    if let Some(&(_, kind)) = kinds.iter().find(|(o, _)| *o == op) {
+        return kind;
+    }
+    let kind = clause_kind(op).filter(|k| matches!(k, ClauseKind::Store(_)));
+    kinds.push((op, kind));
+    kind
+}
+
+/// Whether `form_clauses` puts an `s_clause` in a block whose store kinds
+/// are `kind_of`: two adjacent stores of one kind.
+fn forms_clause(kind_of: &[Option<ClauseKind>]) -> bool {
+    kind_of.windows(2).any(|pair| pair[0].is_some() && pair[0] == pair[1])
+}
+
 /// LLVM releases VGPRs before `s_endpgm` when they limit occupancy and stores
 /// may be outstanding.
 pub fn add_vgpr_release(f: &mut MFunc, num_vgprs: u32) {
@@ -1420,6 +1661,9 @@ pub fn add_vgpr_release(f: &mut MFunc, num_vgprs: u32) {
         return;
     }
     for block in f.blocks.iter_mut() {
+        if !block.insts.iter().any(|i| i.op == Opc::SEndpgm) {
+            continue;
+        }
         let mut out = Vec::with_capacity(block.insts.len() + 2);
         for inst in block.insts.drain(..) {
             if inst.op == Opc::SEndpgm {
@@ -1433,7 +1677,7 @@ pub fn add_vgpr_release(f: &mut MFunc, num_vgprs: u32) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
 
     fn r(reg: u32) -> Opnd {
@@ -1780,5 +2024,581 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// `schedule_block` before its graph was shared between windows: the
+    /// reference the shared graphs are checked against.
+    fn schedule_block_reference(insts: Vec<MInst>, window: usize, units: &UnitIndex, target: crate::target::Target) -> Vec<MInst> {
+        let result_latency = |inst: &MInst| match target {
+            crate::target::Target::Gfx1151 => result_latency(inst),
+            crate::target::Target::Gfx950 => crate::target::gfx9::model::result_latency(inst),
+        };
+        let n = insts.len();
+        // Dependence edges (from, to, latency); successor order does not matter.
+        let mut edges: Vec<(u32, u32, u32)> = Vec::with_capacity(4 * n);
+        let mut preds = vec![0u32; n];
+        let mut edge = |from: usize, to: usize, latency: u32| {
+            edges.push((from as u32, to as u32, latency));
+            preds[to] += 1;
+        };
+        let mut last_def = vec![NO_INST; units.len()];
+        // Readers of each unit since its last def, as linked lists of (inst, next).
+        let mut reader_head = vec![NO_INST; units.len()];
+        let mut readers: Vec<(u32, u32)> = Vec::with_capacity(2 * n);
+        let (mut scc_def, mut scc_readers) = (None, Vec::new());
+        let (mut barrier, mut since_barrier) = (None, Vec::new());
+        // Last write and the reads since, of LDS and of global memory (by
+        // `alias` tag). SMEM reads only kernel arguments and memory the kernel
+        // does not write.
+        let mut lds = (None, Vec::new());
+        let mut vmem = super::super::alias::GlobalOrder::default();
+        for (i, inst) in insts.iter().enumerate() {
+            let flags = inst.op.flags();
+            if flags & (F_BRANCH | F_END | F_DEF_EXEC | F_USE_VCC | F_SMEM | F_FENCE) != 0
+                || matches!(inst.op, Opc::SBarrier | Opc::SSendmsg)
+                || has_phys(inst)
+            {
+                // Fences stay in order even with nothing between them, as the
+                // `s_cbranch_execz` right after its `s_and_saveexec`.
+                if let Some(b) = barrier {
+                    edge(b, i, 0);
+                }
+                for j in std::mem::take(&mut since_barrier) {
+                    edge(j, i, 0);
+                }
+                barrier = Some(i);
+            } else {
+                if let Some(b) = barrier {
+                    edge(b, i, 0);
+                }
+                since_barrier.push(i);
+            }
+            // VMEM loads, and separately DS operations, write their results in
+            // issue order, so a d16 load's tied half does not wait on one of its kind.
+            let in_order = if flags & F_VMEM_LOAD != 0 {
+                F_VMEM_LOAD
+            } else if lds_merge(inst) {
+                F_LDS
+            } else {
+                0
+            };
+            for o in &inst.uses {
+                let tied = inst.defs.contains(o);
+                for u in units.of(o) {
+                    if last_def[u] != NO_INST {
+                        let d = last_def[u] as usize;
+                        let ordered = tied && insts[d].op.flags() & in_order != 0;
+                        edge(d, i, if ordered { 0 } else { result_latency(&insts[d]) });
+                    }
+                    readers.push((i as u32, reader_head[u]));
+                    reader_head[u] = readers.len() as u32 - 1;
+                }
+            }
+            for u in inst.defs.iter().flat_map(|o| units.of(o)) {
+                if last_def[u] != NO_INST {
+                    edge(last_def[u] as usize, i, 0);
+                }
+                let mut r = std::mem::replace(&mut reader_head[u], NO_INST);
+                while r != NO_INST {
+                    let (reader, next) = readers[r as usize];
+                    if reader as usize != i {
+                        edge(reader as usize, i, 0);
+                    }
+                    r = next;
+                }
+                last_def[u] = i as u32;
+            }
+            if flags & F_USE_SCC != 0 {
+                if let Some(d) = scc_def {
+                    edge(d, i, result_latency(&insts[d]));
+                }
+                scc_readers.push(i);
+            }
+            if flags & F_DEF_SCC != 0 {
+                if let Some(d) = scc_def {
+                    edge(d, i, 0);
+                }
+                for r in std::mem::take(&mut scc_readers) {
+                    if r != i {
+                        edge(r, i, 0);
+                    }
+                }
+                scc_def = Some(i);
+            }
+            let memory = if flags & F_LDS != 0 {
+                Some((&mut lds, !inst.defs.is_empty()))
+            } else if flags & (F_VMEM_LOAD | F_VMEM_STORE) != 0 {
+                vmem.access(i as u32, inst.mem, flags & F_VMEM_STORE == 0, |from| edge(from as usize, i, 0));
+                None
+            } else {
+                None
+            };
+            if let Some(((write, reads), is_read)) = memory {
+                if let Some(w) = *write {
+                    edge(w, i, 0);
+                }
+                if is_read {
+                    reads.push(i);
+                } else {
+                    for r in std::mem::take(reads) {
+                        edge(r, i, 0);
+                    }
+                    *write = Some(i);
+                }
+            }
+        }
+        let mut succ_start = vec![0u32; n + 1];
+        for &(from, _, _) in &edges {
+            succ_start[from as usize + 1] += 1;
+        }
+        for i in 0..n {
+            succ_start[i + 1] += succ_start[i];
+        }
+        let mut succs = vec![(0u32, 0u32); edges.len()];
+        let mut fill = succ_start.clone();
+        for &(from, to, latency) in &edges {
+            succs[fill[from as usize] as usize] = (to, latency);
+            fill[from as usize] += 1;
+        }
+        let mut ready_at = vec![0u32; n];
+        let mut done = vec![false; n];
+        // Unscheduled instructions whose predecessors have all issued.
+        let mut ready = vec![0u64; n.div_ceil(64)];
+        for (i, _) in preds.iter().enumerate().filter(|(_, &p)| p == 0) {
+            ready[i / 64] |= 1 << (i % 64);
+        }
+        // Longest latency path from each instruction to the end of the block; a
+        // result read only in later blocks counts its own latency.
+        let mut height = vec![0u32; n];
+        for i in (0..n).rev() {
+            let own = if insts[i].defs.is_empty() { 0 } else { result_latency(&insts[i]) };
+            height[i] = succs[succ_start[i] as usize..succ_start[i + 1] as usize]
+                .iter()
+                .map(|&(j, latency)| latency + height[j as usize])
+                .fold(own, u32::max);
+        }
+        let mut order = Vec::with_capacity(n);
+        let (mut cycle, mut first) = (0u32, 0usize);
+        while order.len() < n {
+            while done[first] {
+                first += 1;
+            }
+            // The first unscheduled instruction's predecessors all precede it, so
+            // it is always a candidate.
+            let mut pick = (first, ready_at[first].max(cycle));
+            let (begin, end) = (first + 1, n.min(first + window));
+            for w in begin / 64..end.div_ceil(64) {
+                let mut bits = ready[w];
+                if w == begin / 64 {
+                    bits &= !0u64 << (begin % 64);
+                }
+                if end < (w + 1) * 64 {
+                    bits &= (1u64 << (end % 64)) - 1;
+                }
+                while bits != 0 {
+                    let i = w * 64 + bits.trailing_zeros() as usize;
+                    bits &= bits - 1;
+                    let start = ready_at[i].max(cycle);
+                    if (start, std::cmp::Reverse(height[i])) < (pick.1, std::cmp::Reverse(height[pick.0])) {
+                        pick = (i, start);
+                    }
+                }
+            }
+            let (i, start) = pick;
+            done[i] = true;
+            ready[i / 64] &= !(1 << (i % 64));
+            order.push(i);
+            cycle = start + u32::from(insts[i].op.fmt() != Fmt::Pseudo || insts[i].op.flags() & F_USE_EXEC != 0);
+            for &(j, latency) in &succs[succ_start[i] as usize..succ_start[i + 1] as usize] {
+                let j = j as usize;
+                preds[j] -= 1;
+                ready_at[j] = ready_at[j].max(start + latency);
+                if preds[j] == 0 && !done[j] {
+                    ready[j / 64] |= 1 << (j % 64);
+                }
+            }
+        }
+        let mut slots: Vec<Option<MInst>> = insts.into_iter().map(Some).collect();
+        order.into_iter().map(|i| slots[i].take().expect("each instruction is scheduled once")).collect()
+    }
+
+    /// A random function of `blocks` blocks of `len` instructions each:
+    /// VALU and SALU arithmetic, VMEM, LDS and scalar loads and stores (tied
+    /// d16 halves among them) with `noalias` tags, SCC and EXEC writers and
+    /// readers, barriers, waits, WMMAs, transcendentals, physical registers
+    /// and pseudo instructions, on registers of one to four dwords, all
+    /// defined in a first block of their own.
+    pub(in super::super) fn random_function(seed: u64, blocks: usize, len: usize) -> MFunc {
+        let mut seed = seed ^ 0x5bd1_e995_9e37_79b9;
+        let mut next = |n: usize| {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 33) as usize % n
+        };
+        let mut f = MFunc::default();
+        let mut pool = |class: Class, size: u8, count: usize| -> Vec<u32> {
+            (0..count)
+                .map(|_| {
+                    f.vregs.push(VRegInfo { class, size, align: if size > 1 && class == Class::S { 2 } else { 1 }, fixed: None });
+                    f.vregs.len() as u32 - 1
+                })
+                .collect()
+        };
+        let (v1, v4, s1, s2) = (pool(Class::V, 1, 24), pool(Class::V, 4, 6), pool(Class::S, 1, 10), pool(Class::S, 2, 4));
+        let whole = |reg: u32, n: u8| Opnd::R(VRef { reg, off: 0, n });
+        let mut entry = Vec::new();
+        for &v in v1.iter().chain(&s1) {
+            entry.push(MInst::new(Opc::Copy, [whole(v, 1)], [Opnd::Imm(v)]));
+        }
+        for &v in &v4 {
+            entry.push(MInst::new(Opc::Copy, [whole(v, 4)], [Opnd::Imm(0)]));
+        }
+        for &v in &s2 {
+            entry.push(MInst::new(Opc::Copy, [whole(v, 2)], [Opnd::Imm(0)]));
+        }
+        f.blocks.push(MBlock { insts: entry, loop_depth: 0 });
+        for b in 0..blocks {
+            let mut insts = Vec::with_capacity(len);
+            while insts.len() < len {
+                let a = whole(v1[next(v1.len())], 1);
+                let c = whole(v1[next(v1.len())], 1);
+                let d = whole(v1[next(v1.len())], 1);
+                let t = v4[next(v4.len())];
+                let part = Opnd::R(VRef { reg: t, off: next(4) as u8, n: 1 });
+                let (x, y) = (whole(s1[next(s1.len())], 1), whole(s1[next(s1.len())], 1));
+                let pair = whole(s2[next(s2.len())], 2);
+                let mem = [super::super::alias::ANY, 1, 2, 3][next(4)];
+                let inst = match next(26) {
+                    0 => MInst::new(Opc::VAddNcU32, [d], [a, Opnd::Imm(next(100) as u32)]),
+                    1 => MInst::new(Opc::VMulF32, [d], [a, c]),
+                    2 => MInst::new(Opc::VFmaF32, [d], [a, c, d]),
+                    3 => MInst::new(Opc::GLoadB32, [d], [a, pair]).with_mods(M_SADDR).with_mem(mem),
+                    4 => MInst::new(Opc::GLoadB128, [whole(t, 4)], [a, pair]).with_mods(M_SADDR).with_mem(mem),
+                    5 => MInst::new(Opc::GStoreB32, [], [a, c, pair]).with_mods(M_SADDR).with_mem(mem),
+                    6 => MInst::new(Opc::DsLoadB32, [d], [a]).with_imm(4 * next(8) as i64),
+                    7 => MInst::new(Opc::DsStoreB32, [], [a, c]),
+                    8 => MInst::new(Opc::DsLoadU16D16, [d], [a, d]),
+                    9 => MInst::new(Opc::DsLoadU16D16Hi, [part], [a, part]),
+                    10 => MInst::new(Opc::GLoadD16HiB16, [d], [a, pair, d]).with_mods(M_SADDR).with_mem(mem),
+                    11 => MInst::new(Opc::SCmpLtI32, [], [x, y]),
+                    12 => MInst::new(Opc::SCselectB32, [x], [y, Opnd::Imm(3)]),
+                    13 => MInst::new(Opc::SAddI32, [x], [y, Opnd::Imm(1)]),
+                    14 => MInst::new(Opc::SLoadB32, [x], [pair]).with_imm(4 * next(16) as i64),
+                    15 => MInst::new([Opc::SBarrier, Opc::SBarrierLds][next(2)], [], []),
+                    16 => MInst::new(Opc::Copy, [d], [a]),
+                    17 => MInst::new(Opc::VExpF32, [d], [a]),
+                    18 => MInst::new(Opc::VWmmaF32F16, [whole(t, 4)], [whole(v4[next(v4.len())], 4), whole(v4[next(v4.len())], 4), whole(t, 4)]),
+                    19 => MInst::new(Opc::VMovB32, [Opnd::P(Phys::V(next(8) as u16), 1)], [a]),
+                    20 => MInst::new(Opc::DsBpermuteB32, [d], [a, c]),
+                    21 => MInst::new(Opc::SchedBarrier, [], []),
+                    22 => MInst::new(Opc::SWaitcntExplicit, [], []).with_imm(0x3f7),
+                    23 => MInst::new(Opc::VAddF32, [part], [part, a]),
+                    24 => MInst::new(Opc::GAtomicAddF32, [], [a, c, pair]).with_mods(M_SADDR).with_mem(mem),
+                    _ => MInst::new(Opc::VCvtF32F16, [d], [part]),
+                };
+                insts.push(inst);
+            }
+            let (x, y) = (whole(s1[next(s1.len())], 1), whole(s1[next(s1.len())], 1));
+            match next(4) {
+                0 => {
+                    let exec = Opnd::P(Phys::ExecLo, 1);
+                    insts.push(MInst::new(Opc::SAndSaveexecB32, [x, exec], [y, exec]));
+                    insts.push(MInst::new(Opc::SCbranchExecz, [], []).with_imm((b as i64 + 2).min(blocks as i64)));
+                }
+                1 => {
+                    insts.push(MInst::new(Opc::SCmpLtI32, [], [x, y]));
+                    insts.push(MInst::new(Opc::SCbranchScc1, [], []).with_imm(1 + next(b + 1) as i64));
+                }
+                _ => {}
+            }
+            f.blocks.push(MBlock { insts, loop_depth: next(3) as u32 });
+        }
+        f.blocks.last_mut().expect("a block").insts.push(MInst::new(Opc::SEndpgm, [], []));
+        f
+    }
+
+    #[test]
+    fn shared_graphs_order_blocks_as_schedule_block_did() {
+        for seed in 0..80u64 {
+            let mut f = random_function(seed, 1 + seed as usize % 4, 10 + 9 * seed as usize % 300);
+            if seed % 3 == 2 {
+                f.target = crate::target::Target::Gfx950;
+            }
+            let dags = Dags::new(&f);
+            let units = UnitIndex::new(f.blocks.iter().flat_map(|b| b.insts.iter()));
+            for window in [1, 2, 3, 7, 16, 32, 63, 64, 65, 512] {
+                let shared = reordered(&f, &dags.orders(window));
+                let mut scheduled = f.clone();
+                schedule_window(&mut scheduled, window);
+                for (b, block) in f.blocks.iter().enumerate() {
+                    let want = format!("{:?}", schedule_block_reference(block.insts.clone(), window, &units, f.target));
+                    assert_eq!(format!("{:?}", shared.blocks[b].insts), want, "seed {seed}, window {window}, block {b}");
+                    assert_eq!(format!("{:?}", scheduled.blocks[b].insts), want, "seed {seed}, window {window}, block {b}");
+                    assert_eq!(shared.blocks[b].loop_depth, block.loop_depth);
+                }
+                assert!(super::super::same_function(&shared, &scheduled));
+            }
+        }
+    }
+
+    /// `insert_waitcnt` before blocks it leaves alone stayed as they were: the reference.
+    fn insert_waitcnt_reference(f: &mut MFunc) {
+        let n = f.blocks.len();
+        let succs: Vec<Vec<usize>> = (0..n).map(|b| f.successors(b)).collect();
+        let mut entry: Vec<Option<WaitState>> = vec![None; n];
+        entry[0] = Some(WaitState::new());
+        loop {
+            let mut changed = false;
+            for b in 0..n {
+                let Some(start) = &entry[b] else {
+                    continue;
+                };
+                let mut waits = Waits::new(start);
+                for inst in &f.blocks[b].insts {
+                    step(&mut waits, inst);
+                }
+                let state = waits.state();
+                for &s in &succs[b] {
+                    let merged = match &entry[s] {
+                        None => state.clone(),
+                        Some(old) => {
+                            let mut m = old.clone();
+                            m.merge(&state);
+                            m
+                        }
+                    };
+                    if entry[s].as_ref() != Some(&merged) {
+                        entry[s] = Some(merged);
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        let wait_all = super::super::debug_flag("waitall");
+        for b in 0..n {
+            let mut waits = Waits::new(entry[b].as_ref().unwrap_or(&WaitState::new()));
+            let insts = std::mem::take(&mut f.blocks[b].insts);
+            let mut out = Vec::with_capacity(insts.len() + 8);
+            for inst in insts {
+                if let Some((vm, lgkm)) = step(&mut waits, &inst) {
+                    out.push(MInst::new(Opc::SWaitcnt, [], []).with_imm(waitcnt_imm(vm, lgkm)));
+                }
+                let loads = inst.op.flags() & (F_VMEM_LOAD | F_LDS | F_SMEM) != 0;
+                out.push(inst);
+                if wait_all && loads {
+                    out.push(MInst::new(Opc::SWaitcnt, [], []).with_imm(waitcnt_imm(0, 0)));
+                }
+            }
+            f.blocks[b].insts = out;
+        }
+    }
+
+    /// `fix_wmma_hazards` before blocks it leaves alone stayed as they were: the reference.
+    fn fix_wmma_hazards_reference(f: &mut MFunc) {
+        let n = f.blocks.len();
+        let mut preds: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for b in 0..n {
+            for s in f.successors(b) {
+                preds[s].push(b);
+            }
+        }
+        let last_valu: Vec<Option<MInst>> = f
+            .blocks
+            .iter()
+            .map(|b| b.insts.iter().rev().find(|i| is_valu(i.op)).cloned())
+            .collect();
+        for b in 0..n {
+            let insts = std::mem::take(&mut f.blocks[b].insts);
+            let mut out: Vec<MInst> = Vec::with_capacity(insts.len());
+            for inst in insts {
+                if super::super::gen_isa::hazards(inst.op) & super::super::gen_isa::HZ_WMMA_AB != 0 {
+                    let prev = out.iter().rev().find(|i| is_valu(i.op));
+                    let hazard = |p: &MInst| {
+                        super::super::gen_isa::hazards(p.op) & super::super::gen_isa::HZ_WMMA_D != 0
+                            && (ranges_overlap(&p.defs[0], &inst.uses[0]) || ranges_overlap(&p.defs[0], &inst.uses[1]))
+                    };
+                    let needs = match prev {
+                        Some(p) => hazard(p),
+                        None => preds[b].iter().any(|&p| last_valu[p].as_ref().is_none_or(&hazard)),
+                    };
+                    if needs {
+                        out.push(MInst::new(Opc::VNop, [], []));
+                    }
+                }
+                out.push(inst);
+            }
+            f.blocks[b].insts = out;
+        }
+    }
+
+    /// `form_clauses` before blocks it leaves alone stayed as they were: the reference.
+    fn form_clauses_reference(f: &mut MFunc) {
+        for block in f.blocks.iter_mut() {
+            let kind_of: Vec<Option<ClauseKind>> =
+                block.insts.iter().map(|i| clause_kind(i.op).filter(|k| matches!(k, ClauseKind::Store(_)))).collect();
+            let mut out = Vec::with_capacity(block.insts.len() + 8);
+            let mut run = 0;
+            for (i, inst) in std::mem::take(&mut block.insts).into_iter().enumerate() {
+                if run == 0 {
+                    if let Some(k) = kind_of[i] {
+                        run = kind_of[i..].iter().take(MAX_CLAUSE).take_while(|&&x| x == Some(k)).count();
+                        if run > 1 {
+                            out.push(MInst::new(Opc::SClause, [], []).with_imm(run as i64 - 1));
+                        }
+                    }
+                }
+                run = run.saturating_sub(1);
+                out.push(inst);
+            }
+            block.insts = out;
+        }
+    }
+
+    /// `add_vgpr_release` before blocks it leaves alone stayed as they were: the reference.
+    fn add_vgpr_release_reference(f: &mut MFunc, num_vgprs: u32) {
+        let has_stores = f
+            .blocks
+            .iter()
+            .any(|b| b.insts.iter().any(|i| i.op.flags() & F_VMEM_STORE != 0));
+        if num_vgprs <= 96 || !has_stores {
+            return;
+        }
+        for block in f.blocks.iter_mut() {
+            let mut out = Vec::with_capacity(block.insts.len() + 2);
+            for inst in block.insts.drain(..) {
+                if inst.op == Opc::SEndpgm {
+                    out.push(MInst::new(Opc::SNop, [], []));
+                    out.push(MInst::new(Opc::SSendmsg, [], []).with_imm(3));
+                }
+                out.push(inst);
+            }
+            block.insts = out;
+        }
+    }
+
+    #[test]
+    fn finish_passes_put_out_what_they_did() {
+        let (mut checked, mut nops, mut clauses) = (0, 0, 0);
+        for seed in 0..120u64 {
+            let mut f = random_function(seed, 1 + seed as usize % 6, 10 + 13 * seed as usize % 250);
+            if super::super::regalloc::allocate(&mut f).is_err() {
+                continue;
+            }
+            // In `rir::finish`'s order, the rebuilding passes sharing one spare.
+            let (mut spare, mut want) = (Vec::new(), f.clone());
+            expand_pseudos_with(&mut f, &mut spare).expect("expands");
+            expand_pseudos(&mut want).expect("expands");
+            let same = |f: &MFunc, want: &MFunc, name: &str| {
+                assert_eq!(format!("{:?}", f.blocks), format!("{:?}", want.blocks), "seed {seed}, {name}");
+            };
+            same(&f, &want, "expand");
+            insert_waitcnt_with(&mut f, &mut spare);
+            insert_waitcnt_reference(&mut want);
+            same(&f, &want, "waits");
+            super::super::vopd::form_pairs_with(&mut f, &mut spare);
+            super::super::vopd::form_pairs(&mut want);
+            same(&f, &want, "pairs");
+            fix_wmma_hazards(&mut f);
+            fix_wmma_hazards_reference(&mut want);
+            same(&f, &want, "wmma");
+            form_clauses(&mut f);
+            form_clauses_reference(&mut want);
+            same(&f, &want, "clauses");
+            insert_delay_alu_with(&mut f, &mut spare);
+            insert_delay_alu(&mut want);
+            same(&f, &want, "delay");
+            let has = |op: Opc| f.blocks.iter().any(|b| b.insts.iter().any(|i| i.op == op));
+            nops += has(Opc::VNop) as u32;
+            clauses += has(Opc::SClause) as u32;
+            for vgprs in [64, 128] {
+                let (mut got, mut want) = (f.clone(), f.clone());
+                add_vgpr_release(&mut got, vgprs);
+                add_vgpr_release_reference(&mut want, vgprs);
+                assert_eq!(format!("{:?}", got.blocks), format!("{:?}", want.blocks), "seed {seed}, release");
+            }
+            checked += 1;
+        }
+        assert!(checked > 100 && nops > 10 && clauses > 10, "{checked} functions allocated, {nops} with v_nop, {clauses} with clauses");
+    }
+
+    /// `sink_load_uses` before its facts held the loads: the reference.
+    fn sink_load_uses_reference(f: &mut MFunc, budget: u32) {
+        let fixed = F_DEF_SCC | F_USE_SCC | F_USE_VCC | F_DEF_EXEC | F_BRANCH | F_END | F_SMEM | F_FENCE;
+        let units = UnitIndex::new(f.blocks.iter().flat_map(|b| b.insts.iter()));
+        // Block number + 1 of the units loaded so far in that block.
+        let mut loaded = vec![0u32; units.len()];
+        for (b, block) in f.blocks.iter_mut().enumerate() {
+            let stamp = b as u32 + 1;
+            let insts = &mut block.insts;
+            let mut candidate = vec![false; insts.len()];
+            for (i, inst) in insts.iter().enumerate() {
+                // Loads write in issue order, so a d16 load's tied destination
+                // does not stall it.
+                let load = inst.op.flags() & (F_VMEM_LOAD | F_LDS) != 0;
+                let in_order = inst.op.flags() & F_VMEM_LOAD != 0 || lds_merge(inst);
+                candidate[i] = inst
+                    .uses
+                    .iter()
+                    .any(|o| !(in_order && inst.defs.contains(o)) && units.of(o).any(|u| loaded[u] == stamp));
+                if load || (inst.op == Opc::Copy && candidate[i]) {
+                    for d in &inst.defs {
+                        for u in units.of(d) {
+                            loaded[u] = stamp;
+                        }
+                    }
+                }
+            }
+            let mut facts: Vec<SinkFacts> = insts.iter().map(SinkFacts::of).collect();
+            for i in (0..insts.len()).rev() {
+                let c = &insts[i];
+                if !candidate[i] || c.op.flags() & fixed != 0 || has_phys(c) || c.op == Opc::SBarrier {
+                    continue;
+                }
+                let is_load = |inst: &MInst| inst.op.flags() & (F_VMEM_LOAD | F_LDS) != 0 && !inst.defs.is_empty();
+                let cs = facts[i];
+                let mut j = i + 1;
+                let mut passed = 0u32;
+                while j < insts.len() && may_sink_past(c, &cs, &insts[j], &facts[j]) {
+                    if is_load(&insts[j]) {
+                        // Delayed loads keep their order, so each still waits
+                        // on the oldest outstanding load.
+                        if is_load(c) && candidate[j] {
+                            break;
+                        }
+                        passed += insts[j].defs.iter().map(|d| vunits(d).count() as u32).sum::<u32>();
+                        if passed > budget {
+                            break;
+                        }
+                    }
+                    j += 1;
+                }
+                if j > i + 1 {
+                    insts[i..j].rotate_left(1);
+                    candidate[i..j].rotate_left(1);
+                    facts[i..j].rotate_left(1);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn load_sinking_moves_what_it_moved() {
+        let mut moved = 0;
+        for seed in 0..120u64 {
+            let mut f = random_function(seed, 1 + seed as usize % 6, 10 + 11 * seed as usize % 400);
+            if seed % 3 == 1 {
+                f.target = crate::target::Target::Gfx950;
+            }
+            for budget in [0, 4, 32] {
+                let (mut got, mut want) = (f.clone(), f.clone());
+                sink_load_uses(&mut got, budget);
+                sink_load_uses_reference(&mut want, budget);
+                assert_eq!(format!("{:?}", got.blocks), format!("{:?}", want.blocks), "seed {seed}, budget {budget}");
+                moved += (format!("{:?}", got.blocks) != format!("{:?}", f.blocks)) as u32;
+            }
+        }
+        assert!(moved > 100, "{moved} sinkings moved something");
     }
 }

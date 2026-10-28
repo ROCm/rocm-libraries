@@ -198,6 +198,11 @@ fn read(mnemonic: &str, rest: &str) -> Option<Fact> {
         let ndefs = usize::from(has_def);
         f.defs = regs_of(&ops[..ndefs.min(ops.len())]);
         f.uses = regs_of(&ops[ndefs.min(ops.len())..]);
+        if has_def && mnemonic.contains("_d16") {
+            // A d16 load keeps the other half of its destination: LLVM's
+            // instruction reads it (a tied operand the text cannot show).
+            f.uses.extend(f.defs.clone());
+        }
         if kind == Kind::Vmem && f.store && !has_def {
             // global/scratch: vaddr, vdata, saddr; buffer: vdata, vaddr, srsrc, soffset.
             let data = if prefix == "buffer_" { ops.first() } else { ops.get(1) };

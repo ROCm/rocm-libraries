@@ -179,10 +179,12 @@ impl From<CompileError> for Unallocated {
 /// schedule whose assignment needs the fewest registers, on up to `threads`
 /// threads (0: as the machine allows). Returns the allocation and the window
 /// (0 for load sinking alone, 1 for program order). `sunk` is `func` after
-/// load sinking (`post::sink_load_uses` with a budget of 32).
+/// load sinking (`post::sink_load_uses` with a budget of 32), and `known`
+/// its schedules.
 fn schedule_and_allocate(
     func: &mut mir::MFunc,
-    sunk: mir::MFunc,
+    sunk: &mir::MFunc,
+    known: &Schedules,
     lds_size: u32,
     wg: u32,
     spill: bool,
@@ -191,31 +193,35 @@ fn schedule_and_allocate(
     let t = func.target.info();
     let waves = |vgprs: u32| t.occupancy(vgprs, lds_size, wg);
     let hw = regalloc::Limits::for_func(func);
-    let base_pressure = regalloc::pressure(&sunk)?;
+    let base_pressure = known.pressure();
     let fits_hw = |p: &regalloc::Pressure| p.vgprs <= hw.vgprs && p.sgprs <= hw.sgprs;
     let mut target = waves(base_pressure.vgprs.min(hw.vgprs));
     let budget = |target: u32| regalloc::Limits { vgprs: t.vgpr_budget(target, lds_size, wg).min(hw.vgprs), sgprs: hw.sgprs };
     let windows: &[usize] = if debug_flag("nosched") { &[] } else { &[64, 32, 16] };
     let mut base: Option<(mir::MFunc, regalloc::Allocation)> = None;
-    let mut scheduled: Vec<(usize, mir::MFunc, regalloc::Pressure)> = Vec::with_capacity(windows.len());
+    // Each window's schedule and pressure; `None` until a later step needs
+    // them if the window could not be tried (`schedule_capped`).
+    let mut scheduled: Vec<(usize, Option<(Vec<Vec<u32>>, regalloc::Pressure)>)> = Vec::with_capacity(windows.len());
     let mut allocated: Vec<Option<(mir::MFunc, regalloc::Allocation)>> = Vec::with_capacity(windows.len());
     let base_alloc = |target: u32| -> Option<(mir::MFunc, regalloc::Allocation)> {
         let mut b = sunk.clone();
-        let a = regalloc::allocate_within(&mut b, budget(target)).ok()?;
+        let a = known.allocate(&mut b, budget(target)).ok()?;
         Some((b, a))
     };
+    // Past these, a pressure fails the test below at `target`: past the
+    // hardware, or past the most VGPRs up to it that keep `target` waves.
+    let cap = regalloc::Limits { vgprs: (0..=hw.vgprs).rev().find(|&v| waves(v) >= target).unwrap_or(0), sgprs: hw.sgprs };
     let mut lowered = false;
     for &window in windows {
-        let mut f = sunk.clone();
-        post::schedule_window(&mut f, window);
-        let p = regalloc::pressure(&f)?;
+        let schedule = if lowered { None } else { known.schedule_capped(window, cap) };
         let mut tried = None;
-        if !lowered && fits_hw(&p) && waves(p.vgprs) >= target {
-            let mut g = f.clone();
+        if let Some((orders, p)) = schedule.as_ref().filter(|(_, p)| fits_hw(p) && waves(p.vgprs) >= target) {
+            let (orders, p) = (orders, *p);
+            let mut g = post::reordered(sunk, orders);
             // A window whose first fit overflows the hardware stays out even
             // when packing tuples first squeezes it in: measured slower than
             // the narrower window at the same occupancy (v2 d256 prefill).
-            if let Some(a) = regalloc::allocate_within(&mut g, budget(target)).ok().filter(|a| !a.tight) {
+            if let Some(a) = known.allocate(&mut g, budget(target)).ok().filter(|a| !a.tight) {
                 if waves(a.num_vgprs) >= target {
                     *func = g;
                     return Ok((regalloc::Allocation { pressure: p, ..a }, window));
@@ -234,7 +240,7 @@ fn schedule_and_allocate(
                 tried = Some((g, a));
             }
         }
-        scheduled.push((window, f, p));
+        scheduled.push((window, schedule));
         allocated.push(tried);
     }
     if base.is_none() && fits_hw(&base_pressure) {
@@ -247,13 +253,14 @@ fn schedule_and_allocate(
         }
     }
     if lowered {
-        for ((window, f, p), tried) in scheduled.iter().zip(allocated) {
+        for ((window, schedule), tried) in scheduled.iter_mut().zip(allocated) {
+            let (orders, p) = schedule.get_or_insert_with(|| known.schedule(*window));
             if !fits_hw(p) || waves(p.vgprs) < target {
                 continue;
             }
             let attempt = tried.or_else(|| {
-                let mut g = f.clone();
-                regalloc::allocate_within(&mut g, budget(target)).ok().filter(|a| !a.tight).map(|a| (g, a))
+                let mut g = post::reordered(sunk, orders);
+                known.allocate(&mut g, budget(target)).ok().filter(|a| !a.tight).map(|a| (g, a))
             });
             if let Some((g, a)) = attempt {
                 if waves(a.num_vgprs) >= target {
@@ -270,10 +277,10 @@ fn schedule_and_allocate(
     // Load sinking alone does not fit, or only by packing tuples first: as
     // before pressure was known, program order (no sinking) gets a try.
     let program = func.clone();
-    let program_pressure = regalloc::pressure(&program)?;
+    let program_pressure = known.live.pressure(&program, None);
     if fits_hw(&program_pressure) {
         let mut g = program.clone();
-        if let Ok(a) = regalloc::allocate_within(&mut g, budget(waves(program_pressure.vgprs))) {
+        if let Ok(a) = known.allocate(&mut g, budget(waves(program_pressure.vgprs))) {
             if base.as_ref().is_none_or(|(_, ba)| waves(a.num_vgprs) >= waves(ba.num_vgprs)) {
                 *func = g;
                 return Ok((regalloc::Allocation { pressure: program_pressure, ..a }, 1));
@@ -284,7 +291,11 @@ fn schedule_and_allocate(
         *func = b;
         return Ok((regalloc::Allocation { pressure: base_pressure, ..ba }, 0));
     }
-    let candidates: Candidates = scheduled.into_iter().chain([(0, sunk, base_pressure), (1, program, program_pressure)]).collect();
+    let scheduled = scheduled.into_iter().map(|(window, schedule)| {
+        let (orders, p) = schedule.unwrap_or_else(|| known.schedule(window));
+        (window, post::reordered(sunk, &orders), p)
+    });
+    let candidates: Candidates = scheduled.chain([(0, sunk.clone(), base_pressure), (1, program, program_pressure)]).collect();
     let error = CompileError::new(
         "ROCKE_DIRECT_REGISTERS",
         format!(
@@ -312,6 +323,15 @@ fn spill_best(
     let t = candidates[0].1.target.info();
     let hw = regalloc::Limits::for_func(&candidates[0].1);
     let over = |p: &regalloc::Pressure| p.vgprs.saturating_sub(hw.vgprs) + p.sgprs.saturating_sub(hw.sgprs);
+    // Banked AGPRs count in the unified registers, which must leave one workgroup room on a CU.
+    let room = crate::target::gfx9::rules::workgroup_registers(t, wg);
+    let agprs = candidates[0].1.agpr_limit != Some(0);
+    for (window, f, _) in candidates.iter().filter(|_| agprs) {
+        if let Some((g, a)) = crate::target::gfx9::agpr::allocate_banked(f, hw).filter(|(_, a)| a.unified_vgprs() <= room) {
+            *func = g;
+            return Ok((a, *window));
+        }
+    }
     let large = candidates[0].1.blocks.iter().map(|b| b.insts.len()).sum::<usize>() >= regalloc::PARALLEL_MIN_INSTS;
     let threads = match threads {
         _ if !large => 1,
@@ -331,6 +351,7 @@ fn spill_best(
         wg_size: wg.max(1),
         lds_slots: t.lds_spill_slots(lds_size, wg, hw.vgprs),
         agpr_slots: match f.target {
+            Target::Gfx950 if !agprs => 0,
             Target::Gfx950 => crate::target::gfx9::spill::agpr_slots(t, hw.vgprs, lds_size, wg),
             Target::Gfx1151 => 0,
         },
@@ -393,6 +414,7 @@ const WIDE_WINDOW: usize = 512;
 /// exceeds that twentieth is tried.
 fn widen_schedule(
     sunk: &mir::MFunc,
+    known: &Schedules,
     func: &mut mir::MFunc,
     (alloc, window): (regalloc::Allocation, usize),
     lds_size: u32,
@@ -407,12 +429,10 @@ fn widen_schedule(
         return Ok((alloc, window));
     }
     let hw = regalloc::Limits::for_func(func);
-    let mut f = sunk.clone();
-    post::schedule_window(&mut f, WIDE_WINDOW);
-    let p = regalloc::pressure(&f)?;
-    if p.vgprs > hw.vgprs || p.sgprs > hw.sgprs {
+    let Some((orders, p)) = known.schedule_capped(WIDE_WINDOW, hw) else {
         return Ok((alloc, window));
-    }
+    };
+    let f = post::reordered(sunk, &orders);
     let wide = post::schedule_cost(&f);
     for target in [chosen, chosen.saturating_sub(1)].into_iter().filter(|&t| t >= 1 && waves(p.vgprs) >= t) {
         if wide.cycles(target) >= bar {
@@ -420,7 +440,7 @@ fn widen_schedule(
         }
         let mut g = f.clone();
         let budget = regalloc::Limits { vgprs: t.vgpr_budget(target, lds_size, wg).min(hw.vgprs), sgprs: hw.sgprs };
-        let Ok(a) = regalloc::allocate_within(&mut g, budget) else {
+        let Ok(a) = known.allocate(&mut g, budget) else {
             continue;
         };
         let reached = waves(a.num_vgprs);
@@ -446,10 +466,12 @@ fn finish(func: &mut mir::MFunc, num_vgprs: u32) -> Result<(u32, u64), CompileEr
         crate::target::gfx9::finish(func, num_vgprs)?;
         return Ok((0, 0));
     }
-    post::expand_pseudos(func)?;
-    post::insert_waitcnt(func);
+    // The block instructions a pass rebuilt, for the next pass to build in.
+    let mut spare = Vec::new();
+    post::expand_pseudos_with(func, &mut spare)?;
+    post::insert_waitcnt_with(func, &mut spare);
     if !debug_flag("novopd") {
-        vopd::form_pairs(func);
+        vopd::form_pairs_with(func, &mut spare);
     }
     let pairs = vopd::count_pairs(func);
     post::fix_wmma_hazards(func);
@@ -457,7 +479,7 @@ fn finish(func: &mut mir::MFunc, num_vgprs: u32) -> Result<(u32, u64), CompileEr
         post::form_clauses(func);
     }
     if !debug_flag("nodelay") {
-        post::insert_delay_alu(func);
+        post::insert_delay_alu_with(func, &mut spare);
     }
     post::add_vgpr_release(func, num_vgprs);
     if !debug_flag("noshrink") {
@@ -476,11 +498,58 @@ fn schedule_and_widen(
 ) -> Result<(regalloc::Allocation, usize), Unallocated> {
     let mut sunk = func.clone();
     post::sink_load_uses(&mut sunk, 32);
-    let chosen = schedule_and_allocate(func, sunk.clone(), lds_size, wg, spill, threads)?;
+    let known = Schedules::new(&sunk)?;
+    let chosen = schedule_and_allocate(func, &sunk, &known, lds_size, wg, spill, threads)?;
     if spill || chosen.0.spill.lds_dwords + chosen.0.spill.scratch_dwords > 0 {
         return Ok(chosen);
     }
-    Ok(widen_schedule(&sunk, func, chosen, lds_size, wg)?)
+    let widened = widen_schedule(&sunk, &known, func, chosen, lds_size, wg)?;
+    if func.target != Target::Gfx950 {
+        return Ok(widened);
+    }
+    let schedule = |window: usize, cap: regalloc::Limits| known.schedule_capped(window, cap).map(|(orders, p)| (post::reordered(&sunk, &orders), p));
+    Ok(crate::target::gfx9::trade::trade(func, widened, schedule, |f, budget| known.allocate(f, budget), lds_size, wg))
+}
+
+/// What every schedule `schedule_and_widen` tries of one function after load
+/// sinking shares: the liveness facts (`regalloc::Liveness`) and the blocks'
+/// dependence graphs.
+struct Schedules {
+    live: regalloc::Liveness,
+    units: regalloc::UnitLists,
+    dags: post::Dags,
+}
+
+impl Schedules {
+    fn new(sunk: &mir::MFunc) -> Result<Schedules, CompileError> {
+        let live = regalloc::Liveness::new(sunk)?;
+        let units = live.unit_lists(sunk);
+        Ok(Schedules { live, units, dags: post::Dags::new(sunk) })
+    }
+
+    /// The order of each block of the function these are of that
+    /// `post::schedule_window` gives with `window`, and its pressure.
+    fn schedule(&self, window: usize) -> (Vec<Vec<u32>>, regalloc::Pressure) {
+        let orders = self.dags.orders(window);
+        let p = self.live.pressure_listed(&self.units, Some(&orders));
+        (orders, p)
+    }
+
+    /// `schedule(window)`, or `None` once its pressure is known to exceed
+    /// `cap` in a class.
+    fn schedule_capped(&self, window: usize, cap: regalloc::Limits) -> Option<(Vec<Vec<u32>>, regalloc::Pressure)> {
+        self.live.pressure_capped(&self.units, cap, |b| self.dags.block_order(b, window))
+    }
+
+    /// `regalloc::pressure` of the function these are of.
+    fn pressure(&self) -> regalloc::Pressure {
+        self.live.pressure_listed(&self.units, None)
+    }
+
+    /// `regalloc::allocate_within` of `f`, a reordering of the function these are of.
+    fn allocate(&self, f: &mut mir::MFunc, budget: regalloc::Limits) -> Result<regalloc::Allocation, CompileError> {
+        regalloc::allocate_within_known(f, budget, &self.live)
+    }
 }
 
 /// `schedule_and_widen` with the alias facts, when they relax an order, and
@@ -844,8 +913,20 @@ fn compile_with(
     earlier: Option<Box<Resume>>,
 ) -> Result<CompiledKernel, Failure> {
     let mut laps = Laps { phases: Vec::new(), mark: Instant::now() };
-    let mut kernel = parse(text)?;
+    let mut kernel = match parse(text) {
+        Err(e) if target == Target::Gfx950 && e.message.contains("used before definition") => {
+            match crate::target::gfx9::early_constants::reorder(text) {
+                Some(reordered) => parse(&reordered)?,
+                None => return Err(e.into()),
+            }
+        }
+        parsed => parsed?,
+    };
     kernel.wave = target.info().wave;
+    if target == Target::Gfx950 {
+        crate::target::gfx9::mask_splat::fold(&mut kernel);
+        crate::target::gfx9::cpol::take_nontemporal(&mut kernel);
+    }
     validate::kernel(&kernel)?;
     let (mut lds, lds_size) = analysis::lds_layout(&kernel);
     validate::lds_pool(lds_size, target.info())?;
@@ -874,6 +955,14 @@ fn compile_with(
     validate::uniformity(&kernel, &uniform)?;
     let mut sel = isel::select_for(target, &kernel, &facts, uniform, &lds, lds_size)?;
     sel.func.vgpr_limit = kernel.vgpr_limit;
+    sel.func.agpr_limit = kernel.agpr_limit;
+    if target == Target::Gfx950 {
+        // Past the registers one workgroup's waves leave per SIMD, no workgroup fits a CU.
+        let most = crate::target::gfx9::rules::workgroup_registers(target.info(), kernel.max_workgroup_size);
+        if most < target.info().max_vgprs {
+            sel.func.vgpr_limit = Some(sel.func.vgpr_limit.map_or(most, |v| v.min(most)));
+        }
+    }
     post::remove_dead_copies(&mut sel.func);
     if target == Target::Gfx950 {
         // gfx950 takes the peephole rules and VALU fusion valid on gfx9
@@ -965,9 +1054,10 @@ fn same_function(a: &mir::MFunc, b: &mir::MFunc) -> bool {
         let mir::MBlock { insts, loop_depth } = x;
         *loop_depth == y.loop_depth && insts.len() == y.insts.len() && insts.iter().zip(&y.insts).all(|(p, q)| inst(p, q))
     };
-    let mir::MFunc { blocks, vregs, target, vgpr_limit } = a;
+    let mir::MFunc { blocks, vregs, target, vgpr_limit, agpr_limit } = a;
     *target == b.target
         && *vgpr_limit == b.vgpr_limit
+        && *agpr_limit == b.agpr_limit
         && vregs.len() == b.vregs.len()
         && vregs.iter().zip(&b.vregs).all(|(x, y)| reg(x, y))
         && blocks.len() == b.blocks.len()

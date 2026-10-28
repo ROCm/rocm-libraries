@@ -138,9 +138,12 @@ fn msgpack_str(bytes: &mut Vec<u8>, value: &str) {
     let length = value.len();
     if length <= 31 {
         bytes.push(0xa0 | length as u8);
-    } else {
-        assert!(length <= u8::MAX as usize);
+    } else if length <= u8::MAX as usize {
         bytes.extend([0xd9, length as u8]);
+    } else {
+        assert!(length <= u16::MAX as usize);
+        bytes.push(0xda);
+        bytes.extend_from_slice(&(length as u16).to_be_bytes());
     }
     bytes.extend_from_slice(value.as_bytes());
 }
@@ -673,13 +676,17 @@ pub fn write_gfx1151_wmma_gemm(symbol: &str, code: &[u8]) -> Result<Vec<u8>, Str
     write_kernel_object(&gemm_spec(symbol, code))
 }
 
+/// The longest kernel symbol written: rocKE's generated GEMM names run past
+/// 300 bytes, and the metadata strings take up to 64 KiB.
+const MAX_SYMBOL: usize = 1024;
+
 /// Construct a loadable single-kernel AMDHSA code object for the spec's
 /// target.
 pub fn write_kernel_object(spec: &KernelObjectSpec) -> Result<Vec<u8>, String> {
     let symbol = spec.symbol;
     let code = spec.code;
     if symbol.is_empty()
-        || symbol.len() > 200
+        || symbol.len() > MAX_SYMBOL
         || !symbol
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'$'))
@@ -1230,6 +1237,22 @@ mod tests {
         assert!(has(&gfx950, "amdgcn-amd-amdhsa--gfx950"));
         let find = |key: &str| gfx950.windows(key.len()).position(|w| w == key.as_bytes()).expect("key") + key.len();
         assert_eq!(gfx950[find(".wavefront_size")], 64);
+    }
+
+    /// A symbol past msgpack's 255-byte str8 (generated GEMM names are):
+    /// the note spells `.name` and `.symbol` as str16, and the object loads.
+    #[test]
+    fn long_symbols_are_msgpack_str16() {
+        let symbol = "k".repeat(380);
+        let mut spec = gemm_spec(&symbol, &[0u8; 8]);
+        spec.target = GFX950_OBJECT;
+        let note = metadata_note_for(&spec);
+        let str16 = |s: &str| [&[0xda][..], &(s.len() as u16).to_be_bytes(), s.as_bytes()].concat();
+        let has = |key: &[u8]| note.windows(key.len()).any(|w| w == key);
+        assert!(has(&str16(&symbol)) && has(&str16(&format!("{symbol}.kd"))));
+        let image = write_kernel_object(&spec).unwrap();
+        assert!(validate_hsaco(&image, &[symbol.clone()]).unwrap().exported_symbols.contains(&symbol));
+        assert!(write_kernel_object(&gemm_spec(&"k".repeat(MAX_SYMBOL + 1), &[0u8; 8])).is_err());
     }
 
     #[test]

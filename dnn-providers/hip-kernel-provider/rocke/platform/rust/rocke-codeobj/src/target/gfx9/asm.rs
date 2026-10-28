@@ -130,6 +130,10 @@ fn aligned(r: u16, n: u8) -> Result<u32, CompileError> {
 /// 512-entry register file, which gfx11 never reaches.
 pub const AGPR0: u16 = 256;
 
+/// The VOP3P opcode of `v_mfma_ld_scale_b32`, the first half of a
+/// block-scaled MFMA (VOP3PX2).
+const LD_SCALE: u32 = 0x2c;
+
 /// An MFMA register operand (`mai`): its index in its bank and whether the
 /// bank is the AGPRs'.
 fn vgpr_or_agpr(o: &Opnd) -> Result<(u32, bool), CompileError> {
@@ -508,9 +512,9 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
             vop3(out, vop3_code, vdst, None, &uses[..2], mods, valu_lits(form, flags), name())?;
         }
         Fmt::Vop3 => {
-            // A fourth use is the destination's old value, not encoded.
+            // The destination's old value (a fourth use, or the third of v_cvt_pk_fp8_f32) is not encoded.
             let vdst = vgpr(nth(defs, 0)?)?;
-            vop3(out, vop3_code, vdst, None, &uses[..uses.len().min(3)], mods, valu_lits(form, flags), name())?;
+            vop3(out, vop3_code, vdst, None, &uses[..super::fp8::encoded_sources(sig, uses)], mods, valu_lits(form, flags), name())?;
         }
         Fmt::Vop3b => {
             let vdst = vgpr(nth(defs, 0)?)?;
@@ -546,7 +550,19 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
             };
             push2(out, words.pack());
         }
-        Fmt::Vop3p if form == Form::Mai => {
+        Fmt::Vop3p if matches!(form, Form::Mai | Form::MaiScale) => {
+            // The block-scaled form (VOP3PX2) starts with v_mfma_ld_scale_b32
+            // reading the A and B scales (the VGPR pair after C, byte 0 of
+            // each: op_sel and op_sel_hi clear); its MFMA half sets bit 11.
+            let scaled = form == Form::MaiScale;
+            if scaled {
+                let pair = nth(uses, 3)?;
+                if pair.dwords() != 2 {
+                    return Err(bad(format!("{}: the A and B scales are one VGPR pair, not {pair:?}", name())));
+                }
+                let s = vgpr(pair)?;
+                push2(out, t::EncVop3p { op: LD_SCALE, src0: t::SRC_VGPR + s, src1: t::SRC_VGPR + s + 1, ..Default::default() }.pack());
+            }
             // D and C share one bank (acc_cd); A and B each name theirs (acc).
             let (vdst, acc_cd) = vgpr_or_agpr(nth(defs, 0)?)?;
             let (a, acc_a) = vgpr_or_agpr(nth(uses, 0)?)?;
@@ -575,7 +591,7 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
             if f64 && ctl >> 7 != 0 {
                 return Err(bad(format!("{}: blgp on an f64 MFMA (those bits are neg there)", name())));
             }
-            if op == Opc::Gfx9(t::Gfx9Op::VMfma16x16x128F8f6f4) {
+            if scaled || op == Opc::Gfx9(t::Gfx9Op::VMfma16x16x128F8f6f4) {
                 let dwords = |format: u32| [8u8, 8, 6, 6, 4].get(format as usize).copied();
                 let (a, b) = (nth(uses, 0)?.dwords(), nth(uses, 1)?.dwords());
                 if ctl >> 3 & 15 != 0 || dwords(ctl & 7) != Some(a) || dwords(ctl >> 7 & 7) != Some(b) {
@@ -590,7 +606,7 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
             let words = t::EncVop3pMai {
                 vdst,
                 cbsz: ctl & 7,
-                abid: ctl >> 3 & 15,
+                abid: if scaled { 1 } else { ctl >> 3 & 15 },
                 acc_cd: u32::from(acc_cd),
                 op: code,
                 src0: t::SRC_VGPR + a,
@@ -663,6 +679,17 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
             let data1 = if form == Form::Ds2addr { vgpr(nth(uses, 2)?)? } else { 0 };
             push2(out, t::EncDs { op: code, offset, addr, data0, data1, vdst, ..Default::default() }.pack());
         }
+        Fmt::Global if form == Form::Lds => {
+            // global_load_lds: a 64-bit VGPR address (saddr off), the data to LDS at M0.
+            if !defs.is_empty() || !(0..1 << 15).contains(&inst.imm) || nth(uses, 0)?.dwords() != 2 {
+                return Err(bad(format!("{}: a VGPR pair address, no destination, and imm within the offset and sc0, nt, sc1", name())));
+            }
+            let addr = vgpr(nth(uses, 0)?)?;
+            let imm = inst.imm as u32;
+            let (offset, sc0, nt, sc1) = (imm & 0xfff, imm >> 12 & 1, imm >> 13 & 1, imm >> 14 & 1);
+            let words = t::EncGlobal { op: code, offset, sc0, nt, sc1, addr, saddr: t::SRC_SADDR_OFF, ..Default::default() };
+            push2(out, words.pack());
+        }
         Fmt::Global if form == Form::Scratch => {
             let (vdst, data) = match defs.first() {
                 Some(d) => (vgpr(d)?, 0),
@@ -697,7 +724,8 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
                 return Err(bad(format!("global offset {offset} out of range")));
             }
             let sc0 = u32::from(mods & M_GLC != 0);
-            let words = t::EncGlobal { op: code, offset: offset as u32, sc0, vdst, saddr, data, addr, ..Default::default() };
+            let (sc1, nt) = (u32::from(mods & super::cpol::M_SC1 != 0), u32::from(mods & super::cpol::M_NT != 0));
+            let words = t::EncGlobal { op: code, offset: offset as u32, sc0, sc1, nt, vdst, saddr, data, addr, ..Default::default() };
             push2(out, words.pack());
         }
         Fmt::Mubuf if form == Form::Nodata => {
@@ -706,6 +734,25 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
             }
             let (sc0, sc1) = (inst.imm as u32 & 1, inst.imm as u32 >> 1);
             push2(out, t::EncMubuf { op: code, sc0, sc1, ..Default::default() }.pack());
+        }
+        Fmt::Mubuf if form == Form::Lds => {
+            // The data goes to LDS at M0: no VGPR is written (vdata 0).
+            if !defs.is_empty() || !(0..1 << 15).contains(&inst.imm) {
+                return Err(bad(format!("{}: no destination, and imm past the offset and sc0, nt, sc1", name())));
+            }
+            let vaddr = vgpr(nth(uses, 0)?)?;
+            let srsrc = match *nth(uses, 1)? {
+                Opnd::P(Phys::S(r), 4) if r % 4 == 0 => sgpr(r, 4)? / 4,
+                ref o => return Err(bad(format!("{o:?} is not an aligned SGPR quad"))),
+            };
+            let (soffset, lit) = src(nth(uses, 2)?, Lit::Plain)?;
+            if lit.is_some() {
+                return Err(bad("buffer soffset literal"));
+            }
+            let imm = inst.imm as u32;
+            let (offset, sc0, nt, sc1) = (imm & 0xfff, imm >> 12 & 1, imm >> 13 & 1, imm >> 14 & 1);
+            let words = t::EncMubuf { op: code, offset, offen: 1, sc0, sc1, lds: 1, nt, soffset, srsrc, vaddr, ..Default::default() };
+            push2(out, words.pack());
         }
         Fmt::Mubuf => {
             let (vdata, rest) = if defs.is_empty() { (vgpr(nth(uses, 0)?)?, &uses[1..]) } else { (vgpr(&defs[0])?, uses) };
@@ -1009,6 +1056,21 @@ mod tests {
             (MInst::new(g(VMfma16x16x4F32), [v(0, 4)], [v(4, 1), v(5, 1), v(0, 4)]), vec![0xd3c5_0000, 0x0402_0b04]),
             (MInst::new(g(VMfma4x4x4F64), [v(0, 2)], [v(2, 2), v(4, 2), v(0, 2)]), vec![0xd3ef_0000, 0x0402_0902]),
             (MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 6), v(12, 4), v(0, 4)]).with_imm(2 | 4 << 7), vec![0xd3ad_0200, 0x8402_1904]),
+            // Block-scaled (VOP3PX2), as llvm-mc encodes v_mfma_scale_f32_32x32x64_f8f6f4
+            // v[0:15], v[16:23], v[24:31], v[0:15], v32, v33 / a[0:15], v[16:19], v[24:27], 0,
+            // v32, v33 cbsz:4 blgp:4 / v[0:15], v[16:21], a[24:31], v[0:15], v254, v255 cbsz:3.
+            (
+                MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 2)]),
+                vec![0xd3ac_0000, 0x0002_4320, 0xd3ae_0800, 0x0402_3110],
+            ),
+            (
+                MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(AGPR0, 16)], [v(16, 4), v(24, 4), Opnd::Imm(0), v(32, 2)]).with_imm(4 | 4 << 7),
+                vec![0xd3ac_0000, 0x0002_4320, 0xd3ae_8c00, 0x8202_3110],
+            ),
+            (
+                MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 6), v(AGPR0 + 24, 8), v(0, 16), v(254, 2)]).with_imm(3),
+                vec![0xd3ac_0000, 0x0003_fffe, 0xd3ae_0b00, 0x1402_3110],
+            ),
         ];
         for (inst, want) in cases {
             assert_eq!(words(inst.clone()), Ok(want), "{inst:?}");
@@ -1053,6 +1115,12 @@ mod tests {
             MInst::new(g(VMfma4x4x4F64), [v(0, 2)], [v(2, 2), v(4, 2), Opnd::Imm(0x3e22_f983)]),
             MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 8), v(12, 8), v(0, 4)]).with_imm(2 << 3),
             MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 8), v(12, 8), v(0, 4)]).with_imm(3 << 7),
+            // Block-scaled: scales not a VGPR pair (one register, SGPRs; llvm-mc
+            // refuses SGPR scales), abid, an A format whose size is not A's.
+            MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 1)]),
+            MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), s(4, 2)]),
+            MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 2)]).with_imm(1 << 3),
+            MInst::new(g(VMfmaScale32x32x64F8f6f4), [v(0, 16)], [v(16, 8), v(24, 8), v(0, 16), v(32, 2)]).with_imm(4),
         ];
         for inst in refused {
             assert!(words(inst.clone()).is_err(), "{inst:?}");

@@ -61,6 +61,15 @@ pub fn whole_workgroups(by_vgprs: u32, workgroup_waves: u32, simds: u32) -> u32 
     by_vgprs - by_vgprs % share
 }
 
+/// The most unified registers (VGPRs and AGPRs) per wave with which one
+/// workgroup of `workgroup_size` lanes still fits a CU: each SIMD's file
+/// holds its share of the workgroup's waves. Past it the dispatch is
+/// refused (a 512-lane workgroup: 256, 1024 lanes: 128).
+pub fn workgroup_registers(t: &crate::target::TargetInfo, workgroup_size: u32) -> u32 {
+    let share = workgroup_size.div_ceil(t.wave).div_ceil(t.simds_per_lds).max(1);
+    t.vgprs_per_simd / share / t.vgpr_granule * t.vgpr_granule
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,5 +113,35 @@ mod tests {
         assert_eq!(t.occupancy(32, 96 << 10, 1024), 4);
         // gfx1151 keeps its own count.
         assert_eq!(crate::target::GFX1151.occupancy(143, 0, 1024), 10);
+    }
+
+    #[test]
+    fn a_workgroup_fits_a_cu_only_within_its_share_of_the_registers() {
+        let t = &crate::target::GFX950;
+        let room = |lanes: u32| workgroup_registers(t, lanes);
+        assert_eq!((room(64), room(256), room(512), room(768), room(1024)), (512, 512, 256, 168, 128));
+        // A 1024-lane kernel with more values live than 128 VGPRs hold spills
+        // within them: four of its waves share each SIMD's 512 registers.
+        let mut text = String::from(
+            "ckdsl.ir v1\nkernel @wide {\n  attrs { max_workgroup_size = i:1024 }\n  params {\n    %X : ptr<f32,global>\n    \
+             %Y : ptr<f32,global>\n  }\n  region @entry {\n    %tid : i32 = gpu.thread_id (  ) { axis = s:\"x\" }\n",
+        );
+        for i in 0..160 {
+            text += &format!("    %c{i} : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{} }}\n", 1024 * i);
+            text += &format!("    %p{i} : i32 = arith.add ( %tid, %c{i} )\n");
+            text += &format!("    %v{i} : f32 = memref.global_load_typed ( %X, %p{i} ) {{ align = i:4, elem_type = s:\"f32\" }}\n");
+        }
+        let (mut fwd, mut rev) = ("%v0".to_string(), "%v159".to_string());
+        for i in 1..160 {
+            text += &format!("    %f{i} : f32 = arith.fadd ( {fwd}, %v{i} )\n    %r{i} : f32 = arith.fadd ( {rev}, %v{} )\n", 159 - i);
+            (fwd, rev) = (format!("%f{i}"), format!("%r{i}"));
+        }
+        text += &format!(
+            "    %y : f32 = arith.fmul ( {fwd}, {rev} )\n    memref.global_store_typed ( %Y, %tid, %y ) {{ align = i:4, elem_type = s:\"f32\" }}\n    \
+             cf.return (  )\n  }}\n}}\n"
+        );
+        let compiled = crate::rir::compile_any_target(&text, crate::target::Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
+        let s = &compiled.stats;
+        assert!(s.vgprs + s.spill.agpr_dwords <= 128 && s.spill.lds_dwords + s.spill.scratch_dwords > 0, "{s:?}");
     }
 }

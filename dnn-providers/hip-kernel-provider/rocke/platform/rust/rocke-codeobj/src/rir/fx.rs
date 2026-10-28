@@ -79,6 +79,30 @@ pub fn hash_words(words: &[u32]) -> u64 {
     h.hash
 }
 
+/// The hash `ScopedTable` files a key under: two multiply-xor lanes over
+/// pairs of words, so that a key's multiplications overlap (`hash_words`
+/// chains one per word). Only where entries go depends on it.
+fn key_hash(words: &[u32]) -> u64 {
+    const K0: u64 = 0x9e37_79b9_7f4a_7c15;
+    const K1: u64 = 0xc2b2_ae3d_27d4_eb4f;
+    let pair = |w: &[u32]| u64::from(w[0]) | u64::from(w[1]) << 32;
+    let (mut a, mut b) = (words.len() as u64, SEED);
+    let mut quads = words.chunks_exact(4);
+    for q in &mut quads {
+        a = (a ^ pair(&q[..2])).wrapping_mul(K0);
+        b = (b ^ pair(&q[2..])).wrapping_mul(K1);
+    }
+    let mut rest = [0u32; 4];
+    let tail = quads.remainder();
+    if !tail.is_empty() {
+        rest[..tail.len()].copy_from_slice(tail);
+        a = (a ^ pair(&rest[..2])).wrapping_mul(K0);
+        b = (b ^ pair(&rest[2..])).wrapping_mul(K1);
+    }
+    let h = (a ^ b.rotate_left(31)).wrapping_mul(K0);
+    h ^ h >> 29
+}
+
 /// Map from `u32`-word keys to values whose entries are removed in reverse
 /// insertion order (`truncate` to an earlier `mark`), as scoped CSE needs.
 pub struct ScopedTable<V> {
@@ -111,7 +135,7 @@ impl<V: Copy> ScopedTable<V> {
         if self.heads.is_empty() {
             return None;
         }
-        let hash = hash_words(key);
+        let hash = key_hash(key);
         let mut i = self.heads[self.bucket(hash)];
         while i != 0 {
             let e = &self.entries[i as usize - 1];
@@ -126,7 +150,7 @@ impl<V: Copy> ScopedTable<V> {
     /// `get(key)`, adding `key` with `value` when it is absent: one hash
     /// and one probe for both.
     pub fn get_or_insert(&mut self, key: &[u32], value: V) -> Option<V> {
-        let hash = hash_words(key);
+        let hash = key_hash(key);
         if !self.heads.is_empty() {
             let mut i = self.heads[self.bucket(hash)];
             while i != 0 {
@@ -143,7 +167,7 @@ impl<V: Copy> ScopedTable<V> {
 
     /// Adds `key`; while present, it shadows an equal key added earlier.
     pub fn insert(&mut self, key: &[u32], value: V) {
-        self.insert_hashed(key, hash_words(key), value);
+        self.insert_hashed(key, key_hash(key), value);
     }
 
     fn insert_hashed(&mut self, key: &[u32], hash: u64, value: V) {
@@ -231,6 +255,46 @@ mod tests {
                 }
             }
             assert_eq!(a.get(&key), b.get(&key));
+        }
+    }
+
+    /// The table against a stack of entries searched newest first, with
+    /// keys of every length up to eleven words sharing prefixes and hashes'
+    /// buckets: where `key_hash` files entries changes no answer.
+    #[test]
+    fn scoped_table_answers_as_a_stack_of_entries() {
+        let mut table = ScopedTable::default();
+        let mut stack: Vec<(Vec<u32>, u32)> = Vec::new();
+        let mut marks = Vec::new();
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut next = |n: u32| {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 33) as u32 % n
+        };
+        for i in 0..60000u32 {
+            let key: Vec<u32> = (0..next(12)).map(|_| next(6)).collect();
+            let want = stack.iter().rev().find(|(k, _)| *k == key).map(|&(_, v)| v);
+            match next(40) {
+                0 => marks.push((table.mark(), stack.len())),
+                1 => {
+                    if let Some((m, n)) = marks.pop() {
+                        table.truncate(m);
+                        stack.truncate(n);
+                    }
+                }
+                2..=9 => {
+                    table.insert(&key, i);
+                    stack.push((key.clone(), i));
+                }
+                10..=19 => assert_eq!(table.get(&key), want),
+                _ => {
+                    assert_eq!(table.get_or_insert(&key, i), want);
+                    if want.is_none() {
+                        stack.push((key.clone(), i));
+                    }
+                }
+            }
+            assert_eq!(table.mark(), stack.len());
         }
     }
 }

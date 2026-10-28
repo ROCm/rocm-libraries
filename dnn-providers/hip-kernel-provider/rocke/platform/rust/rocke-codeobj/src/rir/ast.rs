@@ -18,6 +18,9 @@ pub enum Scalar {
     FP8E4M3,
     BF8E5M2,
     F64,
+    /// The 32-bit carrier of a TF32 operand of an emulated MMA atom: only
+    /// bitcasts and `tile.mma` read it.
+    TF32,
 }
 
 impl Scalar {
@@ -25,7 +28,7 @@ impl Scalar {
         match self {
             Scalar::I1 | Scalar::I8 | Scalar::FP8E4M3 | Scalar::BF8E5M2 => 1,
             Scalar::F16 | Scalar::BF16 | Scalar::I16 => 2,
-            Scalar::I32 | Scalar::F32 => 4,
+            Scalar::I32 | Scalar::F32 | Scalar::TF32 => 4,
             Scalar::I64 | Scalar::F64 => 8,
         }
     }
@@ -363,6 +366,9 @@ pub enum OpKind {
     WaitCnt,
     SchedBarrier,
     SchedGroupBarrier,
+    /// `tile.iglp_opt {level}`: an instruction-ordering strategy for the
+    /// scheduling region it starts (LLVM's `llvm.amdgcn.iglp.opt`).
+    IglpOpt,
     BarrierBare,
     /// `(smem, row, col)`: four f16 elements from `[row][col]` on.
     SmemLoadV4,
@@ -399,6 +405,56 @@ pub enum OpKind {
     /// `(addr: ptr, value) {offset}`: legalized `memref.global_atomic_add`;
     /// returns the old value.
     GAtomicAdd,
+    /// `tile.smem_addr_of (smem) -> i64`: the allocation's LDS byte address.
+    SmemAddrOf,
+    /// `tile.smem_ptr_add (addr: i64, offset: i64) -> i64`: an LDS address plus a byte offset.
+    SmemPtrAdd,
+    /// `tile.async_buffer_load_lds_addr` and `tile.async_buffer_load_lds`
+    /// `(rsrc, lds: i64, voffset, soffset) {dwords, aux}`: each lane's
+    /// `dwords` dwords at its buffer offset go to LDS at the first lane's
+    /// address plus 4 * `dwords` * lane (LDS DMA, gfx950).
+    BufferLoadLds,
+    /// `tile.global_load_lds (ptr, byte_offset: i32, lds: i64) {size_bytes, aux}`:
+    /// as `BufferLoadLds`, from each lane's `ptr + byte_offset`.
+    GlobalLoadLds,
+    /// `tile.ds_read_tr16_b64 (smem, indices...) -> vec<16-bit x4>`: the
+    /// transposing LDS read at the element's address (gfx950).
+    DsReadTr16,
+    /// `tile.ds_read_tr_b8 (smem, indices...) -> vec<8-bit x8>`: as
+    /// `DsReadTr16`, in 8-bit elements.
+    DsReadTr8,
+    /// Either transposing read at `smem`'s `addr + offset` bytes, `bits` 16
+    /// or 8 (`opt` canonical form).
+    LdsReadTr,
+    /// `tile.permlane32_swap (lo: i32, hi: i32) -> (i32, i32)`:
+    /// `llvm.amdgcn.permlane32.swap` (gfx950).
+    Permlane32Swap,
+    /// `tile.readlane (v: i32|f32, lane: i32)`: lane `lane`'s `v`, uniform.
+    ReadLane,
+    /// `arith.cvt_fp8_to_f32 (fp8e4m3) -> f32` and its bf8e5m2 twin (gfx950).
+    CvtFp8ToF32,
+    CvtBf8ToF32,
+    /// `arith.cvt_pk_f32_fp8x4 (vec<fp8e4m3x4>) -> vec<f32x4>` and its bf8e5m2 twin (gfx950).
+    CvtPkF32Fp8,
+    CvtPkF32Bf8,
+    /// `arith.cvt_f32_to_fp8 (f32) -> fp8e4m3` and its bf8e5m2 twin: round to
+    /// nearest even, no saturation (gfx950).
+    CvtF32ToFp8,
+    CvtF32ToBf8,
+    /// `arith.cvt_pk_fp8_f32x4 (vec<f32x4>) -> vec<fp8e4m3x4>` and its bf8e5m2 twin (gfx950).
+    CvtPkFp8F32,
+    CvtPkBf8F32,
+    /// `vector.and (a, b: vec<i32xN>)`: element-wise and.
+    VecAnd,
+    /// `tile.s_wait_asynccnt {n}`: gfx1250's wait on its asynchronous LDS
+    /// copies; a target without that counter has none to wait for.
+    WaitAsyncCnt,
+    /// `memref.global_flag_wait_eq (flags, index, value) {scope}`: polls the
+    /// i32 `flags[index]` with acquire loads until it holds `value`.
+    FlagWaitEq,
+    /// `memref.global_flag_store (flags, index, value) {ordering, scope}`: an
+    /// atomic i32 store.
+    FlagStore,
 }
 
 impl OpKind {
@@ -480,6 +536,7 @@ impl OpKind {
             "tile.s_waitcnt" => OpKind::WaitCnt,
             "tile.sched_barrier" => OpKind::SchedBarrier,
             "tile.sched_group_barrier" => OpKind::SchedGroupBarrier,
+            "tile.iglp_opt" => OpKind::IglpOpt,
             "tile.s_barrier_bare" => OpKind::BarrierBare,
             "tile.smem_load_vN_f32" => OpKind::SmemLoadVec,
             "tile.smem_store_vN_f32" => OpKind::SmemStoreVec,
@@ -529,8 +586,30 @@ impl OpKind {
             "tile.wave_all" => OpKind::WaveAll,
             "tile.lane_id" => OpKind::LaneId,
             "memref.global_atomic_add" => OpKind::GlobalAtomicAdd,
+            // `(ptr<f16>, index, vec<f16x2>)`: an atomic add of both halves at an f16 element index.
+            "memref.global_atomic_add_pk_f16" => OpKind::GlobalAtomicAdd,
             "memref.fence" => OpKind::Fence,
             "tile.sync_lds_only" => OpKind::SyncLdsOnly,
+            "tile.smem_addr_of" => OpKind::SmemAddrOf,
+            "tile.smem_ptr_add" => OpKind::SmemPtrAdd,
+            "tile.async_buffer_load_lds_addr" | "tile.async_buffer_load_lds" => OpKind::BufferLoadLds,
+            "tile.global_load_lds" => OpKind::GlobalLoadLds,
+            "tile.ds_read_tr16_b64" => OpKind::DsReadTr16,
+            "tile.ds_read_tr_b8" => OpKind::DsReadTr8,
+            "tile.permlane32_swap" => OpKind::Permlane32Swap,
+            "tile.readlane" => OpKind::ReadLane,
+            "arith.cvt_fp8_to_f32" => OpKind::CvtFp8ToF32,
+            "arith.cvt_bf8_to_f32" => OpKind::CvtBf8ToF32,
+            "arith.cvt_pk_f32_fp8x4" => OpKind::CvtPkF32Fp8,
+            "arith.cvt_pk_f32_bf8x4" => OpKind::CvtPkF32Bf8,
+            "arith.cvt_f32_to_fp8" => OpKind::CvtF32ToFp8,
+            "arith.cvt_f32_to_bf8" => OpKind::CvtF32ToBf8,
+            "arith.cvt_pk_fp8_f32x4" => OpKind::CvtPkFp8F32,
+            "arith.cvt_pk_bf8_f32x4" => OpKind::CvtPkBf8F32,
+            "vector.and" => OpKind::VecAnd,
+            "tile.s_wait_asynccnt" => OpKind::WaitAsyncCnt,
+            "memref.global_flag_wait_eq" => OpKind::FlagWaitEq,
+            "memref.global_flag_store" => OpKind::FlagStore,
             _ => return None,
         })
     }
@@ -567,6 +646,7 @@ impl OpKind {
                 | OpKind::WaitCnt
                 | OpKind::SchedBarrier
                 | OpKind::SchedGroupBarrier
+                | OpKind::IglpOpt
                 | OpKind::BarrierBare
                 | OpKind::SmemLoadV4
                 | OpKind::LdsAtomicAdd
@@ -587,6 +667,17 @@ impl OpKind {
                 | OpKind::GAtomicAdd
                 | OpKind::Fence
                 | OpKind::SyncLdsOnly
+                | OpKind::BufferLoadLds
+                | OpKind::GlobalLoadLds
+                // A lane's result depends on the other lanes' addresses.
+                | OpKind::DsReadTr16
+                | OpKind::DsReadTr8
+                | OpKind::LdsReadTr
+                | OpKind::Permlane32Swap
+                | OpKind::ReadLane
+                | OpKind::WaitAsyncCnt
+                | OpKind::FlagWaitEq
+                | OpKind::FlagStore
         )
     }
 
@@ -613,6 +704,11 @@ impl OpKind {
                     | OpKind::DsBpermute
                     | OpKind::WaveAny
                     | OpKind::WaveAll
+                    | OpKind::DsReadTr16
+                    | OpKind::DsReadTr8
+                    | OpKind::LdsReadTr
+                    | OpKind::Permlane32Swap
+                    | OpKind::ReadLane
             )
     }
 
@@ -630,6 +726,8 @@ impl OpKind {
                 | OpKind::GAtomicAdd
                 // Later loads must see other agents' writes: none may use the scalar cache.
                 | OpKind::Fence
+                | OpKind::FlagWaitEq
+                | OpKind::FlagStore
         )
     }
 }
@@ -739,6 +837,9 @@ pub struct Kernel {
     /// from the parsers; `rir::compile_any_target_limited` sets it to test
     /// spilling.
     pub vgpr_limit: Option<u32>,
+    /// AGPRs the allocation may use when fewer than the target's:
+    /// `agpr_alloc = [0, 0]` (LLVM's `amdgpu-agpr-alloc`) allows none.
+    pub agpr_limit: Option<u32>,
     pub params: Vec<Param>,
     pub body: Region,
     pub values: Vec<ValueDef>,

@@ -46,7 +46,8 @@ fn order_block(region: &mut Region) {
             }
         }
     }
-    let mut first_use: FxHashMap<ValueId, usize> = FxHashMap::default();
+    // Looked up only, so room for an operand per op changes nothing else.
+    let mut first_use: FxHashMap<ValueId, usize> = FxHashMap::with_capacity_and_hasher(n, Default::default());
     for (i, op) in ops.iter().enumerate() {
         uses(op, &mut |v| {
             first_use.entry(v).or_insert(i);
@@ -79,7 +80,7 @@ fn order_block(region: &mut Region) {
                 || matches!(o.kind, OpKind::Mma | OpKind::Sync | OpKind::SyncLdsOnly | OpKind::InlineAsmIdentity)
                 || matches!(
                     o.kind,
-                    OpKind::BarrierBare | OpKind::WaitCnt | OpKind::SchedBarrier | OpKind::SchedGroupBarrier | OpKind::SetPrio
+                    OpKind::BarrierBare | OpKind::WaitCnt | OpKind::SchedBarrier | OpKind::SchedGroupBarrier | OpKind::IglpOpt | OpKind::SetPrio
                 )
                 || matches!(o.kind, OpKind::GlobalLoad | OpKind::GlobalLoadVec | OpKind::GLoad)
             {

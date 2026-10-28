@@ -328,8 +328,12 @@ fn uniform_rule<'a>(kernel: &Kernel, op: &'a Op, written: bool) -> Rule<'a> {
         OpKind::Constant | OpKind::KernArg | OpKind::BlockId | OpKind::ReadFirstLane | OpKind::SmemAlloc => {
             Rule::Always(true)
         }
+        // An LDS address is the allocation's offset, the same in every lane.
+        OpKind::SmemAddrOf => Rule::Always(true),
+        OpKind::SmemPtrAdd => Rule::Inputs(&op.operands),
         // Wave votes: one value for the whole wave.
         OpKind::WaveAny | OpKind::WaveAll => Rule::Always(true),
+        OpKind::ReadLane => Rule::Always(true),
         OpKind::Not | OpKind::GlobalPtrToI64 => Rule::Inputs(&op.operands),
         OpKind::VecBitcast => Rule::Inputs(op.operands.get(..1).unwrap_or(&[])),
         OpKind::Add
@@ -506,9 +510,10 @@ fn smem_eligible_statically(kernel: &Kernel, op: &Op, written: bool) -> bool {
         return false;
     }
     let Some(&result) = op.results.first() else { return false };
+    // gfx950 (wave64) adds a negative offset into the scalar base.
     matches!(kernel.ty(result).elem(), Scalar::I32 | Scalar::F32 | Scalar::I64)
         && op.int_attr("align").unwrap_or(1) >= 4
-        && op.int_attr("offset").unwrap_or(0) >= 0
+        && (op.int_attr("offset").unwrap_or(0) >= 0 || kernel.wave == 64)
 }
 
 pub fn is_snan_f32(bits: u32) -> bool {
@@ -602,6 +607,8 @@ pub fn canonical_f32(kernel: &Kernel, facts: &Facts) -> Vec<bool> {
 fn canonical_rule<'a>(kernel: &Kernel, facts: &Facts, op: &'a Op) -> Rule<'a> {
     let first = |n: usize| op.operands.get(..n).unwrap_or(&[]);
     match op.kind {
+        // An inline-asm LDS read (gfx950) gives what memory holds.
+        OpKind::InlineAsmIdentity if op.str_attr("template").is_some_and(|t| !t.is_empty()) => Rule::Always(false),
         OpKind::Constant => {
             let konst = op.results.first().and_then(|r| facts.konst.get(r.0 as usize).copied().flatten());
             Rule::Always(match konst {

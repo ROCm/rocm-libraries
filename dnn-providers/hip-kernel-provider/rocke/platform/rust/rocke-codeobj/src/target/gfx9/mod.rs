@@ -13,17 +13,33 @@
 use crate::error::CompileError;
 use crate::rir::mir::MFunc;
 
+pub mod agpr;
 pub mod asm;
+pub mod atomics;
+pub mod attn_ops;
+pub mod conv_ops;
+pub mod cpol;
 #[rustfmt::skip]
 pub mod gen_isa;
 pub mod hazards;
+pub mod iglp;
 pub mod isel_hooks;
+pub mod early_constants;
+pub mod fp8;
+pub mod lanes;
+pub mod lds_dma;
+pub mod lds_tr;
+pub mod mask_splat;
 pub mod legalize;
+pub mod mfma;
 pub mod model;
 pub mod pack;
 pub mod rules;
+pub mod sched;
 pub mod select;
 pub mod spill;
+pub mod trade;
+pub mod vectorize;
 pub mod waitcnt;
 
 /// What gfx950 does between the shared instruction selection and `legalize`:
@@ -253,5 +269,94 @@ mod tests {
         // A limit at or above what the kernel needs changes nothing.
         let roomy = rir::compile_any_target_limited(&text, Target::Gfx950, 256).unwrap_or_else(|e| panic!("{e}"));
         assert!(roomy.hsaco == full.hsaco);
+    }
+
+    /// A K loop of `accs` 32x32x8 f16 MFMA accumulators, each stored after it.
+    fn accumulators(accs: usize) -> String {
+        let mut s = String::from(
+            "ckdsl.ir v1\nkernel @acc {\n  attrs { max_workgroup_size = i:64 }\n  params {\n    %A : ptr<f16,global>\n    \
+             %Y : ptr<f32,global>\n    %n : i32\n  }\n  region @entry {\n    %tid : i32 = gpu.thread_id (  ) { axis = s:\"x\" }\n    \
+             %c0 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }\n    %c1 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:1 }\n    \
+             %c4 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:4 }\n    \
+             %z : vec<f32x16> = arith.constant_vec (  ) { elem = s:\"f32\", fill = f:0.0, vec = i:16 }\n",
+        );
+        let results: Vec<String> = (0..accs).map(|a| format!("%r{a} : vec<f32x16>")).collect();
+        let iter_args: Vec<String> = (0..accs).map(|a| format!("{{ name = s:\"%acc{a}\", type = s:\"vec<f32x16>\" }}")).collect();
+        s += &format!(
+            "    {} = scf.for ( %c0, %n, %c1, {} ) {{ iter_args = l:[ {} ], iv = s:\"%k\", iv_type = s:\"i32\", num_iter_args = i:{accs}, unroll = b:false }}\n      region @body {{\n",
+            results.join(", "),
+            vec!["%z"; accs].join(", "),
+            iter_args.join(", ")
+        );
+        s += "        %o : i32 = arith.mul ( %k, %c4 )\n        %p : i32 = arith.add ( %o, %tid )\n        \
+              %a : vec<f16x4> = memref.global_load_vN ( %A, %p ) { align = i:8, elem_type = s:\"f16\", vec = i:4 }\n";
+        for a in 0..accs {
+            s += &format!("        %d{a} : vec<f32x16> = tile.mma ( %a, %a, %acc{a} ) {{ op_id = s:\"mfma_f32_32x32x8_f16\" }}\n");
+        }
+        let yields: Vec<String> = (0..accs).map(|a| format!("%d{a}")).collect();
+        s += &format!("        scf.yield ( {} ) {{ num = i:{accs} }}\n      }}\n", yields.join(", "));
+        for a in 0..accs {
+            s += &format!(
+                "    %e{a} : f32 = vector.extract ( %r{a} ) {{ index = i:15 }}\n    \
+                 %i{a} : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{} }}\n    %q{a} : i32 = arith.add ( %tid, %i{a} )\n    \
+                 memref.global_store_typed ( %Y, %q{a}, %e{a} ) {{ align = i:4, elem_type = s:\"f32\" }}\n",
+                64 * a
+            );
+        }
+        s + "    cf.return (  )\n  }\n}\n"
+    }
+
+    #[test]
+    fn uniform_loads_below_their_index_base_are_scalar_on_gfx950() {
+        use crate::rir;
+        use crate::target::Target;
+        // `X[for - 1]` of a loop result carried through a load: `opt` leaves
+        // the -4 bytes in the offset, and the address is uniform.
+        let text = "ckdsl.ir v1\nkernel @neg {\n  attrs { max_workgroup_size = i:64 }\n  params {\n    \
+                    %X : ptr<i32,global> { align = i:4, readonly = b:true }\n    %Y : ptr<i32,global>\n    %n : i32\n  }\n  \
+                    region @entry {\n    %tid : i32 = gpu.thread_id (  ) { axis = s:\"x\" }\n    \
+                    %c0 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }\n    \
+                    %c1 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:1 }\n    \
+                    %c2 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:2 }\n    \
+                    %cm : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:-1 }\n    \
+                    %for : i32 = scf.for ( %c0, %n, %c1, %c0 ) { iter_args = l:[ { name = s:\"%acc\", type = s:\"i32\" } ], \
+                    iv = s:\"%i\", iv_type = s:\"i32\", num_iter_args = i:1, unroll = b:false }\n      region @body {\n        \
+                    %g : i32 = memref.global_load_typed ( %X, %acc ) { align = i:4, elem_type = s:\"i32\" }\n        \
+                    %a2 : i32 = arith.add ( %g, %c2 )\n        scf.yield ( %a2 ) { num = i:1 }\n      }\n    \
+                    %m : i32 = arith.add ( %for, %cm )\n    \
+                    %x : i32 = memref.global_load_typed ( %X, %m ) { align = i:4, elem_type = s:\"i32\" }\n    \
+                    %y : i32 = arith.add ( %x, %tid )\n    \
+                    memref.global_store_typed ( %Y, %tid, %y ) { align = i:4, elem_type = s:\"i32\" }\n    cf.return (  )\n  }\n}\n";
+        let loads = |target| {
+            let listing = rir::compile_any_target(text, target).unwrap_or_else(|e| panic!("{e}")).listing();
+            listing.lines().filter(|l| l.contains("global_load")).count()
+        };
+        assert_eq!((loads(Target::Gfx950), loads(Target::Gfx1151)), (0, 1));
+    }
+
+    #[test]
+    fn kernels_with_agpr_alloc_0_use_no_agprs() {
+        use crate::rir;
+        use crate::target::Target;
+        let none = |text: String| text.replacen("attrs { ", "attrs { agpr_alloc = l:[ i:0, i:0 ], ", 1);
+        // Spills short of VGPRs go to LDS instead of AGPRs.
+        let s = rir::compile_any_target_limited(&none(many_live(64)), Target::Gfx950, 16).unwrap_or_else(|e| panic!("{e}")).stats;
+        assert!(s.vgprs <= 16 && s.spill.agpr_dwords == 0 && s.spill.lds_dwords > 0, "{:?}", s.spill);
+        // Accumulators short of VGPRs bank in AGPRs without the attribute, and spill with it.
+        let banked = rir::compile_any_target_limited(&accumulators(6), Target::Gfx950, 64).unwrap_or_else(|e| panic!("{e}"));
+        assert!(banked.stats.spill.agpr_dwords > 0, "{:?}", banked.stats.spill);
+        let spilled = rir::compile_any_target_limited(&none(accumulators(6)), Target::Gfx950, 64).unwrap_or_else(|e| panic!("{e}"));
+        let s = &spilled.stats.spill;
+        assert!(s.agpr_dwords == 0 && s.lds_dwords + s.scratch_dwords > 0, "{s:?}");
+        assert!(!spilled.listing().contains("accvgpr"), "{}", spilled.listing());
+        // Without spills the attribute changes nothing.
+        let plain = rir::compile_any_target(&accumulators(2), Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
+        assert!(rir::compile_any_target(&none(accumulators(2)), Target::Gfx950).is_ok_and(|c| c.hsaco == plain.hsaco));
+        // Only [0, 0] is supported.
+        for range in ["l:[ i:0, i:8 ]", "l:[ i:4, i:4 ]", "i:0"] {
+            let text = many_live(4).replacen("attrs { ", &format!("attrs {{ agpr_alloc = {range}, "), 1);
+            let e = rir::compile_any_target(&text, Target::Gfx950).err().map(|e| e.to_string()).unwrap_or_default();
+            assert!(e.contains("agpr_alloc"), "{range}: {e}");
+        }
     }
 }

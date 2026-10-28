@@ -625,7 +625,9 @@ def render9(v: Variant, info: dict[str, Info], vcmp: dict[int, str]) -> str:
             if m & ~0x11:
                 raise Unprintable("SDWA modifiers beyond neg")
             src = src_text9(u[0], neg(0), True)
-            return f"{mn}_sdwa {reg9(d[0])}, {src} dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1"
+            # A 64-bit result has no destination select in the syntax (the word holds DWORD).
+            dst_sel = "" if i.defs[0][2] > 1 else " dst_sel:DWORD dst_unused:UNUSED_PAD"
+            return f"{mn}_sdwa {reg9(d[0])}, {src}{dst_sel} src0_sel:WORD_1"
         if m & ~0x7:
             raise Unprintable("modifier bits beyond neg")
         e64 = words is not None and is_vop3_word9(words[0])
@@ -645,6 +647,10 @@ def render9(v: Variant, info: dict[str, Info], vcmp: dict[int, str]) -> str:
                 raise Unprintable("modifier bits beyond op_sel")
             opsel = f" op_sel:[{m >> 4 & 1},{m >> 5 & 1},0]" if m & 0x30 else ""
             m = 0
+        if m == 0x80:
+            # op_sel[3], the high half of the destination: after one bit per source.
+            opsel = " op_sel:[" + ",".join(["0"] * len(enc_uses) + ["1"]) + "]"
+            m = 0
         if m & ~0x7:
             raise Unprintable("modifier bits beyond neg")
         srcs = [
@@ -657,9 +663,10 @@ def render9(v: Variant, info: dict[str, Info], vcmp: dict[int, str]) -> str:
             if m:
                 raise Unprintable("modifiers on an AGPR move")
             return f"{mn} {reg9(d[0])}, {src_text9(u[0], False, False)}"
-        if i.form == "mai":
+        if i.form in ("mai", "mai_scale"):
             # D, A, B and C (C may be an inline constant, written as llvm-mc
             # reads one); imm holds cbsz (2:0), abid (6:3) and blgp (9:7).
+            # The block-scaled form then names its scale pair as two VGPRs.
             if m:
                 raise Unprintable("modifiers on an MFMA")
             if v.imm >> 10:
@@ -676,6 +683,11 @@ def render9(v: Variant, info: dict[str, Info], vcmp: dict[int, str]) -> str:
                 else reg9(u[2], float_text=True)
             )
             ops = [reg9(d[0]), reg9(u[0]), reg9(u[1]), c]
+            if i.form == "mai_scale":
+                pair = re.fullmatch(r"v(\d+)x2", u[3])
+                if not pair:
+                    raise Unprintable(f"a scale pair {u[3]}")
+                ops += [f"v{pair.group(1)}", f"v{int(pair.group(1)) + 1}"]
             return f"{mn} " + ", ".join(ops) + tail
         if i.form == "pk32":
             # Lane selects: op_sel in imm bits 2:0, op_sel_hi cleared in 6:4;
@@ -731,6 +743,14 @@ def render9(v: Variant, info: dict[str, Info], vcmp: dict[int, str]) -> str:
         if d:
             return f"{mn} {reg9(d[0])}, off, off{tail}"
         return f"{mn} off, {reg9(u[0])}, off{tail}"
+    if fmt == "Global" and i.form == "lds":
+        # global_load_lds: a VGPR pair address, saddr off; imm holds the
+        # offset and the cache policy sc0, nt, sc1 in bits 12-14.
+        if v.imm >> 15:
+            raise Unprintable("cache policy bits past sc1")
+        policy = [("sc0", 12), ("sc1", 14), ("nt", 13)]
+        tail = "".join(f" {name}" for name, bit in policy if v.imm >> bit & 1)
+        return f"{mn} {reg9(u[0])}, off" + mem_offset("offset", v.imm & 0xFFF) + tail
     if fmt == "Global":
         saddr = bool(m & (1 << 8))
         roles = [r for r, _c, _n in i.uses]
@@ -738,18 +758,33 @@ def render9(v: Variant, info: dict[str, Info], vcmp: dict[int, str]) -> str:
         rest = u[2:] if saddr else u[1:]
         data = [reg9(x) for x, r in zip(rest, roles[1:]) if r != "vdst"]
         ops = ([reg9(d[0])] if d else []) + [reg9(u[0])] + data + [base]
-        if m & ~((1 << 8) | (1 << 12)):
-            raise Unprintable("modifier bits beyond saddr and sc0")
+        if m & ~((1 << 8) | (1 << 12) | (1 << 13) | (1 << 14)):
+            raise Unprintable("modifier bits beyond saddr, sc0, sc1 and nt")
+        # MInst bits: sc0 (M_GLC) 12, sc1 13, nt 14 (target/gfx9/cpol.rs).
+        policy = [("sc0", 12), ("sc1", 13), ("nt", 14)]
         return (
             f"{mn} "
             + ", ".join(ops)
             + mem_offset("offset", v.imm)
-            + (" sc0" if m & (1 << 12) else "")
+            + "".join(f" {name}" for name, bit in policy if m >> bit & 1)
         )
     if fmt == "Mubuf" and i.form == "nodata":
         return (
             mn + (" sc0" if v.imm & 1 else "") + (" sc1" if v.imm & 2 else "")
         ).strip()
+    if fmt == "Mubuf" and i.form == "lds":
+        # LDS DMA: no data register (M0 is the LDS address); imm holds the
+        # offset and the cache policy sc0, nt, sc1 in bits 12-14.
+        if v.imm >> 15:
+            raise Unprintable("cache policy bits past sc1")
+        policy = [("sc0", 12), ("sc1", 14), ("nt", 13)]
+        tail = "".join(f" {name}" for name, bit in policy if v.imm >> bit & 1)
+        return (
+            f"{mn} {reg9(u[0])}, {reg9(u[1])}, {reg9(u[2])} offen"
+            + mem_offset("offset", v.imm & 0xFFF)
+            + tail
+            + " lds"
+        )
     if fmt == "Mubuf":
         vdata, rest = (reg9(d[0]), u) if d else (reg9(u[0]), u[1:])
         return (

@@ -15,13 +15,28 @@
 //!   lgkmcnt in 11:8 (4 bits). A count past what the counter tells apart
 //!   is clamped as LLVM clamps it (vmcnt 62, lgkmcnt 14): waiting for fewer
 //!   outstanding ops is always correct.
+//!
+//! LDS DMA loads write no register: each LDS range they write (their LDS
+//! tag, `lds_dma`) is a key of its own on vmcnt, after the registers, and an
+//! instruction that reads or writes LDS memory waits for the keys whose
+//! ranges overlap its tag. An explicit `s_waitcnt` (`tile.s_waitcnt`, a
+//! fence's) retires what it waits for; `s_barrier` (`tile.sync`) waits for
+//! every outstanding counter, and the LDS-only barrier for lgkmcnt alone,
+//! leaving DMA loads in flight.
 
 use super::gen_isa as t;
+use super::lds_dma;
 use crate::rir::mir::*;
 
+/// LDS ranges of a function's DMA loads with keys of their own; the last
+/// key takes every range past them (and so all of LDS).
+const DMA_KEYS: usize = 16;
+/// The first LDS DMA key.
+const DMA_BASE: usize = 256 + 128 + 256;
+
 /// VGPRs 0..255, then SGPRs 0..127 (VCC 106-107, M0 124, EXEC 126-127),
-/// then AGPRs 0..255.
-const NREGS: usize = 256 + 128 + 256;
+/// then AGPRs 0..255, then the LDS DMA keys.
+const NREGS: usize = DMA_BASE + DMA_KEYS;
 const NONE: u8 = u8::MAX;
 const VM_MAX: u8 = 62;
 const LGKM_MAX: u8 = 14;
@@ -100,8 +115,35 @@ fn tied_source(inst: &MInst) -> Option<usize> {
     (inst.op.flags() & F_TIED != 0 && inst.defs.contains(&inst.uses[last])).then_some(last)
 }
 
+/// The LDS ranges (tags) of a function's DMA loads, by key: the first
+/// `DMA_KEYS - 1` distinct ones in program order, then all of LDS.
+struct DmaKeys {
+    tags: Vec<u16>,
+}
+
+impl DmaKeys {
+    fn of(f: &MFunc) -> DmaKeys {
+        let mut tags = Vec::new();
+        for inst in f.blocks.iter().flat_map(|b| &b.insts).filter(|i| lds_dma::is_dma(i.op)) {
+            if !tags.contains(&inst.mem) {
+                tags.push(inst.mem);
+            }
+        }
+        if tags.len() > DMA_KEYS {
+            tags.truncate(DMA_KEYS - 1);
+            tags.push(crate::rir::alias::ANY);
+        }
+        DmaKeys { tags }
+    }
+
+    /// The key of a DMA load tagged `tag`.
+    fn key(&self, tag: u16) -> usize {
+        DMA_BASE + self.tags.iter().position(|&t| t == tag).unwrap_or(self.tags.len() - 1)
+    }
+}
+
 /// The wait `inst` needs, applied to `state`, then `inst` issued.
-fn step(state: &mut State, inst: &MInst) -> Option<(u8, u8)> {
+fn step(state: &mut State, inst: &MInst, dma: &DmaKeys) -> Option<(u8, u8)> {
     let flags = inst.op.flags();
     let vmem_load = flags & F_VMEM_LOAD != 0;
     let lds_merge = lds_merge(inst);
@@ -121,6 +163,15 @@ fn step(state: &mut State, inst: &MInst) -> Option<(u8, u8)> {
             }
         }
     }
+    // An LDS access waits for the DMA loads into bytes it may touch; DMA
+    // loads land in issue order, so one does not wait for another.
+    if !dma.tags.is_empty() && lds_dma::accesses_lds_memory(inst.op) && !lds_dma::is_dma(inst.op) {
+        for (k, &tag) in dma.tags.iter().enumerate() {
+            if lds_dma::overlaps(tag, inst.mem) {
+                need_vm = need_vm.min(state.vm[DMA_BASE + k]);
+            }
+        }
+    }
     if inst.op == Opc::SBarrier {
         if state.vm_any {
             need_vm = 0;
@@ -128,6 +179,9 @@ fn step(state: &mut State, inst: &MInst) -> Option<(u8, u8)> {
         if state.lgkm_any {
             need_lgkm = 0;
         }
+    }
+    if inst.op == Opc::SBarrierLds && state.lgkm_any {
+        need_lgkm = 0;
     }
     if need_lgkm != NONE && state.smem {
         need_lgkm = 0;
@@ -154,13 +208,38 @@ fn step(state: &mut State, inst: &MInst) -> Option<(u8, u8)> {
     if counters & t::CNT_VM != 0 {
         issue(&mut state.vm, &inst.defs);
         state.vm_any = true;
+        if lds_dma::is_dma(inst.op) {
+            state.vm[dma.key(inst.mem)] = 0;
+        }
     }
     if counters & t::CNT_LGKM != 0 {
         issue(&mut state.lgkm, &inst.defs);
         state.lgkm_any = true;
         state.smem |= counters & t::CNT_SMEM != 0;
     }
+    if inst.op == Opc::SWaitcntExplicit {
+        retire(state, inst.imm);
+    }
     out
+}
+
+/// What an explicit `s_waitcnt` with immediate `imm` waits for, taken out of
+/// `state`. Scalar loads return out of order: with one outstanding, only an
+/// lgkmcnt of 0 settles anything on that counter.
+fn retire(state: &mut State, imm: i64) {
+    let vm = (imm & 0xf | (imm >> 14 & 3) << 4) as u8;
+    let lgkm = (imm >> 8 & 0xf) as u8;
+    if vm < 63 {
+        wait(&mut state.vm, vm);
+        state.vm_any &= vm != 0;
+    }
+    if lgkm == 0 {
+        wait(&mut state.lgkm, 0);
+        state.lgkm_any = false;
+        state.smem = false;
+    } else if lgkm < 15 && !state.smem {
+        wait(&mut state.lgkm, lgkm);
+    }
 }
 
 /// `s_waitcnt` immediate for vmcnt `vm` and lgkmcnt `lgkm` (`NONE`: no wait).
@@ -170,11 +249,21 @@ pub fn waitcnt_imm(vm: u8, lgkm: u8) -> i64 {
     (vm & 0xf) | (vm >> 4) << 14 | 7 << 4 | lgkm << 8
 }
 
+/// The immediate of `tile.s_waitcnt` as rocKE's lowering encodes it for gfx9:
+/// a negative count is no wait (the field's maximum), a larger one clamps to
+/// the field (vmcnt 63, expcnt 7, lgkmcnt 15).
+pub fn explicit_imm(vm: i64, exp: i64, lgkm: i64) -> i64 {
+    let field = |c: i64, max: i64| if c < 0 { max } else { c.min(max) };
+    let (vm, exp, lgkm) = (field(vm, 63), field(exp, 7), field(lgkm, 15));
+    (vm & 0xf) | exp << 4 | lgkm << 8 | (vm >> 4 & 3) << 14
+}
+
 /// Inserts `s_waitcnt` before every instruction that reads or overwrites an
 /// outstanding result, and before barriers.
 pub fn insert(f: &mut MFunc) {
     let n = f.blocks.len();
     let succs: Vec<Vec<usize>> = (0..n).map(|b| f.successors(b)).collect();
+    let dma = DmaKeys::of(f);
     let mut entry: Vec<Option<State>> = vec![None; n];
     entry[0] = Some(State::new());
     loop {
@@ -185,7 +274,7 @@ pub fn insert(f: &mut MFunc) {
             };
             let mut state = start;
             for inst in &f.blocks[b].insts {
-                step(&mut state, inst);
+                step(&mut state, inst, &dma);
             }
             for &s in &succs[b] {
                 let merged = match &entry[s] {
@@ -211,7 +300,7 @@ pub fn insert(f: &mut MFunc) {
         let insts = std::mem::take(&mut f.blocks[b].insts);
         let mut out = Vec::with_capacity(insts.len() + 8);
         for inst in insts {
-            if let Some((vm, lgkm)) = step(&mut state, &inst) {
+            if let Some((vm, lgkm)) = step(&mut state, &inst, &dma) {
                 out.push(MInst::new(Opc::SWaitcnt, [], []).with_imm(waitcnt_imm(vm, lgkm)));
             }
             out.push(inst);
