@@ -160,8 +160,8 @@ PRs that change real source code must include at least one accompanying unit tes
 
 **What counts as a test file?**
 
-- Basename matches one of: `test_*`, `testing_*`, `*_test.*`, `*_tests.*`, `*_gtest.*`, `Test*`, or `unit_test_*`
-  - ✅ `test_parser.py`, `testing_parser.py`, `parser_test.cpp`, `parser_tests.cpp`, `parser_gtest.cpp`, `TestUtils.cpp`, `unit_test_host.cpp`
+- Basename matches one of: `test_*`, `testing_*`, `*_test.*`, `*_tests.*`, `*_gtest.*`, or `Test*`
+  - ✅ `test_parser.py`, `testing_parser.py`, `parser_test.cpp`, `parser_tests.cpp`, `parser_gtest.cpp`, `TestUtils.cpp`
   - ❌ `test.py` (does NOT have the `test_` prefix)
 
 | Pattern     | Example             |
@@ -172,14 +172,11 @@ PRs that change real source code must include at least one accompanying unit tes
 | `*_tests.*` | `parser_tests.cpp`  |
 | `*_gtest.*` | `parser_gtest.cpp`  |
 | `Test*`     | `TestUtils.cpp`     |
-| `unit_test_*` | `unit_test_host.cpp` |
 
 **Path-based recognition**
 Any file located under a `test/gtest/` directory is also treated as a unit
 test, regardless of its filename — e.g.
 `projects/miopen/test/gtest/unit_conv_solver_ConvWinoRageRxS.cpp`.
-Any file under `projects/rocsparse/clients/unittests/` is too, including
-`rocsparse_unit_test_main.cpp`.
 
 **How to fix**
 Add a unit test for the code you changed, named `test_<something>`:
