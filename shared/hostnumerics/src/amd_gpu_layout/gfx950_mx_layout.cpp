@@ -22,22 +22,16 @@ struct GFX950ScalePlan {
     DimensionShufflePlan shuffle;
 };
 
-GFX950ScalePlan makeGFX950ScalePlan(size_t inputElementCount, const std::vector<size_t>& sizes) {
-    if (sizes.size() != 2) {
-        std::ostringstream message;
-        message << "preSwizzleAITER: sizes must have 2 elements, got " << sizes.size();
-        throw std::runtime_error(message.str());
-    }
-
+GFX950ScalePlan makeGFX950ScalePlan(size_t inputElementCount, size_t rowCount, size_t columnCount) {
     GFX950ScalePlan plan;
-    plan.rowCount = sizes[0];
-    plan.columnCount = sizes[1];
+    plan.rowCount = rowCount;
+    plan.columnCount = columnCount;
     const size_t inputElements = checkedMultiply(
         plan.rowCount, plan.columnCount, "gfx950 MX scale layout: size multiplication overflow");
     if (inputElements != inputElementCount) {
         std::ostringstream message;
-        message << "preSwizzleAITER: input size " << inputElementCount
-                << " doesn't match sizes product " << inputElements;
+        message << "gfx950 MX scale layout input size " << inputElementCount
+                << " doesn't match rows * columns = " << inputElements;
         throw std::runtime_error(message.str());
     }
 
@@ -64,9 +58,9 @@ GFX950ScalePlan makeGFX950ScalePlan(size_t inputElementCount, const std::vector<
 }  // namespace
 
 size_t copyGfx950ScaleStorageBytes(const std::byte* input, size_t inputElementCount,
-                                   size_t elementSize, const std::vector<size_t>& sizes,
+                                   size_t elementSize, size_t rowCount, size_t columnCount,
                                    std::byte* output) {
-    const GFX950ScalePlan plan = makeGFX950ScalePlan(inputElementCount, sizes);
+    const GFX950ScalePlan plan = makeGFX950ScalePlan(inputElementCount, rowCount, columnCount);
     validateByteStorage(inputElementCount, plan.outputElementCount, elementSize,
                         "gfx950 MX scale layout");
     if (output == nullptr) return plan.outputElementCount;
