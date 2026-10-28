@@ -3333,7 +3333,14 @@ class Fn:
         if want is not None and T.is_seq(want):
             t = want
         items = ", ".join(self.coerce(v, el, node) for v in vals)
-        return CE(f"{decl_type(t)}{{{items}}}", t, all(v.pure for v in vals))
+        return CE(
+            f"{decl_type(t)}{{{items}}}",
+            t,
+            all(v.pure for v in vals),
+            # the items as written: a C array of another int | Value struct
+            # (rocke_stride_t) converts each from its own type
+            meta={"items": vals} if el == T.IV and not as_list else None,
+        )
 
     def ex_BinOp(self, node):
         if (
@@ -7994,6 +8001,9 @@ class Fn:
             if T.arr_len(to) is not None and ce.code.startswith("std::array<"):
                 inner = ce.code[ce.code.index("{") :]
                 return f"{decl_type(to)}{inner}"
+        ivs = self.int_or_value_struct(ce, t, to, node)
+        if ivs is not None:
+            return ivs
         uf = union_fields(self.env, to)
         if uf is not None and t not in (to, f"const {to}*"):
             # tagged values: a value of one alternative into the tagged union struct
@@ -8014,6 +8024,50 @@ class Fn:
         if t == T.V and to == "rocke_value_t* const":
             return ce.code
         raise Refuse(node, f"cannot pass {t} as {to}")
+
+    def int_or_value_struct(self, ce: CE, t: str, to: str, node) -> str | None:
+        """An int, a Value or an int | Value into a C struct that holds one
+        (rocke_stride_t, with its constructors rocke_stride_imm and
+        rocke_stride_value), and a fixed tuple of them into a C array of that
+        struct (make_global_view's strides). None when `to` is no such struct."""
+        base = to.replace("const ", "").strip()
+        is_arr = base.endswith("*") and not base.endswith("**")
+        sname = base[:-1].strip() if is_arr else base
+        ctors = self.env.headers.int_or_value_ctors(sname)
+        if ctors is None:
+            return None
+        from_int, from_val = ctors
+        if not is_arr:
+            if T.is_int(t):
+                return f"{from_int}({ce.code})"
+            if t == T.V:
+                return f"{from_val}({ce.code})"
+            if t == T.IV:
+                x = (
+                    ce
+                    if ce.code.isidentifier()
+                    else self.bind(CE(ce.code, t, False), "iv")
+                )
+                return f"({x.code}.v != nullptr ? {from_val}({x.code}.v) : {from_int}({x.code}.i))"
+            raise Refuse(node, f"cannot pass {t} as {to}")
+        el = T.seq_elem(t)
+        if el is None:
+            return None
+        items = (ce.meta or {}).get("items")
+        if items is None:
+            n = T.arr_len(t)
+            if n is None:
+                raise Refuse(node, f"{t} into a {sname} array needs a fixed length")
+            src = (
+                ce
+                if ce.code.isidentifier()
+                else self.bind(CE(ce.code, t, False), "seq")
+            )
+            items = [CE(f"{src.code}[{i}]", el) for i in range(n)]
+        conv = ", ".join(self.int_or_value_struct(x, x.t, sname, node) for x in items)
+        tmp = self.tmp(sname.removeprefix("rocke_").removesuffix("_t") + "s")
+        self.emit(f"const {sname} {tmp}[{len(items)}] = {{{conv}}};")
+        return tmp
 
 
 def closure_key(site) -> str:

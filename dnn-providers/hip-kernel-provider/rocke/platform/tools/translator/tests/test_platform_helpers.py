@@ -15,7 +15,10 @@
   no field for (ArchTarget.max_threads_per_block, ArchTarget.fits_lds);
 - a dataclass of another rocke module built through its C init (IOSpecRule);
 - a builder-free helper returning Tuple[bool, ...] through its C return and
-  out parameters, its strings in a scratch arena (validate_io)."""
+  out parameters, its strings in a scratch arena (validate_io);
+- a tuple of ints and Values into a C array of a struct holding an int |
+  Value (make_global_view's strides: rocke_stride_t through rocke_stride_imm
+  and rocke_stride_value), each item converted from its own type."""
 
 from __future__ import annotations
 
@@ -56,6 +59,16 @@ def probe_io(spec: BatchedTranspose2DSpec) -> Tuple[bool, str]:
             max_elems_per_thread=None,
         )
     )
+
+
+def probe_strides(spec: BatchedTranspose2DSpec) -> KernelDef:
+    io_ty = io_ir_type(spec.dtype)
+    b = IRBuilder("probe_strides")
+    X = b.param("X", PtrType(io_ty, "global"))
+    W = b.param("W", I32)
+    make_global_view(X, shape=(2, spec.tile_m), dtype=io_ty, strides=(W, 1))
+    make_global_view(X, shape=(2, spec.tile_m), dtype=io_ty, strides=(spec.vec, 1))
+    return b.kernel
 
 
 def probe_arch(spec: BatchedTranspose2DSpec, arch: str = "gfx950") -> int:
@@ -142,6 +155,7 @@ def _body(cpp: str, fn: str) -> str:
         "probe_float",
         "probe_io",
         "probe_arch",
+        "probe_strides",
         "is_valid_spec",
     ],
 )
@@ -239,6 +253,29 @@ def test_flag_tuple_helper_with_scratch_arena(probe):
     )
     assert m, body
     assert f"std::tuple<bool, std::string>{{{m.group(3)}, {m.group(4)}}}" in body
+
+
+def test_strides_into_the_int_or_value_struct(probe):
+    """(W, 1): each item from its own type, not through the package's int |
+    Value union (rocke_batched_transpose_iv_t, which no header declares);
+    (spec.vec, 1), all ints: item by item from the array."""
+    body = _body(probe[1], "py_probe_strides")
+    m = re.search(
+        r"const rocke_stride_t (\w+)\[2\] = \{rocke_stride_value\(W\), "
+        r"rocke_stride_imm\(1\)\};",
+        body,
+    )
+    assert m, body
+    assert re.search(
+        rf"rocke_make_global_view\(&\w+, X, \w+\.data\(\), .*?, io_ty, {m.group(1)}\)",
+        body,
+    ), body
+    assert re.search(
+        r"const rocke_stride_t \w+\[2\] = \{rocke_stride_imm\((\w+)\[0\]\), "
+        r"rocke_stride_imm\(\1\[1\]\)\};",
+        body,
+    ), body
+    assert "iv_t" not in body, body
 
 
 def test_source_compiles(probe, tmp_path):

@@ -268,6 +268,31 @@ class Headers:
                 if "struct" in body.split("{")[0] and "{" in body:
                     self.structs[t.name] = self._parse_struct(t.name, body, fn)
 
+    def int_or_value_ctors(self, sname: str) -> tuple[str, str] | None:
+        """(from an int, from a Value) constructors of a C struct that holds a
+        Python ``int | Value`` (rocke_stride_t: rocke_stride_imm(int64_t) and
+        rocke_stride_value(rocke_value_t*)): the header functions returning
+        sname by value that take one int or one rocke_value_t*. None unless
+        exactly one of each exists."""
+        cache = self.__dict__.setdefault("_iv_ctors", {})
+        if sname not in cache:
+            from_int, from_val = [], []
+            for f in self.funcs.values():
+                ret = re.sub(r"^(?:static\s+)?(?:inline\s+)?", "", f.ret)
+                if ret != sname or len(f.params) != 1:
+                    continue
+                pt = f.params[0][0].replace("const ", "").strip()
+                if pt in ("int64_t", "int", "int32_t"):
+                    from_int.append(f.name)
+                elif pt == "rocke_value_t*":
+                    from_val.append(f.name)
+            cache[sname] = (
+                (from_int[0], from_val[0])
+                if len(from_int) == 1 and len(from_val) == 1
+                else None
+            )
+        return cache[sname]
+
     @staticmethod
     def _parse_struct(name: str, body: str, fn: str) -> CStruct:
         inner = body[body.index("{") + 1 : body.rindex("}")]
