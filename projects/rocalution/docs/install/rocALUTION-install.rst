@@ -8,11 +8,53 @@
 Install rocALUTION
 ******************
 
-Before you begin, verify that your system is supported. For more information,
-see :ref:`ROCm Core SDK components <rocm:release-components>`.
+Before you begin, verify that your GPU, operating system, and ROCm version are
+supported. For the authoritative list of supported GPUs and their LLVM targets,
+see the :doc:`ROCm compatibility matrix
+<rocm:compatibility/compatibility-matrix>`.
 
 For advanced workflows, source builds, or custom configurations, see
 :doc:`Build rocALUTION from source <./rocALUTION-build-from-source>`.
+
+.. _rocalution-supported-gpus:
+
+Supported GPUs
+==============
+
+rocALUTION packages are published for the following LLVM targets. To find the
+LLVM target for an installed GPU, run ``rocminfo | grep gfx``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 20 55
+
+   * - GPU series
+     - Architecture
+     - LLVM target
+   * - AMD Instinct MI350 series
+     - CDNA 4
+     - ``gfx950``
+   * - AMD Instinct MI300 series
+     - CDNA 3
+     - ``gfx942``
+   * - AMD Instinct MI200 series
+     - CDNA 2
+     - ``gfx90a``
+   * - AMD Instinct MI100 series
+     - CDNA
+     - ``gfx908``
+   * - AMD Radeon AI PRO R9000 / RX 9000 series
+     - RDNA 4
+     - ``gfx1200``, ``gfx1201``
+   * - AMD Radeon PRO W7000 / RX 7000 / PRO V series
+     - RDNA 3
+     - ``gfx1100``, ``gfx1101``, ``gfx1102``
+   * - AMD Radeon PRO W6000 series
+     - RDNA 2
+     - ``gfx1030``
+   * - AMD Ryzen integrated graphics
+     - RDNA 3, RDNA 3.5
+     - ``gfx1103``, ``gfx1150``, ``gfx1151``, ``gfx1152``, ``gfx1153``
 
 .. _install-rocalution-hpc-sdk:
 
@@ -62,9 +104,35 @@ rocALUTION without the full ROCm HPC SDK.
 
    * ``<-llvm_target>`` (starting with ``gfx``) is used if you are installing
      for a single AMD GPU architecture. Omit this to install for all
-     architectures at the cost of disk space.
+     architectures at the cost of disk space. See
+     :ref:`Supported GPUs <rocalution-supported-gpus>` for the available
+     targets.
 
-   For example: ``amdrocm-rocalution7.14-gfx950``
+   For example: ``amdrocm-rocalution10.2-gfx950``
+
+   The following packages are available for each ROCm version:
+
+   .. list-table::
+      :header-rows: 1
+      :widths: 40 60
+
+      * - Package
+        - Contents
+      * - ``amdrocm-rocalution``
+        - Metapackage that installs the runtime for every supported GPU
+          architecture. Depends on the versioned runtime package, which in
+          turn depends on all per-architecture packages.
+      * - ``amdrocm-rocalution-dev``, ``amdrocm-rocalution-devel``
+        - Headers, CMake configuration files, and development symlinks.
+          Use ``-dev`` on Debian-based distributions and ``-devel`` on
+          RPM-based distributions.
+      * - ``amdrocm-rocalution<rocm_version>-<llvm_target>``
+        - Device code for a single GPU architecture, such as
+          ``amdrocm-rocalution10.2-gfx950``. Also installs the matching
+          rocBLAS, rocSPARSE, and rocRAND packages for that architecture.
+      * - ``amdrocm-rocalution-host<rocm_version>``
+        - Architecture-independent host library. Installed as a dependency of
+          every per-architecture package.
 
    Use the following commands to install the latest rocALUTION runtime and
    development packages for supported GPU architectures:
