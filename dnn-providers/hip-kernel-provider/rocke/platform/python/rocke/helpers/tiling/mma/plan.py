@@ -23,7 +23,12 @@ from ....core.dtypes import normalize_dtype
 from ....core.ir import Type, dtype_to_ir_type
 from ..encoding import WarpDistributionEncoding
 from ..fragments import TileDesc, _fragment_dtype_ok
-from ..traits import MmaTraits, MmaTraitsCatalog, load_mma_traits
+from ..traits import (
+    MmaTraits,
+    MmaTraitsCatalog,
+    load_mma_traits,
+)
+from ..traits.backend_coverage import committed_backend_coverage
 from .styles import CanonicalStyle, LayoutStyle
 from .warp_encoding import canonical_layouts
 
@@ -202,7 +207,6 @@ class TileMmaPlan:
                 family="dense",
             )
             d = d if d is not None else c
-        self._refuse_result_dtype_change(self._traits)
 
         if len(shape) != 3:
             raise ValueError(f"shape must be (M, N, K) -- got {shape!r}")
@@ -242,23 +246,6 @@ class TileMmaPlan:
         # not only later at TileMmaDriver.__call__. Derived / canonical / interleaved pass by construction.
         self._assert_operands_sound()
         self._assert_accumulator_matches_oracle()
-
-    @staticmethod
-    def _refuse_result_dtype_change(traits: MmaTraits) -> None:
-        """Refuse a row whose result dtype (D) differs from its accumulator dtype (C).
-
-        The plan and the driver give the backend only the accumulator dtype, and each
-        instruction's result feeds the next one as its accumulator, so an instruction that returns
-        a different dtype cannot be driven here. Both paths that resolve a row (selection by
-        intent and ``atom_override``) end in this check.
-        """
-        if traits.d_dtype != traits.c_dtype:
-            raise ValueError(
-                f"MMA instruction {traits.op_id!r} accumulates in {traits.c_dtype} but returns "
-                f"{traits.d_dtype} -- the TileMma driver does not drive an "
-                f"instruction whose result dtype differs from its accumulator dtype; choose one "
-                f"whose result dtype is {traits.c_dtype}"
-            )
 
     @staticmethod
     def _resolve_named(
@@ -471,30 +458,53 @@ class TileMmaPlan:
                 f"atom-derived descriptor cannot express is not supported."
             )
 
-    def emit_op(self):
-        """Resolve the backend ``MmaOp`` for ``b.mma`` from the arch op-registry -- keyed by
-        the ATOM shape (one ``b.mma`` consumes one atom).
+    def emit_op(self, *, scale_format: tuple[str, str] | None = None):
+        """Return the backend ``MmaOp`` that issues this plan's instruction on its target.
 
-        Lazy import: uses ``core.arch`` -- the op registry, NOT the mfma emission helpers --
-        so this layer stays independent of ``mfma_gemm_inner``.
+        Whether rocke issues an instruction, and with which backend op, is what the measured
+        backend coverage record says (``traits/data/backend_coverage.json``, loaded once per process
+        by :func:`~rocke.helpers.tiling.traits.backend_coverage.committed_backend_coverage`;
+        ``traits/README.md`` "Backend coverage" describes its classes). The op is fetched by the op
+        id the record holds for this (instruction, target) pair, never searched for by operand
+        dtypes and shape: several backend ops can share those. A pair whose class is not ``issuable`` raises
+        ``NotImplementedError`` naming the class. One ``b.mma`` with the op consumes one atom.
+
+        The record holds one op per variant for two kinds of instruction. An integer instruction
+        whose operand signedness is selectable has one op per (A, B) dtype pair; the plan's own A
+        and B pick it, so a ``u8`` operand issues the unsigned instruction. A scaled instruction has
+        one op per scale format, the (A, B) scale dtypes it decodes: ``scale_format=("e8m0",
+        "e8m0")`` names it, and is required when the record holds more than one. The record refuses
+        ``scale_format`` for an instruction it does not record per scale format.
+
+        Emits no IR. Lazy import: uses ``core.arch`` -- the op registry, NOT the mfma emission
+        helpers -- so this layer stays independent of ``mfma_gemm_inner``.
         """
         from rocke.core.arch import ArchTarget
 
-        target = ArchTarget.from_gfx(self._target)
-        m, n, k = self._atom_shape
-        op = target.mma.op_for_shape(
-            family="mma",
-            a_dtype=self._traits.a_dtype,
-            b_dtype=self._traits.b_dtype,
-            c_dtype=self._traits.c_dtype,
-            m=m,
-            n=n,
-            k=k,
-        )
+        variant: dict[str, tuple[str, str]] = {}
+        if scale_format is not None:
+            variant["scale_format"] = scale_format
+        if self._traits.operand_signedness == "selectable":
+            variant["operand_dtypes"] = (
+                normalize_dtype(self._a_dtype.name),
+                normalize_dtype(self._b_dtype.name),
+            )
+        coverage = committed_backend_coverage()
+        status = coverage.status(self.op_id, self._target, **variant)
+        if status != "issuable":
+            raise NotImplementedError(
+                f"{self.op_id!r} on {self._target!r} is not issued by rocke yet (backend "
+                f"coverage: {status}) -- the plan can be visualised but not issued; the classes "
+                f"are described in helpers/tiling/traits/README.md -- TODO: not implemented yet"
+            )
+        backend_op = coverage.backend_op(self.op_id, self._target, **variant)
+        op = ArchTarget.from_gfx(self._target).mma.by_op_id(backend_op)
         if op is None:
             raise ValueError(
-                f"no backend MMA op for atom={self._atom_shape} "
-                f"{self._a_dtype}->{self._c_dtype} on target={self._target!r}"
+                f"backend coverage names backend op {backend_op!r} for {self.op_id!r} on "
+                f"{self._target!r}, but {self._target!r} has no such op -- the record no longer "
+                f"matches the ops core registers; regenerate it as traits/README.md describes "
+                f"under Backend coverage"
             )
         return op
 

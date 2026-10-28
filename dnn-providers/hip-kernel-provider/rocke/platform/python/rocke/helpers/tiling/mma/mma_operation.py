@@ -149,8 +149,8 @@ class TileMma:
     def style(self):
         return self._plan.style
 
-    def emit_op(self):
-        return self._plan.emit_op()
+    def emit_op(self, *, scale_format=None):
+        return self._plan.emit_op(scale_format=scale_format)
 
     # ---- iteration, delegated to the driver -----------------------------------------------------
     def __call__(self, b, a_fragment, b_fragment, accumulator):

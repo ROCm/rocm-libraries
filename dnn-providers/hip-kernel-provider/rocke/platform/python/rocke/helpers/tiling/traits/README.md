@@ -197,10 +197,11 @@ variant beside the dedicated fp8 instruction), keep the dedicated one selectable
 `auto_select: false` on the other: it stays reachable by name (`atom_override`), never by selection.
 Multi-block rows are never selected; they are reachable by name.
 
-`TileMma` drives only rows whose result dtype is the accumulator dtype (`d_dtype == c_dtype`): its
-driver keeps the result in the accumulator. It refuses any other row on both paths, by intent and
-by `atom_override` (today only `wmma_bf16f32_16x16x32_bf16`). `select(d=...)` still returns
-such a row to a caller that asks for it.
+A row whose result dtype differs from its accumulator dtype (`d_dtype != c_dtype`; today only
+`wmma_bf16f32_16x16x32_bf16`) is selected by naming its result, `select(d=...)` or
+`TileMma(..., d=...)`, or pinned by `atom_override`. The `TileMma` driver issues it once per C
+subtile along K and returns the result in `d_dtype`: such a result cannot be the next
+instruction's accumulator, so a tile that needs more than one instruction along K is refused.
 
 A pin-only row lays out A, B and C exactly as its selectable twin does, with one exception: the
 gfx1250 `f8f6f4` 8-bit x 8-bit rows are another instruction than the dedicated fp8 rows beside
@@ -246,7 +247,8 @@ backend issues. For every (row, target) pair it holds one class and the backend 
 `MmaOp.op_id`) the row was matched to, read through `load_backend_coverage()`
 (`backend_coverage.py`): `status(op_id, target)` and `backend_op(op_id, target)`. Only `issuable`
 means the backend issues the row's instruction on that target; it is the one fact a layer that
-issues MMA instructions reads, and `backend_op` is the op it emits.
+issues MMA instructions reads, and `backend_op` is the op it emits. `TileMmaPlan.emit_op()` reads
+it exactly so: it returns the recorded op of an `issuable` pair and refuses any other class.
 
 `tests/helpers/tiling/traits/test_mma_backend_coverage.py` measures the record and requires it to
 equal the committed file exactly, so a backend op that is added, removed or rewired fails the test

@@ -501,6 +501,8 @@ below is resolved for you and is inspectable. The **instruction** catalog is **`
 procedure in `traits/README.md`; resolved automatically). Its **canonical**
 A/B/C encodings are the **baseline/fallback** layout — a starting place, NOT a requirement: you are free to
 hand-roll valid non-canonical (interleaved / custom) layouts (canonical is never required — `mma_is_machinery.md`).
+Whether the resolved instruction is issued on the target, and with which backend op (`mma.emit_op()`), follows the
+measured backend coverage record; its classes are described in `traits/README.md` "Backend coverage".
 
 ### Default: single MMA, everything resolved from traits
 ```python
