@@ -3,10 +3,13 @@
 Documentation for rocFFT is available at
 [https://rocm.docs.amd.com/projects/rocFFT/en/latest/](https://rocm.docs.amd.com/projects/rocFFT/en/latest/).
 
-## (Unreleased) rocFFT 1.0.41
+## (Unreleased) rocFFT 1.0.42
+
+## rocFFT 1.0.41 for ROCm 10.2
 
 ### Added
 
+* Added further support for very large FFTs (length greater than 2^32).
 * JIT callbacks specified with the `rocfft_plan_description_set_load_callback` and
   `rocfft_plan_description_set_store_callback` APIs can now be used with transforms that have fields
   specified on the same plan description.
@@ -33,14 +36,27 @@ Documentation for rocFFT is available at
 * Fixed `rocfft_plan_create` failures and GPU memory access faults for 1D complex transforms of
   lengths involving large prime factors when batches are interleaved (unit batch distance).
 
-### Added
-
-* Added further support for very large FFTs (length greater than 2^32).
-
 ### Optimized
 
-* Improved performance of unit-strided, interleaved, complex-to-real FFTs for the following lengths:
+* Improved performance of unit-strided, interleaved, complex-to-real FFTs on gfx1201, gfx90a, gfx942, and gfx950 for the following lengths:
+  * (100,100,100)
+  * (192,96,96)
+  * (200,96,96)
+  * (128,128,256)
+  * (160,168,168)
+  * (160,168,192)
+  * (168,168,192)
+  * (168,192,192)
+  * (192,192,192)
+  * (192,192,200)
+  * (192,200,200)
+  * (200,200,200)
+  * (216,216,216)
+  * (216,104,104)
   * (216,104,100)
+  * (224,104,104)
+  * (224,108,104)
+  * (224,108,108)
 
 ## rocFFT 1.0.40 for ROCm 10.1
 

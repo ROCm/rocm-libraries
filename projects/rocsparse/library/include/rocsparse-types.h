@@ -1094,10 +1094,8 @@ typedef enum rocsparse_sptrsv_input_
     rocsparse_sptrsv_input_compute_datatype, /**< Select compute datatype \ref rocsparse_datatype for input on a SpTRSV descriptor. */
     rocsparse_sptrsv_input_scalar_alpha, /**< Select scalar alpha pointer for input on a SpTRSV descriptor. */
     rocsparse_sptrsv_input_analysis_policy, /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSV descriptor. */
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
     rocsparse_sptrsv_input_solve_mode, /**< Select the solve mode \ref rocsparse_solve_mode for input on a SpTRSV descriptor. */
     rocsparse_sptrsv_input_diagonal_modifier /**< Select the diagonal modifier \ref rocsparse_diagonal_modifier for input on a SpTRSV descriptor. */
-#endif
 } rocsparse_sptrsv_input;
 
 /*! \ingroup types_module
@@ -1152,10 +1150,8 @@ typedef enum rocsparse_sptrsm_input_
     rocsparse_sptrsm_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on a SpTRSM descriptor. */
     rocsparse_sptrsm_input_scalar_alpha, /**< Select scalar alpha pointer for input on a SpTRSM descriptor. This datatype is used as the compute type. */
     rocsparse_sptrsm_input_analysis_policy, /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSM descriptor. */
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
     rocsparse_sptrsm_input_solve_mode, /**< Select the solve mode \ref rocsparse_solve_mode for input on a SpTRSM descriptor. */
     rocsparse_sptrsm_input_diagonal_modifier /**< Select the diagonal modifier \ref rocsparse_diagonal_modifier for input on a SpTRSM descriptor. */
-#endif
 } rocsparse_sptrsm_input;
 
 /*! \ingroup types_module
@@ -1167,6 +1163,11 @@ typedef enum rocsparse_sptrsm_input_
 typedef enum rocsparse_sptrsm_output_
 {
     rocsparse_sptrsm_output_zero_pivot_position /**< Get zero pivot \p int64_t based position for output from the SpTRSM descriptor and synchronously return zero_pivot. */
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+    ,
+    rocsparse_sptrsm_output_singularity, /**< Get the type of \ref rocsparse_singularity detected during SpTRSM calculation for output from the SpTRSM descriptor. */
+    rocsparse_sptrsm_output_singularity_position /**< Get the singularity \p int64_t based position for output from the SpTRSM descriptor. */
+#endif
 } rocsparse_sptrsm_output;
 
 /*! \ingroup types_module

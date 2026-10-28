@@ -425,6 +425,12 @@ validParameters = { # we need to make sure this matches develop
     #            boundary (needs PrefetchGlobalRead=2).
     # Recommended: set [0, 1] when tuning to compare baseline vs interleaved.
     "LDSSegmentInterleave": [-1, 0, 1],
+    # LDSSegmentBRotate (gfx1250, needs LDSSegmentInterleave=1 aligned [2,2] layout): split B into
+    # two N-halves in different LDS segments and let SIMD pair 1 (odd waves) read its B vIdx groups
+    # rotated by half (v -> (v + nV/2) mod nV), so the two LDS read ports never read the same
+    # segment at the same time. Pair 1's accumulator halves are swapped back before the epilogue.
+    #   0 = off (default), 1 = on.
+    "LDSSegmentBRotate": [0, 1],
     # Persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed
@@ -523,9 +529,18 @@ validParameters = { # we need to make sure this matches develop
     # For mid/small MT size case, we have chance to improve Global Read scheduling by putting more GRInc instructions
     # regardless of miLatencyLeft (overhead of GR inst is often more than the latency of GR inc inst)
     "MinGRIncPerMfma": [-1] + list(range(1,10)),
-    # Interleave alpha scale calculation with beta loads and address calcs - rather
-    # than as a separate block of instructions
-    "InterleaveAlpha": [0, 1],
+    # How the alpha scale (rC *= alpha) is placed in the global write:
+    # 0: as a separate block of instructions, up front before the stores (default).
+    # 1: interleaved with the beta loads and address calcs rather than as a separate
+    #    block. Not supported with matrix instructions.
+    # 2: deferred per element to just before that element's conversion+pack in the
+    #    store loop, instead of scaling all elements up front. Alpha still lands on the
+    #    raw accumulator (before beta*C, bias, activation and pack), so it is general
+    #    across dest types; it routes through the up-front path like 0. The win is
+    #    register lifetime - an up-front scale of every element can clobber a prior
+    #    batch's still-draining store source regs (e.g. fp8 + GroupLoadStore). See
+    #    GlobalWriteBatch._interleaveAlphaWithPack.
+    "InterleaveAlpha": [0, 1, 2],
     # Create a copy of NoLoadLoop which interleaves the stores with the final mac
     # calculation and may perform other optimizations
     # 0 = no interleave
@@ -1191,6 +1206,10 @@ validParameters = { # we need to make sure this matches develop
     # Need certain conditions to use TailloopInNll optimization
     # - NT transpose or AssertSummationElementMultiple * bpeGR is multiple of 4 (with BufferLoad + ShiftPtr)
     "TailloopInNll": [False, True],
+    # Fuse the D-tile buffer_store into the No-Load-Loop (NLL) so early-completed
+    # accumulator pairs are stored while the final-K-step MFMAs for later pairs run.
+    # Scoped to fp4-input (MXFP4) + UseSubtileImpl on gfx950; auto-disabled otherwise.
+    "PostLoopStoreInNll": [False, True],
     # Schedule global read instructions over barrier sync.
     # Only for DirectToLdsA+B + PGR>=2.
     # -1: auto (enable this for PGR>=3)
@@ -1221,10 +1240,29 @@ validParameters = { # we need to make sure this matches develop
     # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
     # gfx1250 / ScheduleIterAlg=4 path only, off by default.
     "TDMLoadWaveSync": [False, True],
-    # StinkyTofu module-option overrides, e.g. {DsReadPerCap: 4, WmmaBatchSize: 2}. Tuning-only:
+    # StinkyTofu module-option overrides, e.g. {WmmaBatchSize: 2, WmmaQueueDepth: 8}. Tuning-only:
     # Solution moves it to the internal _StinkyTofuParameters, which tags the kernel name
     # (only when set) and is dropped from the solution before the logic yaml is written.
     "StinkyTofuParameters": -1,
+    # StinkyTofu register allocation, per kernel: a mode, or a StinkyTofu config
+    # string that starts with one, such as "apply,classes=vs".
+    #   0  off
+    #   1  shadow      colour and report, rewrite nothing
+    #   2  apply       rewrite operands; an over-budget kernel is still rejected
+    #                  before allocation is asked
+    #   3  force       as apply, but an over-budget kernel reaches allocation and
+    #                  its verdict is re-judged against the count that comes out
+    # Only mode 3 changes which kernels are accepted; the rest change only how
+    # the accepted ones are coloured. The string's other settings (classes,
+    # allocator, unbankable, quadrant, ...) are listed in StinkyTofu's
+    # docs/developer/register-allocation.md, "Configuring allocation", and
+    # StinkyTofu parses them, so Tensile accepts exactly what the pipeline runs.
+    # A solution keeps the shortest spelling: "apply" and "2,classes=vs" are both
+    # 2. The kernel name records only the mode: nothing for 0, STRA<mode>
+    # otherwise. The string's other settings stay in the solution and out of
+    # the name, so two configs with one mode are one kernel, built with the
+    # first; Tensile warns about the other.
+    "StinkyTofuRegisterAllocation": -1,
     # TDMFuse -- which tensors share one TDM descriptor set per tensor_load_to_lds.
     # Fused means one rocisa::TensorLoadToLds descriptor programmed per wave,
     # not two heterogeneous regions in one instruction.
@@ -1267,7 +1305,15 @@ validParameters = { # we need to make sure this matches develop
     "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
     # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
     # cluster runs on a separate WGP.
+    # DataParallel and StreamK/StaticGrid derive spatial clustering on either axis.
+    # StreamK supports linear/tree fixup and requires PrefetchAcrossPersistent=0.
     "ClusterDim": validClusterDimensions,
+    # Remap clusters onto the two AIDs (4 XCCs and one GL2 each) so that each GL2 reads
+    # one operand once and only the other operand is duplicated across GL2s.
+    # -2: Read each cluster's XCC from MSG_RTN_GET_SE_AID_ID (requires strict round-robin dispatch)
+    # -1: Disabled
+    # 0-7: XCC that the hardware round-robin dispatches cluster 0 to
+    "ClusterAIDMapping": list(range(-2, 0)),
     # Enable PLR 0.5 to save vgprs
     # 0: Disabled
     # 1: Use PLR 0.5 for A
@@ -1431,6 +1477,7 @@ def checkSpaceFillAlgoIsValid(name, value):
                 msgBase = "Invalid parameter value: {} = {}\nOrderID out of range"
                 raise Exception(msgBase.format(name, value))
 
+
 def checkSpaceFillAlgoWGMIsValid(name, value):
     if type(value) != list:
         msgBase = "Invalid parameter value: {} = {}\nMust be a nested list of values"
@@ -1447,6 +1494,32 @@ def checkSpaceFillAlgoWGMIsValid(name, value):
                 if dim not in range(0,256):  # pragma: no mutate
                     msgBase = "Invalid parameter value: {} = {}\nGridDim {} out of range [0,256)"
                     raise Exception(msgBase.format(name, value, dim))
+
+
+@lru_cache(maxsize=None, typed=True)
+def parseStinkyTofuRegisterAllocation(value):
+    """``(canonical, mode)`` for a StinkyTofuRegisterAllocation value.
+
+    StinkyTofu does the parsing, so a value is valid exactly when the pipeline
+    can run it. ``canonical`` is the shortest spelling of the same
+    configuration: the int mode when that is all it says, a string otherwise.
+    Raises ValueError, naming what is wrong, when the value does not parse.
+    """
+    if type(value) is int and not 0 <= value <= 3:
+        raise ValueError(f"mode {value} is not one of 0..3")
+    if type(value) not in (int, str):
+        raise ValueError("must be a mode 0..3 or a string such as 'apply,classes=vs'")
+    import rocisa
+    text, mode = rocisa.parseRegisterAllocationConfig(value)
+    return (int(text) if text.isdigit() else text), mode
+
+
+def checkStinkyTofuRegisterAllocationIsValid(name, value):
+    try:
+        parseStinkyTofuRegisterAllocation(value)
+    except (TypeError, ValueError) as error:
+        msgBase = "Invalid parameter value: {} = {!r}\n{}"
+        raise Exception(msgBase.format(name, value, error))
 
 
 def checkParametersAreValid(
@@ -1511,6 +1584,8 @@ def checkParametersAreValid(
             checkSpaceFillAlgoIsValid(name, value)
         elif name == "SFCWGM":
             checkSpaceFillAlgoWGMIsValid(name, value)
+        elif name == "StinkyTofuRegisterAllocation":
+            checkStinkyTofuRegisterAllocationIsValid(name, value)
 
         if runTypeCheck:
             expectedTypes = _expectedParamTypes[name]

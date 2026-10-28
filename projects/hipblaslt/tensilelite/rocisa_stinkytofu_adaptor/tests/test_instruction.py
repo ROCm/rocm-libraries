@@ -195,6 +195,7 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     VMinI32,
     VMed3I32,
     VMed3F32,
+    VMaximumMinimumF32,
     VNotB32,
     VPrngB32,
     VRndneF32,
@@ -908,7 +909,7 @@ class TestSNopConstruction(unittest.TestCase):
         self.assertEqual(c.comment, "x")
 
     def test_positional_arg(self):
-        """Supports SNop(3, 'comment') positional style used in Tensile."""
+        """Supports SNop(3, 'comment') positional style used in TensileLite."""
         m = SNop(3, "delay")
         self.assertEqual(m.wait_state, 3)
         self.assertEqual(m.comment, "delay")
@@ -1202,7 +1203,7 @@ class TestScalarALUUnaryConstruction(unittest.TestCase):
 class TestDevelopInstructionExports(unittest.TestCase):
     """Develop-added rocisa instructions must resolve (dummy phase).
 
-    Tensile imports these by name during module load; missing exports
+    TensileLite imports these by name during module load; missing exports
     fail before any kernel is generated. Real ``toString`` / logicalIR
     parity is deferred to the instruction vertical-slice batch.
     """
@@ -1690,6 +1691,7 @@ _VECTOR_MINMAX = [
 _VECTOR_TERNARY_MISC = [
     (VMed3I32, "v_med3_i32", InstType.INST_I32),
     (VMed3F32, "v_med3_f32", InstType.INST_F32),
+    (VMaximumMinimumF32, "v_maximumminimum_f32", InstType.INST_F32),
     (VLShiftLeftOrB32, "v_lshl_or_b32", InstType.INST_B32),
 ]
 

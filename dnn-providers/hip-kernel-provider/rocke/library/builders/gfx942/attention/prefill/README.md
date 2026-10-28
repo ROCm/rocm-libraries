@@ -32,9 +32,12 @@ split matters when you build a spec by hand:
 The gfx950 golden is untouched either way: this is a separate kernel module emitting
 its own symbol against its own fixture, not an arch branch in the gfx950 file.
 
-Still rejected with a structured reason by `supports_attention_dense`: varlen, ragged,
-sliding-window. The deferred-findings backlog lives in the optimization plan for this
-port, which is kept outside the repo.
+Still rejected with a structured reason by `supports_attention_dense`: varlen, ragged.
+Sliding-window and attention sinks are supported, alone or combined. Sinks seed the
+online-softmax state once per work item (`m = sink * log2(e)`, `l = 1`) before the KV
+loop and add a trailing `sink_ptr` ([Hq], q dtype) kernel argument. The
+deferred-findings backlog lives in the optimization plan for this port, which is kept
+outside the repo.
 
 ### Gain over the unified-attention baseline
 
@@ -59,7 +62,8 @@ decision), and the baseline takes `wide4`, `narrow` or `narrow_d64` as
 
 Every config wins at every measured length, and the margin grows with sequence length
 — the persistent grid turns on at the long end, and the causal work per tile rises
-faster than the fixed overhead. Two things worth knowing about how to read the table:
+faster than the fixed overhead. (Measured before the current block orders; the default
+spec now goes persistent at D128.) Two things worth knowing about how to read the table:
 
 - **The D64 rows moved a long way, and the D64 K-bank-conflict pad is why.** An
   earlier comparison, run before the pad was adopted, measured D64 at −17 % (fp16,
@@ -81,7 +85,8 @@ named follow-up, now as upside rather than as a fix for a deficit.
 
 ## Scope
 
-gfx942 only · forward-inference prefill · dense causal (no paging / bias / SWA / sinks)
+gfx942 only · forward-inference prefill · dense causal or full, optional SWA and sinks
+(no paging / bias)
 · bf16 + fp16 · head dims **D64 & D128** · MHA + GQA incl. non-power-of-2 (40/8, 28/4)
 · default **and** persistent grids. D256 is out of scope — it is served by its own
 wide-atom candidates.
@@ -177,7 +182,8 @@ magnitudes live outside the repo per `AGENTS.md`.
 | Per-config `waves_per_eu` | **bf16 D64** → 4 | forces the allocator low enough that a second workgroup co-resides (1 → 2 WG/CU) | **shipped** — large at long sequences |
 | D64 K-bank-conflict pad | **D64 both dtypes** | 2-row-group boundary pad takes the `do_qk` K reads from 32-way to 4-way | **shipped** — large, cross-part confirmed |
 | `lds_k_group_pad` default (8) confirmed | **D64 both dtypes** | gfx942 reuses the shared `AttentionDenseSpec.lds_k_group_pad` field; default 8 inherits from the gfx950 sweep (840 configs, pad ∈ {0,8,16,24,32} × bn × GQA × mode × seqlen). Whole-wave bank model and decision record: `library/builders/gfx950/attention/prefill/README.md §Tuning`. | **adopted** — default unchanged |
-| Persistent grid-stride | all | `num_persistent` CTAs grid-stride over decoded work items; qb-major and hkv-major decodes | **shipped** — large at long sequences; auto-on when work fills the grid |
+| Persistent grid-stride | all | `num_persistent` CTAs grid-stride over decoded work items; `persist_decode` orders them (auto: `hq_minor_swz` for large causal MHA, `bt_hkv_minor` for causal below `chiplet_num_xcds` batches) | **shipped** — default at D128 |
+| Default-grid block order | causal | `nonpersist_decode`: batch, then kv head, fastest with longest-first query blocks (`bt_hkv_minor`); Swizzled Head-first (`hq_minor_swz`) for large causal MHA | **shipped** — auto; see the [case study](../../../../../platform/dsl_docs/architecture/attention_thread_block_mapping_case_study.md) |
 
 ### Evaluated and rejected
 
@@ -202,6 +208,8 @@ magnitudes live outside the repo per `AGENTS.md`.
 python attention_dense_prefill.py                        # parity + bench, default shapes
 python attention_dense_prefill.py --dtype fp16 --d 64
 python attention_dense_prefill.py --persistent --np 304  # persistent grid
+python attention_dense_prefill.py --use-sinks --sw 256   # SWA + sinks
+python attention_dense_prefill.py --nonpersist-decode hq_minor_swz  # pin the default-grid order
 ```
 
 Full-cohort parity and perf are driven by the live harness at
