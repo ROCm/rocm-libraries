@@ -77,6 +77,10 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::StrideBEqual>(),
                      Base::template Pair<Predicates::Contraction::StrideCEqual>(),
                      Base::template Pair<Predicates::Contraction::StrideDEqual>(),
+                     Base::template Pair<Predicates::Contraction::StrideAMultiple>(),
+                     Base::template Pair<Predicates::Contraction::StrideBMultiple>(),
+                     Base::template Pair<Predicates::Contraction::StrideCMultiple>(),
+                     Base::template Pair<Predicates::Contraction::StrideDMultiple>(),
                      Base::template Pair<Predicates::Contraction::LDCEqualsLDD>(),
                      Base::template Pair<Predicates::Contraction::CEqualsD>(),
                      Base::template Pair<Predicates::Contraction::AIGreaterThanEqual>(),
@@ -258,6 +262,30 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::StrideDEqual, IO>
             : public AutoMappingTraits<Predicates::Contraction::StrideDEqual, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::StrideAMultiple, IO>
+            : public AutoMappingTraits<Predicates::Contraction::StrideAMultiple, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::StrideBMultiple, IO>
+            : public AutoMappingTraits<Predicates::Contraction::StrideBMultiple, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::StrideCMultiple, IO>
+            : public AutoMappingTraits<Predicates::Contraction::StrideCMultiple, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::StrideDMultiple, IO>
+            : public AutoMappingTraits<Predicates::Contraction::StrideDMultiple, IO>
         {
         };
 

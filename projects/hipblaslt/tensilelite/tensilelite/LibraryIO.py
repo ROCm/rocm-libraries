@@ -23,6 +23,7 @@
 ################################################################################
 
 from .CustomKernels import getCustomKernelConfig
+from .KernelGenerators import GeneratorKernelRejected, getGeneratorKernelConfig, isGeneratorKernel
 from .ExecutionPolicy import normalize_execution_policy_with_defaults
 from rocisa.enum import DataTypeEnum
 from . import SolutionLibrary
@@ -31,7 +32,7 @@ from . import __version__
 from .Common import printExit, printWarning, print2, \
                            versionIsCompatible, IsaInfo
 from .Common.TimingInstrumentation import timing_context
-from .Common.Architectures import gfxToIsa
+from .Common.Architectures import gfxToIsa, isaToGfx
 from .SolutionStructs import Solution, ProblemSizes
 from .SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
 from .SolutionStructs.Problem import ProblemType, problemTypeToEnum
@@ -605,6 +606,29 @@ def prepareLibraryLogicDict(data: dict[str, Any]) -> None:
             data["Library"]["useKdTree"] = True
 
 
+def dropSkippedSolutionRows(data: Dict[str, Any], kept: List[bool]) -> None:
+    """Renumbers the solution indices of the library table after solutions were skipped.
+
+    The tables name solutions by their position in the list of parsed solutions, which
+    shifts when a solution is skipped; rows of a skipped solution are dropped.
+    """
+    libraryType = data["LibraryType"]
+    if libraryType in ("FreeSize", "Prediction"):
+        # The table is the range [start, start + count) of positions.
+        data["Library"]["table"][1] = sum(kept)
+        return
+    if libraryType != "Matching":
+        return
+    newPosition = {}
+    for position, isKept in enumerate(kept):
+        if isKept:
+            newPosition[position] = len(newPosition)
+    table = data["Library"]["table"]
+    # In place, as ExactLogic is the same list.
+    table[:] = [[row[0], [newPosition[row[1][0]], *row[1][1:]], *row[2:]]
+                for row in table if row[1][0] in newPosition]
+
+
 def reorderSolutionsParams(data: Dict[str, Any]) -> None:
     """Reorder solution dict keys after list-to-dict conversion.
 
@@ -740,7 +764,16 @@ def parseLibraryLogicData(
         solutionState["AssignedDerivedParameters"] = False
         customKernelName = None
         ck = solutionState.get("CustomKernel")
-        if isinstance(ck, dict) and ck.get("name") and not ck.get("generated", False):
+        if isGeneratorKernel(ck):
+            arch = isaToGfx(gfxToIsa(data["ArchitectureName"]))
+            try:
+                generatorConfig = getGeneratorKernelConfig(ck, solutionState.get("InternalSupportParams", {}), arch)
+            except GeneratorKernelRejected as e:
+                printWarning(f"Skipping generator kernel {ck['generator']} {ck.get('generatorParams')} "
+                             f"(solution index {solutionState.get('SolutionIndex')}): {e}")
+                return None
+            solutionState = normalize_execution_policy_with_defaults(generatorConfig, solutionState)
+        elif isinstance(ck, dict) and ck.get("name") and not ck.get("generated", False):
             customKernelName = ck["name"]
         elif solutionState.get("CustomKernelName", ""):
             customKernelName = solutionState["CustomKernelName"]
@@ -797,8 +830,11 @@ def parseLibraryLogicData(
     allSolutions = [solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]]
     skipped = sum(1 for s in allSolutions if s is None)
     if skipped:
-        printWarning(f"Skipped {skipped} solution(s) due to missing or invalid custom.config")
+        printWarning(f"Skipped {skipped} solution(s): missing or invalid custom.config, "
+                     "or rejected by their kernel generator")
     solutions = [s for s in allSolutions if s is not None]
+    if skipped:
+        dropSkippedSolutionRows(data, [s is not None for s in allSolutions])
     typeMismatches = getTypeMismatchCollector()
 
     newLibrary, _ = SolutionLibrary.MasterSolutionLibrary.FromOriginalState(

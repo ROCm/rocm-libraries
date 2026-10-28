@@ -110,6 +110,7 @@ def test_prebuilt_streamk_cluster_keeps_legacy_metadata_and_assembly(tmp_path, o
                              states=SimpleNamespace())
     writer._getCustomKernelSource = lambda kernel: KernelWriterAssembly._getCustomKernelSource(
         writer, kernel, str(tmp_path))
+    writer._setCustomKernelState = lambda kernel: KernelWriterAssembly._setCustomKernelState(writer, kernel)
     # A geometry-only test must never send this prebuilt payload into the
     # source generator, which would switch it to the spatial-cluster schedule.
     result, source = KernelWriterAssembly.getSourceFileString(writer, Kernel(state))

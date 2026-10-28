@@ -183,7 +183,11 @@ namespace TensileLite
         X_MACRO(RR_MagicShiftAndSignWgmMainBlock) \
         X_MACRO(AddressScaleZeroA) \
         X_MACRO(ScaleBlockSizeA) \
-        X_MACRO(ESMRuntimeSupported)
+        X_MACRO(ESMRuntimeSupported) \
+        /* Per-dimension launched grid; unlike NumWorkGroups they are never flattened. */ \
+        X_MACRO(NumWorkGroupsX) \
+        X_MACRO(NumWorkGroupsY) \
+        X_MACRO(NumWorkGroupsZ)
 
     enum class CustomArgSemantic
     {
@@ -226,6 +230,10 @@ namespace TensileLite
         PersistentNoBatch,
         TilesYGSU,
         ComputeUnits,
+        // Tiles along the longer and the shorter free extent, so one kernel serves either skinny
+        // orientation.
+        TilesLong,
+        TilesShort,
         CustomGridSize_Count,
     };
 
@@ -269,6 +277,9 @@ namespace TensileLite
         // same order, so identical rows of A give bitwise-identical rows of D.
         // Uniform summation order refuses hand-written kernels without it.
         bool uniformSummationOrder = false;
+        // Code object holding this kernel when it is not its library's own, e.g. a kernel
+        // built at a code object version the library's code object cannot link with.
+        std::string codeObjectFile;
     };
   
     // Elements in one slot of the GSU (MBSK) reduction buffer. Usage there is
@@ -1093,8 +1104,12 @@ namespace TensileLite
 
         size_t requiredSynchronizerSize(Problem const& problem, Hardware const& hardware) const;
 
+        void                 calculateFreeExtents(dim3& extents,
+                                                  ContractionSolution::Problem const& problem) const;
         void                 calculateTiles(dim3& tiles,
                                             ContractionSolution::Problem const& problem) const;
+        void                 calculateLongShortTiles(dim3& tiles,
+                                                     ContractionSolution::Problem const& problem) const;
         void                 calculateGrid(dim3&                               workGroupSize,
                                            dim3&                               numWorkGroups,
                                            ContractionSolution::Problem const& problem) const;
@@ -1329,6 +1344,10 @@ namespace TensileLite
                                                       TensileLite::dim3&          numWorkItems,
                                                       KA&                         h_args,
                                                       uint32_t                    gsu) const;
+
+        // The code object to load the custom kernel from: its own when it names one, else its
+        // library's.
+        std::string customKernelCodeObjectFile() const;
 
         template <bool T_Debug>
         KernelInvocation generateCustomCall(Problem const&           problem,

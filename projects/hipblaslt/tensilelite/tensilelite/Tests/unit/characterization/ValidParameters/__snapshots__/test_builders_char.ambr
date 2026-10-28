@@ -1367,15 +1367,25 @@
     'AdaptiveGemmNTAB',
     'AssertAIGreaterThanEqual',
     'AssertAILessThanEqual',
+    'AssertAlphaOne',
+    'AssertBetaZero',
     'AssertFree0ElementMultiple',
     'AssertFree1ElementMultiple',
+    'AssertNoActivation',
+    'AssertNoBias',
+    'AssertNoScaleAB',
+    'AssertNoScaleAlphaVec',
     'AssertSizeEqual',
     'AssertSizeGreaterThan',
     'AssertSizeLessThan',
     'AssertStrideAEqual',
+    'AssertStrideAMultiple',
     'AssertStrideBEqual',
+    'AssertStrideBMultiple',
     'AssertStrideCEqual',
+    'AssertStrideCMultiple',
     'AssertStrideDEqual',
+    'AssertStrideDMultiple',
     'AssertSummationElementMultiple',
     'BufferLoad',
     'BufferStore',
@@ -1617,6 +1627,22 @@
       'type': 'int',
       'value': -1,
     }),
+    'AssertAlphaOne': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'AssertBetaZero': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'AssertFree0ElementMultiple': dict({
       'head': list([
         1,
@@ -1635,6 +1661,38 @@
       'len': 9,
       'type': 'list',
     }),
+    'AssertNoActivation': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'AssertNoBias': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'AssertNoScaleAB': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'AssertNoScaleAlphaVec': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'AssertSizeEqual': dict({
       'type': 'int',
       'value': -1,
@@ -1651,7 +1709,15 @@
       'type': 'int',
       'value': -1,
     }),
+    'AssertStrideAMultiple': dict({
+      'type': 'int',
+      'value': -1,
+    }),
     'AssertStrideBEqual': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'AssertStrideBMultiple': dict({
       'type': 'int',
       'value': -1,
     }),
@@ -1659,7 +1725,15 @@
       'type': 'int',
       'value': -1,
     }),
+    'AssertStrideCMultiple': dict({
+      'type': 'int',
+      'value': -1,
+    }),
     'AssertStrideDEqual': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'AssertStrideDMultiple': dict({
       'type': 'int',
       'value': -1,
     }),

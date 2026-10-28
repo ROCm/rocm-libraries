@@ -1,0 +1,173 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+MinimumRequiredVersion: 5.0.0
+ScheduleName: gfx950
+ArchitectureName: gfx950
+CUCount: null
+DeviceNames: [Device 75a0]
+ProblemType:
+  Activation: true
+  ActivationComputeDataType: 0
+  ActivationNoGuard: false
+  ActivationType: hipblaslt_all
+  AllowNoFreeDims: false
+  AssignedDerivedParameters: true
+  Batched: true
+  BetaOnlyUseBias: false
+  BiasDataTypeList: [0, 7]
+  BiasSrc: D
+  ComplexConjugateA: false
+  ComplexConjugateB: false
+  ComputeDataType: 0
+  DataType: 15
+  DataTypeA: 15
+  DataTypeAmaxD: 0
+  DataTypeB: 15
+  DataTypeE: 7
+  DataTypeMXSA: 22
+  DataTypeMXSB: 22
+  DestDataType: 7
+  F32XdlMathOp: 0
+  Gradient: false
+  GroupedGemm: false
+  HighPrecisionAccumulate: true
+  Index0: 0
+  Index01A: 0
+  Index01B: 1
+  Index01MXSA: 0
+  Index01MXSB: 1
+  Index1: 1
+  IndexAssignmentsA: [3, 0, 2]
+  IndexAssignmentsB: [3, 1, 2]
+  IndexAssignmentsLD: [4, 5, 6, 7]
+  IndexAssignmentsMXSA: [3, 0, 2]
+  IndexAssignmentsMXSB: [3, 1, 2]
+  IndexAssignmentsMetadata: [3, 0, 2]
+  IndexUnroll: 3
+  IndexUnrollA: 0
+  IndexUnrollB: 0
+  IndexUnrollM: 0
+  IndexUnrollMXSA: 0
+  IndexUnrollMXSB: 0
+  IndicesBatch: [2]
+  IndicesFree: [0, 1]
+  IndicesSummation: [3]
+  MXBlockA: 32
+  MXBlockB: 32
+  MacDataTypeA: 15
+  MacDataTypeB: 15
+  MetadataLayout: 0
+  MirrorDimsA: []
+  MirrorDimsB: []
+  MirrorDimsMXSA: []
+  MirrorDimsMXSB: []
+  MirrorDimsMetadata: []
+  NumIndicesBatch: 1
+  NumIndicesC: 3
+  NumIndicesFree: 2
+  NumIndicesLD: 4
+  NumIndicesSummation: 1
+  OperationType: GEMM
+  OutputAmaxD: false
+  SetConstStrideA: []
+  SetConstStrideB: []
+  SetConstStrideBias: []
+  SilentHighPrecisionAccumulate: false
+  Sparse: 0
+  StochasticRounding: false
+  StridedBatched: true
+  SupportUserArgs: true
+  SwizzleTensorA: false
+  SwizzleTensorB: false
+  TLUA: false
+  TLUB: false
+  TLUMXSA: false
+  TLUMXSB: false
+  Tensor0: 0
+  Tensor1: 1
+  TileA: 0
+  TileAwareSelection: false
+  TileB: 1
+  TotalIndices: 4
+  TransposeA: true
+  TransposeB: false
+  UseBeta: true
+  UseBias: 1
+  UseE: false
+  UseInitialStridesAB: false
+  UseInitialStridesCD: false
+  UseScaleAB: Scalar
+  UseScaleAlphaVec: 1
+  UseScaleCD: false
+  isMixMode: false
+Solutions:
+- SolutionIndex: 0
+  CustomKernel:
+    generator: SkinnyGEMM
+    generatorParams: {bm: 1, tn: 1, lanesK: 64, waves: 4, prefetch: 2, upIters: 2, partialSteps: 0, group: 1, numXcds: 1, grid3d: true, useBeta: false}
+- SolutionIndex: 1
+  CustomKernel:
+    generator: SkinnyGEMM
+    generatorParams: {bm: 1, tn: 1, lanesK: 64, waves: 4, prefetch: 2, upIters: 2, partialSteps: 0, group: 1, numXcds: 1, grid3d: true, useBeta: true}
+- SolutionIndex: 2
+  CustomKernel:
+    generator: SkinnyGEMM
+    generatorParams: {bm: 1, tn: 1, lanesK: 16, waves: 4, prefetch: 2, upIters: 0, partialSteps: 0, group: 1, numXcds: 1, grid3d: true, useBeta: false}
+- SolutionIndex: 3
+  CustomKernel:
+    generator: SkinnyGEMM
+    generatorParams: {bm: 1, tn: 1, lanesK: 16, waves: 4, prefetch: 2, upIters: 0, partialSteps: 0, group: 1, numXcds: 1, grid3d: true, useBeta: true}
+- SolutionIndex: 4
+  CustomKernel:
+    generator: SkinnyGEMM
+    generatorParams: {bm: 2, tn: 2, lanesK: 16, waves: 4, prefetch: 1, upIters: 0, partialSteps: 1, group: 1, numXcds: 1, grid3d: true, useBeta: false}
+- SolutionIndex: 5
+  CustomKernel:
+    generator: SkinnyGEMM
+    generatorParams: {bm: 2, tn: 2, lanesK: 16, waves: 4, prefetch: 1, upIters: 0, partialSteps: 1, group: 1, numXcds: 1, grid3d: true, useBeta: true}
+- SolutionIndex: 6
+  CustomKernel:
+    generator: SkinnyGEMM
+    generatorParams: {bm: 1, tn: 1, lanesK: 64, waves: 4, prefetch: 2, upIters: 2, partialSteps: 0, group: 1, numXcds: 1, grid3d: false, useBeta: false}
+- SolutionIndex: 7
+  CustomKernel:
+    generator: SkinnyGEMM
+    generatorParams: {bm: 1, tn: 1, lanesK: 64, waves: 4, prefetch: 2, upIters: 2, partialSteps: 0, group: 1, numXcds: 1, grid3d: false, useBeta: true}
+- SolutionIndex: 8
+  CustomKernel:
+    generator: SkinnyGEMM
+    generatorParams: {bm: 1, tn: 2, lanesK: 16, waves: 2, prefetch: 2, upIters: 3, partialSteps: 1, group: 2, numXcds: 8, grid3d: false, useBeta: false}
+- SolutionIndex: 9
+  CustomKernel:
+    generator: SkinnyGEMM
+    generatorParams: {bm: 1, tn: 2, lanesK: 16, waves: 2, prefetch: 2, upIters: 3, partialSteps: 1, group: 2, numXcds: 8, grid3d: false, useBeta: true}
+IndexOrder: [0, 1, 2, 3, 4, 5, 6, 7]
+ExactLogic:
+- - [1, -1, 1, -1, 1, 1, 4097, 8192]
+  - [0, 0.0]
+- - [1, -1, 1, -1, 1, 1, 2049, 3072]
+  - [8, 0.0]
+- - [1, 0, 1, 0, 1, 0, 1, 0]
+  - [0, 0.0]
+- - [1, 0, 1, 0, 1, 0, 1, 0]
+  - [1, 0.0]
+- - [1, 0, 1, 0, 1, 0, 1, 0]
+  - [2, 0.0]
+- - [1, 0, 1, 0, 1, 0, 1, 0]
+  - [3, 0.0]
+- - [1, 0, 1, 0, 1, 0, 1, 0]
+  - [4, 0.0]
+- - [1, 0, 1, 0, 1, 0, 1, 0]
+  - [5, 0.0]
+- - [1, 0, 1, 0, 1, 0, 1, 0]
+  - [6, 0.0]
+- - [1, 0, 1, 0, 1, 0, 1, 0]
+  - [7, 0.0]
+- - [1, 0, 1, 0, 1, 0, 1, 0]
+  - [8, 0.0]
+- - [1, 0, 1, 0, 1, 0, 1, 0]
+  - [9, 0.0]
+RangeLogic: null
+TileSelectionIndices: null
+PerfMetric: DeviceEfficiency
+LibraryType: Range

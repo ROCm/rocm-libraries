@@ -98,6 +98,7 @@ namespace TensileLite
                 iot::mapOptional(io, "workspaceSizePerElemBias", s.workspaceSizePerElemBias);
                 iot::mapOptional(io, "generated", s.generated);
                 iot::mapOptional(io, "uniformSummationOrder", s.uniformSummationOrder);
+                iot::mapOptional(io, "codeObjectFile", s.codeObjectFile);
             }
 
             const static bool flow = false;
