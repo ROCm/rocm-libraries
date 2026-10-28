@@ -179,11 +179,3 @@ using detail::integral_constant;
 using detail::true_type;
 
 THRUST_NAMESPACE_END
-
-// TODO(libhipcxx): remove this namespace and replace ::internal::common_type_t
-// with _THRUST_STD::common_type_t in rocThrust once libhipcxx gets ready
-namespace internal
-{
-template <typename... Tp>
-using common_type_t = _THRUST_STD::common_type_t<Tp...>;
-} // namespace internal
