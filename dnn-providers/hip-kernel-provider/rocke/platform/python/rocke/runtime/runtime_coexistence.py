@@ -23,8 +23,10 @@ sharing one loaded HIP/comgr runtime instance across both halves of the
 process. A library must never ``import torch`` merely to obtain that side
 effect (it would invert the dependency and drag a multi-hundred-MB wheel
 into a pure-IR process): we only honor a torch that is *already* imported
-(via :data:`sys.modules`) and otherwise discover a real ROCm install
-directly. The sole sanctioned exception is the explicit
+(via :data:`sys.modules`). COMGR also discovers the installed
+``rocm-sdk-core`` package directly, without importing torch or initializing
+the SDK's HIP runtime. System ROCm installs remain a fallback. The sole
+sanctioned exception is the explicit
 :func:`rocke.runtime.comgr.prefer_bundled_lib` entrypoint hook, which
 imports torch deliberately to pin the bundled comgr before lowering.
 
@@ -430,6 +432,12 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
          :func:`_rocm_root_libdirs`): ``$ROCM_PATH``/``$ROCM_HOME`` then globbed
          ``/opt/rocm*`` trees, newest version first, each with the bare ``.so``
          and the requested SONAME variants.
+         For COMGR, the installed ``rocm-sdk-core`` compiler is tried before
+         these system installs, even without torch or ``rocm_sdk`` imported:
+         ``_rocm_sdk_core/lib/libamd_comgr.so*`` on Linux, or
+         ``_rocm_sdk_core/bin/amd_comgr*.dll`` on Windows. The standalone SDK
+         tier is skipped when torch's stale compiler is demoted, preserving
+         the existing system-then-torch fallback.
       4. Bare ``lib<stem>.so`` for the dynamic linker's search path -- last
          resort. Historically this was the *only* non-torch candidate, which is
          why a torch-less process failed with ``cannot load libamd_comgr.so``:
@@ -457,7 +465,9 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
     if bundled is not None and not _demote_bundled:
         paths.append(bundled)
     sdk = _rocm_sdk_dll(stem)
-    if sdk is not None:
+    if not _IS_WINDOWS and stem == "amd_comgr":
+        sdk = _rocm_sdk_core_lib(stem)
+    if sdk is not None and sdk not in paths and (_IS_WINDOWS or not _demote_bundled):
         paths.append(sdk)
     if _IS_WINDOWS:
         # ROCm-for-Windows / HIP SDK install: ``%HIP_PATH%\bin`` /
@@ -480,6 +490,8 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
         for soname in sonames:
             paths.append(os.path.join(libdir, f"lib{stem}.so.{soname}"))
     if _demote_bundled:
+        # Preserve the stale-compiler fallback: rediscovering the same SDK
+        # must not promote it ahead of the system compiler just demoted to.
         paths.append(bundled)
     paths.append(f"lib{stem}.so")
     return paths

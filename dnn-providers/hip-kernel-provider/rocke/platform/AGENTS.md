@@ -213,11 +213,20 @@ priority order:
    else `<torch>/lib/lib*.so`, else TheRock's
    `_rocm_sdk_core/lib/lib*.so*` (only when `rocm_sdk` is imported, i.e. the
    torch is TheRock's). Exception for comgr only: a stale torch comgr moves
-   below every step 3 candidate (see below);
-3. a real ROCm install discovered without torch: `$ROCM_PATH` / `$ROCM_HOME` →
+   below every step 4 candidate, and the standalone SDK tier is skipped
+   (see below);
+3. COMGR's installed `rocm-sdk-core` compiler, even without torch or
+   `rocm_sdk` imported: `_rocm_sdk_core/lib/libamd_comgr.so*` on Linux,
+   `_rocm_sdk_core/bin/amd_comgr*.dll` on Windows. The optional
+   `rocke[sdk-core]` extra installs it from an AMD wheel index; see
+   [compiler installation and release support](dsl_docs/runtime/comgr_and_hipmodule.md#installing-the-compiler).
+4. a real ROCm install discovered without torch: `$ROCM_PATH` / `$ROCM_HOME` →
    `<root>/lib`, then globbed `/opt/rocm*/core-*/lib` and `/opt/rocm*/lib`,
    newest version first;
-4. bare `lib<name>.so` on the dynamic linker's search path (last resort).
+5. bare `lib<name>.so` on the dynamic linker's search path (last resort).
+
+The standalone SDK tier is COMGR-only on Linux; HIP's existing torch/runtime
+selection policy is unchanged. Windows also discovers HIP SDK DLLs directly.
 
 With multiple distinct copies in `/proc/self/maps`, the mapped tier prefers
 the sole copy under imported torch or the active `_rocm_sdk_core`. It skips
@@ -227,9 +236,9 @@ Stale torch comgr (`_torch_comgr_is_stale`, comgr only, never HIP): the release
 of torch's comgr is read from its location (in `_rocm_sdk_core`: the wheel's
 release, `rocm_sdk.__version__` or the installed `rocm-sdk-core` version;
 elsewhere: `torch.version.hip`), the same way `resolved_lib_rocm_version` does,
-and compared with the release of the first step 3 install whose version is
+and compared with the release of the first step 4 install whose version is
 readable. If both are known and torch's is older, torch's comgr is tried after
-every step 3 candidate (still before step 4), because an older comgr rejects
+every step 4 candidate (still before step 5), because an older comgr rejects
 ISAs newer than its ROCm. A `_rocm_sdk_core` comgr already mapped into the
 process is never demoted: TheRock's `rocm_sdk.initialize_process` loaded it
 `RTLD_GLOBAL`, and a second comgr beside it aborts the process with `LLVM
@@ -244,8 +253,9 @@ fallback. With multiple mapped paths or unreadable maps, this check does not
 change override precedence or mapped-library selection. To use a different
 COMGR, compile in a separate process before importing torch.
 
-If you hit `cannot load libamd_comgr.so` in a torch-less process, set
-`ROCM_PATH` (or `ROCKE_COMGR_LIB`) to point at your ROCm install.
+If you hit `cannot load libamd_comgr.so` in a torch-less process, install
+`rocke[sdk-core]` from an AMD wheel index, or set `ROCM_PATH` (or
+`ROCKE_COMGR_LIB`) to point at your ROCm install.
 
 ## Hardware requirements for numeric tests
 

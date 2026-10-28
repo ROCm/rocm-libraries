@@ -21,8 +21,9 @@ The resulting HSACO bytes are returned to Python and can be handed
 straight to `hipModuleLoadData` (see `hip_module.py`). No subprocesses,
 no `<hip/hip_runtime.h>` parsing, no clang spawn.
 
-The library is loaded from the default ROCm library locations or the dynamic
-linker search path. ABI definitions mirror ROCm's `amd_comgr.h`.
+The library is supplied by ``rocm-sdk-core`` (the ``rocke[sdk-core]`` extra),
+an explicit override, an already imported torch, or a system ROCm install.
+ABI definitions mirror ROCm's `amd_comgr.h`.
 """
 
 from __future__ import annotations
@@ -121,14 +122,18 @@ def _load_lib() -> ctypes.CDLL:
         except OSError as e:
             failures.append((p, e))
     name = "amd_comgr.dll" if _IS_WINDOWS else "libamd_comgr.so"
+    remedy = (
+        "Install 'rocke[sdk-core]' from an AMD ROCm wheel index, or set "
+        "ROCKE_COMGR_LIB to an explicit COMGR library from your ROCm install. "
+        "See the COMGR installation documentation for supported SDK releases."
+    )
     if not failures:
         raise ComgrError(
-            f"cannot load {name}: no candidate path was produced. Set "
-            f"ROCKE_COMGR_LIB to an explicit library, or make one discoverable."
+            f"cannot load {name}: no candidate path was produced. {remedy}"
         )
     tried = "\n".join(f"  {path}: {exc}" for path, exc in failures)
     raise ComgrError(
-        f"cannot load {name}; {len(failures)} candidate(s) failed:\n{tried}"
+        f"cannot load {name}; {len(failures)} candidate(s) failed:\n{tried}\n{remedy}"
     )
 
 
@@ -460,7 +465,8 @@ def _require_compiler_info() -> CompilerInfo:
         reason = "COMGR could not be loaded" if info is None else info.describe()
         raise ComgrError(
             f"Cannot determine LLVM flavor: {reason}. "
-            "Select a queryable COMGR library for compilation, or set an explicit "
+            "Install 'rocke[sdk-core]' from an AMD ROCm wheel index or select "
+            "a queryable COMGR library for compilation, or set an explicit "
             "LLVM flavor for offline IR emission."
         )
     return info
