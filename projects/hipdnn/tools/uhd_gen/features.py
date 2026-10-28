@@ -276,6 +276,10 @@ def evaluator_feature_semantics_revision(executable: str | Path | None = None) -
     return _run_feature_evaluator([], None, [], executable)[2]
 
 
+# UhdFeatures.cpp refuses a request over 256 MiB; a chunk stays well under it.
+_REQUEST_CHUNK_BYTES = 64 * 1024 * 1024
+
+
 def _run_feature_evaluator(
     signature: list,
     categorical_encoding: dict | None,
@@ -285,16 +289,45 @@ def _run_feature_evaluator(
     """The only crossing into FeatureExtractor, which owns both the digest and the values.
 
     Entries are parsed first only for a readable error; the evaluator does the hashing.
+    Rows are evaluated independently, so a large batch is split into requests under the
+    evaluator's size bound; every chunk must agree on the digest and revision.
     """
     parsed = [parse_signature_entry(entry) for entry in signature]
-    request = {
-        "signature": parsed,
-        "categorical_encoding": categorical_encoding or {},
-        "rows": rows,
-    }
+    header = json.dumps(
+        {"signature": parsed, "categorical_encoding": categorical_encoding or {}},
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    encoded = [json.dumps(row, ensure_ascii=False, allow_nan=False) for row in rows]
+    chunks: list[list[str]] = [[]]
+    size = len(header)
+    for row in encoded:
+        if chunks[-1] and size + len(row) + 1 > _REQUEST_CHUNK_BYTES:
+            chunks.append([])
+            size = len(header)
+        chunks[-1].append(row)
+        size += len(row) + 1
+    evaluator = resolve_feature_evaluator(executable)
+    digest, values, revision = None, [], None
+    for chunk in chunks:
+        part = _evaluate_chunk(evaluator, header, chunk, len(parsed))
+        if digest is not None and part[0::2] != (digest, revision):
+            raise ValueError(
+                f"invalid {EVALUATOR_NAME} response: digest or revision changed between chunks"
+            )
+        digest, revision = part[0], part[2]
+        values.extend(part[1])
+    return digest, values, revision
+
+
+def _evaluate_chunk(
+    evaluator: str, header: str, rows: list[str], width: int
+) -> tuple[str, list[list[float]], int]:
+    """One evaluator request: `header` with its closing brace replaced by the rows."""
+    request = header[:-1] + ', "rows": [' + ", ".join(rows) + "]}"
     result = subprocess.run(
-        [resolve_feature_evaluator(executable)],
-        input=json.dumps(request, ensure_ascii=False, allow_nan=False),
+        [evaluator],
+        input=request,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -315,7 +348,7 @@ def _run_feature_evaluator(
             )
         if not isinstance(digest, str) or not digest.startswith("sha256:"):
             raise ValueError("missing features_hash")
-        if len(values) != len(rows) or any(len(row) != len(parsed) for row in values):
+        if len(values) != len(rows) or any(len(row) != width for row in values):
             raise ValueError("feature matrix shape does not match the request")
         if any(
             not isinstance(value, (int, float)) or not math.isfinite(value)
