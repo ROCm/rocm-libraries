@@ -23,8 +23,8 @@ status_t booster_t::check_problem(const problem_t&  problem,
                                   const hardware_t& hardware,
                                   std::string*      detail) const {
   // The model's dtype class: bf16 = A and B BFloat16; tf32 = A/B/C/D Float with XFloat32
-  // math (strict f32 is a different problem and never uses a tf32 model). Any other class is
-  // refused.
+  // math (strict f32 is a different problem and never uses a tf32 model); fp8 = F8BS, A and B
+  // Float8 into Float8 math with BFloat16 C and D and no MX blocks. Any other class is refused.
   const std::string& dtype = model_->head_string("dtype");
   const char*        not_in_class = nullptr;
   if (dtype == "bf16") {
@@ -35,6 +35,12 @@ status_t booster_t::check_problem(const problem_t&  problem,
           problem.c_dtype == data_type_t::Float && problem.d_dtype == data_type_t::Float &&
           problem.mi_dtype == data_type_t::XFloat32))
       not_in_class = "problem is not tf32 (A/B/C/D f32 with xf32 math)";
+  } else if (dtype == "fp8") {
+    if (!(problem.a_dtype == data_type_t::Float8 && problem.b_dtype == data_type_t::Float8 &&
+          problem.c_dtype == data_type_t::BFloat16 && problem.d_dtype == data_type_t::BFloat16 &&
+          problem.mi_dtype == data_type_t::Float8 && problem.a_mx_block_size == 0 &&
+          problem.b_mx_block_size == 0))
+      not_in_class = "problem is not fp8 (F8BS: A/B Float8 with Float8 math, C/D BFloat16, no MX)";
   } else {
     not_in_class = "unknown dtype class";
   }

@@ -55,9 +55,11 @@ namespace TensileLite
      * is deserialized, once per model file, and used only if its stamps match this build and
      * its manifest diff accepts that library (libraryManifest, checkLibrary): kernels may be
      * removed, and added when their gated structural values were seen in training. Dtype
-     * classes: "bf16" (A and B BFloat16) and "tf32" (A/B/C/D Float with F32XdlMathOp XFloat32,
-     * i.e. compute type f32_fast_xf32 / c_xf32_r). Strict f32, every other dtype and every call
-     * the model declines keep Origami's order.
+     * classes: "bf16" (A and B BFloat16), "tf32" (A/B/C/D Float with F32XdlMathOp XFloat32,
+     * i.e. compute type f32_fast_xf32 / c_xf32_r) and "fp8" (plain F8BS: A/B Float8 with Float8
+     * compute input, C/D BFloat16, A/B scales unset or scalar, no alpha vector, MX blocks or
+     * swizzled operands). Strict f32, every other dtype, other FP8 problems and every call the
+     * model declines keep Origami's order.
      *
      * Tuned entries take precedence: Equality and Range rows are walked before the
      * PredictionMatching row (ExactLogicLibrary), their picks are returned unchanged, and the
@@ -73,10 +75,11 @@ namespace TensileLite
         /// The dtype classes a model can be loaded for.
         TENSILELITEHOST_EXPORT std::vector<std::string> const& dtypes();
 
-        /// Dtype class of the logic files named TensileLibrary_<BB|SS>_*: "bf16", "tf32" or null.
+        /// Dtype class of the logic files named TensileLibrary_<BB|SS|F8F8>_*: "bf16", "tf32",
+        /// "fp8" or null.
         TENSILELITEHOST_EXPORT char const* logicClass(std::string const& logicStem);
 
-        /// Dtype class of a problem: "bf16", "tf32" or null.
+        /// Dtype class of a problem: "bf16", "tf32", "fp8" or null.
         TENSILELITEHOST_EXPORT char const* problemClass(ContractionProblemGemm const& problem);
 
         /**
@@ -91,7 +94,7 @@ namespace TensileLite
 
         /**
          * Canonical manifest of the PredictionMatching rows of libdir for a dtype class: the
-         * files TensileLibrary_<BB|SS>_*<arch>*.dat[.zlib] (not the lazy master), loaded with
+         * files TensileLibrary_<BB|SS|F8F8>_*<arch>*.dat[.zlib] (not the lazy master), loaded with
          * the regular deserializer; their prediction rows' kernels whose problem type is in the
          * class, as origami::nn::boost::canonical_manifest. The model exporter's library check
          * reads the same files and rows.

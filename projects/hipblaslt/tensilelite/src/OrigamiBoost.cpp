@@ -84,7 +84,10 @@ namespace TensileLite
             // A/B type code of the file names holding each class's prediction rows.
             char const* fileToken(std::string const& dtype)
             {
-                return dtype == "bf16" ? "BB" : dtype == "tf32" ? "SS" : nullptr;
+                return dtype == "bf16"   ? "BB"
+                       : dtype == "tf32" ? "SS"
+                       : dtype == "fp8"  ? "F8F8"
+                                         : nullptr;
             }
 
             bool inClass(ContractionSolution::ProblemType const& t, std::string const& dtype)
@@ -92,6 +95,9 @@ namespace TensileLite
                 using rocisa::DataType;
                 if(dtype == "bf16")
                     return t.aType == DataType::BFloat16 && t.bType == DataType::BFloat16;
+                if(dtype == "fp8")
+                    return t.aType == DataType::Float8 && t.bType == DataType::Float8
+                           && t.cType == DataType::BFloat16 && t.dType == DataType::BFloat16;
                 return t.aType == DataType::Float && t.bType == DataType::Float
                        && t.cType == DataType::Float && t.dType == DataType::Float
                        && t.f32XdlMathOp == DataType::XFloat32;
@@ -109,7 +115,7 @@ namespace TensileLite
 
         std::vector<std::string> const& dtypes()
         {
-            static const std::vector<std::string> d{"bf16", "tf32"};
+            static const std::vector<std::string> d{"bf16", "tf32", "fp8"};
             return d;
         }
 
@@ -137,6 +143,17 @@ namespace TensileLite
                && problem.d().dataType() == DataType::Float
                && problem.f32XdlMathOp() == DataType::XFloat32)
                 return "tf32";
+            // Plain F8BS: Float8 compute input, unset or scalar A/B scales. Vector (A/B or alpha)
+            // and MX-block scaling and swizzled operands keep Origami's order.
+            if(problem.a().dataType() == DataType::Float8 && problem.b().dataType() == DataType::Float8
+               && problem.c().dataType() == DataType::BFloat16
+               && problem.d().dataType() == DataType::BFloat16
+               && problem.computeInputTypeA() == DataType::Float8
+               && problem.computeInputTypeB() == DataType::Float8
+               && (problem.useScaleAB().empty() || problem.useScaleAB() == "Scalar")
+               && problem.useScaleAlphaVec() == 0 && problem.mxBlockA() == 0
+               && problem.mxBlockB() == 0 && !problem.swizzleTensorA() && !problem.swizzleTensorB())
+                return "fp8";
             return nullptr;
         }
 
