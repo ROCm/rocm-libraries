@@ -1123,10 +1123,11 @@ namespace TensileLite
 
     namespace
     {
-        bool usePerTileStreamKSplit(ContractionSolution const& solution,
-                                   ContractionProblemGemm const& problem,
-                                   PersistentLaunchSettings const& launch,
-                                   size_t tiles, size_t itersPerTile)
+        bool usePerTileStreamKSplit(ContractionSolution const&      solution,
+                                    ContractionProblemGemm const&   problem,
+                                    PersistentLaunchSettings const& launch,
+                                    size_t                          tiles,
+                                    size_t                          itersPerTile)
         {
             if(!solution.internalArgsSupport.perTileExtraIters)
                 return false;
@@ -1140,8 +1141,8 @@ namespace TensileLite
                || (!solution.customKernel.name.empty() && !solution.customKernel.generated)
                || solution.sizeMapping.useSubtileImpl || solution.problemType.useGradient
                || solution.problemType.sparse || problem.groupedGemm()
-               || launch.reduction != origami::reduction_t::tree
-               || tiles <= 1 || launch.grid <= tiles || launch.grid % tiles != 0)
+               || launch.reduction != origami::reduction_t::tree || tiles <= 1
+               || launch.grid <= tiles || launch.grid % tiles != 0)
                 return false;
             const size_t factor = launch.grid / tiles;
             return factor <= itersPerTile && itersPerTile % factor != 0
