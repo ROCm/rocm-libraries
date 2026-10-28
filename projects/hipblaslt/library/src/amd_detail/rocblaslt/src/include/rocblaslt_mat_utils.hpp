@@ -285,6 +285,98 @@ inline bool problemFitsKernelArgs(int64_t m,
 }
 
 /*******************************************************************************
+ * Host alpha/beta scalar
+ *
+ * Alpha and beta are scalars of the matmul scale type. The ext API does not
+ * carry a scale type (the problem stores HIPBLASLT_DATATYPE_INVALID); the
+ * scalar width then follows the compute type. A fixed 4-byte load over-reads
+ * a 2-byte HIP_R_16F scalar and can treat a zero half as nonzero when the
+ * next two bytes are nonzero (ROCM-31553).
+ ******************************************************************************/
+inline hipDataType scalarTypeFromCompute(rocblaslt_compute_type compute_type)
+{
+    switch(compute_type)
+    {
+    case rocblaslt_compute_f16:
+    case rocblaslt_compute_f16_pedantic:
+        return HIP_R_16F;
+    case rocblaslt_compute_f64:
+    case rocblaslt_compute_f64_pedantic:
+        return HIP_R_64F;
+    case rocblaslt_compute_i32:
+    case rocblaslt_compute_i32_pedantic:
+        return HIP_R_32I;
+    default:
+        return HIP_R_32F;
+    }
+}
+
+inline hipDataType alphaBetaScalarType(hipDataType scale_type, rocblaslt_compute_type compute_type)
+{
+    switch(scale_type)
+    {
+    case HIP_R_16F:
+    case HIP_R_32F:
+    case HIP_R_64F:
+    case HIP_R_32I:
+    case HIP_C_32F:
+    case HIP_C_64F:
+        return scale_type;
+    default:
+        return scalarTypeFromCompute(compute_type);
+    }
+}
+
+// Reads only the bytes `type` occupies. Unknown types are not loaded and
+// compare as nonzero, so a null A or B stays rejected.
+inline bool hostScalarIsZero(hipDataType type, const void* ptr)
+{
+    if(!ptr)
+        return false;
+
+    switch(type)
+    {
+    case HIP_R_16F:
+        return static_cast<float>(*reinterpret_cast<const hipblasLtHalf*>(ptr)) == 0.f;
+    case HIP_R_32F:
+        return *reinterpret_cast<const float*>(ptr) == 0.f;
+    case HIP_R_64F:
+        return *reinterpret_cast<const double*>(ptr) == 0.0;
+    case HIP_R_32I:
+        return *reinterpret_cast<const int32_t*>(ptr) == 0;
+    case HIP_C_32F:
+    {
+        const auto value = *reinterpret_cast<const hipblaslt_complex_float*>(ptr);
+        return value.real() == 0.f && value.imag() == 0.f;
+    }
+    case HIP_C_64F:
+    {
+        const auto value = *reinterpret_cast<const hipblaslt_complex_double*>(ptr);
+        return value.real() == 0.0 && value.imag() == 0.0;
+    }
+    default:
+        return false;
+    }
+}
+
+// True when a null A or B is not allowed. Host scalars are loaded with the
+// width of `scalar_type`. Device pointer modes are not dereferenced.
+inline bool alphaForbidsNullAB(hipDataType            scalar_type,
+                               rocblaslt_pointer_mode pointermode,
+                               const void*            alpha,
+                               const void*            a,
+                               const void*            b)
+{
+    if(!alpha)
+        return true;
+    if(a && b)
+        return false;
+    if(pointermode != rocblaslt_pointer_mode_host)
+        return true;
+    return !hostScalarIsZero(scalar_type, alpha);
+}
+
+/*******************************************************************************
  * Validate Matmul Arguments
  ******************************************************************************/
 inline rocblaslt_status validateMatmulArgs(int64_t                       m,
@@ -320,7 +412,8 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
                                            int64_t                       batch_offset_c = 0,
                                            int64_t                       batch_offset_d = 0,
                                            const rocblaslt_pointer_mode& pointermode
-                                           = rocblaslt_pointer_mode_host)
+                                           = rocblaslt_pointer_mode_host,
+                                           hipDataType scale_type = HIPBLASLT_DATATYPE_INVALID)
 {
     rocblaslt_status status = rocblaslt_status_continue;
 
@@ -459,8 +552,10 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
     if(!beta)
         return rocblaslt_status_invalid_pointer;
 
-    // Update for the valid case: ((alpha_in_host && alpha=0) && (A=NULL || B=NULL))
-    bool alpha_A_B_violation = (!alpha || ((pointermode || (*((float*)alpha))) && (!a || !b)));
+    // A host alpha of 0 may leave A or B null. Load alpha at the scalar width:
+    // a 4-byte read of a HIP_R_16F alpha over-reads the caller (ROCM-31553).
+    const bool alpha_A_B_violation = alphaForbidsNullAB(
+        alphaBetaScalarType(scale_type, compute_type), pointermode, alpha, a, b);
     // pointers must be valid
     if(n && ((k && alpha_A_B_violation) || !c || !d))
         return rocblaslt_status_invalid_pointer;
@@ -696,7 +791,8 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                             batch_offset_b,
                                             batch_offset_c,
                                             batch_offset_d,
-                                            matmul_descr->pointermode);
+                                            matmul_descr->pointermode,
+                                            matmul_descr->scale_type);
 
     const void* alphaVecPtr     = matmul_descr->pointermode ? alpha : nullptr;
     auto        epilogue_status = rocblaslt_epilogue_valid_args(matmul_descr->epilogue,
@@ -768,8 +864,11 @@ inline hipblaslt_complex_double get_alpha_beta_scalar(hipDataType type, const vo
             return {static_cast<double>(*(reinterpret_cast<const int32_t*>(ptr))), 0.0};
         
         case HIP_R_16F:
+            return {static_cast<double>(*reinterpret_cast<const hipblasLtHalf*>(ptr)), 0.0};
         case HIP_R_16BF:
-            return {static_cast<double>(*(reinterpret_cast<const float*>(ptr))), 0.0};
+            return {static_cast<double>(static_cast<float>(
+                        *reinterpret_cast<const hipblasLtBfloat16*>(ptr))),
+                    0.0};
 
         case HIP_C_32F:
         {
