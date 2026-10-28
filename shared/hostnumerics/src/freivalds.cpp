@@ -309,7 +309,6 @@ FreivaldsPreparation prepareFreivalds(const Tensor& a, const Tensor& b,
     if (accLimit == 0 || detail::exactIntegerLimit(outputType) == 0 ||
         epilogue.computeType != operation.accumulatorType ||
         operation.mathMode != MathMode::Default || operation.blockScaleA || operation.blockScaleB ||
-        operation.blockSizeA || operation.blockSizeB ||
         (operation.accumulationRounding != AccumulationRounding::TypeDefault &&
          operation.accumulationRounding != AccumulationRounding::FullPrecision) ||
         epilogue.auxiliaryInput || epilogue.gateResidual || epilogue.accumulateAmax ||

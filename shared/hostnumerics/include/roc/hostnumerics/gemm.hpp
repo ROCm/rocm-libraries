@@ -26,6 +26,14 @@ enum class AccumulationRounding {
     AfterProductAndSum,  // Quantizes every product and accumulated sum.
 };
 
+// Real scales shared by `blockSize` consecutive K elements of one operand.
+// `scales` has shape [M for A or N for B, at least ceil(K / blockSize)];
+// `blockSize` must be nonzero.
+struct MatmulBlockScale {
+    Tensor scales;
+    size_t blockSize = 0;
+};
+
 // Numerical and execution policy intrinsic to one matrix multiplication.
 struct MatmulOptions {
     explicit MatmulOptions(ScalarType accumulator) : accumulatorType(accumulator) {}
@@ -38,10 +46,8 @@ struct MatmulOptions {
     std::optional<ScalarType> computeTypeB;
     std::vector<Tensor> preQuantizationScalesA;  // Ordered factors broadcast to A.
     std::vector<Tensor> preQuantizationScalesB;  // Ordered factors broadcast to B.
-    std::optional<Tensor> blockScaleA;           // [M, ceil(K / blockSizeA)].
-    std::optional<Tensor> blockScaleB;           // [N, ceil(K / blockSizeB)].
-    size_t blockSizeA = 0;
-    size_t blockSizeB = 0;
+    std::optional<MatmulBlockScale> blockScaleA;
+    std::optional<MatmulBlockScale> blockScaleB;
     bool conjugateA = false;
     bool conjugateB = false;
 };

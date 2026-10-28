@@ -125,32 +125,27 @@ inline GemmSupportInfo checkRuntimeGemm(const GemmInvocation& problem) {
     if (problem.mathMode == MathMode::XFloat32 && problem.accumulatorType != ScalarType::Float32)
         return {.reason = "XFloat32 math mode requires a Float32 accumulator."};
 
-    auto validateBlockScale = [&](const std::optional<Tensor>& scale, size_t blockSize,
+    auto validateBlockScale = [&](const std::optional<MatmulBlockScale>& blockScale,
                                   size_t freeExtent, const char* name) -> GemmSupportInfo {
-        if (!scale) {
-            if (blockSize != 0)
-                return {.reason = std::string("Reference GEMM ") + name +
-                                  " block size requires a scale tensor."};
-            return {.supported = true};
-        }
+        if (!blockScale) return {.supported = true};
+        const Tensor& scale = blockScale->scales;
+        const size_t blockSize = blockScale->blockSize;
         if (blockSize == 0)
             return {.reason =
                         std::string("Reference GEMM ") + name + " block size must be nonzero."};
-        if (scale->shape().rank() != 2)
+        if (scale.shape().rank() != 2)
             return {.reason = std::string("Reference GEMM ") + name + " must have rank 2."};
         const size_t blockCount = k / blockSize + (k % blockSize != 0 ? 1 : 0);
-        if (scale->shape()[0] != freeExtent || scale->shape()[1] < blockCount)
+        if (scale.shape()[0] != freeExtent || scale.shape()[1] < blockCount)
             return {.reason =
                         std::string("Reference GEMM ") + name + " block-scale shape mismatch."};
-        if (isComplexScalarType(scale->type()))
+        if (isComplexScalarType(scale.type()))
             return {.reason =
                         std::string("Reference GEMM ") + name + " block scales must be real."};
         return {.supported = true};
     };
-    if (auto result = validateBlockScale(problem.blockScaleA, problem.blockSizeA, m, "A"); !result)
-        return result;
-    if (auto result = validateBlockScale(problem.blockScaleB, problem.blockSizeB, n, "B"); !result)
-        return result;
+    if (auto result = validateBlockScale(problem.blockScaleA, m, "A"); !result) return result;
+    if (auto result = validateBlockScale(problem.blockScaleB, n, "B"); !result) return result;
     if (problem.blockScaleA) {
         if (complexAccumulator)
             return {.reason = "Complex reference GEMM does not support block scaling."};
@@ -173,9 +168,9 @@ inline GemmSupportInfo checkRuntimeGemm(const GemmInvocation& problem) {
         if (storageOverlaps(problem.d, scale))
             return {.reason =
                         "Reference GEMM destination must not overlap a B pre-quantization scale."};
-    if (problem.blockScaleA && storageOverlaps(problem.d, *problem.blockScaleA))
+    if (problem.blockScaleA && storageOverlaps(problem.d, problem.blockScaleA->scales))
         return {.reason = "Reference GEMM destination must not overlap the A block scale."};
-    if (problem.blockScaleB && storageOverlaps(problem.d, *problem.blockScaleB))
+    if (problem.blockScaleB && storageOverlaps(problem.d, problem.blockScaleB->scales))
         return {.reason = "Reference GEMM destination must not overlap the B block scale."};
     return {.supported = true};
 }

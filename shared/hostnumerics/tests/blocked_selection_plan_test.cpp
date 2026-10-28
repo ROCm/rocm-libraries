@@ -126,10 +126,8 @@ void testBlockScaledSelectionBlockPlan() {
     const Tensor blockScaleB = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{columns, scaleBlocks}),
         std::span<const float>(scaleB));
-    blockedProblem.blockScaleA = blockScaleA;
-    blockedProblem.blockSizeA = 8;
-    blockedProblem.blockScaleB = blockScaleB;
-    blockedProblem.blockSizeB = 8;
+    blockedProblem.blockScaleA = MatmulBlockScale{blockScaleA, 8};
+    blockedProblem.blockScaleB = MatmulBlockScale{blockScaleB, 8};
     roc::hostnumerics::detail::bindIndices(blockedProblem, blockedProblem.d.shape(), selection,
                                            selectionOrder);
 

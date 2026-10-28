@@ -1446,12 +1446,14 @@ namespace TensileLite::Client::hostnumerics
         request.conjugateB = m_state->bConjugate;
         if(plan.blockScaleA && plan.blockScaleB)
         {
-            request.blockScaleA = Tensor::copyEncodedBackingStorage(
-                m_state->mxScaleTypeA, plan.blockScaleA->layout, plan.blockScaleA->storage);
-            request.blockScaleB = Tensor::copyEncodedBackingStorage(
-                m_state->mxScaleTypeB, plan.blockScaleB->layout, plan.blockScaleB->storage);
-            request.blockSizeA = m_state->mxBlockA;
-            request.blockSizeB = m_state->mxBlockB;
+            request.blockScaleA = roc::hostnumerics::MatmulBlockScale{
+                Tensor::copyEncodedBackingStorage(
+                    m_state->mxScaleTypeA, plan.blockScaleA->layout, plan.blockScaleA->storage),
+                m_state->mxBlockA};
+            request.blockScaleB = roc::hostnumerics::MatmulBlockScale{
+                Tensor::copyEncodedBackingStorage(
+                    m_state->mxScaleTypeB, plan.blockScaleB->layout, plan.blockScaleB->storage),
+                m_state->mxBlockB};
         }
         translated.alpha  = Tensor::scalar(accumulatorType, m_state->alpha);
         translated.beta   = Tensor::scalar(accumulatorType, m_state->beta);
