@@ -492,28 +492,58 @@ conv-state pool of §4.9, which uses the same indices.
 
 ### 4.6 Registry and tile selection
 
-GDN exposes the Cartesian product of:
+Each gate kind registers the Cartesian product of:
 
 - `num_warps ∈ {1, 2, 4, 8, 16}`;
 - `warp_threads_k ∈ {1, 2, 4, 8, 16, 32}`;
 - `blocks_per_v_dim ∈ {1, 2, 4, 8, 16, 32}`.
 
-This produces 180 stable identities. `is_valid_spec()` is the only legality
-authority and admits 54 GDN candidates for the default D128 shape. Production
-`auto` deterministically prefers `(2, 16, 8)` whenever legal; batch changes
-grid size, not GDN tile selection. A caller may pin an exact candidate with
-`nw<num_warps>_wtk<warp_threads_k>_bpv<blocks_per_v_dim>`.
+This produces 180 stable tile identities per gate kind:
+`nw<num_warps>_wtk<warp_threads_k>_bpv<blocks_per_v_dim>` for GDN and the same with a `kda_`
+prefix for KDA. `is_valid_spec()` is the only legality authority and admits 54 tiles for the
+default D128 shape. KDA accepts only `DK = DV = 128` today, so 54 of its 180 tiles are admissible
+and the other 126 stay registered but unselectable until that limit is lifted. Production `auto`
+deterministically prefers GDN's `(2, 16, 8)` whenever
+legal; batch changes grid size, not GDN tile selection. A caller may pin an exact tile by its
+`spec_id`.
 
+Each registered tile is a tuned candidate on the shared `rocke.dispatch.tuning` template
+(`rocke/dispatch/ARCHITECTURE.md` §14): its knob space holds the §4.10 knobs (axes in
+`dispatch/gdn/axes.py`, scope and legality in `dispatch/gdn/rules.py`), so every
+(tile × knob) configuration of the listed axes is registered, listed by
+`dispatch_gdn_decode_all`, and pinnable by `spec_id` plus `tuning_id`
+(`<spec_id>_wpe<N>@<config_key>`) and/or `tuning_knobs`. The nine knob axes are listed whole;
+`waves_per_eu`, the outer knob, is listed per sweep level as attention's is: `production` (what
+`dispatch_gdn_decode_all` lists by default) sweeps `{0, 4}`, `4` being the one non-zero value the
+knob numeric suite runs on every configured tile, and `full` sweeps every legal value `0`–`8`.
+Every legal `waves_per_eu` is pinnable at either level, and a non-`int` one (`True`, `None`,
+`4.0`) is refused rather than read as `1`, unset or `4`. A pin resolves to exactly that
+configuration or raises `PinRefused`. A knob the request cannot read (a fused-only knob on an
+unfused request, a tile-dependent knob where its `*_applies` predicate is False) is dropped rather
+than refused, and the result's explanation names it (`dropped out-of-scope tuning_knobs [...]`); a
+value outside its knob's axis is refused. So `tuning_knobs` alone (`tuning_id`
+`auto`) carry a configuration across shapes. A stored `tuning_id` does not: it names the knob set
+that was canonical where it was recorded, and where scope drops one of those knobs the pin is
+refused, naming the dropped knobs. `auto` runs the selected tile's base configuration: every
+knob at its default (flags off, hints `default`, `waves_per_eu` `0`).
+
+Not every listed configuration has run on a device. For one request the space is large (GDN,
+plain, bf16 state, D128: 54 tiles and 2,384 configurations at `production`). The fp32-checked
+device suites cover each knob alone on every configured tile, every applicable knob together on
+two fused tiles, `waves_per_eu` `0` and `4`, and sampled pinned configurations per mode. Other knob
+combinations and `waves_per_eu` `1`–`3` and `5`–`8` are pinnable but not device-verified. The
+space is meant to shrink: a follow-up measures every configuration, each checked against the fp32
+reference before it is timed, and removes the knobs and values that do not help.
 
 KDA remains keyed on `work = batch × num_v_heads`. Tensor-parallel sharding
 changes `num_v_heads` per rank, so two launches with the same batch can expose
 different amounts of GPU work:
 
-| Band | Work | `(num_warps, warp_threads_k, blocks_per_v_dim)` |
+| `spec_id` | Work | `(num_warps, warp_threads_k, blocks_per_v_dim)` |
 | --- | --- | --- |
-| `kda_w128` | `≤ 128` | `(4, 16, 4)` |
-| `kda_w512` | `≤ 512` | `(1, 16, 4)` |
-| `kda_w_large` | larger | `(2, 16, 1)` |
+| `kda_nw4_wtk16_bpv4` | `≤ 128` | `(4, 16, 4)` |
+| `kda_nw1_wtk16_bpv4` | `≤ 512` | `(1, 16, 4)` |
+| `kda_nw2_wtk16_bpv1` | larger | `(2, 16, 1)` |
 
 `BPV` manufactures workgroups when the natural grid is too small. KDA's table
 comes from exhaustive legal-tile sweeps with every candidate correctness-gated
@@ -521,6 +551,23 @@ before timing. Its band edges interpolate measured anchors; exact measurements
 live in the protected performance record. Both this table and the GDN default
 were measured on the interleaved load order, before §4.3's loads-first order,
 so they are a snapshot until the sweep is re-run.
+
+The request also carries the state width and the fused modes (§4.9). An `f32` state
+(`state_dtype` `f32`, for either gate kind) reaches the spec and the kernel name but not the tile
+choice: `auto` picks what it picks for the same request with a 16-bit state. Fused requests
+(`fuse_conv` and/or `fuse_out_norm`) admit only `BPV = 1` tiles. Without a fused default, `auto`
+would serve a fused GDN request with the first legal tile in product order, `(1, 1, 1)`, because
+GDN's default `(2, 16, 8)` is not `BPV = 1`, and every fused KDA request with its largest-work
+tile, `(2, 16, 1)`. `auto` therefore prefers one interim static fused tile, `(4, 16, 1)`, for both
+gate kinds and every state width (`kda_nw4_wtk16_bpv1` for KDA). It is the tile the fused numeric
+suite is built around, not a measured winner; per-mode fused defaults are a separate measurement.
+It needs `DK` a multiple of `WTK × VPT = 128` and `DV` a multiple of 16, which both §1.4
+deployments meet. If it is illegal, `auto` falls back to the first legal candidate; for example,
+fused GDN at `DK = 64` falls back to `(1, 1, 1)`, and at `DV = 8` to `(1, 8, 1)`. KDA's work table
+never selects it for an unfused request: KDA's fallback order (taken only when the auto tile is
+illegal) lists the work-table tiles, then this tile, then the GDN order. The fused flags must be
+real bools and the dims real ints in the request, and `fuse_conv` with `num_k_heads ≠ num_v_heads`
+is a request error (§4.9).
 
 ### 4.7 The reference path
 
@@ -614,16 +661,16 @@ the `(4, 16, 1)` tile). A V channel's conv, and (without `out_lds` or `norm_gate
 gate activation, are computed by all `WTK` k-lanes of the row and stored by one: `WTK`-fold. This
 trades occupancy and redundant loads for fewer launches. With `conv_once` a channel is computed
 once per workgroup (one thread instead of `NW × WTV`); `norm_gate_once` does the same for the gate
-product. Tile selection for the fused modes is not part of this emitter.
+product. Tile selection for the fused modes is dispatch's (§4.6), not this emitter's.
 
 ### 4.10 Performance knobs
 
 Ten spec fields change how the warp-tiled kernel computes, not what it computes (the two state
 hints and `waves_per_eu` also apply on the reference path). Each one's default is the code the
 kernel emitted before the knob existed, so with every knob at its default the kernel name and the
-emitted IR are byte-identical to the knob-free emitter (the golden IR test pins
-this). Dispatch does not set the knobs yet: the registry search space and per-mode defaults are
-separate changes, so today a knob is reached only by building a spec directly.
+emitted IR are byte-identical to the knob-free emitter (the golden IR test pins this). The
+registry exposes them as each tile's tuning space (§4.6), so a knob is reached by pinning a
+configuration; `auto` keeps every knob at its default until per-mode defaults are measured.
 
 | Knob | Values (default first) | Changes code where | Effect |
 | --- | --- | --- | --- |
@@ -915,6 +962,10 @@ Widening the range needs nested chunking or per-token rescaling.
 6. Machine-checked byte-identity for the prefill-side cross-engine surfaces this family touches —
    currently reasoned and Python-verified. (Decode is checked: the golden cases lower identically
    through both engines.)
+   The decode dispatch layer (request checks, the registry, the knob space and the shared
+   `rocke.dispatch.tuning` template) is Python-only, with no C++ twin to keep in parity: the
+   provider does not serve GDN/KDA decode through a C++ selector today. A C++ selector, if one is
+   added, needs the same request, scope and pin rules and a parity gate.
 7. A fast fused decode path (§4.9): lifting the three `NOT_YET_IMPLEMENTED` rules of §4.9 —
    `fuse_conv` with `Hk ≠ Hv` (GQA, e.g. Qwen3-Next) and `BPV > 1` for small-batch parallelism,
    through an out-of-place conv state, with `fuse_out_norm` at `BPV > 1` also needing a
