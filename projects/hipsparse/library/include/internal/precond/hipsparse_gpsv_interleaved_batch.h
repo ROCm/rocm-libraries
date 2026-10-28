@@ -242,7 +242,7 @@ hipsparseStatus_t hipsparseZgpsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *  See below for a description of the interleaved memory pattern.
 *
 *  Solving the batched pentadiagonal system involves two steps. First, the user calls
-*  \ref hipsparseSgpsvInterleavedBatch_bufferSizeExt "hipsparseSgpsvInterleavedBatch_bufferSizeExt()"
+*  \ref hipsparseSgpsvInterleavedBatch_bufferSizeExt "hipsparseXgpsvInterleavedBatch_bufferSizeExt()"
 *  to determine the size of the required temporary storage buffer. Once determined, the user allocates
 *  this buffer and passes it to \ref hipsparseSgpsvInterleavedBatch "hipsparseXgpsvInterleavedBatch()"
 *  to perform the actual solve. The \f$x^{i}\f$ vectors, which initially stores the right-hand side values, are

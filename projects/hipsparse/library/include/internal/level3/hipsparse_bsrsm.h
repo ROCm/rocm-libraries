@@ -802,7 +802,7 @@ hipsparseStatus_t hipsparseZbsrsm2_analysis(hipsparseHandle_t         handle,
 *  \f]
 *
 *  After the temporary storage buffer has been allocated, analysis meta data is required. It can be obtained
-*  by hipsparseSbsrsm2_analysis "hipsparseXbsrsm2_analysis()". The triangular solve is completed by calling
+*  by \ref hipsparseSbsrsm2_analysis "hipsparseXbsrsm2_analysis()". The triangular solve is completed by calling
 *  \p hipsparseXbsrsm2_solve, and after all solves are performed, the temporary storage buffer allocated by the
 *  user can be freed.
 *

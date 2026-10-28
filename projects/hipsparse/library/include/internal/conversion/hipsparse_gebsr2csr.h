@@ -44,7 +44,7 @@ extern "C" {
 *    \end{align}
 *  \f]
 *
-*  Allocation size for \p csrValC and \p csrColIndC is computed by the the number of blocks in the GEBSR
+*  Allocation size for \p csrValC and \p csrColIndC is computed by the number of blocks in the GEBSR
 *  matrix, \p nnzb, multiplied by the product of the block dimensions, that is, \p nnz=nnzb*rocBlockDim*colBlockDim.
 *
 *  For example, given the GEBSR matrix:

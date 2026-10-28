@@ -54,7 +54,7 @@ extern "C" {
 *  batchCount         The number of systems to solve.
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
-*                     \ref hipsparseSgtsvInterleavedBatch "hipsparseSgtsvInterleavedBatch()".
+*                     \ref hipsparseSgtsvInterleavedBatch "hipsparseXgtsvInterleavedBatch()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p batchCount, \p dl, \p d, \p du,

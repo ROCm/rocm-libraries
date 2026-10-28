@@ -794,7 +794,7 @@ hipsparseStatus_t hipsparseZcsric02_analysis(hipsparseHandle_t         handle,
 *  output as the incomplete factorization does not generate new non-zeros in the output which do not already exist in \f$A\f$.
 *
 *  The performance of computing Cholesky factorization with hipSPARSE greatly depends on the sparsity pattern
-*  the the matrix \f$A\f$, because this is what determines the amount of parallelism available.
+*  the matrix \f$A\f$, because this is what determines the amount of parallelism available.
 *
 *  \note
 *  The sparse CSR matrix has to be sorted. This can be achieved by calling

@@ -31,7 +31,7 @@ extern "C" {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup conv_module
 *  \brief
-*  \p hipsparseXpruneDense2csr_bufferSize computes the the size of the user-allocated temporary storage buffer
+*  \p hipsparseXpruneDense2csr_bufferSize computes the size of the user-allocated temporary storage buffer
 *  used when converting a dense matrix to a pruned CSR matrix.
 *
 *  \details
@@ -175,7 +175,7 @@ hipsparseStatus_t hipsparseDpruneDense2csr_bufferSize(hipsparseHandle_t         
 
 /*! \ingroup conv_module
 *  \brief
-*  \p hipsparseXpruneDense2csr_bufferSizeExt computes the the size of the user-allocated temporary storage buffer
+*  \p hipsparseXpruneDense2csr_bufferSizeExt computes the size of the user-allocated temporary storage buffer
 *  used when converting a dense matrix to a pruned CSR matrix.
 *
 *  \details
