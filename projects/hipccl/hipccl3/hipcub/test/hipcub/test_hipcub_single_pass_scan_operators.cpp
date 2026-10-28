@@ -38,9 +38,8 @@ struct custom_key_value_pair_op
 {
     using type = hipcub::KeyValuePair<K, V>;
 
-    HIPCUB_HOST_DEVICE
-    HIPCUB_FORCEINLINE type
-        operator()(type a, type b)
+    _CCCL_HOST_DEVICE
+    _CCCL_FORCEINLINE type operator()(type a, type b)
     {
         return type(OpK{}(a.key, b.key), OpV{}(a.value, b.value));
     }
@@ -50,9 +49,8 @@ template<typename T>
 struct make_value
 {
     template<typename U>
-    HIPCUB_HOST_DEVICE
-    HIPCUB_FORCEINLINE T
-        operator()(U v)
+    _CCCL_HOST_DEVICE
+    _CCCL_FORCEINLINE T operator()(U v)
     {
         return T(v);
     }
@@ -63,9 +61,8 @@ struct make_value<hipcub::KeyValuePair<K, V>>
 {
     // We need a special constructor to produce key value pairs from singular values.
     template<typename U>
-    HIPCUB_HOST_DEVICE
-    HIPCUB_FORCEINLINE hipcub::KeyValuePair<K, V>
-                       operator()(U v)
+    _CCCL_HOST_DEVICE
+    _CCCL_FORCEINLINE hipcub::KeyValuePair<K, V> operator()(U v)
     {
         return hipcub::KeyValuePair<K, V>(make_value<K>{}(v), make_value<V>{}(v));
     }
@@ -106,7 +103,7 @@ static void PrefixKernel(TileState tile_state, T* d_input, T* d_output)
     else
     {
         TilePrefix tile_prefix = TilePrefix(tile_state, prefix_share, ScanOp{}, tile_id);
-        if(thread_id < HIPCUB_DEVICE_WARP_THREADS)
+        if(thread_id < _CCCL_DEVICE_WARP_THREADS)
         {
             // Compute tile prefix sum over all tiles, called by the first warp.
             tile_prefix(value);

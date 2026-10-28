@@ -37,7 +37,7 @@ struct value_predicate_t
     T                 value_;
     test_utils::equal equal_op{};
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     inline bool       operator()(const T x) const
     {
         return equal_op(x, value_);
@@ -51,7 +51,7 @@ struct custom_value_predicate_t
     test_utils::equal               equal_op{};
 
     template<class U>
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     inline bool operator()(test_utils::custom_test_type<U> x)
     {
         return equal_op(x.x, value_.x);
@@ -363,25 +363,25 @@ struct NotDefaultConstructible
 {
     int value_;
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     constexpr explicit NotDefaultConstructible(int value)
         : value_(value)
     {}
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     friend constexpr bool operator==(const NotDefaultConstructible& lhs,
                                      const NotDefaultConstructible& rhs)
     {
         return lhs.value_ == rhs.value_;
     }
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     friend constexpr bool operator!=(const NotDefaultConstructible& lhs,
                                      const NotDefaultConstructible& rhs)
     {
         return lhs.value_ != rhs.value_;
     }
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     constexpr operator int() const noexcept
     {
         return value_;
@@ -390,7 +390,7 @@ struct NotDefaultConstructible
 
 struct index_to_value
 {
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     NotDefaultConstructible operator()(int i)
     {
         return NotDefaultConstructible{static_cast<int>(i)};

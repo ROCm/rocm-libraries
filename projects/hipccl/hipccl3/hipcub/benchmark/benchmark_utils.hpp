@@ -226,21 +226,34 @@ struct custom_type
     T x;
     U y;
 
-    HIPCUB_HOST_DEVICE inline constexpr custom_type() : x(T()), y(U()) {}
+    _CCCL_HOST_DEVICE
+    inline constexpr custom_type()
+        : x(T()), y(U())
+    {}
 
-    HIPCUB_HOST_DEVICE inline constexpr custom_type(T xx, U yy) : x(xx), y(yy) {}
+    _CCCL_HOST_DEVICE
+    inline constexpr custom_type(T xx, U yy)
+        : x(xx), y(yy)
+    {}
 
-    HIPCUB_HOST_DEVICE inline constexpr custom_type(T xy) : x(xy), y(xy) {}
+    _CCCL_HOST_DEVICE
+    inline constexpr custom_type(T xy)
+        : x(xy), y(xy)
+    {}
 
     template<class V, class W = V>
-    HIPCUB_HOST_DEVICE inline custom_type(const custom_type<V, W>& other) : x(other.x), y(other.y)
+    _CCCL_HOST_DEVICE
+    inline custom_type(const custom_type<V, W>& other)
+        : x(other.x), y(other.y)
     {}
 
 #ifndef HIPCUB_CUB_API
-    HIPCUB_HOST_DEVICE inline ~custom_type() = default;
+    _CCCL_HOST_DEVICE
+    inline ~custom_type()
+        = default;
 #endif
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     inline custom_type& operator=(const custom_type& other)
     {
         x = other.x;
@@ -248,19 +261,19 @@ struct custom_type
         return *this;
     }
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     inline custom_type operator+(const custom_type& rhs) const
     {
         return custom_type(x + rhs.x, y + rhs.y);
     }
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     inline custom_type operator-(const custom_type& other) const
     {
         return custom_type(x - other.x, y - other.y);
     }
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     inline bool operator<(const custom_type& rhs) const
     {
         // intentionally suboptimal choice for short-circuting,
@@ -268,25 +281,25 @@ struct custom_type
         return ((x == rhs.x && y < rhs.y) || x < rhs.x);
     }
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     inline bool operator>(const custom_type& other) const
     {
         return (x > other.x || (x == other.x && y > other.y));
     }
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     inline bool operator==(const custom_type& rhs) const
     {
         return x == rhs.x && y == rhs.y;
     }
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     inline bool operator!=(const custom_type& other) const
     {
         return !(*this == other);
     }
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     custom_type& operator+=(const custom_type& rhs)
     {
         this->x += rhs.x;
@@ -313,7 +326,7 @@ struct custom_type_decomposer
     using T = typename CustomType::first_type;
     using U = typename CustomType::second_type;
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     ::hipcub::tuple<T&, U&> operator()(CustomType& key) const
     {
         return ::hipcub::tuple<T&, U&>{key.x, key.y};
@@ -427,12 +440,12 @@ std::vector<T>
 
 bool is_warp_size_supported(const unsigned required_warp_size)
 {
-    return HIPCUB_HOST_WARP_THREADS >= required_warp_size;
+    return _CCCL_HOST_WARP_THREADS >= required_warp_size;
 }
 
 template<unsigned int LogicalWarpSize>
 __device__ constexpr bool device_test_enabled_for_warp_size_v
-    = HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize;
+    = _CCCL_DEVICE_WARP_THREADS >= LogicalWarpSize;
 
 template<class T>
 __device__
@@ -501,7 +514,7 @@ inline constexpr auto ceiling_div(const T a, const U b)
 struct minimum
 {
     template<class T, class U>
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     auto operator()(const T& a, const U& b) const
     {
         return a < b ? a : b;
@@ -511,7 +524,7 @@ struct minimum
 struct plus
 {
     template<class A, class B>
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     constexpr auto operator()(const A& a, const B& b) const -> decltype(a + b)
     {
         return a + b;

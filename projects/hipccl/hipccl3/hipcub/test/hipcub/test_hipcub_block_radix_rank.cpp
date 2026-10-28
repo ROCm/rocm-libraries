@@ -507,7 +507,7 @@ TYPED_TEST(HipcubBlockRadixRank, BlockRadixRankMatch)
 {
 #ifdef __HIP_PLATFORM_NVIDIA__
     constexpr unsigned int block_size = TestFixture::params::block_size;
-    if(block_size % HIPCUB_DEVICE_WARP_THREADS != 0)
+    if(block_size % _CCCL_DEVICE_WARP_THREADS != 0)
     {
         // The CUB implementation of BlockRadixRankMatch is currently broken when
         // the warp size does not divide the block size exactly, see

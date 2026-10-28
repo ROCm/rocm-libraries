@@ -1563,7 +1563,7 @@ using HipcubInvalidDeviceScanTestsParams
 TYPED_TEST_SUITE(HipcubInvalidDeviceScanTests, HipcubInvalidDeviceScanTestsParams);
 
 template<typename Destination, typename Source>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 Destination bit_cast(const Source& source)
 {
     static_assert(sizeof(Source) == sizeof(Destination),
@@ -1635,12 +1635,12 @@ struct segment
 
     segment() = default;
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     constexpr segment(SegmentOffsetT b, SegmentOffsetT e)
         : begin{b}, end{e}
     {}
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     friend bool operator==(segment left, segment right)
     {
         return left.begin == right.begin && left.end == right.end;
@@ -1650,7 +1650,7 @@ struct segment
 template<typename SegmentOffsetT, typename WrapperT>
 struct tuple_to_wrapper_op
 {
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     auto operator()(test_utils::tuple<SegmentOffsetT, SegmentOffsetT> interval) const
     {
 #if defined(__HIP_PLATFORM_AMD__)
@@ -1682,12 +1682,12 @@ struct segments_op
     static constexpr auto cascaded = seg_t{minus_1, minus_1};
     counts_type*          counts;
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     segments_op(counts_type* counts_)
         : counts{counts_}
     {}
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     bool check_inputs(seg_t left, seg_t right) const
     {
         // left == right to detect zero-initialized segments
@@ -1712,7 +1712,7 @@ struct segments_op
         return false;
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     seg_t operator()(seg_t left, seg_t right) const
     {
         if(check_inputs(left, right))
@@ -1723,7 +1723,7 @@ struct segments_op
     }
 
     template<typename PrimitiveT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     PrimitiveT operator()(PrimitiveT p_left, PrimitiveT p_right) const
     {
         const auto left  = bit_cast<seg_t>(p_left);
@@ -1736,14 +1736,14 @@ template<typename SegmentOffsetT>
 struct segments_host_op
 {
     using seg_t = segment<SegmentOffsetT>;
-    HIPCUB_HOST
+    _CCCL_HOST
     seg_t operator()(seg_t left, seg_t right) const
     {
         return {left.begin, right.end};
     }
 
     template<typename PrimitiveT>
-    HIPCUB_HOST
+    _CCCL_HOST
     PrimitiveT operator()(PrimitiveT p_left, PrimitiveT p_right) const
     {
         const auto left  = bit_cast<seg_t>(p_left);

@@ -125,30 +125,30 @@ struct DoubleBuffer
 
     int selector;
 
-    HIPCUB_HOST_DEVICE inline
-    DoubleBuffer()
+    _CCCL_HOST_DEVICE
+    inline DoubleBuffer()
     {
         selector = 0;
         d_buffers[0] = nullptr;
         d_buffers[1] = nullptr;
     }
 
-    HIPCUB_HOST_DEVICE inline
-    DoubleBuffer(T * d_current, T * d_alternate)
+    _CCCL_HOST_DEVICE
+    inline DoubleBuffer(T* d_current, T* d_alternate)
     {
         selector = 0;
         d_buffers[0] = d_current;
         d_buffers[1] = d_alternate;
     }
 
-    HIPCUB_HOST_DEVICE inline
-    T * Current()
+    _CCCL_HOST_DEVICE
+    inline T* Current()
     {
         return d_buffers[selector];
     }
 
-    HIPCUB_HOST_DEVICE inline
-    T * Alternate()
+    _CCCL_HOST_DEVICE
+    inline T* Alternate()
     {
         return d_buffers[selector ^ 1];
     }
@@ -245,10 +245,10 @@ __HIPCUB_ALIGN_BYTES(double, 8)
 __HIPCUB_ALIGN_BYTES(int4, 16)
 __HIPCUB_ALIGN_BYTES(uint4, 16)
 __HIPCUB_ALIGN_BYTES(float4, 16)
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+_CCCL_SUPPRESS_DEPRECATED_PUSH
 __HIPCUB_ALIGN_BYTES(long4, 16)
 __HIPCUB_ALIGN_BYTES(ulong4, 16)
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+_CCCL_SUPPRESS_DEPRECATED_POP
     #if HIPCUB_CTK_AT_LEAST(13, 0)
 __HIPCUB_ALIGN_BYTES(long4_16a, 16)
 __HIPCUB_ALIGN_BYTES(long4_32a, 32)
@@ -258,11 +258,11 @@ __HIPCUB_ALIGN_BYTES(ulong4_32a, 32)
 __HIPCUB_ALIGN_BYTES(longlong2, 16)
 __HIPCUB_ALIGN_BYTES(ulonglong2, 16)
 __HIPCUB_ALIGN_BYTES(double2, 16)
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+_CCCL_SUPPRESS_DEPRECATED_PUSH
 __HIPCUB_ALIGN_BYTES(longlong4, 16)
 __HIPCUB_ALIGN_BYTES(ulonglong4, 16)
 __HIPCUB_ALIGN_BYTES(double4, 16)
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+_CCCL_SUPPRESS_DEPRECATED_POP
     #if HIPCUB_CTK_AT_LEAST(13, 0)
 __HIPCUB_ALIGN_BYTES(longlong4_16a, 16)
 __HIPCUB_ALIGN_BYTES(longlong4_32a, 32)
@@ -431,16 +431,16 @@ HIPCUB_DEFINE_VECTOR_TYPE(short, short)
 HIPCUB_DEFINE_VECTOR_TYPE(ushort, ushort)
 HIPCUB_DEFINE_VECTOR_TYPE(int, int)
 HIPCUB_DEFINE_VECTOR_TYPE(uint, uint)
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+_CCCL_SUPPRESS_DEPRECATED_PUSH
 HIPCUB_DEFINE_VECTOR_TYPE(long, long)
 HIPCUB_DEFINE_VECTOR_TYPE(unsigned long, unsigned long)
 HIPCUB_DEFINE_VECTOR_TYPE(long long, long long)
 HIPCUB_DEFINE_VECTOR_TYPE(unsigned long long, unsigned long long)
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+_CCCL_SUPPRESS_DEPRECATED_POP
 HIPCUB_DEFINE_VECTOR_TYPE(float, float)
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+_CCCL_SUPPRESS_DEPRECATED_PUSH
 HIPCUB_DEFINE_VECTOR_TYPE(double, double)
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+_CCCL_SUPPRESS_DEPRECATED_POP
 HIPCUB_DEFINE_VECTOR_TYPE(bool, unsigned char)
 
 #undef HIPCUB_DEFINE_VECTOR_TYPE
@@ -466,7 +466,8 @@ struct Uninitialized
     DeviceWord storage[WORDS];
 
     /// Alias
-    HIPCUB_HOST_DEVICE __forceinline__ T& Alias()
+    _CCCL_HOST_DEVICE __forceinline__
+    T& Alias()
     {
         return reinterpret_cast<T&>(*this);
     }
@@ -514,19 +515,22 @@ struct BaseTraits<UNSIGNED_INTEGER, true, _UnsignedBits, T>
 
     using key_codec = decltype(::rocprim::traits::get<T>().template radix_key_codec<false>());
 
-    static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
+    static _CCCL_HOST_DEVICE __forceinline__
+    UnsignedBits TwiddleIn(UnsignedBits key)
     {
         return key;
     }
 
-    static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits TwiddleOut(UnsignedBits key)
+    static _CCCL_HOST_DEVICE __forceinline__
+    UnsignedBits TwiddleOut(UnsignedBits key)
     {
         return key;
     }
 
     //! deprecated [Since 5.0]
     HIPCUB_DEPRECATED_BECAUSE("Use hip::std::numeric_limits<T>::max()")
-    static HIPCUB_HOST_DEVICE __forceinline__ T Max()
+    static _CCCL_HOST_DEVICE __forceinline__
+    T Max()
     {
         UnsignedBits retval_bits = MAX_KEY;
         T retval;
@@ -536,7 +540,8 @@ struct BaseTraits<UNSIGNED_INTEGER, true, _UnsignedBits, T>
 
     //! deprecated [Since 5.0]
     HIPCUB_DEPRECATED_BECAUSE("Use hip::std::numeric_limits<T>::lowest()")
-    static HIPCUB_HOST_DEVICE __forceinline__ T Lowest()
+    static _CCCL_HOST_DEVICE __forceinline__
+    T Lowest()
     {
         UnsignedBits retval_bits = LOWEST_KEY;
         T retval;
@@ -561,19 +566,22 @@ struct BaseTraits<SIGNED_INTEGER, true, _UnsignedBits, T>
 
     using key_codec = decltype(::rocprim::traits::get<T>().template radix_key_codec<false>());
 
-    static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
+    static _CCCL_HOST_DEVICE __forceinline__
+    UnsignedBits TwiddleIn(UnsignedBits key)
     {
         return key ^ HIGH_BIT;
     };
 
-    static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits TwiddleOut(UnsignedBits key)
+    static _CCCL_HOST_DEVICE __forceinline__
+    UnsignedBits TwiddleOut(UnsignedBits key)
     {
         return key ^ HIGH_BIT;
     };
 
     //! deprecated [Since 5.0]
     HIPCUB_DEPRECATED_BECAUSE("Use hip::std::numeric_limits<T>::max()")
-    static HIPCUB_HOST_DEVICE __forceinline__ T Max()
+    static _CCCL_HOST_DEVICE __forceinline__
+    T Max()
     {
         UnsignedBits retval = MAX_KEY;
         return reinterpret_cast<T&>(retval);
@@ -581,7 +589,8 @@ struct BaseTraits<SIGNED_INTEGER, true, _UnsignedBits, T>
 
     //! deprecated [Since 5.0]
     HIPCUB_DEPRECATED_BECAUSE("Use hip::std::numeric_limits<T>::lowest()")
-    static HIPCUB_HOST_DEVICE __forceinline__ T Lowest()
+    static _CCCL_HOST_DEVICE __forceinline__
+    T Lowest()
     {
         UnsignedBits retval = LOWEST_KEY;
         return reinterpret_cast<T&>(retval);
@@ -604,13 +613,15 @@ struct BaseTraits<FLOATING_POINT, true, _UnsignedBits, T>
 
     using key_codec = decltype(::rocprim::traits::get<T>().template radix_key_codec<false>());
 
-    static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
+    static _CCCL_HOST_DEVICE __forceinline__
+    UnsignedBits TwiddleIn(UnsignedBits key)
     {
         UnsignedBits mask = (key & HIGH_BIT) ? UnsignedBits(-1) : HIGH_BIT;
         return key ^ mask;
     };
 
-    static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits TwiddleOut(UnsignedBits key)
+    static _CCCL_HOST_DEVICE __forceinline__
+    UnsignedBits TwiddleOut(UnsignedBits key)
     {
         UnsignedBits mask = (key & HIGH_BIT) ? HIGH_BIT : UnsignedBits(-1);
         return key ^ mask;
@@ -618,7 +629,7 @@ struct BaseTraits<FLOATING_POINT, true, _UnsignedBits, T>
 
     //! deprecated [Since 5.0]
     HIPCUB_DEPRECATED_BECAUSE("Use hip::std::numeric_limits<T>::max()")
-    static HIPCUB_HOST_DEVICE __forceinline__
+    static _CCCL_HOST_DEVICE __forceinline__
     T Max()
     {
         return _HIPCUB_STD::numeric_limits<T>::max();
@@ -626,7 +637,7 @@ struct BaseTraits<FLOATING_POINT, true, _UnsignedBits, T>
 
     //! deprecated [Since 5.0]
     HIPCUB_DEPRECATED_BECAUSE("Use hip::std::numeric_limits<T>::lowest()")
-    static HIPCUB_HOST_DEVICE __forceinline__
+    static _CCCL_HOST_DEVICE __forceinline__
     T Lowest()
     {
         return _HIPCUB_STD::numeric_limits<T>::lowest();
@@ -839,7 +850,7 @@ struct is_primitive_impl
 // TODO(bgruber): for 2. we should probably just check whether sizeof(T) * 2 <= sizeof(int128) (or 256-bit on SM100)
 // Users must be able to hook into both scenarios with their custom types, so this trait must depend on cub::Traits
 
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+_CCCL_SUPPRESS_DEPRECATED_PUSH
 template<typename T>
 struct is_primitive : is_primitive_impl::is_primitive<T>
 {};
@@ -847,7 +858,7 @@ struct is_primitive : is_primitive_impl::is_primitive<T>
 template<typename T>
 inline constexpr bool is_primitive_v = is_primitive<T>::value;
 
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+_CCCL_SUPPRESS_DEPRECATED_POP
 
 } // namespace detail
 

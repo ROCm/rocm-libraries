@@ -131,11 +131,11 @@ public:
         this->block_offset          = num_items_;    // Initialize past-the-end
         this->block_end             = num_items_;    // Initialize past-the-end
         this->num_items             = num_items_;
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+        _CCCL_SUPPRESS_DEPRECATED_PUSH
         this->total_tiles
             = static_cast<int>(_HIPCUB_STD::min(OffsetT{_HIPCUB_STD::numeric_limits<int>::max()},
                                                 _HIPCUB_LIBCXX::ceil_div(num_items_, tile_items)));
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+        _CCCL_SUPPRESS_DEPRECATED_POP
         this->grid_size             = _HIPCUB_STD::min(total_tiles, max_grid_size);
         int avg_tiles_per_block     = total_tiles / grid_size;
         // leftover grains go to big blocks:
@@ -152,9 +152,9 @@ public:
      * consecutive sequence of input tiles.
      */
     template<int TILE_ITEMS>
-    HIPCUB_DEVICE
-    HIPCUB_FORCEINLINE void BlockInit(int block_id,
-                                      detail::int_constant_t<GRID_MAPPING_RAKE> /*strategy_tag*/)
+    _CCCL_DEVICE
+    _CCCL_FORCEINLINE void BlockInit(int block_id,
+                                     detail::int_constant_t<GRID_MAPPING_RAKE> /*strategy_tag*/)
     {
         block_stride = TILE_ITEMS;
         if (block_id < big_shares)
@@ -179,8 +179,8 @@ public:
      * of input tiles.
      */
     template<int TILE_ITEMS>
-    HIPCUB_DEVICE
-    HIPCUB_FORCEINLINE void
+    _CCCL_DEVICE
+    _CCCL_FORCEINLINE void
         BlockInit(int block_id, detail::int_constant_t<GRID_MAPPING_STRIP_MINE> /*strategy_tag*/)
     {
         block_stride = grid_size * TILE_ITEMS;
@@ -195,8 +195,8 @@ public:
      * separated by a stride equal to the the extent of the grid.
      */
     template<int TILE_ITEMS, GridMappingStrategy STRATEGY>
-    HIPCUB_DEVICE
-    HIPCUB_FORCEINLINE void BlockInit()
+    _CCCL_DEVICE
+    _CCCL_FORCEINLINE void BlockInit()
     {
         BlockInit<TILE_ITEMS>(blockIdx.x, detail::int_constant_t<STRATEGY>());
     }
@@ -208,8 +208,8 @@ public:
      * of input tiles.
      */
     template<int TILE_ITEMS, typename OffsetT1 = OffsetT>
-    HIPCUB_DEVICE
-    HIPCUB_FORCEINLINE void
+    _CCCL_DEVICE
+    _CCCL_FORCEINLINE void
         BlockInit(OffsetT1 block_offset, ///< [in] Threadblock begin offset (inclusive)
                   OffsetT1 block_end) ///< [in] Threadblock end offset (exclusive)
     {

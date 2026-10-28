@@ -42,16 +42,16 @@ namespace detail
 // TODO: this should be moved to libhipcxx's `hip::__device_memory_resource` when that's added
 struct device_memory_resource
 {
-    HIPCUB_HOST
+    _CCCL_HOST
     void* allocate(size_t bytes, size_t /* alignment */)
     {
         void* ptr{nullptr};
-        HIPCUB_TRY_CUDA_API(::hipMalloc, "allocate failed to allocate with hipMalloc", &ptr, bytes);
+        _CCCL_TRY_CUDA_API(::hipMalloc, "allocate failed to allocate with hipMalloc", &ptr, bytes);
         _CCCL_ASSERT(ptr != nullptr, "allocate failed to allocate with cudaMallocAsync");
         return ptr;
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     void* allocate(size_t /*bytes*/, size_t /* alignment */)
     {
         _HipcubLog(
@@ -60,13 +60,13 @@ struct device_memory_resource
         _HIPCUB_STD::terminate();
     }
 
-    HIPCUB_HOST
+    _CCCL_HOST
     void deallocate(void* ptr, size_t /* bytes */)
     {
-        HIPCUB_ASSERT_CUDA_API(::hipFree, "deallocate failed with hipFree", ptr);
+        _CCCL_ASSERT_CUDA_API(::hipFree, "deallocate failed with hipFree", ptr);
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     void deallocate(void* /*ptr*/, size_t /* bytes */)
     {
         _HipcubLog(
@@ -81,19 +81,19 @@ struct device_memory_resource
         return allocate(stream, bytes);
     }
 
-    HIPCUB_HOST
+    _CCCL_HOST
     void* allocate(_HIPCUB_LIBCXX::stream_ref stream, size_t bytes)
     {
         void* ptr{nullptr};
-        HIPCUB_TRY_CUDA_API(::hipMallocAsync,
-                            "allocate failed to allocate with hipMallocAsync",
-                            &ptr,
-                            bytes,
-                            stream.get());
+        _CCCL_TRY_CUDA_API(::hipMallocAsync,
+                           "allocate failed to allocate with hipMallocAsync",
+                           &ptr,
+                           bytes,
+                           stream.get());
         return ptr;
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     void* allocate(_HIPCUB_LIBCXX::stream_ref /*stream*/, size_t /*bytes*/)
     {
         _HipcubLog(
@@ -102,16 +102,16 @@ struct device_memory_resource
         _HIPCUB_STD::terminate();
     }
 
-    HIPCUB_HOST
+    _CCCL_HOST
     void deallocate(_HIPCUB_LIBCXX::stream_ref stream, void* ptr, size_t /* bytes */)
     {
-        HIPCUB_ASSERT_CUDA_API(::hipFreeAsync,
-                               "deallocate failed with hipFreeAsync",
-                               ptr,
-                               stream.get());
+        _CCCL_ASSERT_CUDA_API(::hipFreeAsync,
+                              "deallocate failed with hipFreeAsync",
+                              ptr,
+                              stream.get());
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     void deallocate(_HIPCUB_LIBCXX::stream_ref /*stream*/, void* /*ptr*/, size_t /* bytes */)
     {
         _HipcubLog(

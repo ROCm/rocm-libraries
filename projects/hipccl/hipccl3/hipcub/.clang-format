@@ -142,9 +142,9 @@ AttributeMacros:
     - __forceinline__
     - __shared__
     - __launch_bounds__
-    - HIPCUB_DEVICE
-    - HIPCUB_HOST
-    - HIPCUB_HOST_DEVICE
+    - _CCCL_DEVICE
+    - _CCCL_HOST
+    - _CCCL_HOST_DEVICE
     - HIPCUB_SHARED_MEMORY
     - HIPCUB_RUNTIME_FUNCTION
     - HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS
@@ -159,9 +159,9 @@ Macros:
     - __shared__=[[shared]]
     - __launch_bounds__(x)=[[launch_bounds(x)]]
     - __attribute__(x)=[[attribute(x)]]
-    - HIPCUB_DEVICE=[[DEVICE___]]
-    - HIPCUB_HOST=[[HOST___]]
-    - HIPCUB_HOST_DEVICE=[[HOST_DEVICE___]]
+    - _CCCL_DEVICE=[[DEVICE___]]
+    - _CCCL_HOST=[[HOST___]]
+    - _CCCL_HOST_DEVICE=[[HOST_DEVICE___]]
     - HIPCUB_SHARED_MEMORY=[[SHARED_MEMORY___]]
     - HIPCUB_RUNTIME_FUNCTION=[[RUNTIME_FUNCTION___]]
     - HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS=[[DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS___]]

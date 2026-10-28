@@ -26,8 +26,8 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_DEVICE_DEVICE_COPY_HPP_
-#define HIPCUB_DEVICE_DEVICE_COPY_HPP_
+#ifndef _CCCL_DEVICE_DEVICE_COPY_HPP_
+#define _CCCL_DEVICE_DEVICE_COPY_HPP_
 
 #include <hip/hip_common.h>
 
@@ -37,4 +37,4 @@
     #include "../backend/cub/device/device_copy.hpp" // IWYU pragma: export
 #endif
 
-#endif // HIPCUB_DEVICE_DEVICE_COPY_HPP_
+#endif // _CCCL_DEVICE_DEVICE_COPY_HPP_

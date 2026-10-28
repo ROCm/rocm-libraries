@@ -101,8 +101,8 @@ TYPED_TEST_SUITE(HipcubWarpExchangeTest, HipcubWarpExchangeTestParams);
 struct BlockedToStripedOp
 {
     template<class WarpExchange, class T, unsigned ItemsPerThread>
-    HIPCUB_DEVICE void operator()(WarpExchange& warp_exchange,
-                                  T (&thread_data)[ItemsPerThread]) const
+    _CCCL_DEVICE
+    void operator()(WarpExchange& warp_exchange, T (&thread_data)[ItemsPerThread]) const
     {
         warp_exchange.BlockedToStriped(thread_data, thread_data);
     }
@@ -111,8 +111,8 @@ struct BlockedToStripedOp
 struct StripedToBlockedOp
 {
     template<class WarpExchange, class T, unsigned ItemsPerThread>
-    HIPCUB_DEVICE void operator()(WarpExchange& warp_exchange,
-                                  T (&thread_data)[ItemsPerThread]) const
+    _CCCL_DEVICE
+    void operator()(WarpExchange& warp_exchange, T (&thread_data)[ItemsPerThread]) const
     {
         warp_exchange.StripedToBlocked(thread_data, thread_data);
     }

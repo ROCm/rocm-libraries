@@ -453,9 +453,9 @@ TYPED_TEST(HipcubThreadOperationTests, IterateStore)
 
 struct sum_op
 {
-    template<typename T> HIPCUB_HOST_DEVICE
-    T
-    operator()(const T& input_1,const T& input_2) const
+    template<typename T>
+    _CCCL_HOST_DEVICE
+    T operator()(const T& input_1, const T& input_2) const
     {
         return input_1 + input_2;
     }

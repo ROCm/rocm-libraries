@@ -106,32 +106,34 @@ class BlockReduce
 public:
     using TempStorage = typename base_type::storage_type;
 
-    HIPCUB_DEVICE inline
-    BlockReduce() : temp_storage_(private_storage())
+    _CCCL_DEVICE
+    inline BlockReduce()
+        : temp_storage_(private_storage())
     {
     }
 
-    HIPCUB_DEVICE inline
-    BlockReduce(TempStorage& temp_storage) : temp_storage_(temp_storage)
+    _CCCL_DEVICE
+    inline BlockReduce(TempStorage& temp_storage)
+        : temp_storage_(temp_storage)
     {
     }
 
-    HIPCUB_DEVICE inline
-    T Sum(T input)
+    _CCCL_DEVICE
+    inline T Sum(T input)
     {
         base_type::reduce(input, input, temp_storage_);
         return input;
     }
 
-    HIPCUB_DEVICE inline
-    T Sum(T input, int valid_items)
+    _CCCL_DEVICE
+    inline T Sum(T input, int valid_items)
     {
         base_type::reduce(input, input, valid_items, temp_storage_);
         return input;
     }
 
     template<int ItemsPerThread>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T Sum(T (&input)[ItemsPerThread])
     {
         T output{};
@@ -140,23 +142,23 @@ public:
     }
 
     template<typename ReduceOp>
-    HIPCUB_DEVICE inline
-    T Reduce(T input, ReduceOp reduce_op)
+    _CCCL_DEVICE
+    inline T Reduce(T input, ReduceOp reduce_op)
     {
         base_type::reduce(input, input, temp_storage_, reduce_op);
         return input;
     }
 
     template<typename ReduceOp>
-    HIPCUB_DEVICE inline
-    T Reduce(T input, ReduceOp reduce_op, int valid_items)
+    _CCCL_DEVICE
+    inline T Reduce(T input, ReduceOp reduce_op, int valid_items)
     {
         base_type::reduce(input, input, valid_items, temp_storage_, reduce_op);
         return input;
     }
 
     template<int ItemsPerThread, typename ReduceOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T Reduce(T (&input)[ItemsPerThread], ReduceOp reduce_op)
     {
         T output{};
@@ -165,8 +167,8 @@ public:
     }
 
 private:
-    HIPCUB_DEVICE inline
-    TempStorage& private_storage()
+    _CCCL_DEVICE
+    inline TempStorage& private_storage()
     {
         HIPCUB_SHARED_MEMORY TempStorage private_storage;
         return private_storage;
