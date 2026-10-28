@@ -182,7 +182,7 @@ The descriptor stores enough state to execute without `EngineConfig -> Engine ->
 - Plugin resource manager.
 - Plugin execution context wrapper.
 
-A descriptor that was created from saved bytes keeps those bytes and returns them on save. A
+A descriptor that was created from saved bytes keeps the plan bytes and returns them on save. A
 built plan serializes through its plugin once, on its first save, and keeps the result.
 
 Execution reads the engine ID and execution context directly from the execution plan descriptor.
@@ -372,10 +372,14 @@ this order:
 4. A kernel with a source kind other than kpack.
 5. A plan whose dispatch handler does not support save.
 
-hipDNN saves a loaded plan from the bytes it was loaded from. `to_binary()` of a graph that
+hipDNN saves a loaded plan from the plan bytes it was loaded from. `to_binary()` of a graph that
 `from_binary()` loaded with its plan returns the plan bytes unchanged, inside a graph-and-plan
 container with the bytes of the graph. `to_compiled_plan_binary()` of a loaded plan returns the
-plan bytes unchanged. hipDNN does not call the plugin to save a loaded plan.
+plan bytes unchanged. When the input to `from_compiled_plan_binary()` is a graph-and-plan
+container, only its plan part is kept, so the save returns the plan and not the container.
+hipDNN does not call the plugin to save a loaded plan. A loaded plan keeps its plan bytes for
+its lifetime, whether or not it is saved again. For the kernel ingestor engines the plan bytes
+include the kernel code object.
 
 The provider also refuses a direct call of the save hook on a restored context. That refusal has
 the status `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE` and the message

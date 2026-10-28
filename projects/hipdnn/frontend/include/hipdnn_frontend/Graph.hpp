@@ -2920,8 +2920,10 @@ public:
 
     /** @brief Serialize the compiled backend execution plan to a byte vector.
      *
-     * Requires build_plans() or build() to have finalized the execution plan.
-     * The returned data is intended for from_compiled_plan_binary().
+     * Requires build_plans() or build() to have finalized the execution plan, or a plan loaded
+     * from bytes with deserialize(handle, data) or from_compiled_plan_binary(). A loaded plan
+     * returns the plan bytes it was loaded from, with their original provider and format
+     * versions. The returned data is intended for from_compiled_plan_binary().
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error serialize_compiled_plan(std::vector<uint8_t>& data) const

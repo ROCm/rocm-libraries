@@ -739,7 +739,8 @@ protected:
     // loaded plan. Every run uses the CPU reference of the original graph. Then it saves the
     // loaded plan again in the same form, destroys the loaded graph, loads the second save
     // with another new handle, and checks the engine, the workspace size and two runs the
-    // same way. A plan-only second save must equal the first.
+    // same way. A plan-only second save must equal the first. For a graph-and-plan save, the
+    // loaded and the reloaded graph must save plan bytes equal to the original plan's.
     void roundTripInAFreshHandle(std::shared_ptr<Graph> graph,
                                  int64_t pinnedEngineId,
                                  SaveForm form,
@@ -796,6 +797,21 @@ protected:
             ASSERT_NE(contents & HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN, 0)
                 << "the saved graph holds no execution plan";
         }
+
+        // The plan bytes alone, as the built plan saves them. A graph-and-plan container holds
+        // exactly these bytes as its plan part, and loading a container keeps only that part.
+        std::vector<uint8_t> originalPlanBytes;
+        {
+            auto planSave = graph->to_compiled_plan_binary();
+            ASSERT_EQ(planSave.second.code, ErrorCode::OK) << planSave.second.err_msg;
+            originalPlanBytes = std::move(planSave.first);
+        }
+        const auto expectPlanBytesUnchanged = [&](const Graph& loadedGraph) {
+            auto planSave = loadedGraph.to_compiled_plan_binary();
+            ASSERT_EQ(planSave.second.code, ErrorCode::OK) << planSave.second.err_msg;
+            EXPECT_EQ(planSave.first, originalPlanBytes)
+                << "the plan cut out of the container differs from the original plan bytes";
+        };
 
         int64_t originalWorkspaceSize = 0;
         result = graph->get_workspace_size(originalWorkspaceSize);
@@ -862,10 +878,18 @@ protected:
             ASSERT_NE(contents & HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN, 0)
                 << "the second save holds no execution plan";
         }
+        if(form == SaveForm::GRAPH_AND_PLAN)
+        {
+            ASSERT_NO_FATAL_FAILURE(expectPlanBytesUnchanged(*loaded));
+        }
 
         loaded.reset();
         std::shared_ptr<Graph> reloaded;
         ASSERT_NO_FATAL_FAILURE(loadCheckAndRun(resaved, reloaded));
+        if(form == SaveForm::GRAPH_AND_PLAN)
+        {
+            ASSERT_NO_FATAL_FAILURE(expectPlanBytesUnchanged(*reloaded));
+        }
     }
 };
 
