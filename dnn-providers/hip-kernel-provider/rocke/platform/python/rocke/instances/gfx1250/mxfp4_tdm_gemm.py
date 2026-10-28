@@ -89,11 +89,21 @@ class MxFp4TdmGemmSpec:
 
     @property
     def a_tile_bytes(self) -> int:
-        return self.tile_m * (self.tile_k // 2)
+        return self.tile_m * self.a_lds_row_stride_bytes
 
     @property
     def b_tile_bytes(self) -> int:
-        return self.tile_n * (self.tile_k // 2)
+        return self.tile_n * self.b_lds_row_stride_bytes
+
+    @property
+    def a_scale_tile_bytes(self) -> int:
+        """Row-major rocKE staging: tile_m × (tile_k/32) E8M0 bytes."""
+        return self.tile_m * (self.tile_k // 32)
+
+    @property
+    def b_scale_tile_bytes(self) -> int:
+        """Row-major rocKE staging: (tile_k/32) × tile_n E8M0 bytes."""
+        return (self.tile_k // 32) * self.tile_n
 
     @property
     def effective_prefetch_depth(self) -> int:
@@ -104,9 +114,10 @@ class MxFp4TdmGemmSpec:
     @property
     def lds_bytes(self) -> int:
         depth = self.effective_prefetch_depth
-        a_stride = self.a_lds_row_stride_bytes
-        b_stride = self.b_lds_row_stride_bytes
-        return depth * (self.tile_m * a_stride + self.tile_n * b_stride)
+        ab = depth * (self.a_tile_bytes + self.b_tile_bytes)
+        if self.scale_tdm:
+            ab += depth * (self.a_scale_tile_bytes + self.b_scale_tile_bytes)
+        return ab
 
     @property
     def a_lds_row_stride_bytes(self) -> int:
@@ -149,7 +160,6 @@ class MxFp4TdmGemmSpec:
 # Each landed substep removes its flag from this frozenset.
 _UNIMPLEMENTED_STEP6_FLAGS = frozenset(
     {
-        "scale_tdm",
         "lds_pad",
         "lds_segment_interleave",
         "lds_segment_b_rotate",
@@ -310,7 +320,10 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
 
     shared = b.smem_alloc(I8, [spec.lds_bytes], name_hint="ab_tdm")
     shared_addr = b.smem_addr_of(shared)
-    b_region = spec.tdm_prefetch_depth * spec.a_tile_bytes
+    depth = spec.effective_prefetch_depth
+    b_region = depth * spec.a_tile_bytes
+    scale_region = depth * (spec.a_tile_bytes + spec.b_tile_bytes)
+    b_scale_region = scale_region + depth * spec.a_scale_tile_bytes
 
     def _buffer_offsets(parity):
         a_offset = b.mul(parity, b.const_i32(spec.a_tile_bytes))
@@ -318,13 +331,26 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
             b.const_i32(b_region),
             b.mul(parity, b.const_i32(spec.b_tile_bytes)),
         )
-        return a_offset, b_offset
+        if not spec.scale_tdm:
+            return a_offset, b_offset, None, None
+        a_scale_offset = b.add(
+            b.const_i32(scale_region),
+            b.mul(parity, b.const_i32(spec.a_scale_tile_bytes)),
+        )
+        b_scale_offset = b.add(
+            b.const_i32(b_scale_region),
+            b.mul(parity, b.const_i32(spec.b_scale_tile_bytes)),
+        )
+        return a_offset, b_offset, a_scale_offset, b_scale_offset
 
     def _issue_tdm(k0, parity) -> None:
-        a_lds_offset, b_lds_offset = _buffer_offsets(parity)
+        a_lds_offset, b_lds_offset, a_scale_lds, b_scale_lds = _buffer_offsets(parity)
         k_byte = b.div(k0, b.const_i32(2))
         remaining_k = b.sub(packed_k, k_byte)
-        a_row_stride = b.const_i32(spec.tile_k // 2)
+        a_row_stride = b.const_i32(spec.a_lds_row_stride_bytes)
+        scale_k_groups = spec.tile_k // 32
+        group0 = b.div(k0, c32)
+        remaining_groups = b.sub(scale_groups, group0)
 
         def _issue_ab_strip(a_row0, a_rows, b_row0, b_rows) -> None:
             a_lds = b.smem_ptr_add(
@@ -374,6 +400,59 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
                 )
             )
 
+        def _issue_scale_strip(a_row0, a_rows, b_col0, b_cols) -> None:
+            assert a_scale_lds is not None and b_scale_lds is not None
+            a_scale_dst = b.smem_ptr_add(
+                shared_addr,
+                b.zext(
+                    b.add(
+                        a_scale_lds,
+                        b.mul(a_row0, b.const_i32(scale_k_groups)),
+                    ),
+                    shared_addr.type,
+                ),
+            )
+            b_scale_dst = b.smem_ptr_add(
+                shared_addr,
+                b.zext(
+                    b.add(b_scale_lds, b_col0),
+                    shared_addr.type,
+                ),
+            )
+            a_scale_elem = b.add(
+                b.mul(b.add(block_m, a_row0), scale_groups),
+                group0,
+            )
+            b_scale_elem = b.add(
+                b.mul(group0, N),
+                b.add(block_n, b_col0),
+            )
+            # rocKE staging layout (not Tensile InMemorySwizzle bit-exact).
+            b.tensor_load_to_lds(
+                *b.tdm_descriptor_2d(
+                    b.global_ptr_add(AS, a_scale_elem),
+                    a_scale_dst,
+                    elem_bytes=1,
+                    tensor_dim0=remaining_groups,
+                    tensor_dim1=b.sub(M, b.add(block_m, a_row0)),
+                    row_stride=scale_groups,
+                    tile_dim0=scale_k_groups,
+                    tile_dim1=a_rows,
+                )
+            )
+            b.tensor_load_to_lds(
+                *b.tdm_descriptor_2d(
+                    b.global_ptr_add(BS, b_scale_elem),
+                    b_scale_dst,
+                    elem_bytes=1,
+                    tensor_dim0=b.sub(N, b.add(block_n, b_col0)),
+                    tensor_dim1=remaining_groups,
+                    row_stride=N,
+                    tile_dim0=b_cols,
+                    tile_dim1=scale_k_groups,
+                )
+            )
+
         if spec.wave_separated_tdm:
             num_waves = spec.warp_m * spec.warp_n * spec.warp_k
             a_rows = spec.tile_m // num_waves
@@ -384,6 +463,11 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
         else:
             with b.scf_if(b.cmp_eq(wave, c0)):
                 _issue_ab_strip(c0, spec.tile_m, c0, spec.tile_n)
+        # Scale tiles are small; wave 0 stages the full MacroTile into LDS
+        # (row-major rocKE layout, not Tensile InMemorySwizzle).
+        if spec.scale_tdm:
+            with b.scf_if(b.cmp_eq(wave, c0)):
+                _issue_scale_strip(c0, spec.tile_m, c0, spec.tile_n)
 
     def _prefetch_gl2(k0) -> None:
         """PrefetchGL2=2: hint A/B rows two DepthU tiles ahead into GL2."""
@@ -429,12 +513,12 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
         first = b.add(row_base, b.add(b.const_i32(inner_k // 2), lane_k))
         return b.vec_concat(_load_i32x4(first), _load_i32x4(b.add(first, c32)))
 
-    def _pack_a_scale(global_row, group0):
+    def _pack_a_scale_global(global_row, group0):
         index = b.add(b.mul(global_row, scale_groups), group0)
         raw = b.global_load_vN(AS, index, I8, 4, align=1)
         return b.bitcast(raw, I32)
 
-    def _pack_b_scale(global_col, group0):
+    def _pack_b_scale_global(global_col, group0):
         values = []
         for group in range(4):
             index = b.add(
@@ -442,6 +526,34 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
                 global_col,
             )
             values.append(b.global_load(BS, index, I8, align=1))
+        return b.bitcast(b.vec_pack(values, I8), I32)
+
+    def _pack_a_scale_lds(a_scale_buf, local_row, inner_k):
+        byte_off = b.add(
+            a_scale_buf,
+            b.add(
+                b.mul(local_row, b.const_i32(spec.tile_k // 32)),
+                b.const_i32(inner_k // 32),
+            ),
+        )
+        raw = b.smem_load_vN(shared, byte_off, dtype=I8, n=4)
+        return b.bitcast(raw, I32)
+
+    def _pack_b_scale_lds(b_scale_buf, local_col, inner_k):
+        values = []
+        group_base = inner_k // 32
+        for group in range(4):
+            byte_off = b.add(
+                b_scale_buf,
+                b.add(
+                    b.mul(
+                        b.const_i32(group_base + group),
+                        b.const_i32(spec.tile_n),
+                    ),
+                    local_col,
+                ),
+            )
+            values.append(b.smem_load_vN(shared, byte_off, dtype=I8, n=1))
         return b.bitcast(b.vec_pack(values, I8), I32)
 
     atom_rows = [
@@ -459,20 +571,34 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
         for repeat in range(spec.wave_repeat_n)
     ]
 
-    def _a_scales_for_group(group0):
+    def _a_scales_for_step(a_scale_buf, k0, inner_k):
+        if spec.scale_tdm:
+            assert a_scale_buf is not None
+            return [
+                _pack_a_scale_lds(a_scale_buf, b.add(atom_row, lane), inner_k)
+                for atom_row in atom_rows
+            ]
+        group0 = b.div(b.add(k0, b.const_i32(inner_k)), c32)
         return [
-            _pack_a_scale(b.add(block_m, b.add(atom_row, lane)), group0)
+            _pack_a_scale_global(b.add(block_m, b.add(atom_row, lane)), group0)
             for atom_row in atom_rows
         ]
 
-    def _b_scales_for_group(group0):
+    def _b_scales_for_step(b_scale_buf, k0, inner_k):
+        if spec.scale_tdm:
+            assert b_scale_buf is not None
+            return [
+                _pack_b_scale_lds(b_scale_buf, b.add(atom_col, lane_col), inner_k)
+                for atom_col in atom_cols
+            ]
+        group0 = b.div(b.add(k0, b.const_i32(inner_k)), c32)
         return [
-            _pack_b_scale(b.add(block_n, b.add(atom_col, lane_col)), group0)
+            _pack_b_scale_global(b.add(block_n, b.add(atom_col, lane_col)), group0)
             for atom_col in atom_cols
         ]
 
     def _compute_tile(k0, parity, accumulators):
-        a_buffer, b_buffer = _buffer_offsets(parity)
+        a_buffer, b_buffer, a_scale_buf, b_scale_buf = _buffer_offsets(parity)
         out = list(accumulators)
         inner_ks = list(range(0, spec.tile_k, _ATOM_K))
         # HalfPLR-style A local-read prefetch: load the next K-step A
@@ -483,14 +609,13 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
                 _load_a_fragment(a_buffer, atom_row, inner_ks[0])
                 for atom_row in atom_rows
             ]
-        # Scale DRAM double-buffer: prefetch next E8M0 packs into VGPR while
-        # the current WMMA cluster runs (still global loads).
+        # Scale double-buffer: prefetch next E8M0 packs into VGPR while the
+        # current WMMA cluster runs (global or LDS depending on scale_tdm).
         a_scale_prefetch = None
         b_scale_prefetch = None
         if spec.scale_double_buffer and inner_ks:
-            group0 = b.div(b.add(k0, b.const_i32(inner_ks[0])), c32)
-            a_scale_prefetch = _a_scales_for_group(group0)
-            b_scale_prefetch = _b_scales_for_group(group0)
+            a_scale_prefetch = _a_scales_for_step(a_scale_buf, k0, inner_ks[0])
+            b_scale_prefetch = _b_scales_for_step(b_scale_buf, k0, inner_ks[0])
         for step_i, inner_k in enumerate(inner_ks):
             group0 = b.div(b.add(k0, b.const_i32(inner_k)), c32)
             next_inner = inner_ks[step_i + 1] if step_i + 1 < len(inner_ks) else None
@@ -507,9 +632,8 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
                 a_scales = a_scale_prefetch
                 b_scales = b_scale_prefetch
                 if next_inner is not None:
-                    next_group = b.div(b.add(k0, b.const_i32(next_inner)), c32)
-                    a_scale_prefetch = _a_scales_for_group(next_group)
-                    b_scale_prefetch = _b_scales_for_group(next_group)
+                    a_scale_prefetch = _a_scales_for_step(a_scale_buf, k0, next_inner)
+                    b_scale_prefetch = _b_scales_for_step(b_scale_buf, k0, next_inner)
             else:
                 a_scales = None
                 b_scales = None
@@ -519,21 +643,31 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
                     if a_frags is not None
                     else _load_a_fragment(a_buffer, atom_row, inner_k)
                 )
-                a_scale = (
-                    a_scales[rm]
-                    if a_scales is not None
-                    else _pack_a_scale(b.add(block_m, b.add(atom_row, lane)), group0)
-                )
+                if a_scales is not None:
+                    a_scale = a_scales[rm]
+                elif spec.scale_tdm:
+                    a_scale = _pack_a_scale_lds(
+                        a_scale_buf, b.add(atom_row, lane), inner_k
+                    )
+                else:
+                    a_scale = _pack_a_scale_global(
+                        b.add(block_m, b.add(atom_row, lane)), group0
+                    )
                 for rn, atom_col in enumerate(atom_cols):
                     index = rm * spec.wave_repeat_n + rn
                     b_frag = _load_b_fragment(b_buffer, atom_col, inner_k)
-                    b_scale = (
-                        b_scales[rn]
-                        if b_scales is not None
-                        else _pack_b_scale(
+                    if b_scales is not None:
+                        b_scale = b_scales[rn]
+                    elif spec.scale_tdm:
+                        b_scale = _pack_b_scale_lds(
+                            b_scale_buf,
+                            b.add(atom_col, lane_col),
+                            inner_k,
+                        )
+                    else:
+                        b_scale = _pack_b_scale_global(
                             b.add(block_n, b.add(atom_col, lane_col)), group0
                         )
-                    )
                     out[index] = b.mma(
                         _WmmaScaleF4Atom(),
                         a_frag,
