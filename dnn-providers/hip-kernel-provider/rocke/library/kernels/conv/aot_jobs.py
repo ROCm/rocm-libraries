@@ -1404,12 +1404,11 @@ def job_for_identity(identity: KernelIdentity) -> BuildJob:
     )
 
 
-# Forward LDS budget per arch for the AOT grid, below the arch's capacity.
-# gfx1250 has 320 KB of LDS per workgroup; its catalog value was a 160 KB
-# placeholder until the WMMA direct dgrad. The forward configurations between
-# the two (256x256 wavelet/cshuffle tiles) have not been run with --verify on
-# gfx1250 yet, so its forward grid stays at the old budget until they have.
-_AOT_FWD_LDS_BUDGET = {"gfx1250": 160 * 1024}
+# Optional per-arch forward LDS soft budget below ArchTarget.lds_capacity_bytes.
+# Empty: the grid uses the hardware cap from arch_specs (gfx1250 = 327680 B /
+# 320 KiB; LLVM FeatureAddressableLocalMemorySize327680 / TensileLite DeviceLDS).
+# A lower entry here only shrinks the AOT grid further; it is not the arch limit.
+_AOT_FWD_LDS_BUDGET: dict[str, int] = {}
 
 # Configurations that validate but are left out of the AOT grid, per
 # (arch, direction): each entry is matched against the job's spec_kwargs.

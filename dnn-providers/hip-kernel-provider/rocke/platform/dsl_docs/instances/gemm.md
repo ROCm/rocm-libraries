@@ -135,7 +135,7 @@ Shipped tile geometries cover `64..256 x 64..256 x 16..128` with warp grids `1x1
 - `tile_m`, `tile_n` divisible by `warp_* * warp_tile_*`;
 - `tile_k` divisible by `warp_tile_k`;
 - `block_size = warp_m * warp_n * warp_k * wave_size` consistent;
-- LDS allocation under the per-block budget (arch-keyed via `ArchTarget.lds_capacity_bytes`: 160 KiB on gfx950, 64 KiB on gfx942 / gfx1151 / gfx1201);
+- LDS allocation under the per-block budget (arch-keyed via `ArchTarget.lds_capacity_bytes`: 320 KiB on gfx1250, 160 KiB on gfx950, 64 KiB on gfx942 / gfx1151 / gfx1201);
 - vector load widths divide tile shape;
 - requested epilogue is implemented;
 - scheduler and pipeline names are recognized.
