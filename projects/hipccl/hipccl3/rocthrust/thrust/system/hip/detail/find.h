@@ -44,6 +44,7 @@
 #  include <thrust/iterator/counting_iterator.h>
 #  include <thrust/iterator/transform_iterator.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
+#  include <thrust/type_traits/unwrap_contiguous_iterator.h>
 #  if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #    include <thrust/detail/algorithm_wrapper.h>
 
@@ -134,22 +135,23 @@ struct transform_input_iterator_t
     return retval;
   }
 
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE self_t operator++()
+  THRUST_HOST_DEVICE THRUST_FORCEINLINE self_t& operator++()
   {
     ++input;
     return *this;
   }
 
+  // Pass the dereferenced value straight to op (like ::cuda::transform_iterator) instead of materializing the
+  // value_type first, so value types need not be constructible on the device. See:
+  // https://github.com/NVIDIA/cccl/issues/3591
   THRUST_HOST_DEVICE THRUST_FORCEINLINE reference operator*() const
   {
-    thrust::detail::it_value_t<InputIt> x = *input;
-    return op(x);
+    return op(*input);
   }
 
   THRUST_HOST_DEVICE THRUST_FORCEINLINE reference operator*()
   {
-    thrust::detail::it_value_t<InputIt> x = *input;
-    return op(x);
+    return op(*input);
   }
 
   THRUST_HOST_DEVICE THRUST_FORCEINLINE self_t operator+(difference_type n) const
@@ -218,21 +220,17 @@ find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Pred
   const Size interval_threshold = 1 << 20;
   const Size interval_size      = (_THRUST_STD::min)(interval_threshold, num_items);
 
-  // FIXME(bgruber): we should also be able to use transform_iterator here, but it makes nvc++ hang. See:
-  // https://github.com/NVIDIA/cccl/issues/3594. The problem does not occur with nvcc, so we could not add a test :/
-  using XfrmIterator = __find_if::transform_input_iterator_t<bool, InputIt, Predicate>;
-  // using XfrmIterator  = transform_iterator<Predicate, InputIt>;
-  using IteratorTuple = thrust::tuple<XfrmIterator, counting_iterator<Size>>;
-  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
+  // Upstream uses ::cuda::make_transform_iterator here. thrust::transform_iterator converts to the value_type before
+  // calling the functor (https://github.com/NVIDIA/cccl/issues/3591), so keep a dedicated iterator that does not.
+  auto unwrapped_first = thrust::try_unwrap_contiguous_iterator(first);
+  using XfrmIterator   = __find_if::transform_input_iterator_t<bool, decltype(unwrapped_first), Predicate>;
 
-  IteratorTuple iter_tuple = thrust::make_tuple(XfrmIterator(first, predicate), counting_iterator<Size>(0));
+  const auto begin = thrust::make_zip_iterator(XfrmIterator(unwrapped_first, predicate), counting_iterator<Size>(0));
+  const auto end = begin + num_items;
 
-  ZipIterator begin = thrust::make_zip_iterator(iter_tuple);
-  ZipIterator end   = begin + num_items;
-
-  for (ZipIterator interval_begin = begin; interval_begin < end; interval_begin += interval_size)
+  for (auto interval_begin = begin; interval_begin < end; interval_begin += interval_size)
   {
-    ZipIterator interval_end = interval_begin + interval_size;
+    auto interval_end = interval_begin + interval_size;
     if (end < interval_end)
     {
       interval_end = end;
