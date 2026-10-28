@@ -857,7 +857,8 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                               const hardware_t& hardware,
                                               const std::vector<config_t>& configs,
                                               rank_options_t options) {
-  if (options.inference != inference_mode_t::analytical) {
+  if (options.inference == inference_mode_t::nn ||
+      options.inference == inference_mode_t::nn_fallback) {
     if (const nn::model_handle_t handle = nn::detail::resolve_model_handle(options);
         handle >= 0) {
       if (auto results = nn::detail::try_rank_with_model(
@@ -871,7 +872,12 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
       throw std::runtime_error("No NN model loaded for selected backend");
     }
   }
-  return rank_configs_analytical(problem, hardware, configs, options.analytical_model);
+  auto results = rank_configs_analytical(problem, hardware, configs, options.analytical_model);
+  if (options.inference == inference_mode_t::analytical_rerank) {
+    nn::detail::try_rerank_with_model(
+        nn::detail::resolve_rerank_handle(options), problem, hardware, results, options.nn);
+  }
+  return results;
 }
 
 std::vector<prediction_result_t> rank_configs(const problem_t& problem,
