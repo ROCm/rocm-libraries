@@ -27,7 +27,7 @@ enum class MxScaleStorageLayout {
 struct MxScaleStoragePlan {
     MxScaleStorageLayout layout = MxScaleStorageLayout::Natural;
     std::array<size_t, 2> naturalShape{};  // [slow, fast] dimensions.
-    size_t blockSize = 0;                  // Used only by Gfx1250.
+    size_t blockSize = 0;                  // Data elements sharing each scale.
     size_t naturalByteCount = 0;
     size_t physicalByteCount = 0;
 };
@@ -40,11 +40,11 @@ struct MxScaleStoragePlan {
 MxScaleStorageLayout mxScaleStorageLayoutForArchitectureName(std::string_view architectureName);
 
 // Computes the natural and padded physical storage sizes of one-byte scales.
-// `blockSize` is the number of data elements sharing each scale. Gfx1250 groups
-// 128 / blockSize scales along the fast dimension and requires a block size of
-// 16 or 32; Natural and Gfx950 do not depend on the block size and accept any
-// value. Throws std::runtime_error for an unsupported Gfx1250 block size, an
-// invalid layout, or a byte count that overflows size_t.
+// `blockSize` is the number of data elements sharing each scale and must be
+// nonzero. Gfx1250 groups 128 / blockSize scales along the fast dimension and
+// requires a block size of 16 or 32; the Natural and Gfx950 byte layouts do not
+// depend on it. Throws std::runtime_error for a zero or unsupported block size,
+// an invalid layout, or a byte count that overflows size_t.
 MxScaleStoragePlan planMxScaleStorage(std::array<size_t, 2> naturalShape, size_t blockSize,
                                       MxScaleStorageLayout layout);
 
