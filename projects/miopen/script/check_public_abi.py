@@ -725,9 +725,9 @@ class Param:
     def declaration_text(self) -> str:
         """The parameter as an _impl declaration spells it.
 
-        A top-level const is dropped: it is not part of the function's type, and
-        clang-tidy's readability-avoid-const-params-in-decls rejects it in a
-        declaration. A default argument stays, as the public header has it.
+        A top-level const is dropped: it is not part of the function's type, so it
+        adds nothing to a declaration. A default argument stays, as the public
+        header has it.
         """
         text = f"{drop_top_level_const(self.type)} {self.name}"
         return f"{text} = {self.default}" if self.default is not None else text
