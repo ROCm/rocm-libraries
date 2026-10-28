@@ -1599,12 +1599,12 @@ namespace TensileLite
 
             if(state.has("WorkGroupMappingXCC") && state.has("WorkGroupMappingXCCGroup"))
             {
-                // The library stores only `value`. Loading the file reads the
-                // device compute-unit count; building this record must not.
-                rv.push_back(std::make_shared<WorkgroupMappingXCCCheck>(
-                    std::array<int, 2>{int(state.integer("WorkGroupMappingXCC")),
-                                       int(state.integer("WorkGroupMappingXCCGroup"))},
-                    size_t{0}));
+                // Store only the value. The first evaluation reads the device.
+                // The test constructor would freeze a count of 0 and reject
+                // every kernel, because 0 is not a device that check accepts.
+                rv.push_back(std::make_shared<WorkgroupMappingXCCCheck>(std::array<int, 2>{
+                    int(state.integer("WorkGroupMappingXCC")),
+                    int(state.integer("WorkGroupMappingXCCGroup"))}));
             }
 
             if(problem.truthy("SwizzleTensorA"))
