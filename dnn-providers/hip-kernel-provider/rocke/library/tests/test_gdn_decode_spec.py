@@ -441,6 +441,28 @@ class TestEmission(unittest.TestCase):
                 with self.subTest(tuning_id=spec.tuning_id, state=state_dtype):
                     self.assertEqual(_compiled_scratch_bytes(self, spec.kernel_spec), 0)
 
+    def test_auto_does_not_spill_off_the_measured_head_dims(self):
+        # The sweep ran at DK = DV = 128. The fused f32 GDN row's
+        # waves_per_eu caps the registers; with a wider key dim the state no
+        # longer fits and the kernel spills, so auto must not run it there.
+        from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
+
+        for dk, dv in ((256, 128), (256, 256), (128, 256)):
+            req = GdnDecodeRequest(
+                batch=16,
+                arch="gfx950",
+                num_k_heads=16,
+                num_v_heads=16,
+                head_k_dim=dk,
+                head_v_dim=dv,
+                state_dtype="f32",
+                fuse_conv=True,
+                fuse_out_norm=True,
+            )
+            spec = dispatch_gdn_decode(req).spec
+            with self.subTest(dk=dk, dv=dv, tuning_id=spec.tuning_id):
+                self.assertEqual(_compiled_scratch_bytes(self, spec.kernel_spec), 0)
+
     def test_default_gdn_tile_compiles_with_an_f32_state(self):
         spec = dc.replace(GdnDecodeSpec(), state_dtype="f32")
         self.assertEqual(_compiled_scratch_bytes(self, spec), 0)

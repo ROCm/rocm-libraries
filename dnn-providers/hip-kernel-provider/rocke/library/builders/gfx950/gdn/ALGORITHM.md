@@ -537,9 +537,9 @@ reference before it is timed, and removes the knobs and values that do not help.
 **`auto` defaults.** Production `auto` runs one static configuration per *case*: gate kind ×
 fused (either `fuse_conv` or `fuse_out_norm`) × state width. Each is a tile plus a knob stack on
 top of that tile's base, kept as data in `dispatch/gdn/axes.py` (`AUTO_DEFAULTS`). Batch, head
-count and `batch × num_v_heads` never select it: they change the grid only. Every case turns on
-streaming (nontemporal) state loads and stores; the table lists the rest. A knob not listed stays
-off (`waves_per_eu` `0`).
+count and `batch × num_v_heads` never select it: they change the grid only. Head dims change it
+only through `waves_per_eu` (below). Every case turns on streaming (nontemporal) state loads and
+stores; the table lists the rest. A knob not listed stays off (`waves_per_eu` `0`).
 
 | Gate | Mode | State | Tile `(NW, WTK, BPV)` | Knobs besides the streaming state hints |
 | --- | --- | --- | --- | --- |
@@ -576,9 +576,11 @@ f32 the rule picks `(16, 16, 1)` with `interleave_cols`, `conv_once`, `out_lds`,
 
 Not measured: a fused request with one flag (it runs its row with the other flag's knobs
 dropped, below; e.g. `fuse_out_norm` alone at `Hk ≠ Hv`, where `fuse_conv` is not allowed), other
-head dims where the case tile is legal (e.g. GDN at `DK = 256`, which runs the row; with
-`waves_per_eu=4` the GDN fused f32 row spills there), an `f16` state (it moves the same bytes as
-bf16, so it runs the bf16 row), f16 I/O and `use_qk_l2norm` off (each runs its row), and gfx942.
+head dims where the case tile is legal (e.g. GDN at `DK = 256`, which runs its row without
+`waves_per_eu=4`: that knob was measured only at `DK = DV = 128`, and with it the GDN fused f32
+row spills at a wider key dim; the row's other knobs are not timed there), an `f16` state (it
+moves the same bytes as bf16, so it runs the bf16 row), f16 I/O and `use_qk_l2norm` off (each
+runs its row), and gfx942.
 To revisit a case, sweep its tiles × knobs cold (`tune.py` times tiles at their base
 configuration only; an in-tree tiles × knobs sweep is a follow-up, §8), then change its row in
 `AUTO_DEFAULTS`, the literal table in `test_gfx950_wiring.py` and this table together.

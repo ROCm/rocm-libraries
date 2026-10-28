@@ -35,7 +35,12 @@ from kernels.gfx950.gdn_decode import (
 from rocke.dispatch.core import Capability, KernelCandidate, OperatorRequest
 from rocke.dispatch.tuning import make_tuned_candidate
 
-from .axes import AUTO_DEFAULTS, AUTO_STATE_ROW, AutoDefault
+from .axes import (
+    AUTO_DEFAULTS,
+    AUTO_STATE_ROW,
+    AUTO_WAVES_PER_EU_HEAD_DIMS,
+    AutoDefault,
+)
 from .common import (
     FAMILY,
     GDN_ABI_VERSION,
@@ -201,6 +206,8 @@ def _make_candidate(*, tile: Tuple[int, int, int], priority: int, gate_kind: str
         # scope), so a row that carries it drops it wherever conv_once drops.
         if knobs.get("norm_gate_once") and not conv_once_applies(make_spec(req, tile)):
             knobs.pop("norm_gate_once")
+        if (req.head_k_dim, req.head_v_dim) != AUTO_WAVES_PER_EU_HEAD_DIMS:
+            knobs.pop("waves_per_eu", None)
         return knobs
 
     def scope_check(req: GdnDecodeRequest) -> Tuple[bool, str]:

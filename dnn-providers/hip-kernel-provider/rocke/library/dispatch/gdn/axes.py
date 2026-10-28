@@ -107,6 +107,12 @@ AUTO_STATE_ROW: Mapping[str, str] = MappingProxyType(
     {"bf16": "bf16", "f16": "bf16", "f32": "f32"}
 )
 
+# ``waves_per_eu`` caps the registers per wave and was measured only at these
+# head dims (head_k_dim, head_v_dim). A request with other head dims runs its
+# row without it (``auto_knobs``): at a wider key dim the state no longer fits
+# and the fused f32 GDN row spills. Every other knob of the row is kept.
+AUTO_WAVES_PER_EU_HEAD_DIMS: Tuple[int, int] = (128, 128)
+
 # The static ``auto`` default per case: (gate_kind, fused, state row), where
 # fused means fuse_conv or fuse_out_norm. One entry per case, never keyed on
 # batch, head count or work: the batch only changes the grid. Chosen on gfx950

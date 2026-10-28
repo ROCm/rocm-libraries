@@ -196,6 +196,21 @@ class TestStaticSelection(unittest.TestCase):
                 # No batch dependence: one configuration for every batch.
                 self.assertEqual(len(picks), 1, (gate_kind, fused, row, heads))
 
+    def test_waves_per_eu_is_dropped_off_the_measured_head_dims(self):
+        # The row's waves_per_eu was measured at DK = DV = 128 only; elsewhere
+        # it caps the registers below what the state needs and the kernel
+        # spills, so auto runs the rest of the row without it.
+        knobs = _SHIPPED[("gdn", True, "f32")][1]
+        self.assertIn("waves_per_eu", knobs)
+        want = {k: v for k, v in knobs.items() if k != "waves_per_eu"}
+        for dk, dv in ((256, 128), (256, 256), (128, 256)):
+            with self.subTest(dk=dk, dv=dv):
+                got = dispatch_gdn_decode(
+                    _case_req(8, "gdn", True, "f32", head_k_dim=dk, head_v_dim=dv)
+                )
+                self.assertEqual(dict(got.spec.knobs), want)
+                self.assertEqual(got.spec.kernel_spec.waves_per_eu, 0)
+
     def test_one_fused_flag_drops_the_knobs_it_cannot_read(self):
         for (gate_kind, fused, row), (tile, knobs) in _SHIPPED.items():
             if not fused:
