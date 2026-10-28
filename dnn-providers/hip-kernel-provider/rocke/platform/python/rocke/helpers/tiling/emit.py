@@ -502,12 +502,17 @@ def _zero_scalar(b: Any, dtype: Any) -> Any:
     return b.vec_extract(b.zero_vec(_storage_element(dtype), 1), 0)
 
 
+# Storage elements moved with vector accesses: global loads, LDS loads and LDS stores
+# (global_load_vN, smem_load_vN, smem_store_vN). tf32 is held and moved as i32.
 _WIDE_OK = {
     "f16",
     "bf16",
     "f32",
     "i32",
-}  # storage elements global_load_vN / smem_load_vN vectorize (tf32 is held and moved as i32)
+    "fp8e4m3",
+    "bf8e5m2",
+    "i8",
+}
 
 
 def _register_run(tile_desc: TileDesc, window: TensorWindow) -> tuple[int, int] | None:
