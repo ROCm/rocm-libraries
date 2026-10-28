@@ -71,7 +71,7 @@ int main(int argc, char** argv)
         s.use_alibi = local >= 8;
         s.use_qq_bias = local >= 8;
         s.use_decode_grid = true;
-        red.head_size = local == 15 ? 64 : dims[(local - 12 + 3) % 3];
+        red.head_size = local == 15 ? 64 : dims[local % 3];
         red.num_query_heads = 8;
         red.num_kv_heads = 2;
         red.dtype = "bf16";
