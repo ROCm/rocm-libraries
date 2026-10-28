@@ -69,7 +69,7 @@ namespace rocisa
         // barrier between two entries is detected by comparing resetsBefore.
         enum class Kind : uint8_t
         {
-            Reset, // NoOptItem, branch, label, macro, waitcnt
+            Reset, // NoOpt module, branch, label, macro, waitcnt
             SMov, // SMovB32
             Instr, // any other Instruction
             Other
@@ -90,24 +90,6 @@ namespace rocisa
         std::vector<int> resetsBefore = {0};
         // Highest VGPR index referenced by any instruction; -1 = none seen.
         int maxVgprSeen = -1;
-    };
-
-    // No opt item container class
-    class NoOptItem : public Item
-    {
-    public:
-        NoOptItem(std::shared_ptr<Item> item)
-            : Item("")
-            , _item(item)
-        {
-        }
-        std::shared_ptr<Item> getItem() const
-        {
-            return _item;
-        }
-
-    private:
-        std::shared_ptr<Item> _item;
     };
 
     void insertDelayAlu(std::shared_ptr<Module> module);

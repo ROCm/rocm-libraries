@@ -193,7 +193,7 @@ namespace rocisa
                     for(int i = lo; i < hi; ++i)
                     {
                         auto& list = graph.sgpr[i];
-                        // A NoOptItem wrapper never compares equal to item.
+                        // Keep NoOpt entries separate so they always reset tracking.
                         if(!noOpt && !list.empty() && !list.back().noOpt
                            && list.back().item == item
                            && list.back().barrierSeq == graph.barrierSeq)
