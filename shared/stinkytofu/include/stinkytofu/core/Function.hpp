@@ -188,6 +188,13 @@ class STINKYTOFU_EXPORT Function {
     /// Delete all BasicBlocks and their IR (list traits delete each block and its IR).
     void clear();
 
+    /// Make this function a copy of \p other: its name, callability, GEMM tile
+    /// config, metadata, and blocks, with each IR node cloned and each block's
+    /// successor and predecessor lists kept in order. Attached SSA and def-use
+    /// chains are not copied. False when a node does not support clone(), which
+    /// leaves that node out.
+    bool copyFrom(const Function& other);
+
     SSAArena& ssaArena();
     const SSAArena& ssaArena() const;
 

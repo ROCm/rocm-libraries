@@ -5,6 +5,7 @@
 import importlib.machinery
 import importlib.util
 import os
+import shlex
 import sys
 
 import pytest
@@ -758,6 +759,122 @@ def test_size_lays_functions_out_in_order():
     assert helper.labels == {"entry": helper.start}
 
 
+def test_copy_is_whole_and_separate():
+    module = stinkytofu.load_asm_file(ROUNDTRIP_KERNEL)
+    copy = module.copy()
+    assert copy.serialize() == module.serialize()
+    assert copy.emit_asm() == module.emit_asm()
+    vgprs = "SignatureKernelDescriptor.totalVgprs"
+    assert copy.getMetaDataU64(vgprs) == module.getMetaDataU64(vgprs)
+    assert module.getMetaDataU64(vgprs) is not None
+    assert copy.load_warnings() == module.load_warnings()
+
+    kernel = stinkytofu.load_stir(KERNEL)
+    before = kernel.serialize()
+    edited = kernel.copy()
+    edited.run_passes(["RemoveInstructionPass=v_mov_b32"])
+    assert kernel.serialize() == before
+    assert edited.serialize() != before
+
+
+def test_run_info_records_each_run():
+    module = stinkytofu.load_stir(KERNEL)
+    assert module.run_info() == []
+    module.run_passes(["StinkyRemoveNopPass"])
+    module.run_passes(
+        ["RemoveInstructionPass=v_mov_b32"],
+        function="k",
+        features={"unroll_gemm": False},
+        tile={"NumWaves": 2},
+    )
+    module.run_passes([])
+    first, second = module.run_info()
+    assert (first.passes, first.function, first.features, first.tile) == (
+        ["StinkyRemoveNopPass"],
+        None,
+        {},
+        {},
+    )
+    assert (second.arch, second.version) == ((12, 5, 0), stinkytofu.version())
+    assert (second.function, second.features, second.tile) == (
+        "k",
+        {"unroll_gemm": False},
+        {"NumWaves": 2},
+    )
+    assert second.command == (
+        "stinkytofu run --arch 12,5,0 --pass RemoveInstructionPass=v_mov_b32"
+        " --function k --feature unroll_gemm=false --tile NumWaves=2"
+    )
+    assert str(second) == "stinkytofu %s: %s" % (
+        stinkytofu.version(),
+        second.command[len("stinkytofu ") :],
+    )
+
+    printed = module.serialize(comments=True)
+    assert printed.splitlines()[:2] == ["// %s" % first, "// %s" % second]
+    assert not module.serialize().startswith("//")
+    assert stinkytofu.load_stir(printed).serialize() == module.serialize()
+    assert module.emit_asm(comments=True).startswith("// %s\n// %s\n" % (first, second))
+    assert [str(run) for run in module.copy().run_info()] == [str(first), str(second)]
+
+
+def test_run_info_quotes_words_and_keeps_a_run_that_raised():
+    module = stinkytofu.load_stir(
+        'st.func @() {\n^entry:\n  "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }\n}\n'
+    )
+    module.run_passes(["RemoveInstructionPass=s_nop, s_endpgm"], function="")
+    assert module.run_info()[0].command.endswith(
+        "--pass 'RemoveInstructionPass=s_nop, s_endpgm' --function ''"
+    )
+    with pytest.raises(ValueError, match="unknown pass"):
+        module.run_passes(["NotARealPass"])
+    assert len(module.run_info()) == 1
+    # A refused pass still ran, and may have run passes before it.
+    with pytest.raises(RuntimeError, match="no attached SSA"):
+        module.run_passes(["RegisterAllocationPass"])
+    assert module.run_info()[-1].passes == ["RegisterAllocationPass"]
+
+
+def test_compare_runs_each_list_on_its_own_copy():
+    module = stinkytofu.load_stir(KERNEL)
+    before = module.serialize()
+    result = stinkytofu.compare(
+        module, ["StinkyRemoveNopPass"], ["LiftAsmRegistersToSSAPass"], function="k"
+    )
+    assert module.serialize() == before
+    assert module.run_info() == []
+    assert module.functions()[0].has_attached_ssa is False
+
+    assert [record.pass_name for record in result.a.records] == ["StinkyRemoveNopPass"]
+    assert [record.pass_name for record in result.b.records] == [
+        "LiftAsmRegistersToSSAPass"
+    ]
+    assert result.b.module.functions()[0].has_attached_ssa is True
+    assert [run.passes for run in result.b.module.run_info()] == [
+        ["LiftAsmRegistersToSSAPass"]
+    ]
+    # The nop pass leaves the function unlifted, so side a has no pressure.
+    assert result.a.pressure == {"k": None}
+    assert result.b.pressure["k"].vgpr == 2
+    assert result.a.size["k"].bytes == result.b.size["k"].bytes == 8
+    assert result.a.hazards == result.b.hazards == {"k": []}
+    assert str(result) == (
+        "k: vgpr - -> 2, sgpr - -> 0, bytes 8 -> 8, cycles 2 -> 2, hazard violations 0 -> 0"
+    )
+
+    both = stinkytofu.compare(stinkytofu.load_stir(HAZARD_STREAM), [], [])
+    assert str(both).endswith("hazard violations 1 -> 1")
+
+
+def test_compare_names_the_side_that_failed():
+    module = stinkytofu.load_stir(KERNEL)
+    with pytest.raises(RuntimeError, match="^passes_b: missed: RegisterAllocation"):
+        stinkytofu.compare(module, ["StinkyRemoveNopPass"], ["RegisterAllocationPass"])
+    with pytest.raises(ValueError, match="^passes_a: unknown pass 'NotARealPass'"):
+        stinkytofu.compare(module, ["NotARealPass"], [])
+    assert module.run_info() == []
+
+
 def test_cli_passes(capsys):
     assert main(["passes"]) == 0
     assert "LiftAsmRegistersToSSAPass" in capsys.readouterr().out
@@ -836,6 +953,36 @@ def test_cli_prints_dumps_to_stderr(tmp_path, capsys):
     assert "*** After Pass: RemoveInstructionPass ***" in captured.err
     assert "***" not in captured.out
     stinkytofu.load_stir(captured.out)
+
+
+def test_cli_repeats_a_recorded_run(tmp_path, capsys):
+    path = tmp_path / "k.stir"
+    path.write_text(TDM_STREAM)
+    module = stinkytofu.load_stir(TDM_STREAM)
+    module.run_passes(
+        ["TDMLoadWaveSyncPass"], features={"unroll_gemm": False}, tile={"NumWaves": 2}
+    )
+    [run] = module.run_info()
+    assert main(shlex.split(run.command)[1:] + [str(path)]) == 0
+    printed = capsys.readouterr().out
+    assert printed == module.serialize()
+    assert "st.s_barrier_signal" in printed
+
+
+@pytest.mark.parametrize(
+    "setting, message",
+    [
+        (["--feature", "unroll_gemm=maybe"], "must be true or false"),
+        (["--feature", "unroll_gemm"], "takes NAME=VALUE"),
+        (["--tile", "NumWaves=two"], "must be an integer"),
+        (["--tile", "Bogus=1"], "unknown tile key 'Bogus'"),
+    ],
+)
+def test_cli_rejects_a_bad_setting(tmp_path, capsys, setting, message):
+    path = tmp_path / "k.stir"
+    path.write_text(KERNEL)
+    assert main(["run", str(path), "--pass", "StinkyRemoveNopPass"] + setting) == 2
+    assert message in capsys.readouterr().err
 
 
 def test_cli_runs_one_function(tmp_path, capsys):

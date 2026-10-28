@@ -27,6 +27,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
@@ -159,6 +160,16 @@
 
 namespace stinkytofu {
 struct SignatureBase;
+
+/// One run_passes call of the Python analysis API, kept so the run can be
+/// repeated: the pass specs in order, the function it was limited to, and the
+/// feature and tile values the caller set.
+struct PassRunRecord {
+    std::vector<std::string> passes;
+    std::optional<std::string> function;
+    std::vector<std::pair<std::string, bool>> features;
+    std::vector<std::pair<std::string, uint32_t>> tile;
+};
 
 /**
  * @brief Assembly IR Module container
@@ -418,6 +429,13 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
      */
     void setLoadWarnings(std::vector<Diagnostic> warnings);
     const std::vector<Diagnostic>& getLoadWarnings() const;
+
+    /**
+     * @brief Pass runs made on this module through the Python analysis API,
+     * oldest first. Empty for a module no such run has touched.
+     */
+    void addPassRun(PassRunRecord run);
+    const std::vector<PassRunRecord>& getPassRuns() const;
 
     // ---- Plugin data (opaque key-value store for pass plugins) ----
 

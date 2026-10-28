@@ -29,9 +29,11 @@
 #include <nanobind/stl/unique_ptr.h>
 #include <nanobind/stl/vector.h>
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <memory>
@@ -43,6 +45,7 @@
 #include <variant>
 #include <vector>
 
+#include "stinkytofu/Version.h"
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/analysis/asm/HazardGapAnalysisPass.hpp"
 #include "stinkytofu/analysis/asm/ssa/SSALiveIntervals.hpp"
@@ -95,6 +98,7 @@ struct PyBlock {
 
 struct PyFunction {
     std::string name;
+    bool hasAttachedSSA = false;
     nb::list blocks;
 };
 
@@ -163,6 +167,17 @@ struct PyFunctionSize {
     int64_t cycles = 0;
     int instructions = 0;
     nb::dict labels;
+};
+
+struct PyRunInfo {
+    std::array<int, 3> arch{};
+    std::string version;
+    std::vector<std::string> passes;
+    std::optional<std::string> function;
+    nb::dict features;
+    nb::dict tile;
+    std::string command;
+    std::string line;
 };
 
 std::string trimCopy(std::string text) {
@@ -425,8 +440,86 @@ std::unique_ptr<StinkyAsmModule> loadAsmFile(const std::string& path, std::array
                    toLabel);
 }
 
-std::string serializeModule(const StinkyAsmModule& module, bool ssa) {
+/// A copy for the analysis API. Output settings, plugin data, and instruction
+/// groups are not copied; no call in this API sets them.
+std::unique_ptr<StinkyAsmModule> copyModule(const StinkyAsmModule& module) {
+    auto copy = std::make_unique<StinkyAsmModule>(module.getName(), module.getArch(),
+                                                  module.getModuleOptions());
+    bool entry = true;
+    for (const Function* function : module.getFunctions()) {
+        if (function == nullptr) continue;
+        Function& target = entry ? copy->getFunction() : copy->createFunction(function->getName());
+        entry = false;
+        if (!target.copyFrom(*function))
+            throw std::invalid_argument("function '" + function->getName() +
+                                        "' holds IR that cannot be copied");
+    }
+    copy->setSignature(module.getSignature());
+    copy->setLoadWarnings(module.getLoadWarnings());
+    for (const PassRunRecord& run : module.getPassRuns()) copy->addPassRun(run);
+    return copy;
+}
+
+/// \p word as one shell word: bare when it is plain, single-quoted otherwise.
+std::string shellWord(const std::string& word) {
+    const bool plain = !word.empty() && std::all_of(word.begin(), word.end(), [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) ||
+               std::strchr("_@%+=:,./-", c) != nullptr;
+    });
+    if (plain) return word;
+    std::string quoted = "'";
+    for (char c : word) quoted += c == '\'' ? std::string("'\\''") : std::string(1, c);
+    return quoted + "'";
+}
+
+/// The stinkytofu command line, after `stinkytofu`, that repeats \p run.
+std::string runCommand(const std::array<int, 3>& arch, const PassRunRecord& run) {
+    std::string text = "run --arch " + std::to_string(arch[0]) + "," + std::to_string(arch[1]) +
+                       "," + std::to_string(arch[2]);
+    for (const std::string& spec : run.passes) text += " --pass " + shellWord(spec);
+    if (run.function) text += " --function " + shellWord(*run.function);
+    for (const auto& [name, value] : run.features)
+        text += " --feature " + name + (value ? "=true" : "=false");
+    for (const auto& [name, value] : run.tile)
+        text += " --tile " + name + "=" + std::to_string(value);
+    return text;
+}
+
+/// `stinkytofu <version>: run ...`, what run_info() and the printed comment say.
+std::string runLine(const std::array<int, 3>& arch, const PassRunRecord& run) {
+    return "stinkytofu " + std::string(getRuntimeVersion()) + ": " + runCommand(arch, run);
+}
+
+/// One `// stinkytofu <version>: run ...` line per run, which STIR and
+/// assembler source both read as a comment.
+std::string runCommentLines(const StinkyAsmModule& module) {
+    std::string lines;
+    for (const PassRunRecord& run : module.getPassRuns())
+        lines += "// " + runLine(module.getArch(), run) + "\n";
+    return lines;
+}
+
+nb::list runInfo(const StinkyAsmModule& module) {
+    nb::list out;
+    for (const PassRunRecord& run : module.getPassRuns()) {
+        PyRunInfo info;
+        info.arch = module.getArch();
+        info.version = getRuntimeVersion();
+        info.passes = run.passes;
+        info.function = run.function;
+        for (const auto& [name, value] : run.features)
+            info.features[name.c_str()] = nb::cast(value);
+        for (const auto& [name, value] : run.tile) info.tile[name.c_str()] = nb::cast(value);
+        info.command = "stinkytofu " + runCommand(module.getArch(), run);
+        info.line = runLine(module.getArch(), run);
+        out.append(std::move(info));
+    }
+    return out;
+}
+
+std::string serializeModule(const StinkyAsmModule& module, bool ssa, bool comments) {
     std::ostringstream out;
+    if (comments) out << runCommentLines(module);
     AsmPrinterOptions options;
     options.ssaForm = ssa;
     AsmPrinter printer(out, options);
@@ -437,6 +530,7 @@ std::string serializeModule(const StinkyAsmModule& module, bool ssa) {
 std::string emitModuleAsm(const StinkyAsmModule& module, bool comments, bool cycleInfo,
                           bool symbolicNames, bool signature) {
     std::ostringstream out;
+    if (comments) out << runCommentLines(module);
     if (signature && module.getSignature()) out << module.getSignature()->toString();
     AsmEmitterOptions options;
     options.emitComments = comments;
@@ -479,9 +573,19 @@ std::vector<std::string> modifierTexts(const StinkyInstruction& inst) {
 struct RunOptions {
     std::optional<bool> unrollGemm;
     std::optional<bool> distributeGlobalRead;
-    std::vector<std::pair<uint32_t GemmTileConfig::*, uint32_t>> tile;
+    std::vector<std::pair<const GemmTileField*, uint32_t>> tile;
     std::optional<DebugPrintInstrumentation::Format> printBefore;
     std::optional<DebugPrintInstrumentation::Format> printAfter;
+};
+
+/// The `features` keys: the names run_passes, run_info, and the command line use.
+struct FeatureFlag {
+    const char* name;
+    std::optional<bool> RunOptions::*field;
+};
+constexpr FeatureFlag kFeatureFlags[] = {
+    {"unroll_gemm", &RunOptions::unrollGemm},
+    {"distribute_global_read", &RunOptions::distributeGlobalRead},
 };
 
 /// A Python int other than a bool, which nanobind's integer casts accept too.
@@ -492,15 +596,18 @@ bool isPlainInt(nb::handle value) {
 void readFeatures(const nb::dict& features, RunOptions& options) {
     for (auto [key, value] : features) {
         const std::string name = nb::str(key).c_str();
-        std::optional<bool>* field = nullptr;
-        if (name == "unroll_gemm") field = &options.unrollGemm;
-        if (name == "distribute_global_read") field = &options.distributeGlobalRead;
-        if (field == nullptr)
-            throw std::invalid_argument("unknown features key '" + name +
-                                        "'; keys: unroll_gemm, distribute_global_read");
+        const FeatureFlag* flag = nullptr;
+        std::string keys;
+        for (const FeatureFlag& candidate : kFeatureFlags) {
+            if (name == candidate.name) flag = &candidate;
+            if (!keys.empty()) keys += ", ";
+            keys += candidate.name;
+        }
+        if (flag == nullptr)
+            throw std::invalid_argument("unknown features key '" + name + "'; keys: " + keys);
         if (!nb::isinstance<nb::bool_>(value))
             throw nb::type_error(("features['" + name + "'] must be a bool").c_str());
-        *field = nb::cast<bool>(value);
+        options.*(flag->field) = nb::cast<bool>(value);
     }
 }
 
@@ -521,7 +628,7 @@ void readTile(const nb::dict& tile, RunOptions& options) {
         uint32_t number = 0;
         if (!nb::try_cast(value, number))
             throw std::invalid_argument("tile['" + name + "'] must be in [0, 4294967295]");
-        options.tile.emplace_back(field->member, number);
+        options.tile.emplace_back(field, number);
     }
 }
 
@@ -562,7 +669,7 @@ void applyOptions(PassManager& passManager, const RunOptions& options) {
     passManager.setPassFeatureConfig(features);
 
     GemmTileConfig tile = passManager.getPassContext().getGemmTileConfig();
-    for (const auto& [member, value] : options.tile) tile.*member = value;
+    for (const auto& [field, value] : options.tile) tile.*(field->member) = value;
     passManager.setGemmTileConfig(tile);
 }
 
@@ -678,6 +785,18 @@ nb::list runPasses(StinkyAsmModule& module, const std::vector<std::string>& spec
     options.printAfter = dumpFormat("print_after", printAfter);
     const std::vector<Function*> functions = selectFunctions(module, functionName);
 
+    if (!specs.empty()) {
+        PassRunRecord run;
+        run.passes = specs;
+        run.function = functionName;
+        for (const FeatureFlag& flag : kFeatureFlags) {
+            if (const std::optional<bool>& value = options.*(flag.field))
+                run.features.emplace_back(flag.name, *value);
+        }
+        for (const auto& [field, value] : options.tile) run.tile.emplace_back(field->name, value);
+        module.addPassRun(std::move(run));
+    }
+
     nb::list records;
     for (Function* function : functions) {
         for (const Requested& item : requested)
@@ -720,6 +839,7 @@ nb::list moduleFunctions(nb::handle owner) {
         if (function == nullptr) continue;
         PyFunction snapshot;
         snapshot.name = function->getName();
+        snapshot.hasAttachedSSA = function->hasAttachedSSA();
         for (const BasicBlock& block : *function) snapshot.blocks.append(snapshotBlock(block));
         out.append(std::move(snapshot));
     }
@@ -1002,6 +1122,10 @@ void bind_stir_api(nb::module_& m, nb::class_<StinkyAsmModule>& cls) {
 
     nb::class_<PyFunction>(m, "Function")
         .def_prop_ro("name", [](const PyFunction& function) { return function.name; })
+        .def_prop_ro(
+            "has_attached_ssa", [](const PyFunction& function) { return function.hasAttachedSSA; },
+            "True after a lift: defs and uses are SSA values, and live_ranges() and pressure() "
+            "can read the function")
         .def(
             "blocks", [](const PyFunction& function) { return function.blocks; },
             "Basic blocks in layout order");
@@ -1123,6 +1247,31 @@ void bind_stir_api(nb::module_& m, nb::class_<StinkyAsmModule>& cls) {
         .def_prop_ro("producer_opcode", [](const PyHazardGap& gap) { return gap.producerOpcode; })
         .def_prop_ro("consumer_opcode", [](const PyHazardGap& gap) { return gap.consumerOpcode; });
 
+    nb::class_<PyRunInfo>(m, "RunInfo")
+        .def_prop_ro("arch",
+                     [](const PyRunInfo& run) {
+                         return nb::make_tuple(run.arch[0], run.arch[1], run.arch[2]);
+                     })
+        .def_prop_ro(
+            "version", [](const PyRunInfo& run) { return run.version; },
+            "The library version that made the run")
+        .def_prop_ro(
+            "passes", [](const PyRunInfo& run) { return run.passes; },
+            "The pass specs, in order, as run_passes was given them")
+        .def_prop_ro(
+            "function", [](const PyRunInfo& run) { return run.function; },
+            "The function the run was limited to, or None for every function")
+        .def_prop_ro(
+            "features", [](const PyRunInfo& run) { return run.features; },
+            "The features the caller set")
+        .def_prop_ro(
+            "tile", [](const PyRunInfo& run) { return run.tile; }, "The tile fields the caller set")
+        .def_prop_ro(
+            "command", [](const PyRunInfo& run) { return run.command; },
+            "The stinkytofu command that repeats the run, without the input file")
+        .def("__str__", [](const PyRunInfo& run) { return run.line; })
+        .def("__repr__", [](const PyRunInfo& run) { return "<RunInfo " + run.line + ">"; });
+
     nb::class_<PyFunctionSize>(m, "FunctionSize")
         .def_prop_ro(
             "start", [](const PyFunctionSize& size) { return size.start; },
@@ -1137,13 +1286,21 @@ void bind_stir_api(nb::module_& m, nb::class_<StinkyAsmModule>& cls) {
             "labels", [](const PyFunctionSize& size) { return size.labels; },
             "Each label's byte offset in the image, in program order");
 
-    cls.def("serialize", &serializeModule, nb::arg("ssa") = false,
-            "Print this module. ssa=True is a diagnostic view and does not round-trip");
+    cls.def("copy", &copyModule,
+            "A separate module with the same functions, metadata, kernel header, and history. "
+            "Attached SSA is not copied");
+    cls.def("serialize", &serializeModule, nb::arg("ssa") = false, nb::kw_only(),
+            nb::arg("comments") = false,
+            "Print this module. ssa=True is a diagnostic view and does not round-trip. "
+            "comments=True writes one // line per recorded run first");
     cls.def("emit_asm", &emitModuleAsm, nb::kw_only(), nb::arg("comments") = false,
             nb::arg("cycle_info") = false, nb::arg("symbolic_names") = false,
             nb::arg("signature") = true,
             "Assembler source for every function, entry first. signature writes the kernel "
-            "header load_asm kept");
+            "header load_asm kept. comments writes the recorded runs, header comments, and "
+            "kept source comments");
+    cls.def("run_info", &runInfo,
+            "One RunInfo per run_passes call that ran passes on this module, oldest first");
     cls.def("assemble", &assembleModule,
             "Assemble emit_asm() with amd_comgr. None when it assembles, else the assembler's "
             "messages");
@@ -1206,4 +1363,7 @@ void bind_stir_api(nb::module_& m, nb::class_<StinkyAsmModule>& cls) {
             return names;
         },
         "Names of the passes run_passes can run");
+    m.def(
+        "version", []() { return std::string(getRuntimeVersion()); },
+        "The library version, as run_info() records it");
 }

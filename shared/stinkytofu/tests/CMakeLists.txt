@@ -157,6 +157,7 @@ set(UNIT_CORE_TEST_FILES
     unit/core/BackendRegistryTest.cpp
     unit/core/ComgrProbeTest.cpp
     unit/core/DiagnosticTest.cpp
+    unit/core/FunctionCopyTest.cpp
     unit/core/OptimizationRemarkTest.cpp
     unit/core/PassArgumentsTest.cpp
     unit/core/PassBuilderTest.cpp

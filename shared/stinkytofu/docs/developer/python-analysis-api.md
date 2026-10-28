@@ -15,7 +15,8 @@ Use it to test a pass on a kernel, and to edit a kernel by hand.
 3. Read each instruction. Registers stay physical until you run `LiftAsmRegistersToSSAPass`. After that pass, operands are SSA value ids.
 4. Check the module with `verify()`, and edit it a block or an operand at a time.
 5. Ask the analyses for live ranges, register pressure, hazard gaps, and size, as objects.
-6. Print the module back to STIR, or emit assembler source and assemble it.
+6. Compare two pass lists on copies of a module, and record each run as a command that repeats it.
+7. Print the module back to STIR, or emit assembler source and assemble it.
 
 `stinkytofu run` runs only the passes you name. It does not run the optimization pipeline.
 
@@ -64,6 +65,8 @@ stinkytofu run kernel.stir --function helper \
 | `--asm` | Read the input as assembler source. Use it for stdin, or a file without `.s` |
 | `--pass NAME[=args]` | Pass to run. Repeat for more than one, in order |
 | `--function NAME` | Run the passes on that function only. Default is every function |
+| `--feature NAME=true` or `=false` | Set `unroll_gemm` or `distribute_global_read`, as `run_passes(features=...)` does. Repeatable |
+| `--tile NAME=N` | Set a GEMM tile field, such as `NumWaves=2`, as `run_passes(tile=...)` does. Repeatable |
 | `--print-before stir` or `asm` | Write the function to stderr before each pass |
 | `--print-after stir` or `asm` | Write the function to stderr after each pass |
 | `--emit-asm` | Print assembler source. The default for assembler input |
@@ -75,10 +78,12 @@ Exit status:
 | Code | When |
 | --- | --- |
 | 0 | The run finished |
-| 2 | The file is missing, the text does not load, the pass name is unknown, or no function has the `--function` name |
+| 2 | The file is missing, the text does not load, the pass name is unknown, no function has the `--function` name, or a `--feature` or `--tile` setting is unknown or has a bad value |
 | 1 | A pass refuses the function, or a pass reports an analysis failure |
 
 Remarks from the passes also go to stderr. The `--print-before` and `--print-after` dumps go to stderr too. Stdout is only the module.
+
+`module.run_info()` gives each run as one of these commands, so a result can be rebuilt from its input file.
 
 Tests for this API are in `python_module/tests/test_stir_api.py`. When pytest is installed, standalone `ctest` runs that file.
 
@@ -182,7 +187,9 @@ A call that raises returns no records.
 
 ### Print and emit
 
-`serialize()` prints physical STIR, as `st.module @name { ... }`. That text round-trips through `load_stir`, whether the module was loaded from STIR or from `.s`: labels, alignment, and directive text all print, so `load_stir(module.serialize()).emit_asm()` matches `module.emit_asm(signature=False)`. STIR carries no kernel header, and it drops source comments. The label syntax is in [Architecture](architecture.md).
+`serialize()` prints physical STIR, as `st.module @name { ... }`. That text round-trips through `load_stir`, whether the module was loaded from STIR or from `.s`: labels, alignment, and directive text all print, so `load_stir(module.serialize()).emit_asm()` matches `module.emit_asm(signature=False)`. STIR carries no kernel header, and it drops source comments and function metadata, such as the kernel's VGPR total a `.s` load reads from its header. To keep all of that, use `module.copy()`. The label syntax is in [Architecture](architecture.md).
+
+`serialize(comments=True)` first writes one `// stinkytofu <version>: run ...` line for each run the module recorded; see `run_info()` below. `load_stir` skips those lines.
 
 A block that an instruction names gets its label back on load, so hand-written STIR that branches to `^loop` emits `loop:`.
 
@@ -192,7 +199,7 @@ A block that an instruction names gets its label back on load, so hand-written S
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `comments` | false | Header comments and kept source comments |
+| `comments` | false | The recorded runs, as `serialize(comments=True)` writes them, then header comments and kept source comments |
 | `cycle_info` | false | A cycle note on each instruction |
 | `symbolic_names` | false | Symbolic register names that the load kept |
 | `signature` | true | The kernel header `load_asm` kept. A STIR module has none |
@@ -207,7 +214,7 @@ error = stinkytofu.load_asm(edited).assemble()   # None when the kernel assemble
 
 ### Read instructions
 
-`functions()` copies the module as it is at that call. A later `run_passes` leaves those objects unchanged.
+`functions()` copies the module as it is at that call. A later `run_passes` leaves those objects unchanged. Each function has a `name` and `blocks()`, and `has_attached_ssa` is true once a lift has reached it.
 
 ```python
 text = """\
@@ -358,3 +365,51 @@ module.size("k").bytes                # encoded bytes
 - the module's functions are laid out in order, entry first, so alignment padding and PC-relative literals are sized where each function sits;
 - the fields are `start` (the byte offset of the function in the image), `bytes`, `cycles`, `instructions` (not counting labels and directives), and `labels`, which maps each label to its byte offset;
 - the kernel's total is the sum of `bytes` over its functions.
+
+### Copy, record, and compare
+
+`module.copy()` returns a separate module with the same functions. A pass run on one does not change the other. The copy is made in memory, not through text, so it keeps what STIR drops:
+- function metadata, which `InsertDelayAluPass` and register allocation read;
+- source comments and symbolic register names;
+- the kernel header, the load warnings, and the run history.
+
+Attached SSA is not copied: lift the copy again to read values.
+
+`module.run_info()` returns one `RunInfo` for each `run_passes` call that ran passes on the module, oldest first. The record is made before the first pass runs, so a call that raised partway is listed too. A call that failed its checks, such as one with an unknown pass name, ran nothing and is not listed.
+
+| `RunInfo` field | Meaning |
+| --- | --- |
+| `arch`, `version` | The module's arch, and `stinkytofu.version()` |
+| `passes` | The pass specs, as `run_passes` was given them |
+| `function` | The function the run was limited to, or `None` |
+| `features`, `tile` | The `features` and `tile` values the caller set |
+| `command` | The `stinkytofu run` command that repeats the run; add the input file |
+
+```python
+module.run_passes(["TDMLoadWaveSyncPass"], tile={"NumWaves": 2})
+[run] = module.run_info()
+run.command   # "stinkytofu run --arch 12,5,0 --pass TDMLoadWaveSyncPass --tile NumWaves=2"
+str(run)      # "stinkytofu 0.1.0-<commit>: run --arch 12,5,0 --pass ..."
+```
+
+`stinkytofu.compare(module, passes_a, passes_b, **options)` runs each pass list on its own `module.copy()` and returns a `Comparison`:
+- `options` are the `run_passes` keywords, applied to both sides;
+- the module you pass is not changed;
+- if one side's run raises, the same exception type is raised again, with `passes_a:` or `passes_b:` before its message.
+
+On the two-instruction kernel from [Read instructions](#read-instructions):
+
+```python
+module = stinkytofu.load_stir(text)
+result = stinkytofu.compare(module, ["StinkyRemoveNopPass"], ["LiftAsmRegistersToSSAPass"],
+                            function="k")
+result.b.pressure["k"].vgpr           # 2
+print(result)
+# k: vgpr - -> 2, sgpr - -> 0, bytes 8 -> 8, cycles 2 -> 2, hazard violations 0 -> 0
+```
+
+`result.a` and `result.b` are `Side` objects:
+- `passes`, `records` (the `PassRecord`s), and `module`, the copy after the run;
+- `pressure`, `size`, and `hazards`, which map each function the run reached to what the queries above return after the run.
+
+`pressure` is `None` for a function the run left without attached SSA, and `str(result)` shows that as `-`.

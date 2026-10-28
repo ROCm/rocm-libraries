@@ -5,9 +5,11 @@
 The command calls the analysis API. It does not run the optimization pipeline.
 A .s file, or stdin with --asm, loads as assembler source and prints assembler
 source; anything else loads as STIR and prints STIR. --print-before and
---print-after write each pass's dump to stderr; stdout stays the module. Exit
-status: 0 success, 2 for a missing file, a load error, an unknown pass, or an
-unknown function, 1 when a pass refuses the function or reports an analysis
+--print-after write each pass's dump to stderr; stdout stays the module.
+--feature and --tile set run_passes' features and tile, so a command that
+module.run_info() records runs again as it is. Exit status: 0 success, 2 for a
+missing file, a load error, an unknown pass, function, feature, or tile field,
+or a bad value, 1 when a pass refuses the function or reports an analysis
 failure.
 """
 
@@ -38,6 +40,32 @@ def _arch(text):
         ) from exc
 
 
+def _settings(items, option, convert):
+    """NAME=VALUE arguments as a dict, or None when there are none."""
+    settings = {}
+    for item in items:
+        name, sep, value = item.partition("=")
+        if not sep or not name.strip():
+            raise ValueError("%s takes NAME=VALUE, not %r" % (option, item))
+        settings[name.strip()] = convert(option, name.strip(), value.strip())
+    return settings or None
+
+
+def _boolean(option, name, text):
+    if text.lower() not in ("true", "false"):
+        raise ValueError("%s %s must be true or false, not %r" % (option, name, text))
+    return text.lower() == "true"
+
+
+def _integer(option, name, text):
+    try:
+        return int(text)
+    except ValueError as exc:
+        raise ValueError(
+            "%s %s must be an integer, not %r" % (option, name, text)
+        ) from exc
+
+
 def cmd_passes():
     for name in _module().pass_names():
         sys.stdout.write(name + "\n")
@@ -59,6 +87,8 @@ def cmd_run(args):
     records = module.run_passes(
         args.passes,
         function=args.function,
+        features=_settings(args.features, "--feature", _boolean),
+        tile=_settings(args.tile, "--tile", _integer),
         print_before=args.print_before,
         print_after=args.print_after,
     )
@@ -107,6 +137,21 @@ def build_parser():
     run.add_argument(
         "--function",
         help="run the passes on this function only; default every function",
+    )
+    run.add_argument(
+        "--feature",
+        dest="features",
+        action="append",
+        default=[],
+        metavar="NAME=true|false",
+        help="set a pass feature, repeatable: unroll_gemm or distribute_global_read",
+    )
+    run.add_argument(
+        "--tile",
+        action="append",
+        default=[],
+        metavar="NAME=N",
+        help="set a GEMM tile field, repeatable, such as NumWaves=2",
     )
     run.add_argument(
         "--print-before",

@@ -7,6 +7,7 @@ import sys
 import types
 from ._stinkytofu import *
 from . import _stinkytofu
+from .compare import Comparison, Side, compare
 
 # Register submodules under the stinkytofu.* namespace
 for _name, _obj in vars(_stinkytofu).items():

@@ -269,6 +269,19 @@ TEST(ApiExport, VerifyStinkyIR) {
     EXPECT_FALSE(verifyStinkyIR(func).empty());
 }
 
+TEST(ApiExport, ModuleCopyAndRunRecord) {
+    Function source("f");
+    source.createBasicBlock("entry");
+    Function copy;
+    EXPECT_TRUE(copy.copyFrom(source));
+    EXPECT_EQ(copy.getName(), "f");
+
+    StinkyAsmModule module("m", kArch, StinkyAsmModule::ModuleOptions{});
+    module.addPassRun(PassRunRecord{{"StinkyRemoveNopPass"}, std::nullopt, {}, {}});
+    ASSERT_EQ(module.getPassRuns().size(), 1u);
+    EXPECT_EQ(module.getPassRuns().front().passes.front(), "StinkyRemoveNopPass");
+}
+
 // =============================================================================
 // Analysis queries (Python module stir_api.cpp)
 // =============================================================================

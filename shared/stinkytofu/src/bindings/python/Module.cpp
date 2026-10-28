@@ -79,6 +79,7 @@ struct StinkyAsmModule::Impl {
 
     std::shared_ptr<SignatureBase> signature;
     std::vector<Diagnostic> loadWarnings;
+    std::vector<PassRunRecord> passRuns;
 
     // Plugin data: opaque key-value stores for pass plugins.
     std::unordered_map<std::string, int64_t> pluginDataI64;
@@ -336,6 +337,14 @@ void StinkyAsmModule::setLoadWarnings(std::vector<Diagnostic> warnings) {
 
 const std::vector<Diagnostic>& StinkyAsmModule::getLoadWarnings() const {
     return pImpl->loadWarnings;
+}
+
+void StinkyAsmModule::addPassRun(PassRunRecord run) {
+    pImpl->passRuns.push_back(std::move(run));
+}
+
+const std::vector<PassRunRecord>& StinkyAsmModule::getPassRuns() const {
+    return pImpl->passRuns;
 }
 
 void StinkyAsmModule::setPluginDataI64(const std::string& key, int64_t value) {
