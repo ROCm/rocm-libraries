@@ -6669,8 +6669,9 @@ def build_unified_attention_2d(
 
     out_val = b.fmul(loop.results[2], b.rcp(loop.results[1]))
     # Rows can see no key at all under any mask (bottom-right causal with Sq > Skv,
-    # or a window / right bound): store 0 instead of acc * rcp(0) == NaN, like the
-    # tiled kernels. Only an exact-zero sum counts, so a NaN ``l`` still reaches O.
+    # or a window / right bound): store 0 instead of acc * rcp(0) == NaN. This is
+    # the tiled 2D epilogue's rule: only an exact-zero sum counts as keyless, so a
+    # NaN ``l`` still reaches O.
     out_val = b.select(b.fcmp("oeq", loop.results[1], zero_f), zero_f, out_val)
     out_cast = b.cast_f32_to(out_val, dtype)
     out_off, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=dim)
@@ -6822,8 +6823,10 @@ def build_unified_attention_3d(
             # skips others). Use 0 as the exponent reference there so alpha/prob
             # are 0 rather than NaN, but carry and store the raw max: it stays -inf
             # until a key is seen, so the reduce ignores an empty segment and a
-            # masked prefix cannot pin m at 0. The default mask never hits this:
-            # IR unchanged.
+            # masked prefix cannot pin m at 0. The default mask keeps its pinned IR
+            # without this guard, although it can reach the case: a default-mask
+            # prefill row whose causal limit ends before a trailing segment sees
+            # only masked keys there, so that segment's alpha is exp2(-inf - -inf).
             new_m = b.select(b.fcmp("ogt", new_m_raw, neg_inf), new_m_raw, zero_f)
         alpha = b.exp2(b.fsub(m_val, new_m))
         prob = b.exp2(b.fsub(score, new_m))

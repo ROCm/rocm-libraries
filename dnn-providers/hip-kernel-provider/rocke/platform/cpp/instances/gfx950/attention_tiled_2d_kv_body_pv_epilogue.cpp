@@ -756,12 +756,13 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
             ctx->acc_final[n * ctx->ACC_M_ATOMS + atom]
                 = ctx->out_carry[ml_count_final + n * ctx->ACC_M_ATOMS + atom];
 
-    /* Per-row reciprocal of L and the nonzero predicate (Python 3609-3610).
-     * Python emits ALL rcps first (list comp), THEN all fcmps -- two loops. */
+    /* Per-row reciprocal of L and the exact-zero predicate (only an exact-zero
+     * L marks a keyless row, stored as 0; a NaN L stays NaN in O). Python emits
+     * ALL rcps first (list comp), THEN all fcmps -- two loops. */
     for(r = 0; r < ctx->SOFTMAX_STATE_SLOTS; ++r)
         ctx->rcp_l[r] = rocke_b_rcp(b, ctx->l_final[r]);
     for(r = 0; r < ctx->SOFTMAX_STATE_SLOTS; ++r)
-        ctx->l_nonzero[r] = rocke_b_fcmp(b, "ogt", ctx->l_final[r], ctx->zero_f);
+        ctx->l_zero[r] = rocke_b_fcmp(b, "oeq", ctx->l_final[r], ctx->zero_f);
 
     if(ctx->USE_MFMA_32X32)
     {
@@ -795,7 +796,7 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
             }
             rocke_value_t* out_base_t = NULL;
             rocke_value_t* inv_l_t;
-            rocke_value_t* l_nonzero_t;
+            rocke_value_t* l_zero_t;
             const char* in_names[3];
             rocke_value_t* in_values[3];
 
@@ -810,7 +811,7 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
                 return NULL;
 
             inv_l_t = rocke_b_rcp(b, ctx->l_final[0]);
-            l_nonzero_t = rocke_b_fcmp(b, "ogt", ctx->l_final[0], ctx->zero_f);
+            l_zero_t = rocke_b_fcmp(b, "oeq", ctx->l_final[0], ctx->zero_f);
             for(n = 0; n < ctx->ACC_N_TILES; ++n)
             {
                 rocke_value_t* acc32 = rocke_gfx950_attn2d_acc_final_get(ctx, n, 0);
@@ -825,7 +826,7 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
                     rocke_value_t* v = rocke_b_vec_extract(b, acc32, r);
                     rocke_value_t* normalized = rocke_b_fmul(b, v, inv_l_t);
                     rocke_value_t* final_h = rocke_b_cast_f32_to(
-                        b, rocke_b_select(b, l_nonzero_t, normalized, ctx->zero_f), dtype);
+                        b, rocke_b_select(b, l_zero_t, ctx->zero_f, normalized), dtype);
                     rocke_if_t iff = rocke_b_scf_if(b, op_mask_t);
                     rocke_b_region_enter(b, iff.then_region);
                     rocke_b_global_store(
@@ -913,7 +914,7 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
                     rocke_value_t* v = rocke_b_vec_extract(b, acc32, r);
                     rocke_value_t* normalized = rocke_b_fmul(b, v, ctx->rcp_l[r]);
                     rocke_value_t* final_h = rocke_b_cast_f32_to(
-                        b, rocke_b_select(b, ctx->l_nonzero[r], normalized, ctx->zero_f), dtype);
+                        b, rocke_b_select(b, ctx->l_zero[r], ctx->zero_f, normalized), dtype);
                     rocke_value_t* sidx[2];
                     sidx[0] = row;
                     sidx[1] = col_in_stripe;
@@ -1043,7 +1044,7 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
                         b, rocke_gfx950_attn2d_acc_final_get(ctx, n, atom), r % 4);
                     normalized = rocke_b_fmul(b, v, ctx->rcp_l[r]);
                     final_h = rocke_b_cast_f32_to(
-                        b, rocke_b_select(b, ctx->l_nonzero[r], normalized, ctx->zero_f), dtype);
+                        b, rocke_b_select(b, ctx->l_zero[r], ctx->zero_f, normalized), dtype);
                     sidx[0] = row;
                     sidx[1] = col_in_stripe;
                     rocke_b_smem_store_vN(b, ctx->Acc_lds, sidx, 2, final_h, 1);

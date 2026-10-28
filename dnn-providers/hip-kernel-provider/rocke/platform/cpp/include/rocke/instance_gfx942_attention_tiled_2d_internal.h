@@ -358,7 +358,7 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* l_final[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* acc_final[ROCKE_GFX942_ATTN2D_MAX_ACCS];
     rocke_value_t* rcp_l[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
-    rocke_value_t* l_nonzero[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+    rocke_value_t* l_zero[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
 } rocke_gfx942_attn2d_build_ctx_t;
 
 /* ===================================================================== *
@@ -614,7 +614,7 @@ rocke_value_t* rocke_gfx942_attn2d_strided_v_b_operand(rocke_gfx942_attn2d_build
 
 /* ----- epilogue (lines 5054-5287) ----- *
  * Drains outstanding async copies, reads the loop results into ctx->l_final /
- * acc_final / rcp_l / l_nonzero, then emits the normalize + store (the
+ * acc_final / rcp_l / l_zero, then emits the normalize + store (the
  * transposed-x8 direct scalar store, the 32x32 Acc_lds stripe store, or the
  * narrow striped vec8 cooperative store). Returns b->kernel on success or NULL
  * with the builder error set. */
