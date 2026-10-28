@@ -317,6 +317,47 @@ class SigMap:
         self.helpers = d["helpers"]
         self.external = d.get("external_helpers", {})
 
+    def external_function(self, module: str, name: str) -> dict | None:
+        """A function of another rocke module (rocke.helpers.spec) that has a C
+        twin, in the shape of a `helpers` entry ({"python": ..., "c": ...}).
+
+        mine_maps tags the C parameters no Python argument feeds only coarsely
+        (out / count / extra); the ones a call can still supply are re-tagged
+        here from the C declaration alone:
+        - `char* X` then `size_t X_cap` (or `out_cap`), for a Python `-> str`:
+          the string result written into a caller buffer (str_out, str_cap);
+        - `size_t* X_len` right after it: the result's length, not wanted (null).
+        None when the module or name has no C function twin."""
+        e = self.external.get(module, {}).get("symbols", {}).get(name)
+        if not e or e.get("kind") != "function":
+            return None
+        c = e.get("c")
+        if not c or c.get("kind") != "function" or "slots" not in c:
+            return None
+        extra = [dict(x) for x in c.get("extra_c", [])]
+        returns = e.get("returns") or ""
+        for i, x in enumerate(extra):
+            nxt = extra[i + 1] if i + 1 < len(extra) else None
+            if (
+                returns == "str"
+                and x["c_type"].replace(" ", "") == "char*"
+                and nxt is not None
+                and nxt["c_type"] == "size_t"
+                and nxt["c"] in (x["c"] + "_cap", "out_cap")
+            ):
+                x["role"], nxt["role"] = "str_out", "str_cap"
+                aft = extra[i + 2] if i + 2 < len(extra) else None
+                if (
+                    aft is not None
+                    and aft["c_type"].replace(" ", "") == "size_t*"
+                    and aft["c"].endswith("_len")
+                ):
+                    aft["role"] = "null"
+        return {
+            "python": {"params": e.get("params", []), "returns": returns},
+            "c": dict(c, extra_c=extra),
+        }
+
 
 class PyModules:
     """Imports the real modules of the package (S1: import snapshot)."""

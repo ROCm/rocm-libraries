@@ -18,7 +18,14 @@ import pytest
 from trtest import ROCKE, TR, platform_probe, strip_holes
 
 # probe_valid is refused (validate_io has no rule) and filled; probe_build
-# calls it and the filled method BatchedTranspose2DSpec.kernel_name
+# calls it and the filled method BatchedTranspose2DSpec.kernel_name, made
+# untranslatable by a flags dict (kernel_name_join has no rule for one)
+EDITS = [
+    (
+        'f"p{self.lds_pad}",\n',
+        'f"p{self.lds_pad}",\n            flags={"probe": True},\n',
+    )
+]
 PROBE = """\
 def probe_valid(spec: BatchedTranspose2DSpec, arch: str = "gfx950") -> tuple[bool, str]:
     ok, why = validate_io(
@@ -93,7 +100,7 @@ def _run(env, abi, out=None):
 def probe(tmp_path_factory, clang_format):
     """(analyze output, source, abi dir) with the fills."""
     root = tmp_path_factory.mktemp("call_filled")
-    env = platform_probe(root, PROBE, FILLS)
+    env = platform_probe(root, PROBE, FILLS, edits=EDITS)
     abi = root / "abi"
     abi.mkdir()
     out = root / "batched_transpose.cpp"

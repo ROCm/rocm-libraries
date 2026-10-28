@@ -6475,6 +6475,8 @@ class Fn:
                 else:
                     parts.append(("one", self.bind(self.expr(a), "e")))
             els = {T.seq_elem(v.t) if k == "seq" else v.t for k, v in parts}
+            if len(els) == 2 and els == {T.STR, T.SSTR}:
+                els = {T.SSTR}  # str values of both spellings: owned strings
             if len(els) != 1:
                 raise Refuse(node, f"variadic arguments of types {els}")
             el = els.pop()
@@ -6486,7 +6488,7 @@ class Fn:
                         f"{name}.insert({name}.end(), {src_v}.begin(), {src_v}.end());"
                     )
                 else:
-                    self.emit(f"{name}.push_back({v.code});")
+                    self.emit(f"{name}.push_back({self.coerce(v, el, node)});")
             out[var["name"]] = CE(name, T.vec(el))
             for k in node.keywords:
                 out[k.arg] = self.bind(self.expr(k.value), k.arg)
@@ -6554,6 +6556,9 @@ class Fn:
         has_of = {sl.get("has"): sl for sl in slots.values() if sl.get("has")}
         args = []
         last_seq = None
+        # a sequence argument passed as None (flags=None): the C pointers that
+        # go with it are NULL and its count is 0, until the next argument
+        none_seq = False
         for i, (cty, cname) in enumerate(cf.params):
             if i == 0 and self_arg is not None and T.struct_of(cty):
                 args.append(self_arg)
@@ -6615,11 +6620,19 @@ class Fn:
                         f"{decl_type(cty)}{{}}"
                     )  # absent: its has_ flag is false
                     continue
+                none_seq = ce.t == T.NONE and T.is_ptr(cty) and cty != T.STR
+                if none_seq:
+                    last_seq = None
                 if T.is_seq(ce.t):
                     last_seq = ce
                 args.append(self.coerce(ce, cty, node))
                 continue
             role = extra.get(cname)
+            if role not in ("extra", "count"):
+                none_seq = False
+            if none_seq and role in ("extra", "count"):
+                args.append("nullptr" if T.is_ptr(cty) else "0")
+                continue
             if role is not None and self.gen_arg(
                 role, cty, cname, args, has_of, bound, node
             ):
@@ -6689,6 +6702,10 @@ class Fn:
             return True
         if role == "str_cap":
             args.append(f"sizeof({g['str']})")
+            return True
+        if role == "null":
+            # an optional output the Python result has no use for
+            args.append("nullptr")
             return True
         if role == "has":
             sl = has_of.get(cname)
@@ -7143,6 +7160,9 @@ class Fn:
                 attr,
             )
         e = self.env.sig.helpers.get(f"{modstem}:{attr}")
+        if e is None and src.startswith("rocke."):
+            # a function of another rocke module with a C twin (kernel_name_join)
+            e = self.env.sig.external_function(src, attr)
         if e is None:
             raise Refuse(node, f"helper {modstem}:{attr} not in sigmap")
         c = e["c"]
@@ -7614,6 +7634,17 @@ class Fn:
             in (el, el.replace("const ", ""))
         ):
             return f"{ce.code}.data()"
+        if el == T.SSTR and to in ("const char* const*", "const char**"):
+            # owned strings into a C string array: pointers into the (named) list
+            src_ = (
+                ce
+                if ce.code.isidentifier()
+                else self.bind(CE(ce.code, t, False), "strs")
+            )
+            tmp = self.tmp("cstrs")
+            self.emit(f"std::vector<const char*> {tmp};")
+            self.emit(f"for(const auto& s_ : {src_.code}) {tmp}.push_back(s_.c_str());")
+            return f"{tmp}.data()"
         if el is not None and (to.endswith("* const*") or to.endswith("**")):
             return f"{ce.code}.data()"
         if (

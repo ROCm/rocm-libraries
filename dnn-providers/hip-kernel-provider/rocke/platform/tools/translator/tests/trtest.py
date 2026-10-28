@@ -87,11 +87,13 @@ def platform_probe(
     fills: dict[str, str] | None = None,
     package: str = "batched_transpose",
     arch: str = "common",
+    edits: list[tuple[str, str]] | None = None,
 ) -> dict:
     """The environment of a platform-instance probe under root: the package's
     real module with `extra` appended (its names added to __all__), imported
     from a symlink overlay of platform/python (TR_LIBRARY), the code maps mined
-    from the tree, no facts, and `fills` (function -> C++) as the hand fills."""
+    from the tree, no facts, and `fills` (function -> C++) as the hand fills.
+    `edits` are (old, new) text replacements made in the real module first."""
     real = ROCKE / "platform" / "python"
     lib = root / "python"
     path = ["rocke", "instances", arch]
@@ -107,6 +109,9 @@ def platform_probe(
         if f.name != f"{package}.py" and f.name != "__pycache__":
             (dst / f.name).symlink_to(f)
     text = (src / f"{package}.py").read_text()
+    for old, new in edits or []:
+        assert old in text, old
+        text = text.replace(old, new, 1)
     names = re.findall(r"^def (\w+)", extra, re.M)
     text = text.replace(
         "__all__ = [", "__all__ = [\n" + "".join(f'    "{n}",\n' for n in names), 1

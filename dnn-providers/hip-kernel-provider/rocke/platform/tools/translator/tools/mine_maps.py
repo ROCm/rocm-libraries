@@ -691,7 +691,12 @@ def build_sigmap(tree: rsrc.Tree, tw: dict) -> dict:
             cands = [c for c in cands if c.kind in rsrc._KIND_OK[ps.kind]]
             same = [c for c in cands if rel[-1] in c.file]
             pick = (same or cands)[:1]
-            e = {"kind": ps.kind, "python_line": ps.line, "params": ps.params}
+            e = {
+                "kind": ps.kind,
+                "python_line": ps.line,
+                "params": ps.params,
+                "returns": ps.returns,
+            }
             if pick:
                 c = pick[0]
                 e["c"] = {
