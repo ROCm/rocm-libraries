@@ -373,15 +373,17 @@ rocblaslt_status
     auto scale_type = normalizeOperandType(prob.scale_type);
     if(scale_type != HIPBLASLT_DATATYPE_INVALID && scale_type != HIP_R_32F)
     {
+        // Print the hipDataType. hip2RocRollerType throws on a format rocRoller
+        // does not name, and that throw becomes an internal error.
         std::cerr << "rocRoller only supports F32 as scale type not "
-                  << hipblaslt::hip2RocRollerType(scale_type) << std::endl;
+                  << static_cast<int>(scale_type) << std::endl;
         return rocblaslt_status_invalid_value;
     }
 
     if(kernelType.typeAcc != HIP_R_32F)
     {
         std::cerr << "rocRoller only supports F32 accumulation, not "
-                  << hipblaslt::hip2RocRollerType(kernelType.typeAcc) << std::endl;
+                  << static_cast<int>(kernelType.typeAcc) << std::endl;
         return rocblaslt_status_invalid_value;
     }
 
