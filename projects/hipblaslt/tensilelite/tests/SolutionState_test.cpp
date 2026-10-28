@@ -513,6 +513,7 @@ TEST(SolutionState, RecordFromDerivedState)
         solution->problemPredicate);
     ASSERT_NE(xcc, nullptr);
     EXPECT_EQ(xcc->value, (std::array<int, 2>{4, 8}));
+    // Unevaluated. The count is filled on the first check, not frozen at 0.
     EXPECT_EQ(xcc->cuCount, size_t{0});
 
     EXPECT_EQ(onlyDirect<Predicates::Contraction::SizeEqual>(solution->problemPredicate), nullptr);
@@ -589,6 +590,7 @@ TEST(SolutionState, BuildsWithoutADevice)
         solution->problemPredicate);
     ASSERT_NE(xcc, nullptr);
     EXPECT_EQ(xcc->value, (std::array<int, 2>{4, 8}));
+    // Unevaluated. The count is filled on the first check, not frozen at 0.
     EXPECT_EQ(xcc->cuCount, size_t{0});
 }
 

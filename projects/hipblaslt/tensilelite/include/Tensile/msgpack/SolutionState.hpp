@@ -75,9 +75,9 @@ namespace TensileLite
      * so an empty string arrives as 0.0 and a null as the string "null"; both
      * are read as the values the state holds.
      *
-     * WorkgroupMappingXCCCheck is recorded with a compute-unit count of 0.
-     * The library file stores only the predicate value, and the device's
-     * compute-unit count is read when that file is loaded.
+     * WorkgroupMappingXCCCheck stores only its value. Its compute-unit count
+     * stays 0 until the predicate is evaluated, which is when the device is
+     * read. Building the record does not query a GPU.
      *
      * Throws std::runtime_error naming the key when a key the record needs is
      * missing or holds a value of the wrong kind.
