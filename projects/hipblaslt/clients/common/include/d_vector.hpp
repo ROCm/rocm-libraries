@@ -30,6 +30,7 @@
 #include "hipblaslt_arguments.hpp"
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_test.hpp"
+#include "host_memory.hpp"
 #include "singletons.hpp"
 #include <algorithm>
 #include <cinttypes>
@@ -38,8 +39,6 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#else
-#include <sys/sysinfo.h>
 #endif
 
 #define MEM_MAX_GUARD_PAD 8192
@@ -87,17 +86,10 @@ public:
     size_t get_available_host_memory()
     {
 #ifdef __linux__
-        struct sysinfo info;
-        if(sysinfo(&info) == 0)
-        {
-            // In the linux system, the host memory(pinned memory)'s capacity is the same as the free memory
-            return info.freeram;
-        }
-        else
-        {
+        size_t available = available_host_memory_bytes();
+        if(available == 0)
             hipblaslt_cerr << "Error getting available host memory" << std::endl;
-            return 0;
-        }
+        return available;
 #elif defined(_WIN32)
         MEMORYSTATUSEX memStatus = {};
         memStatus.dwLength = sizeof(memStatus);
