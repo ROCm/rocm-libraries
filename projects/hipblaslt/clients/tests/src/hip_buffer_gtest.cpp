@@ -9,8 +9,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
+#include <type_traits>
 #include <utility>
 
 namespace
@@ -137,22 +139,30 @@ TEST(HipBuffer, smoke_TransfersAndBroadcastsNormally)
     constexpr std::array<int32_t, 12> broadcastInput{9, 8, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     constexpr std::array<int32_t, 12> broadcastExpected{9, 8, 7, 9, 8, 7, 9, 8, 7, 9, 8, 7};
 
-    HipHostBuffer first(HIP_R_32I, firstValues.size());
-    copyToHost(first, firstValues);
-    HipDeviceBuffer device(HIP_R_32I, firstExpected.size());
-    ASSERT_EQ(device.memcheck(), hipSuccess);
-    ASSERT_EQ(synchronize(device, first, repeats), hipSuccess);
+    hipStream_t stream = nullptr;
+    ASSERT_EQ(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), hipSuccess);
+    const std::unique_ptr<std::remove_pointer_t<hipStream_t>, decltype(&hipStreamDestroy)>
+        streamOwner(stream, &hipStreamDestroy);
+    for(bool hmm : {false, true})
+    {
+        SCOPED_TRACE(hmm);
+        HipHostBuffer first(HIP_R_32I, firstValues.size());
+        copyToHost(first, firstValues);
+        HipDeviceBuffer device(HIP_R_32I, firstExpected.size(), hmm);
+        ASSERT_EQ(device.memcheck(), hipSuccess);
+        ASSERT_EQ(synchronize(device, first, repeats, stream), hipSuccess);
 
-    HipHostBuffer observed(HIP_R_32I, firstExpected.size());
-    ASSERT_EQ(synchronize(observed, device), hipSuccess);
-    expectHostEquals(observed, firstExpected);
+        HipHostBuffer observed(HIP_R_32I, firstExpected.size());
+        ASSERT_EQ(synchronize(observed, device), hipSuccess);
+        expectHostEquals(observed, firstExpected);
 
-    HipHostBuffer fullInput(HIP_R_32I, broadcastInput.size());
-    copyToHost(fullInput, broadcastInput);
-    ASSERT_EQ(synchronize(device, fullInput), hipSuccess);
-    ASSERT_EQ(broadcast(device, repeats), hipSuccess);
-    ASSERT_EQ(synchronize(observed, device), hipSuccess);
-    expectHostEquals(observed, broadcastExpected);
+        HipHostBuffer fullInput(HIP_R_32I, broadcastInput.size());
+        copyToHost(fullInput, broadcastInput);
+        ASSERT_EQ(synchronize(device, fullInput, 1, stream), hipSuccess);
+        ASSERT_EQ(broadcast(device, repeats), hipSuccess);
+        ASSERT_EQ(synchronize(observed, device), hipSuccess);
+        expectHostEquals(observed, broadcastExpected);
+    }
 }
 
 TEST(HipBuffer, smoke_TransfersValidSwizzleGeometry)
