@@ -892,7 +892,7 @@ def build_moe_fused_mega_gemm_fp8(
                     stride_a_scale=stride_a_scale,
                     stride_gate_scale=stride_gate_scale,
                     stride_up_scale=stride_up_scale,
-                    tag=f"{mi}_{ni}",
+                    tag=f"m{mi}_n{ni}",
                 )
                 gate_list.append(g_dq)
                 up_list.append(u_dq)
@@ -1029,7 +1029,7 @@ def build_moe_fused_mega_gemm_fp8(
                         inter_full=N,
                         inter_blk_base=inter_blk_base,
                         stride_down_scale=stride_down_scale,
-                        tag=f"d{mi}_{ni}",
+                        tag=f"d_m{mi}_n{ni}",
                     )
                     down_list.append(d_dq)
             # Barrier before the next H_out tile reuses Hidden_smem reads

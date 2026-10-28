@@ -69,8 +69,8 @@ def _assert_engines_agree(kernel, arch="gfx942"):
 def test_llvm_text_has_add_nuw_and_icmp_ult(int_type):
     text = _lower_kernel_to_llvm_python(_two_op_kernel(int_type), arch="gfx942")
     ty = int_type.name
-    assert f"%add1 = add nuw {ty} %a, %b" in text
-    assert f"%ult2 = icmp ult {ty} %a, %b" in text
+    assert f"%add_1 = add nuw {ty} %a, %b" in text
+    assert f"%ult_2 = icmp ult {ty} %a, %b" in text
 
 
 @pytest.mark.parametrize("int_type", [I32, I64])
@@ -527,9 +527,9 @@ def _hip_kernel():
 
 def test_hip_lowering_spells_unsigned_forms():
     hip = lower_kernel_to_hip(_hip_kernel(), arch="gfx942")
-    assert "int add1 = (int32_t)((uint32_t)a + (uint32_t)b);" in hip
-    assert "bool ult3 = (uint32_t)a < (uint32_t)b;" in hip
-    assert "int range5 = a;" in hip
+    assert "int add_1 = (int32_t)((uint32_t)a + (uint32_t)b);" in hip
+    assert "bool ult_3 = (uint32_t)a < (uint32_t)b;" in hip
+    assert "int range_5 = a;" in hip
 
 
 def test_hip_add_nuw_compiles_without_nsw(tmp_path):

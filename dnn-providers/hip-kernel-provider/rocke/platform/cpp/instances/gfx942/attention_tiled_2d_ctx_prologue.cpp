@@ -397,7 +397,7 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
         ctx->softcap_p = rocke_b_param(b, "softcap", rocke_f32(), NULL);
         ctx->num_seqs_p = rocke_b_param(b, "num_seqs", rocke_i32(), NULL);
         ctx->bt_stride_p = rocke_b_param(b, "block_table_stride", rocke_i32(), NULL);
-        ctx->qq_bias_stride0_p = rocke_b_param(b, "qq_bias_stride_0", rocke_i32(), NULL);
+        ctx->qq_bias_stride0_p = rocke_b_param(b, "qq_bias_stride0", rocke_i32(), NULL);
         /* Appended LAST and only when requested, so the LSE-off ABI is unchanged. */
         if(spec->emit_lse)
         {

@@ -148,7 +148,7 @@ def test_integer_wmma_reinterprets_only_the_packed_byte_operand():
         r"(%reg\.\d+) = bitcast <16 x i8> \S+ to <4 x i32>", text
     )
     assert re.search(
-        rf"\(i1 1, <4 x i32> {re.escape(reinterpreted)}, i1 1, <4 x i32> %cz\d+,",
+        rf"\(i1 1, <4 x i32> {re.escape(reinterpreted)}, i1 1, <4 x i32> %cz\d+_\d+,",
         _mma_call(text),
     )
     assert_target_accepts(text, "gfx1151")

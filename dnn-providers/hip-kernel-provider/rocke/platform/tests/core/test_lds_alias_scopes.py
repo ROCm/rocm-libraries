@@ -84,7 +84,7 @@ class TestLdsAliasScopes(unittest.TestCase):
         # for the DMA into `dst`.
         ir = lower_kernel_to_llvm(_kernel(scopes=True, overlap=True), arch="gfx942")
         scope = {
-            m.group(2).split("@")[1].split(".")[0].rstrip("0123456789"): m.group(1)
+            re.sub(r"_[0-9]+$", "", m.group(2).split("@")[1].split(".")[0]): m.group(1)
             for m in re.finditer(
                 r'^(![0-9]+) = distinct !\{!\d+, !\d+, !"([^"]+)"\}', ir, re.MULTILINE
             )

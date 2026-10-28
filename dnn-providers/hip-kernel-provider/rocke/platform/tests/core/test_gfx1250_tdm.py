@@ -59,14 +59,14 @@ class TestGfx1250Tdm(unittest.TestCase):
         for name in ("src", "dst"):
             with self.subTest(ptr=name):
                 self.assertRegex(
-                    llvm, rf"%gaddr\d+ = ptrtoint ptr addrspace\(1\) %{name} to i64"
+                    llvm, rf"%gaddr_\d+ = ptrtoint ptr addrspace\(1\) %{name} to i64"
                 )
         # hi[24:0] of the global address, type field (bits 31:30) = 2.
-        self.assertRegex(llvm, r"= lshr i64 %gaddr\d+, 32")
-        self.assertRegex(llvm, r"= and i32 %tr\d+, 33554431")
-        self.assertRegex(llvm, r"= or i32 %and\d+, -2147483648")
+        self.assertRegex(llvm, r"= lshr i64 %gaddr_\d+, 32")
+        self.assertRegex(llvm, r"= and i32 %tr_\d+, 33554431")
+        self.assertRegex(llvm, r"= or i32 %and_\d+, -2147483648")
         # The smem i64 address is truncated to the 32-bit LDS byte address.
-        self.assertRegex(llvm, r"%tr\d+ = trunc i64 %lds_addr\d+ to i32")
+        self.assertRegex(llvm, r"%tr_\d+ = trunc i64 %lds_addr_\d+ to i32")
 
     def test_group1_shape_packing(self):
         llvm = _lower(_build_round_trip())
@@ -75,7 +75,7 @@ class TestGfx1250Tdm(unittest.TestCase):
         self.assertRegex(llvm, r"= shl i32 %dim1, 16")
         self.assertRegex(llvm, r"= lshr i32 %dim1, 16")
         # tile_dim0=64 lands in the high half of dword 3.
-        self.assertRegex(llvm, r"= or i32 %lshr\d+, 4194304")
+        self.assertRegex(llvm, r"= or i32 %lshr_\d+, 4194304")
 
     def test_every_descriptor_dword_is_wave_uniform(self):
         args = _readfirstlane_args(_lower(_build_round_trip()))
@@ -98,8 +98,8 @@ class TestGfx1250Tdm(unittest.TestCase):
                 self.assertRegex(
                     llvm,
                     rf"call void @llvm\.amdgcn\.{re.escape(intrinsic)}\("
-                    r"<4 x i32> %vp\d+, <8 x i32> %vp\d+, <4 x i32> (%cz\d+), "
-                    r"<4 x i32> \1, <8 x i32> %cz\d+, i32 0\)",
+                    r"<4 x i32> %vp_\d+, <8 x i32> %vp_\d+, <4 x i32> (%cz\d+_\d+), "
+                    r"<4 x i32> \1, <8 x i32> %cz\d+_\d+, i32 0\)",
                 )
         self.assertEqual(
             llvm.count("call void @llvm.amdgcn.s.wait.tensorcnt(i16 0)"), 2
@@ -126,7 +126,7 @@ class TestGfx1250Tdm(unittest.TestCase):
 
     def test_tile_dim0_high_bit_printed_signed(self):
         llvm = _lower(_build_round_trip(tile_dim0=0xFFFF))
-        self.assertRegex(llvm, r"= or i32 %lshr\d+, -65536")
+        self.assertRegex(llvm, r"= or i32 %lshr_\d+, -65536")
 
     def test_i32_lds_address_used_directly(self):
         b = IRBuilder("i32_lds")
@@ -182,7 +182,7 @@ class TestGfx1250Tdm(unittest.TestCase):
         b.global_store(dst, b.const_i32(0), b.global_ptr_to_i64(src))
         b.ret()
         llvm = _lower(b.kernel, arch="gfx950", flavor="llvm22")
-        self.assertRegex(llvm, r"%gaddr\d+ = ptrtoint ptr addrspace\(1\) %src to i64")
+        self.assertRegex(llvm, r"%gaddr_\d+ = ptrtoint ptr addrspace\(1\) %src to i64")
         self.assertIs(b.global_ptr_to_i64(src).type, I64)
         with self.assertRaises(TypeError):
             b.global_ptr_to_i64(b.param("flat", PtrType(F32, "private")))

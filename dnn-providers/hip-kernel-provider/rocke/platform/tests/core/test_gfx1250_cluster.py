@@ -125,7 +125,7 @@ class TestGfx1250Cluster(unittest.TestCase):
         llvm = _lower(_one(lambda b: b.cluster_size("y")))
         self.assertRegex(
             llvm,
-            r"(%cwmax\d+) = call i32 @llvm\.amdgcn\.cluster\.workgroup\.max\.id\.y\(\)\n"
+            r"(%cwmax_\d+) = call i32 @llvm\.amdgcn\.cluster\.workgroup\.max\.id\.y\(\)\n"
             r"  %\S+ = add nsw i32 \1, 1\n",
         )
         self.assertNotIn("@llvm.amdgcn.cluster.id.", llvm)

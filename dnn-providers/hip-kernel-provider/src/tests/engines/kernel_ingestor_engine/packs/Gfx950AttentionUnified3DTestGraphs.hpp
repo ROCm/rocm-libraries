@@ -199,7 +199,7 @@ inline std::vector<KernelArgument> pythonSegmentAbi()
             scalar("softcap"),
             scalar("num_seqs"),
             scalar("block_table_stride"),
-            scalar("qq_bias_stride_0")};
+            scalar("qq_bias_stride0")};
 }
 
 /// The 5-pointer reduce-kernel ABI.

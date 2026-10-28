@@ -314,7 +314,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
         phase_base = rocke_b_add(b, hi_tile, rocke_b_const_i32(b, ph));
         for(i = 0; i < n_acc; ++i)
         {
-            snprintf(names[idx], 48, "dwt_acc%d_%d", ph, i);
+            snprintf(names[idx], 48, "dwt_acc%d_i%d", ph, i);
             inits[idx++] = accs[i];
         }
         for(t = 0; t < TH - 1; ++t)

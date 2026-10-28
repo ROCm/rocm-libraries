@@ -205,7 +205,7 @@ def _attention(problem, arch, q, k, v, *, tuning_spec=None, sinks=None):
         "softcap": 0.0,
         "num_seqs": 1,
         "block_table_stride": blocks,
-        "qq_bias_stride_0": 0,
+        "qq_bias_stride0": 0,
     }
     reduce_values = {
         "output_ptr": out,

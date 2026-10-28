@@ -374,7 +374,7 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
     {
         for(int k = 0; k < NP; ++k)
         {
-            names.push_back("dwp_acc_" + std::to_string(f) + "_" + std::to_string(k));
+            names.push_back("dwp_acc_" + std::to_string(f) + "_k" + std::to_string(k));
             inits.push_back(zero2);
         }
     }
@@ -457,7 +457,7 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
     std::vector<std::string> tail_names;
     std::vector<rocke_iter_arg_t> tail_args((size_t)n_acc);
     for(int i = 0; i < n_acc; ++i)
-        tail_names.push_back("dwp_tail_" + std::to_string(i));
+        tail_names.push_back("dwp_tail_i" + std::to_string(i));
     for(int i = 0; i < n_acc; ++i)
     {
         tail_args[(size_t)i].name = tail_names[(size_t)i].c_str();
@@ -639,7 +639,7 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_tiled_packed(
         vals_t inits;
         for(int i = 0; i < n_acc; ++i)
         {
-            names.push_back("dwtp_acc" + std::to_string(ph) + "_" + std::to_string(i));
+            names.push_back("dwtp_acc" + std::to_string(ph) + "_i" + std::to_string(i));
             inits.push_back(accs[(size_t)i]);
         }
         for(int t = 0; t < TH - 1; ++t)
@@ -649,7 +649,7 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_tiled_packed(
             vals_t row = pairs_of(raw);
             for(size_t i = 0; i < row.size(); ++i)
             {
-                names.push_back("dwtp_x" + std::to_string(ph) + "_r" + std::to_string(t) + "_"
+                names.push_back("dwtp_x" + std::to_string(ph) + "_r" + std::to_string(t) + "_c"
                                 + std::to_string(i));
                 inits.push_back(row[i]);
             }
@@ -659,7 +659,7 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_tiled_packed(
             load_w_row(rocke_b_const_i32(b, ph), w0);
             for(size_t i = 0; i < w0.size(); ++i)
             {
-                names.push_back("dwtp_w" + std::to_string(ph) + "_" + std::to_string(i));
+                names.push_back("dwtp_w" + std::to_string(ph) + "_i" + std::to_string(i));
                 inits.push_back(w0[i]);
             }
         }
