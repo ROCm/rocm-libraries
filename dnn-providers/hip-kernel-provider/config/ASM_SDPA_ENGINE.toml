@@ -23,7 +23,7 @@ version = 1
 #   rtol: relative tolerance
 #
 
-# SdpaBackward defect DEF-03 (test plan sdpa-bwd.md §4.8): the ASM kernel's fp16
+# SdpaBackward defect DEF-03 (test plan sdpa-bwd.md §4.2): the ASM kernel's fp16
 # dV loses precision when Skv <= 2 and Sq >= 512 (4 to 18 ulps, growing with Sq;
 # bf16 is bit-exact). The fp16 probes stay in their levels: every ASM run reports
 # them as skipped, and any other engine runs them. Delete this entry when the
@@ -42,7 +42,7 @@ reason = "DEF-03: fp16 dV loses precision at Skv <= 2 and Sq >= 512 (AITER kerne
 # one per tolerance class and dtype of the SdpaBackward test plan. The generator
 # writes the block between the BEGIN and END lines.
 # BEGIN SdpaBackward tolerance classes, written by generate_sdpa_bwd_bundles.py --toml
-# Plan sdpa-bwd.md §6.2. Each SdpaBackward case id ends with its tolerance class token
+# Plan sdpa-bwd.md §6.1. Each SdpaBackward case id ends with its tolerance class token
 # after its dtype token, so every id matches exactly one row. The class follows from the
 # case's shape, band, scale and value domain and a NumPy estimate of max|ref| per
 # gradient: atol <= 0.1 x the smallest non-zero max|ref| (the guard), and a

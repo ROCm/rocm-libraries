@@ -530,7 +530,7 @@ def case_id(c, dt, cls):
 CORE_BASE = dict(B=2, Hq=3, Hk=3, Hv=3, Dqk=128, Dv=128)
 CORE_SEQ = {"lt": (40, 72), "eq": (64, 64), "gt": (72, 40)}
 CORE_BAND = {"none": (None, None), "causal": (None, 0), "window": (16, 0)}
-# Core cells (§4.2): Sq:Skv relation x mask class x alignment where it differs.
+# Core cells (§4): Sq:Skv relation x mask class x alignment where it differs.
 CORE_CELLS = [
     (seq, mask, al)
     for seq in ("lt", "eq", "gt")
@@ -614,7 +614,7 @@ def derived_features(c):
 
 
 def core_items():
-    """Quick: every core cell in both dtypes (§4.2)."""
+    """Quick: every core cell in both dtypes (§4.1)."""
     out = []
     for n, cell in enumerate(CORE_CELLS, 1):
         seq, mask, al = cell
@@ -711,7 +711,7 @@ def quick_variant_items():
 
 
 # fmt: off
-# Catalog placement (§3.7, §4): level -> shapes. A shape carried by another
+# Catalog placement (§3, §4.1): level -> shapes. A shape carried by another
 # plan item is in MERGED instead (the carrier lists the shape id).
 PLACE = {
     "quick":   "H08 H11 H50 H65 H90",
@@ -741,7 +741,7 @@ EXTRA_ITEMS = {  # plan items a placed shape also carries (the §4 probes it rep
     "H77": "PRB-B08", "H88": "PRB-E04", "H89": "PRB-V01", "H90": "V9", "X11": "A3 G7",
 }
 
-# Model layers (§3.5, register R-M2..R-M4): variants dropped for the nightly
+# Model layers (§3.3; registers R-M2..R-M4 in §4.3): variants dropped for the nightly
 # budget (each model stays covered), and edits.
 M_DROP = ("M05.n M15.n M30.n M32.n M33.n M34.n M37.n M24.n M27.n M35.n M08.n M16.n M31.n M03.pr M36.pr "
           "M39.f").split()  # M39.f: replaced in full by X11 and M41.fc
@@ -895,7 +895,7 @@ def regression_and_defect_items():
              inputs={"bias": "row 7 and column 5 all -inf"}, topology="AdditiveMask", oracle="14358+I4",
              regression_of="#14358 6be2472f007",
              expected="dead row: dQ row 0 exactly; dead key: dK = dV = 0; all finite"),
-        # open engine defects (gfx942 pilots); a defect does not depend on the shape (§4.8 shrink rule)
+        # open engine defects (gfx942 pilots); a defect does not depend on the shape (§4.2 shrink rule)
         *[item(f"DEF-01{sfx}", "pr", "probe", "T19 IVP12 " + extra, (1, 1, 1, 1, 64, 64),
                tensor_layout={t: "dstride2"}, defect="DEF-01", expected=E_ANY)
           for t, sfx, extra in (("Q", "a", "H51"), ("dQ", "b", "H52"), ("K", "c", ""), ("V", "d", ""), ("O", "e", ""),
@@ -1058,7 +1058,7 @@ def probe_items():
              **scale),
         item("PRB-A01", "quick", "claim", "AW1 A2 A3", (1, 2, 2, 2, 64, 64), align="BR", R=0, inputs=P.domain("v01"),
              expected="same result as TOP_LEFT causal (C07)"),
-        # hazard additions (§3.8)
+        # hazard additions (§3.4)
         item("H97", "pr", "claim", "G5 G6 G7 A3", (2, 3, 3, 3, 128, 128), "fp16", R=0, expected="correct accept"),
         item("H98", "nightly", "claim", "A4", (1, 2, 2, 2, 256, 256), W=63, R=0, expected="correct accept"),
         item("H99", "nightly", "claim", "G8 G6 A2 A3", (1, 2, 2, 2, 64, 320, 192, 192), align="BR", R=0,
@@ -1104,7 +1104,7 @@ def golden_items():
 
 
 def targeted_items():
-    """Targeted products (§4.4): TP-A head dim 192 x core cells; TP-B layouts x
+    """Targeted products (§4): TP-A head dim 192 x core cells; TP-B layouts x
     core cells; TP-C GQA/MQA x core cells (nightly); TP-D the complete
     {bhsd, bshd} x {128, 192} x {bf16, fp16} x core cells not placed yet (full)."""
     out = []
@@ -1238,7 +1238,7 @@ def plan_items():
 
 
 # --------------------------------------------------------------------------
-# All-pairs generation (§4.3), seeded and greedy: stage 1 covers every pair of
+# All-pairs generation (§4), seeded and greedy: stage 1 covers every pair of
 # two claim values with claim-only cases; stage 2 every remaining required
 # pair. The runnable cases up to nightly are the seeds, so only the pairs they
 # miss get a case.
@@ -1688,7 +1688,7 @@ def toml_rows():
 def toml_block():
     lines = [
         TOML_BEGIN,
-        "# Plan sdpa-bwd.md §6.2. Each SdpaBackward case id ends with its tolerance class token",
+        "# Plan sdpa-bwd.md §6.1. Each SdpaBackward case id ends with its tolerance class token",
         "# after its dtype token, so every id matches exactly one row. The class follows from the",
         "# case's shape, band, scale and value domain and a NumPy estimate of max|ref| per",
         "# gradient: atol <= 0.1 x the smallest non-zero max|ref| (the guard), and a",
