@@ -82,8 +82,9 @@ class WgradSplitPolicy:
     * ``max_degree`` / ``max_degree_by_dtype`` -- the cap, overridable per dW
       dtype. A packed 16-bit atomic rounds the running sum in dW on every add,
       so with same-sign partials the relative error grows with the degree, up
-      to about ``degree * 2**-(mantissa bits + 1)``. A 16-bit dtype's cap keeps
-      that bound under the 5e-2 tolerance the wgrad suite verifies against.
+      to about ``degree * 2**-(fraction bits + 1)`` (see
+      :func:`atomic_rounding_degree_cap`). A 16-bit dtype's cap keeps that
+      bound under the 5e-2 tolerance the wgrad suite verifies against.
       A cap of 1 turns the automatic split off for that dtype; an explicit
       degree still launches it. The general cap is for fp32 dW, whose atomic
       rounding is negligible at any degree here.
@@ -99,15 +100,38 @@ class WgradSplitPolicy:
         return dict(self.max_degree_by_dtype).get(dtype_d, self.max_degree)
 
 
+# Normalized error the wgrad correctness suite verifies dW against.
+WGRAD_TOLERANCE = 5e-2
+
+
+def atomic_rounding_degree_cap(fraction_bits: int, tol: float = WGRAD_TOLERANCE) -> int:
+    """Largest split-K degree whose 16-bit atomic rounding stays within ``tol``.
+
+    A dtype with ``fraction_bits`` explicit fraction bits has unit roundoff
+    ``u = 2**-(fraction_bits + 1)`` under round-to-nearest (``2**-8`` for bf16,
+    ``2**-11`` for fp16). A degree-``d`` split rounds each of its ``d`` partials
+    to the dtype and then adds ``d - 1`` of them into the running sum in dW,
+    so with same-sign partials the relative error is bounded by
+    ``gamma_d = d*u / (1 - d*u)``. Returns the largest ``d`` with
+    ``gamma_d <= tol`` (at least 1).
+    """
+    u = 2.0 ** -(fraction_bits + 1)
+    degree = 1
+    while (degree + 1) * u < 1 and (degree + 1) * u / (1 - (degree + 1) * u) <= tol:
+        degree += 1
+    return degree
+
+
 # Arches whose wgrad split-K degree comes from a fitted policy rather than the
 # CK formulas, whose fill targets leave these devices mostly idle. Fitted on
 # gfx1250 bf16/fp16 wgrad.
 #
-# The bf16 cap is an accuracy bound, not a throughput fit: bf16 keeps 8
-# significant bits, so 16 same-sign partials stay within 16 * 2**-9 of the
-# exact sum, under the 5e-2 tolerance. Higher degrees are faster on
-# small-channel shapes with a deep reduction, but all-positive inputs then
-# exceed that tolerance.
+# The bf16 cap is an accuracy bound, not a throughput fit: bf16 has 7 fraction
+# bits, so its unit roundoff is 2**-8 and 12 same-sign partials stay within
+# gamma_12 ~= 4.9e-2 of the exact sum, under the 5e-2 tolerance. Higher degrees
+# are faster on small-channel shapes with a deep reduction, but all-positive
+# inputs then exceed that tolerance (at 16, one 1.0 partial followed by fifteen
+# 2**-8 ones rounds back to 1.0, a 5.5% error).
 #
 # fp16 is not split automatically (cap 1). Its packed atomic does not scale
 # like bf16's here: the best degree ranges from 16 on a tiny dW down to no
@@ -119,7 +143,7 @@ _WGRAD_SPLIT_POLICY: dict[str, WgradSplitPolicy] = {
         grouped_target_ctas=4096,
         min_slice_k=2048,
         max_degree=128,
-        max_degree_by_dtype=(("bf16", 16), ("fp16", 1)),
+        max_degree_by_dtype=(("bf16", atomic_rounding_degree_cap(7)), ("fp16", 1)),
     ),
 }
 

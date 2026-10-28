@@ -2392,12 +2392,13 @@ sweep CSVs.
   bf16/fp16 atomic (`global_atomic_add_pk_*`) rounds the running sum in
   dW on every add, so with same-sign partials the relative error grows
   roughly linearly in the split degree, up to about
-  `degree * 2**-(mantissa bits + 1)`. A degree picked for CTA fill alone
-  on a small-channel, deep-reduction wgrad can pass on signed random
+  `degree * 2**-(fraction bits + 1)` (`2**-8` per add for bf16, which
+  has 7 fraction bits). A degree picked for CTA fill alone on a
+  small-channel, deep-reduction wgrad can pass on signed random
   inputs and still miss the tolerance on all-positive ones. Cap the
   16-bit degree from that bound, not from throughput, and test the cap
   with all-positive inputs (`WgradSplitPolicy.max_degree_by_dtype` on
-  gfx1250 caps bf16 at 16).
+  gfx1250 caps bf16 at 12).
 - **Validator rule scoped to the wrong epilogue.** A store-width rule
   written for the MFMA cshuffle epilogue also gated the WMMA split-K
   epilogue, which never reads that width. Hand-built specs left the width

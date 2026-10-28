@@ -860,11 +860,11 @@ class TestConvWgradCorrectness(unittest.TestCase):
         # (N, H=W, C, K, G, dtype, (tile_m, tile_n, tile_k), --split-k,
         #  expected degree); -1 is the resolver's pick.
         cases = [
-            (32, 32, 64, 96, 1, "bf16", (32, 64, 64), -1, 16),
+            (32, 32, 64, 96, 1, "bf16", (32, 64, 64), -1, 12),
             (32, 32, 64, 128, 1, "fp16", (64, 64, 64), 8, 8),
-            (32, 32, 64, 64, 4, "bf16", (32, 32, 32), -1, 16),
+            (32, 32, 64, 64, 4, "bf16", (32, 32, 32), -1, 12),
             (32, 32, 64, 64, 4, "fp16", (32, 32, 32), 8, 8),
-            (64, 64, 16, 16, 1, "bf16", (32, 64, 64), -1, 16),
+            (64, 64, 16, 16, 1, "bf16", (32, 64, 64), -1, 12),
         ]
         ran = 0
         for N, HW, C, K, G, dtype, tile, requested, degree in cases:

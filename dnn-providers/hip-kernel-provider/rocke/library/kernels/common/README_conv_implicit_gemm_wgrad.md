@@ -64,9 +64,11 @@ Other wave32 arches keep `split_k=1`, and no WMMA arch has the two-stage path.
 - Degree (`WgradSplitPolicy` in `rocke/helpers/split_k.py`): the smaller of a
   CTA-fill term and a slice-depth term, under a per-dtype cap. Each packed
   16-bit atomic rounds the running sum in dW, so with same-sign partials the
-  error grows with the degree, up to about `degree * 2**-9` for bf16. bf16 is
-  capped at 16, which keeps that bound under the suite's 5e-2 tolerance; higher
-  degrees miss it on all-positive inputs. fp32 takes the general cap of 128.
+  error grows with the degree, up to about `degree * 2**-8` for bf16 (7
+  fraction bits, unit roundoff `2**-8`). bf16 is capped at 12, the largest
+  degree that keeps that bound under the suite's 5e-2 tolerance
+  (`atomic_rounding_degree_cap`); higher degrees miss it on all-positive
+  inputs. fp32 takes the general cap of 128.
 - fp16 is not split automatically: its cap is 1, so `--split-k -1` (and every
   auto caller) runs it unsplit. The fp16 packed atomic does not scale like
   bf16's on gfx1250. In a degree sweep the best fp16 degree ranged from 16 on

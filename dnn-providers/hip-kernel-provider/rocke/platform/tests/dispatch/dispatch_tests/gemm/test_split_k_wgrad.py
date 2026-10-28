@@ -11,6 +11,7 @@ and that is what most of this file pins.
 from __future__ import annotations
 
 import math
+import struct
 import unittest
 
 from rocke.helpers.split_k import (
@@ -236,24 +237,50 @@ class TestGfx1250Policy(unittest.TestCase):
         # each 16-bit dtype takes its own cap, and fp32 the general one. fp16's
         # cap of 1 keeps it unsplit even here, where the demand is highest.
         args = (24, 9 * 24, 42 * 240 * 320)
-        self.assertEqual(self._pick(*args, dtype_d="bf16").split_k, 16)
+        self.assertEqual(self._pick(*args, dtype_d="bf16").split_k, 12)
         self.assertEqual(self._pick(*args, dtype_d="fp16").split_k, 1)
         self.assertEqual(self._pick(*args, dtype_d="fp32").split_k, 128)
 
     def test_bf16_degree_stays_within_tolerance(self):
         # N=64, 64x64, C=K=16, 3x3: wg_M=16, wg_N=144, wg_K=262144. Fill and
         # slice depth both ask for 128, where all-positive bf16 partials exceed
-        # the 5e-2 tolerance. Each packed bf16 add rounds the running sum by at
-        # most 2**-9, so the degree must keep degree * 2**-9 under 5e-2.
+        # the 5e-2 tolerance. bf16's unit roundoff is 2**-8 (7 fraction bits),
+        # and a degree-d split rounds d times, so gamma_d = d*u / (1 - d*u)
+        # must stay under 5e-2: 12 does, 13 does not.
+        u = 2.0**-8
         for tile in (32, 64):
             d = self._pick(16, 9 * 16, 64 * 64 * 64, tile=tile, dtype_d="bf16")
-            self.assertEqual(d.split_k, 16, d.reason)
-            self.assertLess(d.split_k * 2.0**-9, 5e-2)
+            self.assertEqual(d.split_k, 12, d.reason)
+            self.assertLessEqual(d.split_k * u / (1 - d.split_k * u), 5e-2)
+        self.assertGreater(13 * u / (1 - 13 * u), 5e-2)
+
+    def test_bf16_cap_holds_on_worst_case_partials(self):
+        # One 1.0 partial followed by (degree - 1) partials of 2**-8: each is
+        # half an ulp at 1.0, so a round-to-nearest-even bf16 sum stays at 1.0.
+        # At 16 that loses 15/256 (about 5.5%); at the cap it must not exceed
+        # the tolerance.
+        def bf16(x):
+            bits = struct.unpack("<I", struct.pack("<f", x))[0]
+            bits = (bits + 0x7FFF + ((bits >> 16) & 1)) & 0xFFFF0000
+            return struct.unpack("<f", struct.pack("<I", bits))[0]
+
+        def rel_err(degree):
+            parts = [1.0] + [2.0**-8] * (degree - 1)
+            acc = 0.0
+            for p in parts:
+                acc = bf16(acc + bf16(p))
+            exact = sum(parts)
+            return abs(acc - exact) / exact
+
+        self.assertGreater(rel_err(16), 5e-2)
+        cap = self._pick(24, 9 * 24, 42 * 240 * 320, dtype_d="bf16").split_k
+        self.assertLessEqual(rel_err(cap), 5e-2)
 
     def test_fill_boundary(self):
         # 2048 // 127 = 2048 // 128 = 16; one tile more drops the fill to 15.
+        # fp32, so no 16-bit accuracy cap binds below the fill term.
         for tiles, expected in ((127, 16), (128, 16), (129, 15)):
-            d = self._pick(64, 64 * tiles, 1 << 24, dtype_d="bf16")
+            d = self._pick(64, 64 * tiles, 1 << 24, dtype_d="fp32")
             self.assertEqual((d.base_grid, d.split_k), (tiles, expected))
 
     def test_tiny_reduction_does_not_split(self):
