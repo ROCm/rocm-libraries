@@ -8535,6 +8535,13 @@ rocblaslt_status rocblaslt_local_kernel_set_exact_match(
        st != rocblaslt_status_success)
         return st;
 
+    auto hardware = TensileLite::hip::GetDevice(handle->device);
+    if(!hardware)
+        return rocblaslt_status_internal_error;
+    auto solution = localLibrary->lookupIndex(kernelIndex);
+    if(!solution || !(*solution->hardwarePredicate)(*hardware))
+        return rocblaslt_status_invalid_value;
+
     if(!localLibrary->setExactMatch(TensileLite::LocalExactShape{m, n, batch, k}, kernelIndex))
         return rocblaslt_status_invalid_value;
     return rocblaslt_status_success;

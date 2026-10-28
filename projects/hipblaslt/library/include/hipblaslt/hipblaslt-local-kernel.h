@@ -110,7 +110,8 @@ hipblasStatus_t hipblasLtLocalKernelRegister(hipblasLtHandle_t handle,
  *
  *  \retval HIPBLAS_STATUS_SUCCESS          The mapping was published.
  *  \retval HIPBLAS_STATUS_INVALID_VALUE    The index is not a registered local
- *                                          kernel.
+ *                                          kernel or cannot run on the handle's
+ *                                          device.
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtLocalKernelSetExactMatch(
