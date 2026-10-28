@@ -61,7 +61,8 @@ st.func @at_p2_k2_buffer_store() {
   "st.buffer_store_b128"(v[624:627], v525, s[16:19], 0) { issueCycles = 1, latencyCycles = 1, mod.mubuf = { offen = true, offset12 = 608, glc = false, slc = false, nt = false, lds = false, scope = "SCOPE_CU" } }
 }
 
-#--- P(2)=40832: same VMEM group remains open, so xcnt protection is still emitted.
+#--- P(2)=40832: a zero-byte label does not break the same VMEM group, so xcnt
+# protection is still emitted before the prefetch.
 # CHECK-LABEL: function "same_vmem_group_needs_xcnt"
 # CHECK: {{.*}}buffer_load_b32
 # CHECK: {{.*}}total=40824 bytes{{.*}}s_wait_xcnt{{.*}}(0)
@@ -73,6 +74,7 @@ st.func @same_vmem_group_needs_xcnt() {
 ^entry:
   v100 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
   "st.asm_directive"(".align", "40820")
+label_same_vmem_group:
   "st.buffer_store_b128"(v[624:627], v525, s[16:19], 0) { issueCycles = 1, latencyCycles = 1, mod.mubuf = { offen = true, offset12 = 608, glc = false, slc = false, nt = false, lds = false, scope = "SCOPE_CU" } }
 }
 
