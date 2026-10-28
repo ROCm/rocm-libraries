@@ -10,28 +10,36 @@ from pathlib import Path
 from types import ModuleType
 from typing import Protocol
 
+from geko.paths import HIPBLASLT_PATH_ENV_VAR, locate_hipblaslt_root
 
-def _solution_id_gen_path(hipblaslt_path: str | Path | None = None) -> Path:
-    """Return the ``SolutionIdGen.py`` path for one hipBLASLt checkout.
 
-    Without ``hipblaslt_path``, the checkout is the one containing this file,
-    which holds only for a source tree or an editable install. A non-editable
-    ``pip install .`` copies Geko into ``site-packages``, where that guess
-    points into the virtualenv.
+def _solution_id_gen_path() -> Path:
+    """Return the ``SolutionIdGen.py`` path for this process.
+
+    The checkout comes from :func:`geko.paths.locate_hipblaslt_root`: the
+    process binding, then ``GEKO_HIPBLASLT_PATH``, then the nearest ancestor
+    of this file that contains ``tensilelite/``.
 
     Args:
-        hipblaslt_path: hipBLASLt checkout root used by the Geko run, or None.
+        None.
 
     Returns:
         Path to ``tensilelite/tensilelite/Common/SolutionIdGen.py``.
+
+    Raises:
+        FileNotFoundError: If no checkout is bound, set, or found by walking up.
     """
-    root = (
-        Path(hipblaslt_path) if hipblaslt_path is not None else Path(__file__).resolve().parents[4]
-    )
+    root = locate_hipblaslt_root(anchor=Path(__file__))
+    if root is None:
+        raise FileNotFoundError(
+            "SolutionIdGen.py not found. Call bind_hipblaslt with the hipBLASLt "
+            f"checkout, set {HIPBLASLT_PATH_ENV_VAR}, or install Geko from the "
+            "hipBLASLt checkout with 'pip install -e .'."
+        )
     return root / "tensilelite" / "tensilelite" / "Common" / "SolutionIdGen.py"
 
 
-def _load_solution_id_gen(hipblaslt_path: str | Path | None = None) -> ModuleType:
+def _load_solution_id_gen() -> ModuleType:
     """Load SolutionIdGen without importing ``tensilelite.Common``.
 
     ``tensilelite.Common`` imports rocisa. Geko's uniqueness retry only needs
@@ -40,20 +48,22 @@ def _load_solution_id_gen(hipblaslt_path: str | Path | None = None) -> ModuleTyp
     merged library is built.
 
     Args:
-        hipblaslt_path: hipBLASLt checkout root used by the Geko run, or None.
+        None.
 
     Returns:
         The loaded ``SolutionIdGen`` module.
 
     Raises:
-        FileNotFoundError: If ``SolutionIdGen.py`` is not in the checkout.
+        FileNotFoundError: If ``SolutionIdGen.py`` is not in the selected checkout.
         ImportError: If the module spec or loader cannot be created.
     """
-    module_path = _solution_id_gen_path(hipblaslt_path)
+    module_path = _solution_id_gen_path()
     if not module_path.is_file():
         raise FileNotFoundError(
-            f"SolutionIdGen.py not found: {module_path}. Pass hipblaslt_path, "
-            "or install Geko from the hipBLASLt checkout with 'pip install -e .'."
+            f"SolutionIdGen.py not found: {module_path}. "
+            "Call bind_hipblaslt with the hipBLASLt checkout, "
+            f"set {HIPBLASLT_PATH_ENV_VAR}, or install Geko from the "
+            "hipBLASLt checkout with 'pip install -e .'."
         )
     spec = importlib.util.spec_from_file_location("geko_solution_id_gen", module_path)
     if spec is None or spec.loader is None:
@@ -69,20 +79,18 @@ class _SolutionLibrary(Protocol):
     solutions: list[dict]
 
 
-def assign_fresh_solution_uids(
-    libraries: list[_SolutionLibrary], hipblaslt_path: str | Path | None = None
-) -> int:
+def assign_fresh_solution_uids(libraries: list[_SolutionLibrary]) -> int:
     """Give every solution a new UID before writing ``full_libs`` or ``final_libs``.
 
     The source UID is dropped, including a UID copied from an Origami solution.
     One draw is shared across the libraries so the written directory has no
     duplicate. ``TensileMergeLibrary`` still matches ``SolutionNameMin``: an
     existing Equality solution keeps its UID, and a new name keeps this one.
+    The codec checkout comes from :func:`geko.paths.locate_hipblaslt_root`.
 
     Args:
         libraries: Libraries updated in place. Each solution dict loses
             ``SolutionUID`` and receives a new canonical value.
-        hipblaslt_path: hipBLASLt checkout root that contains ``SolutionIdGen.py``.
 
     Returns:
         Number of solutions assigned a new UID.
@@ -96,7 +104,7 @@ def assign_fresh_solution_uids(
     solutions = [solution for library in libraries for solution in library.solutions]
     if not solutions:
         return 0
-    solution_id_gen = _load_solution_id_gen(hipblaslt_path)
+    solution_id_gen = _load_solution_id_gen()
     seen: set[str] = set()
     for solution in solutions:
         solution.pop("SolutionUID", None)
@@ -104,13 +112,14 @@ def assign_fresh_solution_uids(
     return len(solutions)
 
 
-def uniquify_generated_logic(paths: list[Path], hipblaslt_path: str | Path | None = None) -> int:
+def uniquify_generated_logic(paths: list[Path]) -> int:
     """Make SolutionUIDs unique across logic files from one Geko run.
+
+    The codec checkout comes from :func:`geko.paths.locate_hipblaslt_root`.
 
     Args:
         paths: ``3_LibraryLogic`` YAML files written by the Tensile jobs in
             this generation. Other architectures are not read.
-        hipblaslt_path: hipBLASLt checkout root that contains ``SolutionIdGen.py``.
 
     Returns:
         Number of UID lines rewritten.
@@ -123,4 +132,4 @@ def uniquify_generated_logic(paths: list[Path], hipblaslt_path: str | Path | Non
     """
     if not paths:
         return 0
-    return _load_solution_id_gen(hipblaslt_path).rewrite_colliding_solution_uids(list(paths))
+    return _load_solution_id_gen().rewrite_colliding_solution_uids(list(paths))

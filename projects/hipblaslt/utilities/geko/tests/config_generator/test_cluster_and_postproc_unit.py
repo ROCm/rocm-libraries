@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 import sys
 
 from geko.config_generator import cluster_sizes as cs
@@ -117,14 +116,71 @@ def test_gfx950_postprocessor_adjustments(monkeypatch) -> None:
 
 
 def test_load_cms_groups_import_error(monkeypatch) -> None:
+    """A missing checkout is reported when tensilelite cannot be imported.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the missing checkout is not reported.
+    """
     monkeypatch.setitem(sys.modules, "tensilelite", None)
-    monkeypatch.setattr(os.path, "isdir", lambda _p: False)
+    monkeypatch.setattr(gfx950_pp, "locate_hipblaslt_root", lambda **_kwargs: None)
     raised = False
     try:
         gfx950_pp.load_CMS_groups("H", "N", "N", lambda *a, **k: ForkParameter(name=a[0], values=a[1]))
     except ImportError:
         raised = True
     assert raised is True
+
+
+def test_load_cms_groups_uses_the_bound_checkout(monkeypatch, tmp_path) -> None:
+    """CMS import retry uses the tensilelite directory from the bound checkout.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If that tensilelite directory is not inserted on sys.path.
+    """
+    root = tmp_path / "hip"
+    (root / "tensilelite").mkdir(parents=True)
+    monkeypatch.setitem(sys.modules, "tensilelite", None)
+    monkeypatch.setattr(gfx950_pp, "locate_hipblaslt_root", lambda **_kwargs: root)
+    inserted = []
+
+    class _PathList(list):
+        """A sys.path stand-in that records insertions."""
+
+        def insert(self, index: int, path: str) -> None:
+            """Record ``path`` and insert it.
+
+            Args:
+                index: Insertion index.
+                path: Path inserted on sys.path.
+
+            Returns:
+                None.
+
+            Raises:
+                None.
+            """
+            inserted.append(path)
+            super().insert(index, path)
+
+    monkeypatch.setattr(sys, "path", _PathList(sys.path))
+    try:
+        gfx950_pp.load_CMS_groups("H", "N", "N", lambda *a, **k: ForkParameter(name=a[0], values=a[1]))
+    except ImportError:
+        pass
+    assert inserted == [str(root / "tensilelite")]
 
 
 def test_base_postprocessor_ignore_non_temporal_filter(monkeypatch) -> None:

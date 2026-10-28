@@ -597,7 +597,7 @@ invoke build --install-deps --clients --architecture gfx950 --skip-rocroller
 
 `TensileMergeLibrary` arguments: `--no_eff` skips efficiency calculations; `--force_merge True` forces merge on conflicts; the three positional args are original dir, new libs dir, output dir (same as original to update in place).
 
-`final_libs` and `full_libs` give every solution a new `SolutionUID`, including one copied from Origami. Geko loads `SolutionIdGen.py` from the hipBLASLt checkout passed to the workflow. A direct library call without `hipblaslt_path` uses the checkout that contains Geko, which only an editable install keeps; if that file is missing, the call fails instead of keeping a copied UID. `TensileMergeLibrary` matches `SolutionNameMin`: an existing Equality solution keeps its UID and the new one is ignored, and a new name (the Origami copy) is merged with the fresh UID so it does not duplicate the Origami file.
+`final_libs` and `full_libs` give every solution a new `SolutionUID`, including one copied from Origami. Search, tune, prune, and the CLI call `bind_hipblaslt` with the hipBLASLt checkout for that run. `merge_solutions` does not take a hipBLASLt path. A direct library call, including the gfx950 CMS loader, uses that binding, then `GEKO_HIPBLASLT_PATH`, then the nearest parent directory that contains `tensilelite/`, which an editable install keeps. If that file is missing, the call fails instead of keeping a copied UID. `TensileMergeLibrary` matches `SolutionNameMin`: an existing Equality solution keeps its UID and the new one is ignored, and a new name (the Origami copy) is merged with the fresh UID so it does not duplicate the Origami file.
 
 **Verify:**
 ```bash

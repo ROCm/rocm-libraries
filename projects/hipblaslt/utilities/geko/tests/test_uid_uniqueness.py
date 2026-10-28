@@ -10,10 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from geko.library.uid_uniqueness import (
-    assign_fresh_solution_uids,
-    uniquify_generated_logic,
-)
+from geko.library.uid_uniqueness import assign_fresh_solution_uids, uniquify_generated_logic
+from geko.paths import HIPBLASLT_PATH_ENV_VAR, bind_hipblaslt
 
 
 def _write_solution_id_gen(directory: Path, source: str) -> Path:
@@ -47,52 +45,76 @@ def test_assign_fresh_solution_uids_skips_an_empty_library(tmp_path: Path) -> No
     Raises:
         AssertionError: If the empty call loads the codec or returns a count.
     """
-    assert assign_fresh_solution_uids([], hipblaslt_path=tmp_path / "missing") == 0
+    assert assign_fresh_solution_uids([]) == 0
 
 
-def test_assign_fresh_solution_uids_rejects_a_missing_codec(tmp_path: Path) -> None:
-    """A checkout without SolutionIdGen.py fails before a copied UID is written.
+def test_assign_fresh_solution_uids_rejects_a_missing_codec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bound checkout without SolutionIdGen.py fails and does not fall through.
 
     Args:
         tmp_path: Pytest temporary-directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
 
     Returns:
         None.
 
     Raises:
-        AssertionError: If the missing codec is not reported.
+        AssertionError: If the missing codec is not reported or the env checkout is used.
     """
+    _write_solution_id_gen(
+        tmp_path / "env" / "tensilelite" / "tensilelite" / "Common",
+        "def claim_solution_uid(solution, seen):\n"
+        "    solution['SolutionUID'] = '0uENV'\n"
+        "    seen.add('0uENV')\n"
+        "    return '0uENV'\n",
+    )
+    monkeypatch.setenv(HIPBLASLT_PATH_ENV_VAR, str(tmp_path / "env"))
+    bind_hipblaslt(tmp_path / "missing")
     library = SimpleNamespace(solutions=[{"SolutionUID": "0u5"}])
 
     with pytest.raises(FileNotFoundError, match="SolutionIdGen.py not found"):
-        assign_fresh_solution_uids([library], hipblaslt_path=tmp_path / "missing")
+        assign_fresh_solution_uids([library])
 
     assert library.solutions[0]["SolutionUID"] == "0u5"
 
 
-def test_assign_fresh_solution_uids_uses_the_given_checkout(tmp_path: Path) -> None:
-    """An explicit hipBLASLt checkout supplies the codec.
+def test_assign_fresh_solution_uids_uses_the_bound_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bound hipBLASLt checkout supplies the codec and wins over the env var.
 
     Args:
         tmp_path: Pytest temporary-directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
 
     Returns:
         None.
 
     Raises:
-        AssertionError: If the codec from that checkout is not used.
+        AssertionError: If the bound codec is not used.
     """
     _write_solution_id_gen(
-        tmp_path / "tensilelite" / "tensilelite" / "Common",
+        tmp_path / "bound" / "tensilelite" / "tensilelite" / "Common",
         "def claim_solution_uid(solution, seen):\n"
-        "    solution['SolutionUID'] = '0uCHECKOUT'\n"
-        "    seen.add('0uCHECKOUT')\n"
-        "    return '0uCHECKOUT'\n",
+        "    solution['SolutionUID'] = '0uBOUND'\n"
+        "    seen.add('0uBOUND')\n"
+        "    return '0uBOUND'\n",
     )
+    _write_solution_id_gen(
+        tmp_path / "env" / "tensilelite" / "tensilelite" / "Common",
+        "def claim_solution_uid(solution, seen):\n"
+        "    solution['SolutionUID'] = '0uENV'\n"
+        "    seen.add('0uENV')\n"
+        "    return '0uENV'\n",
+    )
+    monkeypatch.setenv(HIPBLASLT_PATH_ENV_VAR, str(tmp_path / "env"))
+    bind_hipblaslt(tmp_path / "bound")
     library = SimpleNamespace(solutions=[{"SolutionUID": "0u5"}])
 
-    assert assign_fresh_solution_uids([library], hipblaslt_path=tmp_path) == 1
-    assert library.solutions[0]["SolutionUID"] == "0uCHECKOUT"
+    assert assign_fresh_solution_uids([library]) == 1
+    assert library.solutions[0]["SolutionUID"] == "0uBOUND"
 
 
 def test_assign_fresh_solution_uids_uses_the_loaded_codec(
@@ -167,11 +189,14 @@ def test_uniquify_generated_logic_skips_empty_paths() -> None:
     assert uniquify_generated_logic([]) == 0
 
 
-def test_uniquify_generated_logic_rejects_a_missing_codec(tmp_path: Path) -> None:
-    """A checkout without SolutionIdGen.py fails without rewriting logic files.
+def test_uniquify_generated_logic_rejects_a_missing_codec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An env checkout without SolutionIdGen.py fails and does not fall through.
 
     Args:
         tmp_path: Pytest temporary-directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
 
     Returns:
         None.
@@ -181,9 +206,10 @@ def test_uniquify_generated_logic_rejects_a_missing_codec(tmp_path: Path) -> Non
     """
     logic = tmp_path / "logic.yaml"
     logic.write_text("SolutionUID: 0u5\n", encoding="utf-8")
+    monkeypatch.setenv(HIPBLASLT_PATH_ENV_VAR, str(tmp_path / "missing"))
 
     with pytest.raises(FileNotFoundError, match="SolutionIdGen.py not found"):
-        uniquify_generated_logic([logic], hipblaslt_path=tmp_path / "missing")
+        uniquify_generated_logic([logic])
 
     assert logic.read_text(encoding="utf-8") == "SolutionUID: 0u5\n"
 
@@ -214,3 +240,80 @@ def test_uniquify_generated_logic_uses_the_loaded_rewriter(
     rewritten = uniquify_generated_logic([logic])
 
     assert rewritten == 1
+
+
+def test_assign_fresh_solution_uids_rejects_a_missing_checkout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No bound checkout, env var, or ancestor walk leaves the copied UID unchanged.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the missing checkout is not reported.
+    """
+    monkeypatch.setattr(
+        "geko.library.uid_uniqueness.locate_hipblaslt_root",
+        lambda **_kwargs: None,
+    )
+    library = SimpleNamespace(solutions=[{"SolutionUID": "0u5"}])
+
+    with pytest.raises(FileNotFoundError, match="SolutionIdGen.py not found"):
+        assign_fresh_solution_uids([library])
+
+    assert library.solutions[0]["SolutionUID"] == "0u5"
+
+
+def test_assign_fresh_solution_uids_uses_the_env_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GEKO_HIPBLASLT_PATH supplies the codec when nothing is bound.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the env checkout is not used.
+    """
+    _write_solution_id_gen(
+        tmp_path / "tensilelite" / "tensilelite" / "Common",
+        "def claim_solution_uid(solution, seen):\n"
+        "    solution['SolutionUID'] = '0uENV'\n"
+        "    seen.add('0uENV')\n"
+        "    return '0uENV'\n",
+    )
+    monkeypatch.setenv(HIPBLASLT_PATH_ENV_VAR, str(tmp_path))
+    library = SimpleNamespace(solutions=[{"SolutionUID": "0u5"}])
+
+    assert assign_fresh_solution_uids([library]) == 1
+    assert library.solutions[0]["SolutionUID"] == "0uENV"
+
+
+def test_assign_fresh_solution_uids_uses_the_containing_checkout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no binding and no env var, the codec is the checkout containing Geko.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the source-tree codec does not replace a malformed UID.
+    """
+    monkeypatch.delenv(HIPBLASLT_PATH_ENV_VAR, raising=False)
+    library = SimpleNamespace(solutions=[{"SolutionUID": "not-a-uid"}])
+
+    assert assign_fresh_solution_uids([library]) == 1
+    assert library.solutions[0]["SolutionUID"].startswith("0u")
+    assert library.solutions[0]["SolutionUID"] != "not-a-uid"

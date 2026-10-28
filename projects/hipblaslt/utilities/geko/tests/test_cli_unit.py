@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from geko import cli
+from geko import paths
 
 
 @pytest.fixture(autouse=True)
@@ -413,6 +414,7 @@ def test_dispatch_aborts_when_gpu_check_times_out(monkeypatch: pytest.MonkeyPatc
 
     rc = cli.dispatch(_bench_args(tmp_path, workload), anchor=str(tmp_path))
     assert rc == 1
+    assert paths._BOUND_HIPBLASLT_PATH == tmp_path
 
 
 def test_dispatch_aborts_when_gpu_check_finds_insufficient_devices(

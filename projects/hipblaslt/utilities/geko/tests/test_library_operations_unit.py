@@ -13,6 +13,7 @@ import yaml
 
 from geko.library import Library
 from geko.library import operations
+from geko import paths
 
 
 def _make_min_library() -> Library:
@@ -82,6 +83,28 @@ def _write_match_table(path: Path, entries) -> Path:
 def test_load_collection_missing_dir_raises(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         operations.load_collection(tmp_path / "missing")
+
+
+def test_merge_solutions_rejects_hipblaslt_path(tmp_path: Path) -> None:
+    """Library merge and dataframe helpers do not take a hipBLASLt path.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If a hipBLASLt path argument is accepted.
+    """
+    with pytest.raises(TypeError, match="hipblaslt_path"):
+        operations.merge_solutions(tmp_path, hipblaslt_path=tmp_path)
+    with pytest.raises(TypeError, match="hipblaslt_path"):
+        operations.from_dataframe(pd.DataFrame(), tmp_path, hipblaslt_path=tmp_path)
+    with pytest.raises(TypeError, match="hipblaslt_path"):
+        operations.from_full_dataframe(
+            pd.DataFrame(), tmp_path, tmp_path, hipblaslt_path=tmp_path
+        )
 
 
 def test_merge_solutions_no_files_raises(tmp_path: Path) -> None:
@@ -558,10 +581,22 @@ def test_prune_library_missing_hipblaslt_raises(tmp_path: Path) -> None:
 
 
 def test_prune_library_requires_library_type(tmp_path: Path) -> None:
+    """Reject a non-library after binding the checkout for SolutionIdGen.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the type error is not reported or the checkout is not bound.
+    """
     hip = tmp_path / "hip"
     hip.mkdir()
     with pytest.raises(TypeError, match="Must be of type 'Library'"):
         operations.prune_library(hip, base_lib={})
+    assert paths._BOUND_HIPBLASLT_PATH == hip
 
 
 def test_prune_library_requires_sizes(tmp_path: Path) -> None:

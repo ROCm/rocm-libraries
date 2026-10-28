@@ -4,6 +4,7 @@
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from geko.config_generator.constants import get_list_of_mt_max_size
+from geko.paths import locate_hipblaslt_root
 from geko.config_generator.mi_designer import MFMA, MIDesign
 from geko.config_generator.fork_params.post_processor import BasePostProcessor, mark_post_process, _mi_matches_mt
 from geko.config_generator.shared_utils import (
@@ -203,35 +204,39 @@ def load_CMS_groups(
     parameters. For ``MatrixInstruction``, that default is replaced here with
     a comment derived from ``MIDesign.calculate_mfma_parameters`` (MT, TT, WG,
     MIBlockM), matching the loop below.
+
+    Args:
+        datatype: Tensile data-type letter used to select the CMS query.
+        transA: Transpose flag for matrix A.
+        transB: Transpose flag for matrix B.
+        make_param: Bound ``_make_param`` that builds a ``ForkParameter``.
+        MT_DU: Optional macro-tile and depth filter. None keeps every kernel.
+
+    Returns:
+        CMS groups to prepend to the MI groups. Empty when the data type has
+        no CMS query.
+
+    Raises:
+        ImportError: If tensilelite cannot be imported from the checkout
+            selected by :func:`geko.paths.locate_hipblaslt_root`.
     """
     try:
         from tensilelite.Components.CustomSchedule import query_cms_kernels
         from tensilelite.Common.ValidParameters import validParameters
     except ImportError:
         import sys
-        import os
-        # Walk up directory tree looking for tensilelite as a sibling directory
-        # This works regardless of where the file is moved within the project structure
-        current_file = os.path.abspath(__file__)
-        current_dir = os.path.dirname(current_file)
-        tensilelite_path = None
-        
-        # Walk up until we find a parent containing 'tensilelite' directory
-        while current_dir != os.path.dirname(current_dir):  # not at filesystem root
-            candidate_path = os.path.join(current_dir, "tensilelite")
-            if os.path.isdir(candidate_path):
-                tensilelite_path = candidate_path
-                break
-            current_dir = os.path.dirname(current_dir)
-        
-        if tensilelite_path:
-            sys.path.insert(0, tensilelite_path)
+
+        root = locate_hipblaslt_root(anchor=__file__)
+        tensilelite_path = None if root is None else root / "tensilelite"
+        if tensilelite_path is not None and tensilelite_path.is_dir():
+            sys.path.insert(0, str(tensilelite_path))
             from tensilelite.Components.CustomSchedule import query_cms_kernels
             from tensilelite.Common.ValidParameters import validParameters
         else:
             raise ImportError(
-                "tensilelite not found. Could not locate tensilelite directory "
-                "in parent directories of this file."
+                "tensilelite not found. Call bind_hipblaslt with the hipBLASLt "
+                "checkout, set GEKO_HIPBLASLT_PATH, or install Geko from the "
+                "hipBLASLt checkout with 'pip install -e .'."
             )
     
 
