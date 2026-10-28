@@ -67,9 +67,9 @@ Ranges compare and hash by value, support len() and iterate over their indices.
         nb::kw_only(), "logical_elements"_a, "allocated_elements"_a, "requested_elements"_a,
         R"doc(
 Choose a prime stride from allocated_elements / requested_elements.
-The resulting count is approximate. Zero requested elements, or a request
-at least as large as logical_elements, selects the full logical range. All
-arguments are keyword-only because the three counts are easy to transpose.
+The resulting count is approximate. Zero requested elements selects no index;
+a request at least as large as logical_elements selects the full logical range.
+All arguments are keyword-only because the three counts are easy to transpose.
 )doc");
 }
 }  // namespace roc::hostnumerics::python_bindings
