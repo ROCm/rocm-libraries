@@ -115,33 +115,35 @@ class BlockStore
 public:
     using TempStorage = typename base_type::storage_type;
 
-    HIPCUB_DEVICE inline
-    BlockStore() : temp_storage_(private_storage())
+    _CCCL_DEVICE
+    inline BlockStore()
+        : temp_storage_(private_storage())
     {
     }
 
-    HIPCUB_DEVICE inline
-    BlockStore(TempStorage& temp_storage) : temp_storage_(temp_storage)
+    _CCCL_DEVICE
+    inline BlockStore(TempStorage& temp_storage)
+        : temp_storage_(temp_storage)
     {
     }
 
     template<class OutputIteratorT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void Store(OutputIteratorT block_iter, T (&items)[ItemsPerThread])
     {
         base_type::store(block_iter, items, temp_storage_);
     }
 
     template<class OutputIteratorT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void Store(OutputIteratorT block_iter, T (&items)[ItemsPerThread], int valid_items)
     {
         base_type::store(block_iter, items, valid_items, temp_storage_);
     }
 
 private:
-    HIPCUB_DEVICE inline
-    TempStorage& private_storage()
+    _CCCL_DEVICE
+    inline TempStorage& private_storage()
     {
         HIPCUB_SHARED_MEMORY TempStorage private_storage;
         return private_storage;

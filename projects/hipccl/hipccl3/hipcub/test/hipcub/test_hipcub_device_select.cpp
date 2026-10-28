@@ -1008,7 +1008,7 @@ struct TestUniqueEqualityOp
     static constexpr int segment = 3;
 
     template<typename T>
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     bool operator()(const T& a, const T& b) const
     {
         static_assert(std::is_integral<T>::value, "T must be integral type");

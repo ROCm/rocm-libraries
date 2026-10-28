@@ -213,7 +213,7 @@ struct transform_idx_to_offset_op
     _HIPCUB_STD::int64_t segments;
     unsigned int         segment_length;
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline OffsetT       operator()(_HIPCUB_STD::int64_t i) const
     {
         if(i < segments)

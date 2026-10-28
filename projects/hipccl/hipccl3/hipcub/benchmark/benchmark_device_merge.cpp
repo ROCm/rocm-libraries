@@ -27,7 +27,7 @@
 template<class Key>
 struct CompareFunction
 {
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     inline constexpr bool operator()(const Key& a, const Key& b)
     {
         return a < b;

@@ -71,8 +71,6 @@
         #define _HIPCUB_STD _HIPCUB_LIBCXX::std
         #define _HIPCUB_STD_EXEC _HIPCUB_STD::execution
         #define _HIPCUB_HAS_DEVICE_SYSTEM_STD 1
-        #define _HIPCUB_STD_NAMESPACE_BEGIN _CCCL_BEGIN_NAMESPACE_CUDA_STD
-        #define _HIPCUB_STD_NAMESPACE_END _CCCL_END_NAMESPACE_CUDA_STD
     #endif
 #endif
 // Otherwise, if the '::hip::std' namespace from 'libhipcxx' is available.
@@ -89,8 +87,6 @@
         #define _HIPCUB_STD _HIPCUB_LIBCXX::std
         #define _HIPCUB_STD_EXEC _HIPCUB_STD::execution
         #define _HIPCUB_HAS_DEVICE_SYSTEM_STD 1
-        #define _HIPCUB_STD_NAMESPACE_BEGIN _CCCL_BEGIN_NAMESPACE_CUDA_STD
-        #define _HIPCUB_STD_NAMESPACE_END _CCCL_END_NAMESPACE_CUDA_STD
     #endif
 #endif
 

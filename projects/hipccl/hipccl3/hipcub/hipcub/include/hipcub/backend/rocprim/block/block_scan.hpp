@@ -102,30 +102,32 @@ class BlockScan
 public:
     using TempStorage = typename base_type::storage_type;
 
-    HIPCUB_DEVICE inline
-    BlockScan() : temp_storage_(private_storage())
+    _CCCL_DEVICE
+    inline BlockScan()
+        : temp_storage_(private_storage())
     {
     }
 
-    HIPCUB_DEVICE inline
-    BlockScan(TempStorage& temp_storage) : temp_storage_(temp_storage)
+    _CCCL_DEVICE
+    inline BlockScan(TempStorage& temp_storage)
+        : temp_storage_(temp_storage)
     {
     }
 
-    HIPCUB_DEVICE inline
-    void InclusiveSum(T input, T& output)
+    _CCCL_DEVICE
+    inline void InclusiveSum(T input, T& output)
     {
         base_type::inclusive_scan(input, output, temp_storage_);
     }
 
-    HIPCUB_DEVICE inline
-    void InclusiveSum(T input, T& output, T& block_aggregate)
+    _CCCL_DEVICE
+    inline void InclusiveSum(T input, T& output, T& block_aggregate)
     {
         base_type::inclusive_scan(input, output, block_aggregate, temp_storage_);
     }
 
     template<typename BlockPrefixCallbackOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void InclusiveSum(T input, T& output, BlockPrefixCallbackOp& block_prefix_callback_op)
     {
         base_type::inclusive_scan(input,
@@ -136,14 +138,14 @@ public:
     }
 
     template<int ItemsPerThread>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void InclusiveSum(T (&input)[ItemsPerThread], T (&output)[ItemsPerThread])
     {
         base_type::inclusive_scan(input, output, temp_storage_);
     }
 
     template<int ItemsPerThread>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void
         InclusiveSum(T (&input)[ItemsPerThread], T (&output)[ItemsPerThread], T& block_aggregate)
     {
@@ -151,7 +153,7 @@ public:
     }
 
     template<int ItemsPerThread, typename BlockPrefixCallbackOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void InclusiveSum(T (&input)[ItemsPerThread],
                              T (&output)[ItemsPerThread],
                              BlockPrefixCallbackOp& block_prefix_callback_op)
@@ -164,22 +166,25 @@ public:
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE inline
-    void InclusiveScan(T input, T& output, ScanOp scan_op)
+    _CCCL_DEVICE
+    inline void InclusiveScan(T input, T& output, ScanOp scan_op)
     {
         base_type::inclusive_scan(input, output, temp_storage_, scan_op);
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE inline
-    void InclusiveScan(T input, T& output, ScanOp scan_op, T& block_aggregate)
+    _CCCL_DEVICE
+    inline void InclusiveScan(T input, T& output, ScanOp scan_op, T& block_aggregate)
     {
         base_type::inclusive_scan(input, output, block_aggregate, temp_storage_, scan_op);
     }
 
     template<typename ScanOp, typename BlockPrefixCallbackOp>
-    HIPCUB_DEVICE inline
-    void InclusiveScan(T input, T& output, ScanOp scan_op, BlockPrefixCallbackOp& block_prefix_callback_op)
+    _CCCL_DEVICE
+    inline void InclusiveScan(T                      input,
+                              T&                     output,
+                              ScanOp                 scan_op,
+                              BlockPrefixCallbackOp& block_prefix_callback_op)
     {
         base_type::inclusive_scan(
             input, output, temp_storage_, block_prefix_callback_op, scan_op
@@ -187,7 +192,7 @@ public:
     }
 
     template<int ItemsPerThread, typename ScanOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void
         InclusiveScan(T (&input)[ItemsPerThread], T (&output)[ItemsPerThread], ScanOp scan_op)
     {
@@ -195,7 +200,7 @@ public:
     }
 
     template<int ItemsPerThread, typename ScanOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void InclusiveScan(T (&input)[ItemsPerThread],
                               T (&output)[ItemsPerThread],
                               T      initial_value,
@@ -205,7 +210,7 @@ public:
     }
 
     template<int ItemsPerThread, typename ScanOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void InclusiveScan(T (&input)[ItemsPerThread],
                               T (&output)[ItemsPerThread],
                               ScanOp scan_op,
@@ -215,7 +220,7 @@ public:
     }
 
     template<int ItemsPerThread, typename ScanOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void InclusiveScan(T (&input)[ItemsPerThread],
                               T (&output)[ItemsPerThread],
                               T      initial_value,
@@ -231,7 +236,7 @@ public:
     }
 
     template<int ItemsPerThread, typename ScanOp, typename BlockPrefixCallbackOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void InclusiveScan(T (&input)[ItemsPerThread],
                               T (&output)[ItemsPerThread],
                               ScanOp                 scan_op,
@@ -242,20 +247,20 @@ public:
         );
     }
 
-    HIPCUB_DEVICE inline
-    void ExclusiveSum(T input, T& output)
+    _CCCL_DEVICE
+    inline void ExclusiveSum(T input, T& output)
     {
         base_type::exclusive_scan(input, output, T(0), temp_storage_);
     }
 
-    HIPCUB_DEVICE inline
-    void ExclusiveSum(T input, T& output, T& block_aggregate)
+    _CCCL_DEVICE
+    inline void ExclusiveSum(T input, T& output, T& block_aggregate)
     {
         base_type::exclusive_scan(input, output, T(0), block_aggregate, temp_storage_);
     }
 
     template<typename BlockPrefixCallbackOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ExclusiveSum(T input, T& output, BlockPrefixCallbackOp& block_prefix_callback_op)
     {
         base_type::exclusive_scan(input,
@@ -266,14 +271,14 @@ public:
     }
 
     template<int ItemsPerThread>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ExclusiveSum(T (&input)[ItemsPerThread], T (&output)[ItemsPerThread])
     {
         base_type::exclusive_scan(input, output, T(0), temp_storage_);
     }
 
     template<int ItemsPerThread>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void
         ExclusiveSum(T (&input)[ItemsPerThread], T (&output)[ItemsPerThread], T& block_aggregate)
     {
@@ -281,7 +286,7 @@ public:
     }
 
     template<int ItemsPerThread, typename BlockPrefixCallbackOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ExclusiveSum(T (&input)[ItemsPerThread],
                              T (&output)[ItemsPerThread],
                              BlockPrefixCallbackOp& block_prefix_callback_op)
@@ -294,16 +299,16 @@ public:
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE inline
-    void ExclusiveScan(T input, T& output, T initial_value, ScanOp scan_op)
+    _CCCL_DEVICE
+    inline void ExclusiveScan(T input, T& output, T initial_value, ScanOp scan_op)
     {
         base_type::exclusive_scan(input, output, initial_value, temp_storage_, scan_op);
     }
 
     template<typename ScanOp>
-    HIPCUB_DEVICE inline
-    void ExclusiveScan(T input, T& output, T initial_value,
-                       ScanOp scan_op, T& block_aggregate)
+    _CCCL_DEVICE
+    inline void
+        ExclusiveScan(T input, T& output, T initial_value, ScanOp scan_op, T& block_aggregate)
     {
         base_type::exclusive_scan(
             input, output, initial_value, block_aggregate, temp_storage_, scan_op
@@ -311,9 +316,11 @@ public:
     }
 
     template<typename ScanOp, typename BlockPrefixCallbackOp>
-    HIPCUB_DEVICE inline
-    void ExclusiveScan(T input, T& output, ScanOp scan_op,
-                       BlockPrefixCallbackOp& block_prefix_callback_op)
+    _CCCL_DEVICE
+    inline void ExclusiveScan(T                      input,
+                              T&                     output,
+                              ScanOp                 scan_op,
+                              BlockPrefixCallbackOp& block_prefix_callback_op)
     {
         base_type::exclusive_scan(
             input, output, temp_storage_, block_prefix_callback_op, scan_op
@@ -321,7 +328,7 @@ public:
     }
 
     template<int ItemsPerThread, typename ScanOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ExclusiveScan(T (&input)[ItemsPerThread],
                               T (&output)[ItemsPerThread],
                               T      initial_value,
@@ -331,7 +338,7 @@ public:
     }
 
     template<int ItemsPerThread, typename ScanOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ExclusiveScan(T (&input)[ItemsPerThread],
                               T (&output)[ItemsPerThread],
                               T      initial_value,
@@ -344,7 +351,7 @@ public:
     }
 
     template<int ItemsPerThread, typename ScanOp, typename BlockPrefixCallbackOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ExclusiveScan(T (&input)[ItemsPerThread],
                               T (&output)[ItemsPerThread],
                               ScanOp                 scan_op,
@@ -356,8 +363,8 @@ public:
     }
 
 private:
-    HIPCUB_DEVICE inline
-    TempStorage& private_storage()
+    _CCCL_DEVICE
+    inline TempStorage& private_storage()
     {
         HIPCUB_SHARED_MEMORY TempStorage private_storage;
         return private_storage;

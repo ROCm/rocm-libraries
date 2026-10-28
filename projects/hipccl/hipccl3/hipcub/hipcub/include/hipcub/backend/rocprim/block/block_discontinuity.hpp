@@ -51,18 +51,20 @@ class BlockDiscontinuity
 public:
     using TempStorage = typename base_type::storage_type;
 
-    HIPCUB_DEVICE inline
-    BlockDiscontinuity() : temp_storage_(private_storage())
+    _CCCL_DEVICE
+    inline BlockDiscontinuity()
+        : temp_storage_(private_storage())
     {
     }
 
-    HIPCUB_DEVICE inline
-    BlockDiscontinuity(TempStorage& temp_storage) : temp_storage_(temp_storage)
+    _CCCL_DEVICE
+    inline BlockDiscontinuity(TempStorage& temp_storage)
+        : temp_storage_(temp_storage)
     {
     }
 
     template<int ItemsPerThread, typename FlagT, typename FlagOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void
         FlagHeads(FlagT (&head_flags)[ItemsPerThread], T (&input)[ItemsPerThread], FlagOp flag_op)
     {
@@ -70,7 +72,7 @@ public:
     }
 
     template<int ItemsPerThread, typename FlagT, typename FlagOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void FlagHeads(FlagT (&head_flags)[ItemsPerThread],
                           T (&input)[ItemsPerThread],
                           FlagOp flag_op,
@@ -80,7 +82,7 @@ public:
     }
 
     template<int ItemsPerThread, typename FlagT, typename FlagOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void
         FlagTails(FlagT (&tail_flags)[ItemsPerThread], T (&input)[ItemsPerThread], FlagOp flag_op)
     {
@@ -88,7 +90,7 @@ public:
     }
 
     template<int ItemsPerThread, typename FlagT, typename FlagOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void FlagTails(FlagT (&tail_flags)[ItemsPerThread],
                           T (&input)[ItemsPerThread],
                           FlagOp flag_op,
@@ -98,7 +100,7 @@ public:
     }
 
     template<int ItemsPerThread, typename FlagT, typename FlagOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void FlagHeadsAndTails(FlagT (&head_flags)[ItemsPerThread],
                                   FlagT (&tail_flags)[ItemsPerThread],
                                   T (&input)[ItemsPerThread],
@@ -111,7 +113,7 @@ public:
     }
 
     template<int ItemsPerThread, typename FlagT, typename FlagOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void FlagHeadsAndTails(FlagT (&head_flags)[ItemsPerThread],
                                   FlagT (&tail_flags)[ItemsPerThread],
                                   T tile_successor_item,
@@ -125,7 +127,7 @@ public:
     }
 
     template<int ItemsPerThread, typename FlagT, typename FlagOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void FlagHeadsAndTails(FlagT (&head_flags)[ItemsPerThread],
                                   T tile_predecessor_item,
                                   FlagT (&tail_flags)[ItemsPerThread],
@@ -139,7 +141,7 @@ public:
     }
 
     template<int ItemsPerThread, typename FlagT, typename FlagOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void FlagHeadsAndTails(FlagT (&head_flags)[ItemsPerThread],
                                   T tile_predecessor_item,
                                   FlagT (&tail_flags)[ItemsPerThread],
@@ -154,8 +156,8 @@ public:
     }
 
 private:
-    HIPCUB_DEVICE inline
-    TempStorage& private_storage()
+    _CCCL_DEVICE
+    inline TempStorage& private_storage()
     {
         HIPCUB_SHARED_MEMORY TempStorage private_storage;
         return private_storage;

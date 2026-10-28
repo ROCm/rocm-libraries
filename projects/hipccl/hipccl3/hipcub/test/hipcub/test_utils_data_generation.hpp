@@ -36,7 +36,7 @@ namespace test_utils
 {
 
 template<typename T>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 T set_half_bits(uint16_t value)
 {
     T              half_value{};

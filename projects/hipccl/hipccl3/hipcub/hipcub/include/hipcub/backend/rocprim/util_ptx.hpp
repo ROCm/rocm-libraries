@@ -55,8 +55,8 @@ BEGIN_HIPCUB_NAMESPACE
 
 // ID functions etc.
 
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE int RowMajorTid(int block_dim_x, int block_dim_y, int block_dim_z)
+_CCCL_DEVICE
+_CCCL_FORCEINLINE int RowMajorTid(int block_dim_x, int block_dim_y, int block_dim_z)
 {
     return ((block_dim_z == 1) ? 0 : (hipThreadIdx_z * block_dim_x * block_dim_y))
         + ((block_dim_y == 1) ? 0 : (hipThreadIdx_y * block_dim_x))
@@ -64,8 +64,8 @@ HIPCUB_FORCEINLINE int RowMajorTid(int block_dim_x, int block_dim_y, int block_d
 }
 
 template<int LOGICAL_WARP_THREADS, int /* ARCH */ = 0>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE uint64_t WarpMask(unsigned int warp_id)
+_CCCL_DEVICE
+_CCCL_FORCEINLINE uint64_t WarpMask(unsigned int warp_id)
 {
     constexpr bool is_pow_of_two = ::rocprim::detail::is_power_of_two(LOGICAL_WARP_THREADS);
     const bool     is_arch_warp  = LOGICAL_WARP_THREADS == ::rocprim::arch::wavefront::size();
@@ -82,11 +82,11 @@ HIPCUB_FORCEINLINE uint64_t WarpMask(unsigned int warp_id)
 // Shuffle funcs
 
 template<int LOGICAL_WARP_THREADS, typename T>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE T ShuffleUp(T                    input,
-                               int                  src_offset,
-                               [[maybe_unused]] int first_thread /*Not supported in rocPRIM*/,
-                               [[maybe_unused]] unsigned int member_mask /*Not supported in ROCm*/)
+_CCCL_DEVICE
+_CCCL_FORCEINLINE T ShuffleUp(T                    input,
+                              int                  src_offset,
+                              [[maybe_unused]] int first_thread /*Not supported in rocPRIM*/,
+                              [[maybe_unused]] unsigned int member_mask /*Not supported in ROCm*/)
 {
     return ::rocprim::warp_shuffle_up(
         input, src_offset, LOGICAL_WARP_THREADS
@@ -94,12 +94,11 @@ HIPCUB_FORCEINLINE T ShuffleUp(T                    input,
 }
 
 template<int LOGICAL_WARP_THREADS, typename T>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE
-    T ShuffleDown(T                             input,
-                  int                           src_offset,
-                  [[maybe_unused]] int          last_thread /*Not supported in rocPRIM*/,
-                  [[maybe_unused]] unsigned int member_mask /*Not supported in ROCm*/)
+_CCCL_DEVICE
+_CCCL_FORCEINLINE T ShuffleDown(T                    input,
+                                int                  src_offset,
+                                [[maybe_unused]] int last_thread /*Not supported in rocPRIM*/,
+                                [[maybe_unused]] unsigned int member_mask /*Not supported in ROCm*/)
 {
     return ::rocprim::warp_shuffle_down(
         input, src_offset, LOGICAL_WARP_THREADS
@@ -107,8 +106,8 @@ HIPCUB_FORCEINLINE
 }
 
 template<int LOGICAL_WARP_THREADS, typename T>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE T ShuffleIndex(
+_CCCL_DEVICE
+_CCCL_FORCEINLINE T ShuffleIndex(
     T input, int src_lane, [[maybe_unused]] unsigned int member_mask /*Not supported in ROCm*/)
 {
     return ::rocprim::warp_shuffle(
@@ -119,8 +118,8 @@ HIPCUB_FORCEINLINE T ShuffleIndex(
 namespace detail {
 
 template<typename UnsignedBits>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE auto
+_CCCL_DEVICE
+_CCCL_FORCEINLINE auto
     unsigned_bit_extract(UnsignedBits source, unsigned int bit_start, unsigned int num_bits) ->
     typename std::enable_if<sizeof(UnsignedBits) == 8, unsigned int>::type
 {
@@ -132,8 +131,8 @@ HIPCUB_FORCEINLINE auto
 }
 
 template<typename UnsignedBits>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE auto
+_CCCL_DEVICE
+_CCCL_FORCEINLINE auto
     unsigned_bit_extract(UnsignedBits source, unsigned int bit_start, unsigned int num_bits) ->
     typename std::enable_if<sizeof(UnsignedBits) < 8, unsigned int>::type
 {
@@ -152,8 +151,8 @@ HIPCUB_FORCEINLINE auto
 template<typename UnsignedBits>
 //! deprecated [Since 5.0]
 HIPCUB_DEPRECATED_BECAUSE("Use hip::bitfield_extract()")
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE
+_CCCL_DEVICE
+_CCCL_FORCEINLINE
     unsigned int BFE(UnsignedBits source, unsigned int bit_start, unsigned int num_bits)
 {
     static_assert(std::is_unsigned<UnsignedBits>::value, "UnsignedBits must be unsigned");
@@ -166,11 +165,11 @@ HIPCUB_FORCEINLINE
  */
 template<typename UnsignedBits>
 //! deprecated [Since 5.0]
-HIPCUB_DEPRECATED_BECAUSE("Use hip::bitfield_extract()") HIPCUB_DEVICE
-HIPCUB_FORCEINLINE unsigned int BFE(UnsignedBits source,
-                                    unsigned int bit_start,
-                                    unsigned int num_bits,
-                                    detail::int_constant_t<16> /*byte_len*/)
+HIPCUB_DEPRECATED_BECAUSE("Use hip::bitfield_extract()") _CCCL_DEVICE
+_CCCL_FORCEINLINE unsigned int BFE(UnsignedBits source,
+                                   unsigned int bit_start,
+                                   unsigned int num_bits,
+                                   detail::int_constant_t<16> /*byte_len*/)
 {
     const __uint128_t MASK = (__uint128_t{1} << num_bits) - 1;
     return (source >> bit_start) & MASK;
@@ -184,8 +183,8 @@ namespace detail
  * @brief Shifts @p val left by the amount specified by unsigned 32-bit value in @p num_bits. If @p
  * num_bits is larger than 32 bits, @p num_bits is clamped to 32.
  */
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE uint32_t LogicShiftLeft(uint32_t val, uint32_t num_bits)
+_CCCL_DEVICE
+_CCCL_FORCEINLINE uint32_t LogicShiftLeft(uint32_t val, uint32_t num_bits)
 {
     return num_bits >= sizeof(val) * 8 ? 0 : val << num_bits;
 }
@@ -194,8 +193,8 @@ HIPCUB_FORCEINLINE uint32_t LogicShiftLeft(uint32_t val, uint32_t num_bits)
  * @brief Shifts @p val right by the amount specified by unsigned 32-bit value in @p num_bits. If @p
  * num_bits is larger than 32 bits, @p num_bits is clamped to 32.
  */
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE uint32_t LogicShiftRight(uint32_t val, uint32_t num_bits)
+_CCCL_DEVICE
+_CCCL_FORCEINLINE uint32_t LogicShiftRight(uint32_t val, uint32_t num_bits)
 {
     return num_bits >= sizeof(val) * 8 ? 0 : val >> num_bits;
 }
