@@ -6809,7 +6809,14 @@ class Fn:
         return fn
 
     def call_param(self, node) -> CE:
-        """b.param(name, t, **attrs): attrs (a py::attrs value) becomes rocke_param_opts_t or NULL."""
+        """b.param(name, t, **attrs): attrs (a py::attrs value) becomes rocke_param_opts_t or NULL.
+
+        b.param(name, t, noalias=True, align=16): each keyword sets the field of
+        rocke_param_opts_t with its name and, when the struct has one, the
+        `<name>_set` flag (the C builder adds only the flagged attributes, as
+        Python's dict(**attrs) holds only the keywords passed)."""
+        if node.keywords and all(k.arg is not None for k in node.keywords):
+            return self.call_param_kw(node)
         star = [k for k in node.keywords if k.arg is None]
         if len(star) != 1 or len(node.args) != 2 or len(node.keywords) != 1:
             raise Refuse(node, "param(**attrs) shape")
@@ -6823,6 +6830,40 @@ class Fn:
         return self.bind(
             CE(
                 f"rocke_b_param({self.builder}, {self.coerce(name, T.STR, node)}, {ty.code}, py_adapt::param_opts({attrs.code}, &{o}))",
+                T.V,
+                False,
+            ),
+            "param",
+        )
+
+    def call_param_kw(self, node) -> CE:
+        st = self.env.headers.structs.get("rocke_param_opts_t")
+        if st is None or len(node.args) != 2:
+            raise Refuse(node, "param(name, t, **kw) shape")
+        name = self.bind(self.expr(node.args[0]), "pname")
+        ty = self.bind(self.expr(node.args[1]), "ptype")
+        sets = []
+        for k in node.keywords:
+            ft = st.fields.get(k.arg)
+            if ft is None or k.arg.endswith("_set"):
+                raise Refuse(
+                    node, f"param attribute {k.arg} has no rocke_param_opts_t field"
+                )
+            v = self.bind(self.expr(k.value), k.arg)
+            if ft == T.STR and v.t == T.SSTR and not v.code.isidentifier():
+                raise Refuse(node, f"param attribute {k.arg} of a temporary string")
+            if ft == "bool" and v.t != T.BOOL:
+                raise Refuse(node, f"param attribute {k.arg} of type {v.t}")
+            sets.append((k.arg, self.coerce(v, ft, node)))
+        o = self.tmp("opts")
+        self.emit(f"rocke_param_opts_t {o}{{}};")
+        for f, code in sets:
+            self.emit(f"{o}.{f} = {code};")
+            if f + "_set" in st.fields:
+                self.emit(f"{o}.{f}_set = true;")
+        return self.bind(
+            CE(
+                f"rocke_b_param({self.builder}, {self.coerce(name, T.STR, node)}, {ty.code}, &{o})",
                 T.V,
                 False,
             ),
@@ -7074,7 +7115,7 @@ class Fn:
             )
         if method in ("scf_for", "scf_for_iter"):
             return self.call_loop(method, node)
-        if method == "param" and any(k.arg is None for k in node.keywords):
+        if method == "param" and node.keywords:
             return self.call_param(node)
         if method == "scf_yield":
             vals = self.bind_call_args(

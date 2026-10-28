@@ -7,7 +7,8 @@
   result through a caller buffer (kernel_name_join), a None sequence argument
   with its companions NULL / 0, owned strings into a C string array;
 - such a helper that returns a tuple through out parameters and its success
-  flag (block_lds_reduce_with_index)."""
+  flag (block_lds_reduce_with_index);
+- b.param(name, t, noalias=..., align=...) into rocke_param_opts_t."""
 
 from __future__ import annotations
 
@@ -19,7 +20,14 @@ import sys
 import pytest
 from trtest import ROCKE, TR, platform_probe, strip_holes
 
-PROBE = ""
+PROBE = """\
+def probe_params(spec: BatchedTranspose2DSpec) -> KernelDef:
+    b = IRBuilder(spec.kernel_name())
+    b.param("X", PtrType(I32, "global"), readonly=True, align=8, noalias=False)
+    b.param("n", I32)
+    return b.kernel
+
+"""
 
 # qwen3_sampler imports block_lds_reduce_with_index (the maps list a helper
 # only when the package imports it)
@@ -91,6 +99,7 @@ def _body(cpp: str, fn: str) -> str:
     "name",
     [
         "BatchedTranspose2DSpec.kernel_name",
+        "probe_params",
     ],
 )
 def test_translates(probe, name):
@@ -112,6 +121,20 @@ def test_kernel_name_join_through_its_c_twin(probe):
         body,
     ), body
     assert 'throw ckc::ValueError("string result does not fit")' in body
+
+
+def test_param_keywords_set_the_opts_fields(probe):
+    body = _body(probe[1], "py_probe_params")
+    sets = re.findall(r"opts_\d+\.(\w+) = ([^;]+);", body)
+    assert sets == [
+        ("readonly", "true"),
+        ("readonly_set", "true"),
+        ("align", "8"),
+        ("align_set", "true"),
+        ("noalias", "false"),
+        ("noalias_set", "true"),
+    ], sets
+    assert re.search(r'rocke_b_param\(b, "X", .*, &opts_\d+\)', body), body
 
 
 def test_out_parameter_helper_checks_its_flag(sampler):
