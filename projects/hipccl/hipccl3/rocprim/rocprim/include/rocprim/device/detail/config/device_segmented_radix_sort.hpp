@@ -109,8 +109,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 16, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -181,8 +180,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'radix_bits': 7, 'block_size_x': 256, 'ipt': 16, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 8, 'warp_small_bs': 256, 'warp_partition': 5, 'warp_medium_lws': 16, 'warp_medium_ipt': 16, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             7,
@@ -248,7 +246,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'radix_bits': 7, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 32, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 4, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             7,
@@ -319,8 +317,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -391,8 +388,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 16, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -463,8 +459,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'radix_bits': 7, 'block_size_x': 256, 'ipt': 16, 'warp_partitioning_allowed': 1, 'warp_small_lws': 16, 'warp_small_ipt': 8, 'warp_small_bs': 256, 'warp_partition': 5, 'warp_medium_lws': 32, 'warp_medium_ipt': 16, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             7,
@@ -535,8 +530,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 4, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -602,7 +596,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -685,8 +679,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'radix_bits': 7, 'block_size_x': 128, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 32, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 4, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             7,
@@ -757,8 +750,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'radix_bits': 7, 'block_size_x': 128, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 32, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 4, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             7,
@@ -824,7 +816,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -895,8 +887,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 4, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -967,8 +958,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -1039,8 +1029,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -1111,8 +1100,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 4, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -1178,7 +1166,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 7, 'block_size_x': 128, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 32, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 4, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             7,
@@ -1201,8 +1189,7 @@ constexpr auto segmented_radix_sort_config_picker()
 {
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -1213,8 +1200,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -1225,7 +1211,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -1236,8 +1222,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -1248,8 +1233,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -1260,8 +1244,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -1272,7 +1255,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -1425,8 +1408,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -1485,8 +1467,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -1541,7 +1522,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -1612,8 +1593,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -1672,8 +1652,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -1732,8 +1711,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -1792,8 +1770,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -1848,7 +1825,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -1930,8 +1907,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'radix_bits': 7, 'block_size_x': 256, 'ipt': 16, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 8, 'warp_small_bs': 256, 'warp_partition': 5, 'warp_medium_lws': 16, 'warp_medium_ipt': 16, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             7,
@@ -2002,8 +1978,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'radix_bits': 7, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 32, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 4, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             7,
@@ -2069,7 +2044,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'radix_bits': 7, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 32, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 4, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             7,
@@ -2140,8 +2115,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 7, 'block_size_x': 128, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 32, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 4, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             7,
@@ -2212,8 +2186,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 7, 'block_size_x': 256, 'ipt': 16, 'warp_partitioning_allowed': 1, 'warp_small_lws': 16, 'warp_small_ipt': 8, 'warp_small_bs': 256, 'warp_partition': 5, 'warp_medium_lws': 32, 'warp_medium_ipt': 16, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             7,
@@ -2284,8 +2257,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'radix_bits': 7, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 32, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 4, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             7,
@@ -2356,8 +2328,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 4, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -2423,7 +2394,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 7, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 32, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 4, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             7,
@@ -2506,8 +2477,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'radix_bits': 7, 'block_size_x': 256, 'ipt': 16, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 8, 'warp_small_bs': 256, 'warp_partition': 5, 'warp_medium_lws': 16, 'warp_medium_ipt': 16, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             7,
@@ -2578,8 +2548,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -2645,7 +2614,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'radix_bits': 7, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 32, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 4, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             7,
@@ -2716,8 +2685,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -2788,8 +2756,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 16, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -2860,8 +2827,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -2932,8 +2898,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'radix_bits': 7, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 32, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 4, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             7,
@@ -2999,7 +2964,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -3082,8 +3047,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'radix_bits': 7, 'block_size_x': 256, 'ipt': 16, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 8, 'warp_small_bs': 256, 'warp_partition': 5, 'warp_medium_lws': 16, 'warp_medium_ipt': 16, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             7,
@@ -3154,8 +3118,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 16, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -3221,7 +3184,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 16, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -3292,8 +3255,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -3364,8 +3326,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 16, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -3436,8 +3397,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 16, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -3508,8 +3468,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'radix_bits': 7, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 32, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 4, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             7,
@@ -3575,7 +3534,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -3658,8 +3617,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -3730,8 +3688,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 16, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -3797,7 +3754,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 16, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -3868,8 +3825,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 4, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -3940,8 +3896,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -4012,8 +3967,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 16, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -4084,8 +4038,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 16, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -4151,7 +4104,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 64, 'warp_medium_lws': 16, 'warp_medium_ipt': 8, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -4234,8 +4187,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 7, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 9, 'warp_small_bs': 128, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 10, 'warp_medium_bs': 128}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -4306,8 +4258,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 6, 'warp_small_bs': 128, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 17, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -4378,8 +4329,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 16, 'warp_small_ipt': 3, 'warp_small_bs': 256, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 17, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -4450,8 +4400,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 16, 'warp_small_ipt': 3, 'warp_small_bs': 128, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 10, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -4517,7 +4466,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 16, 'warp_small_ipt': 4, 'warp_small_bs': 128, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 11, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -4588,8 +4537,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 6, 'warp_small_bs': 256, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 17, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -4660,8 +4608,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 2, 'warp_medium_bs': 128}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -4727,7 +4674,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 1, 'warp_small_bs': 128, 'warp_partition': 3000, 'warp_medium_lws': 16, 'warp_medium_ipt': 7, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -4810,8 +4757,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 7, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 9, 'warp_small_bs': 128, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 10, 'warp_medium_bs': 128}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -4882,8 +4828,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 6, 'warp_small_bs': 128, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 17, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -4954,8 +4899,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 8, 'warp_partitioning_allowed': 1, 'warp_small_lws': 16, 'warp_small_ipt': 3, 'warp_small_bs': 256, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 17, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -5026,8 +4970,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 16, 'warp_small_ipt': 3, 'warp_small_bs': 128, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 10, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -5093,7 +5036,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 16, 'warp_small_ipt': 4, 'warp_small_bs': 128, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 11, 'warp_medium_bs': 256}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -5164,8 +5107,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 6, 'warp_small_bs': 256, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 17, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -5236,8 +5178,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 4, 'warp_small_bs': 256, 'warp_partition': 3000, 'warp_medium_lws': 32, 'warp_medium_ipt': 2, 'warp_medium_bs': 128}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
@@ -5303,7 +5244,7 @@ constexpr auto segmented_radix_sort_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'radix_bits': 8, 'block_size_x': 256, 'ipt': 17, 'warp_partitioning_allowed': 1, 'warp_small_lws': 8, 'warp_small_ipt': 1, 'warp_small_bs': 128, 'warp_partition': 3000, 'warp_medium_lws': 16, 'warp_medium_ipt': 7, 'warp_medium_bs': 256}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_radix_sort_config_params{
             8,
