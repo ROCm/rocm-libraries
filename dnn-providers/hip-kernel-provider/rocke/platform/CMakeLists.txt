@@ -464,6 +464,7 @@ if(ROCKE_INSTALL_TESTS)
     install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ir_validity.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/_bounded_run.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_flavor_gate.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_hostcaps.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_llvm_identity.py"
