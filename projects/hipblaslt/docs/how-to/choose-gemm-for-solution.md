@@ -317,14 +317,17 @@ python clients/scripts/rocjitsu/rocjitsu_race_sweep.py \
   --reports /path/to/new-reports-directory \
   --solution-index-range-begin 8000 --solution-index-range-end 16000 \
   --suite-timeout 300 --workers 4 --batch-size 32 \
-  --continue-on-failure --recover-unexecuted --run-known-failures
+  --continue-on-failure --run-known-failures
 ```
 
 Omit `--solution-index-range-end` to continue toward the catalogue's end.
-`--continue-on-failure` allows later batches to run after a failure;
-`--recover-unexecuted` replays untouched members of aborted batches while
-time remains. Numerical assertions, identity and dispatch checks, and race
-detection stay enabled. Use a benchmark and device library from compatible
+`--continue-on-failure` runs later indices in the same native batch after a
+numerical failure, then runs later batches. After a fatal process failure, it
+queues only provably unstarted indices as a profile-matched remainder batch
+while time remains. Numerical validation, identity and dispatch checks, and
+race detection stay enabled; earlier failures remain in the report and keep
+the run unsuccessful. `--recover-unexecuted` remains an alias for this behavior.
+Use a benchmark and device library from compatible
 builds, and supply the complete source revision of the emulator.
 
 The deadline stops new work and terminates active processes. Final report

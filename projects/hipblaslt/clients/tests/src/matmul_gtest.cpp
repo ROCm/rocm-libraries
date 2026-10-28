@@ -42,6 +42,7 @@ namespace
     {
         try
         {
+            MatmulResult result;
             testing_matmul_with_bias(arg,
                                      HIP_R_8F_E4M3,
                                      HIP_R_8F_E4M3,
@@ -50,7 +51,8 @@ namespace
                                      HIP_R_8F_E4M3,
                                      HIP_R_8F_E4M3,
                                      HIP_R_32F,
-                                     HIP_R_32F);
+                                     HIP_R_32F,
+                                     result);
             FAIL() << "Expected " << expected;
         }
         catch(const std::invalid_argument& error)
@@ -70,6 +72,7 @@ namespace
         hipblasLtBatchMode_t       mode;
         std::vector<HipHostBuffer> gold, result;
         double                     norm_error = 0, atol = 1, rtol = 1;
+        MatmulResult               validation;
 
         BenchVerifyD(int64_t m, int64_t n, int64_t batches, hipblasLtBatchMode_t mode)
             : m(m)
@@ -148,6 +151,7 @@ namespace
                   HIP_R_32F,
                   HIP_R_32F,
                   HIP_R_32F,
+                  validation,
                   mode);
             return hipblaslt_bench_options::verification_failures() - before;
         }
@@ -161,6 +165,9 @@ namespace
         EXPECT_EQ(d.run(), 2);
         EXPECT_EQ(d.atol, 1);
         EXPECT_GT(d.norm_error, 0.1);
+        // The bad batch also fails the case reported to data-file sweeps.
+        ASSERT_TRUE(d.validation.norm_passed.has_value());
+        EXPECT_FALSE(*d.validation.norm_passed);
     }
 
     TEST(BenchVerify, smoke_MatchingResultCountsNothing)
@@ -169,6 +176,7 @@ namespace
         EXPECT_EQ(d.run(), 0);
         EXPECT_EQ(d.norm_error, 0);
         EXPECT_EQ(d.atol, 1e-6);
+        EXPECT_FALSE(d.validation.norm_passed.has_value());
     }
 
     // Every batch is off by about 4e-6 relative, under the f32 limit of 1e-5. The reported

@@ -114,6 +114,27 @@ def bench_log(j=None):
     return "\n".join(lines) + "\n"
 
 
+def bench_case_log(jobs, statuses=None, done=True):
+    cases = [(j, c) for j in jobs for c in j["cases"]]
+    statuses = ["PASSED"] * len(cases) if statuses is None else statuses
+    lines = []
+    for ordinal, ((j, case), status) in enumerate(zip(cases, statuses, strict=True)):
+        index = j["solutions"][0]["index"]
+        lines.append(
+            f"[hipblaslt-case-v1] BEGIN {ordinal} {index} "
+            + " ".join(map(str, case["shape"]))
+            + "\n"
+        )
+        lines.append(f"[hipblaslt-case-v1] RESULT {index} {status}\n")
+        record = bench_log({**j, "cases": [case]})
+        if status == "FAILED":
+            record = record.replace(",0,0.00001,0.00001", ",1,failed,failed")
+        lines.extend([record, f"[hipblaslt-case-v1] END {ordinal} {index} {status}\n"])
+    if done:
+        lines.append(f"[hipblaslt-case-v1] DONE {len(cases)} {statuses.count('FAILED')}\n")
+    return "".join(lines)
+
+
 def failure_list():
     return {
         "version": 3,
@@ -136,6 +157,192 @@ def failure_list():
 
 
 class SweepTests(unittest.TestCase):
+
+    def protocol_jobs(self, count=3):
+        jobs = []
+        for i in range(count):
+            j = job()
+            j.update(id=i, batch_id=0, cases=j["cases"][:1], target_dispatches_per_case=1)
+            j["solutions"][0] = {
+                "index": i,
+                "name": f"solution-{i}",
+                "kernel": f"kernel-{i}",
+            }
+            jobs.append(j)
+        return jobs
+
+    def test_native_numerical_failure_does_not_taint_completed_neighbors(self):
+        jobs = self.protocol_jobs()
+        results = sweep.classify_bench_batch(
+            jobs, bench_case_log(jobs, ["FAILED", "PASSED", "PASSED"]), 1
+        )
+        self.assertEqual([r["outcome"] for r in results], ["NUMERICAL_FAILED", "PASS", "PASS"])
+        self.assertEqual([r["failed"] for r in results], [True, False, False])
+        self.assertEqual([r["target_dispatches"] for r in results], [1, 1, 1])
+        self.assertEqual(results[0]["cases"][0]["numerical"]["norm_error"], 1)
+        self.assertEqual(results[0]["cases"][0]["numerical"]["atol"], "failed")
+        self.assertEqual(
+            results[0]["errors"],
+            [f"Native numerical validation FAILED: {tuple(jobs[0]['cases'][0]['shape'])}"],
+        )
+        self.assertEqual(sweep.numerical_index_counts(results), {"FAILED": 1, "PASSED": 2})
+
+    def test_explicit_norm_failure_overrides_finite_allclose_measurements(self):
+        jobs = self.protocol_jobs(1)
+        text = bench_case_log(jobs, ["FAILED"]).replace(",1,failed,failed", ",0.25,0.00001,0.00001")
+        result = sweep.classify_bench_batch(jobs, text, 1)[0]
+        self.assertEqual(result["outcome"], "NUMERICAL_FAILED")
+        self.assertEqual(result["cases"][0]["numerical"]["atol"], 0.00001)
+
+    def test_case_records_distinguish_cleanup_interruption_from_unstarted_work(self):
+        jobs = self.protocol_jobs()
+        text = bench_case_log(jobs)
+        text = text[: text.index("[hipblaslt-case-v1] END 1")]
+        results = sweep.classify_bench_batch(jobs, text, -6)
+        self.assertEqual(
+            [r["outcome"] for r in results],
+            [
+                "VALIDATED_IN_FAILED_PROCESS",
+                "INCOMPLETE",
+                "UNEXECUTED",
+            ],
+        )
+        self.assertFalse(results[1]["cases"][0]["native_completed"])
+        self.assertEqual(results[1]["cases"][0]["reported_numerical_status"], "PASSED")
+        self.assertEqual(sweep.numerical_index_counts(results), {"PASSED": 1, "INCOMPLETE": 2})
+
+    def test_native_records_require_verdict_completion_and_consistent_counts(self):
+        jobs = self.protocol_jobs(1)
+        text = bench_case_log(jobs)
+        for broken, rc in [
+            (text.replace("RESULT 0 PASSED", "RESULT 0 NOT_CHECKED"), 0),
+            (text.replace("[hipblaslt-case-v1] RESULT 0 PASSED\n", ""), 0),
+            (text.replace("DONE 1 0", "DONE 1 1"), 0),
+            (text.replace("[hipblaslt-case-v1] DONE 1 0\n", ""), 0),
+            (text, 1),
+            (bench_case_log(jobs, ["FAILED"]), 0),
+        ]:
+            with self.subTest(text=broken, rc=rc):
+                self.assertTrue(sweep.classify_bench_batch(jobs, broken, rc)[0]["failed"])
+
+    def test_contradictory_native_status_never_counts_as_numerical_pass(self):
+        jobs = self.protocol_jobs(1)
+        text = bench_case_log(jobs)
+        for broken in (
+            text.replace("END 0 0 PASSED", "END 0 0 FAILED"),
+            text.replace("RESULT 0 PASSED", "RESULT 0 FAILED"),
+            text.replace(
+                "RESULT 0 PASSED\n",
+                "RESULT 0 PASSED\n[hipblaslt-case-v1] RESULT 0 PASSED\n",
+            ),
+        ):
+            with self.subTest(text=broken):
+                result = sweep.classify_bench_batch(jobs, broken, 1)[0]
+                self.assertTrue(result["failed"])
+                self.assertEqual(sweep.numerical_index_counts([result]), {"INCOMPLETE": 1})
+
+    def test_selected_dispatches_must_belong_to_the_active_case(self):
+        jobs = self.protocol_jobs(2)
+        text = bench_case_log(jobs)
+        misplaced = (
+            sweep.target_dispatch_line(jobs[0]) + "\n" + text,
+            text + sweep.target_dispatch_line(jobs[0]) + "\n",
+            text.replace(
+                sweep.target_dispatch_line(jobs[0]),
+                sweep.target_dispatch_line(jobs[1]),
+                1,
+            ),
+        )
+        for broken in misplaced:
+            with self.subTest(text=broken):
+                results = sweep.classify_bench_batch(jobs, broken, 0)
+                self.assertTrue(all(r["failed"] for r in results))
+                self.assertTrue(
+                    any("Selected target dispatch" in error for error in results[0]["batch_errors"])
+                )
+
+    def test_case_rows_cannot_satisfy_a_different_started_shape(self):
+        j = job()
+        j["cases"] = j["cases"][:2]
+        text = bench_case_log([j])
+        shapes = [f"{','.join(map(str, c['shape']))},0,0.00001,0.00001" for c in j["cases"]]
+        text = text.replace(shapes[0], "SWAPPED_ROW", 1).replace(shapes[1], shapes[0], 1)
+        text = text.replace("SWAPPED_ROW", shapes[1], 1)
+        result = sweep.classify_bench_batch([j], text, 0)[0]
+        self.assertTrue(result["failed"])
+        self.assertFalse(any(c["status"] == "PASSED" for c in result["cases"]))
+        self.assertEqual(sweep.numerical_index_counts([result]), {"INCOMPLETE": 1})
+
+    def test_native_case_identity_resolves_repeated_kernel_names(self):
+        jobs = self.protocol_jobs(2)
+        jobs[1]["solutions"][0]["kernel"] = jobs[0]["solutions"][0]["kernel"]
+        results = sweep.classify_bench_batch(jobs, bench_case_log(jobs), 0)
+        self.assertEqual([r["outcome"] for r in results], ["PASS", "PASS"])
+        self.assertEqual([r["target_dispatches"] for r in results], [1, 1])
+        text = bench_case_log(jobs).replace("END 0 0 PASSED", "END 0 1 PASSED")
+        results = sweep.classify_bench_batch(jobs, text, -6)
+        self.assertTrue(all(r["failed"] for r in results))
+        self.assertNotIn("UNEXECUTED", [r["outcome"] for r in results])
+
+    def test_queue_coordinator_owns_progress_and_worker_inputs_are_private(self):
+        owner = threading.get_ident()
+        jobs = [{"id": i, "nested": [i]} for i in range(12)]
+        observed = []
+
+        def execute(batch, slot):
+            batch[0]["nested"].append(slot)
+            return [{"id": batch[0]["id"], "failed": False, "cases": []}]
+
+        def progress(value):
+            self.assertEqual(threading.get_ident(), owner)
+            observed.extend(r["id"] for r in value["completed"])
+
+        result = sweep.run_queue([[j] for j in jobs], 4, execute, progress)
+        self.assertEqual(sorted(observed), list(range(12)))
+        self.assertEqual(len(observed), len(set(observed)))
+        self.assertEqual([j["nested"] for j in jobs], [[i] for i in range(12)])
+        self.assertEqual(result["assigned_job_ids"], list(range(12)))
+
+    def test_worker_exit_reports_infrastructure_error_to_coordinator(self):
+        def execute(batch, slot):
+            raise SystemExit("worker stopped")
+
+        result = sweep.run_queue([[{"id": 0, "cases": []}]], 1, execute, lambda value: None)
+        self.assertEqual(result["results"][0]["outcome"], "INFRASTRUCTURE_ERROR")
+        self.assertEqual(result["results"][0]["errors"], ["SystemExit('worker stopped')"])
+
+    def test_infrastructure_error_preserves_prior_pass_and_numerical_history(self):
+        good = {
+            "id": 0,
+            "index": 7,
+            "outcome": "PASS",
+            "failed": False,
+            "errors": [],
+            "cases": [{"status": "PASSED"}],
+        }
+        error = {
+            "id": 0,
+            "index": 7,
+            "outcome": "INFRASTRUCTURE_ERROR",
+            "failed": True,
+            "errors": ["disk full"],
+            "cases": [{"status": "INFRASTRUCTURE_ERROR"}],
+        }
+        merged = sweep.merge_attempts(good, error)
+        self.assertEqual(merged["outcome"], "PASS_RETAINED")
+        self.assertTrue(merged["failed"])
+        self.assertEqual(sweep.numerical_index_counts([merged]), {"PASSED": 1})
+        self.assertEqual(merged["latest_attempt_errors"], ["disk full"])
+        bad = {
+            **good,
+            "outcome": "NUMERICAL_FAILED",
+            "failed": True,
+            "cases": [{"status": "FAILED"}],
+        }
+        replay = sweep.merge_attempts(sweep.merge_attempts(bad, good), good)
+        self.assertEqual(sweep.numerical_index_counts([replay]), {"PASSED": 1})
+        self.assertEqual(sweep.numerical_failure_indices([replay]), [7])
+
     def test_ranges_use_original_ids_before_profile_and_shard_grouping(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -451,10 +658,13 @@ class SweepTests(unittest.TestCase):
     def test_recovery_reuses_profile_and_yaml_and_preserves_failed_process(self):
         self.exercise_recovery()
 
-    def test_recovery_exception_preserves_other_indices_and_original_attempt(self):
+    def test_recovery_crash_preserves_other_indices_and_original_attempt(self):
         self.exercise_recovery(recovery_error=True)
 
-    def exercise_recovery(self, recovery_error=False):
+    def test_recovery_stops_after_one_batch_with_no_progress(self):
+        self.exercise_recovery(no_progress=True)
+
+    def exercise_recovery(self, recovery_error=False, no_progress=False):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             records = [solution(i) for i in range(4)]
@@ -523,6 +733,9 @@ class SweepTests(unittest.TestCase):
                     }
                     for row in rows
                 ]
+                if no_progress:
+                    log.write_text("")
+                    return 1
                 if len(inputs) == 1:
                     log.write_text(
                         bench_log(jobs[0])
@@ -531,8 +744,16 @@ class SweepTests(unittest.TestCase):
                     )
                     return 1
                 if recovery_error and jobs[0]["id"] == 2:
-                    raise RuntimeError("recovery launch failed")
-                log.write_text(bench_log(jobs[0]))
+                    case = jobs[0]["cases"][0]
+                    log.write_text(
+                        f"[hipblaslt-case-v1] BEGIN 0 {jobs[0]['solutions'][0]['index']} "
+                        + " ".join(map(str, case["shape"]))
+                        + "\n"
+                        + sweep.target_dispatch_line(jobs[0])
+                        + "\n"
+                    )
+                    return 1
+                log.write_text("".join(bench_log(j) for j in jobs))
                 return 0
 
             with (
@@ -542,21 +763,37 @@ class SweepTests(unittest.TestCase):
             ):
                 self.assertEqual(sweep.run(args), 1)
             summary = json.loads((args.reports / "summary.json").read_text())
-            self.assertEqual([len(rows) for rows in inputs], [4, 1, 1])
-            self.assertEqual(inputs[1], [inputs[0][2]])
-            self.assertEqual(inputs[2], [inputs[0][3]])
+            if no_progress:
+                self.assertEqual([len(rows) for rows in inputs], [4, 4])
+                self.assertEqual(summary["outcome_counts"], {"UNEXECUTED": 4})
+                self.assertEqual(summary["numerical_index_counts"], {"INCOMPLETE": 4})
+                self.assertEqual(summary["accounted_cases"], 4)
+                self.assertEqual(summary["recovered_indices"], list(range(4)))
+                self.assertEqual(summary["failed_batch_ids"], [0])
+                self.assertTrue(all(len(r["attempts"]) == 2 for r in summary["results"]))
+                self.assertFalse(summary["passed"])
+                return
+            self.assertEqual(
+                [len(rows) for rows in inputs], [4, 2, 1] if recovery_error else [4, 2]
+            )
+            self.assertEqual(inputs[1], inputs[0][2:])
+            if recovery_error:
+                self.assertEqual(inputs[2], [inputs[0][3]])
             self.assertEqual(len(set(configs)), 1)
             self.assertEqual(
                 summary["outcome_counts"],
                 {
                     "VALIDATED_IN_FAILED_PROCESS": 1,
-                    "LAUNCHED_NO_RESULT": 1,
+                    "LAUNCHED_NO_RESULT": 2 if recovery_error else 1,
                     "PASS_RECOVERED": 1 if recovery_error else 2,
-                    **({"RECOVERY_ERROR": 1} if recovery_error else {}),
                 },
             )
             self.assertEqual(summary["recovered_indices"], [2, 3])
-            self.assertEqual(summary["failed_process_ids"], ["batch-000"])
+            self.assertEqual(summary["failed_batch_ids"], [0])
+            self.assertCountEqual(
+                summary["failed_process_ids"],
+                (["batch-000", "batch-000-recovery-001"] if recovery_error else ["batch-000"]),
+            )
             self.assertEqual(summary["accounted_cases"], 4)
             self.assertEqual([r["index"] for r in summary["index_outcomes"]], list(range(4)))
             self.assertEqual(summary["results"][2]["attempts"][0]["outcome"], "UNEXECUTED")
@@ -617,7 +854,7 @@ class SweepTests(unittest.TestCase):
                     any(r["failed"] for r in sweep.classify_bench_batch(jobs, broken, 0))
                 )
 
-    def test_batch_diagnostics_are_reported_as_one_failed_batch(self):
+    def test_process_diagnostics_preserve_index_results(self):
         jobs = [job(), job()]
         for i, j in enumerate(jobs):
             j.update(id=i, batch_id=0)
@@ -629,9 +866,6 @@ class SweepTests(unittest.TestCase):
                 results = sweep.classify_bench_batch(
                     jobs, diagnostic + "".join(bench_log(j) for j in jobs), rc
                 )
-                for result in results:
-                    result["batch_id"] = 0
-                self.assertEqual(sweep.failed_batch_ids(results), [0])
                 self.assertTrue(all(r["cases"][0]["status"] == "PASSED" for r in results))
                 manifest = dict(
                     backend="bench",
@@ -642,7 +876,8 @@ class SweepTests(unittest.TestCase):
                     jobs=jobs,
                 )
                 report = sweep.render_report(manifest, {"results": results, "passed": False})
-                self.assertIn("Failed batches: 1/1.", report)
+                self.assertNotIn("Failed batches:", report)
+                self.assertNotIn("Batch seconds", report)
                 self.assertIn("| 7 | VALIDATED_IN_FAILED_PROCESS | 1/1 |", report)
                 self.assertIn("| 8 | VALIDATED_IN_FAILED_PROCESS | 1/1 |", report)
                 self.assertNotIn("| FAIL |", report)
@@ -668,6 +903,49 @@ class SweepTests(unittest.TestCase):
         self.assertEqual(result["max_active"], 2)
         self.assertIsNone(result["stop"])
         self.assertEqual([r["id"] for r in snapshots[0]["completed"]], [2, 3])
+
+    def test_recovery_enters_shared_queue_after_pending_work(self):
+        owner = threading.get_ident()
+        release = threading.Event()
+        starts = []
+        starts_lock = threading.Lock()
+
+        def execute(batch, slot):
+            with starts_lock:
+                starts.append(tuple(j["id"] for j in batch))
+            if batch[0]["id"] == 2:
+                self.assertTrue(release.wait(2))
+            if batch[0]["id"] == 3:
+                release.set()
+            return [
+                {
+                    "id": j["id"],
+                    "failed": j["id"] == 1 and len(batch) == 2,
+                    "outcome": ("UNEXECUTED" if j["id"] == 1 and len(batch) == 2 else "PASS"),
+                    "errors": [],
+                    "cases": [
+                        {"status": ("UNEXECUTED" if j["id"] == 1 and len(batch) == 2 else "PASSED")}
+                    ],
+                }
+                for j in batch
+            ]
+
+        def recover(batch, completed):
+            self.assertEqual(threading.get_ident(), owner)
+            return [[{"id": 1}]] if len(batch) == 2 else []
+
+        result = sweep.run_queue(
+            [[{"id": 0}, {"id": 1}], [{"id": 2}], [{"id": 3}]],
+            2,
+            execute,
+            lambda _: None,
+            continue_on_failure=True,
+            recover=recover,
+        )
+        self.assertLess(starts.index((3,)), starts.index((1,)))
+        self.assertEqual([r["id"] for r in result["results"]], [0, 1, 2, 3])
+        self.assertEqual(result["assigned_job_ids"], [0, 1, 2, 3])
+        self.assertEqual(len(result["results"][1]["attempts"]), 2)
 
     def test_batched_run_filters_skips_and_preserves_partial_failure_accounting(self):
         for failure, continuation in (
@@ -1284,6 +1562,35 @@ class SweepTests(unittest.TestCase):
             self.assertEqual(result["attempts"][1]["outcome"], "PASS")
             self.assertTrue(result["failed"])
 
+    def test_resume_keeps_qualified_index_after_later_infrastructure_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reports, _, _ = self.exercise_skips(Path(tmp), "bench", [])
+            manifest = json.loads((reports / "manifest.json").read_text())
+            prior = json.loads((reports / "solution-000.result.json").read_text())
+            error = {
+                "id": prior["id"],
+                "failed": True,
+                "outcome": "INFRASTRUCTURE_ERROR",
+                "errors": ["report write failed"],
+                "cases": [
+                    {
+                        "case_id": c["case_id"],
+                        "shape": c["shape"],
+                        "status": "INFRASTRUCTURE_ERROR",
+                    }
+                    for c in prior["cases"]
+                ],
+            }
+            sweep.write_json(reports / "batch-999.result.json", {"results": [error]})
+            (reports / "solution-000.result.json").unlink()
+            carried, retry = sweep.resume_results(reports, manifest)
+            retained = next(r for r in carried if r["id"] == prior["id"])
+            self.assertEqual(retry, {})
+            self.assertEqual(retained["outcome"], "PASS_RETAINED")
+            self.assertTrue(retained["failed"])
+            self.assertEqual(sweep.numerical_index_counts([retained]), {"PASSED": 1})
+            self.assertEqual(retained["latest_attempt_errors"], ["report write failed"])
+
     def test_progress_checkpoints_do_not_rewrite_full_reports_for_every_batch(self):
         with tempfile.TemporaryDirectory() as tmp:
             writes = []
@@ -1373,7 +1680,8 @@ class SweepTests(unittest.TestCase):
                     self.assertEqual(summary["counts"]["SKIPPED"], 2)
                     self.assertEqual(len(summary["unstarted_cases"]), 4)
                     if failure == "exception":
-                        self.assertEqual(len(summary["missing"]), 2)
+                        self.assertEqual(summary["counts"]["INFRASTRUCTURE_ERROR"], 2)
+                        self.assertEqual(len(summary["missing"]), 0)
 
     def test_recheck_executes_known_cases_and_keeps_strict_validation(self):
         for backend in ("tensile", "bench"):
@@ -1933,6 +2241,30 @@ class SweepTests(unittest.TestCase):
         self.assertEqual(result["stop"]["trigger_job"], 0)
         self.assertTrue(result["results"][0]["failed"])
         self.assertIn("No space left", result["results"][0]["errors"][0])
+        self.assertEqual(result["results"][0]["outcome"], "INFRASTRUCTURE_ERROR")
+
+    def test_progress_error_retains_completed_index_validation(self):
+        def progress(value):
+            raise OSError("No space left")
+
+        result = sweep.run_queue(
+            [[{"id": 0}]],
+            1,
+            lambda batch, slot: [
+                {
+                    "id": 0,
+                    "failed": False,
+                    "outcome": "PASS",
+                    "errors": [],
+                    "cases": [{"status": "PASSED"}],
+                }
+            ],
+            progress,
+        )["results"][0]
+        self.assertEqual(result["outcome"], "PASS_RETAINED")
+        self.assertTrue(result["failed"])
+        self.assertEqual(sweep.numerical_index_counts([result]), {"PASSED": 1})
+        self.assertIn("No space left", result["latest_attempt_errors"][0])
 
 
 if __name__ == "__main__":

@@ -10,13 +10,14 @@ import html
 import json
 import math
 import os
+import queue
 import re
 import signal
 import subprocess
 import sys
 import threading
 import time
-from collections import Counter
+from collections import Counter, deque
 from pathlib import Path
 
 from rocjitsu_known_failures import apply_known_failures
@@ -69,6 +70,10 @@ def solution_report(job, result, backend):
     if result.get("batch_errors") and "outcome" not in result:
         state = "BATCH FAILED"
     notes = "; ".join(result["errors"] + result.get("batch_errors", []))
+    if result.get("attempts"):
+        notes += ("; " if notes else "") + "Earlier attempts and failures retained"
+    if result.get("latest_attempt_errors"):
+        notes += "; latest infrastructure error: " + "; ".join(result["latest_attempt_errors"])
     if skipped:
         if not result["failed"]:
             state = "SKIPPED" if len(skipped) == planned else "PASS WITH SKIPS"
@@ -83,21 +88,56 @@ def solution_report(job, result, backend):
         state,
         f"{observed}/{planned}",
         f"{result.get('target_dispatches', '?')}/{(planned - len(skipped)) * job.get('target_dispatches_per_case', 2 if backend == 'bench' else 1)}",
-        f"{result['batch_seconds']:.2f}" if "batch_seconds" in result else "—",
         notes or "Identity, numerical and race checks passed",
     ]
 
 
-def failed_batch_ids(results):
-    return sorted(
-        {
-            r.get("batch_id", r["id"])
-            for r in results
-            if r.get("current_attempt_failed", r["failed"])
-            and not r.get("planning_outcome")
-            and not r.get("resumed_from")
-        }
+def merge_attempts(previous, current):
+    """Retain history without letting a reporting/setup error erase qualified work."""
+    history = copy.deepcopy(previous.get("attempts", [previous]))
+    history.extend(copy.deepcopy(current.get("attempts", [current])))
+    preserve = current.get("outcome") == "INFRASTRUCTURE_ERROR" and previous.get("outcome") in {
+        "PASS",
+        "PASS_RECOVERED",
+        "PASS_RETAINED",
+    }
+    result = copy.deepcopy(previous if preserve else current)
+    result.update(
+        attempts=history,
+        failed=previous["failed"] or current["failed"],
+        current_attempt_failed=current["failed"],
     )
+    if preserve:
+        result.update(outcome="PASS_RETAINED", latest_attempt_errors=current["errors"])
+    elif result.get("outcome") == "PASS":
+        result["outcome"] = "PASS_RECOVERED"
+    return result
+
+
+def numerical_index_counts(results):
+    counts = Counter()
+    for result in results:
+        statuses = {c["status"] for c in result["cases"]}
+        status = (
+            "FAILED"
+            if "FAILED" in statuses
+            else "PASSED" if statuses == {"PASSED"} else "INCOMPLETE"
+        )
+        counts[status] += 1
+    return dict(counts)
+
+
+def numerical_failure_indices(results):
+    failures = set()
+    for result in results:
+        pending = [result]
+        while pending:
+            attempt = pending.pop()
+            if attempt.get("attempts"):
+                pending.extend(attempt["attempts"])
+            elif any(c["status"] == "FAILED" for c in attempt["cases"]):
+                failures.add(result["index"])
+    return sorted(failures)
 
 
 def render_report(manifest, summary):
@@ -113,24 +153,23 @@ def render_report(manifest, summary):
         "",
         f"Original index range: `{cell(manifest['solution_index_range']['begin'])}` "
         f"to `{cell(manifest['solution_index_range']['end'])}` (exclusive; None means catalogue end); "
-        f"policy: `{cell(manifest['policy'])}`; "
-        f"inventory/preparation: {manifest['preparation_seconds']:.2f} s.",
+        f"policy: `{cell(manifest['policy'])}`.",
         f"Artifact fingerprint: `{manifest['artifact_fingerprint']}`.",
         f"Selected solutions: {len(manifest['jobs'])}; eligible/inventory solutions: "
         f"{inventory.get('eligible_solutions', '?')}/{inventory.get('solutions', '?')}; "
         f"eligible/inventory kernel names: "
         f"{inventory.get('eligible_kernel_names', '?')}/{inventory.get('unique_kernel_names', '?')}.",
         "",
-        "PASS requires all planned cases, matching identities/dispatches, no races or warnings, and a successful exit. "
+        "PASS requires all planned cases, matching identities/dispatches, no races or warnings, and completed native execution. "
         "SKIPPED cases did not run; PASS WITH SKIPS validates only the remaining cases.",
         "VALIDATED_IN_FAILED_PROCESS retains completed per-index checks alongside a process failure. "
         "UNEXECUTED and LAUNCHED_NO_RESULT distinguish absent launches from absent numerical results.",
-        f"Failed batches: {len(failed_batch_ids(summary['results']))}/"
-        f"{len({j.get('batch_id', j['id']) for j in manifest['jobs']})}.",
+        "Numerical totals describe the retained result for each index. Earlier numerical failures remain "
+        "listed separately, including after a successful replay.",
         "Full shapes, identities, commands and logs are in this run's reports directory.",
         "",
-        "| Solution index | Result | Numerical passes | Target dispatches | Batch seconds | Notes |",
-        "|---:|:---|---:|---:|---:|:---|",
+        "| Solution index | Result | Numerical passes | Target dispatches | Notes |",
+        "|---:|:---|---:|---:|:---|",
     ]
     for job in manifest["jobs"]:
         if job["id"] in results:
@@ -141,12 +180,7 @@ def render_report(manifest, summary):
             state = "INCOMPLETE" if assigned else "PENDING"
             if final or (summary.get("stop") and not assigned):
                 state = "NOT RUN"
-            row = [str(job["solutions"][0]["index"]), state, "—", "—", "—", ""]
-        result = results.get(job["id"], {})
-        if result.get("resumed_from"):
-            row[-1] += f" (prior run batch-{result.get('batch_id', job['id']):03})"
-        else:
-            row[-1] += f" (batch-{job.get('batch_id', job['id']):03})"
+            row = [str(job["solutions"][0]["index"]), state, "—", "—", ""]
         lines.append("| " + " | ".join(map(cell, row)) + " |")
     lines += [
         "",
@@ -161,13 +195,14 @@ def render_report(manifest, summary):
         ),
         "",
     ]
-    if "counts" in summary:
+    if "numerical_index_counts" in summary:
         lines += [
-            f"Cases: {summary['counts'].get('PASSED', 0)} numerical passes, "
-            f"{summary['counts'].get('SKIPPED', 0)} skipped, "
-            f"{len(summary['missing'])} missing, "
-            f"{len(summary['unstarted_cases'])} unstarted; "
-            f"{summary['planned_cases']} planned.",
+            f"Indices: {len(manifest['jobs'])} selected; numerical validation "
+            f"{summary['numerical_index_counts'].get('PASSED', 0)} passed, "
+            f"{summary['numerical_index_counts'].get('FAILED', 0)} failed, "
+            f"{summary['numerical_index_counts'].get('INCOMPLETE', 0)} incomplete.",
+            f"Indices with a numerical failure in any retained attempt: "
+            f"{len(summary.get('numerical_failure_indices', []))}.",
             "",
         ]
     if summary.get("stop"):
@@ -340,10 +375,18 @@ def classify_tensile(job, text, returncode):
     return finish_result(job, text, returncode, result, errors, launches_per_case=1)
 
 
-def finish_result(job, text, returncode, result, errors, launches_per_case):
+def finish_result(
+    job,
+    text,
+    returncode,
+    result,
+    errors,
+    launches_per_case,
+    counted_statuses=frozenset({"PASSED"}),
+):
     dispatches = Counter(re.findall(r'^\[rocjitsu\] Kernel dispatch: "([^"]+)"', text, re.M))
     kernel = job["solutions"][0]["kernel"]
-    wanted = sum(c["status"] == "PASSED" for c in result["cases"]) * launches_per_case
+    wanted = sum(c["status"] in counted_statuses for c in result["cases"]) * launches_per_case
     if dispatches[kernel] != wanted:
         errors.append(
             f"Target dispatch count mismatch: expected {wanted}, observed {dispatches[kernel]}"
@@ -448,8 +491,14 @@ def classify_bench(job, text, returncode):
     records, headers, pending = [], None, None
     errors = []
     launches = 0
+    verdict = None
+    explicit_verdicts = "[hipblaslt-case-v1]" in text
     for line in text.splitlines():
         launches += line == target_dispatch_line(job)
+        validation = re.fullmatch(r"\[hipblaslt-case-v1\] RESULT (-?\d+) (\w+)", line)
+        if validation:
+            verdict = (int(validation[1]), validation[2])
+            continue
         header = re.match(r"^\[\d+\]:(.*)", line)
         if header:
             headers = next(csv.reader([header[1]]))
@@ -471,6 +520,8 @@ def classify_bench(job, text, returncode):
             if len(row) == len(headers):
                 pending = dict(zip(headers, row))
                 pending["target_dispatches"] = launches
+                pending["native_verdict"] = verdict
+                verdict = None
                 launches = 0
                 records.append(pending)
                 headers = None
@@ -494,17 +545,40 @@ def classify_bench(job, text, returncode):
                 or row["kernel name"] != solution["kernel"]
             ):
                 raise ValueError(f"Wrong bench solution/kernel identity: {shape}")
-            # norm_check_assert handles datatype-dependent tolerance in the native
-            # client. Require its measurement too; an exit of zero is insufficient.
-            numeric = [float(row[k]) for k in ("norm_error", "atol", "rtol")]
-            passed = all(math.isfinite(x) and x >= 0 for x in numeric)
+            native = row["native_verdict"]
+            if explicit_verdicts and (
+                native is None
+                or native[0] != solution["index"]
+                or native[1] not in {"PASSED", "FAILED", "NOT_CHECKED"}
+            ):
+                raise ValueError(f"Missing or invalid native numerical verdict: {shape}")
+            # The native norm criterion determines pass/fail. On failure, bench
+            # prints "failed" for allclose atol/rtol instead of floating values.
+            # Keep those measurements verbatim; never infer a pass from them.
+            measurements = {}
+            finite = True
+            for key in ("norm_error", "atol", "rtol"):
+                raw = row[key]
+                if raw == "failed" and key != "norm_error" and native and native[1] == "FAILED":
+                    measurements[key] = raw
+                    finite = False
+                    continue
+                value = float(raw)
+                valid = math.isfinite(value) and value >= 0
+                measurements[key] = value if valid else raw
+                finite &= valid
+            status = (
+                "NOT_VALIDATED"
+                if native and native[1] == "NOT_CHECKED"
+                else ("FAILED" if not finite or (native and native[1] == "FAILED") else "PASSED")
+            )
             cases[shape] = {
                 "case_id": expected[shape]["id"],
                 "index": solution["index"],
                 "shape": shape,
-                "status": "PASSED" if passed else "FAILED",
+                "status": status,
                 "target_dispatches": row["target_dispatches"],
-                "numerical": dict(zip(("norm_error", "atol", "rtol"), numeric)),
+                "numerical": measurements,
                 "solution_name": row["Solution name"],
                 "kernel": row["kernel name"],
             }
@@ -512,8 +586,8 @@ def classify_bench(job, text, returncode):
                 errors.append(
                     f"Case {shape}: unexpected target dispatches ({row['target_dispatches']})"
                 )
-            if not passed:
-                errors.append(f"Non-finite bench validation: {shape}")
+            if status != "PASSED":
+                errors.append(f"Native numerical validation {status}: {shape}")
         except (KeyError, ValueError) as error:
             errors.append(f"Invalid bench record: {error}")
     if len(cases) != len(expected):
@@ -525,11 +599,220 @@ def classify_bench(job, text, returncode):
         {"id": job["id"], "cases": list(cases.values())},
         errors,
         launches_per_case=job.get("target_dispatches_per_case", 2),
+        counted_statuses=frozenset({"PASSED", "FAILED", "NOT_VALIDATED"}),
     )
+
+
+def classify_bench_records(jobs, text, returncode):
+    """Use native case boundaries to attribute results even after a failed case."""
+    planned = [(j, c) for j in jobs for c in j["cases"]]
+    begun, active, done = {}, None, None
+    protocol_errors = []
+    target_kernels = {j["solutions"][0]["kernel"] for j in jobs}
+    by_case = {(j["id"], c["id"]): j for j, c in planned}
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        if line.startswith("[hipblaslt-case-v1]"):
+            fields = line.split()
+            try:
+                event = fields[1]
+                if event == "BEGIN":
+                    if active is not None or done is not None or len(fields) != 8:
+                        raise ValueError("Unexpected case begin")
+                    ordinal, index, *shape = map(int, fields[2:])
+                    if ordinal != len(begun) or ordinal >= len(planned):
+                        raise ValueError("Case ordinal is not the next selected input")
+                    job, case = planned[ordinal]
+                    if index != job["solutions"][0]["index"] or shape != list(case["shape"]):
+                        raise ValueError("Case begin does not match the selected index/shape")
+                    active = (job["id"], case["id"])
+                    begun[active] = {
+                        "start": offset,
+                        "ordinal": ordinal,
+                        "index": index,
+                        "result_count": 0,
+                    }
+                elif event == "END":
+                    if active is None or len(fields) != 5:
+                        raise ValueError("Unexpected case end")
+                    record = begun[active]
+                    if (int(fields[2]), int(fields[3])) != (
+                        record["ordinal"],
+                        record["index"],
+                    ):
+                        raise ValueError("Case end has the wrong identity")
+                    if fields[4] not in {
+                        "PASSED",
+                        "FAILED",
+                        "NOT_CHECKED",
+                        "INCOMPLETE",
+                    }:
+                        raise ValueError("Unknown case status")
+                    record.update(end=offset + len(line), status=fields[4])
+                    active = None
+                    if fields[4] != "INCOMPLETE" and record.get("result_status") != fields[4]:
+                        record["conflicting_verdict"] = True
+                        raise ValueError("Case end disagrees with its numerical result")
+                elif event == "RESULT":
+                    if active is None or len(fields) != 4:
+                        raise ValueError("Numerical result outside a case")
+                    record = begun[active]
+                    record["result_count"] += 1
+                    if (
+                        int(fields[2]) != record["index"]
+                        or fields[3] not in {"PASSED", "FAILED", "NOT_CHECKED"}
+                        or record["result_count"] != 1
+                    ):
+                        record["conflicting_verdict"] = True
+                        raise ValueError("Invalid or duplicate numerical result")
+                    record["result_status"] = fields[3]
+                elif event == "DONE":
+                    if active is not None or done is not None or len(fields) != 4:
+                        raise ValueError("Unexpected native completion record")
+                    done = tuple(map(int, fields[2:]))
+                    failures = sum(
+                        r.get("status") in {"FAILED", "INCOMPLETE"} for r in begun.values()
+                    )
+                    if done != (len(begun), failures):
+                        raise ValueError("Native completion counts do not match case records")
+                else:
+                    raise ValueError("Unknown native case event")
+            except (ValueError, IndexError) as error:
+                protocol_errors.append(str(error))
+        dispatch = re.match(r'^\[rocjitsu\] Kernel dispatch: "([^"]+)"', line)
+        if dispatch and dispatch[1] in target_kernels:
+            if active is None:
+                protocol_errors.append("Selected target dispatch outside a case")
+            elif line.rstrip("\r\n") != target_dispatch_line(by_case[active]):
+                protocol_errors.append("Selected target dispatch belongs to another case")
+        offset += len(line)
+    if active is not None:
+        begun[active]["end"] = len(text)
+    prefix_valid = not protocol_errors
+    batch_errors = protocol_errors.copy()
+    if done is None:
+        batch_errors.append("Missing native completion record")
+    expected_validation_exit = (
+        prefix_valid
+        and done is not None
+        and done[0] == len(planned)
+        and done[1] > 0
+        and all(r.get("status") != "INCOMPLETE" for r in begun.values())
+        and returncode == 1
+    )
+    if returncode and not expected_validation_exit:
+        batch_errors.append(f"Native process exited {returncode}")
+    if done is not None and len(begun) != len(planned):
+        batch_errors.append("Native process did not start every selected input")
+    if done is not None and done[1] and not returncode:
+        batch_errors.append("Native process returned success despite failed cases")
+    races = re.findall(r"^RACE .*", text, re.M)
+    warnings = Counter(line for line in text.splitlines() if "[rj warn]" in line)
+    if races:
+        batch_errors.append(f"Process reported {len(races)} races (none suppressed)")
+    if warnings:
+        batch_errors.append(f"Process reported {sum(warnings.values())} emulator warnings")
+    kernel_owners = Counter(j["solutions"][0]["kernel"] for j in jobs)
+    results = []
+    for job in jobs:
+        parsed_cases, errors, records = [], [], []
+        for case in job["cases"]:
+            record = begun.get((job["id"], case["id"]))
+            if record is None:
+                continue
+            span = text[record["start"] : record.get("end", len(text))]
+            cleaned = "\n".join(
+                line
+                for line in span.splitlines()
+                if not line.startswith("RACE ") and "[rj warn]" not in line
+            )
+            records.append(cleaned)
+            parsed = classify_bench({**job, "cases": [case]}, cleaned, 0)
+            parsed_cases.extend(parsed["cases"])
+            errors.extend(parsed["errors"])
+        result = finish_result(
+            job,
+            "\n".join(records),
+            0,
+            {"id": job["id"], "cases": parsed_cases},
+            errors,
+            job.get("target_dispatches_per_case", 2),
+            counted_statuses=frozenset({"PASSED", "FAILED", "NOT_VALIDATED"}),
+        )
+        observed = {c["case_id"]: c for c in result["cases"]}
+        dispatches = 0
+        for case in job["cases"]:
+            record = begun.get((job["id"], case["id"]))
+            span = text[record["start"] : record.get("end", len(text))] if record else ""
+            count = sum(line == target_dispatch_line(job) for line in span.splitlines())
+            dispatches += count
+            if case["id"] in observed:
+                actual = observed[case["id"]]
+                actual.update(native_started=True, native_completed="status" in record)
+                if record.get("conflicting_verdict") or record.get("status") != actual["status"]:
+                    actual["reported_numerical_status"] = actual["status"]
+                    actual["status"] = "INCOMPLETE"
+                    result["errors"].append("Case result lacks a matching completion status")
+                continue
+            status = (
+                "UNEXECUTED"
+                if record is None and prefix_valid
+                else (
+                    "MISSING_RECORD"
+                    if not prefix_valid
+                    else (
+                        "LAUNCHED_NO_RESULT"
+                        if count
+                        else (
+                            "NATIVE_REJECTED"
+                            if "error: NO solution found!" in span
+                            else "INCOMPLETE"
+                        )
+                    )
+                )
+            )
+            result["cases"].append(
+                {
+                    "case_id": case["id"],
+                    "index": job["solutions"][0]["index"],
+                    "shape": case["shape"],
+                    "status": status,
+                    "target_dispatches": count,
+                    "native_started": record is not None,
+                    "native_completed": record is not None and "status" in record,
+                }
+            )
+        kernel = job["solutions"][0]["kernel"]
+        result["race_headers"] = [
+            r
+            for r in races
+            if kernel_owners[kernel] == 1
+            and re.search(r"(?:^| )kernel=" + re.escape(kernel) + r"(?: |$)", r)
+        ]
+        if result["race_headers"]:
+            result["errors"].append(f"{len(result['race_headers'])} races naming this kernel")
+        result.update(
+            target_dispatches=dispatches if prefix_valid else None,
+            index_failed=bool(result["errors"])
+            and any(c["status"] != "UNEXECUTED" for c in result["cases"]),
+            batch_errors=batch_errors.copy(),
+            returncode=returncode,
+            process_diagnostics={
+                "race_headers": races,
+                "warnings": dict(warnings),
+                "completion": done,
+            },
+        )
+        result["failed"] = result["index_failed"] or bool(batch_errors)
+        result["outcome"] = index_outcome(result)
+        results.append(result)
+    return results
 
 
 def classify_bench_batch(jobs, text, returncode):
     """Keep record identities, launch evidence and process diagnostics separate."""
+    if "[hipblaslt-case-v1]" in text:
+        return classify_bench_records(jobs, text, returncode)
     expected_order = [j["solutions"][0]["index"] for j in jobs for c in j["cases"]]
     chunks, record_order, start = {}, [], 0
     batch_errors = []
@@ -672,9 +955,14 @@ def index_outcome(result):
         "LAUNCHED_NO_RESULT",
         "UNEXECUTED",
         "MISSING_RECORD",
+        "INCOMPLETE",
+        "NOT_VALIDATED",
+        "INFRASTRUCTURE_ERROR",
     ):
         if status in statuses:
             return status
+    if "FAILED" in statuses:
+        return "NUMERICAL_FAILED"
     if result.get("index_failed", result["failed"] and not result.get("batch_errors")):
         return "FAIL"
     if result.get("batch_errors"):
@@ -726,12 +1014,29 @@ def execute_command(command, log, timeout, env):
             raise
 
 
-def run_queue(batches, workers, execute, progress, deadline=None, continue_on_failure=False):
-    lock = threading.Lock()
-    results = []
-    next_batch = 0
+def run_queue(
+    batches,
+    workers,
+    execute,
+    progress,
+    deadline=None,
+    continue_on_failure=False,
+    recover=None,
+):
+    """The calling thread owns scheduling, results, retries and progress writes.
+
+    Each worker receives a private batch and transfers its completed results
+    through a Queue. After that transfer it never accesses those results again.
+    """
+    pending = deque(copy.deepcopy(batches))
+    original_ids = [job["id"] for batch in batches for job in batch]
+    if len(set(original_ids)) != len(original_ids):
+        raise ValueError("A selected job appears in more than one initial batch")
+    work = [queue.Queue() for _ in range(workers)]
+    finished = queue.Queue()
+    results, active = {}, {}
     assigned = []
-    active = 0
+    assigned_ids = set()
     maximum = 0
     stop_snapshot = None
 
@@ -743,71 +1048,115 @@ def run_queue(batches, workers, execute, progress, deadline=None, continue_on_fa
                 "trigger_job": trigger_job,
                 "assigned_jobs": len(assigned),
                 "assigned_job_ids": assigned.copy(),
-                "in_flight": active,
+                "in_flight": len(active),
             }
 
     def expired():
         return deadline is not None and time.monotonic() >= deadline
 
     def worker(slot):
-        nonlocal next_batch, active, maximum
-        while True:
-            with lock:
-                if stop_snapshot is not None or next_batch == len(batches):
-                    return
-                if expired():
-                    stop("suite-timeout")
-                    return
-                batch = batches[next_batch]
-                next_batch += 1
-                assigned.extend(j["id"] for j in batch)
-                active += 1
-                maximum = max(maximum, active)
+        while (batch := work[slot].get()) is not None:
             try:
                 completed = execute(batch, slot)
-            except Exception as error:
+                if sorted(r["id"] for r in completed) != sorted(j["id"] for j in batch):
+                    raise ValueError("Worker did not return one result per assigned job")
+            # SystemExit in a worker must still produce a completion for the coordinator.
+            except BaseException as error:
                 completed = [
                     {
                         "id": job["id"],
                         "failed": True,
+                        "outcome": "INFRASTRUCTURE_ERROR",
                         "errors": [repr(error)],
-                        "cases": [],
+                        "cases": [
+                            {
+                                "case_id": c["id"],
+                                "shape": c["shape"],
+                                "status": "INFRASTRUCTURE_ERROR",
+                                "target_dispatches": None,
+                            }
+                            for c in job.get("cases", [])
+                            if not c.get("skip")
+                        ],
                     }
                     for job in batch
                 ]
-            with lock:
-                results.extend(completed)
-                active -= 1
-                if expired():
-                    stop("suite-timeout", batch[0]["id"])
-                elif not continue_on_failure:
-                    failed = next((r for r in completed if r["failed"]), None)
-                    if failed is not None:
-                        stop("job-failure", failed["id"])
-                try:
-                    progress(
-                        {
-                            "results": results,
-                            "completed": completed,
-                            "assigned_jobs": len(assigned),
-                            "assigned_job_ids": assigned.copy(),
-                            "stop": stop_snapshot,
-                        }
-                    )
-                except Exception as error:
-                    for result in completed:
-                        result["failed"] = True
-                        result.setdefault("errors", []).append(f"Cannot write progress: {error!r}")
-                    stop("progress-error", batch[0]["id"])
+            finished.put((slot, completed))
+
+    def dispatch():
+        nonlocal maximum
+        for slot in range(workers):
+            if not pending or stop_snapshot is not None:
+                break
+            if slot in active:
+                continue
+            if expired():
+                stop("suite-timeout")
+                break
+            batch = pending.popleft()
+            for job in batch:
+                if job["id"] not in assigned_ids:
+                    assigned.append(job["id"])
+                    assigned_ids.add(job["id"])
+            active[slot] = batch
+            maximum = max(maximum, len(active))
+            work[slot].put(batch)
 
     threads = [threading.Thread(target=worker, args=(slot,)) for slot in range(workers)]
     for thread in threads:
         thread.start()
-    for thread in threads:
-        thread.join()
+    try:
+        dispatch()
+        while active:
+            slot, completed = finished.get()
+            batch = active.pop(slot)
+            recovery = recover(batch, completed) if recover and not expired() else []
+            for result in completed:
+                previous = results.get(result["id"])
+                if previous is not None:
+                    result = merge_attempts(previous, result)
+                results[result["id"]] = result
+            completed = [results[r["id"]] for r in completed]
+            if expired():
+                stop("suite-timeout", batch[0]["id"])
+            elif not continue_on_failure and any(r["failed"] for r in completed):
+                stop("job-failure", next(r["id"] for r in completed if r["failed"]))
+            if stop_snapshot is None:
+                pending.extend(recovery)
+            try:
+                progress(
+                    {
+                        "results": list(results.values()),
+                        "completed": completed,
+                        "assigned_jobs": len(assigned),
+                        "assigned_job_ids": assigned.copy(),
+                        "stop": stop_snapshot,
+                    }
+                )
+            except Exception as error:
+                for result in completed:
+                    message = f"Cannot write progress: {error!r}"
+                    result["failed"] = True
+                    result.setdefault("errors", []).append(message)
+                    if result.get("outcome") in {
+                        "PASS",
+                        "PASS_RECOVERED",
+                        "PASS_RETAINED",
+                    }:
+                        result["outcome"] = "PASS_RETAINED"
+                        result["latest_attempt_errors"] = [message]
+                    elif result.get("outcome") is None:
+                        result["outcome"] = "INFRASTRUCTURE_ERROR"
+                stop("progress-error", batch[0]["id"])
+            dispatch()
+    finally:
+        for channel in work:
+            channel.put(None)
+        for thread in threads:
+            thread.join()
     return {
-        "results": sorted(results, key=lambda r: r["id"]),
-        "unstarted": [j["id"] for batch in batches[next_batch:] for j in batch],
+        "results": sorted(results.values(), key=lambda r: r["id"]),
+        "unstarted": [job_id for job_id in original_ids if job_id not in assigned_ids],
         "assigned_job_ids": assigned,
         "max_active": maximum,
         "stop": stop_snapshot,
@@ -879,12 +1228,9 @@ def resume_results(directory, manifest):
         attempts = evidence.get(job["id"], [])
         if not attempts:
             continue
-        result = copy.deepcopy(attempts[-1])
-        if len(attempts) > 1:
-            result["attempts"] = copy.deepcopy(attempts)
-            result["failed"] = any(r["failed"] for r in attempts)
-            if result.get("outcome") == "PASS":
-                result["outcome"] = "PASS_RECOVERED"
+        result = copy.deepcopy(attempts[0])
+        for attempt in attempts[1:]:
+            result = merge_attempts(result, attempt)
         result["resumed_from"] = str(directory)
         observed = {c["case_id"] for c in result["cases"]}
         expected = {c["id"] for c in job["cases"]}
@@ -923,6 +1269,9 @@ def resume_results(directory, manifest):
 def run(args):
     suite_start = time.monotonic()
     deadline = math.inf if args.suite_timeout is None else suite_start + args.suite_timeout
+    continuation = getattr(args, "continue_on_failure", False) or getattr(
+        args, "recover_unexecuted", False
+    )
     args.reports.mkdir(parents=True, exist_ok=False)
     try:
         manifest, configs = prepare(args)
@@ -980,7 +1329,7 @@ def run(args):
                 "suite_timeout": args.suite_timeout,
                 "backend": args.backend,
                 "batch_size": batch_size,
-                "continue_on_failure": getattr(args, "continue_on_failure", False),
+                "continue_on_failure": continuation,
                 "recover_unexecuted": getattr(args, "recover_unexecuted", False),
                 "library_dir": manifest["library_dir"],
                 "controlled_environment": {
@@ -996,12 +1345,10 @@ def run(args):
             },
         )
 
-        def execute(batch, slot, recovery=False):
+        def execute(batch, slot):
             begin = time.monotonic()
             batch_id = batch[0]["batch_id"]
-            stem = args.reports / f"batch-{batch_id:03}"
-            if recovery:
-                stem = args.reports / f"batch-{batch_id:03}-recovery-{batch[0]['id']:03}"
+            stem = args.reports / batch[0].get("attempt_id", f"batch-{batch_id:03}")
             completed, runnable = [], []
             for job in batch:
                 if "planning_error" in job:
@@ -1084,6 +1431,8 @@ def run(args):
                         "--data",
                         str(stem.with_suffix(".data")),
                     ]
+                    if continuation:
+                        client_args.insert(0, "--continue-on-failure")
                 if rc:
                     completed += [
                         finish_result(
@@ -1154,62 +1503,38 @@ def run(args):
                     "results": completed,
                 },
             )
-            if (
-                not recovery
-                and args.backend == "bench"
-                and getattr(args, "recover_unexecuted", False)
-            ):
-                originals = {job["id"]: job for job in runnable}
-                for result in completed:
-                    if not result["cases"] or any(
-                        c["status"] != "UNEXECUTED" for c in result["cases"]
-                    ):
-                        continue
-                    if time.monotonic() >= deadline:
-                        break
-                    original = copy.deepcopy(result)
-                    try:
-                        retried = execute([originals[result["id"]]], slot, recovery=True)[0]
-                    except Exception as error:
-                        retried = {
-                            "id": result["id"],
-                            "batch_id": batch_id,
-                            "profile": result["profile"],
-                            "attempt_id": f"batch-{batch_id:03}-recovery-{result['id']:03}",
-                            "failed": True,
-                            "index_failed": True,
-                            "outcome": "RECOVERY_ERROR",
-                            "errors": [repr(error)],
-                            "cases": [
-                                {
-                                    **case,
-                                    "status": "RECOVERY_ERROR",
-                                    "target_dispatches": None,
-                                }
-                                for case in result["cases"]
-                            ],
-                            "target_dispatches": None,
-                            "returncode": None,
-                            "batch_errors": [],
-                            "process_diagnostics": {},
-                        }
-                    result.update(retried)
-                    result["attempts"] = [original, copy.deepcopy(retried)]
-                    result["failed"] = original["failed"] or retried["failed"]
-                    if retried.get("outcome") == "PASS":
-                        result["outcome"] = "PASS_RECOVERED"
             return completed
+
+        recovery_attempts = Counter()
+
+        def recover(batch, completed):
+            remaining = {
+                r["id"]
+                for r in completed
+                if r["cases"] and all(c["status"] == "UNEXECUTED" for c in r["cases"])
+            }
+            if not remaining:
+                return []
+            untouched = [copy.deepcopy(j) for j in batch if j["id"] in remaining]
+            no_progress = len(untouched) == len(batch)
+            retries = batch[0].get("no_progress_retries", 0) + 1 if no_progress else 0
+            if retries > 1:
+                return []
+            batch_id = batch[0]["batch_id"]
+            recovery_attempts[batch_id] += 1
+            attempt = f"batch-{batch_id:03}-recovery-{recovery_attempts[batch_id]:03}"
+            for job in untouched:
+                job.update(attempt_id=attempt, no_progress_retries=retries)
+            return [untouched]
 
         next_checkpoint = 0
 
         def retain_attempt(result):
             original = retry.pop(result["id"], None)
             if original is not None:
-                result["current_attempt_failed"] = result["failed"]
-                result["attempts"] = [original, copy.deepcopy(result)]
-                result["failed"] = original["failed"] or result["failed"]
-                if result.get("outcome") == "PASS":
-                    result["outcome"] = "PASS_RECOVERED"
+                merged = merge_attempts(original, result)
+                result.clear()
+                result.update(merged)
 
         def progress(value):
             nonlocal next_checkpoint
@@ -1233,7 +1558,7 @@ def run(args):
             for result in value["completed"]:
                 row = solution_report(manifest["jobs"][result["id"]], result, args.backend)
                 print(
-                    f"{args.backend} solution {row[0]}: {row[1]}; numerical={row[2]}; dispatches={row[3]}; batch_seconds={row[4]}; {row[5]}",
+                    f"{args.backend} solution {row[0]}: {row[1]}; numerical={row[2]}; dispatches={row[3]}; {row[4]}",
                     flush=True,
                 )
 
@@ -1244,7 +1569,8 @@ def run(args):
             execute,
             progress,
             deadline=deadline,
-            continue_on_failure=getattr(args, "continue_on_failure", False),
+            continue_on_failure=continuation,
+            recover=recover if args.backend == "bench" and continuation else None,
         )
         if not execution_batches and time.monotonic() >= deadline:
             summary["stop"] = {
@@ -1262,6 +1588,8 @@ def run(args):
             retain_attempt(result)
             job = by_id[result["id"]]
             observed = {c["case_id"] for c in result["cases"]}
+            if len(observed) != len(result["cases"]) or observed - {c["id"] for c in job["cases"]}:
+                raise ValueError(f"Invalid case accounting for job {job['id']}")
             # A worker exception can interrupt native setup/parsing. These cases
             # were still excluded from its input; retain their skip evidence.
             skipped = [c for c in skipped_cases(job) if c["case_id"] not in observed]
@@ -1303,7 +1631,6 @@ def run(args):
             counts=dict(counts),
             missing=missing,
             unstarted_cases=unstarted,
-            failed_batch_ids=failed_batch_ids(summary["results"]),
             outcome_counts=dict(
                 Counter(r.get("outcome") or index_outcome(r) for r in summary["results"])
             ),
@@ -1337,6 +1664,9 @@ def run(args):
                 )
         summary["processes"] = processes
         summary["failed_process_ids"] = [p["id"] for p in processes if p["failed"]]
+        summary["failed_batch_ids"] = sorted(
+            {int(p["id"].split("-")[1]) for p in processes if p["failed"]}
+        )
         completed_by_id = {r["id"]: r for r in summary["results"]}
         summary["index_outcomes"] = []
         for job in manifest["jobs"]:
@@ -1350,6 +1680,18 @@ def run(args):
                         for c in job["cases"]
                     ],
                 }
+            else:
+                result = copy.deepcopy(result)
+                observed = {c["case_id"] for c in result["cases"]}
+                result["cases"] += [
+                    {
+                        "case_id": c["id"],
+                        "shape": c["shape"],
+                        "status": "MISSING_RECORD",
+                    }
+                    for c in job["cases"]
+                    if c["id"] not in observed
+                ]
             summary["index_outcomes"].append(
                 {
                     **result,
@@ -1360,6 +1702,10 @@ def run(args):
         summary["outcome_counts"] = dict(
             Counter(r.get("outcome") or index_outcome(r) for r in summary["index_outcomes"])
         )
+        summary["numerical_index_counts"] = numerical_index_counts(summary["index_outcomes"])
+        summary["numerical_failure_indices"] = numerical_failure_indices(summary["index_outcomes"])
+        assert sum(summary["outcome_counts"].values()) == len(manifest["jobs"])
+        assert sum(summary["numerical_index_counts"].values()) == len(manifest["jobs"])
         summary["accounted_cases"] = sum(counts.values()) + len(missing) + len(unstarted)
         assert summary["accounted_cases"] == summary["planned_cases"]
         summary["passed"] = (
@@ -1373,7 +1719,11 @@ def run(args):
         write_json(args.reports / "summary.json", summary)
         write_text(args.reports / "summary.md", render_report(manifest, summary))
         print(
-            f"{counts['PASSED']}/{summary['planned_cases']} numerical passes; {counts['SKIPPED']} skipped, {len(missing)} missing, {len(unstarted)} unstarted. Reports: {args.reports}"
+            f"Indices: {len(manifest['jobs'])} selected; numerical validation "
+            f"{summary['numerical_index_counts'].get('PASSED', 0)} passed, "
+            f"{summary['numerical_index_counts'].get('FAILED', 0)} failed, "
+            f"{summary['numerical_index_counts'].get('INCOMPLETE', 0)} incomplete; "
+            f"{len(summary['numerical_failure_indices'])} with failures in retained history. Reports: {args.reports}"
         )
         return 0 if summary["passed"] else 1
     except Exception as error:
@@ -1412,7 +1762,7 @@ def main():
     parser.add_argument(
         "--recover-unexecuted",
         action="store_true",
-        help="Replay wholly unexecuted indices once, individually, retaining original process failures",
+        help="Alias for --continue-on-failure, including batched recovery of unexecuted indices",
     )
     parser.add_argument("--target", choices=("gfx942", "gfx950"), required=True)
     parser.add_argument(

@@ -193,9 +193,12 @@ The human-readable client output is an interface dependency; format changes must
 update the parsers, and missing evidence fails the run.
 
 Workers use separate physical cores, with emulator/OpenMP/BLAS thread budgets of
-one. On failure, workers stop claiming batches and finish their in-flight batches.
-`--continue-on-failure` instead processes the remaining selection while retaining
-failures and an unsuccessful final exit. It is useful for complete timing samples.
+one. One coordinator owns batch assignment, recovery, index results and report
+writes; each worker owns only its current private batch. On failure, workers stop
+claiming batches and finish their in-flight batches. With `--continue-on-failure`,
+bench finishes cleanup after a numerical failure and runs later inputs in the
+same native process. The runner also processes later batches and retains an
+unsuccessful final exit when any index or process failed.
 A batch's time allowance is `--timeout` (default 120 seconds) multiplied by the
 number of runnable solutions. Conversion and native execution share that deadline,
 shortened to the remaining suite budget when `--suite-timeout` is supplied. There is no overall deadline by default. The optional suite clock starts before inventory preparation. Expiry kills
@@ -206,8 +209,8 @@ not a hard process-memory limit.
 
 Each backend writes into a fresh report directory:
 
-- `summary.md`: solution index, individual outcome, numerical passes, dispatch counts,
-  elapsed time and reasons. Updated atomically at most once every five seconds
+- `summary.md`: solution index, individual outcome, numerical passes, dispatch counts
+  and reasons. Updated atomically at most once every five seconds
   during normal execution, on stopping, and at completion; published
   in the GitHub job summary. Partial reports distinguish pending/incomplete work.
 - `manifest.json`: inventory, selection, policy, shapes, predicates, input hashes,
@@ -215,7 +218,8 @@ Each backend writes into a fresh report directory:
 - `known_failures.yaml`: the exact list used for this run, hashed in the manifest.
 - `settings.json`, `rocjitsu.json` or `profile-*.json`: CPU assignment, environment and emulator settings.
 - `batch-*`: per-process INI/YAML, binary bench input, command, combined log,
-  timing breakdown and classified native results.
+  timing breakdown and classified native results. Batch timing stays in these
+  diagnostic receipts; the report presents outcomes by original solution index.
 - `solution-*.result.json`: per-index evidence and the corresponding `batch_id`.
 - `prior-solution-*.result.json`: earlier incomplete attempts retained when resuming.
 - `progress.json`, `summary.json`: incremental/final accounting and first-failure
@@ -228,11 +232,31 @@ planned-case denominator; expected dispatch counts exclude skipped cases. Final
 accounting includes all observed statuses, skipped cases, missing records and
 unstarted cases. Skips do not establish numerical or race coverage.
 
-The console reports each index when its batch finishes. Completed numerical records retain the norm error, tolerances, solution identity and target dispatch counts. `VALIDATED_IN_FAILED_PROCESS` means those per-index checks completed, while the native process failed a shared check. `LAUNCHED_NO_RESULT` means the target ran without producing a numerical record; `UNEXECUTED` means an aborted process never launched that input. Explicit native selection rejection reports `NATIVE_REJECTED`. Planning reports hardware exclusions, unsupported features, invalid inputs and missing code objects separately.
+The console reports each index when its batch finishes. Bench emits flushed
+`BEGIN`, numerical `RESULT`, post-cleanup `END` and final `DONE` records. The
+runner requires matching case order, shape, actual solution/kernel identity,
+target dispatches and completion counts. A native `FAILED` verdict establishes
+numerical failure even when bench prints `failed` in the allclose columns; those
+columns are measurements, not the native norm threshold. Completed records
+retain the norm error, allclose measurements, identity and dispatch counts.
+`summary.json` counts retained numerical results once per index and lists
+indices with failures in earlier attempts separately. `VALIDATED_IN_FAILED_PROCESS`
+keeps a completed numerical result alongside a shared process failure.
+`LAUNCHED_NO_RESULT` means the target ran without producing a numerical record;
+`UNEXECUTED` means an aborted process never launched that input. Explicit native
+selection rejection reports `NATIVE_REJECTED`. Planning reports hardware
+exclusions, unsupported features, invalid inputs and missing code objects separately.
 
 Race headers naming a unique selected kernel appear with that index. All race headers, warnings and process errors are also retained as process diagnostics; ambiguous or shutdown diagnostics are not assigned to a member index. `summary.json` has one `index_outcomes` entry per requested index, including unstarted work, plus separate `processes` and `failed_process_ids`. Its `outcome_counts` must not be replaced by a count of per-row `failed` flags: those flags retain process failures for the run's exit status.
 
-Use `--recover-unexecuted` to replay each wholly unexecuted index once in its own native process. Recovery keeps the selected profile, exact YAML and checks, records both attempts, and respects any remaining suite deadline. It runs only when ordered dispatch and record evidence establishes that the original input never launched. Launched failures, native rejections and ambiguous logs are not retried automatically. The original process failure still makes the run exit unsuccessfully, even if every replay passes. Use `--continue-on-failure` as well to complete the remaining selected batches.
+`--continue-on-failure` also places provably unstarted members of a failed
+process back on the shared queue as one remainder batch, with the same profile,
+YAML rows and checks. A remainder batch can shrink after another interruption;
+only one retry is allowed without progress, and the suite deadline still applies.
+Launched failures, native rejections and ambiguous logs are not retried
+automatically. Every attempt remains in the receipts, and an earlier process
+failure keeps the run unsuccessful even if all untouched indices later pass.
+`--recover-unexecuted` is retained as an alias for `--continue-on-failure`.
 
 Replay the saved batch command and input to preserve the original process context. To investigate a launched failure, repeat the same tool/library/profile arguments with `--batch-size 1 --solution-index-range-begin N --solution-index-range-end N_PLUS_ONE` and a fresh reports directory. A successful isolated replay does not erase the original batch failure.
 
@@ -248,8 +272,8 @@ budgets can change.
 Completed outcomes, including numerical failures, races, planning gaps and
 skips, carry forward without another native execution. Unstarted indices,
 missing cases, unexecuted inputs, timeouts, killed processes and recovery errors
-are attempted again. Each continuation attempts those inputs once, with optional
-`--recover-unexecuted` recovery under its remaining deadline. Completed batch
+are attempted again. Each continuation attempts those inputs under its remaining
+deadline, including bounded remainder-batch recovery when continuation is enabled. Completed batch
 receipts are usable even when progress, per-index files or the final summary were
 never written. Raw logs without a classified receipt remain evidence to inspect;
 they do not establish a pass, and their indices run again.
@@ -266,7 +290,7 @@ unsuccessful, including when a timeout or process failure is followed by a
 successful replay. `PASS_RECOVERED` describes that replay; it does not clear the
 original failure. A fresh run without `--resume-from` independently qualifies a
 fixed artifact. Carried rows identify their prior run's batch; current
-`processes` and `failed_batch_ids` describe this continuation's executions.
+`processes`, `failed_process_ids` and `failed_batch_ids` describe this continuation's executions.
 Earlier failed process IDs are retained in the source manifest/receipts and
 the continuation's `resume` metadata. The final summary still accounts for every selected original
 index and distinguishes numerical results, race reports, process failures,
