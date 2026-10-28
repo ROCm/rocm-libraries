@@ -56,7 +56,7 @@ public:
      *
      * An id already claimed keeps the incumbent and logs the loser rather than throwing:
      * two engines hashing onto one id (RFC 0003) is an authoring collision, and this is
-     * the backstop for pairs the descriptor policy can't see -- RFC 0020 §10.2.1 drops
+     * the backstop for pairs the descriptor policy can't see -- RFC 0020 §13.2.1 drops
      * every UED in a name collision before it reaches this list, but two hand-written
      * engines have no such gate, and refusing both here would take a working engine down
      * to punish one duplicate.
