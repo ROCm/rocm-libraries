@@ -24,6 +24,7 @@ MxScaleStorageLayout mxScaleStorageLayoutForArchitectureName(std::string_view ar
 
 MxScaleStoragePlan planMxScaleStorage(std::array<size_t, 2> naturalShape, size_t blockSize,
                                       MxScaleStorageLayout layout) {
+    if (blockSize == 0) throw std::runtime_error("MX scale block size must be nonzero.");
     const size_t naturalByteCount = ::roc::hostnumerics::detail::checkedMultiply(
         naturalShape[0], naturalShape[1], "MX natural scale storage");
     size_t physicalByteCount = naturalByteCount;

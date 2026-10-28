@@ -97,11 +97,13 @@ namespace TensileLite
         }
 
         // Batch stride for pre-swizzled gfx950 MX scales.
-        size_t preSwizzledScaleBatchStride(TensorDescriptor const& tensor, size_t boundIndex)
+        size_t preSwizzledScaleBatchStride(TensorDescriptor const& tensor,
+                                           size_t                  boundIndex,
+                                           size_t                  mxBlock)
         {
             using namespace roc::hostnumerics::amd_gpu_layout;
             return planMxScaleStorage({tensor.sizes()[1 - boundIndex], tensor.sizes()[boundIndex]},
-                                      0,
+                                      mxBlock,
                                       MxScaleStorageLayout::Gfx950)
                 .physicalByteCount;
         }
@@ -3458,7 +3460,8 @@ namespace TensileLite
                 size_t batchStride = usesDataParallelArgsV1
                                          ? problem.mxsa().strides()[descriptorStrideAB + 1]
                                          : preSwizzledScaleBatchStride(problem.mxsa(),
-                                                                       problem.boundIndices()[0].a);
+                                                                       problem.boundIndices()[0].a,
+                                                                       problem.mxBlockA());
                 rv.args.appendCustomType("StrideScaleA1", batchStride, arg.type);
                 break;
             }
@@ -3473,7 +3476,8 @@ namespace TensileLite
                 size_t batchStride = usesDataParallelArgsV1
                                          ? problem.mxsb().strides()[descriptorStrideAB + 1]
                                          : preSwizzledScaleBatchStride(problem.mxsb(),
-                                                                       problem.boundIndices()[0].b);
+                                                                       problem.boundIndices()[0].b,
+                                                                       problem.mxBlockB());
                 rv.args.appendCustomType("StrideScaleB1", batchStride, arg.type);
                 break;
             }
