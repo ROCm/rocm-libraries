@@ -4989,8 +4989,9 @@ class _Attention3DPrepared:
 class _Attention2DLaunchMeta:
     grid: Tuple[int, int, int]
     block: Tuple[int, int, int]
-    # What the compiled kernel addresses, from ``_spec_kv_addr_limit``.
-    kv_addr_limit: _KvAddrLimit | None
+    # What the compiled kernel addresses, from ``_spec_kv_addr_limit``. None skips
+    # the launch-time width check, so callers built before the field still work.
+    kv_addr_limit: _KvAddrLimit | None = None
 
 
 # Compiled state is shared; scratch belongs to an execution, invocation or graph.
