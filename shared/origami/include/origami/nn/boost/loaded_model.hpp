@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "origami/hardware.hpp"
 #include "origami/nn/boost/library_stamp.hpp"
 #include "origami/nn/boost/types.hpp"
 #include "origami/origami_export.h"
@@ -80,6 +81,63 @@ class ORIGAMI_EXPORT ensemble_t {
   std::size_t                                     top_n_ = 10;
   std::vector<manifest_entry_t>                   manifest_;
   std::vector<std::set<std::string>>              seen_values_;
+};
+
+/// A model that passed every compatibility check (load_validate.cpp): the registry's boost_v1
+/// payload and the only way to rank with it (rank.cpp).
+class ORIGAMI_EXPORT booster_t {
+ public:
+  /**
+   * @brief Load @p path and verify it against @p target and @p identity.
+   *
+   * Checks, in order: file format, arch, dtype, feature schema hash, Origami source hash, the
+   * kernel library (diff_library on target.library_kernels, refused on retrain_required), that
+   * every model column belongs to the schema and that the extractor computes it. The Origami
+   * commit is not checked; on success @p detail reports both commits and the library diff.
+   */
+  static std::shared_ptr<const booster_t> create(const std::string&      path,
+                                                 const deployment_t&     target,
+                                                 const build_identity_t& identity,
+                                                 status_t&               status,
+                                                 std::string&            detail);
+  /// Same, for an already parsed model.
+  static std::shared_ptr<const booster_t> create(std::shared_ptr<const ensemble_t> model,
+                                                 const deployment_t&               target,
+                                                 const build_identity_t&           identity,
+                                                 status_t&                         status,
+                                                 std::string&                      detail);
+
+  /**
+   * @brief Re-order Origami's top candidates.
+   *
+   * @param candidates Origami's ranked candidates (best first). Only the first top_n are
+   *        considered; the caller passes distinct kernels.
+   */
+  boost_result_t rank(const problem_t&   problem,
+                      const hardware_t&  hardware,
+                      const candidate_t* candidates,
+                      std::size_t        num_candidates) const;
+
+  /// Problem-level check only (dtype class, D dtype, M/N/K/batch training ranges; cheap). Any
+  /// CU budget is accepted: the features see it through resolve_num_cus(problem.num_cus, N_CU).
+  status_t check_problem(const problem_t&  problem,
+                         const hardware_t& hardware,
+                         std::string*      detail = nullptr) const;
+
+  /// Model-ordered feature row for one candidate. False (with reason) if not computable.
+  bool model_features(const problem_t&   problem,
+                      const hardware_t&  hardware,
+                      const candidate_t& candidate,
+                      double*            row,
+                      std::string*       why = nullptr) const;
+
+  const ensemble_t& model() const { return *model_; }
+
+ private:
+  booster_t() = default;
+  std::shared_ptr<const ensemble_t> model_;
+  std::vector<std::size_t>          slot_;  // model column -> extractor slot
+  std::vector<data_type_t>          d_dtypes_;
 };
 
 }  // namespace origami::nn::boost

@@ -32,6 +32,10 @@
 
 namespace origami::nn {
 
+namespace boost {
+class rerank_source_t;
+}
+
 using model_handle_t = int;
 
 constexpr model_handle_t invalid_handle = -1;
@@ -39,6 +43,7 @@ constexpr model_handle_t invalid_handle = -1;
 enum class backend_id_t : std::uint8_t {
   tilewright_v1,
   embedding_similarity_v1,
+  boost_v1,
 };
 
 struct feature_layout_t {
@@ -62,12 +67,15 @@ struct inference_options_t {
   std::size_t min_scored            = 0;
   int         force_cell            = -1;
   bool        use_smart_k_whitelist = true;
+  /// boost: the caller's candidates and kernel fields for analytical_rerank (nn/boost/types.hpp).
+  boost::rerank_source_t* rerank_source = nullptr;
 };
 
-/// Per-library handles for both ML backends (either may be invalid_handle).
+/// Per-library handles for the ML backends (any may be invalid_handle).
 struct library_models_t {
   model_handle_t tilewright           = invalid_handle;
   model_handle_t embedding_similarity = invalid_handle;
+  model_handle_t boost                = invalid_handle;
 
   bool has(backend_id_t backend) const;
   model_handle_t get(backend_id_t backend) const;

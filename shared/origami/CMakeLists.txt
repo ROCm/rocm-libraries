@@ -109,7 +109,9 @@ target_sources(origami-headers
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/nn.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/boost/library_stamp.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/boost/load_limits.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/boost/load_validate.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/boost/loaded_model.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/boost/rank.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/boost/sha256.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/boost/types.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/features/gemm_boost.hpp"
@@ -152,12 +154,56 @@ target_sources(
             "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/model_registry.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/dispatch.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/boost/library_stamp.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/boost/load_validate.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/boost/orr_loader.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/boost/rank.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/boost/sha256.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/features/gemm_boost.cpp"
 )
 
 target_link_libraries(origami PRIVATE hip::host)
+
+# Stamp of the latency-model sources. An Origami Boost model (nn/boost) carries the same
+# stamp and is refused by any build whose sources differ. The nn/ backends, Origami Boost
+# included, are excluded so the stamp tracks only the model the corrections were trained against.
+file(GLOB_RECURSE _origami_stamp_files
+     RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
+     CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/*.hpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/*.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/*.hpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/*.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/*.hpp")
+list(FILTER _origami_stamp_files EXCLUDE REGEX "^include/origami/nn/")
+list(SORT _origami_stamp_files)
+set(_origami_stamp_lines "")
+foreach(_f IN LISTS _origami_stamp_files)
+    file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/${_f}" _h)
+    string(APPEND _origami_stamp_lines "${_f}\t${_h}\n")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${_f}")
+endforeach()
+string(SHA256 _origami_source_hash "${_origami_stamp_lines}")
+set(ORIGAMI_SOURCE_HASH "sha256:${_origami_source_hash}")
+set(ORIGAMI_SOURCE_COMMIT "unknown")
+if(GIT_EXECUTABLE)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" --no-optional-locks log -1 --format=%H --
+                include/origami src/origami src/simulator ":(exclude)include/origami/nn"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT_VARIABLE _origami_source_commit
+        RESULT_VARIABLE _origami_git_result
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    if(_origami_git_result EQUAL 0 AND _origami_source_commit MATCHES "^[0-9a-f]+$")
+        set(ORIGAMI_SOURCE_COMMIT "${_origami_source_commit}")
+    endif()
+endif()
+message(STATUS "Origami source stamp: ${ORIGAMI_SOURCE_HASH} (commit ${ORIGAMI_SOURCE_COMMIT})")
+file(CONFIGURE
+     OUTPUT "${PROJECT_BINARY_DIR}/src/origami_source_stamp.hpp"
+     CONTENT "#pragma once\n#define ORIGAMI_SOURCE_HASH \"@ORIGAMI_SOURCE_HASH@\"\n#define ORIGAMI_SOURCE_COMMIT \"@ORIGAMI_SOURCE_COMMIT@\"\n"
+     @ONLY)
+target_include_directories(origami PRIVATE "${PROJECT_BINARY_DIR}/src")
 
 if(ORIGAMI_ENABLE_PYTHON)
     add_subdirectory(python)
