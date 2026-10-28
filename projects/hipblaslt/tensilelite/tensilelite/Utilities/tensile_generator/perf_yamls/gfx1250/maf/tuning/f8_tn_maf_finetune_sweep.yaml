@@ -92,6 +92,8 @@ BenchmarkProblems:
         - ExpandPointerSwap: [False]
         - CompactLoopStore: [False]
         - PreloadKernArgs: [True]
+        - InitCIterWmma: [0, 1]
+        - SwInstructionPrefetch: [0, 1, -1]
 
         - ClusterDim: [[4,4],[2,4]]
         - ClusterAIDMapping: [-1, -2]

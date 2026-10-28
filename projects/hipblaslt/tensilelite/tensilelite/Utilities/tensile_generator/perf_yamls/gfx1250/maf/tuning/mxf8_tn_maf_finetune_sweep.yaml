@@ -94,6 +94,8 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - ExpandPointerSwap: [False]
         - PreloadKernArgs: [True]
+        - InitCIterWmma: [0, 1]
+        - SwInstructionPrefetch: [0, 1, -1]
 
         - CompactLoopStore: [True, False]
         - NumElementsPerBatchStore: [16]
