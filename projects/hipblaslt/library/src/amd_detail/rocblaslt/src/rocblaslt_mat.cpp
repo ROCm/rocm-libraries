@@ -142,23 +142,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
 
     int8_t alpha_1[16] = {0}; // use dScaleAlphaVec instead, original alpha => 1.0
     if(scaleAlphaVec)
-    {
-        if(matmul_descr->compute_type == rocblaslt_compute_f64)
-        {
-            *((double*)alpha_1) = 1.f;
-            alpha               = alpha_1;
-        }
-        else if(matmul_descr->compute_type == rocblaslt_compute_i32)
-        {
-            *((int32_t*)alpha_1) = 1.f;
-            alpha                = alpha_1;
-        }
-        else
-        {
-            *((float*)alpha_1) = 1.f;
-            alpha              = alpha_1;
-        }
-    }
+        setTo1(matmul_descr->compute_type, alpha_1, &alpha);
 
     // FIXME: Is this still needed?
     // // check alignment of pointers before casting
@@ -862,8 +846,8 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
 
     // A host alpha of 0 may leave A or B null. Load alpha at the scale-type
     // width: a 4-byte read of a HIP_R_16F alpha over-reads the caller (ROCM-31553).
-    const hipDataType scalar_type
-        = alphaBetaScalarType(matmul_descr->scale_type, matmul_descr->compute_type);
+    const hipDataType scalar_type = alphaBetaScalarType(
+        matmul_descr->scale_type, matmul_descr->compute_type, matA->type);
     const bool alpha_A_B_violation = alphaForbidsNullAB(
         scalar_type, matmul_descr->pointermode, alpha, A, B);
 

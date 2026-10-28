@@ -288,10 +288,12 @@ inline bool problemFitsKernelArgs(int64_t m,
  * Host alpha/beta scalar
  *
  * Alpha and beta are scalars of the matmul scale type. The ext API does not
- * carry a scale type (the problem stores HIPBLASLT_DATATYPE_INVALID); the
- * scalar width then follows the compute type. A fixed 4-byte load over-reads
- * a 2-byte HIP_R_16F scalar and can treat a zero half as nonzero when the
- * next two bytes are nonzero (ROCM-31553).
+ * carry a scale type (the problem stores HIPBLASLT_DATATYPE_INVALID). The
+ * scalar width then follows the compute type, except for complex A: compute
+ * type is real, so a complex alpha must follow the A type or only the real
+ * part is read. A fixed 4-byte load over-reads a 2-byte HIP_R_16F scalar and
+ * can treat a zero half as nonzero when the next two bytes are nonzero
+ * (ROCM-31553).
  ******************************************************************************/
 inline hipDataType scalarTypeFromCompute(rocblaslt_compute_type compute_type)
 {
@@ -311,7 +313,9 @@ inline hipDataType scalarTypeFromCompute(rocblaslt_compute_type compute_type)
     }
 }
 
-inline hipDataType alphaBetaScalarType(hipDataType scale_type, rocblaslt_compute_type compute_type)
+inline hipDataType alphaBetaScalarType(hipDataType             scale_type,
+                                       rocblaslt_compute_type  compute_type,
+                                       hipDataType             type_a = HIPBLASLT_DATATYPE_INVALID)
 {
     switch(scale_type)
     {
@@ -323,8 +327,12 @@ inline hipDataType alphaBetaScalarType(hipDataType scale_type, rocblaslt_compute
     case HIP_C_64F:
         return scale_type;
     default:
-        return scalarTypeFromCompute(compute_type);
+        break;
     }
+    // Ext API: no scale type. Complex alpha is the A type, not the real compute type.
+    if(type_a == HIP_C_32F || type_a == HIP_C_64F)
+        return type_a;
+    return scalarTypeFromCompute(compute_type);
 }
 
 // Reads only the bytes `type` occupies. Unknown types are not loaded and
@@ -555,7 +563,7 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
     // A host alpha of 0 may leave A or B null. Load alpha at the scalar width:
     // a 4-byte read of a HIP_R_16F alpha over-reads the caller (ROCM-31553).
     const bool alpha_A_B_violation = alphaForbidsNullAB(
-        alphaBetaScalarType(scale_type, compute_type), pointermode, alpha, a, b);
+        alphaBetaScalarType(scale_type, compute_type, type_a), pointermode, alpha, a, b);
     // pointers must be valid
     if(n && ((k && alpha_A_B_violation) || !c || !d))
         return rocblaslt_status_invalid_pointer;
@@ -840,6 +848,12 @@ inline void setTo1(const rocblaslt_compute_type& compute_type, const void* onePt
     {
         *((int32_t*)onePtr) = 1.f;
         *dst                = onePtr;
+    }
+    else if(compute_type == rocblaslt_compute_f16 || compute_type == rocblaslt_compute_f16_pedantic)
+    {
+        // A float 1.0 (0x3f800000) read back as a half is 0.
+        *((hipblasLtHalf*)onePtr) = hipblasLtHalf(1.f);
+        *dst                      = onePtr;
     }
     else
     {

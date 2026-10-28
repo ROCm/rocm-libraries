@@ -6119,9 +6119,9 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
         // A host alpha of 0 may leave A or B null. Load alpha at the scalar
         // width: a 4-byte read of a HIP_R_16F alpha over-reads the caller
         // (ROCM-31553). The ext API leaves scale_type invalid; the width then
-        // follows the compute type.
+        // follows the compute type, or the A type when A is complex.
         const hipDataType scalar_type
-            = alphaBetaScalarType(problem.scale_type, problem.compute_type);
+            = alphaBetaScalarType(problem.scale_type, problem.compute_type, problem.a_type);
         if(problem.alpha == nullptr || problem.beta == nullptr || problem.C == nullptr
            || problem.D == nullptr
            || alphaForbidsNullAB(scalar_type,

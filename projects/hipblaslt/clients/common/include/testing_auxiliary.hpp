@@ -1997,6 +1997,57 @@ void testing_aux_f16_alpha_null_a_b_ext(const Arguments& arg)
     CHECK_HIPBLASLT_ERROR(hipblasLtDestroy(handle));
 }
 
+// Ext API stores no scale type. A complex alpha must be read as complex:
+// 0+1i is not zero, so null A/B stays invalid.
+void testing_aux_c32_alpha_null_a_b_ext(const Arguments& arg)
+{
+    const int64_t m           = arg.M[0];
+    const int64_t n           = arg.N[0];
+    const int64_t k           = arg.K[0];
+    const int64_t batch_count = 1;
+
+    const hipblaslt_complex_float alpha_real(1.f, 0.f);
+    const hipblaslt_complex_float alpha_imag(0.f, 1.f);
+    const hipblaslt_complex_float alpha_zero(0.f, 0.f);
+    const hipblaslt_complex_float beta(1.f, 0.f);
+
+    hipblasLtHandle_t handle;
+    CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&handle));
+
+    void* d_c = nullptr;
+    void* d_d = nullptr;
+    CHECK_HIP_ERROR(hipMalloc(&d_c, m * n * batch_count * sizeof(hipblaslt_complex_float)));
+    CHECK_HIP_ERROR(hipMalloc(&d_d, m * n * batch_count * sizeof(hipblaslt_complex_float)));
+
+    auto set_problem = [&](const void* alpha) {
+        hipblaslt_ext::Gemm gemm(handle,
+                                 HIPBLAS_OP_N,
+                                 HIPBLAS_OP_N,
+                                 HIP_C_32F,
+                                 HIP_C_32F,
+                                 HIP_C_32F,
+                                 HIP_C_32F,
+                                 HIPBLAS_COMPUTE_32F);
+        hipblaslt_ext::GemmEpilogue epilogue;
+        hipblaslt_ext::GemmInputs   inputs;
+        inputs.setA(nullptr);
+        inputs.setB(nullptr);
+        inputs.setC(d_c);
+        inputs.setD(d_d);
+        inputs.setAlpha(alpha);
+        inputs.setBeta(&beta);
+        return gemm.setProblem(m, n, k, batch_count, epilogue, inputs);
+    };
+
+    EXPECT_HIPBLAS_STATUS(set_problem(&alpha_real), HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_HIPBLAS_STATUS(set_problem(&alpha_imag), HIPBLAS_STATUS_INVALID_VALUE);
+    CHECK_HIPBLASLT_ERROR(set_problem(&alpha_zero));
+
+    CHECK_HIP_ERROR(hipFree(d_c));
+    CHECK_HIP_ERROR(hipFree(d_d));
+    CHECK_HIPBLASLT_ERROR(hipblasLtDestroy(handle));
+}
+
 void testing_aux_matmul_alg_get_attr_bad_arg(const Arguments& arg) {}
 
 void testing_aux_matmul_alg_null_matmul(const Arguments& arg)
