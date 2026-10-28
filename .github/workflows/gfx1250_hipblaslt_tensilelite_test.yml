@@ -242,7 +242,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          REF="$(sed -nE '/therock-ref:/,/value:/ s/.*value: *"([0-9a-f]{40})".*/\1/p' .github/actions/ci-env/action.yml)"
+          REF="$(sed -nE '/therock-ref:/,/value:/ s/.*value: *"([^"]+)".*/\1/p' .github/actions/ci-env/action.yml)"
           export REF
           python3 - <<'EOF'
           import glob, json, os, sys, urllib.request
