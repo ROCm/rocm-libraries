@@ -221,7 +221,7 @@ DefaultSolution:
   WavefrontSize: -1
   WorkGroup: [16, 16, 1]
   WorkGroupMapping: 8
-  WorkGroupMappingXCC: 8
+  WorkGroupMappingXCC: 1
   WorkGroupMappingXCCGroup: -1
   WorkGroupReduction: false
 Solutions:
@@ -324,7 +324,7 @@ Solutions:
   Valid: true
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -430,7 +430,7 @@ Solutions:
   Valid: true
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 24
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -537,7 +537,7 @@ Solutions:
   Valid: true
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -27790,7 +27790,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -27899,7 +27899,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -28008,7 +28008,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -28118,7 +28118,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -28446,7 +28446,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -28664,7 +28664,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -28775,7 +28775,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -28886,7 +28886,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -28995,7 +28995,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -29105,7 +29105,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -29214,7 +29214,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -37194,7 +37194,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -37741,7 +37741,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -37851,7 +37851,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -37960,7 +37960,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -38724,7 +38724,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -38833,7 +38833,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -39269,7 +39269,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -39488,7 +39488,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -39597,7 +39597,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -39821,7 +39821,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -39934,7 +39934,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -40046,7 +40046,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -40157,7 +40157,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -40269,7 +40269,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -40382,7 +40382,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -40494,7 +40494,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -40606,7 +40606,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -40717,7 +40717,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -40830,7 +40830,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -40939,7 +40939,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -41050,7 +41050,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -41161,7 +41161,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -41273,7 +41273,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -41384,7 +41384,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -41496,7 +41496,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -46085,7 +46085,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -46194,7 +46194,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -46410,7 +46410,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -46630,7 +46630,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -46741,7 +46741,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -46849,7 +46849,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -46960,7 +46960,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -47069,7 +47069,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -47181,7 +47181,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -47400,7 +47400,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -47508,7 +47508,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -47618,7 +47618,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -47729,7 +47729,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -47840,7 +47840,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -48060,7 +48060,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -48170,7 +48170,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -48388,7 +48388,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -48499,7 +48499,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -48608,7 +48608,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -48718,7 +48718,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -48826,7 +48826,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -48937,7 +48937,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -49049,7 +49049,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -49606,7 +49606,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -49718,7 +49718,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -49831,7 +49831,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -49943,7 +49943,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -50169,7 +50169,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -50615,7 +50615,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -50725,7 +50725,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -50837,7 +50837,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -55785,7 +55785,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -55896,7 +55896,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -56003,7 +56003,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -56114,7 +56114,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -56224,7 +56224,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -56335,7 +56335,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -56447,7 +56447,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -56560,7 +56560,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -56673,7 +56673,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -56785,7 +56785,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -56898,7 +56898,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -57009,7 +57009,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -57121,7 +57121,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -57233,7 +57233,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -57344,7 +57344,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -57455,7 +57455,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -57567,7 +57567,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -57680,7 +57680,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -57792,7 +57792,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -57904,7 +57904,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -58016,7 +58016,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -58126,7 +58126,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 48
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -58871,7 +58871,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: 24
+  WorkGroupMapping: 32
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
   _DepthUA: 8
@@ -59085,7 +59085,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -48
+  WorkGroupMapping: -64
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
   _DepthUA: 8
@@ -59734,7 +59734,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -24
+  WorkGroupMapping: -32
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 16
   _DepthUA: 16
@@ -59950,7 +59950,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 48
+  WorkGroupMapping: 64
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
@@ -60381,7 +60381,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 24
+  WorkGroupMapping: 32
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
@@ -60595,7 +60595,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 24
+  WorkGroupMapping: 32
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
@@ -60811,7 +60811,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -24
+  WorkGroupMapping: -32
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
@@ -61029,7 +61029,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 48
+  WorkGroupMapping: 64
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
@@ -61247,7 +61247,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -24
+  WorkGroupMapping: -32
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
   _DepthUA: 8
@@ -61461,7 +61461,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: 24
+  WorkGroupMapping: 32
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
   _DepthUA: 8
@@ -61677,7 +61677,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -48
+  WorkGroupMapping: -64
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 16
@@ -61894,7 +61894,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 16
   _DepthUA: 16
@@ -62322,7 +62322,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 24
+  WorkGroupMapping: 32
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
   _DepthUA: 8
@@ -62537,7 +62537,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 16
@@ -62754,7 +62754,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 24
+  WorkGroupMapping: 32
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 16
   _DepthUA: 16
@@ -62967,7 +62967,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: 24
+  WorkGroupMapping: 32
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
   _DepthUA: 8
@@ -63183,7 +63183,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 16
   _DepthUA: 16
@@ -63397,7 +63397,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 16
   _DepthUA: 16
@@ -63612,7 +63612,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 48
+  WorkGroupMapping: 64
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
@@ -63828,7 +63828,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -24
+  WorkGroupMapping: -32
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 16
   _DepthUA: 16
@@ -64047,7 +64047,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [16, 0, 2]
   _DepthU: 16
   _DepthUA: 16
@@ -64260,7 +64260,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
   _DepthUA: 8
@@ -64693,7 +64693,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 48
+  WorkGroupMapping: 64
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
   _DepthUA: 8
@@ -64909,7 +64909,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 16
@@ -65124,7 +65124,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
@@ -65339,7 +65339,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 24
+  WorkGroupMapping: 32
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
@@ -65558,7 +65558,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
   _DepthUA: 8
@@ -65777,7 +65777,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -48
+  WorkGroupMapping: -64
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
   _DepthUA: 8
@@ -65994,7 +65994,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 24
+  WorkGroupMapping: 32
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 16
   _DepthUA: 16
@@ -66209,7 +66209,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 16
@@ -66425,7 +66425,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 48
+  WorkGroupMapping: 64
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
@@ -66641,7 +66641,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 8
   _DepthUA: 8
@@ -66860,7 +66860,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [16, 0, 1]
   _DepthU: 16
   _DepthUA: 16
