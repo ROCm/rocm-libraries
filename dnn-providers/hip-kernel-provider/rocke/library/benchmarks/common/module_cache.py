@@ -75,6 +75,12 @@ class ModuleCache:
         self._hits = 0
         self._misses = 0
         self._full = False
+        # The one over-budget launcher handed out most recently, kept only
+        # long enough to unload it on the next miss -- by then its launch has
+        # drained, since callers gate/time each candidate before moving on.
+        # Without this a long sweep past the budget leaks one HIP module per
+        # miss for the rest of the run.
+        self._unadmitted: Any = None
 
     # -- query ------------------------------------------------------------
 
@@ -136,6 +142,9 @@ class ModuleCache:
                 return held
 
         self._misses += 1
+        if key is not None and self._unadmitted is not None:
+            self._unadmitted.unload()
+            self._unadmitted = None
         hsaco = Path(hsaco_path).read_bytes()
         launcher = KernelLauncher(
             hsaco=hsaco, kernel_name=kernel_name, signature=signature
@@ -146,6 +155,7 @@ class ModuleCache:
                 self._bytes += len(hsaco)
             else:
                 self._full = True
+                self._unadmitted = launcher
         return launcher
 
     def clear(self) -> None:
@@ -155,7 +165,7 @@ class ModuleCache:
         that the launches it handed out have finished, and unloading a module
         under a kernel in flight faults.
         """
-        if not self._held:
+        if not self._held and self._unadmitted is None:
             return
         from rocke.runtime import synchronize_and_release
 
@@ -163,6 +173,9 @@ class ModuleCache:
         for launcher in self._held.values():
             launcher.unload()
         self._held.clear()
+        if self._unadmitted is not None:
+            self._unadmitted.unload()
+            self._unadmitted = None
         self._bytes = 0
         self._full = False
 

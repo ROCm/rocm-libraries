@@ -159,6 +159,21 @@ def add_skip_measured_arg(parser) -> None:
     )
 
 
+def same_results_file(results_path, skip_measured_path) -> bool:
+    """Whether ``--results`` and ``--skip-measured`` name the same file.
+
+    Call before constructing :class:`ResultsWriter`: a sweep resuming into its
+    own results file must open it for append, not truncate it out from under
+    the skip set it was just read for.
+    """
+    if not results_path or not skip_measured_path:
+        return False
+    try:
+        return Path(results_path).resolve() == Path(skip_measured_path).resolve()
+    except OSError:
+        return Path(results_path) == Path(skip_measured_path)
+
+
 def row_timing(row: dict) -> str:
     """How ``row``'s time was measured; rows older than the field are block."""
     return row.get("timing") or BLOCK_TIMING
@@ -192,7 +207,12 @@ class ResultsWriter:
     """
 
     def __init__(
-        self, path: Optional[str], engine: str, timing: str = BLOCK_TIMING
+        self,
+        path: Optional[str],
+        engine: str,
+        timing: str = BLOCK_TIMING,
+        *,
+        append: bool = False,
     ) -> None:
         if engine not in ENGINES:
             raise ValueError(f"engine must be one of {ENGINES}, got {engine!r}")
@@ -205,7 +225,10 @@ class ResultsWriter:
         self._n = 0
         if self._path is not None:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._fh = self._path.open("w", encoding="utf-8")
+            # ``append``: ``--results`` and ``--skip-measured`` name the same
+            # file, so the rows ``measured_keys`` already read for this run's
+            # skip set are the run's own history, not scratch to discard.
+            self._fh = self._path.open("a" if append else "w", encoding="utf-8")
 
     @property
     def n_rows(self) -> int:

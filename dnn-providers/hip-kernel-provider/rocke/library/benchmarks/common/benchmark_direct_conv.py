@@ -47,6 +47,7 @@ from benchmarks.common.case_results import (
     add_results_arg,
     add_skip_measured_arg,
     measured_keys,
+    same_results_file,
 )
 from benchmarks.common.early_stop import EarlyStop, add_early_stop_arg, case_key
 from benchmarks.common.module_cache import add_module_cache_arg
@@ -2468,12 +2469,19 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
 
     # The binaries are shape-generic, so their modules outlive a case.
     modules = ModuleCache(args.module_cache_bytes)
+    # --skip-measured: cases a previous run of this sweep already recorded,
+    # timed the way this run times them. Read before opening --results below:
+    # when the two flags name the same file, the writer must not truncate it
+    # out from under this read.
+    done = measured_keys(args.skip_measured, "direct", args.timing)
     # One row per case, for the comparison driver and the shard runner to
     # merge. Does nothing without --results.
-    results_out = ResultsWriter(args.results, "direct", args.timing)
-    # --skip-measured: cases a previous run of this sweep already recorded,
-    # timed the way this run times them.
-    done = measured_keys(args.skip_measured, "direct", args.timing)
+    results_out = ResultsWriter(
+        args.results,
+        "direct",
+        args.timing,
+        append=same_results_file(args.results, args.skip_measured),
+    )
     n_skipped = 0
 
     from kernels.conv.direct_aot_jobs import DIRECT_DTYPES

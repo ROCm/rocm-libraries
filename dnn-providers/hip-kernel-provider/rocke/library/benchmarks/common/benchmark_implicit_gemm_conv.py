@@ -83,6 +83,7 @@ from benchmarks.common.case_results import (  # noqa: E402
     add_results_arg,
     add_skip_measured_arg,
     measured_keys,
+    same_results_file,
 )
 from benchmarks.common.early_stop import (  # noqa: E402
     EarlyStop,
@@ -4675,12 +4676,19 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
     # A cached binary is shape-generic: its module is loaded on the first case
     # that offers it and reused by every later one.
     modules = ModuleCache(args.module_cache_bytes)
+    # --skip-measured: cases a previous run of this sweep already recorded,
+    # timed the way this run times them. Read before opening --results below:
+    # when the two flags name the same file, the writer must not truncate it
+    # out from under this read.
+    done = measured_keys(args.skip_measured, "implicit", args.timing)
     # One row per case, for the comparison driver and the shard runner to
     # merge. Does nothing without --results.
-    results_out = ResultsWriter(args.results, "implicit", args.timing)
-    # --skip-measured: cases a previous run of this sweep already recorded,
-    # timed the way this run times them.
-    done = measured_keys(args.skip_measured, "implicit", args.timing)
+    results_out = ResultsWriter(
+        args.results,
+        "implicit",
+        args.timing,
+        append=same_results_file(args.results, args.skip_measured),
+    )
     n_skipped = 0
 
     def _u8(t):

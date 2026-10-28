@@ -296,11 +296,31 @@ def time_batch_staged(
     blocked the host on the stalled stream (the watchdog had to release it, so
     the sample holds host time); the second is reported, as it means the bound
     launch synchronizes when it should not.
+
+    The gate itself (``hipStreamWaitValue32`` support) is checked once, before
+    any candidate is timed: a device that lacks it would otherwise fail every
+    candidate the same way, one caught exception at a time, and the case would
+    report no winner with nothing in the log to say why. Falls back to
+    :func:`time_batch` (block timing) with a warning rather than doing that.
     """
     from statistics import median
 
     from rocke.runtime.hip_module import HipError
-    from rocke.runtime.stall_gate import StallTimeout, time_launches_staged
+    from rocke.runtime.stall_gate import (
+        StallTimeout,
+        default_gate,
+        time_launches_staged,
+    )
+
+    try:
+        default_gate()
+    except HipError as e:
+        print(
+            f"  [staged] {e}; this device cannot be timed with --timing staged, "
+            f"falling back to --timing block for this run",
+            flush=True,
+        )
+        return time_batch(runs, warmup=warmup, iters=iters, stream=stream)
 
     out: List[Optional[float]] = []
     for i, run in enumerate(runs):
