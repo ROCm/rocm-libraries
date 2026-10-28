@@ -579,11 +579,11 @@ TEST(TestSdpaFwdNode, PreValidateDrainRunsBeforeShapeChecks)
 
 namespace
 {
-std::shared_ptr<TensorAttributes> makeCuSeqLen(std::vector<int64_t> dims,
+std::shared_ptr<TensorAttributes> makeCuSeqLen(const std::vector<int64_t>& dims,
                                                DataType dataType = DataType::INT32)
 {
     auto t = std::make_shared<TensorAttributes>();
-    t->set_dim(std::move(dims));
+    t->set_dim(dims);
     t->set_data_type(dataType);
     return t;
 }

@@ -593,14 +593,14 @@ TEST(TestSdpaAttributes, NativeSetUnfuseFmaSetsHintNotUnsupported)
 
 namespace
 {
-std::shared_ptr<TensorAttributes> makeIndexTensor(std::vector<int64_t> dims,
-                                                  std::vector<int64_t> strides = {})
+std::shared_ptr<TensorAttributes> makeIndexTensor(const std::vector<int64_t>& dims,
+                                                  const std::vector<int64_t>& strides = {})
 {
     auto t = std::make_shared<TensorAttributes>();
-    t->set_dim(std::move(dims));
+    t->set_dim(dims);
     if(!strides.empty())
     {
-        t->set_stride(std::move(strides));
+        t->set_stride(strides);
     }
     return t;
 }

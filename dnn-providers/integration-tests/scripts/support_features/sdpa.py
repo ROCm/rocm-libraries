@@ -90,6 +90,11 @@ FEATURES = (
         ("seq_len_q_tensor_uid", "seq_len_kv_tensor_uid", "padding_mask"),
         "per-batch sequence lengths, or padding",
     ),
+    Feature(
+        "varlen:cu_seq_lens",
+        ("cu_seq_len_q_tensor_uid", "cu_seq_len_kv_tensor_uid"),
+        "cumulative sequence lengths (prefix sums, B+1 values)",
+    ),
     Feature("scale:fixed", ("attn_scale_value",)),
     Feature("scale:runtime", ("scale_tensor_uid",)),
     Feature("scale:default", ("attn_scale_value", "scale_tensor_uid")),
@@ -272,6 +277,8 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
         or attrs.get("padding_mask")
     ):
         features.add("varlen:seq_lens")
+    if has("cu_seq_len_q_tensor_uid") or has("cu_seq_len_kv_tensor_uid"):
+        features.add("varlen:cu_seq_lens")
     if attrs.get("generate_stats") or has("stats_tensor_uid"):
         features.add("out:stats")
     if has("max_tensor_uid") or has("sum_exp_tensor_uid"):
