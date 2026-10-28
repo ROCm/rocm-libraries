@@ -239,7 +239,7 @@ TEST(MxGeneration, Behavior) {
             const MxTensor result = generateMx(problem);
             checkReference(problem, result);
             const size_t expectedBytes =
-                (static_cast<size_t>(problem.leadingDimension) * problem.shape[1] *
+                (static_cast<size_t>(*problem.leadingDimension) * problem.shape[1] *
                      scalarTypeInfo(dataType).storageBits +
                  7) /
                 8;
@@ -493,4 +493,20 @@ TEST(MxGeneration, Behavior) {
         invalidScale = true;
     }
     require(invalidScale, "MX reference refresh accepted an invalid scale index.");
+}
+
+TEST(MxGeneration, LeadingDimensionDefaultsToContiguousColumns) {
+    MxCase contiguous = defaultMxCase(Shape{5, 3});
+    contiguous.blockSize = 4;
+    EXPECT_FALSE(contiguous.leadingDimension.has_value());
+    EXPECT_EQ(generateMx(contiguous).data.layout(), Layout(Shape{5, 3}, {1, 5}, 0));
+
+    MxCase padded = contiguous;
+    padded.leadingDimension = 7;
+    EXPECT_EQ(generateMx(padded).data.layout(), Layout(Shape{5, 3}, {1, 7}, 0));
+
+    // An explicit leading dimension is never replaced by the default.
+    MxCase tooShort = contiguous;
+    tooShort.leadingDimension = 0;
+    EXPECT_THROW(generateMx(tooShort), std::runtime_error);
 }

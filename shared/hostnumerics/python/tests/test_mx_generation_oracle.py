@@ -20,7 +20,6 @@ class MxGenerationOracleTests(unittest.TestCase):
         expected = expected_mx(case)
         observed = hv.generate_mx(*make_problem(case))
         rows = case.shape[0]
-        leading_dimension = case.leading_dimension or rows
         blocked_extent = case.shape[case.block_axis]
         free_extent = case.shape[1 - case.block_axis]
         block_count = (blocked_extent + case.block_size - 1) // case.block_size
@@ -30,7 +29,7 @@ class MxGenerationOracleTests(unittest.TestCase):
             else (block_count, free_extent)
         )
 
-        self.assertEqual(observed.data.strides, [1, leading_dimension])
+        self.assertEqual(observed.data.strides, [1, case.leading_dimension])
         self.assertEqual(observed.scales.shape, list(expected_scale_shape))
         self.assertEqual(observed.data.storage, expected.data_storage)
         self.assertEqual(observed.scales.storage, expected.scale_storage)
