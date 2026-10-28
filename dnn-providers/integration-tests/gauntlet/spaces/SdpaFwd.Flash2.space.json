@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "operation": "SdpaFwd",
+  "description": "Probe-only alignment evidence for HIP_FLASH2_ENGINE (gfx942 only), not a shape space: one fixed fp16 SDPA forward (BHSD, b 2, 8 query heads over 4 kv heads, seqlen_q = seqlen_kv = 256, head size 128, non-causal, no stats) that the engine claims (head size 64 or 128, fp16 Q/K/V/O, seqlen_q a multiple of 64, and seqlen_q * seqlen_kv above ceil(seqlen_q / 64) * 6000, the shape-crossover rule of useFlash2ForShape in HipFlash2FwdPlanBuilder.hpp), so the only thing that can make it decline is the declared alignment. The axes are the declared alignment of Q, K, V and O (tensor_patches on uids 1, 0, 3, 2) and the placement of the device pointers. It exists to show whether the engine honors a declared alignment: it needs 8 bytes for Q and O and 2 for K and V, so alignments below 8 decline and 8 and above pass. exact puts every device pointer at exactly the declared alignment, under misaligns Q (placement_uid 1) below it and passes only if the backend rejects that pointer (drawn as exact at alignment 1), default leaves the pointers where they are. The engine is built only with -DENABLE_HIP_FLASH2_ENGINE=ON and runs only on gfx942, so on any other build the space is all DECLINED: run it with --test-engine HIP_FLASH2_ENGINE --test-config hip-kernel-provider/src/engines/hip_flash2_engine/config/HIP_FLASH2_ENGINE.toml and HIP_FLASH2_KERNEL_DIR set to the hip_flash2_kernels directory of the build tree. Probed on gfx942 with the stock SdpaFwd axes narrowed to fp16: 200 samples, 115 PASS, 85 DECLINED, 0 WRONG; every alignment below 8 declined, and all 21 declines at 8 and above had seqlen_kv of 1, 18, 52 or 64, the crossover rule, which this fixed shape avoids.",
+  "engine": "HIP_FLASH2_ENGINE",
+  "template": "../../integration-test-bundles/quick/SdpaFwd/Default/graph.template.json",
+  "axes": {
+    "alignment": {"values": [1, 2, 4, 8, 16, 32, 64, 128, 256]},
+    "placement": {"values": ["default", "exact", "under"]}
+  },
+  "derive": {
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
+  },
+  "case": {
+    "values": {
+      "io_data_type": "half",
+      "tensors": [
+        {"uid": 0, "dims": [2, 4, 256, 128], "strides": [131072, 32768, 128, 1], "data_type": "half"},
+        {"uid": 1, "dims": [2, 8, 256, 128], "strides": [262144, 32768, 128, 1], "data_type": "half"},
+        {"uid": 2, "dims": [2, 8, 256, 128], "strides": [262144, 32768, 128, 1], "data_type": "half"},
+        {"uid": 3, "dims": [2, 4, 256, 128], "strides": [131072, 32768, 128, 1], "data_type": "half"}
+      ],
+      "attributes": {
+        "attributes__attn_scale_value": 0.0883883461356163,
+        "attributes__diagonal_alignment": "TOP_LEFT",
+        "attributes__right_bound": "${None}"
+      }
+    },
+    "metadata": {
+      "purpose": "probe",
+      "placement": "${eff_placement}",
+      "placement_uid": 1
+    },
+    "tensor_patches": [
+      {"uid": 0, "set": {"alignment": "${alignment}"}},
+      {"uid": 1, "set": {"alignment": "${alignment}"}},
+      {"uid": 2, "set": {"alignment": "${alignment}"}},
+      {"uid": 3, "set": {"alignment": "${alignment}"}}
+    ]
+  }
+}

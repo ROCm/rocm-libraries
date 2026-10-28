@@ -290,12 +290,13 @@ reports `DECLINED`, not a failure.
 | `ResampleFwd/Default` | `HIP_MLOPS_ENGINE` | `ResampleFwd/Variant2` | pooling forward, no index output |
 | `SdpaFwd/Default` | `ASM_SDPA_ENGINE` | `SdpaFwd/Default` | SDPA forward, bfloat16, head size 128 or 192 |
 | `SdpaFwd/Gfx950Dense` | `hipkernel:Gfx950AttentionDense` | `SdpaFwd/Default` | SDPA forward, BSHD, head size 64 or 128 |
+| `SdpaFwd/Flash2` | `HIP_FLASH2_ENGINE` | `SdpaFwd/Default` | **not a shape space**: one fixed fp16 SDPA forward (BHSD, head size 128, seqlen 256), varying only `alignment` and `placement`; gfx942 builds with `-DENABLE_HIP_FLASH2_ENGINE=ON` only |
 | `Matmul/Align` | none (probes MIOpen and hipBLASLt) | `Matmul/Default` | **not a shape space**: one fixed float batched matmul, varying only `alignment` and `placement` |
 
 The engine column is informational (the space's `engine` key). A space's `description`
 says what it draws, why each constraint exists and which tensor each axis touches.
 
-**Input-value, alignment and placement axes.** Every space except `Matmul/Align` has a
+**Input-value, alignment and placement axes.** Every space except `Matmul/Align` and `SdpaFwd/Flash2` has a
 `domain` axis, and every space has an `alignment` and a `placement` axis. They render
 case metadata and `tensor_patches` rather than shape values:
 

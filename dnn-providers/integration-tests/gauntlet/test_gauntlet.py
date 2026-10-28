@@ -498,6 +498,7 @@ def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
         "RMSNormBackward/Default",
         "ResampleFwd/Default",
         "SdpaFwd/Default",
+        "SdpaFwd/Flash2",
         "SdpaFwd/Gfx950Dense",
     ]
     for sp in SPACES:
@@ -697,7 +698,7 @@ OLD_SHAPE_DIGESTS = {
     "SdpaFwd/Gfx950Dense": "69623b2107c84d79090cab4630861813954bf838689cb9ae32950835d7e8340c",
 }
 # the spaces without a domain axis: one fixed shape, only alignment and placement are drawn
-FIXED_SHAPE_SPACES = ["Matmul/Align"]
+FIXED_SHAPE_SPACES = ["Matmul/Align", "SdpaFwd/Flash2"]
 DOMAIN_SPACE_IDS = [s for s in SPACE_IDS if s not in FIXED_SHAPE_SPACES]
 ALIGNMENTS = [1, 2, 4, 8, 16, 32, 64, 128, 256]
 PLACEMENTS = ["default", "exact", "under"]
@@ -714,6 +715,7 @@ PLACEMENT_OPERAND = {
     "RMSNormBackward/Default": "x",
     "ResampleFwd/Default": "X",
     "SdpaFwd/Default": "Q",
+    "SdpaFwd/Flash2": "Q",
     "SdpaFwd/Gfx950Dense": "Q",
 }
 PATCHED_OPERANDS = (
@@ -1569,7 +1571,11 @@ def test_default_run_covers_every_space_and_filter_narrows(run):
     assert run.run("--samples", "2", space="RMSNorm/Default") == 0
     assert run.summary["spaces"] == ["RMSNorm/Default"]
     assert run.run("--samples", "2", space="SdpaFwd/.*") == 0
-    assert run.summary["spaces"] == ["SdpaFwd/Default", "SdpaFwd/Gfx950Dense"]
+    assert run.summary["spaces"] == [
+        "SdpaFwd/Default",
+        "SdpaFwd/Flash2",
+        "SdpaFwd/Gfx950Dense",
+    ]
 
 
 def test_filter_matching_nothing_and_broken_spaces_are_usage_errors(
