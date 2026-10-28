@@ -112,6 +112,11 @@ public:
                 indexTensor.has_value() ? &indexTensor.value() : nullptr);
     }
 
+    const GpuResampleParams& params() const
+    {
+        return _params;
+    }
+
 private:
     GpuResampleFwdParams _params;
 };
@@ -158,6 +163,11 @@ public:
                 _params.resampleMode,
                 _params.paddingMode,
                 indexTensor.has_value() ? &indexTensor.value() : nullptr);
+    }
+
+    const GpuResampleParams& params() const
+    {
+        return _params;
     }
 
 private:
