@@ -684,6 +684,23 @@ namespace
         }
     }
 
+    // Tensile initialization failures are reported only for architectures in
+    // Tensile::AMDGPU::Processor. Other architectures (for example a GPU reached
+    // through an amdgcnspirv build) fall back quietly unless verbose is enabled.
+    void print_tensile_init_warning(const rocblas_internal_ostream& msg, const std::string& arch)
+    {
+        const bool tensile_arch
+            = Tensile::AMDGPU(arch, 0, 0, arch).processor != Tensile::AMDGPU::Processor{};
+        if(!tensile_arch)
+        {
+            print_if_verbose(msg);
+            return;
+        }
+        if(rocblas_suppress_tensile_error_messages())
+            return;
+        rocblas_cerr << std::endl << msg << std::endl;
+    }
+
     // Generated from ROCBLAS_TENSILE_ARCH_SKIPLIST. Only the part before the first
     // ':' is compared, so every target-ID feature variant of an entry is skipped
     // (gfx90a and gfx90a:xnack+ both skip gfx90a, gfx90a:xnack-, ...).
@@ -974,8 +991,11 @@ namespace
 #endif
                     if(!TestPath(tensileLibraryPath))
                     {
+                        // A missing library is not fatal: the target may be absent from the
+                        // skiplist under a different name (gfx1250-strict reports gfx1250) or
+                        // rocBLAS may be built for a generic target such as amdgcnspirv.
                         rocblas_internal_ostream msg;
-                        msg << "\nrocBLAS error: Cannot read " << tensileLibraryPath << ": "
+                        msg << "rocBLAS warning: Cannot read " << tensileLibraryPath << ": "
                             << strerror(errno);
 #if ROCBLAS_TENSILE_SEPARATE_ARCH
                         msg << " for GPU arch : " << processor;
@@ -995,8 +1015,12 @@ namespace
                                 msg << "\n  " << file_name.path().string();
                         }
 #endif
-                        rocblas_cerr << msg.str() << std::endl;
-                        rocblas_abort();
+                        msg << "\nTensile unavailable for GPU architecture '" << processor
+                            << "'; GEMM will use hipBLASLt or source kernels.";
+                        print_tensile_init_warning(msg, processor);
+
+                        std::lock_guard<std::mutex> lock(m_libraryMapMutex);
+                        return m_libraryMap[processor];
                     }
                 }
             }
@@ -1156,8 +1180,11 @@ namespace
                         auto lib = ftr_lib_ptr->get();
                         if(!lib)
                         {
-                            rocblas_cerr << "\nrocBLAS error: Could not load " << tensileLibraryPath
-                                         << " for architecture: " << processor << std::endl;
+                            rocblas_internal_ostream msg;
+                            print_tensile_init_warning(msg << "rocBLAS warning: Could not load "
+                                                           << tensileLibraryPath
+                                                           << " for architecture: " << processor,
+                                                       processor);
                         }
                         else
                         {
@@ -1173,10 +1200,13 @@ namespace
 
                 if(m_libraryMap.find(processor) == m_libraryMap.end())
                 {
-                    rocblas_cerr << "\nrocBLAS error: Could not initialize Tensile library for "
-                                    "architecture: "
-                                 << processor << std::endl;
-                    rocblas_abort();
+                    rocblas_internal_ostream msg;
+                    print_tensile_init_warning(
+                        msg << "rocBLAS warning: Could not initialize Tensile library for "
+                               "architecture: "
+                            << processor << "; GEMM will use hipBLASLt or source kernels.",
+                        processor);
+                    return m_libraryMap[processor];
                 }
             }
 
@@ -1244,8 +1274,32 @@ namespace
                 // succeeds.
                 auto new_adapter = std::make_unique<Tensile::hip::SolutionAdapter>();
 
-                // Initialize the adapter and get the library (all of the same gfx use the same library)
-                a.library = host.initialize(*new_adapter, device);
+                // Initialize the adapter and get the library (all of the same gfx use the same library).
+                // A failure leaves a null library so GEMM falls back to hipBLASLt or source kernels.
+                try
+                {
+                    a.library = host.initialize(*new_adapter, device);
+                }
+                catch(const std::exception& e)
+                {
+                    rocblas_internal_ostream msg;
+                    print_tensile_init_warning(
+                        msg << "rocBLAS warning: Could not initialize Tensile; GEMM will use "
+                               "hipBLASLt or source kernels:\n"
+                            << e.what(),
+                        rocblas_internal_get_arch_name(device));
+                    a.library = nullptr;
+                }
+                catch(const rocblas_status& status)
+                {
+                    rocblas_internal_ostream msg;
+                    print_tensile_init_warning(
+                        msg << "rocBLAS warning: Could not initialize Tensile; GEMM will use "
+                               "hipBLASLt or source kernels:\n"
+                            << rocblas_status_to_string(status),
+                        rocblas_internal_get_arch_name(device));
+                    a.library = nullptr;
+                }
 
                 // Atomically change the adapter stored for this device ID
                 adapter = new_adapter.release();
