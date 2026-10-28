@@ -172,9 +172,24 @@ struct Pad
     __host__ __device__ constexpr bool
     IsValidUpperIndexMappedToValidLowerIndex(const UpIdx& idx_up) const
     {
-        return SkipIsValidCheck ||
-               ((idx_up[Number<0>{}] >= left_pad_length_) &&
-                (idx_up[Number<0>{}] < up_lengths_[Number<0>{}] - right_pad_length_));
+        if constexpr(SkipIsValidCheck)
+        {
+            return true;
+        }
+        else if constexpr(is_same<remove_cvref_t<decltype(idx_up[Number<0>{}])>, index_t>::value &&
+                          is_same<remove_cvref_t<decltype(up_lengths_[Number<0>{}])>,
+                                  index_t>::value &&
+                          is_same<remove_cvref_t<LeftPadLength>, Number<0>>::value &&
+                          is_same<remove_cvref_t<RightPadLength>, Number<0>>::value)
+        {
+            return static_cast<uint32_t>(idx_up[Number<0>{}]) <
+                   static_cast<uint32_t>(up_lengths_[Number<0>{}]);
+        }
+        else
+        {
+            return (idx_up[Number<0>{}] >= left_pad_length_) &&
+                   (idx_up[Number<0>{}] < up_lengths_[Number<0>{}] - right_pad_length_);
+        }
     }
 
     __host__ __device__ static constexpr bool IsKnownAtCompileTime()
@@ -1589,13 +1604,15 @@ struct ConvBwdDataImplicitGemmOutTransform
     using LowerIndex = MultiIndex<4>; // N, Ho, Wo, K
     using UpperIndex = MultiIndex<3>; // K0, M, K1
 
-    index_t N_, Ho_, Wo_, K_;
+    index_t N_, Ho_, Wo_, K_, nK_;
     index_t XDot_;
     index_t HTilde_, WTilde_;
     index_t WTildeSlice_, TildeSlice_;
+    index_t nTildeSlice_, nWTildeSlice_;
     index_t IHTildeSliceBegin_, IWTildeSliceBegin_;
     index_t HRatio_, WRatio_;
     index_t XDotSlice_K_;
+    index_t nXDotSlice_K_;
     index_t MPad_, KPad_;
     Tuple<index_t, index_t, index_t> up_lengths_; // K0_, MPadded, K1_;
 
@@ -1629,16 +1646,20 @@ struct ConvBwdDataImplicitGemmOutTransform
           Ho_{Ho},
           Wo_{Wo},
           K_{K},
+          nK_{-K},
           XDot_{XDot},
           HTilde_{HTilde},
           WTilde_{WTilde},
           WTildeSlice_{WTildeSlice},
           TildeSlice_{HWTildeSlice},
+          nTildeSlice_{-HWTildeSlice},
+          nWTildeSlice_{-WTildeSlice},
           IHTildeSliceBegin_{IHTildeSliceBegin},
           IWTildeSliceBegin_{IWTildeSliceBegin},
           HRatio_{HRatio},
           WRatio_{WRatio},
           XDotSlice_K_{XDotSlice_K},
+          nXDotSlice_K_{-XDotSlice_K},
           MPad_{MPad},
           KPad_{KPad},
           up_lengths_{make_tuple(K0, MPadded, K1)},
@@ -1672,12 +1693,12 @@ struct ConvBwdDataImplicitGemmOutTransform
         NStep = MagicDivision::DoMagicDivision(idx_up[I1],
                                                this->low_lengths_magic_divisor_multiplier_[I2],
                                                this->low_lengths_magic_divisor_shift_[I2]);
-        HStep = idx_up[I1] - NStep * TildeSlice_;
+        HStep = idx_up[I1] + NStep * nTildeSlice_;
         // HStep = HStep / WTildeSlice_
         HStep = MagicDivision::DoMagicDivision(HStep,
                                                this->low_lengths_magic_divisor_multiplier_[I3],
                                                this->low_lengths_magic_divisor_shift_[I3]);
-        WStep = idx_up[I1] - NStep * TildeSlice_ - HStep * WTildeSlice_;
+        WStep = idx_up[I1] + NStep * nTildeSlice_ + HStep * nWTildeSlice_;
         // Slice
         HStep += IHTildeSliceBegin_;
         WStep += IWTildeSliceBegin_;
@@ -1697,13 +1718,13 @@ struct ConvBwdDataImplicitGemmOutTransform
             MagicDivision::DoMagicDivision(K_idx,
                                            this->low_lengths_magic_divisor_multiplier_[I0],
                                            this->low_lengths_magic_divisor_shift_[I0]);
-        index_t KStep = K_idx - YStep * XDotSlice_K_;
+        index_t KStep = K_idx + YStep * nXDotSlice_K_;
         // Xstep = KStep / K_
         index_t XStep =
             MagicDivision::DoMagicDivision(KStep,
                                            this->low_lengths_magic_divisor_multiplier_[I1],
                                            this->low_lengths_magic_divisor_shift_[I1]);
-        KStep -= XStep * K_;
+        KStep += XStep * nK_;
         // Embed
         YStep *= HRatio_;
         XStep *= WRatio_;

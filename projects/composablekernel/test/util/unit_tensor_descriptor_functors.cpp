@@ -509,3 +509,164 @@ TEST(TensorDescriptorFunctorsIntegration, ForwardConvInputTransformMatchesGeneri
         }
     }
 }
+
+TEST(TensorDescriptorFunctorsIntegration, BackwardConvOutputTransformMatchesGeneric)
+{
+    constexpr index_t N             = 1;
+    constexpr index_t Ho            = 2;
+    constexpr index_t Wo            = 2;
+    constexpr index_t K             = 2;
+    constexpr index_t YDot          = 1;
+    constexpr index_t XDot          = 2;
+    constexpr index_t HTilde        = 2;
+    constexpr index_t WTilde        = 2;
+    constexpr index_t ConvDilationH = 1;
+    constexpr index_t ConvDilationW = 1;
+    constexpr index_t K0            = 1;
+    constexpr index_t K1            = 5;
+    constexpr index_t MPerBlock     = 3;
+    constexpr index_t KPerBlock     = 5;
+
+    constexpr index_t YDotSlice         = 1;
+    constexpr index_t XDotSlice         = 2;
+    constexpr index_t HTildeSlice       = 2;
+    constexpr index_t WTildeSlice       = 2;
+    constexpr index_t IHTildeSliceBegin = 0;
+    constexpr index_t IWTildeSliceBegin = 0;
+    constexpr index_t HRatio            = -1;
+    constexpr index_t WRatio            = -1;
+    constexpr index_t KRaw              = YDotSlice * XDotSlice * K;
+    constexpr index_t MRaw              = N * HTildeSlice * WTildeSlice;
+    constexpr index_t KPadded           = math::integer_divide_ceil(KRaw, KPerBlock) * KPerBlock;
+    constexpr index_t MPadded           = math::integer_divide_ceil(MRaw, MPerBlock) * MPerBlock;
+    constexpr index_t KPad              = KPadded - KRaw;
+    constexpr index_t MPad              = MPadded - MRaw;
+
+    const auto output_desc         = make_naive_tensor_descriptor_packed(make_tuple(N, Ho, Wo, K));
+    const auto padded_spatial_desc = transform_tensor_descriptor(
+        output_desc,
+        make_tuple(make_pass_through_transform(N),
+                   make_pad_transform(Ho, Number<0>{}, Number<0>{}),
+                   make_pad_transform(Wo, Number<0>{}, Number<0>{}),
+                   make_pass_through_transform(K)),
+        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
+    const auto custom_desc =
+        transform_tensor_descriptor(padded_spatial_desc,
+                                    make_tuple(make_conv_bwd_data_out_transform(N,
+                                                                                Ho,
+                                                                                Wo,
+                                                                                K,
+                                                                                YDot,
+                                                                                XDot,
+                                                                                HTilde,
+                                                                                WTilde,
+                                                                                ConvDilationH,
+                                                                                ConvDilationW,
+                                                                                HTildeSlice,
+                                                                                WTildeSlice,
+                                                                                YDotSlice,
+                                                                                XDotSlice,
+                                                                                IHTildeSliceBegin,
+                                                                                IWTildeSliceBegin,
+                                                                                1,
+                                                                                1,
+                                                                                K0,
+                                                                                K1,
+                                                                                MPerBlock,
+                                                                                KPerBlock)),
+                                    make_tuple(Sequence<0, 1, 2, 3>{}),
+                                    make_tuple(Sequence<0, 1, 2>{}));
+
+    const auto embedded_desc = transform_tensor_descriptor(
+        padded_spatial_desc,
+        make_tuple(make_pass_through_transform(N),
+                   make_embed_transform(make_tuple(YDot, HTilde), make_tuple(HRatio, 1)),
+                   make_embed_transform(make_tuple(XDot, WTilde), make_tuple(WRatio, 1)),
+                   make_pass_through_transform(K)),
+        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+        make_tuple(Sequence<0>{}, Sequence<1, 2>{}, Sequence<3, 4>{}, Sequence<5>{}));
+
+    const auto sliced_desc = transform_tensor_descriptor(
+        embedded_desc,
+        make_tuple(make_pass_through_transform(N),
+                   make_slice_transform(YDot, Number<0>{}, YDotSlice),
+                   make_slice_transform(HTilde, IHTildeSliceBegin, HTildeSlice),
+                   make_slice_transform(XDot, Number<0>{}, XDotSlice),
+                   make_slice_transform(WTilde, IWTildeSliceBegin, WTildeSlice),
+                   make_pass_through_transform(K)),
+        make_tuple(Sequence<0>{},
+                   Sequence<1>{},
+                   Sequence<2>{},
+                   Sequence<3>{},
+                   Sequence<4>{},
+                   Sequence<5>{}),
+        make_tuple(Sequence<0>{},
+                   Sequence<1>{},
+                   Sequence<2>{},
+                   Sequence<3>{},
+                   Sequence<4>{},
+                   Sequence<5>{}));
+
+    const auto raw_gemm_desc = transform_tensor_descriptor(
+        sliced_desc,
+        make_tuple(make_merge_transform(make_tuple(YDotSlice, XDotSlice, K)),
+                   make_merge_transform(make_tuple(N, HTildeSlice, WTildeSlice))),
+        make_tuple(Sequence<1, 3, 5>{}, Sequence<0, 2, 4>{}),
+        make_tuple(Sequence<0>{}, Sequence<1>{}));
+
+    const auto padded_gemm_desc =
+        transform_tensor_descriptor(raw_gemm_desc,
+                                    make_tuple(make_pad_transform(KRaw, Number<0>{}, KPad),
+                                               make_pad_transform(MRaw, Number<0>{}, MPad)),
+                                    make_tuple(Sequence<0>{}, Sequence<1>{}),
+                                    make_tuple(Sequence<0>{}, Sequence<1>{}));
+
+    const auto generic_desc =
+        transform_tensor_descriptor(padded_gemm_desc,
+                                    make_tuple(make_unmerge_transform(make_tuple(K0, K1)),
+                                               make_pass_through_transform(MPadded)),
+                                    make_tuple(Sequence<0>{}, Sequence<1>{}),
+                                    make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
+
+    for(index_t k0 = 0; k0 < K0; ++k0)
+    {
+        for(index_t m = 0; m < MPadded; ++m)
+        {
+            for(index_t k1 = 0; k1 < K1; ++k1)
+            {
+                const auto index              = make_tuple(k0, m, k1);
+                const auto custom_coordinate  = make_tensor_coordinate(custom_desc, index);
+                const auto generic_coordinate = make_tensor_coordinate(generic_desc, index);
+
+                SCOPED_TRACE(::testing::Message() << "k0=" << k0 << ", m=" << m << ", k1=" << k1);
+                EXPECT_EQ(custom_coordinate.GetOffset(), generic_coordinate.GetOffset());
+                EXPECT_EQ(coordinate_has_valid_offset_assuming_visible_index_is_valid(
+                              custom_desc, custom_coordinate),
+                          coordinate_has_valid_offset_assuming_visible_index_is_valid(
+                              generic_desc, generic_coordinate));
+            }
+        }
+    }
+}
+
+TEST(TensorDescriptorFunctorsIntegration, ZeroPadTransformValidityBounds)
+{
+    constexpr index_t Length = 5;
+    const auto index_pad     = make_pad_transform(Length, Number<0>{}, Number<0>{});
+    const auto long_pad      = make_pad_transform(long_index_t{Length}, Number<0>{}, Number<0>{});
+
+    EXPECT_FALSE(index_pad.IsValidUpperIndexMappedToValidLowerIndex(make_multi_index(-1)));
+    EXPECT_TRUE(index_pad.IsValidUpperIndexMappedToValidLowerIndex(make_multi_index(0)));
+    EXPECT_TRUE(index_pad.IsValidUpperIndexMappedToValidLowerIndex(make_multi_index(Length - 1)));
+    EXPECT_FALSE(index_pad.IsValidUpperIndexMappedToValidLowerIndex(make_multi_index(Length)));
+
+    EXPECT_FALSE(
+        long_pad.IsValidUpperIndexMappedToValidLowerIndex(make_multi_index<long_index_t>(-1)));
+    EXPECT_TRUE(
+        long_pad.IsValidUpperIndexMappedToValidLowerIndex(make_multi_index<long_index_t>(0)));
+    EXPECT_TRUE(long_pad.IsValidUpperIndexMappedToValidLowerIndex(
+        make_multi_index<long_index_t>(Length - 1)));
+    EXPECT_FALSE(
+        long_pad.IsValidUpperIndexMappedToValidLowerIndex(make_multi_index<long_index_t>(Length)));
+}
