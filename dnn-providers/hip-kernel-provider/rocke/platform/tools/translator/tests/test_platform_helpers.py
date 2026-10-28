@@ -8,7 +8,8 @@
   with its companions NULL / 0, owned strings into a C string array;
 - such a helper that returns a tuple through out parameters and its success
   flag (block_lds_reduce_with_index);
-- b.param(name, t, noalias=..., align=...) into rocke_param_opts_t."""
+- b.param(name, t, noalias=..., align=...) into rocke_param_opts_t;
+- any IR scalar type constant of rocke.core.ir with a C singleton (FP8E4M3)."""
 
 from __future__ import annotations
 
@@ -26,6 +27,13 @@ def probe_params(spec: BatchedTranspose2DSpec) -> KernelDef:
     b.param("X", PtrType(I32, "global"), readonly=True, align=8, noalias=False)
     b.param("n", I32)
     return b.kernel
+
+
+def probe_fp8(spec: BatchedTranspose2DSpec) -> int:
+    from ...core.ir import FP8E4M3
+
+    t = FP8E4M3
+    return 1 if t == FP8E4M3 else 0
 
 """
 
@@ -100,6 +108,7 @@ def _body(cpp: str, fn: str) -> str:
     [
         "BatchedTranspose2DSpec.kernel_name",
         "probe_params",
+        "probe_fp8",
     ],
 )
 def test_translates(probe, name):
@@ -146,6 +155,10 @@ def test_out_parameter_helper_checks_its_flag(sampler):
         r"py_adapt::raise_builder\(b\);",
         body,
     ), body
+
+
+def test_ir_scalar_constant(probe):
+    assert "rocke_fp8e4m3()" in _body(probe[1], "py_probe_fp8")
 
 
 def test_source_compiles(probe, tmp_path):

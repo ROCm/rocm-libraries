@@ -2638,8 +2638,8 @@ class Fn:
         mod = self.mod
         if name in mod.imports:
             src, attr = mod.imports[name]
-            if src == "rocke.core.ir" and attr in T.IR_SCALARS:
-                return CE(T.IR_SCALARS[attr], T.TYPE)
+            if src == "rocke.core.ir" and self.ir_scalar_c(attr):
+                return CE(self.ir_scalar_c(attr), T.TYPE)
             val = getattr(mod.pymod, name, None)
             if val is None and src:
                 try:  # a function-local import: the name lives in its module
@@ -3166,12 +3166,37 @@ class Fn:
             idx.pure,
         )
 
+    def ir_scalar_c(self, attr: str) -> str | None:
+        """The C singleton of an IR scalar type constant of rocke.core.ir: the
+        table's, else `NAME = Type("n")` as rocke_n() when a header declares it
+        (FP8E4M3 -> rocke_fp8e4m3())."""
+        if attr in T.IR_SCALARS:
+            return T.IR_SCALARS[attr]
+        import rocke.core.ir as I
+
+        v = getattr(I, attr, None)
+        n = getattr(v, "name", None)
+        if (
+            isinstance(v, I.Type)
+            and type(v) is I.Type
+            and isinstance(n, str)
+            and re.fullmatch(r"[a-z0-9_]+", n)
+        ):
+            f = self.env.headers.funcs.get(f"rocke_{n}")
+            if f is not None and f.ret == T.TYPE and not f.params:
+                return f"rocke_{n}()"
+        return None
+
     def _ir_type_name(self, v):
         import rocke.core.ir as I
 
         for k, c in T.IR_SCALARS.items():
             if getattr(I, k, None) is v:
                 return c
+        if type(v) is I.Type:
+            for k in dir(I):
+                if getattr(I, k, None) is v:
+                    return self.ir_scalar_c(k)
         return None
 
     def _const_value(self, v, node) -> CE:
