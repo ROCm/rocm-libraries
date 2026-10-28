@@ -467,8 +467,9 @@ void rocke_gfx950_attn2d_reset_softmax_scratch(void)
  *  Front half of the QK + mask + softmax body.
  *
  *  Narrow 16x16x16 and transposed-32x32 QK/softmax paths; both supported by the
- *  gfx950 ctx. On return the softmax-derived state (alpha / new_l / m_new and,
- *  on the transposed path, the PT32 register-P groups) is handed to the peer
+ *  gfx950 ctx. On return the softmax-derived state (alpha / new_l / m_carry,
+ *  the raw running max, and, on the transposed path, the PT32 register-P
+ *  groups) is handed to the peer
  *  rocke_gfx950_attn2d_emit_pv_bucket, which runs acc *= alpha; acc += P @ V and
  *  emits the scf_yield carry.
  * ===================================================================== */
