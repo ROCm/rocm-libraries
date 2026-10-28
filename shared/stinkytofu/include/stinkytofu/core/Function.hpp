@@ -135,6 +135,14 @@ class STINKYTOFU_EXPORT Function {
         return basicBlocks.erase(pos);
     }
 
+    /// Erase \p block, which must not be the entry block and which no branch may
+    /// name, so a predecessor reaches it only by falling through. Each
+    /// predecessor's edge to it moves to the block after it, where that
+    /// predecessor now falls, unless the predecessor has that edge already. With
+    /// no block after it, or from the block after it, the edge is dropped.
+    /// Attached SSA is cleared.
+    void eraseBlock(BasicBlock& block);
+
     /// Entry block is the first in the list (basicBlocks.front()).
     BasicBlock* getEntryBlock() {
         return basicBlocks.empty() ? nullptr : &basicBlocks.front();

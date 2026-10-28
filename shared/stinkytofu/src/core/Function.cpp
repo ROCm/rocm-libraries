@@ -19,7 +19,9 @@
  * ************************************************************************ */
 #include "stinkytofu/core/Function.hpp"
 
+#include <algorithm>
 #include <iostream>
+#include <iterator>
 #include <ostream>
 #include <unordered_map>
 
@@ -68,6 +70,24 @@ bool Function::copyFrom(const Function& other) {
             copy->addPredecessor(copies.at(pred));
     }
     return complete;
+}
+
+void Function::eraseBlock(BasicBlock& block) {
+    clearAttachedSSA();
+    const auto after = std::next(BasicBlockList::iterator(&block));
+    BasicBlock* next = after == basicBlocks.end() ? nullptr : &*after;
+    for (BasicBlock* pred : block.getPredecessors()) {
+        if (next == nullptr || pred == &block || pred == next) continue;
+        std::vector<BasicBlock*>& succs = pred->getSuccessors();
+        if (std::find(succs.begin(), succs.end(), next) != succs.end()) continue;
+        const auto edge = std::find(succs.begin(), succs.end(), &block);
+        if (edge == succs.end()) continue;
+        *edge = next;
+        next->addPredecessor(pred);
+    }
+    removePredecessorEdges(block);
+    removeSuccessorEdges(block);
+    block.erase();
 }
 
 SSAArena& Function::ssaArena() {

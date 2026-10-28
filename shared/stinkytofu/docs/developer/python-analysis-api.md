@@ -16,7 +16,8 @@ Use it to test a pass on a kernel, and to edit a kernel by hand.
 4. Check the module with `verify()`, and edit it a block or an operand at a time.
 5. Ask the analyses for live ranges, register pressure, hazard gaps, and size, as objects.
 6. Compare two pass lists on copies of a module, and record each run as a command that repeats it.
-7. Print the module back to STIR, or emit assembler source and assemble it.
+7. Shrink a failing kernel to the smallest module that still fails.
+8. Print the module back to STIR, or emit assembler source and assemble it.
 
 `stinkytofu run` runs only the passes you name. It does not run the optimization pipeline.
 
@@ -84,6 +85,35 @@ Exit status:
 Remarks from the passes also go to stderr. The `--print-before` and `--print-after` dumps go to stderr too. Stdout is only the module.
 
 `module.run_info()` gives each run as one of these commands, so a result can be rebuilt from its input file.
+
+`reduce` shrinks a file while a test command still reports it failing, as `llvm-reduce --test` does. Each candidate is written to a temporary file in the input's form: `.s` as assembler source, anything else as STIR. The command gets that path as its last argument, and exit status 0 means the candidate still fails. A test that aborts, or crashes in a pass, ends only its own process. The smallest failing module goes to stdout, and one progress line per removal, then a summary, go to stderr.
+
+On the hazard kernel in [Shrink a failing kernel](#shrink-a-failing-kernel), saved as `kernel.stir`:
+
+```bash
+cat > fails.sh <<'EOF'
+#!/bin/sh
+stinkytofu run "$1" --pass HazardGapAnalysisPass 2>&1 | grep -q "VIOLATION rule=SaluSgprToMemAddr"
+EOF
+chmod +x fails.sh
+stinkytofu reduce kernel.stir --test ./fails.sh -o small.stir
+# the last stderr line: functions 1 -> 1, blocks 1 -> 1, lines 7 -> 2 after 12 checks
+```
+
+| Option | Meaning |
+| --- | --- |
+| `FILE` or `-`, `--arch`, `--asm`, `-o PATH` | As for `run` |
+| `--test CMD` | The command to run on each candidate |
+| `--test-arg ARG` | An argument for the command, before the path. Repeatable |
+| `--timeout SECONDS` | Stop a test that runs this long. It counts as not failing |
+| `--max-checks N` | Stop after N tests, and print the smallest failing module so far |
+
+Exit status:
+
+| Code | When |
+| --- | --- |
+| 0 | The file was reduced, or `--max-checks` stopped the search |
+| 2 | The file is missing, the text does not load, the test command cannot start, or the test does not report the file as failing |
 
 Tests for this API are in `python_module/tests/test_stir_api.py`. When pytest is installed, standalone `ctest` runs that file.
 
@@ -305,6 +335,15 @@ It returns the warnings, one string each, as `load_warnings()` does. Their lines
 
 It does not check the value against the instruction; `verify()` does that. A function with attached SSA is refused, since its `defs` and `uses` list SSA values. To edit its physical operands, load `module.serialize()` again.
 
+`block_lines(function, block)` returns a block's body as `serialize()` prints it, one string per line. There is a line for each instruction, label, and directive, including the text lines a `.s` load keeps. The block's own label is not among them, since the block's header carries it. `replace_block(function, block, "\n".join(lines))` leaves the module as it was, so a caller can drop lines and rebuild the block from the rest. A rebuilt block keeps what STIR keeps: its source comments and symbolic register names are gone.
+
+`delete_block(function, block)` deletes a block that no branch in another block names:
+- a predecessor that fell into the block now falls into the block after it;
+- with no block after it, the predecessors lose that edge, and the block's own edges go with it;
+- the function's attached SSA is dropped.
+
+`delete_function(function)` deletes a callable function and its blocks. A call that lists it in `mod.call_targets` keeps the name, which does not reach the assembly.
+
 These raise, and the module is left as it was:
 
 | What happened | Exception |
@@ -313,6 +352,8 @@ These raise, and the module is left as it was:
 | The body does not parse, or names an opcode the arch does not have | `ValueError`, with each error line and its id |
 | The body has a block header, a `Successors:` line, or a `}` | `ValueError` (`syntax`) |
 | `set_operand` on a function with attached SSA | `ValueError` |
+| `delete_block` on the entry block, or on a block a branch in another block names | `ValueError`. The message gives the branch, such as `'st.s_cbranch_scc1' at ^entry #1` |
+| `delete_function` on the entry function | `ValueError` |
 | A value with no operand form: a bool, an SSA value, an unknown register class, or an int that does not fit 32 bits | `ValueError` |
 | `index`, or the position in `operand`, is out of range | `IndexError` |
 
@@ -413,3 +454,65 @@ print(result)
 - `pressure`, `size`, and `hazards`, which map each function the run reached to what the queries above return after the run.
 
 `pressure` is `None` for a function the run left without attached SSA, and `str(result)` shows that as `-`.
+
+### Shrink a failing kernel
+
+`stinkytofu.reduce(module, check, *, max_checks=None, log=None)` removes what a failure does not need, as `llvm-reduce` does, and returns a `Reduction`. `check(candidate)` returns true while the bug is still present:
+- each call gets its own copy of a candidate, which has no attached SSA, so the check runs the passes it needs, as it would on the original;
+- the first call is on the module you pass. If it returns false, `reduce` raises `ValueError`, and if it raises, so does `reduce`;
+- on a later candidate, an exception counts as not failing, so a check need not catch what a broken candidate makes a pass raise.
+
+This kernel breaks a hazard rule: `tensor_load_to_lds` reads `s0` too soon after `s_mov_b32` writes it.
+
+```python
+module = stinkytofu.load_stir("""\
+st.func @k() {
+^entry:
+  "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  v0 = "st.v_mov_b32"(v1) { issueCycles = 1, latencyCycles = 1 }
+  s0 = "st.s_mov_b32"(s1) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_nop"(1) { issueCycles = 1, latencyCycles = 1 }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1 }
+  v2 = "st.v_add_f32"(v0, v1) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+""")
+
+def still_fails(candidate):
+    return any(gap.rule == "SaluSgprToMemAddr" and not gap.ok for gap in candidate.hazards("k"))
+
+result = stinkytofu.reduce(module, still_fails, log=print)
+print(result)    # functions 1 -> 1, blocks 1 -> 1, lines 7 -> 2 after 12 checks
+print(result.module.serialize())
+# st.module @k {
+#   st.func @k() {
+#     ^entry:
+#       s0 = "st.s_mov_b32"(s1) { issueCycles = 1, latencyCycles = 1 }
+#       "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1 }
+#   }
+# }
+```
+
+A check that runs passes catches what it expects: `run_passes(["HazardGapAnalysisPass"])` raises `RuntimeError` with `HazardGapAnalysisPass reported an analysis failure` for the same kernel.
+
+Each round removes callable functions, then blocks other than a function's entry, then lines from each block, as `block_lines` lists them. Each level tries removing a chunk at a time, from all of them down to one. Rounds repeat until one removes nothing. A block goes once no branch in another block names it, so one round's line removals can let the next round's blocks go.
+- Candidates are `module.copy()` with the removals made, so function metadata and the kernel header stay, and the module you pass is not changed.
+- A candidate whose `verify()` reports a kind of problem the module did not have is skipped without a check. That keeps the label a branch names, and at least one instruction in each function.
+- A check should test for its particular failure. One that accepts any failure can end on a different bug.
+
+| `Reduction` field | Meaning |
+| --- | --- |
+| `module` | The smallest module the check still reported as failing |
+| `checks` | How many times the check ran |
+| `complete` | False when `max_checks` stopped the search |
+| `functions`, `blocks`, `lines` | `(before, after)` counts. `str()` prints them as `lines 5012 -> 37` |
+
+A pass that aborts takes the Python process with it. `stinkytofu.command_check(argv, *, form="stir", timeout=None)` makes a check that runs a command instead, which is what the `reduce` command uses:
+- the candidate is written to a temporary `candidate.stir` with `serialize()`, or `candidate.s` with `emit_asm()` when `form="asm"`, and its path is the command's last argument;
+- exit status 0 means the candidate still fails. The command reads no input, and its output is discarded;
+- a command still running after `timeout` seconds is stopped, and counts as not failing. One that cannot start raises `OSError` on the first check.
+
+```python
+check = stinkytofu.command_check(["sh", "fails.sh"], form="asm", timeout=60)
+small = stinkytofu.reduce(stinkytofu.load_asm_file("kernel.s"), check).module.emit_asm()
+```

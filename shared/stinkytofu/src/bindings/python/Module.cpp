@@ -159,6 +159,19 @@ Function& StinkyAsmModule::createFunction(std::string_view name, bool isCallable
     return *func;
 }
 
+bool StinkyAsmModule::removeFunction(std::string_view name) {
+    auto& callables = pImpl->callableFunctions;
+    const auto found = std::find_if(callables.begin(), callables.end(), [name](const auto& func) {
+        return func && func->getName() == name;
+    });
+    if (found == callables.end()) return false;
+    std::vector<BasicBlock*> blocks;
+    for (BasicBlock& block : **found) blocks.push_back(&block);
+    invalidateGroupsInBlocks(blocks);
+    callables.erase(found);
+    return true;
+}
+
 Function* StinkyAsmModule::getFunction(std::string_view name) {
     if (name.empty()) return &pImpl->function;
     for (auto& func : pImpl->callableFunctions) {

@@ -1,6 +1,7 @@
 # Copyright (C) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 """stinkytofu passes | stinkytofu run FILE [--pass NAME[=args]]...
+| stinkytofu reduce FILE --test CMD [--test-arg ARG]...
 
 The command calls the analysis API. It does not run the optimization pipeline.
 A .s file, or stdin with --asm, loads as assembler source and prints assembler
@@ -11,6 +12,12 @@ module.run_info() records runs again as it is. Exit status: 0 success, 2 for a
 missing file, a load error, an unknown pass, function, feature, or tile field,
 or a bad value, 1 when a pass refuses the function or reports an analysis
 failure.
+
+reduce shrinks FILE while the test command still reports it failing: each
+candidate is written in FILE's form, its path goes last on the command line,
+and exit status 0 means it still fails. The smallest module goes to stdout and
+progress to stderr. Exit status: 0 success, 2 for a missing file, a load error,
+a test that cannot start, or a test that does not report FILE as failing.
 """
 
 import argparse
@@ -72,18 +79,29 @@ def cmd_passes():
     return 0
 
 
-def cmd_run(args):
+def _load(args):
+    """The module args.input names, and whether it is assembler source."""
     stinkytofu = _module()
     arch = _arch(args.arch)
     is_asm = args.asm or args.input.endswith(".s")
     if args.input == "-":
-        text = sys.stdin.read()
         load = stinkytofu.load_asm if is_asm else stinkytofu.load_stir
-        module = load(text, arch=arch)
-    elif is_asm:
-        module = stinkytofu.load_asm_file(args.input, arch=arch)
+        return load(sys.stdin.read(), arch=arch), is_asm
+    if is_asm:
+        return stinkytofu.load_asm_file(args.input, arch=arch), is_asm
+    return stinkytofu.load_stir_file(args.input, arch=arch), is_asm
+
+
+def _write(args, text):
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as handle:
+            handle.write(text)
     else:
-        module = stinkytofu.load_stir_file(args.input, arch=arch)
+        sys.stdout.write(text)
+
+
+def cmd_run(args):
+    module, is_asm = _load(args)
     records = module.run_passes(
         args.passes,
         function=args.function,
@@ -97,14 +115,28 @@ def cmd_run(args):
             if dump is not None:
                 sys.stderr.write(dump)
     if args.emit_asm or (is_asm and not args.ssa):
-        out = module.emit_asm()
+        _write(args, module.emit_asm())
     else:
-        out = module.serialize(ssa=args.ssa)
-    if args.output:
-        with open(args.output, "w", encoding="utf-8") as handle:
-            handle.write(out)
-    else:
-        sys.stdout.write(out)
+        _write(args, module.serialize(ssa=args.ssa))
+    return 0
+
+
+def cmd_reduce(args):
+    stinkytofu = _module()
+    module, is_asm = _load(args)
+    check = stinkytofu.command_check(
+        [args.test] + args.test_args,
+        form="asm" if is_asm else "stir",
+        timeout=args.timeout,
+    )
+    result = stinkytofu.reduce(
+        module,
+        check,
+        max_checks=args.max_checks,
+        log=lambda line: sys.stderr.write(line + "\n"),
+    )
+    sys.stderr.write(str(result) + "\n")
+    _write(args, result.module.emit_asm() if is_asm else result.module.serialize())
     return 0
 
 
@@ -112,19 +144,26 @@ def build_parser():
     parser = argparse.ArgumentParser(
         prog="stinkytofu",
         description="Load STIR or assembler source, run named StinkyTofu passes, "
-        "and print the result.",
+        "and print the result, or shrink a file a test reports failing.",
     )
-    sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("passes", help="print one pass name per line")
-    run = sub.add_parser("run", help="load a file, run passes, and print the result")
-    run.add_argument("input", help="STIR file, .s file, or - for stdin")
-    run.add_argument(
+    loaded = argparse.ArgumentParser(add_help=False)
+    loaded.add_argument("input", help="STIR file, .s file, or - for stdin")
+    loaded.add_argument(
         "--arch", default="12,5,0", help="major,minor,stepping (default 12,5,0)"
     )
-    run.add_argument(
+    loaded.add_argument(
         "--asm",
         action="store_true",
         help="read the input as assembler source; a .s file always is",
+    )
+    loaded.add_argument(
+        "-o", "--output", help="write the result to this file instead of stdout"
+    )
+
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("passes", help="print one pass name per line")
+    run = sub.add_parser(
+        "run", parents=[loaded], help="load a file, run passes, and print the result"
     )
     run.add_argument(
         "--pass",
@@ -172,8 +211,38 @@ def build_parser():
         action="store_true",
         help="print assembler source; the default for assembler input",
     )
-    run.add_argument(
-        "-o", "--output", help="write the result to this file instead of stdout"
+
+    reduce = sub.add_parser(
+        "reduce",
+        parents=[loaded],
+        help="shrink a file while a test command still reports it failing",
+    )
+    reduce.add_argument(
+        "--test",
+        required=True,
+        metavar="CMD",
+        help="command run on each candidate, with its path last; exit 0 means it "
+        "still fails",
+    )
+    reduce.add_argument(
+        "--test-arg",
+        dest="test_args",
+        action="append",
+        default=[],
+        metavar="ARG",
+        help="argument for the test command, before the path, repeatable",
+    )
+    reduce.add_argument(
+        "--timeout",
+        type=float,
+        metavar="SECONDS",
+        help="stop a test after this long; it counts as not failing",
+    )
+    reduce.add_argument(
+        "--max-checks",
+        type=int,
+        metavar="N",
+        help="stop after N tests and print the smallest failing module so far",
     )
     return parser
 
@@ -183,6 +252,8 @@ def main(argv=None):
     try:
         if args.command == "passes":
             return cmd_passes()
+        if args.command == "reduce":
+            return cmd_reduce(args)
         return cmd_run(args)
     except ValueError as exc:
         sys.stderr.write("stinkytofu: %s\n" % exc)

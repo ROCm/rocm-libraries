@@ -678,6 +678,89 @@ def test_branch_to_a_missing_label_is_reported():
     assert "'nowhere'" in diagnostic.message
 
 
+CHAIN_KERNEL = """\
+st.func @k() {
+^entry:
+  "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^mid
+^mid:
+  "st.s_nop"(1) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^last
+^last:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+"""
+
+
+def test_block_lines_rebuild_the_block_unchanged():
+    module = stinkytofu.load_stir(EDIT_KERNEL)
+    printed = module.serialize()
+    assert module.block_lines("k", "entry") == [
+        'v[0:3] = "st.ds_load_b128"(v40) { issueCycles = 4, latencyCycles = 56 }',
+        '"st.s_cbranch_scc1"(loop) { issueCycles = 1, latencyCycles = 1 }',
+    ]
+    # ^loop's own label is the { label } on its header, not a body line.
+    assert module.block_lines("k", "loop") == [NOP.format(0).strip()]
+    for block in module.functions()[0].blocks():
+        lines = module.block_lines("k", block.name)
+        module.replace_block("k", block.name, "\n".join(lines))
+    assert module.serialize() == printed
+
+
+def test_block_lines_hold_every_line_of_assembler_source():
+    module = stinkytofu.load_asm_file(ROUNDTRIP_KERNEL)
+    emitted, printed = module.emit_asm(), module.serialize()
+    [function] = module.functions()
+    [block] = function.blocks()
+    lines = module.block_lines(function.name, block.name)
+    directives = [line for line in lines if line.startswith('"st.asm_directive"(')]
+    labels = [line for line in lines if line.endswith(":") or ": { alignment" in line]
+    assert len(block.instructions()) == 1938
+    assert (len(lines), len(directives), len(labels)) == (2203, 218, 47)
+    assert sum(line.startswith('"st.asm_directive"(".set"') for line in lines) == 82
+    module.replace_block(function.name, block.name, "\n".join(lines))
+    assert (module.emit_asm(), module.serialize()) == (emitted, printed)
+
+
+def test_delete_block_hands_a_falling_predecessor_on():
+    module = stinkytofu.load_stir(CHAIN_KERNEL)
+    module.delete_block("k", "mid")
+    entry, last = module.functions()[0].blocks()
+    assert (entry.name, last.name) == ("entry", "last")
+    assert entry.successors() == ["last"]
+    printed = module.serialize()
+    assert stinkytofu.load_stir(printed).serialize() == printed
+
+
+@pytest.mark.parametrize(
+    "block, message",
+    [
+        ("entry", "it is the entry block of function 'k'"),
+        ("loop", r"'st.s_cbranch_scc1' at \^entry #1 branches to 'loop'"),
+        ("nowhere", "no block '\\^nowhere'"),
+    ],
+)
+def test_delete_block_refuses_the_entry_and_a_branch_target(block, message):
+    module = stinkytofu.load_stir(EDIT_KERNEL)
+    before = module.serialize()
+    with pytest.raises(ValueError, match=message):
+        module.delete_block("k", block)
+    assert module.serialize() == before
+
+
+def test_delete_function_keeps_the_entry():
+    module = stinkytofu.load_stir(MODULE)
+    with pytest.raises(ValueError, match="'main' cannot be deleted: it is the entry"):
+        module.delete_function("main")
+    with pytest.raises(
+        ValueError, match="no function 'nope'; functions: 'main', 'helper'"
+    ):
+        module.delete_function("nope")
+    module.delete_function("helper")
+    assert [function.name for function in module.functions()] == ["main"]
+    assert "@helper" not in module.serialize()
+
+
 def test_live_ranges_and_pressure_read_the_lift():
     module = stinkytofu.load_stir(KERNEL)
     module.run_passes(["LiftAsmRegistersToSSAPass"])
@@ -875,6 +958,192 @@ def test_compare_names_the_side_that_failed():
     assert module.run_info() == []
 
 
+NOISY_KERNEL = """\
+st.func @k() {
+^entry:
+  "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  v0 = "st.v_mov_b32"(v1) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_nop"(1) { issueCycles = 1, latencyCycles = 1 }
+  v2 = "st.v_add_f32"(v0, v1) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_nop"(2) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_branch"(tail) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^tail
+^tail:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+"""
+
+
+def opcodes_of(module):
+    return [
+        inst.opcode
+        for function in module.functions()
+        for block in function.blocks()
+        for inst in block.instructions()
+    ]
+
+
+def adds_v1(module):
+    return any(
+        inst.opcode == "st.v_add_f32" and ("v", 1, 1) in inst.uses
+        for function in module.functions()
+        for block in function.blocks()
+        for inst in block.instructions()
+    )
+
+
+def test_reduce_keeps_only_what_the_check_needs():
+    module = stinkytofu.load_stir(NOISY_KERNEL)
+    before = module.serialize()
+    log = []
+    result = stinkytofu.reduce(module, adds_v1, log=log.append)
+    assert result.module.serialize() == (
+        "st.module @k {\n  st.func @k() {\n    ^entry:\n"
+        '      v2 = "st.v_add_f32"(v0, v1) { issueCycles = 1, latencyCycles = 1 }\n'
+        "  }\n}\n"
+    )
+    assert (result.functions, result.blocks, result.lines) == ((1, 1), (2, 1), (7, 1))
+    assert result.complete
+    assert str(result) == (
+        "functions 1 -> 1, blocks 2 -> 1, lines 7 -> 1 after %d checks" % result.checks
+    )
+    # ^tail goes once the branch naming it has gone.
+    assert log[0] == "removed 3 lines of ^entry in 'k'; 3 left"
+    assert log[-1] == "removed 1 block of 'k'; 1 left"
+    assert module.serialize() == before
+
+
+def test_reduce_removes_callable_functions():
+    def main_has_a_nop(module):
+        [main] = [
+            function for function in module.functions() if function.name == "main"
+        ]
+        return any(
+            inst.opcode == "st.s_nop"
+            for block in main.blocks()
+            for inst in block.instructions()
+        )
+
+    result = stinkytofu.reduce(stinkytofu.load_stir(MODULE), main_has_a_nop)
+    assert [function.name for function in result.module.functions()] == ["main"]
+    assert result.functions == (2, 1)
+
+
+def test_reduce_offers_no_candidate_verify_rejects():
+    module = stinkytofu.load_asm(
+        "s_nop 0\ns_cbranch_scc1 label_x\ns_nop 1\nlabel_x:\ns_endpgm\n"
+    )
+    seen = []
+
+    def branches(candidate):
+        seen.append([diagnostic.id for diagnostic in candidate.verify()])
+        return "st.s_cbranch_scc1" in opcodes_of(candidate)
+
+    result = stinkytofu.reduce(module, branches)
+    # The label stays: without it, the branch is an undefined-label.
+    assert result.module.block_lines("", "entry") == [
+        '"st.s_cbranch_scc1"(label_x) { issueCycles = 1, latencyCycles = 1 }',
+        "label_x:",
+    ]
+    assert len(seen) > 1 and all(ids == [] for ids in seen)
+
+
+def test_reduce_checks_the_module_first():
+    module = stinkytofu.load_stir(NOISY_KERNEL)
+    with pytest.raises(ValueError, match="check does not report the module as failing"):
+        stinkytofu.reduce(module, lambda candidate: False)
+    with pytest.raises(ZeroDivisionError):
+        stinkytofu.reduce(module, lambda candidate: 1 / 0)
+    with pytest.raises(ValueError, match="max_checks must be at least 1"):
+        stinkytofu.reduce(module, adds_v1, max_checks=0)
+
+
+def test_reduce_takes_a_check_that_raises_as_not_failing():
+    calls = []
+
+    def only_the_first(candidate):
+        calls.append(candidate)
+        if len(calls) > 1:
+            raise RuntimeError("missed: RegisterAllocation")
+        return True
+
+    module = stinkytofu.load_stir(NOISY_KERNEL)
+    result = stinkytofu.reduce(module, only_the_first)
+    assert result.module.serialize() == module.serialize()
+    assert result.complete and result.checks == len(calls) > 1
+
+
+def test_reduce_stops_at_max_checks():
+    result = stinkytofu.reduce(
+        stinkytofu.load_stir(NOISY_KERNEL), adds_v1, max_checks=2
+    )
+    assert (result.checks, result.complete) == (2, False)
+    assert str(result).endswith(" after 2 checks, stopped at max_checks")
+    assert adds_v1(result.module)
+
+
+def write_test(tmp_path, body):
+    """A test command: a Python script that reads the candidate as text."""
+    script = tmp_path / "fails.py"
+    script.write_text(
+        "import os, signal, sys\ntext = open(sys.argv[1]).read()\n" + body
+    )
+    return [sys.executable, str(script)]
+
+
+def test_command_check_runs_a_command_on_each_candidate(tmp_path):
+    test = write_test(
+        tmp_path,
+        'ok = sys.argv[1].endswith(".stir") and "v_add_f32" in text\n'
+        "sys.exit(0 if ok else 1)\n",
+    )
+    result = stinkytofu.reduce(
+        stinkytofu.load_stir(NOISY_KERNEL), stinkytofu.command_check(test)
+    )
+    assert opcodes_of(result.module) == ["st.v_add_f32"]
+
+
+def test_command_check_writes_assembly_for_asm(tmp_path):
+    test = write_test(
+        tmp_path,
+        'ok = sys.argv[1].endswith(".s") and "v_mov_b32 v0, v1" in text\n'
+        "sys.exit(0 if ok else 1)\n",
+    )
+    check = stinkytofu.command_check(test, form="asm")
+    result = stinkytofu.reduce(stinkytofu.load_asm(ASM), check)
+    assert result.module.emit_asm() == "v_mov_b32 v0, v1\n"
+
+
+def test_command_check_outlives_a_test_that_dies(tmp_path):
+    # A candidate without the v_mov kills the test process, as an abort in a
+    # pass would; that candidate only counts as not failing.
+    test = write_test(
+        tmp_path,
+        'if "v_mov_b32" not in text:\n'
+        "    os.kill(os.getpid(), signal.SIGKILL)\n"
+        'sys.exit(0 if "v_add_f32" in text else 1)\n',
+    )
+    result = stinkytofu.reduce(
+        stinkytofu.load_stir(NOISY_KERNEL), stinkytofu.command_check(test)
+    )
+    assert opcodes_of(result.module) == ["st.v_mov_b32", "st.v_add_f32"]
+
+
+def test_command_check_stops_a_slow_test(tmp_path):
+    check = stinkytofu.command_check(
+        write_test(tmp_path, "import time\ntime.sleep(30)\n"), timeout=0.2
+    )
+    assert check(stinkytofu.load_stir(KERNEL)) is False
+
+
+def test_command_check_refuses_what_it_cannot_run(tmp_path):
+    with pytest.raises(ValueError, match='form must be "stir" or "asm"'):
+        stinkytofu.command_check(["true"], form="llvm")
+    missing = stinkytofu.command_check([str(tmp_path / "missing")])
+    with pytest.raises(OSError):
+        stinkytofu.reduce(stinkytofu.load_stir(KERNEL), missing)
+
+
 def test_cli_passes(capsys):
     assert main(["passes"]) == 0
     assert "LiftAsmRegistersToSSAPass" in capsys.readouterr().out
@@ -997,6 +1266,42 @@ def test_cli_runs_one_function(tmp_path, capsys):
     assert counts == [1, 0]
     assert main(["run", str(path), "--function", "nowhere"]) == 2
     assert "no function 'nowhere'" in capsys.readouterr().err
+
+
+def test_cli_reduces_a_stir_file(tmp_path, capsys):
+    path = tmp_path / "k.stir"
+    path.write_text(NOISY_KERNEL)
+    python, script = write_test(tmp_path, 'sys.exit(0 if "v_add_f32" in text else 1)\n')
+    out = tmp_path / "small.stir"
+    argv = ["reduce", str(path), "--test", python, "--test-arg", script]
+    assert main(argv + ["-o", str(out)]) == 0
+    assert opcodes_of(stinkytofu.load_stir(out.read_text())) == ["st.v_add_f32"]
+    err = capsys.readouterr().err
+    assert "removed 3 lines of ^entry in 'k'; 3 left\n" in err
+    assert "functions 1 -> 1, blocks 2 -> 1, lines 7 -> 1 after " in err
+
+    assert main(argv + ["--max-checks", "1"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == stinkytofu.load_stir(NOISY_KERNEL).serialize()
+    assert captured.err.endswith("after 1 check, stopped at max_checks\n")
+
+
+def test_cli_reduces_assembler_source(tmp_path, capsys):
+    path = tmp_path / "k.s"
+    path.write_text(ASM)
+    python, script = write_test(tmp_path, 'sys.exit(0 if "v_mov_b32" in text else 1)\n')
+    assert main(["reduce", str(path), "--test", python, "--test-arg", script]) == 0
+    assert capsys.readouterr().out == "v_mov_b32 v0, v1\n"
+
+
+def test_cli_reduce_needs_a_test_that_fails_on_the_input(tmp_path, capsys):
+    path = tmp_path / "k.stir"
+    path.write_text(KERNEL)
+    python, script = write_test(tmp_path, "sys.exit(1)\n")
+    assert main(["reduce", str(path), "--test", python, "--test-arg", script]) == 2
+    assert "check does not report the module as failing" in capsys.readouterr().err
+    assert main(["reduce", str(path), "--test", str(tmp_path / "missing")]) == 2
+    assert "No such file or directory" in capsys.readouterr().err
 
 
 def _launcher():

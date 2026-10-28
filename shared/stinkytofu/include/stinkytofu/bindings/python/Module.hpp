@@ -324,6 +324,18 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
     Function& createFunction(std::string_view name, bool isCallable = true);
 
     /**
+     * @brief Remove the callable Function \p name and its IR.
+     *
+     * Groups bounded by its instructions are cleared first, as
+     * invalidateGroupsInBlocks() does. A call whose `mod.call_targets` lists the
+     * name keeps it; that list does not reach the assembly.
+     *
+     * @return False, changing nothing, for the entry Function or a name no
+     * callable Function has.
+     */
+    bool removeFunction(std::string_view name);
+
+    /**
      * @brief Look up a Function by name. Empty name returns the entry Function.
      */
     Function* getFunction(std::string_view name);

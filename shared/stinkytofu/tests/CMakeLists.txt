@@ -155,6 +155,7 @@ set(UNIT_LOGICAL_TEST_FILES
 set(UNIT_CORE_TEST_FILES
     unit/core/AnalysisManagerTest.cpp
     unit/core/BackendRegistryTest.cpp
+    unit/core/BlockAndFunctionEraseTest.cpp
     unit/core/ComgrProbeTest.cpp
     unit/core/DiagnosticTest.cpp
     unit/core/FunctionCopyTest.cpp

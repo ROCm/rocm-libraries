@@ -140,6 +140,11 @@ configure_file(
     COPYONLY
 )
 configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/stinkytofu/reduce.py"
+    "${CMAKE_BINARY_DIR}/lib/stinkytofu/reduce.py"
+    COPYONLY
+)
+configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/stinkytofu/__main__.py"
     "${CMAKE_BINARY_DIR}/lib/stinkytofu/__main__.py"
     COPYONLY
@@ -198,7 +203,8 @@ install(FILES $<TARGET_FILE:stinkytofu>
 )
 
 # Install Python wrapper (__init__.py)
-install(FILES stinkytofu/__init__.py stinkytofu/cli.py stinkytofu/compare.py stinkytofu/__main__.py
+install(FILES stinkytofu/__init__.py stinkytofu/cli.py stinkytofu/compare.py
+    stinkytofu/reduce.py stinkytofu/__main__.py
     DESTINATION ${STINKYTOFU_PYTHON_SITE_DIR}/stinkytofu
     COMPONENT python_bindings
 )
@@ -213,7 +219,8 @@ install(PROGRAMS bin/stinkytofu
 if(DEFINED SKBUILD)
     install(TARGETS stinkytofu_python DESTINATION stinkytofu)
     install(FILES $<TARGET_FILE:stinkytofu> DESTINATION stinkytofu)
-    install(FILES stinkytofu/__init__.py stinkytofu/cli.py stinkytofu/compare.py stinkytofu/__main__.py
+    install(FILES stinkytofu/__init__.py stinkytofu/cli.py stinkytofu/compare.py
+        stinkytofu/reduce.py stinkytofu/__main__.py
         DESTINATION stinkytofu)
     install(FILES "${CMAKE_BINARY_DIR}/intrinsics.st.bc" DESTINATION stinkytofu)
 endif()

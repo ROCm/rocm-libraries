@@ -282,6 +282,17 @@ TEST(ApiExport, ModuleCopyAndRunRecord) {
     EXPECT_EQ(module.getPassRuns().front().passes.front(), "StinkyRemoveNopPass");
 }
 
+TEST(ApiExport, BlockAndFunctionErase) {
+    Function func("f");
+    func.createBasicBlock("entry");
+    func.eraseBlock(*func.createBasicBlock("extra"));
+    EXPECT_EQ(func.size(), 1u);
+
+    StinkyAsmModule module("m", kArch, StinkyAsmModule::ModuleOptions{});
+    module.createFunction("helper");
+    EXPECT_TRUE(module.removeFunction("helper"));
+}
+
 // =============================================================================
 // Analysis queries (Python module stir_api.cpp)
 // =============================================================================

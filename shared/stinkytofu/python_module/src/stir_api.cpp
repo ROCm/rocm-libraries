@@ -976,6 +976,68 @@ void setOperand(StinkyAsmModule& module, const std::string& functionName,
         inst.setSrcReg(*slot, replacement);
 }
 
+/// The block's body as serialize() prints it, one line per IR node, without the
+/// block's own label, which its header carries.
+std::vector<std::string> blockLines(StinkyAsmModule& module, const std::string& functionName,
+                                    const std::string& blockName) {
+    const BasicBlock& block = selectBlock(selectFunction(module, functionName), blockName);
+    const IRBase* own = ownLabel(block);
+    std::vector<std::string> lines;
+    for (const IRBase& ir : block) {
+        if (&ir == own) continue;
+        std::ostringstream text;
+        AsmPrinter(text).printIR(ir);
+        std::string line = text.str();
+        line.erase(0, line.find_first_not_of(' '));
+        while (!line.empty() && line.back() == '\n') line.pop_back();
+        lines.push_back(std::move(line));
+    }
+    return lines;
+}
+
+void deleteBlock(StinkyAsmModule& module, const std::string& functionName,
+                 const std::string& blockName) {
+    Function& function = selectFunction(module, functionName);
+    BasicBlock& block = selectBlock(function, blockName);
+    const std::string refused = "block '^" + blockName + "' cannot be deleted: ";
+    if (&block == function.getEntryBlock())
+        throw std::invalid_argument(refused + "it is the entry block of function '" + functionName +
+                                    "'");
+
+    std::vector<std::string> names{block.getLabel()};
+    for (const IRBase& ir : block) {
+        const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr || !isLabel(*inst)) continue;
+        if (const auto* label = inst->getModifier<LabelData>()) names.push_back(label->label);
+    }
+    for (const BasicBlock& from : function) {
+        if (&from == &block) continue;
+        int index = 0;
+        for (const IRBase& ir : from) {
+            if (!isIndexedInstruction(ir)) continue;
+            const auto& inst = *cast<StinkyInstruction>(&ir);
+            for (const std::string& target : getBranchTargets(inst)) {
+                if (std::find(names.begin(), names.end(), target) == names.end()) continue;
+                throw std::invalid_argument(refused + "'" + opcodeOf(inst) + "' at ^" +
+                                            from.getLabel() + " #" + std::to_string(index) +
+                                            " branches to '" + target + "'");
+            }
+            ++index;
+        }
+    }
+
+    module.invalidateGroupsInBlocks({&block});
+    discardDefUseAnalysis(function);
+    function.eraseBlock(block);
+}
+
+void deleteFunction(StinkyAsmModule& module, const std::string& name) {
+    if (&selectFunction(module, name) == &module.getFunction())
+        throw std::invalid_argument("function '" + name +
+                                    "' cannot be deleted: it is the entry function");
+    module.removeFunction(name);
+}
+
 /// (block, index, "use" or "def"), with index None for a block's leading pair
 /// or a label, and None for a slot past the function's last.
 nb::object placeTuple(const SlotPlace& place) {
@@ -1331,6 +1393,15 @@ void bind_stir_api(nb::module_& m, nb::class_<StinkyAsmModule>& cls) {
             nb::arg("operand"), nb::arg("value"),
             "Set one physical operand: operand is (\"defs\", i) or (\"uses\", i) of the "
             "instruction at index, and value takes a form functions() lists");
+    cls.def("block_lines", &blockLines, nb::arg("function"), nb::arg("block"),
+            "A block's body as serialize() prints it: one line per instruction, label, or "
+            "directive, without the block's own label. replace_block(function, block, "
+            "\"\\n\".join(lines)) leaves the module unchanged");
+    cls.def("delete_block", &deleteBlock, nb::arg("function"), nb::arg("block"),
+            "Delete a block no branch from another block names. A predecessor that fell into it "
+            "falls into the block after it. The entry block cannot be deleted");
+    cls.def("delete_function", &deleteFunction, nb::arg("function"),
+            "Delete a callable function. The entry function cannot be deleted");
     cls.def("live_ranges", &liveRanges, nb::arg("function"),
             "Where each SSA value of a lifted function is live, in slots, with a place() lookup");
     cls.def("pressure", &pressure, nb::arg("function"),
