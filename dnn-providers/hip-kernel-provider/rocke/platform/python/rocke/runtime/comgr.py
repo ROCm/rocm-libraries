@@ -11,6 +11,12 @@ The chain we drive:
       -> AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE     -> ELF relocatable
       -> AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE -> HSA code object
 
+Several kernels destined for one code object (`build_hsaco_from_llvm_modules`)
+enter as one SOURCE each and are joined by AMD_COMGR_ACTION_LINK_BC_TO_BC
+before codegen, so a single module -- and a single AMDGPU metadata note
+listing every kernel -- reaches the backend. Linking relocatables instead
+would leave one metadata note per object, and the HIP runtime reads only one.
+
 The resulting HSACO bytes are returned to Python and can be handed
 straight to `hipModuleLoadData` (see `hip_module.py`). No subprocesses,
 no `<hip/hip_runtime.h>` parsing, no clang spawn.
@@ -28,7 +34,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from ._ctypes_bind import _LazyFn
 from .runtime_coexistence import (
@@ -63,6 +69,11 @@ AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE = 0x7
 
 class ComgrError(RuntimeError):
     pass
+
+
+class ComgrProcessDied(ComgrError):
+    """The process compiling one module (``fresh_process=True``) died before
+    it reported a result or an error: a toolchain crash, not a compile error."""
 
 
 def _load_lib() -> ctypes.CDLL:
@@ -178,16 +189,62 @@ def _read_rocm_version_file(path: str) -> Optional[Tuple[int, int]]:
         return None
 
 
+def _torch_package_hip_text(text: str) -> Optional[str]:
+    """The ``hip`` value of a torch package's ``version.py`` text
+    (``hip: Optional[str] = '7.2.53211-...'``), or ``None`` when the line is
+    absent or holds ``None`` (a build without ROCm)."""
+    for line in text.splitlines():
+        s = line.strip()
+        if not s.startswith("hip"):
+            continue
+        rest = s[3:].lstrip()
+        if not rest or rest[0] not in ":=":
+            continue  # another name that starts with "hip"
+        if "=" not in rest:
+            return None
+        value = rest.split("=", 1)[1].strip()
+        if len(value) >= 2 and value[0] in "'\"" and value[-1] == value[0]:
+            return value[1:-1]
+        return None
+    return None
+
+
+def _torch_package_rocm_version(lib_path: str) -> Optional[Tuple[int, int]]:
+    """ROCm vintage of a comgr library inside a torch package
+    (``<site>/torch/lib/libamd_comgr.so``), read from the package's
+    ``version.py`` without importing torch; ``None`` when the library is not
+    in a torch package's ``lib`` directory.
+
+    A torch package carries no ``.info/version``, so without this an explicit
+    ``ROCKE_COMGR_LIB`` naming torch's comgr in a process that has not imported
+    torch was dated by ``/opt/rocm``: the node's ROCm, not the library's.
+    """
+    libdir = os.path.dirname(lib_path)
+    pkg = os.path.dirname(libdir)
+    if os.path.basename(libdir) != "lib" or os.path.basename(pkg) != "torch":
+        return None
+    try:
+        with open(os.path.join(pkg, "version.py"), encoding="utf-8") as fh:
+            hip = _torch_package_hip_text(fh.read())
+    except OSError:
+        return None
+    return _parse_rocm_version(hip) if hip else None
+
+
 def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
     """Best-effort package metadata for diagnostics, not LLVM compatibility.
 
     Derived from the resolved COMGR path (:func:`resolved_lib_path`):
 
       * a path under the imported torch package -> ``torch.version.hip``;
+      * in a torch package's ``lib`` directory (torch not imported, e.g. an
+        explicit ``ROCKE_COMGR_LIB``) -> the ``hip`` entry of that package's
+        ``version.py`` (read, never imported);
       * a path under TheRock's ``_rocm_sdk_core`` wheel -> the wheel's ROCm
         release (``rocm_sdk.__version__`` or ``rocm-sdk-core`` metadata);
-      * a ROCm install tree -> its root ``.info/version``, with
-        ``/opt/rocm/.info/version`` as a final fallback.
+      * a ROCm install tree (``<root>/lib/libamd_comgr.so`` or, on a packaged
+        install, ``<root>/core-<X>/lib/libamd_comgr.so``) -> its root
+        ``.info/version``, with ``/opt/rocm/.info/version`` as a final fallback.
 
     Returns ``None`` if no usable path or version is found. Compiler selection
     and validation use :func:`loaded_compiler_info` instead.
@@ -212,6 +269,11 @@ def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
             if rp == tdir or rp.startswith(tdir + os.sep):
                 ver = getattr(getattr(torch_mod, "version", None), "hip", None)
                 return _parse_rocm_version(ver) if ver else None
+    # torch-bundled comgr of a torch that is not imported -> its version.py.
+    for cand in (rp, path):
+        ver = _torch_package_rocm_version(cand)
+        if ver is not None:
+            return ver
     # TheRock wheel comgr -> the wheel's ROCm release. Without this the climb
     # below finds no .info/version inside site-packages and falls back to
     # /opt/rocm, reporting the host's release for the wheel's LLVM.
@@ -517,6 +579,16 @@ _do_action = _bind(
     "amd_comgr_do_action", ctypes.c_int, ctypes.c_int, _ActionInfo, _DataSet, _DataSet
 )
 
+_get_isa_count = _bind(
+    "amd_comgr_get_isa_count", ctypes.c_int, ctypes.POINTER(ctypes.c_size_t)
+)
+_get_isa_name = _bind(
+    "amd_comgr_get_isa_name",
+    ctypes.c_int,
+    ctypes.c_size_t,
+    ctypes.POINTER(ctypes.c_char_p),
+)
+
 
 def _check(s: int, where: str) -> None:
     if s != AMD_COMGR_STATUS_SUCCESS:
@@ -527,15 +599,42 @@ def _check(s: int, where: str) -> None:
         )
 
 
+def supported_isas() -> List[str]:
+    """Every ISA name the loaded comgr can target, e.g. ``amdgcn-amd-amdhsa--gfx950``.
+
+    :func:`build_hsaco_from_llvm_ir` raises the same :class:`ComgrError` for a
+    target comgr does not know and for IR that fails to compile; asking first
+    is how a caller tells the two apart. Raises :class:`ComgrError` when the
+    library cannot be loaded.
+    """
+    count = ctypes.c_size_t(0)
+    _check(_get_isa_count(ctypes.byref(count)), "get_isa_count")
+    names = []
+    for i in range(count.value):
+        name = ctypes.c_char_p()
+        _check(_get_isa_name(i, ctypes.byref(name)), "get_isa_name")
+        names.append(name.value.decode("utf-8"))
+    return names
+
+
 @dataclass
 class ComgrTimings:
+    """Per-stage COMGR wall time in seconds, in pipeline order.
+
+    ``bc`` compiles each IR module to bitcode, ``link`` links several bitcode
+    modules into one (``LINK_BC_TO_BC``; 0.0 for a single module),
+    ``relocatable`` code-generates and ``executable`` links the code object.
+    Construct it by keyword: ``link`` sits between ``bc`` and ``relocatable``.
+    """
+
     bc: float = 0.0
+    link: float = 0.0
     relocatable: float = 0.0
     executable: float = 0.0
 
     @property
     def total(self) -> float:
-        return self.bc + self.relocatable + self.executable
+        return self.bc + self.link + self.relocatable + self.executable
 
 
 def _extract_first(data_set: _DataSet, kind: int) -> bytes:
@@ -558,6 +657,72 @@ def _extract_first(data_set: _DataSet, kind: int) -> bytes:
     finally:
         _release_data(data)
     return out
+
+
+def _build_in_fresh_process(
+    ir_text: str, *, isa: str, options: List[str]
+) -> Tuple[bytes, ComgrTimings]:
+    """Compile one module in a new Python process that compiles nothing else.
+
+    The child (:mod:`rocke.runtime._comgr_fresh_process`) loads the comgr
+    library this process resolved (passed as ``ROCKE_COMGR_LIB``, so a
+    torch-bundled library is kept even though the child does not import torch),
+    imports this rocke package (its root is put first on ``PYTHONPATH``) and
+    runs with comgr's own on-disk cache off (``AMD_COMGR_CACHE=0``).
+    Raises :class:`ComgrError` with the child's message for a compile error and
+    :class:`ComgrProcessDied` when the child dies.
+    """
+    import json
+    import subprocess
+    import tempfile
+
+    # The parent's own checks first: the same library, the same flavor gate.
+    lib = _resolve_lib()
+    _assert_ir_flavor_matches_lib(ir_text)
+    env = dict(os.environ)
+    lib_path = getattr(lib, "_name", None) or resolved_lib_path()
+    if lib_path:
+        env["ROCKE_COMGR_LIB"] = lib_path
+    # The child compiles the module itself: comgr's on-disk cache could hand
+    # back an object some other process compiled with another history.
+    env["AMD_COMGR_CACHE"] = "0"
+    pkg_root = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
+    env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (pkg_root, env.get("PYTHONPATH", "")) if p
+    )
+    with tempfile.TemporaryDirectory(prefix="rocke-comgr-") as tmp:
+        out_path = os.path.join(tmp, "out.bin")
+        header = {"isa": isa, "options": list(options), "out": out_path}
+        proc = subprocess.run(
+            [sys.executable, "-m", "rocke.runtime._comgr_fresh_process"],
+            input=json.dumps(header).encode("utf-8") + b"\n" + ir_text.encode("utf-8"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+        tail = proc.stderr.decode("utf-8", "replace")[-2000:]
+        if proc.returncode == 2:  # the child's ComgrError, message on stderr
+            raise ComgrError(tail.strip())
+        if proc.returncode == 1:  # an exception other than ComgrError
+            raise ComgrError(f"the fresh compile process failed: {tail.strip()}")
+        if proc.returncode != 0 or not os.path.exists(out_path):
+            raise ComgrProcessDied(
+                f"the fresh compile process died (exit status {proc.returncode})"
+                + (f": {tail.strip()}" if tail.strip() else "")
+            )
+        with open(out_path, "rb") as fh:
+            meta = json.loads(fh.readline())
+            hsaco = fh.read()
+    if len(hsaco) != meta["size"]:
+        raise ComgrProcessDied(
+            f"the fresh compile process wrote {len(hsaco)} of {meta['size']} bytes"
+        )
+    timings = ComgrTimings(
+        bc=meta["bc"], relocatable=meta["relocatable"], executable=meta["executable"]
+    )
+    return hsaco, timings
 
 
 def _probe_llvm_version(lib: ctypes.CDLL) -> tuple[int, int, int] | None:
@@ -637,28 +802,96 @@ def build_hsaco_from_llvm_ir(
     *,
     isa: str = "amdgcn-amd-amdhsa--gfx950",
     options: Optional[List[str]] = None,
+    fresh_process: bool = False,
 ) -> Tuple[bytes, ComgrTimings]:
     """Compile LLVM IR text to a loadable HSACO blob, all in-process.
 
     Returns the (hsaco_bytes, timings) tuple. `hsaco_bytes` can be passed
     directly to `hipModuleLoadData`.
+
+    ``fresh_process=True`` compiles the module in a new process instead, as
+    the only compile of that process (:func:`_build_in_fresh_process`). Use it
+    for IR whose code generation would otherwise depend on what this process
+    compiled before. The known case is ``llvm.amdgcn.iglp.opt(i32 1)``: LLVM's
+    AMDGPU single-wave small-GEMM IGroupLP strategy keeps its DS-write counts
+    in file-scope statics that it adds to and never resets, so the schedule of
+    a module depends on every earlier ``iglp_opt(1)`` compile in the process.
+    A process that compiles one module gives the code the strategy is written
+    for (its own assertion expects those counts to be zero) and the same code
+    object every time. The default keeps the in-process compile.
+    """
+    if fresh_process:
+        options = list(options or ["-O3"])
+        return _build_in_fresh_process(ir_text, isa=isa, options=options)
+    return _build_hsaco((ir_text,), isa=isa, options=options)
+
+
+def build_hsaco_from_llvm_modules(
+    ir_texts: Sequence[str],
+    *,
+    isa: str = "amdgcn-amd-amdhsa--gfx950",
+    options: Optional[List[str]] = None,
+) -> Tuple[bytes, ComgrTimings]:
+    """Compile several LLVM IR modules into ONE loadable HSACO blob.
+
+    Each text is compiled to bitcode on its own, exactly as
+    :func:`build_hsaco_from_llvm_ir` would, then the bitcode modules are linked
+    (``LINK_BC_TO_BC``) and the linked module is code-generated once. The
+    object therefore carries one AMDGPU metadata note naming every kernel.
+    ``options`` are module-wide codegen options, shared by every kernel.
+
+    Internal-linkage globals (rocKE's LDS pools) are renamed by the linker
+    when two modules spell the same name; two external definitions of one
+    name -- two kernels sharing a symbol -- fail the link.
+    """
+    ir_texts = tuple(ir_texts)
+    if len(ir_texts) < 2:
+        raise ValueError(
+            "build_hsaco_from_llvm_modules links two or more modules; use "
+            "build_hsaco_from_llvm_ir for one"
+        )
+    return _build_hsaco(ir_texts, isa=isa, options=options)
+
+
+def _require_count(data_set: _DataSet, kind: int, expected: int, where: str) -> None:
+    count = ctypes.c_size_t(0)
+    _check(_action_data_count(data_set, kind, ctypes.byref(count)), "action_data_count")
+    if count.value != expected:
+        raise ComgrError(
+            f"{where}: produced {count.value} outputs, expected {expected}"
+        )
+
+
+def _build_hsaco(
+    ir_texts: Tuple[str, ...],
+    *,
+    isa: str,
+    options: Optional[List[str]],
+) -> Tuple[bytes, ComgrTimings]:
+    """The one comgr pipeline behind both public entry points.
+
+    A single module takes exactly the historical path (one SOURCE named
+    ``kernel.ll``, no link stage), so single-kernel objects are unchanged.
     """
     options = list(options or ["-O3"])
+    linking = len(ir_texts) > 1
 
     # Query the loaded compiler before submitting IR: a known p8-generation
     # mismatch can abort inside codegen. The guard reports version provenance
     # and raises a catchable error instead.
     _resolve_lib()
-    _assert_ir_flavor_matches_lib(ir_text)
+    for ir_text in ir_texts:
+        _assert_ir_flavor_matches_lib(ir_text)
 
     # Handles are created lazily below; declare them up front so the
     # ``finally`` block can release whatever was successfully created even
     # when an intermediate ``_check`` raises (the common case during a
     # validity/heuristics sweep over borderline specs).
     in_set = None
-    src = None
+    sources = []
     info = None
     bc_set = None
+    linked_set = None
     reloc_set = None
     exe_set = None
 
@@ -666,15 +899,18 @@ def build_hsaco_from_llvm_ir(
         # Input data set (LLVM IR text wrapped as SOURCE).
         in_set = _DataSet()
         _check(_create_data_set(ctypes.byref(in_set)), "create_data_set(in)")
-        src = _Data()
-        _check(
-            _create_data(AMD_COMGR_DATA_KIND_SOURCE, ctypes.byref(src)),
-            "create_data(src)",
-        )
-        payload = ir_text.encode("utf-8")
-        _check(_set_data(src, len(payload), payload), "set_data(src)")
-        _check(_set_data_name(src, b"kernel.ll"), "set_data_name(src)")
-        _check(_data_set_add(in_set, src), "data_set_add(src)")
+        for index, ir_text in enumerate(ir_texts):
+            src = _Data()
+            _check(
+                _create_data(AMD_COMGR_DATA_KIND_SOURCE, ctypes.byref(src)),
+                "create_data(src)",
+            )
+            sources.append(src)
+            payload = ir_text.encode("utf-8")
+            name = f"kernel_{index}.ll" if linking else "kernel.ll"
+            _check(_set_data(src, len(payload), payload), "set_data(src)")
+            _check(_set_data_name(src, name.encode("utf-8")), "set_data_name(src)")
+            _check(_data_set_add(in_set, src), "data_set_add(src)")
 
         # Action info.
         info = _ActionInfo()
@@ -688,7 +924,7 @@ def build_hsaco_from_llvm_ir(
 
         timings = ComgrTimings()
 
-        # Stage 1: LLVM IR (text/source) -> BC
+        # Stage 1: LLVM IR (text/source) -> BC, one per module.
         bc_set = _DataSet()
         _check(_create_data_set(ctypes.byref(bc_set)), "create_data_set(bc)")
         t0 = time.perf_counter()
@@ -698,13 +934,33 @@ def build_hsaco_from_llvm_ir(
         )
         timings.bc = time.perf_counter() - t0
 
+        codegen_input = bc_set
+        if linking:
+            # Stage 1b: every BC -> one linked BC.
+            _require_count(
+                bc_set, AMD_COMGR_DATA_KIND_BC, len(ir_texts), "COMPILE_SOURCE_TO_BC"
+            )
+            linked_set = _DataSet()
+            _check(_create_data_set(ctypes.byref(linked_set)), "create_data_set(link)")
+            t0 = time.perf_counter()
+            _check(
+                _do_action(AMD_COMGR_ACTION_LINK_BC_TO_BC, info, bc_set, linked_set),
+                "do_action(LINK_BC_TO_BC)",
+            )
+            timings.link = time.perf_counter() - t0
+            _require_count(linked_set, AMD_COMGR_DATA_KIND_BC, 1, "LINK_BC_TO_BC")
+            codegen_input = linked_set
+
         # Stage 2: BC -> relocatable ELF
         reloc_set = _DataSet()
         _check(_create_data_set(ctypes.byref(reloc_set)), "create_data_set(reloc)")
         t0 = time.perf_counter()
         _check(
             _do_action(
-                AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE, info, bc_set, reloc_set
+                AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE,
+                info,
+                codegen_input,
+                reloc_set,
             ),
             "do_action(CODEGEN_BC_TO_RELOCATABLE)",
         )
@@ -733,11 +989,13 @@ def build_hsaco_from_llvm_ir(
             _destroy_data_set(exe_set)
         if reloc_set is not None:
             _destroy_data_set(reloc_set)
+        if linked_set is not None:
+            _destroy_data_set(linked_set)
         if bc_set is not None:
             _destroy_data_set(bc_set)
         if info is not None:
             _destroy_action_info(info)
-        if src is not None:
+        for src in reversed(sources):
             _release_data(src)
         if in_set is not None:
             _destroy_data_set(in_set)

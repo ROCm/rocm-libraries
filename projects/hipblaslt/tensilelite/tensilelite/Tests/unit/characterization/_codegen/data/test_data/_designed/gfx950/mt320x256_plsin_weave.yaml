@@ -1,0 +1,126 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# DESIGNED gfx950 MXF4 MT320x256 last-K PLSIN Weave config.
+#
+# MIWT [10,8] is the transpose of MT256x320 last-K Weave. The tile product is
+# 80, past the 64 that spillFree admits, so this config only resolves PLSIN
+# True through largeTileLend in assignPostLoopStoreInNll -- it is the one place
+# in the unit suite where that arm is load-bearing on a real emit.
+#
+# What the paired arms look like in the generated kernel:
+#   fused NLL   weaves last-K MFMAs into the store after lending K=0 A/B, and
+#               shuffles with v_permlane16_swap.
+#   plain NLL   is the K-tail and M/N edge path, and keeps ds_bpermute.
+#
+# Both must be present in every kernel: the fused arm is taken when K is a
+# multiple of DepthU and the tile is full, the plain arm otherwise, and the
+# kernel carries both. A kernel with only one of them is the failure this
+# config exists to catch.
+#
+# The two problem groups differ only in PrefetchGlobalRead (1 and 2), which is
+# what gives the test two solutions to check rather than one.
+#
+# This duplicates the solution parameters of Tests/common/gemm/gfx950/
+# subtile_mxfp4_mt320x256_plsin_weave.yaml, which runs the same tile on
+# hardware for numerics. Deliberately duplicated rather than shared: the unit
+# lane must not read from the GPU test corpus, since a change made there for
+# hardware reasons would silently reshape what this characterizes.
+#
+# CPU-only. No GPU, no compile, no hardware access.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  Device: 0
+  MXScaleFormat: 1
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # [0] Full-tile fused path (K multiple of DU) + K-tail / M-N edges, PGR=1.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 10, 8,  2, 2]  # MT 320x256, MIWT=[10,8]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - PostLoopStoreInNll: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # Fused full-tile (beta=0, K % DU == 0)
+          - Exact: [320, 256, 1, 256]
+          # Plain NLL: K not a multiple of DepthU.
+          - Exact: [320, 256, 1, 384]
+          # M/N edge (partial tile)
+          - Exact: [319, 255, 1, 256]
+
+  ########################################
+  # [1] Same tile at PGR=2.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 10, 8,  2, 2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - PostLoopStoreInNll: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [320, 256, 1, 256]
+          - Exact: [320, 256, 1, 384]
+          - Exact: [319, 255, 1, 256]

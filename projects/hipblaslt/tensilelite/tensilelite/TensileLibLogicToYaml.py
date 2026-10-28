@@ -1573,10 +1573,10 @@ def TensileLibLogicToYaml(
 def parseArgs():
     argParser = argparse.ArgumentParser()
     argHelp = {
-        "input": "Library logic file or benchmark data file (1_BenchmarkProblems/.../Data/*_Final.yaml) to be converted to tensile input yaml file.",
+        "input": "Library logic file or benchmark data file (1_BenchmarkProblems/.../Data/*_Final.yaml) to be converted to TensileLite input YAML file.",
         "indices": "Comma-separated list of Solution indices from the input file to extract. Ex: 0,3,4,5",
         "output": "Base Output file name.",
-        "skipMI": "Skips the MatrixInstruction field in the tensile yaml file",
+        "skipMI": "Skips the MatrixInstruction field in the TensileLite YAML file",
         "runConfig": "Tuning config to inherit GlobalParameters and LibraryLogic from. Located automatically from the input path when omitted.",
         "noRunConfig": "Emit built-in defaults instead of inheriting run settings from the originating config.",
         "keepEpilogues": "Keep the epilogue settings (activation, bias, scale-alpha-vector, scale-AB) the input records. By default they are left out, as in a config geko tunes without epilogues.",
@@ -1663,4 +1663,4 @@ def main():
             args.keep_epilogues,
         )
         tensileYamlFiles.append(tensileYamlFile)
-    tPrint(1, f"Tensile Files generated: {tensileYamlFiles}")
+    tPrint(1, f"TensileLite files generated: {tensileYamlFiles}")
