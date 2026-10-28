@@ -47,25 +47,37 @@ from hipdnn_flatbuffers_sdk.data_objects.Int32Array import Int32ArrayT
 from hipdnn_flatbuffers_sdk.data_objects.Float32Array import Float32ArrayT
 from hipdnn_flatbuffers_sdk.data_objects.Float64Array import Float64ArrayT
 
+from .artifact import GBDT_MODEL_IDENTIFIER, INTEGER_ARRAY_DTYPES, REAL_ARRAY_DTYPES
+
 logger = logging.getLogger(__name__)
 
 # File identifier for GbdtModel FlatBuffers
-GBDT_MODEL_FILE_IDENTIFIER = b"HGBM"
+GBDT_MODEL_FILE_IDENTIFIER = GBDT_MODEL_IDENTIFIER
 
 #: Tree encodings `build_gbdt_model` writes (gbdt_model.fbs).
 SPLIT_LEAF = "split_leaf"
 NODE_ARRAYS = "node_arrays"
 ENCODINGS = (SPLIT_LEAF, NODE_ARRAYS)
-LEAF_PRECISIONS = ("float32", "float64")
+#: The RealArray member each `leaf_precision` stores leaves in.
+_LEAF_TYPES = {"float32": RealArray.Float32Array, "float64": RealArray.Float64Array}
+LEAF_PRECISIONS = tuple(_LEAF_TYPES)
 
 #: Integer array types, narrowest first: (union tag, object class, numpy dtype).
-_INTEGER_TYPES = (
-    (IntegerArray.UInt8Array, UInt8ArrayT, np.uint8),
-    (IntegerArray.Int8Array, Int8ArrayT, np.int8),
-    (IntegerArray.UInt16Array, UInt16ArrayT, np.uint16),
-    (IntegerArray.Int16Array, Int16ArrayT, np.int16),
-    (IntegerArray.Int32Array, Int32ArrayT, np.int32),
+_INTEGER_TYPES = tuple(
+    (tag, cls, INTEGER_ARRAY_DTYPES[tag])
+    for tag, cls in (
+        (IntegerArray.UInt8Array, UInt8ArrayT),
+        (IntegerArray.Int8Array, Int8ArrayT),
+        (IntegerArray.UInt16Array, UInt16ArrayT),
+        (IntegerArray.Int16Array, Int16ArrayT),
+        (IntegerArray.Int32Array, Int32ArrayT),
+    )
 )
+#: The object class of each RealArray member.
+_REAL_CLASSES = {
+    RealArray.Float32Array: Float32ArrayT,
+    RealArray.Float64Array: Float64ArrayT,
+}
 
 #: Reproducible-builds stamp source: converting the same model twice must give the same
 #: bytes, since RFC 0019.13 §10.5 records a content hash over them.
@@ -176,7 +188,7 @@ def build_gbdt_model(
 
     model = GbdtModelT()
     if encoding == SPLIT_LEAF:
-        table = _threshold_table(
+        table_type, table = _threshold_table(
             structures + [tree for _, trees in group_structures for tree in trees]
         )
         # Keyed by the float64 value LightGBM chose; a float32 table holds it exactly.
@@ -185,12 +197,7 @@ def build_gbdt_model(
             root, index, leaf_precision
         )  # noqa: E731
         if len(table.values):
-            model.thresholdTableType = (
-                RealArray.Float32Array
-                if isinstance(table, Float32ArrayT)
-                else RealArray.Float64Array
-            )
-            model.thresholdTable = table
+            model.thresholdTableType, model.thresholdTable = table_type, table
     else:
         build = _build_tree
     model.trees = [build(root) for root in structures]
@@ -277,8 +284,16 @@ def _integers(values) -> tuple[int, Any]:
     raise ValueError(f"values {low}..{high} do not fit an int32 array")
 
 
-def _threshold_table(roots: list[dict[str, Any]]):
-    """The distinct split thresholds, sorted: float32 when every one is exactly a float32."""
+def _reals(tag: int, values) -> tuple[int, Any]:
+    """(union tag, object) of the RealArray member `tag` holding `values`."""
+    typed = _REAL_CLASSES[tag]()
+    typed.values = np.asarray(values, dtype=REAL_ARRAY_DTYPES[tag])
+    return tag, typed
+
+
+def _threshold_table(roots: list[dict[str, Any]]) -> tuple[int, Any]:
+    """(union tag, object) of the distinct split thresholds, sorted: float32 when every one
+    is exactly a float32."""
     found: set[float] = set()
     stack = list(roots)
     while stack:
@@ -287,14 +302,8 @@ def _threshold_table(roots: list[dict[str, Any]]):
             found.add(float(node["threshold"]))
             stack += [node["left_child"], node["right_child"]]
     values = np.asarray(sorted(found), dtype=np.float64)
-    narrow = values.astype(np.float32)
-    if np.array_equal(narrow.astype(np.float64), values):
-        table = Float32ArrayT()
-        table.values = narrow
-    else:
-        table = Float64ArrayT()
-        table.values = values
-    return table
+    exact = np.array_equal(values.astype(np.float32).astype(np.float64), values)
+    return _reals(RealArray.Float32Array if exact else RealArray.Float64Array, values)
 
 
 def _build_split_leaf_tree(
@@ -343,12 +352,7 @@ def _build_split_leaf_tree(
             tree.splitDefaultLeft = default_left
         if not all(decision_lte):
             tree.splitDecisionLte = decision_lte
-    if leaf_precision == "float32":
-        tree.leavesType, tree.leaves = RealArray.Float32Array, Float32ArrayT()
-        tree.leaves.values = np.asarray(leaves, dtype=np.float32)
-    else:
-        tree.leavesType, tree.leaves = RealArray.Float64Array, Float64ArrayT()
-        tree.leaves.values = np.asarray(leaves, dtype=np.float64)
+    tree.leavesType, tree.leaves = _reals(_LEAF_TYPES[leaf_precision], leaves)
     return tree
 
 

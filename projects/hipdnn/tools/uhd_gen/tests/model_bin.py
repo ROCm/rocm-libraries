@@ -1,9 +1,27 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""How a written `model.bin` stores its trees, for tests of the flags that choose it."""
+"""`model.bin` in tests: writing a GbdtModelT, and reading how a written one stores its trees."""
 from __future__ import annotations
 
 from pathlib import Path
+
+
+def packed(model) -> bytes:
+    """A GbdtModelT as `model.bin` bytes, with the file identifier the runtime checks."""
+    import flatbuffers
+
+    from uhd_gen.artifact import GBDT_MODEL_IDENTIFIER
+
+    builder = flatbuffers.Builder(1024)
+    builder.Finish(model.Pack(builder), file_identifier=GBDT_MODEL_IDENTIFIER)
+    return bytes(builder.Output())
+
+
+def write_model(model, path: Path) -> Path:
+    """`packed(model)` written to `path`; returns `path`."""
+    path.write_bytes(packed(model))
+    return path
+
 
 #: The flags of `train` and `generate`, and the (encoding, leaf type) each writes.
 ENCODING_FLAGS = [

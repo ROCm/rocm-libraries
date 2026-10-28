@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-flatbuffers = pytest.importorskip("flatbuffers")
+pytest.importorskip("flatbuffers")
 lgb = pytest.importorskip("lightgbm")
 np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
@@ -15,6 +15,7 @@ from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT  # noqa: E4
 
 from uhd_gen import train_uhd  # noqa: E402
 from uhd_gen.artifact import threshold_table, tree_arrays  # noqa: E402
+from uhd_gen.tests.model_bin import write_model  # noqa: E402
 from uhd_gen.evaluate import _flatbuffer_scorer  # noqa: E402
 from uhd_gen.lgbm_to_flatbuffer import build_gbdt_model  # noqa: E402
 
@@ -49,9 +50,7 @@ def _shipped(path, booster, base_score, encoding="split_leaf"):
         0,
     )
     model.baseScore = base_score
-    builder = flatbuffers.Builder(1024)
-    builder.Finish(model.Pack(builder), file_identifier=b"HGBM")
-    path.write_bytes(bytes(builder.Output()))
+    write_model(model, path)
     return model
 
 
@@ -124,9 +123,7 @@ def test_short_routing_arrays_are_read_as_the_runtime_reads_them(
     model.numFeatures = 1
     model.featuresHash = "sha256:test"
     model.groupByFeatureIndex = -1
-    builder = flatbuffers.Builder(1024)
-    builder.Finish(model.Pack(builder), file_identifier=b"HGBM")
-    (tmp_path / "model.bin").write_bytes(bytes(builder.Output()))
+    write_model(model, tmp_path / "model.bin")
 
     probes = np.array([[5.0], [np.nan], [10.0]])
     monkeypatch.setattr(train_uhd, "build_feature_matrix", lambda *_a, **_k: probes)

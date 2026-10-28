@@ -5,11 +5,10 @@ verifier refuses, reason for reason, as TreeDataAdapter refuses it."""
 from __future__ import annotations
 
 import struct
-from pathlib import Path
 
 import pytest
 
-flatbuffers = pytest.importorskip("flatbuffers")
+pytest.importorskip("flatbuffers")
 lgb = pytest.importorskip("lightgbm")
 np = pytest.importorskip("numpy")
 pytest.importorskip("pandas")
@@ -28,6 +27,7 @@ from uhd_gen.artifact import (  # noqa: E402
     verify_tree_artifact,
 )
 from uhd_gen.lgbm_to_flatbuffer import build_gbdt_model  # noqa: E402
+from uhd_gen.tests.model_bin import write_model  # noqa: E402
 
 
 def _booster(trees: int = 60, leaves: int = 31, features: int = 6) -> lgb.Booster:
@@ -43,13 +43,6 @@ def _booster(trees: int = 60, leaves: int = 31, features: int = 6) -> lgb.Booste
 
 def _model(buffer: bytes) -> GbdtModelT:
     return GbdtModelT.InitFromPackedBuf(bytearray(buffer), 0)
-
-
-def _pack(model: GbdtModelT, path: Path) -> Path:
-    builder = flatbuffers.Builder(1024)
-    builder.Finish(model.Pack(builder), file_identifier=b"HGBM")
-    path.write_bytes(bytes(builder.Output()))
-    return path
 
 
 def _leaf(value: float) -> dict:
@@ -167,7 +160,7 @@ def _two_splits() -> GbdtModelT:
 
 
 def test_the_unbroken_model_verifies(tmp_path):
-    verify_tree_artifact(_pack(_two_splits(), tmp_path / "model.bin"), None)
+    verify_tree_artifact(write_model(_two_splits(), tmp_path / "model.bin"), None)
 
 
 def _with(change) -> GbdtModelT:
@@ -288,7 +281,7 @@ def _set(tree, field: str, values) -> None:
 def test_a_malformed_split_leaf_tree_is_refused_with_the_runtimes_reason(
     tmp_path, change, reason
 ):
-    path = _pack(_with(change), tmp_path / "model.bin")
+    path = write_model(_with(change), tmp_path / "model.bin")
     with pytest.raises(ValueError, match=reason.replace("(", r"\(")):
         verify_tree_artifact(path, None)
 
@@ -297,12 +290,12 @@ def test_a_non_finite_threshold_or_leaf_is_refused(tmp_path):
     model = _two_splits()
     model.thresholdTable.values = np.asarray([0.5, np.inf], dtype=np.float32)
     with pytest.raises(ValueError, match="split threshold is not finite"):
-        verify_tree_artifact(_pack(model, tmp_path / "a.bin"), None)
+        verify_tree_artifact(write_model(model, tmp_path / "a.bin"), None)
 
     model = _two_splits()
     model.trees[0].leaves.values = np.asarray([1.0, np.nan, 3.0], dtype=np.float32)
     with pytest.raises(ValueError, match="leaf prediction is not finite"):
-        verify_tree_artifact(_pack(model, tmp_path / "b.bin"), None)
+        verify_tree_artifact(write_model(model, tmp_path / "b.bin"), None)
 
 
 def test_repeated_split_leaf_trees_cannot_claim_more_nodes_than_the_buffer_holds():

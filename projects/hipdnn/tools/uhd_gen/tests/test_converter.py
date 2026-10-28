@@ -279,38 +279,36 @@ class TestConverter:
         assert model_json["max_feature_idx"] == n_features - 1
 
 
+def _assert_scores_as_lightgbm(model, rows, encoding, precision, tolerance, what):
+    """`model`, converted in this encoding, scores every row as LightGBM does; returns the
+    converted buffer."""
+    buffer = build_gbdt_model(
+        model.dump_model(), "sha256:test", encoding=encoding, leaf_precision=precision
+    )
+    expected = model.predict(rows, raw_score=True)
+    for i, row in enumerate(rows):
+        actual = _score_flatbuffer_model(buffer, row)
+        assert actual == pytest.approx(
+            expected[i], rel=tolerance, abs=tolerance
+        ), f"{what} {i}: flatbuffer {actual} != lightgbm {expected[i]}"
+    return buffer
+
+
+@pytest.mark.parametrize(("encoding", "precision", "tolerance"), ENCODINGS)
 class TestRoundTrip:
     """Converted models must predict what LightGBM predicts (RFC 0019 §15 Phase 4)."""
 
-    @pytest.mark.parametrize(("encoding", "precision", "tolerance"), ENCODINGS)
     def test_predictions_match_lightgbm(self, encoding, precision, tolerance):
         X, y = _create_synthetic_data(n_samples=800, n_features=6)
         model = _train_simple_model(X, y, num_trees=12)
-        buffer = build_gbdt_model(
-            model.dump_model(),
-            "sha256:test",
-            encoding=encoding,
-            leaf_precision=precision,
-        )
+        _assert_scores_as_lightgbm(model, X, encoding, precision, tolerance, "row")
 
-        expected = model.predict(X, raw_score=True)
-        for row in range(X.shape[0]):
-            actual = _score_flatbuffer_model(buffer, X[row])
-            assert actual == pytest.approx(
-                expected[row], rel=tolerance, abs=tolerance
-            ), f"row {row}: flatbuffer {actual} != lightgbm {expected[row]}"
-
-    @pytest.mark.parametrize(("encoding", "precision", "tolerance"), ENCODINGS)
     def test_exact_threshold_values_match(self, encoding, precision, tolerance):
         """Only values exactly on a threshold observe `decision_lte` (`<=` vs `<`)."""
         X, y = _create_synthetic_data(n_samples=400, n_features=4)
         model = _train_simple_model(X, y, num_trees=6)
-        model_json = model.dump_model()
-        buffer = build_gbdt_model(
-            model_json, "sha256:test", encoding=encoding, leaf_precision=precision
-        )
 
-        thresholds = _collect_thresholds(model_json)
+        thresholds = _collect_thresholds(model.dump_model())
         assert thresholds, "model produced no internal splits to probe"
 
         probes = []
@@ -318,40 +316,28 @@ class TestRoundTrip:
             row = np.full(X.shape[1], 0.5)
             row[feature_idx] = threshold
             probes.append(row)
+        _assert_scores_as_lightgbm(
+            model,
+            np.array(probes),
+            encoding,
+            precision,
+            tolerance,
+            "probe on threshold",
+        )
 
-        probe_matrix = np.array(probes)
-        expected = model.predict(probe_matrix, raw_score=True)
-        for i, row in enumerate(probes):
-            actual = _score_flatbuffer_model(buffer, row)
-            assert actual == pytest.approx(
-                expected[i], rel=tolerance, abs=tolerance
-            ), f"probe {i} on threshold: flatbuffer {actual} != lightgbm {expected[i]}"
-
-    @pytest.mark.parametrize(("encoding", "precision", "tolerance"), ENCODINGS)
     def test_missing_values_match(self, encoding, precision, tolerance):
         """NaN features must take the direction `default_left` records."""
         X, y = _create_synthetic_data(n_samples=600, n_features=5)
         model = _train_simple_model(X, y, num_trees=8)
-        buffer = build_gbdt_model(
-            model.dump_model(),
-            "sha256:test",
-            encoding=encoding,
-            leaf_precision=precision,
-        )
 
         rng = np.random.default_rng(7)
         probes = X[:60].copy()
         for row in probes:
             row[rng.integers(0, probes.shape[1])] = np.nan
+        _assert_scores_as_lightgbm(
+            model, probes, encoding, precision, tolerance, "NaN probe"
+        )
 
-        expected = model.predict(probes, raw_score=True)
-        for i, row in enumerate(probes):
-            actual = _score_flatbuffer_model(buffer, row)
-            assert actual == pytest.approx(
-                expected[i], rel=tolerance, abs=tolerance
-            ), f"NaN probe {i}: flatbuffer {actual} != lightgbm {expected[i]}"
-
-    @pytest.mark.parametrize(("encoding", "precision", "tolerance"), ENCODINGS)
     def test_learning_rate_is_not_applied_twice(self, encoding, precision, tolerance):
         """Leaf values already include `learning_rate`; it must not be applied again.
 
@@ -370,20 +356,10 @@ class TestRoundTrip:
             train_data,
             num_boost_round=5,
         )
-        buffer = build_gbdt_model(
-            model.dump_model(),
-            "sha256:test",
-            encoding=encoding,
-            leaf_precision=precision,
+        buffer = _assert_scores_as_lightgbm(
+            model, X[:50], encoding, precision, tolerance, "row"
         )
-
         assert GbdtModel.GetRootAs(buffer, 0).LearningRate() == pytest.approx(1.0)
-
-        expected = model.predict(X[:50], raw_score=True)
-        for i in range(50):
-            assert _score_flatbuffer_model(buffer, X[i]) == pytest.approx(
-                expected[i], rel=tolerance, abs=tolerance
-            )
 
 
 def _collect_thresholds(model_json) -> list[tuple[int, float]]:

@@ -21,6 +21,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -32,134 +33,119 @@ namespace detail
 
 namespace fbs = hipdnn_flatbuffers_sdk::data_objects;
 
-/// The values of one typed array, widened to @p T. False when the table or its values are
-/// absent.
-template <typename Table, typename T>
-inline bool copyValues(const void* table, std::vector<T>& out)
+/// Calls @p f with @p table as the IntegerArray member @p type names. False, calling
+/// nothing, for NONE or a tag this runtime does not know: the one list of members it reads.
+template <typename F>
+inline bool visitArray(fbs::IntegerArray type, const void* table, F&& f)
 {
-    const auto* typed = static_cast<const Table*>(table);
-    if(typed == nullptr || typed->values() == nullptr)
-    {
-        return false;
-    }
-    out.assign(typed->values()->begin(), typed->values()->end());
-    return true;
-}
-
-/// An IntegerArray, in whichever type its tag names, as int32 values. False, with @p why
-/// set, for an absent array or a tag this runtime does not know.
-inline bool decodeIntegers(fbs::IntegerArray type,
-                           const void* table,
-                           std::vector<int32_t>& out,
-                           std::string& why)
-{
-    bool ok = false;
     switch(type)
     {
     case fbs::IntegerArray::Int8Array:
-        ok = copyValues<fbs::Int8Array>(table, out);
-        break;
+        f(static_cast<const fbs::Int8Array*>(table));
+        return true;
     case fbs::IntegerArray::UInt8Array:
-        ok = copyValues<fbs::UInt8Array>(table, out);
-        break;
+        f(static_cast<const fbs::UInt8Array*>(table));
+        return true;
     case fbs::IntegerArray::Int16Array:
-        ok = copyValues<fbs::Int16Array>(table, out);
-        break;
+        f(static_cast<const fbs::Int16Array*>(table));
+        return true;
     case fbs::IntegerArray::UInt16Array:
-        ok = copyValues<fbs::UInt16Array>(table, out);
-        break;
+        f(static_cast<const fbs::UInt16Array*>(table));
+        return true;
     case fbs::IntegerArray::Int32Array:
-        ok = copyValues<fbs::Int32Array>(table, out);
-        break;
-    case fbs::IntegerArray::NONE:
-        why = "is absent";
-        return false;
+        f(static_cast<const fbs::Int32Array*>(table));
+        return true;
     default:
-        why = "is stored as integer array type " + std::to_string(static_cast<int>(type))
-              + ", which this runtime cannot read";
         return false;
     }
-    if(!ok)
-    {
-        why = "has no values";
-    }
-    return ok;
 }
 
-/// A RealArray, in whichever type its tag names, as double values; as decodeIntegers.
-inline bool
-    decodeReals(fbs::RealArray type, const void* table, std::vector<double>& out, std::string& why)
+/// As above, for a RealArray.
+template <typename F>
+inline bool visitArray(fbs::RealArray type, const void* table, F&& f)
 {
-    bool ok = false;
     switch(type)
     {
     case fbs::RealArray::Float32Array:
-        ok = copyValues<fbs::Float32Array>(table, out);
-        break;
+        f(static_cast<const fbs::Float32Array*>(table));
+        return true;
     case fbs::RealArray::Float64Array:
-        ok = copyValues<fbs::Float64Array>(table, out);
-        break;
-    case fbs::RealArray::NONE:
-        why = "is absent";
-        return false;
+        f(static_cast<const fbs::Float64Array*>(table));
+        return true;
     default:
-        why = "is stored as real array type " + std::to_string(static_cast<int>(type))
-              + ", which this runtime cannot read";
         return false;
     }
-    if(!ok)
+}
+
+/// Bytes one element of the typed array @p Table occupies.
+template <typename Table>
+constexpr size_t elementBytesOf()
+{
+    using Values = std::remove_pointer_t<decltype(std::declval<const Table&>().values())>;
+    return sizeof(typename Values::return_type);
+}
+
+/// The union a tag belongs to, as a refusal names it.
+inline const char* kindOf(fbs::IntegerArray /*type*/)
+{
+    return "integer";
+}
+
+inline const char* kindOf(fbs::RealArray /*type*/)
+{
+    return "real";
+}
+
+/// A typed array's values, in whichever type its tag names, widened to @p T. False when the
+/// member is absent, unknown to this runtime or holds no values, with @p why saying which:
+/// "is absent", "is stored as <kind> array type N, which this runtime cannot read", or
+/// "has no values".
+template <typename Union, typename T>
+inline bool decode(Union type, const void* table, std::vector<T>& out, std::string& why)
+{
+    bool present = false;
+    const bool known = visitArray(type, table, [&](const auto* typed) {
+        present = typed != nullptr && typed->values() != nullptr;
+        if(present)
+        {
+            out.assign(typed->values()->begin(), typed->values()->end());
+        }
+    });
+    if(type == Union::NONE)
+    {
+        why = "is absent";
+    }
+    else if(!known)
+    {
+        why = std::string("is stored as ") + kindOf(type) + " array type "
+              + std::to_string(static_cast<int>(type)) + ", which this runtime cannot read";
+    }
+    else if(!present)
     {
         why = "has no values";
     }
-    return ok;
+    return known && present;
 }
 
 /// How many values a RealArray holds, in whichever type its tag names; 0 when unknown.
 inline size_t length(fbs::RealArray type, const void* table)
 {
-    const auto count = [](const auto* typed) -> size_t {
-        return typed == nullptr || typed->values() == nullptr ? 0 : typed->values()->size();
-    };
-    switch(type)
-    {
-    case fbs::RealArray::Float32Array:
-        return count(static_cast<const fbs::Float32Array*>(table));
-    case fbs::RealArray::Float64Array:
-        return count(static_cast<const fbs::Float64Array*>(table));
-    default:
-        return 0;
-    }
+    size_t count = 0;
+    visitArray(type, table, [&](const auto* typed) {
+        count = typed == nullptr || typed->values() == nullptr ? 0 : typed->values()->size();
+    });
+    return count;
 }
 
 /// Bytes one element of an IntegerArray / RealArray of this tag occupies; 0 when unknown.
-inline size_t elementBytes(fbs::IntegerArray type)
+template <typename Union>
+inline size_t elementBytes(Union type)
 {
-    switch(type)
-    {
-    case fbs::IntegerArray::Int8Array:
-    case fbs::IntegerArray::UInt8Array:
-        return 1;
-    case fbs::IntegerArray::Int16Array:
-    case fbs::IntegerArray::UInt16Array:
-        return 2;
-    case fbs::IntegerArray::Int32Array:
-        return 4;
-    default:
-        return 0;
-    }
-}
-
-inline size_t elementBytes(fbs::RealArray type)
-{
-    switch(type)
-    {
-    case fbs::RealArray::Float32Array:
-        return 4;
-    case fbs::RealArray::Float64Array:
-        return 8;
-    default:
-        return 0;
-    }
+    size_t bytes = 0;
+    visitArray(type, nullptr, [&](const auto* typed) {
+        bytes = elementBytesOf<std::remove_cv_t<std::remove_pointer_t<decltype(typed)>>>();
+    });
+    return bytes;
 }
 
 } // namespace detail
@@ -424,7 +410,7 @@ inline std::unique_ptr<TreeDataAdapter>
     if(model->threshold_table_type() != fb::RealArray::NONE)
     {
         std::string why;
-        if(!detail::decodeReals(
+        if(!detail::decode(
                model->threshold_table_type(), model->threshold_table(), thresholdTable, why))
         {
             HIPDNN_SDK_LOG_ERROR("TreeDataAdapter: threshold_table " << why);
@@ -633,12 +619,42 @@ inline bool TreeDataAdapter::prepareTrees(
         roots.push_back(offset);
         uint32_t count = 0;
 
+        // Either encoding's splits and leaves, once their children are in range: the same
+        // checks, in the same order, and the same nodes. Returns the refusal, or nullptr.
+        const auto addSplit = [&](double threshold,
+                                  int32_t feature,
+                                  uint32_t left,
+                                  uint32_t right,
+                                  bool defaultLeft,
+                                  bool lte) -> const char* {
+            if(!std::isfinite(threshold))
+            {
+                return "split threshold is not finite";
+            }
+            if(feature < 0 || feature >= numFeatures)
+            {
+                return "split feature outside the declared feature count";
+            }
+            ++incoming[left];
+            ++incoming[right];
+            nodes.push_back(
+                {threshold, {offset + left, offset + right}, feature, defaultLeft, lte});
+            return nullptr;
+        };
+        const auto addLeaf = [&](double value) -> const char* {
+            if(!std::isfinite(value))
+            {
+                return "leaf prediction is not finite";
+            }
+            nodes.push_back({value, {0, 0}, -1, false, false});
+            return nullptr;
+        };
+
         if(tree->leaves_type() != fb::RealArray::NONE)
         {
             // Split/leaf encoding: splits at offset + i, then leaves at offset + splits + j.
             std::string why;
-            if(!detail::decodeReals(tree->leaves_type(), tree->leaves(), leaves, why)
-               || leaves.empty())
+            if(!detail::decode(tree->leaves_type(), tree->leaves(), leaves, why) || leaves.empty())
             {
                 return reject(t, "leaves " + (why.empty() ? std::string("are empty") : why));
             }
@@ -650,7 +666,7 @@ inline bool TreeDataAdapter::prepareTrees(
                                       const void* table,
                                       std::vector<int32_t>& out) {
                 std::string reason;
-                return detail::decodeIntegers(type, table, out, reason)
+                return detail::decode(type, table, out, reason)
                        || reject(t, std::string(name) + " " + reason);
             };
             if(splits > 0)
@@ -714,30 +730,24 @@ inline bool TreeDataAdapter::prepareTrees(
                 {
                     return reject(t, "split threshold index outside the threshold table");
                 }
-                if(!std::isfinite(thresholdTable[static_cast<size_t>(id)]))
+                if(const char* refusal
+                   = addSplit(thresholdTable[static_cast<size_t>(id)],
+                              features[i],
+                              left,
+                              right,
+                              defaultLeft != nullptr ? defaultLeft->Get(i) != 0
+                                                     : tree->default_left_fill(),
+                              decisionLte == nullptr || decisionLte->Get(i) != 0))
                 {
-                    return reject(t, "split threshold is not finite");
+                    return reject(t, refusal);
                 }
-                if(features[i] < 0 || features[i] >= numFeatures)
-                {
-                    return reject(t, "split feature outside the declared feature count");
-                }
-                ++incoming[left];
-                ++incoming[right];
-                nodes.push_back(
-                    {thresholdTable[static_cast<size_t>(id)],
-                     {offset + left, offset + right},
-                     features[i],
-                     defaultLeft != nullptr ? defaultLeft->Get(i) != 0 : tree->default_left_fill(),
-                     decisionLte == nullptr || decisionLte->Get(i) != 0});
             }
             for(const double leaf : leaves)
             {
-                if(!std::isfinite(leaf))
+                if(const char* refusal = addLeaf(leaf))
                 {
-                    return reject(t, "leaf prediction is not finite");
+                    return reject(t, refusal);
                 }
-                nodes.push_back({leaf, {0, 0}, -1, false, false});
             }
         }
         else
@@ -767,11 +777,10 @@ inline bool TreeDataAdapter::prepareTrees(
                     {
                         return reject(t, "leaf has no prediction");
                     }
-                    if(!std::isfinite(tree->leaf_values()->Get(i)))
+                    if(const char* refusal = addLeaf(tree->leaf_values()->Get(i)))
                     {
-                        return reject(t, "leaf prediction is not finite");
+                        return reject(t, refusal);
                     }
-                    nodes.push_back({tree->leaf_values()->Get(i), {0, 0}, -1, false, false});
                     continue;
                 }
 
@@ -781,25 +790,17 @@ inline bool TreeDataAdapter::prepareTrees(
                 {
                     return reject(t, "child index outside the tree");
                 }
-                if(!std::isfinite(tree->thresholds()->Get(i)))
+                if(const char* refusal = addSplit(
+                       tree->thresholds()->Get(i),
+                       tree->feature_indices()->Get(i),
+                       static_cast<uint32_t>(left),
+                       static_cast<uint32_t>(right),
+                       defaultLeft != nullptr && i < defaultLeft->size()
+                           && defaultLeft->Get(i) != 0,
+                       !hasDecisionLte || (i < decisionLte->size() && decisionLte->Get(i) != 0)))
                 {
-                    return reject(t, "split threshold is not finite");
+                    return reject(t, refusal);
                 }
-                const int32_t feature = tree->feature_indices()->Get(i);
-                if(feature < 0 || feature >= numFeatures)
-                {
-                    return reject(t, "split feature outside the declared feature count");
-                }
-                const auto leftIndex = static_cast<uint32_t>(left);
-                const auto rightIndex = static_cast<uint32_t>(right);
-                ++incoming[leftIndex];
-                ++incoming[rightIndex];
-                nodes.push_back(
-                    {tree->thresholds()->Get(i),
-                     {offset + leftIndex, offset + rightIndex},
-                     feature,
-                     defaultLeft != nullptr && i < defaultLeft->size() && defaultLeft->Get(i) != 0,
-                     !hasDecisionLte || (i < decisionLte->size() && decisionLte->Get(i) != 0)});
             }
         }
 

@@ -35,6 +35,19 @@ namespace fb = hipdnn_flatbuffers_sdk::data_objects;
 
 constexpr const char* HASH = "sha256:split_leaf";
 constexpr int32_t FEATURES = 6;
+/// randomTree draws each threshold from the first THRESHOLD_POOL multiples of 1/8.
+constexpr int THRESHOLD_POOL = 16;
+
+/// Every threshold randomTree may draw, ascending: exact in float32.
+std::vector<double> eighthsTable()
+{
+    std::vector<double> table(THRESHOLD_POOL);
+    for(int i = 0; i < THRESHOLD_POOL; ++i)
+    {
+        table[static_cast<size_t>(i)] = 0.125 * i;
+    }
+    return table;
+}
 
 /// A random node-array tree, node 0 its root, its splits drawing thresholds from a small pool
 /// (so the table deduplicates) and routing missing values both ways.
@@ -42,7 +55,7 @@ Builder::TreeSpec randomTree(std::mt19937& rng, int depth)
 {
     Builder::TreeSpec tree;
     std::uniform_int_distribution<int32_t> feature(0, FEATURES - 1);
-    std::uniform_int_distribution<int> pool(0, 15);
+    std::uniform_int_distribution<int> pool(0, THRESHOLD_POOL - 1);
     std::uniform_real_distribution<double> leaf(-2.0, 2.0);
     std::bernoulli_distribution coin(0.5);
     std::bernoulli_distribution stop(0.25);
@@ -244,11 +257,7 @@ TEST(TestTreeDataAdapterSplitLeaf, Float32LeavesStayWithinTheirRounding)
 TEST(TestTreeDataAdapterSplitLeaf, AFloat32ThresholdTableIsReadAsItsValues)
 {
     const auto forest = randomForest(19, 10, 4); // every threshold is a multiple of 1/8
-    std::vector<double> table;
-    for(int i = 0; i <= 15; ++i)
-    {
-        table.push_back(0.125 * i);
-    }
+    const auto table = eighthsTable();
     const auto exact = load(modelOf(forest).build());
     const auto narrow = load(modelOf(forest)
                                  .setThresholdTable(table, fb::RealArray::Float32Array)
@@ -315,11 +324,7 @@ TEST(TestTreeDataAdapterSplitLeaf, OneModelMayMixEncodings)
     const auto forest = randomForest(29, 2, 3);
     const auto both = load(modelOf(forest).build());
 
-    std::vector<double> table;
-    for(int i = 0; i <= 15; ++i)
-    {
-        table.push_back(0.125 * i);
-    }
+    const auto table = eighthsTable();
     const auto mixed = load(modelOf({forest[0]})
                                 .setThresholdTable(table)
                                 .addSplitLeafTree(Builder::toSplitLeaf(forest[1], table))

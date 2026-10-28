@@ -14,16 +14,32 @@ from pathlib import Path
 
 import numpy as np
 
+import uhd_gen  # noqa: F401  puts _generated/ on sys.path
+from hipdnn_flatbuffers_sdk.data_objects.IntegerArray import IntegerArray
+from hipdnn_flatbuffers_sdk.data_objects.RealArray import RealArray
+
 #: `TreeDataAdapter::load` reads at most this many bytes (and refuses an empty file).
 MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
 #: `loadFromBuffer`'s floor: a root offset and a file identifier.
 _MIN_ARTIFACT_BYTES = 4 + 4
 GBDT_MODEL_IDENTIFIER = b"HGBM"
 
-#: Element width of each IntegerArray / RealArray union member, by tag (gbdt_model.fbs).
+#: The element type of each IntegerArray / RealArray union member, by tag (gbdt_model.fbs).
 #: A tag missing here is one this reader, like the runtime, cannot decode.
-INTEGER_ARRAY_BYTES = {1: 1, 2: 1, 3: 2, 4: 2, 5: 4}
-REAL_ARRAY_BYTES = {1: 4, 2: 8}
+INTEGER_ARRAY_DTYPES = {
+    IntegerArray.Int8Array: np.int8,
+    IntegerArray.UInt8Array: np.uint8,
+    IntegerArray.Int16Array: np.int16,
+    IntegerArray.UInt16Array: np.uint16,
+    IntegerArray.Int32Array: np.int32,
+}
+REAL_ARRAY_DTYPES = {
+    RealArray.Float32Array: np.float32,
+    RealArray.Float64Array: np.float64,
+}
+#: Element width of each member, by tag.
+INTEGER_ARRAY_BYTES = {t: np.dtype(d).itemsize for t, d in INTEGER_ARRAY_DTYPES.items()}
+REAL_ARRAY_BYTES = {t: np.dtype(d).itemsize for t, d in REAL_ARRAY_DTYPES.items()}
 
 
 class _Unverifiable(ValueError):
@@ -293,7 +309,7 @@ def _values(array):
 
 def _decoded(tag: int, array, widths, reject, name: str):
     """The runtime's decodeIntegers / decodeReals: the values, or a rejection naming why."""
-    if tag == 0:
+    if tag == 0:  # NONE in either union
         reject(f"{name} is absent")
     if tag not in widths:
         reject(
@@ -309,6 +325,20 @@ def _decoded(tag: int, array, widths, reject, name: str):
 def _length(tag: int, array) -> int:
     values = _values(array) if tag in REAL_ARRAY_BYTES else None
     return 0 if values is None else len(values)
+
+
+def _check_split(threshold: float, feature: int, num_features: int, reject) -> None:
+    """Either encoding's split, once its children are in range, as `prepareTrees` checks it."""
+    if not math.isfinite(threshold):
+        reject("split threshold is not finite")
+    if feature < 0 or feature >= num_features:
+        reject("split feature outside the declared feature count")
+
+
+def _check_leaf(value: float, reject) -> None:
+    """Either encoding's leaf, as `prepareTrees` checks it."""
+    if not math.isfinite(value):
+        reject("leaf prediction is not finite")
 
 
 def _split_leaf_arrays(tree, table, num_features: int, reject):
@@ -329,7 +359,7 @@ def _split_leaf_arrays(tree, table, num_features: int, reject):
             )
         )
     elif any(
-        tag != 0
+        tag != IntegerArray.NONE
         for tag in (
             tree.splitFeaturesType,
             tree.splitThresholdsType,
@@ -378,11 +408,8 @@ def _split_leaf_arrays(tree, table, num_features: int, reject):
         if index < 0 or index >= len(table):
             reject("split threshold index outside the threshold table")
         threshold = float(table[index])
-        if not math.isfinite(threshold):
-            reject("split threshold is not finite")
         feature = int(features[i])
-        if feature < 0 or feature >= num_features:
-            reject("split feature outside the declared feature count")
+        _check_split(threshold, feature, num_features, reject)
         feature_out[i] = feature
         threshold_out[i] = threshold
         default_out[i] = (
@@ -392,8 +419,7 @@ def _split_leaf_arrays(tree, table, num_features: int, reject):
         )
         lte_out[i] = True if decision_lte is None else bool(decision_lte[i])
     for j, leaf in enumerate(leaves):
-        if not math.isfinite(float(leaf)):
-            reject("leaf prediction is not finite")
+        _check_leaf(float(leaf), reject)
         leaf_out[splits + j] = float(leaf)
     return (
         feature_out,
@@ -434,7 +460,7 @@ def tree_arrays(tree, table, num_features: int, where: str = "tree"):
     def reject(reason: str):
         raise ValueError(f"{where}: {reason}")
 
-    if tree.leavesType != 0:
+    if tree.leavesType != RealArray.NONE:
         return _split_leaf_arrays(tree, table, num_features, reject)
     count = _node_arrays(tree, reject)
     feature = np.asarray(tree.featureIndices, dtype=np.int64)
@@ -457,8 +483,7 @@ def tree_arrays(tree, table, num_features: int, where: str = "tree"):
         if int(left[node]) == -1:
             if node >= len(leaf_values):
                 reject("leaf has no prediction")
-            if not math.isfinite(float(leaf_values[node])):
-                reject("leaf prediction is not finite")
+            _check_leaf(float(leaf_values[node]), reject)
             continue
         if (
             left[node] < 0
@@ -467,10 +492,7 @@ def tree_arrays(tree, table, num_features: int, where: str = "tree"):
             or right[node] >= count
         ):
             reject("child index outside the tree")
-        if not math.isfinite(float(threshold[node])):
-            reject("split threshold is not finite")
-        if feature[node] < 0 or feature[node] >= num_features:
-            reject("split feature outside the declared feature count")
+        _check_split(float(threshold[node]), int(feature[node]), num_features, reject)
     return (
         feature,
         threshold,
@@ -485,7 +507,7 @@ def tree_arrays(tree, table, num_features: int, where: str = "tree"):
 
 def threshold_table(model, where: str) -> np.ndarray:
     """The model's split threshold table as the runtime decodes it (empty when absent)."""
-    if model.thresholdTableType == 0:
+    if model.thresholdTableType == RealArray.NONE:
         return np.zeros(0, dtype=np.float64)
 
     def reject(reason: str):
@@ -516,7 +538,7 @@ def _check_trees(
 
         if tree is None:
             reject("missing nodes or a required node array")
-        if tree.leavesType != 0:
+        if tree.leavesType != RealArray.NONE:
             leaf_bytes = REAL_ARRAY_BYTES.get(tree.leavesType, 0)
             child_bytes = INTEGER_ARRAY_BYTES.get(tree.splitLeftType, 0)
             if leaf_bytes == 0:
