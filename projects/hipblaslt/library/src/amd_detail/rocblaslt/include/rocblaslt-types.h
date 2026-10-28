@@ -344,7 +344,12 @@ typedef enum rocblaslt_matrix_layout_attribute_
     ROCBLASLT_MATRIX_LAYOUT_LD         = 6,
     ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE = 7,
     ROCBLASLT_MATRIX_LAYOUT_OFFSET     = 8,
-    ROCBLASLT_MATRIX_LAYOUT_MAX        = 9
+    ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_ARRAY                   = 9,
+    ROCBLASLT_GROUPED_MATRIX_LAYOUT_COLS_ARRAY                   = 10,
+    ROCBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY                     = 11,
+    ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_COLS_ARRAY_INTEGER_WIDTH = 12,
+    ROCBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY_INTEGER_WIDTH       = 13,
+    ROCBLASLT_MATRIX_LAYOUT_MAX                                  = 14
 } rocblaslt_matrix_layout_attribute;
 
 typedef enum
@@ -392,6 +397,8 @@ typedef enum rocblaslt_matmul_desc_attributes_
     ROCBLASLT_MATMUL_DESC_A_SCALE_MODE               = 31,
     ROCBLASLT_MATMUL_DESC_B_SCALE_MODE               = 32,
     ROCBLASLT_MATMUL_DESC_SM_COUNT_TARGET            = 33,
+    ROCBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE         = 34,
+    ROCBLASLT_MATMUL_DESC_BETA_BATCH_STRIDE          = 35,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT   = 100,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
@@ -418,7 +425,14 @@ typedef enum rocblaslt_matmul_preference_attributes_
     ROCBLASLT_MATMUL_PREF_SEARCH_MODE         = 0,
     ROCBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES = 1,
     ROCBLASLT_MATMUL_PREF_SM_COUNT_TARGET     = 2,
-    ROCBLASLT_MATMUL_PREF_MAX                 = 3
+    ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_ROWS       = 3,
+    ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_COLS       = 4,
+    ROCBLASLT_MATMUL_PREF_GROUPED_AVERAGE_REDUCTION_DIM     = 5,
+    ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_ROWS_EXT       = 100,
+    ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_COLS_EXT       = 101,
+    ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_TOTAL_ROWS_EXT = 102,
+    ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_TOTAL_COLS_EXT = 103,
+    ROCBLASLT_MATMUL_PREF_MAX
 } rocblaslt_matmul_preference_attributes;
 
 /********************************************************************************
@@ -483,6 +497,14 @@ typedef struct _rocblaslt_matrix_transform_desc
 #ifdef __cplusplus
 }
 #endif
+
+namespace rocblaslt
+{
+    namespace adaptive_sm
+    {
+        class Launch;
+    }
+}
 
 /********************************************************************
  * RocblasltContractionProblem captures the arguments for a GEMM-like *
@@ -634,6 +656,12 @@ struct RocblasltContractionProblem
     // 1 = on. Forwarded into ContractionProblemParameters::setUniformSummationOrder
     // by tensile_host.cpp.
     int32_t uniform_summation_order = 0;
+    // The C API launch's adaptive state (null: none), set post-construction.
+    // runContractionProblem forwards its probe target into
+    // ContractionProblemParameters::setOccupancyProbe and sets its `probed`.
+    rocblaslt::adaptive_sm::Launch* adaptive_launch = nullptr;
+    // sm_count_target came from the adaptive estimator rather than the user.
+    bool adaptive_sm_count = false;
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // The four below are set post-construction, not through the constructor.

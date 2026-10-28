@@ -46,12 +46,13 @@
 #include "mxDataGen.hpp"
 #endif
 // Ungated: generateW4A16Input is used even without the MX data generator.
-#include "w4a16_datagen.hpp"
 #include "near.hpp"
 #include "norm.hpp"
+#include "testing_matmul_grouped_c.hpp"
 #include "ulp.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
+#include "w4a16_datagen.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
@@ -1255,6 +1256,13 @@ void check(hipStream_t                   stream,
     double ulp_sum_total   = 0.0;
     size_t ulp_count_total = 0;
 
+    // Every gemm and batch folds its allclose pair into this one; see allclose.hpp.
+    if(arg.allclose_check)
+    {
+        hipblaslt_atol = 0;
+        hipblaslt_rtol = 0;
+    }
+
     for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
     {
         if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
@@ -1543,38 +1551,51 @@ void check(hipStream_t                   stream,
 
         if(arg.allclose_check)
         {
+            double          gemm_atol = 0;
+            double          gemm_rtol = 0;
+            AllcloseFailure failure;
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
-                bool is_allclose = allclose_check_general('F',
-                                                          M[gemmIdx],
-                                                          N[gemmIdx],
-                                                          ldd[gemmIdx],
-                                                          stride_d[gemmIdx],
-                                                          hD_gold[gemmIdx].buf(),
-                                                          hD_1[gemmIdx].buf(),
-                                                          num_batches[gemmIdx],
-                                                          hipblaslt_atol,
-                                                          hipblaslt_rtol,
-                                                          To);
+                allclose_check_general('F',
+                                       M[gemmIdx],
+                                       N[gemmIdx],
+                                       ldd[gemmIdx],
+                                       stride_d[gemmIdx],
+                                       hD_gold[gemmIdx].buf(),
+                                       hD_1[gemmIdx].buf(),
+                                       num_batches[gemmIdx],
+                                       gemm_atol,
+                                       gemm_rtol,
+                                       To,
+                                       &failure);
             }
             else
             {
                 for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
                 {
-                    bool is_allclose = allclose_check_general('F',
-                                                              M[gemmIdx],
-                                                              N[gemmIdx],
-                                                              ldd[gemmIdx],
-                                                              0,
-                                                              hD_gold[batch].buf(),
-                                                              hD_1[batch].buf(),
-                                                              1,
-                                                              hipblaslt_atol,
-                                                              hipblaslt_rtol,
-                                                              To);
+                    double          batch_atol;
+                    double          batch_rtol;
+                    AllcloseFailure batch_failure;
+                    allclose_check_general('F',
+                                           M[gemmIdx],
+                                           N[gemmIdx],
+                                           ldd[gemmIdx],
+                                           0,
+                                           hD_gold[batch].buf(),
+                                           hD_1[batch].buf(),
+                                           1,
+                                           batch_atol,
+                                           batch_rtol,
+                                           To,
+                                           &batch_failure);
+                    allclose_merge_pair(gemm_atol, gemm_rtol, batch_atol, batch_rtol);
+                    allclose_merge_failure(failure, batch_failure, batch);
                 }
             }
-            //TODO: confirm if allclose_check_assert is neccessary
+            allclose_merge_pair(hipblaslt_atol, hipblaslt_rtol, gemm_atol, gemm_rtol);
+            if(failure.bad_count)
+                hipblaslt_cerr << "allclose check failed for D of gemm " << gemmIdx << ": "
+                               << allclose_failure_message(failure) << std::endl;
         }
 
         if(arg.ulp_check)
@@ -1922,6 +1943,14 @@ void testing_matmul(const Arguments& arg)
             return;
 #endif
         }
+    }
+
+    if(arg.api_method == kApiMethodGroupedC)
+    {
+        const std::string reason = groupedCApiUnsupportedReason(arg);
+        if(!reason.empty())
+            hipblaslt_cerr << "api_method grouped_gemm_c " << reason << std::endl;
+        CHECK_SUCCESS(reason.empty());
     }
 
     // for all f8/bf8 cases including mix mode
@@ -4293,6 +4322,7 @@ void testing_matmul_with_bias(const Arguments& arg,
     int     returnedAlgoCount = 0;
     std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResult;
     std::vector<size_t>                           heuristicTuningIndex;
+    std::unique_ptr<GroupedCApiProblem>           groupedC;
 
     // Cpp API
     hipblaslt_ext::GemmPreference gemmPref;
@@ -5218,6 +5248,32 @@ void testing_matmul_with_bias(const Arguments& arg,
                 workspace_size = std::max(workspace_size, heuristicResult[i].workspaceSize);
             CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
         }
+        else if(arg.api_method == kApiMethodGroupedC)
+        {
+            groupedC = std::make_unique<GroupedCApiProblem>(handle,
+                                                            arg,
+                                                            transA,
+                                                            transB,
+                                                            M,
+                                                            N,
+                                                            K,
+                                                            lda,
+                                                            ldb,
+                                                            ldc,
+                                                            ldd,
+                                                            da,
+                                                            db,
+                                                            dc,
+                                                            dd,
+                                                            max_workspace_size);
+            EXPECT_HIPBLAS_STATUS(groupedC->status(), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_HIPBLAS_STATUS(groupedC->heuristic(requestAlgoCount, heuristicResult),
+                                  HIPBLAS_STATUS_SUCCESS);
+            heuristicTuningIndex.assign(heuristicResult.size(), 0);
+            for(auto& result : heuristicResult)
+                workspace_size = std::max(workspace_size, result.workspaceSize);
+            CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
+        }
         else
         {
             if(arg.use_ext_setproblem)
@@ -6020,7 +6076,18 @@ void testing_matmul_with_bias(const Arguments& arg,
             else
             {
                 //grouped gemm
-                if(arg.use_user_args)
+                if(groupedC)
+                {
+                    EXPECT_HIPBLAS_STATUS(groupedC->run(0,
+                                                        heuristicResult[sol].algo,
+                                                        &h_alpha[0],
+                                                        &h_beta[0],
+                                                        *dWorkspace,
+                                                        workspace_size,
+                                                        stream),
+                                          HIPBLAS_STATUS_SUCCESS);
+                }
+                else if(arg.use_user_args)
                 {
                     groupedGemmVec[0].setMaxWorkspaceBytes(workspace_size);
                     CHECK_HIPBLASLT_ERROR(
@@ -6846,7 +6913,47 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
             // Grouped GEMM launches are timed back to back, with no flush between them.
             searchCfg.flush = false;
-            if(arg.use_user_args)
+            if(groupedC)
+            {
+                auto runBlock = [&](size_t sol, int b) {
+                    EXPECT_HIPBLAS_STATUS(
+                        groupedC->run(b,
+                                      heuristicResult[sol].algo,
+                                      &h_alpha[0],
+                                      &h_beta[0],
+                                      (unsigned char*)(*dWorkspace) + b * workspace_size,
+                                      workspace_size,
+                                      stream),
+                        HIPBLAS_STATUS_SUCCESS);
+                };
+                search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
+                    heuristicResult.size(),
+                    searchCfg,
+                    timingCfg,
+                    event_gpu_time_start,
+                    event_gpu_time_end,
+                    stream,
+                    reporting
+                        .prepare([&](size_t sol) {
+                            prepareCandidate(sol);
+                            // A descriptor sets up its launch on its first hipblasLtMatmul.
+                            // Block 0's first run is the first cold call, which the
+                            // result check reads.
+                            for(int32_t b = 1; b < block_count; b++)
+                                runBlock(sol, b);
+                            startCotenant();
+                        })
+                        .cold([&](size_t sol, int32_t i) {
+                            runBlock(sol, i % block_count);
+                            if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
+                                copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                        })
+                        .launch([&](size_t sol, int64_t i) {
+                            runBlock(sol, static_cast<int>(i % block_count));
+                        }),
+                    timingAbort);
+            }
+            else if(arg.use_user_args)
             {
                 std::vector<unsigned char*> d_userArgsVec(block_count);
                 search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
