@@ -15,9 +15,10 @@ Covered:
 * scalar split-3D segment + reduce (launched directly: no dispatcher route
   reaches them), where a whole segment can be masked for a row and must not
   set the merge's overall max;
-* rows that see no key at all (top-left, ``q_len > kv_len``): O must be 0.
+* rows that see no key at all (top-left, ``q_len > kv_len``, and the default
+  bottom-right mask with ``q_len > kv_len`` and no window): O must be 0.
 * a NaN per-segment sum must make the reduce give NaN for that row, not be
-  skipped as an empty segment.
+  skipped as an empty segment; a NaN query row must give NaN O in scalar 2D.
 
 Not covered: the default-mask scalar 3D body, which applies no window (and
 whose prefill rows with fully masked trailing segments are a separate
@@ -64,7 +65,7 @@ def _tdt(dtype):
     return torch.float16 if dtype == "fp16" else torch.bfloat16
 
 
-def _problem(dtype, q_len, kv_len, num_blocks, top_left):
+def _problem(dtype, q_len, kv_len, num_blocks, top_left, window=_WINDOW):
     return UnifiedAttentionProblem(
         total_q=q_len,
         num_seqs=1,
@@ -75,7 +76,7 @@ def _problem(dtype, q_len, kv_len, num_blocks, top_left):
         max_seqlen_q=q_len,
         max_seqlen_k=kv_len,
         dtype=dtype,
-        sliding_window=_WINDOW,
+        sliding_window=window,
         num_kv_blocks=num_blocks,
         causal_top_left=top_left,
     )
@@ -108,8 +109,8 @@ def _inputs(dtype, q_len, kv_len):
     )
 
 
-def _reference(data, kv_len, top_left):
-    """FP32 O for one sequence, causal + sliding window; keyless rows give 0."""
+def _reference(data, kv_len, top_left, window=_WINDOW):
+    """FP32 O for one sequence, causal + sliding window (0: none); keyless rows give 0."""
     q = data["q"]
     q_len = q.shape[0]
     nblk = (kv_len + _BS - 1) // _BS
@@ -122,7 +123,9 @@ def _reference(data, kv_len, top_left):
     p = torch.arange(q_len, device=q.device).view(-1, 1)
     kk = torch.arange(kv_len, device=q.device).view(1, -1)
     diag = p + (0 if top_left else kv_len - q_len)
-    visible = (kk <= diag) & (diag - kk < _WINDOW)
+    visible = kk <= diag
+    if window:
+        visible &= diag - kk < window
     s = s.masked_fill(~visible, float("-inf"))
     probs = torch.softmax(s, dim=-1).nan_to_num(0.0)
     return torch.matmul(probs, v).transpose(0, 1), visible.any(dim=-1)
@@ -297,6 +300,58 @@ def test_scalar_2d_masked_leading_keys(case, dtype):
     torch.cuda.synchronize()
     ref, has_key = _reference(data, kv_len, top_left)
     _check(out, ref, has_key, dtype)
+
+
+@requires_cdna3_or_4
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_scalar_2d_default_mask_keyless_rows(dtype):
+    """Default mask (bottom-right causal, no window) with q_len > kv_len.
+
+    Query row i sees keys 0..i - (q_len - kv_len), so the first 16 of 32 rows
+    see no key, l = 0 and acc * rcp(l) is NaN unless the epilogue stores 0.
+    """
+    q_len, kv_len = 32, 16
+    data = _inputs(dtype, q_len, kv_len)
+    problem = _problem(dtype, q_len, kv_len, data["num_blocks"], False, window=0)
+    assert problem.default_mask
+    out = _run_scalar_2d(problem, data)
+    torch.cuda.synchronize()
+    ref, has_key = _reference(data, kv_len, False, window=0)
+    assert int((~has_key).sum()) == 16
+    _check(out, ref, has_key, dtype)
+
+
+@requires_cdna3_or_4
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", _DTYPES)
+@pytest.mark.parametrize("case", ["bottom_right", "top_left"])
+def test_scalar_2d_propagates_nan_query_row(case, dtype):
+    """A NaN query row must give NaN O, not be stored as a keyless 0.
+
+    The NaN scores make the row's sum l NaN. The epilogue stores 0 only for an
+    exact-zero sum (``fcmp oeq``); a guard of the form ``l > 0`` (``fcmp ogt``)
+    is false for NaN and would turn the corrupt row into a finite 0.
+    """
+    q_len, kv_len, top_left = _CASES[case]
+    row, head = 100, 3
+    data = _inputs(dtype, q_len, kv_len)
+    problem = _problem(dtype, q_len, kv_len, data["num_blocks"], top_left)
+    ref, has_key = _reference(data, kv_len, top_left)
+    assert bool(has_key[row])
+    data["q"][row, head] = float("nan")
+    out = _run_scalar_2d(problem, data)
+    torch.cuda.synchronize()
+
+    assert torch.isnan(
+        out[row, head]
+    ).all(), f"row {row} head {head}: NaN query did not reach O"
+    others = torch.ones(out.shape[:2], dtype=torch.bool, device=out.device)
+    others[row, head] = False
+    assert torch.isfinite(out[others]).all(), "NaN leaked into another (row, head)"
+    tol = 2e-2 if dtype == "fp16" else 4e-2
+    err = (out.float() - ref).abs().amax(dim=-1)[others]
+    assert err.max().item() < tol, f"{(err >= tol).sum().item()} (row, head) wrong"
 
 
 @requires_cdna3_or_4

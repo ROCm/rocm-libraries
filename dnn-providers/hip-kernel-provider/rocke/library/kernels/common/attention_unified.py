@@ -6668,11 +6668,10 @@ def build_unified_attention_2d(
         b.scf_yield(new_m_raw, new_l, new_acc)
 
     out_val = b.fmul(loop.results[2], b.rcp(loop.results[1]))
-    if not p.default_mask:
-        # Rows can see no key at all (e.g. top-left rows past ``kv_len`` with a window
-        # or a right bound): emit 0 instead of acc * rcp(0) == NaN, like the tiled
-        # kernels. The default mask never produces such a row, so its IR is unchanged.
-        out_val = b.select(b.fcmp("ogt", loop.results[1], zero_f), out_val, zero_f)
+    # Rows can see no key at all under any mask (bottom-right causal with Sq > Skv,
+    # or a window / right bound): store 0 instead of acc * rcp(0) == NaN, like the
+    # tiled kernels. Only an exact-zero sum counts, so a NaN ``l`` still reaches O.
+    out_val = b.select(b.fcmp("oeq", loop.results[1], zero_f), zero_f, out_val)
     out_cast = b.cast_f32_to(out_val, dtype)
     out_off, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=dim)
     valid = b.land(active, b.cmp_lt(dim, b.const_i32(p.head_size)))
