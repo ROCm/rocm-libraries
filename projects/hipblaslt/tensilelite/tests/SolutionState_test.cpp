@@ -14,6 +14,8 @@
 #include <utility>
 #include <vector>
 
+#include <hip/hip_runtime_api.h>
+
 // The headers declaring ContractionProblemGemm come before <msgpack.hpp>, which
 // reaches the Windows SDK headers that define the enum name CONST as a macro.
 #include <Tensile/AMDGPU.hpp>
@@ -585,13 +587,28 @@ TEST(SolutionState, NamesSummationOrder)
 
 TEST(SolutionState, BuildsWithoutADevice)
 {
+    // Constructing the record must not call hipGetDevice. On a machine with a
+    // GPU that call would store a non-zero count here. The test constructor
+    // also leaves the count at 0, but it marks the query done, so evaluation
+    // rejects the kernel instead of reading the device.
     auto solution = build();
     auto const* xcc = onlyDirect<Predicates::Contraction::WorkgroupMappingXCCCheck>(
         solution->problemPredicate);
     ASSERT_NE(xcc, nullptr);
     EXPECT_EQ(xcc->value, (std::array<int, 2>{4, 8}));
-    // Unevaluated. The count is filled on the first check, not frozen at 0.
     EXPECT_EQ(xcc->cuCount, size_t{0});
+
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, 1024, 1024, 1024, 1024, 1024, 1024, 1.0, false, 1);
+    int        deviceCount = 0;
+    hipError_t deviceErr   = hipGetDeviceCount(&deviceCount);
+    if(deviceErr != hipSuccess || deviceCount == 0)
+    {
+        EXPECT_THROW((*xcc)(problem), std::runtime_error);
+        return;
+    }
+    EXPECT_TRUE((*xcc)(problem));
+    EXPECT_NE(xcc->cuCount, size_t{0});
 }
 
 TEST(SolutionState, ClusterStreamKAcceptsPersistentLoopArgsVersion2)
