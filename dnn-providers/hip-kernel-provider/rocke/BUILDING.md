@@ -26,7 +26,14 @@ per-file `parents[N]` math.
 ## Quick start (CMake-managed environment)
 
 When the rocke features are enabled, the build creates and maintains a
-separate editable environment at `build/rocke-pyenv/`. Provision the SDK in the
+separate editable environment at `build/rocke-pyenv/`. Provider descriptor
+packaging uses the build's exported `amd_comgr` library when available, forwarding
+its path as `ROCKE_COMGR_LIB` to the configure probe, pack commands and packaging
+CTest entries. `HIPKERNELPROVIDER_ROCKE_COMGR_LIB` overrides that selection;
+an inherited `ROCKE_COMGR_LIB` takes priority over the package default too.
+This build-local selection does not change rocKE's SDK-based runtime discovery.
+
+When no package compiler or explicit override is supplied, provision the SDK in the
 interpreter environment passed as `Python3_EXECUTABLE` **before configuration**,
 using the same AMD SDK release/index as other ROCm frameworks in that environment.
 See [compiler installation](platform/dsl_docs/runtime/comgr_and_hipmodule.md#installing-the-compiler).

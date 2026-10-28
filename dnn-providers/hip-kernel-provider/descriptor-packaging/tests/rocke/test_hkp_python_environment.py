@@ -231,7 +231,7 @@ def build_environment(tmp_path, cmake, cmake_make_program):
     return factory
 
 
-def _configure_comgr_consumer(environment, *, sdk):
+def _configure_comgr_consumer(environment, *, sdk, package=True):
     """Use the production resolver with isolated metadata and a loadable fixture.
 
     Copy only runtime modules beneath an empty package initializer so this probe
@@ -243,6 +243,10 @@ def _configure_comgr_consumer(environment, *, sdk):
     (runtime.parent / "__init__.py").write_text("", encoding="utf-8")
     (runtime / "__init__.py").write_text("", encoding="utf-8")
     source_runtime = PKG.parent / "rocke/platform/python/rocke/runtime"
+    runtime_files = {
+        "rocke/__init__.py": "",
+        "rocke/runtime/__init__.py": "",
+    }
     for name in (
         "comgr.py",
         "_ctypes_bind.py",
@@ -250,6 +254,12 @@ def _configure_comgr_consumer(environment, *, sdk):
         "_sdk_comgr.py",
     ):
         shutil.copyfile(source_runtime / name, runtime / name)
+        runtime_files[f"rocke/runtime/{name}"] = (source_runtime / name).read_text(
+            encoding="utf-8"
+        )
+    _wheel(environment.wheels, "rocke", runtime_files)
+    # Only inspect CTest registration here; no pytest subprocess is executed.
+    write_module(environment.runtime, "pytest", "registration-only")
     relative = (
         "_rocm_sdk_core/bin/amd_comgr.dll"
         if os.name == "nt"
@@ -276,26 +286,59 @@ def _configure_comgr_consumer(environment, *, sdk):
             encoding="utf-8",
         )
         (metadata / "RECORD").write_text(f"{relative},,\n", encoding="utf-8")
-    competing = environment.source / "package-comgr"
-    competing.write_bytes(b"not a loadable library")
+    competing = environment.source / (
+        "package-comgr.dll" if os.name == "nt" else "package-comgr.so"
+    )
+    shutil.copyfile(loadable, competing)
+    package_target = ""
+    if package:
+        package_target = f"""add_library(amd_comgr SHARED IMPORTED)
+set_target_properties(amd_comgr PROPERTIES IMPORTED_LOCATION "{competing.as_posix()}")
+"""
+        if package == "config":
+            package_dir = environment.source / "comgr config"
+            package_dir.mkdir()
+            (package_dir / "amd_comgr-config.cmake").write_text(
+                package_target, encoding="utf-8"
+            )
+            package_target = f'set(amd_comgr_DIR "{package_dir.as_posix()}")\n'
+    (environment.source / "consumer.py").write_text(
+        CONSUMER
+        + """
+from rocke.runtime import comgr
+result['comgr'] = comgr._resolve_lib()._name
+(args.out_root / 'imports.json').write_text(json.dumps(result), encoding='utf-8')
+""",
+        encoding="utf-8",
+    )
     (environment.source / "CMakeLists.txt").write_text(
         consumer_preamble("HkpComgrSelection")
         + """set(ROCKE_WHEEL_VERSION 0.1.0)
 set(HKP_PKG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/descriptor-packaging")
-add_library(amd_comgr SHARED IMPORTED)
-set_target_properties(amd_comgr PROPERTIES
-    IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/package-comgr")
+"""
+        + package_target
+        + """
 _hkp_resolve_rocke_args(args comgr_lib)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/comgr-selection.txt" "${comgr_lib}\\n${args}\\n")
+set(HKP_TOOL "${CMAKE_CURRENT_SOURCE_DIR}/consumer.py")
+hkp_wire_pack_target(
+    NAME first SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/authored"
+    OUT_ROOT "${CMAKE_CURRENT_BINARY_DIR}/first"
+    ARCHES gfx942 HIPCC unused
+    ROCM_KPACK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/kpack with spaces"
+    ENABLE_ROCKE ON ${args})
+enable_testing()
+set(HIPKERNELPROVIDER_ENABLE_TESTS ON)
+hkp_register_tests("${CMAKE_CURRENT_SOURCE_DIR}/kpack with spaces" unused "${comgr_lib}")
 """,
         encoding="utf-8",
     )
     return loadable
 
 
-def test_configure_uses_sdk_without_deriving_imported_comgr(build_environment):
+def test_configure_uses_sdk_without_imported_comgr(build_environment):
     env = build_environment()
-    _configure_comgr_consumer(env, sdk=True)
+    _configure_comgr_consumer(env, sdk=True, package=False)
     env.configure(comgr_lib="")
     selection = (env.build_dir / "comgr-selection.txt").read_text(encoding="utf-8")
     assert selection.startswith("\n")
@@ -303,9 +346,95 @@ def test_configure_uses_sdk_without_deriving_imported_comgr(build_environment):
     assert "package-comgr" not in selection
 
 
-def test_configure_rejects_package_comgr_when_sdk_is_missing(build_environment):
+# Exercise both a missing SDK (TheRock's build interpreter) and a competing SDK:
+# the build's exported compiler must be the one configure, packing and CTest use.
+@pytest.mark.parametrize("sdk", [False, True])
+@pytest.mark.parametrize("package", [True, "config"], ids=["target", "package"])
+def test_configure_and_pack_use_imported_comgr(build_environment, sdk, package):
     env = build_environment()
-    _configure_comgr_consumer(env, sdk=False)
+    _configure_comgr_consumer(env, sdk=sdk, package=package)
+    env.configure(comgr_lib="")
+    expected = next(env.source.glob("package-comgr.*"))
+    selection = (env.build_dir / "comgr-selection.txt").read_text(encoding="utf-8")
+    assert selection.splitlines()[0] == expected.as_posix()
+    assert f"ROCKE_COMGR_LIB;{expected.as_posix()}" in selection
+    # The default must stay build-local rather than become a cached user override.
+    cache = (env.build_dir / "CMakeCache.txt").read_text(encoding="utf-8")
+    assert "HIPKERNELPROVIDER_ROCKE_COMGR_LIB:PATH=\n" in cache
+    env.run(env.cmake, "--build", env.build_dir, "--target", "hkp_packaging_first")
+    result = env.consumer()
+    assert Path(result["comgr"]) == expected
+    assert Path(result["env"]["ROCKE_COMGR_LIB"]) == expected
+    tests = (env.build_dir / "CTestTestfile.cmake").read_text(encoding="utf-8")
+    assert tests.count(f"ROCKE_COMGR_LIB={expected.as_posix()}") == 2
+
+
+@pytest.mark.parametrize(
+    "properties,configuration,selected",
+    [
+        (
+            "IMPORTED_CONFIGURATIONS DEBUG\\;RELEASE "
+            "IMPORTED_LOCATION_DEBUG {debug} IMPORTED_LOCATION_RELEASE {release}",
+            "Debug",
+            "debug",
+        ),
+        (
+            "IMPORTED_CONFIGURATIONS DEBUG\\;RELEASE "
+            "IMPORTED_LOCATION_DEBUG {missing} IMPORTED_LOCATION_RELEASE {release}",
+            "Debug",
+            "release",
+        ),
+        (
+            "IMPORTED_CONFIGURATIONS DEBUG\\;RELEASE "
+            "IMPORTED_LOCATION_DEBUG {debug} IMPORTED_LOCATION_RELEASE {release}",
+            "",
+            "release",
+        ),
+        ("IMPORTED_LOCATION {release}", "", "release"),
+        ("IMPORTED_IMPLIB {release}", "", None),
+        (
+            "IMPORTED_CONFIGURATIONS CUSTOM IMPORTED_LOCATION_CUSTOM {debug}",
+            "",
+            "debug",
+        ),
+    ],
+    ids=[
+        "configured",
+        "missing-config",
+        "multi-config",
+        "unconfigured",
+        "implib-is-not-loadable",
+        "custom-config",
+    ],
+)
+def test_imported_comgr_loadable_location(
+    build_environment, properties, configuration, selected
+):
+    env = build_environment()
+    paths = {name: env.source / name for name in ("debug", "release", "missing")}
+    for name in ("debug", "release"):
+        paths[name].touch()
+    properties = properties.format(
+        **{name: f'"{path.as_posix()}"' for name, path in paths.items()}
+    )
+    (env.source / "CMakeLists.txt").write_text(
+        consumer_preamble("HkpImportedComgr")
+        + f"""set(CMAKE_BUILD_TYPE "{configuration}")
+add_library(amd_comgr SHARED IMPORTED)
+set_target_properties(amd_comgr PROPERTIES {properties})
+hkp_imported_library_location(amd_comgr selection)
+file(WRITE "${{CMAKE_CURRENT_BINARY_DIR}}/selection.txt" "${{selection}}")
+""",
+        encoding="utf-8",
+    )
+    env.configure(comgr_lib="")
+    result = (env.build_dir / "selection.txt").read_text(encoding="utf-8")
+    assert result == (paths[selected].as_posix() if selected else "")
+
+
+def test_configure_rejects_missing_comgr(build_environment):
+    env = build_environment()
+    _configure_comgr_consumer(env, sdk=False, package=False)
     proc = env.configure(comgr_lib="", success=False)
     diagnostic = " ".join((proc.stdout + proc.stderr).split())
     assert "no candidate path" in diagnostic
@@ -313,9 +442,10 @@ def test_configure_rejects_package_comgr_when_sdk_is_missing(build_environment):
 
 
 @pytest.mark.parametrize("loadable", [True, False])
-def test_configure_explicit_comgr_is_sole_candidate(build_environment, loadable):
+@pytest.mark.parametrize("sdk", [False, True])
+def test_configure_explicit_comgr_is_sole_candidate(build_environment, loadable, sdk):
     env = build_environment()
-    fixture_library = _configure_comgr_consumer(env, sdk=True)
+    fixture_library = _configure_comgr_consumer(env, sdk=sdk)
     explicit = env.root / ("explicit.dll" if os.name == "nt" else "explicit.so")
     if loadable:
         shutil.copyfile(fixture_library, explicit)
@@ -328,6 +458,18 @@ def test_configure_explicit_comgr_is_sole_candidate(build_environment, loadable)
         diagnostic = " ".join((proc.stdout + proc.stderr).split())
         assert explicit.as_posix() in diagnostic
         assert "1 candidate(s) failed" in diagnostic
+
+
+def test_configure_preserves_runtime_comgr_override(build_environment):
+    env = build_environment()
+    fixture_library = _configure_comgr_consumer(env, sdk=False)
+    explicit = env.root / ("env-override.dll" if os.name == "nt" else "env-override.so")
+    shutil.copyfile(fixture_library, explicit)
+    env.env["ROCKE_COMGR_LIB"] = str(explicit)
+    env.configure(comgr_lib="")
+    selection = (env.build_dir / "comgr-selection.txt").read_text(encoding="utf-8")
+    assert selection.splitlines()[0] == explicit.as_posix()
+    assert f"ROCKE_COMGR_LIB;{explicit.as_posix()}" in selection
 
 
 def test_pth_runtime_and_parent_inventory_preserved(tmp_path, build_environment):
