@@ -415,12 +415,15 @@ namespace rocsparse
             {
                 const T d_mod = B_modified[static_cast<int64_t>(m) * rhs + gid];
 
-                // These are the solved x_interface values that affect this tile
+                // These are the solved x_interface values that affect this tile.
+                // The products are named so the tile-edge coefficients stay in
+                // distinct registers; folding them into one expression has been
+                // miscompiled for a one-sided bidiagonal spike system.
                 const T x_interface_left  = B_spike[num_spikes * rhs + row_left];
                 const T x_interface_right = B_spike[num_spikes * rhs + row_right];
-
-                const T x_final
-                    = (d_mod - (a_mod * x_interface_left) - (c_mod * x_interface_right)) / b_mod;
+                const T left_term         = a_mod * x_interface_left;
+                const T right_term        = c_mod * x_interface_right;
+                const T x_final           = (d_mod - left_term - right_term) / b_mod;
 
                 // Store result to global memory
                 B[ldb * rhs + gid] = x_final;
