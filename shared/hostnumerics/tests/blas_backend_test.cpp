@@ -39,12 +39,14 @@ void testTransformingBlockScaleFallsBack(roc::hostnumerics::ScalarType accumulat
         GemmTestCase problem(Tensor::copyNativeStorage<T>(layoutA, std::span<const T>(a)),
                              Tensor::copyNativeStorage<T>(layoutB, std::span<const T>(b)),
                              std::move(output), accumulatorType);
-        problem.blockScaleA = Tensor::copyEncodedBackingStorage(ScalarType::E8M0, scaleLayout,
-                                                                std::as_bytes(std::span(scaleA)));
-        problem.blockSizeA = 2;
-        problem.blockScaleB = Tensor::copyEncodedBackingStorage(ScalarType::E8M0, scaleLayout,
-                                                                std::as_bytes(std::span(scaleB)));
-        problem.blockSizeB = 2;
+        problem.blockScaleA =
+            MatmulBlockScale{Tensor::copyEncodedBackingStorage(ScalarType::E8M0, scaleLayout,
+                                                               std::as_bytes(std::span(scaleA))),
+                             2};
+        problem.blockScaleB =
+            MatmulBlockScale{Tensor::copyEncodedBackingStorage(ScalarType::E8M0, scaleLayout,
+                                                               std::as_bytes(std::span(scaleB))),
+                             2};
         return problem;
     };
 

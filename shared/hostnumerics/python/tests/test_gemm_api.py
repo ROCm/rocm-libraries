@@ -195,10 +195,12 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             pre_quantization_scales_b=[
                 hv.from_numpy(np.asarray([0.5], dtype=np.float32))
             ],
-            block_scale_a=hv.from_numpy(np.asarray([[2.0, 4.0]], dtype=np.float32)),
-            block_scale_b=hv.from_numpy(np.asarray([[3.0, 5.0]], dtype=np.float32)),
-            block_size_a=4,
-            block_size_b=4,
+            block_scale_a=hv.MatmulBlockScale(
+                hv.from_numpy(np.asarray([[2.0, 4.0]], dtype=np.float32)), 4
+            ),
+            block_scale_b=hv.MatmulBlockScale(
+                hv.from_numpy(np.asarray([[3.0, 5.0]], dtype=np.float32)), 4
+            ),
             alpha=1.0,
             beta=0.0,
             math_mode=hv.MathMode.Default,

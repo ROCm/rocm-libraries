@@ -166,8 +166,8 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
     preScalesB.reserve(problem.preQuantizationScalesB.size());
     for (const Tensor& scale : problem.preQuantizationScalesB)
         preScalesB.emplace_back(scale.broadcastTo(problem.b.shape()));
-    if (problem.blockScaleA) blockScaleA.emplace(*problem.blockScaleA);
-    if (problem.blockScaleB) blockScaleB.emplace(*problem.blockScaleB);
+    if (problem.blockScaleA) blockScaleA.emplace(problem.blockScaleA->scales);
+    if (problem.blockScaleB) blockScaleB.emplace(problem.blockScaleB->scales);
 
     const bool hasBlockScale = blockScaleA.has_value() || blockScaleB.has_value();
     const bool loadAWithoutTransforms =
@@ -241,12 +241,14 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
             accumulateRange(accumulator, 0, k);
         } else {
             for (size_t reductionBase = 0; reductionBase < k;) {
-                const size_t remainingA =
-                    blockScaleA ? problem.blockSizeA - reductionBase % problem.blockSizeA
-                                : k - reductionBase;
-                const size_t remainingB =
-                    blockScaleB ? problem.blockSizeB - reductionBase % problem.blockSizeB
-                                : k - reductionBase;
+                const size_t remainingA = blockScaleA
+                                              ? problem.blockScaleA->blockSize -
+                                                    reductionBase % problem.blockScaleA->blockSize
+                                              : k - reductionBase;
+                const size_t remainingB = blockScaleB
+                                              ? problem.blockScaleB->blockSize -
+                                                    reductionBase % problem.blockScaleB->blockSize
+                                              : k - reductionBase;
                 const size_t reductionEnd =
                     reductionBase + std::min({k - reductionBase, remainingA, remainingB});
                 Accumulator partial = Accumulator(0);
@@ -254,11 +256,13 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
 
                 Accumulator scale = Accumulator(1);
                 if (blockScaleA)
-                    scale = multiply(scale,
-                                     (*blockScaleA)(row, (reductionEnd - 1) / problem.blockSizeA));
-                if (blockScaleB)
                     scale = multiply(
-                        scale, (*blockScaleB)(column, (reductionEnd - 1) / problem.blockSizeB));
+                        scale,
+                        (*blockScaleA)(row, (reductionEnd - 1) / problem.blockScaleA->blockSize));
+                if (blockScaleB)
+                    scale =
+                        multiply(scale, (*blockScaleB)(column, (reductionEnd - 1) /
+                                                                   problem.blockScaleB->blockSize));
                 accumulator = add(accumulator, multiply(partial, scale));
                 reductionBase = reductionEnd;
             }
@@ -336,36 +340,41 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
             for (size_t reductionBase = 0; reductionBase < k;) {
                 size_t reductions = std::min(reductionBlockElements, k - reductionBase);
                 if (blockScaleA)
-                    reductions = std::min(reductions,
-                                          problem.blockSizeA - reductionBase % problem.blockSizeA);
+                    reductions =
+                        std::min(reductions, problem.blockScaleA->blockSize -
+                                                 reductionBase % problem.blockScaleA->blockSize);
                 if (blockScaleB)
-                    reductions = std::min(reductions,
-                                          problem.blockSizeB - reductionBase % problem.blockSizeB);
+                    reductions =
+                        std::min(reductions, problem.blockScaleB->blockSize -
+                                                 reductionBase % problem.blockScaleB->blockSize);
                 const bool startsScaleSegment =
                     reductionBase == 0 ||
-                    (blockScaleA && reductionBase % problem.blockSizeA == 0) ||
-                    (blockScaleB && reductionBase % problem.blockSizeB == 0);
+                    (blockScaleA && reductionBase % problem.blockScaleA->blockSize == 0) ||
+                    (blockScaleB && reductionBase % problem.blockScaleB->blockSize == 0);
                 if (startsScaleSegment) std::fill(partial.begin(), partial.end(), Accumulator(0));
                 accumulateTile(partial, reductionBase, reductions);
 
                 const size_t reductionEnd = reductionBase + reductions;
                 const bool endsScaleSegment =
-                    reductionEnd == k || (blockScaleA && reductionEnd % problem.blockSizeA == 0) ||
-                    (blockScaleB && reductionEnd % problem.blockSizeB == 0);
+                    reductionEnd == k ||
+                    (blockScaleA && reductionEnd % problem.blockScaleA->blockSize == 0) ||
+                    (blockScaleB && reductionEnd % problem.blockScaleB->blockSize == 0);
                 if (!endsScaleSegment) {
                     reductionBase = reductionEnd;
                     continue;
                 }
                 std::array<Accumulator, outputBlockColumns> bScales;
                 for (size_t column = 0; column < columns; ++column)
-                    bScales[column] = blockScaleB
-                                          ? (*blockScaleB)(columnBase + column,
-                                                           (reductionEnd - 1) / problem.blockSizeB)
-                                          : Accumulator(1);
+                    bScales[column] =
+                        blockScaleB
+                            ? (*blockScaleB)(columnBase + column,
+                                             (reductionEnd - 1) / problem.blockScaleB->blockSize)
+                            : Accumulator(1);
                 for (size_t row = 0; row < rows; ++row) {
                     const Accumulator aScale =
                         blockScaleA
-                            ? (*blockScaleA)(rowBase + row, (reductionEnd - 1) / problem.blockSizeA)
+                            ? (*blockScaleA)(rowBase + row,
+                                             (reductionEnd - 1) / problem.blockScaleA->blockSize)
                             : Accumulator(1);
                     for (size_t column = 0; column < columns; ++column) {
                         if constexpr (needsExplicitArithmetic) {

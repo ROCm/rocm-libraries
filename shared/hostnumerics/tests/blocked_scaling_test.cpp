@@ -16,8 +16,7 @@ void testBlockScaleAppliedAfterCompleteScaleSegment() {
 
     GemmTestCase blockedProblem = makeProblem(a, b, blockedOutput, 1, reductionElements, 1);
     const Tensor blockScaleA = Tensor::copyNativeValues<float>(Shape{1, 1}, scaleA);
-    blockedProblem.blockScaleA = blockScaleA;
-    blockedProblem.blockSizeA = reductionElements;
+    blockedProblem.blockScaleA = MatmulBlockScale{blockScaleA, reductionElements};
 
     runAndCheck(blockedProblem, blockedOutput,
                 "Blocked GEMM applied a one-sided block scale before its complete reduction "
@@ -42,11 +41,9 @@ void testOneSidedBlockScaling() {
         GemmTestCase blockedProblem =
             makeProblem(a, b, blockedOutput, rows, reductionElements, columns);
         if (scaleOperandA) {
-            blockedProblem.blockScaleA = blockScale;
-            blockedProblem.blockSizeA = 8;
+            blockedProblem.blockScaleA = MatmulBlockScale{blockScale, 8};
         } else {
-            blockedProblem.blockScaleB = blockScale;
-            blockedProblem.blockSizeB = 8;
+            blockedProblem.blockScaleB = MatmulBlockScale{blockScale, 8};
         }
 
         runAndCheck(blockedProblem, blockedOutput, "One-sided block scaling result mismatch.");
@@ -69,8 +66,7 @@ void testOneSidedBlockScalingWithZeroReductionExtent() {
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
     GemmTestCase blockedProblem = makeProblem(empty, empty, blockedOutput, rows, 0, columns);
     const Tensor emptyScale(ScalarType::Float32, Shape{rows, 0});
-    blockedProblem.blockScaleA = emptyScale;
-    blockedProblem.blockSizeA = 8;
+    blockedProblem.blockScaleA = MatmulBlockScale{emptyScale, 8};
     runAndCheck(blockedProblem, blockedOutput,
                 "One-sided block scaling read scales for an empty reduction dimension.");
     require(compare(blockedOutput,

@@ -121,8 +121,7 @@ PeriodicMatmulPreparation preparePeriodicMatmul(Shape outputShape, size_t reduct
         (operation.computeTypeA && *operation.computeTypeA != ScalarType::Float32) ||
         (operation.computeTypeB && *operation.computeTypeB != ScalarType::Float32) ||
         !operation.preQuantizationScalesA.empty() || !operation.preQuantizationScalesB.empty() ||
-        operation.blockScaleA || operation.blockScaleB || operation.blockSizeA != 0 ||
-        operation.blockSizeB != 0 ||
+        operation.blockScaleA || operation.blockScaleB ||
         (operation.accumulationRounding != AccumulationRounding::TypeDefault &&
          operation.accumulationRounding != AccumulationRounding::FullPrecision))
         return unsupported(
