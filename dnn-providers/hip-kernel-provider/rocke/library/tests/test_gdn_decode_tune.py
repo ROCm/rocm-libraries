@@ -84,6 +84,8 @@ def test_main_reports_dispatcher_default_outside_top_rows(monkeypatch, capsys):
         "dispatch_gdn_decode_bases",
         lambda request: (object(), object(), object()),
     )
+    # Synthetic fixture timings, not measurements: no kernel runs here. They
+    # only need to differ, so each printed label must come from its own row.
     monkeypatch.setattr(
         tune,
         "sweep_registry_batch",
