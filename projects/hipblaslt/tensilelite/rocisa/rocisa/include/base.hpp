@@ -109,10 +109,12 @@ namespace rocisa
         // Same as calling init() for each arch, but probes the assembler
         // capabilities of all not-yet-initialized ISAs concurrently.  Each
         // probe is an independent assembler run, so results are unchanged.
-        void initMany(const nb::list& archs, const std::string& assemblerPath, bool debug = false)
+        void initMany(const nb::iterable& archs,
+                      const std::string&  assemblerPath,
+                      bool                debug = false)
         {
             std::vector<IsaVersion> isaVersions;
-            for(auto arch : archs)
+            for(nb::handle arch : archs)
             {
                 auto       t = nb::cast<nb::tuple>(arch);
                 IsaVersion isaVersion

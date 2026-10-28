@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import sys
 
+import rocisa
+
 _ISAS = [(9, 4, 2), (9, 5, 0), (12, 0, 1)]
 
 # rocIsa caches capabilities per ISA for the life of the process, so each way of
@@ -63,3 +65,10 @@ def test_concurrent_probing_matches_serial_probing():
     # The probe must actually have reached an assembler.
     assert any(caps["asmCaps"]["SupportedISA"] == 1 for caps in serial.values())
     assert concurrent == serial
+
+
+def test_init_many_accepts_any_iterable():
+    # Empty inputs probe nothing, so no assembler is needed.
+    ti = rocisa.rocIsa.getInstance()
+    ti.initMany((), "unused", False)
+    ti.initMany(iter([]), "unused", False)
