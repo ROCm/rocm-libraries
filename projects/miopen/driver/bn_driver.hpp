@@ -90,7 +90,7 @@ public:
     int RunForwardCPU();
 
     int RunBackwardGPU() override;
-    int RunBackwardCPU(Tref epsilon);
+    int RunBackwardCPU();
 
     void runGPUFwdInference(Tref epsilon, float alpha, float beta);
     void runGPUFwdInferenceActivation(Tref epsilon, float alpha, float beta);
@@ -1961,12 +1961,13 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::VerifyForward()
 }
 
 template <typename TInput, typename Tref, typename TAcc, typename TScaleBias, typename TOut>
-int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardCPU(Tref epsilon)
+int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardCPU()
 {
 
     if(!back)
         return miopenStatusSuccess;
 
+    Tref epsilon = static_cast<Tref>(EPSILON);
     // float alphaDataDiff = static_cast<float>(1), betaDataDiff = static_cast<float>(0);
     // float alphaParamDiff = static_cast<float>(1), betaParamDiff = static_cast<float>(0);
     int size{0};
@@ -2071,8 +2072,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::VerifyBackward()
     const Tref maxrms = static_cast<Tref>((sizeof(TInput) == 4) ? RMSTOL_FP32 : RMSTOL_FP16);
     bool anError      = false;
 
-    Tref epsilon = static_cast<Tref>(EPSILON);
-    RunBackwardCPU(epsilon);
+    RunBackwardCPU();
 
     out_bwd.CopyFromDeviceToHost(GetStream());
     dScale.CopyFromDeviceToHost(GetStream());
