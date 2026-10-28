@@ -113,13 +113,24 @@ def is_fence(line):
     return line.lstrip().startswith("```")
 
 
-def _scan_fields(text, labels, first):
-    """(blocks, skipped) of parse_fields; skipped counts `<first>:` lines inside fenced code."""
+# A markdown heading or a thematic break outside fenced code ends a field's continuation.
+FIELD_END = re.compile(r"^(?:#{1,6}\s|\s*(?:-{3,}|\*{3,}|_{3,})\s*$)")
+# An `ID:` line in any markup a lane may wrap it in (bullet, quote, bold, inline code).
+ID_LINE = re.compile(r"^\s*(?:[-*>]\s+)?(?:\*\*|__|`)?ID(?:\*\*|__|`)?:")
+
+
+def parse_fields(text, labels, first="ID"):
+    """Labelled-line blocks: a `<first>:` line starts a block; a later labelled line
+    starts the next field; any other line (blank lines and fenced code included)
+    continues the current field, until a markdown heading or a `---` line outside fenced
+    code ends it (a later labelled line still joins the block). A fence directly before a
+    `<first>:` line wraps the blocks up to the next bare fence outside nested code;
+    neither fence is read. Returns a list of {label: value} dicts."""
     label_re = re.compile(
         r"^(" + "|".join(re.escape(x) for x in labels) + r"):[ \t]*(.*)$"
     )
     lines = text.splitlines()
-    blocks, cur, field, fenced, wrapped, skipped = [], None, None, False, False, 0
+    blocks, cur, field, fenced, wrapped = [], None, None, False, False
     for i, line in enumerate(lines):
         if is_fence(line):
             bare = line.strip() == "```"
@@ -139,33 +150,25 @@ def _scan_fields(text, labels, first):
             if cur is not None:
                 field = m.group(1)
                 cur[field] = m.group(2)
+        elif not fenced and FIELD_END.match(line):
+            field = None
         elif cur is not None and field:
             cur[field] += "\n" + line
-        if fenced and label_re.match(line) and line.startswith(f"{first}:"):
-            skipped += 1
         if is_fence(line):
             fenced = not fenced
     for block in blocks:
         for key in block:
             block[key] = block[key].strip()
-    return blocks, skipped
-
-
-def parse_fields(text, labels, first="ID"):
-    """Labelled-line blocks: a `<first>:` line starts a block; a later labelled line
-    starts the next field; any other line (blank lines and fenced code included)
-    continues the current field. A fence directly before a `<first>:` line wraps the
-    blocks up to the next bare fence outside nested code; neither fence is read.
-    Returns a list of {label: value} dicts."""
-    return _scan_fields(text, labels, first)[0]
+    return blocks
 
 
 def unparsed_ids(text):
-    """Number of `ID:` lines of a lane report's Findings section that parse_findings
-    cannot read: those inside a code fence that does not wrap whole blocks."""
-    return _scan_fields(split_sections(text).get("Findings", ""), FINDING_LABELS, "ID")[
-        1
-    ]
+    """Number of `ID:` lines of a lane report's Findings section that parse_findings does
+    not read as a finding: marked up (bullet, quote, bold, inline code) or inside a code
+    fence that does not wrap whole blocks."""
+    findings = split_sections(text).get("Findings", "")
+    seen = sum(1 for line in findings.splitlines() if ID_LINE.match(line))
+    return seen - len(parse_findings(text))
 
 
 def split_sections(text):
@@ -206,24 +209,29 @@ def parse_findings(text):
     ]
 
 
+SEPARATOR_CELL = re.compile(r":?-+:?")
+
+
 def coverage_rows(text):
-    """(path, read depth cell, tests) per table row of a lane report's Coverage section;
-    the header and separator rows come back too, with their text as the depth cell."""
-    rows = []
+    """(path, read depth cell, tests) per data row of a lane report's Coverage section;
+    a table's header and separator rows are dropped."""
+    rows, after_row = [], False
     for line in split_sections(text).get("Coverage", "").splitlines():
         cells = [
             c.strip().strip("`")
             for c in re.sub(r"^\s*(?:[-*]\s+)?\|?", "", line).rstrip("|").split("|")
         ]
-        if len(cells) >= 2:
-            rows.append((cells[0], cells[1], " | ".join(cells[2:]).strip() or "-"))
+        if len(cells) < 2:
+            after_row = False
+            continue
+        if all(SEPARATOR_CELL.fullmatch(c) for c in cells):
+            if after_row:
+                rows.pop()
+            after_row = False
+            continue
+        rows.append((cells[0], cells[1], " | ".join(cells[2:]).strip() or "-"))
+        after_row = True
     return rows
-
-
-def parse_coverage(text):
-    """(path, read depth, tests) rows of a lane report's Coverage section; rows whose
-    depth is not a read depth (the header, the separator) are skipped."""
-    return [r for r in coverage_rows(text) if r[1] in READ_DEPTHS]
 
 
 M_LINE = re.compile(

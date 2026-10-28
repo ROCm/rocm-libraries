@@ -112,8 +112,10 @@ def cmd_draft(a):
     PIN.md's BASE and HEAD; otherwise (line outside every hunk, `$BASE:` removed content,
     another anchor form) it is a `## General` item with one `path:line` anchor. A `$HEAD:`
     prefix is dropped before the anchor match. OPEN SUGGESTION and FUTURE WORK findings are
-    one General item per tier and kind. Pasted text loses fenced code, provisional IDs, lane
-    reports, `$EVIDENCE` paths and `$HEAD:`/`$BASE:` prefixes."""
+    one General item each, with the same anchor, below a `**<tier>: <kind>**` line per tier
+    and kind (`###` stays reserved for inline entries). Pasted text loses fenced code,
+    provisional IDs, lane reports, `$EVIDENCE`
+    paths and `$HEAD:`/`$BASE:` prefixes."""
     rp = rl.round_dir(a.evidence, a.round)
     if not (rp / "ID-MAP.md").is_file():
         raise rl.Fail(f"missing {rp / 'ID-MAP.md'}; run ledger.py ids")
@@ -125,7 +127,7 @@ def cmd_draft(a):
     )
     blocks = finding_blocks(a.evidence)
     ranges = {}
-    inline, general, themes = [], [], {}
+    inline, general, groups = [], [], {}
     for row in rl.find_table(tables, "Findings").rows:
         fid, tier = row["ID"], rl.tier_pair(row["Tier"])[1]
         if row["Status"] != "OPEN" and not (
@@ -144,6 +146,8 @@ def cmd_draft(a):
             anchor = f"{removed.group(1)}:{removed.group(2)} (removed)"
         else:
             anchor = re.split(r"[,;]\s*", strip_fences(where))[0]
+        fix = strip_fences(block.get("Fix", ""))
+        fix_text = f" Fix: {fix}" if fix else ""
         if tier in rl.TIERS[:2]:
             inside = False
             if m:
@@ -153,7 +157,6 @@ def cmd_draft(a):
                         pins["CLONE"], pins["BASE"], pins["HEAD"], path
                     )
                 inside = any(lo <= line <= hi for lo, hi in ranges[path])
-            fix = strip_fences(block.get("Fix", ""))
             if inside:
                 narrowed = row["Verdict"] == "PARTIAL" or "Actual" not in block
                 body = [
@@ -175,25 +178,24 @@ def cmd_draft(a):
             else:
                 general.append(
                     f"- {anchor or fid} ({fid}, {tier}; not in a changed hunk){note}: {claim}"
-                    + (f" Fix: {fix}" if fix else "")
+                    + fix_text
                 )
         else:
-            themes.setdefault((tier, row["Kind"]), []).append(
-                f"{claim} (`{strip_fences(where)}`, {fid})"
+            groups.setdefault((tier, row["Kind"]), []).append(
+                f"- {anchor or fid} ({fid}): {claim}{fix_text}"
             )
     out = ["# Draft comments (nothing posted)", ""]
     for entry in sorted(inline, key=lambda e: e[:3]):
         out += [entry[3], ""]
     out += ["## General", ""] + general
-    out += [
-        f"- **{tier} {kind}**: " + "; ".join(items)
-        for (tier, kind), items in sorted(
-            themes.items(), key=lambda kv: (rl.TIERS.index(kv[0][0]), kv[0][1])
-        )
-    ]
+    for (tier, kind), items in sorted(
+        groups.items(), key=lambda kv: (rl.TIERS.index(kv[0][0]), kv[0][1])
+    ):
+        out += ([""] if out[-1] else []) + [f"**{tier}: {kind}**", ""] + items
     rl.write(rp / "COMMENTS.md", "\n".join(out) + "\n")
     print(
-        f"comments: {len(inline)} inline, {len(general)} general findings, {len(themes)} themes"
+        f"comments: {len(inline)} inline, {len(general)} general findings, "
+        f"{sum(map(len, groups.values()))} lower-tier findings"
     )
 
 

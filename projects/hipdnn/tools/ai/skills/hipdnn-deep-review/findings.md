@@ -16,11 +16,14 @@ Proof:     what was run or read: command, exit code, log as $EVIDENCE/<relative 
 Fix:       smallest change that resolves it, or the decision a human must make
 ```
 
-Write the block as plain lines, never inside a code fence. `Actual` and `Fix` are written for the PR author, who posts them
+Write the block as plain lines, never inside a code fence; each label starts its line (no
+bullet, bold or quote). A markdown heading or a `---` line ends a field: write notes under
+**Checked, no finding** or **Handoffs**, never below a block. `Actual` and `Fix` are written for the PR author, who posts them
 nearly verbatim: no first person, no lane IDs and no `$VAR`s (`path:line` anchors, quoted code and final IDs are fine).
 
 `<LANE>` is the lane's name (`VER` for a verifier). `<n>` counts from 1 within the report; a
-follow-up report continues after the lane's last `p<n>`. Read each anchor from `$HEAD`
+follow-up report continues after the lane's last `p<n>` with the lane's own prefix (`AUTH-p3`,
+never `AUTH-f1-p1`). Read each anchor from `$HEAD`
 (`$REPO`, or `git -C "$CLONE" show` outside the sparse set), not from a diff hunk or an
 earlier head. Mark anything not observed directly `[INFERENCE]`. Never write absolute local
 paths: cite `$EVIDENCE/...`, `$SCRATCH/...` or repository-relative paths.
@@ -35,7 +38,7 @@ contradiction and the policy rule it relies on.
 | Kind | Confirmed when | `REFUTED` when | `UNVERIFIED` when |
 |---|---|---|---|
 | defect | A reproduction fails at `$HEAD` for the stated reason, and passes or is absent at `$BASE` if the finding says the PR introduced it | It passes at `$HEAD`, or fails for another reason | It cannot run here (device, declined approval, dependency, no build) |
-| test-gap | A plausible, non-equivalent mutation in the claimed behavior survives the named tests, which pass unmutated | The mutation is killed | The tests cannot run, or only skip |
+| test-gap | A plausible, non-equivalent mutation in the claimed behavior survives the named tests, which pass unmutated; or, when no configuration that builds the claimed code links it into the named tests' binary, that link-graph evidence plus the absence of any registered test that exercises the path (no mutant runs) | The mutation is killed | The tests cannot run, or only skip |
 | source-claim | Every cited `path:line` supports it and no other location contradicts it | A cited or uncited location contradicts it | - |
 | process | The PR text, CI run or label the rule needs is absent or contradicts the claim; for skill or brief text, the cited text lacks or contradicts the requirement | The artifact exists and supports the claim, or the cited text states the requirement | The artifact is not readable |
 
@@ -65,7 +68,7 @@ sections. The first line is `# <LANE> (round <N>, <$HEAD_SHORT>)`. Sections, in 
 
 1. **Findings** in the format above (may be empty; **Checked, no finding** is then the
    content).
-2. **Coverage:** one row per examined file: path, read depth (`full`, `diff-only`,
+2. **Coverage:** one row per examined file: repository-relative path (a changed file exactly as in `files.txt`; no braces or globs), read depth (`full`, `diff-only`,
    `sampled`; nothing else in that cell), tests that reach it. `RUN` adds two literal non-file lines, and no other lane does: `Flag: <NAME>=<value> (<configure
    line or preset>)` for each option enabled, and `Build: none (<missing>)` when nothing built. Ledger and Coverage parsing ignore
    them (a row counts only when its second cell is a read depth); keep them free of `|`.

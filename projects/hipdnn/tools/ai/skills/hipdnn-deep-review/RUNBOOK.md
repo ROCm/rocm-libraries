@@ -102,15 +102,9 @@ none; a scout that fails twice leaves its area without a file and `CONTEXT.md` s
 all have returned, dispatch `SYNTH`.
 
 **Gate:** every area whose scout did not fail twice has `orient/<slug>.md` whose `Describes` sha is `$BASE`,
-`CONTEXT.md` exists, and every repository path they cite exists at `$BASE`; this prints
-nothing then:
-
-```bash
-. <evidence dir>/r<N>/env.sh; : "${BASE:?}"
-cat CONTEXT.md orient/*.md | "$GREP" -oE '`[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+(:[0-9]+)?`' |
-  tr -d '`' | sed 's/:[0-9]*$//' | sort -u |
-  while read -r p; do git -C "$CLONE" cat-file -e "$BASE:$p" 2>/dev/null || echo "not at base: $p"; done
-```
+`CONTEXT.md` exists, and `partition.py orient-gate` exits 0: every repository path they cite in
+backticks exists at `$BASE` or is a `files.txt` path absent at `$BASE` (a file the change adds);
+it prints `not at base: <path>` for any other.
 
 Fix each `not at base` citation by hand or re-dispatch the scout. Then publish `CONTEXT.md`
 and `orient/*.md` to `$KNOWLEDGE/<KEY>-r<N>/` (the store's own conventions win), replacing
@@ -208,9 +202,10 @@ Builds:    every scratch configure (RUN, ROCK, VER) passes -DENABLE_CLANG_TIDY=O
 Agents:    <maximum concurrent agents>
 Cores:     <CPU cores for builds and tests>
 Mutation:  <host-provided recipe or wrapper command for mutating a built tree> | none
+Scope:     <user's scope notes, e.g. areas being deprecated; "do not file findings in <area>"> | none
 ```
 
-`Agents:`, `Cores:` and `Mutation:` are inputs from the user or the host; the skill assumes no values. Dispatch each lane, scout, verifier and the
+`Agents:`, `Cores:`, `Mutation:` and `Scope:` are inputs from the user or the host; the skill assumes no values. Dispatch each lane, scout, verifier and the
 writer as its own fresh agent with shell and write access; fill this template as its first
 message. Agents see only their dispatch: each begins by reading `dispatch-context.md`.
 
@@ -221,7 +216,7 @@ split `Cores:` between them while they overlap, `RUN` taking the larger share.
 
 ```markdown
 Role:      <LANE> | SCOUT<k> | SYNTH | VER-<batch> | WRITER; round <N>; follow-up f<k> if any
-Context:   read $EVIDENCE/r<N>/dispatch-context.md first (Env, Approved, Builds, Agents, Cores, Mutation)
+Context:   read $EVIDENCE/r<N>/dispatch-context.md first (Env, Approved, Builds, Agents, Cores, Mutation, Scope)
 Read:      lanes, verifiers: $SKILL/lanes/common.md, findings.md, policy.md, then <brief path>.
            Scouts, SYNTH: lanes/common.md, lanes/orient.md. WRITER: report.md *REPORT.md*, policy.md
 Inputs:    under $EVIDENCE/r<N>/: PIN.md; pr/body.md or intent.md; CONTEXT.md and the area
@@ -233,7 +228,8 @@ Inputs:    under $EVIDENCE/r<N>/: PIN.md; pr/body.md or intent.md; CONTEXT.md an
            ROCK not-run items). `RUN`, `ROCK`, `AUTH`: the **Options and guards** and
            **Consumers** sections of `CONTEXT.md` and the area files. Follow-up: the lane report
            path plus the approved request, decision or Handoff.
-Output:    <exact file>; scratch $SCRATCH/<ID>/; first provisional ID p<n>
+Output:    <exact file>; scratch $SCRATCH/<ID>/; first provisional ID <LANE>-p<n> (a follow-up
+           continues its lane's numbering: <LANE>-p<n>, never <LANE>-f<k>-p<n>)
 Overrides: anything that differs from dispatch-context.md for this agent (a narrower
            Approved command, its share of Cores) | none
 Return:    at most 10 lines: IDs, tiers, one-line claims, STOP or approval requests.
@@ -268,7 +264,8 @@ findings are `UNVERIFIED`.
 *Lane report*), `N/A` or `STOP:`, or is `FAILED`; `ledger.py coverage "$EVIDENCE" <N>` (it
 copies each lane's read depth and tests into this round's Coverage rows) prints no `pending:`
 row except one carried forward (edit it to `carried from r<M>` by hand) or owned by a `FAILED`
-lane. Re-dispatch a non-conforming report once, naming the rule.
+lane. An `ignored:` line names an owner lane's row that matched no changed file (a short path
+or a grouped row) and why. Re-dispatch a non-conforming report once, naming the rule.
 
 ## Merge and verify
 
@@ -282,9 +279,12 @@ lane. Re-dispatch a non-conforming report once, naming the rule.
 2. `ledger.py ids "$EVIDENCE" <N>` assigns final `<LANE>-<n>` IDs (all `CORR<k>` share
    `CORR-<n>`), writes `ID-MAP.md` ([report.md](report.md) *Final IDs*) and adds a candidate
    row per finding; re-running keeps assigned IDs; it exits 1 when a report sits below a nested `r<k>/`
-   directory or holds `ID:` lines it cannot parse. Cluster findings with the same location and
-   claim, and those a verifier reported as `ORCH: cluster <ID> with <ID>` under **Handoffs**: keep one, put its ID in the `SUPERSEDED-BY` cell of each other row of `ID-MAP.md`,
-   and run `ids` again, which sets their status `SUPERSEDED-BY:<ID>`. `ledger.py coverage`
+   directory, holds `ID:` lines it cannot parse or a provisional ID not of the form `<LANE>-p<n>`.
+   Cluster findings with the same location and claim, and those a verifier reported as
+   `ORCH: cluster <ID> with <ID>` under **Handoffs**: `ledger.py cluster "$EVIDENCE" <N> <kept ID>
+   <duplicate ID>...` sets each duplicate's `SUPERSEDED-BY` cell in `ID-MAP.md`, repoints cells
+   and statuses that pointed at a duplicate, refuses a kept ID that is itself superseded, and
+   reruns `ids`, which sets their status `SUPERSEDED-BY:<ID>`. `ledger.py coverage`
    re-copies read depth and tests after a follow-up.
 3. Route **Handoffs** to a follow-up dispatch of the target lane or into the ledger as a
    candidate. A `SCOUT` handoff corrects an Orient file: edit a line in `orient/<slug>.md`

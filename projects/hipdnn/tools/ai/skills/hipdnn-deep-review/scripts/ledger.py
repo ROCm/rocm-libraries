@@ -5,6 +5,7 @@
 
 Usage: ledger.py <seed|ids|coverage|verdicts|mlines|counts> <evidence dir> <round>
        ledger.py seed <evidence dir> <round> [--lane NAME=<status text>]...
+       ledger.py cluster <evidence dir> <round> <kept ID> <duplicate ID>...
        ledger.py set <evidence dir> <round> <ID> <FIXED@sha|ACCEPTED-RISK|OPEN> [--class C] [--note TEXT]
 
 Each subcommand reads `<evidence>/r<round>/` and `<evidence>/LEDGER.md` and exits 1 with a
@@ -172,8 +173,9 @@ def cmd_ids(a):
     to the provisional IDs in lanes/*.md and verify/VER<batch>.md, continuing each prefix's
     counter in LEDGER.md; write ID-MAP.md; add a candidate row per new finding. IDs already
     in an existing ID-MAP.md keep their value; a SUPERSEDED-BY entry there sets the row's
-    status. Fails when a report is nested below `r<k>/`, holds `ID:` lines it cannot parse or
-    reports a finding whose Tier is missing or not one of the four tiers.
+    status. Fails when a report is nested below `r<k>/`, holds `ID:` lines it cannot parse,
+    reports a provisional ID not of the form `<LANE>-p<n>` (`<LANE>` is capitals and an
+    optional number) or a finding whose Tier is missing or not one of the four tiers.
     """
     rp = rl.round_dir(a.evidence, a.round)
     require_flat(rp)
@@ -210,14 +212,20 @@ def cmd_ids(a):
                     f"{path.name}: {prov}: Tier '{f.get('Tier', '')}' is not one of "
                     + ", ".join(rl.TIERS)
                 )
-            m = re.fullmatch(r"(.+)-p(\d+)", prov)
+            m = re.fullmatch(r"([A-Z]+\d*)-p(\d+)", prov)
             if not m:
-                raise rl.Fail(f"{path.name}: bad provisional ID {prov}")
+                raise rl.Fail(
+                    f"{path.name}: bad provisional ID {prov}: write <LANE>-p<n>; a "
+                    "follow-up continues its lane's p<n>, never <LANE>-f<k>-p<n>"
+                )
             if prov in reported:
                 raise rl.Fail(f"provisional ID {prov} reported twice")
             reported[prov] = (path.stem, f, re.sub(r"\d+$", "", m.group(1)))
     if unparsed:
-        raise rl.Fail(f"unparsed ID: lines in {', '.join(unparsed)}")
+        raise rl.Fail(
+            f"unparsed ID: lines in {', '.join(unparsed)}: write each finding as plain "
+            "labelled lines starting at column 0 (no bullet, bold or partial fence)"
+        )
     for prov, (stem, f, prefix) in sorted(reported.items(), key=lambda kv: kv[1][0]):
         if prov not in mapping:
             counters[prefix] = counters.get(prefix, 0) + 1
@@ -262,11 +270,53 @@ def cmd_ids(a):
     print(f"ids: {len(mapping)} mapped, {added} rows added")
 
 
+def cmd_cluster(a):
+    """Supersede duplicate findings of this round by one kept finding: set each duplicate's
+    SUPERSEDED-BY cell in ID-MAP.md to the kept ID, repoint ID-MAP cells and ledger statuses
+    that point at a duplicate, then run `ids` to apply them. Fails when a duplicate is not a
+    final ID of this round's ID-MAP.md, the kept ID is unknown, itself superseded or among
+    the duplicates."""
+    rp = rl.round_dir(a.evidence, a.round)
+    map_path = rp / "ID-MAP.md"
+    if not map_path.is_file():
+        raise rl.Fail(f"missing {map_path}; run ledger.py ids")
+    idmap = rl.parse_tables(map_path.read_text(encoding="utf-8"), "ID-MAP.md")[0]
+    by_final = {r["Final ID"]: r for r in idmap.rows}
+    tables = load_ledger(a.evidence)
+    findings = rl.find_table(tables, "Findings").rows
+    status = {r["ID"]: r["Status"] for r in findings}
+    dups = set(a.dups)
+    if a.keep in dups:
+        raise rl.Fail(f"{a.keep} is both kept and a duplicate")
+    if a.keep not in by_final and a.keep not in status:
+        raise rl.Fail(f"unknown ID {a.keep}")
+    if by_final.get(a.keep, {}).get("SUPERSEDED-BY") or status.get(
+        a.keep, ""
+    ).startswith("SUPERSEDED-BY"):
+        raise rl.Fail(f"{a.keep} is itself superseded; keep the finding it points at")
+    unknown = sorted(dups - by_final.keys())
+    if unknown:
+        raise rl.Fail(f"not a final ID of r{a.round}/ID-MAP.md: {', '.join(unknown)}")
+    for r in idmap.rows:
+        if r["Final ID"] in dups or r["SUPERSEDED-BY"] in dups:
+            r["SUPERSEDED-BY"] = a.keep
+    pointers = {f"SUPERSEDED-BY:{d}" for d in dups}
+    for r in findings:
+        if r["Status"] in pointers:
+            r["Status"] = f"SUPERSEDED-BY:{a.keep}"
+    rl.write(map_path, rl.render_tables([idmap]))
+    save_ledger(a.evidence, tables)
+    print(f"cluster: {', '.join(sorted(dups))} superseded by {a.keep}")
+    cmd_ids(a)
+
+
 def cmd_coverage(a):
     """Copy each owner lane's read depth and tests (lane report Coverage rows) into this
-    round's Coverage rows. Reports paths still `pending`; paths a lane lists that are not
-    changed files are ignored. Fails when a report is nested below `r<k>/` or an owner
-    lane's row for a changed file has a depth other than full, diff-only or sampled."""
+    round's Coverage rows. Reports paths still `pending`, and an `ignored:` line with the
+    reason for an owner lane's row that names a pending file by a path suffix or groups
+    files with braces or globs; other paths a lane lists that are not changed files are
+    ignored silently. Fails when a report is nested below `r<k>/` or an owner lane's row
+    for a changed file has a depth other than full, diff-only or sampled."""
     rp = rl.round_dir(a.evidence, a.round)
     require_flat(rp)
     tables = load_ledger(a.evidence)
@@ -274,14 +324,17 @@ def cmd_coverage(a):
     rows = {r["File"]: r for r in cov.rows}
     reports = read_reports(rp)
     own_reports = {stem for stem, _ in reports}
-    updated, bad = 0, []
+    owners = {r["Owner lane"] for r in cov.rows}
+    updated, bad, unmatched = 0, [], []
     for stem, text in reports:
         lane = re.sub(r"-f\d+$", "", stem)
         for path, depth, tests in rl.coverage_rows(text):
             row = rows.get(path)
-            if not row or not (
-                row["Owner lane"] == lane or row["Owner lane"] not in own_reports
-            ):
+            if not row:
+                if lane in owners:
+                    unmatched.append((stem, path))
+                continue
+            if not (row["Owner lane"] == lane or row["Owner lane"] not in own_reports):
                 continue
             if depth not in rl.READ_DEPTHS:
                 bad.append(f"{stem}: {path}: read depth '{depth}'")
@@ -293,6 +346,13 @@ def cmd_coverage(a):
     print(f"coverage: {updated} rows copied, {len(pending)} pending")
     for path in pending:
         print(f"pending: {path}")
+    for stem, cell in unmatched:
+        if re.search(r"[{}*?]", cell):
+            print(f"ignored: {stem}: {cell} (one row per file: no braces or globs)")
+            continue
+        hits = [p for p in pending if p.endswith("/" + cell)]
+        if len(hits) == 1:
+            print(f"ignored: {stem}: {cell} (did you mean {hits[0]}?)")
     for reason in bad:
         print(f"non-conforming: {reason}")
     if bad:
@@ -521,6 +581,7 @@ def main(argv=None):
     for name, fn in (
         ("seed", cmd_seed),
         ("ids", cmd_ids),
+        ("cluster", cmd_cluster),
         ("coverage", cmd_coverage),
         ("verdicts", cmd_verdicts),
         ("mlines", cmd_mlines),
@@ -537,6 +598,9 @@ def main(argv=None):
             s.add_argument("status")
             s.add_argument("--class", dest="evidence_class")
             s.add_argument("--note", default="")
+        if name == "cluster":
+            s.add_argument("keep")
+            s.add_argument("dups", nargs="+", metavar="dup")
         s.set_defaults(fn=fn)
     args = p.parse_args(argv)
     try:

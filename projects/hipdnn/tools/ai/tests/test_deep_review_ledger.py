@@ -639,3 +639,63 @@ def test_gates_fail_on_a_report_below_a_nested_round_directory(ledger, ev, sub, 
     (nested / "CORR1.md").write_text(report("CORR1"))
     assert run(ledger, sub, ev) == 1
     assert "r1/r1/lanes/CORR1.md" in capsys.readouterr().err.replace("\\", "/")
+
+
+@pytest.mark.parametrize("markup", ["**ID:**", "- ID:", "> ID:", "`ID:`"])
+def test_ids_fails_on_a_marked_up_id_line(ledger, ev, markup, capsys):
+    seeded(ledger, ev)
+    block = finding("CORR1-p1").replace("ID:", markup, 1)
+    with_reports(ledger, ev, CORR1=report("CORR1", [block, finding("CORR1-p2")]))
+    assert run(ledger, "ids", ev) == 1
+    assert "unparsed ID: lines in CORR1.md" in capsys.readouterr().err
+
+
+def test_ids_rejects_a_follow_up_prefix_in_a_provisional_id(ledger, rl, ev, capsys):
+    seeded(ledger, ev)
+    with_reports(ledger, ev, TESTQ_f1=report("TESTQ", [finding("TESTQ-f1-p1")]))
+    assert run(ledger, "ids", ev) == 1
+    assert "bad provisional ID TESTQ-f1-p1" in capsys.readouterr().err
+    with_reports(ledger, ev, TESTQ_f1=report("TESTQ", [finding("TESTQ-p1")]))
+    assert run(ledger, "ids", ev) == 0
+    assert [r["ID"] for r in table(rl, ev, "Findings").rows] == ["TESTQ-1"]
+
+
+@pytest.mark.parametrize("end", ["### Lane notes", "---"])
+def test_prose_after_a_heading_or_rule_stays_out_of_the_last_field(rl, end):
+    text = report("CORR1", [finding("CORR1-p1") + f"\n{end}\nAlso looked at c.cpp.\n"])
+    assert rl.parse_findings(text)[0]["Fix"] == "clamp it"
+
+
+def test_coverage_names_a_short_path_or_grouped_owner_row(ledger, ev, capsys):
+    (ev / "r1" / "owners.tsv").write_text("CORR1\tsrc/a.cpp\nCORR1\tsrc/b.cpp\n")
+    (ev / "r1" / "numstat.txt").write_text("3\t2\tsrc/a.cpp\n1\t0\tsrc/b.cpp\n")
+    seeded(ledger, ev)
+    rows = [
+        ("a.cpp", "full", "-"),
+        ("src/{b,c}.cpp", "full", "-"),
+        ("x.h", "full", "-"),
+    ]
+    with_reports(ledger, ev, CORR1=report("CORR1", coverage=rows))
+    assert run(ledger, "coverage", ev) == 0
+    out = capsys.readouterr().out
+    assert "ignored: CORR1: a.cpp (did you mean src/a.cpp?)" in out
+    assert "ignored: CORR1: src/{b,c}.cpp (one row per file" in out
+    assert "x.h" not in out
+
+
+def test_cluster_supersedes_repoints_chains_and_refuses_a_superseded_keep(
+    ledger, rl, ev, capsys
+):
+    make_candidates(ledger, ev, "IMPORTANT", "IMPORTANT", "IMPORTANT")
+    assert run(ledger, "cluster", ev, 1, "CORR-1", "CORR-2") == 0
+    assert run(ledger, "cluster", ev, 1, "CORR-3", "CORR-1") == 0
+    status = {r["ID"]: r["Status"] for r in table(rl, ev, "Findings").rows}
+    assert status == {
+        "CORR-1": "SUPERSEDED-BY:CORR-3",
+        "CORR-2": "SUPERSEDED-BY:CORR-3",
+        "CORR-3": "",
+    }
+    capsys.readouterr()
+    assert run(ledger, "cluster", ev, 1, "CORR-2", "CORR-3") == 1
+    assert "CORR-2 is itself superseded" in capsys.readouterr().err
+    assert run(ledger, "cluster", ev, 1, "CORR-3", "CORR-9") == 1
