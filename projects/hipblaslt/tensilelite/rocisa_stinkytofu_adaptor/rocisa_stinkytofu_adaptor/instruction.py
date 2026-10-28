@@ -4681,7 +4681,32 @@ class LocalReadInstruction(ReadWriteInstruction):
 
 
 class DSLoadInstruction(LocalReadInstruction):
+    """rocisa ``DSLoadInstruction`` text (``mem.hpp`` ``preStr`` / ``toString``).
+
+    ISA major below 11 spells ``ds_read_*``; gfx11 and later keep ``ds_load_*``.
+    An unset kernel ISA matches native ``IsaVersion{}`` (0, 0, 0). The DS
+    modifier carries the LDS ``offset:``.
+    """
+
     __slots__ = ()
+
+    def preStr(self) -> str:
+        from .base import getKernel
+        isa = getKernel().isa
+        major = int(isa[0]) if isa else 0
+        text = self.instStr
+        if major < 11:
+            pos = text.find("load")
+            if pos != -1:
+                text = text[:pos] + "read" + text[pos + 4:]
+        return text
+
+    def toString(self) -> str:
+        kstr = self.preStr() + " " + self.getArgStr()
+        ds = getattr(self, "ds", None)
+        if ds is not None and hasattr(ds, "toString"):
+            kstr += ds.toString()
+        return self.formatWithComment(kstr)
 
 
 class LocalWriteInstruction(ReadWriteInstruction):

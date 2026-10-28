@@ -57,6 +57,7 @@ if _PKG_PARENT not in sys.path:
 from rocisa_stinkytofu_adaptor import base as _base  # noqa: E402
 from rocisa_stinkytofu_adaptor.code import Module  # noqa: E402
 from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
+    DSModifiers,
     GLOBALModifiers,
     MUBUFModifiers,
     EXEC,
@@ -2660,6 +2661,25 @@ class TestDSLoadInstructions(AdaptorTestCase):
             with self.subTest(cls=cls.__name__):
                 inst = cls(dst=vgpr(0), src=vgpr(1), comment="dsld")
                 self.assertIn(mnemonic, str(inst))
+
+    def test_isa_selects_read_mnemonic_and_prints_offset(self):
+        """gfx9 spells ds_read_*; gfx11+ keeps ds_load_*. Offset comes from DSModifiers.
+
+        An unset kernel ISA matches native IsaVersion{} (0, 0, 0), which is
+        what the tensilelite unit tests see.
+        """
+        inst = DSLoadB128(
+            dst=vgpr(100, 4), src=vgpr(200),
+            ds=DSModifiers(offset=64), comment="c")
+        self.assertIn("ds_load_b128 v[100:103], v200 offset:64", str(inst))
+
+        # preStr only reads KernelInfo.isa. Rendering the registers would
+        # query hardware caps, and this stinkytofu build only has gfx1250.
+        _base.setKernelInfo(_base.KernelInfo(isa=(9, 0, 0), wavefrontSize=64))
+        self.assertEqual(inst.preStr(), "ds_read_b128")
+
+        _base.setKernelInfo(_base.KernelInfo())
+        self.assertEqual(inst.preStr(), "ds_read_b128")
 
     def test_deepcopy(self):
         for cls, _ in _DS_LOAD:
