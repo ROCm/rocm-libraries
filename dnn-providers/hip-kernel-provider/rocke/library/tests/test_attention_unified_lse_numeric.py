@@ -750,7 +750,7 @@ def test_tiled_2d_lse_one_query_head_per_kv_head(dtype, q_lens, kv_lens):
 @pytest.mark.parametrize("backend", ["auto", "tiled"])
 def test_tiled_2d_lse_with_sliding_window(backend, window, dtype):
     """D128 sliding window: on gfx942 the LSE-off route is the 4-warp GQA body,
-    so this is where D6's fallback to the default builder is exercised. Seq 0
+    so this is where the LSE-on fallback to the default builder is exercised. Seq 0
     (256 queries over 5000 keys) is cut by both windows; seq 1 (64/64) only by 64."""
     q_lens, kv_lens = [256, 64], [5000, 64]
     problem, q, kc, vc, cu, su, bt = _case2d(

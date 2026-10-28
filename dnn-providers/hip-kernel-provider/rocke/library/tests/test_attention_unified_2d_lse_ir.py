@@ -176,9 +176,18 @@ def test_2d_lse_off_ir_is_byte_identical_to_pre_change(arch, branch):
     assert "lse_ptr" not in off_ir
     assert _lse_store_count(off_ir) == 0
     flavor = _resolve_llvm_flavor()
-    assert flavor in _OFF_SHA256, f"record the LSE-off hashes for LLVM flavor {flavor}"
-    pinned = _OFF_SHA256[flavor][arch][branch]
-    assert hashlib.sha256(off_ir.encode()).hexdigest() == pinned
+    digest = hashlib.sha256(off_ir.encode()).hexdigest()
+    # A snapshot, not a regenerable golden: emit_lse must never change LSE-off
+    # IR. Re-record only when the base kernel changes on purpose: re-bless the
+    # IR golden (platform/tests/instances/rocke_ir_parity_harness.py --write)
+    # in the same commit and paste the hash printed here.
+    assert flavor in _OFF_SHA256, (
+        f"no LSE-off hashes for LLVM flavor {flavor}; this build gives "
+        f"{arch}/{branch} {digest}"
+    )
+    assert (
+        digest == _OFF_SHA256[flavor][arch][branch]
+    ), f"LSE-off IR changed for {arch}/{branch} at {flavor}: {digest}"
 
 
 @pytest.mark.parametrize("arch,branch", _CASES)
