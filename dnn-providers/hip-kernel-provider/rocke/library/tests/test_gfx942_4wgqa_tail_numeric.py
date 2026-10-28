@@ -2,16 +2,16 @@
 # SPDX-License-Identifier: MIT
 """On-GPU guardrail: the gfx942 4-warp GQA kernel must not read outside a sequence's Q and K/V.
 
-Q: each CTA covers a fixed 128-row (fold: 32-token) query tile, so the last partial q-block spans
-rows beyond the sequence. Those rows are never stored, but their Q loads have to stay in bounds.
+Q: each CTA covers a fixed query tile, so the last partial q-block spans rows beyond the sequence. Those rows are never stored, but their Q loads have to stay in bounds.
 An over-read only faults when it leaves Q's allocation and the pages behind it are unmapped.
 That is only reliable if Q's allocation is the first one of a fresh process and ends exactly at
 its segment's end, so each case runs in its own spawned process (all of them at once).
 
 K/V: the last KV tile spans keys past the sequence. They are masked to P = 0, but 0 * NaN is NaN,
 so their K/V has to come from the sequence's own blocks. The K/V cases surround each sequence
-with hostile data: NaN in the cache slots after its last key, and a block table padded with a
-NaN block or with a block id far outside the cache.
+with hostile data: NaN in the cache slots after its last key, and block-table entries past its
+own blocks (in every row, also of shorter sequences) that point to a NaN block or to a block id
+far outside the cache.
 """
 
 from __future__ import annotations
@@ -19,6 +19,8 @@ from __future__ import annotations
 import concurrent.futures as cf
 import math
 import multiprocessing as mp
+import os
+import time
 
 import pytest
 
@@ -30,6 +32,8 @@ requires_gfx942_gpu = requires_gpu("gfx942")
 TOL = 4e-2  # repo-wide bf16 attention gate
 FOUR_WARP_SPEC_ID = "gfx942_u2d_gfx942_4warp_nw1_mw32_t64_llvm"
 FAR_BLOCK = 100_000  # outside any cache here, but within i32 element addressing
+# The cases take seconds; an out-of-bounds read can hang a worker instead of faulting.
+RESULTS_TIMEOUT_S = 300
 
 
 def _tail_buffer(numel, dtype):
@@ -72,17 +76,18 @@ def _poison(k, v, table, kv_lens, bs, mode):
                 k[blk, kl % bs :] = float("nan")
                 v[blk, kl % bs :] = float("nan")
     pad = spare if mode == "nan" else FAR_BLOCK
+    table = table.clone()
+    for i, kl in enumerate(kv_lens):
+        table[i, (kl + bs - 1) // bs :] = pad
     extra = torch.full((table.shape[0], 8), pad, dtype=table.dtype, device=table.device)
     return torch.cat([table, extra], 1).contiguous()
 
 
 def _prefill(case):
-    """Prefill through default dispatch (D256 causal, D128 sliding window)."""
+    """Prefill through default dispatch; the cases' shapes route to the 4-warp kernel."""
     import torch
 
     H = _load_windowed_harness()
-    if H is None:
-        return "skip"
     s = H.Scenario(
         name=case["id"],
         seq_lens=[tuple(x) for x in case["seq_lens"]],
@@ -183,9 +188,9 @@ def _prefill_case(id, seq_lens, d, bs, window, kv_poison=None):
     )
 
 
-# Q-tail cases are chunked prefill (Sq < Skv) with Skv a multiple of both KV tile widths (32 and
-# 64), so only the q-block is partial. K/V-tail cases use 232 keys: not a multiple of the block
-# size or of either tile width.
+# Q-tail cases are chunked prefill (Sq < Skv) with Skv a multiple of the kernel's KV tile widths,
+# so only the q-block is partial. K/V-tail cases use 232 keys: not a multiple of the block size
+# or of a tile width.
 PREFILL = [
     _prefill_case("d256_causal_q_tail", [(240, 512)], 256, 16, None),
     _prefill_case("d128_swa_fold_q_tail", [(240, 512)], 128, 16, 64),
@@ -210,27 +215,70 @@ DECODE = [
 ]
 
 
+def _without_expandable_segments(conf):
+    # The Q cases need Q's allocation to end at its segment's end; expandable segments map more
+    # memory behind it, and the over-read would no longer fault.
+    keep = [
+        o
+        for o in (conf or "").split(",")
+        if o and not o.startswith("expandable_segments")
+    ]
+    return ",".join(keep + ["expandable_segments:False"])
+
+
 @pytest.fixture(scope="module")
-def results():
-    """Start every case in its own fresh process up front; the tests collect the results."""
+def results(request):
+    """Start each selected case in its own fresh process up front; the tests collect the results."""
+    worker = {
+        "test_prefill_tail_reads_in_bounds": _prefill,
+        "test_pinned_4warp_decode_tail_reads_in_bounds": _pinned_decode,
+    }
+    selected = [
+        (worker[item.originalname], item.callspec.params["case"])
+        for item in request.session.items
+        if item.module is request.module and item.originalname in worker
+    ]
+    if _load_windowed_harness() is None:
+        selected = [(fn, case) for fn, case in selected if fn is not _prefill]
+    env_names = ("PYTORCH_HIP_ALLOC_CONF", "PYTORCH_CUDA_ALLOC_CONF")
+    saved = {name: os.environ.get(name) for name in env_names}
+    # submit() below starts each spawned worker, which takes the environment set here.
+    for name in env_names:
+        os.environ[name] = _without_expandable_segments(saved[name])
     ctx = mp.get_context("spawn")  # fork after the parent touched the GPU is unsafe
     pools, futures = [], {}
-    for fn, cases in ((_prefill, PREFILL), (_pinned_decode, DECODE)):
-        for case in cases:
+    try:
+        for fn, case in selected:
             pool = cf.ProcessPoolExecutor(max_workers=1, mp_context=ctx)
             pools.append(pool)
             futures[(fn.__name__, case["id"])] = pool.submit(fn, case)
-    yield futures
+    finally:
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    yield futures, time.monotonic() + RESULTS_TIMEOUT_S
     for pool in pools:
-        pool.shutdown(wait=True, cancel_futures=True)
+        # A hung worker would block a waiting shutdown forever.
+        for proc in getattr(pool, "_processes", {}).values():
+            if proc.is_alive():
+                proc.kill()
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def _max_abs(results, fn, case):
-    # A fault in the worker re-raises here; a hard abort raises BrokenProcessPool.
-    value = results[(fn.__name__, case["id"])].result()
-    if value == "skip":
+    futures, deadline = results
+    key = (fn.__name__, case["id"])
+    if key not in futures:
         pytest.skip("windowed parity harness not present in this checkout")
-    return value
+    # A fault in the worker re-raises here; a hard abort raises BrokenProcessPool.
+    try:
+        return futures[key].result(timeout=max(0.0, deadline - time.monotonic()))
+    except cf.TimeoutError:
+        pytest.fail(
+            f"no result within {RESULTS_TIMEOUT_S} s: the kernel likely read out of bounds"
+        )
 
 
 @requires_gfx942_gpu
