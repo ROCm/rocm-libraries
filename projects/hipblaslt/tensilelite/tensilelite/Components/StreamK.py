@@ -20,9 +20,9 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from ..ExecutionPolicy import isPersistent, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
+from ..ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa.enum import CacheScope
-from rocisa.code import Module, Label
+from rocisa.code import Module, Label, RegSet
 from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, replaceHolder, EXEC, VOP3PModifiers, ContinuousRegister
 from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, SBitcmp1B32, SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, VReadfirstlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32, SLongBranch, SLongBranchPositive
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, scalarUInt32DivideAndRemainder
@@ -30,9 +30,11 @@ from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, vectorS
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
 
 from ..Common import IsaVersion, print2, ceilDivide, log2
+from ..Common.Utilities import isMxf4SubtilePath
 from ..Component import Component
 from .TileProcessingStrategy import TileProcessingStrategy, TileWork
 from .WorkAssignment import QueuePartition, StaticPartition
+from .ClusterTileMapping import ClusterTileMapping
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
 import abc
@@ -346,6 +348,8 @@ class StreamK(TileProcessingStrategy):
 
     def tileWork(self, kernel):
         completion = ("StreamKTileIdx", "StreamKPartialIdx") if hasDynamicAssignment(kernel) or hasHybridAssignment(kernel) else ()
+        if isStreamKSpatialCluster(kernel):
+            completion += ("PersistentPhantomTile",)
         return TileWork("PersistentTileID", "StreamKLocalStart", "StreamKLocalEnd", completion)
 
     def prefetchEligibility(self, writer, kernel, skip):
@@ -358,7 +362,32 @@ class StreamK(TileProcessingStrategy):
         return StaticPartition("PersistentIteration", "PersistentIterationEnd", "skGrid", "PersistentWorkGroupIndex")
 
     def persistentTileRegisters(self, kernel):
-        return list(self.tileWork(kernel).completion_identity) + ["StreamKLocalStart", "StreamKLocalEnd"]
+        peer = ["StreamKClusterPeer"] if isStreamKSpatialCluster(kernel) else []
+        return list(self.tileWork(kernel).completion_identity) + ["StreamKLocalStart", "StreamKLocalEnd"] + peer
+
+    def computeTotalTiles(self, writer, kernel, dstSgpr):
+        if isStreamKSpatialCluster(kernel):
+            return ClusterTileMapping.blockCount(writer, kernel, dstSgpr)
+        return super().computeTotalTiles(writer, kernel, dstSgpr)
+
+    def tileIndexToWorkGroup(self, writer, kernel, sTmp):
+        if isStreamKSpatialCluster(kernel):
+            return ClusterTileMapping.materialize(writer, kernel, sTmp, peer="StreamKClusterPeer")
+        return super().tileIndexToWorkGroup(writer, kernel, sTmp)
+
+    def skipPhantomTileStore(self, writer, kernel):
+        if isStreamKSpatialCluster(kernel):
+            return ClusterTileMapping.skipPhantomCompletion(writer, kernel)
+        return super().skipPhantomTileStore(writer, kernel)
+
+    def flagOffset(self, kernel, dst, logicalProducer):
+        module = Module("StreamK flag byte offset")
+        if isStreamKSpatialCluster(kernel):
+            module.add(ClusterTileMapping.physicalSlot(kernel, dst, logicalProducer))
+            logicalProducer = sgpr(dst)
+        module.add(SLShiftLeftB32(dst=sgpr(dst), src=logicalProducer, shiftHex=log2(4),
+                                  comment="flag offset based on physical partial slot"))
+        return module
 
     def persistentWorkspaceRegisters(self, kernel):
         return ["SrdWS"] if kernel["StreamKAtomic"] == 0 else []
@@ -1032,6 +1061,9 @@ class StreamK(TileProcessingStrategy):
         # StreamKLocalEnd == ItersPerTile, so the loop count is exactly
         # ItersPerTile (no StreamKLocalStart/End SGPRs to read).
         module.add(SSubU32(dst=sgpr(loopCounterName), src0=sgpr("StreamKLocalEnd"), src1=sgpr("StreamKLocalStart"), comment="StreamK loop counter = localEnd - localStart"))
+        if isStreamKSpatialCluster(kernel):
+            module.add(SCmpEQU32(src0=sgpr("SizesSum+%u" % writer.states.unrollIdx), src1=0, comment="Empty summation"))
+            module.add(SCSelectB32(dst=sgpr(loopCounterName), src0=0, src1=sgpr(loopCounterName), comment="K=0 stores without compute"))
         # Short circuit if alpha==0 (set loopCounter to 0 to skip main loop)
         alphaLabel2 = Label(writer.labels.getNameInc("SKAlphaCheck"), "")
         module.add(BranchIfNotZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(), alphaLabel2))
@@ -1276,7 +1308,7 @@ class StreamK(TileProcessingStrategy):
 
             # check flag
             tmpSgpr = writer.sgprPool.checkOut(3, "globalWriteElements")
-            module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sFlagIdx), shiftHex=log2(4), comment="flag offset based on wg index"))
+            module.add(self.flagOffset(kernel, tmpSgpr, sgpr(sFlagIdx)))
 
             module.add(skFixupWaitForFlag) # loop to wait for flag
             module.add(memOrder.readFlag(writer, dst=tmpSgpr+1, soffset=sgpr(tmpSgpr)))
@@ -1287,11 +1319,11 @@ class StreamK(TileProcessingStrategy):
 
             module.add(SBarrier(comment="wait for all workgroups before resetting flag"))
             skipFlagReset = Label(label=writer.labels.getNameInc("SK_SkipFlagReset"), comment="")
-            module.add(VReadfirstlaneB32(dst=sgpr(tmpSgpr+2), src=vgpr("Serial"), comment="Wave 0 updates flags"))
-            module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=0, comment="Check for wave 0"))
+            module.add(VReadfirstlaneB32(dst=sgpr(tmpSgpr+1), src=vgpr("Serial"), comment="Wave 0 updates flags"))
+            module.add(SCmpEQU32(src0=sgpr(tmpSgpr+1), src1=0, comment="Check for wave 0"))
             module.add(SCBranchSCC0(labelName=skipFlagReset.getLabelName(), comment="Skip flag reset"))
-            # (tmpSgpr+2) is 0 on wave 0 (Serial==0); use it to reset the flag
-            module.add(self.emitFlagStore(writer, src=sgpr(tmpSgpr+2), soffset=sgpr(tmpSgpr), comment="reset flag"))
+            # Reuse the consumed ready-value register: (tmpSgpr+1) is 0 on wave 0 (Serial==0); use it to reset the flag
+            module.add(self.emitFlagStore(writer, src=sgpr(tmpSgpr+1), soffset=sgpr(tmpSgpr), comment="reset flag"))
             module.add(skipFlagReset)
 
             writer.sgprPool.checkIn(tmpSgpr)
@@ -1363,7 +1395,7 @@ class StreamK(TileProcessingStrategy):
                 module.add(skFixupLabel)
 
                 # Check flag
-                module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sCtaIdx), shiftHex=log2(4), comment="flag offset based on CTA index"))
+                module.add(self.flagOffset(kernel, tmpSgpr, sgpr(sCtaIdx)))
                 module.add(memOrder.readFlag(writer, dst=tmpSgpr+2, soffset=sgpr(tmpSgpr)))
                 if kernel["DebugStreamK"] & 2 == 0:
                     module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=1, comment="check if ready"))
@@ -1482,6 +1514,19 @@ class StreamK(TileProcessingStrategy):
             # Deferred block
             partialsModule = Module("Partials_DeferredBlock")
             partialsModule.add(partialsDeferredLabel)
+            # This block names its staging registers "ValuC+<absolute vgpr>" (see the
+            # UseSubtileImpl arm of startVgprValuOffset below), so it is only correct
+            # while vgprValuC is 0.  It is built here but emitted after the post-loop
+            # code, which re-points vgprValuC at a freshly checked out base; without
+            # pinning, every operand shifts up by that base.  On tiles whose D
+            # accumulators spilled from the agpr pool into the vgpr pool the shifted
+            # window lands on a live accumulator.
+            # Scoped with the unbiased sumIdx below: pinning and biasing are one
+            # fix, and applying only half of it to the kernels that ship against
+            # develop's biased form would be a combination nothing has run.
+            if isMxf4SubtilePath(kernel):
+                partialsModule.add(RegSet("v", "vgprValuC", 0))
+                writer.states.deferredPartialsValuCPinned = True
             for edge in edges:
                 sIdx = writer.acquirePersistentConstSgpr(kernel, "PersistentWorkGroupIndex")
                 if writer.isPersistentConstantsToVgprEnabled(kernel):
@@ -1526,11 +1571,18 @@ class StreamK(TileProcessingStrategy):
         # into SrdWS+1 instead of adding only the carry.
         offBytes = hex(kernel["MacroTile0"]*kernel["MacroTile1"]*writer.states.bpeCinternal)
         tmpHi = writer.sgprPool.checkOut(1, "SKSlotOffsetHi")
+        slotTmp = None
+        if isStreamKSpatialCluster(kernel):
+            slotTmp = writer.sgprPool.checkOut(1, "SKPhysicalSlot")
+            module.add(ClusterTileMapping.physicalSlot(kernel, slotTmp, sPartialIdx))
+            sPartialIdx = sgpr(slotTmp)
         module.add(SMulI32(dst=sgpr(tmpSgpr), src0=offBytes, src1=sPartialIdx, comment="Offset to correct partials tile (low word)"))
         module.add(SMulHIU32(dst=sgpr(tmpHi), src0=offBytes, src1=sPartialIdx, comment="partials tile offset (high word) for 64-bit SRD"))
         module.add(SAddU32(dst=sgpr("SrdWS+0"), src0=sgpr("SrdWS+0"), src1=sgpr(tmpSgpr), comment="add lo to SRD"))
         module.add(SAddCU32(dst=sgpr("SrdWS+1"), src0=sgpr("SrdWS+1"), src1=sgpr(tmpHi), comment="add hi (offset high word + lo carry) to SRD"))
         writer.sgprPool.checkIn(tmpHi)
+        if slotTmp is not None:
+            writer.sgprPool.checkIn(slotTmp)
 
         if tmpLocal is not None:
             writer.sgprPool.checkIn(tmpLocal)
@@ -1820,7 +1872,7 @@ class StreamK(TileProcessingStrategy):
                 sIdx = writer.acquirePersistentConstSgpr(kernel, "PersistentWorkGroupIndex")
                 if writer.isPersistentConstantsToVgprEnabled(kernel):
                     module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.persistentConstVgprs["PersistentWorkGroupIndex"])))
-                module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sIdx), shiftHex=log2(4), comment="flag offset based on CTA index"))
+                module.add(self.flagOffset(kernel, tmpSgpr, sgpr(sIdx)))
                 writer.releasePersistentConstSgpr(sIdx)
 
             with writer.allocTmpSgpr(1, tag="StreamKCommon_setFlag_tmpSgprRes") as flagSgprRes:
@@ -2028,8 +2080,14 @@ class StreamK(TileProcessingStrategy):
                 for vi in range(0, gwvw):
                     # loop over registers within one scalar
                     for rIdx in range(0, regsPerScalar):
+                        # UseSubtileImpl pins vgprValuC to 0 for this block, so the
+                        # holder value is the absolute register; the regular path
+                        # keeps the assembler macro's base.
                         startVgprValuOffset = 0 if kernel.get("UseSubtileImpl") else writer.states.c.startVgprValu
-                        module.add(replaceHolder(codeAccVgprRead.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - startVgprValuOffset))
+                        holder = ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - startVgprValuOffset
+                        if isMxf4SubtilePath(kernel):
+                            writer.assertNotSpilledDTile(holder, 1, "writePartials accvgpr read")
+                        module.add(replaceHolder(codeAccVgprRead.popFirstItem(), holder))
                         # if kernel["StoreCInUnroll"] and not edge:
                         #     tempStr = tempStr.replace("__placeholder__",str(elementIdx*gwvw*regsPerScalar + regsPerScalar*vi + rIdx))
                         #     accVgprRead.addCode(tempStr.replace("ValuC","L2GC"))
@@ -2093,18 +2151,25 @@ class StreamK(TileProcessingStrategy):
             WaveNum = kernel["NumThreads"] // kernel["WavefrontSize"]
 
         storeCode = Module("Partials GroupLoadStore")
+        # Keep the shared scalar offset updates beside the stores that consume them.
+        offsetCode = storeCode if kernel["GroupLoadStore"] else module
         for elementIdx in range(len(batchElements)):
             element = batchElements[elementIdx]
             addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
             addr = addrCalc.addrDVgpr
-            # For UseSubtileImpl, vgprValuC is remapped; add the base offset so the
-            # WS store reads from the correct accumulator VGPRs.  For the regular path
-            # (non-subtile), startVgprValu is already accounted for by the vgprValuC
-            # assembler macro, so no offset is needed (matches rebase behaviour).
-            if kernel.get("UseSubtileImpl"):
+            # elementSumIdx is an absolute vgpr index (it comes from vgprPool
+            # checkOut) and chooseGlobalWrite renders it as a raw register, so
+            # biasing it by a ValuC base makes the WS store read the wrong
+            # accumulators. Correcting that is scoped to the MXF4 subtile path
+            # because every other UseSubtileImpl kernel ships against the biased
+            # form and would have its partials store moved by the fix.
+            if kernel.get("UseSubtileImpl") and not isMxf4SubtilePath(kernel):
                 sumIdx = ss.elementSumIdx[elementIdx] + writer.states.c.startVgprValu
             else:
                 sumIdx = ss.elementSumIdx[elementIdx]
+            if isMxf4SubtilePath(kernel):
+                writer.assertNotSpilledDTile(sumIdx, gwvw * (writer.states.bpeCinternal // writer.states.bpr),
+                                             "writePartials WS store")
             storeWidth = gwvw  # pitch must match store/load width gwvw, not StoreVectorWidth (differ on source kernels)
             # storeWidth = 2
             increment = (kernel["WavefrontSize"] * WaveNum) * storeWidth * writer.states.bpeCinternal
@@ -2115,12 +2180,12 @@ class StreamK(TileProcessingStrategy):
                 module.add(vectorStaticMultiply(vgpr(addr), vgpr("Serial"), storeWidth * writer.states.bpeCinternal, tmpSgprRes))
                 # kStr += inst("v_mul_lo_u32", , "Partials buffer address")
                 if clsLoop:
-                    module.add(SAddU32(dst=sgpr(tmpS01), src0=sgpr(tmpS01), src1=increment, comment="Inc sgpr offset"))
+                    offsetCode.add(SAddU32(dst=sgpr(tmpS01), src0=sgpr(tmpS01), src1=increment, comment="Inc sgpr offset"))
                 else:
-                    module.add(SMovB32(dst=sgpr(tmpS01), src=0, comment="Init sgpr offset"))
+                    offsetCode.add(SMovB32(dst=sgpr(tmpS01), src=0, comment="Init sgpr offset"))
             else:
                 # module.addComment1("WavefrontSize={}, WaveNum={}, storeWidth={}, bpeC={}".format(kernel["WavefrontSize"], WaveNum, storeWidth, writer.states.bpeCinternal))
-                module.add(SAddU32(dst=sgpr(tmpS01), src0=sgpr(tmpS01), src1=increment, comment="Inc sgpr offset"))
+                offsetCode.add(SAddU32(dst=sgpr(tmpS01), src0=sgpr(tmpS01), src1=increment, comment="Inc sgpr offset"))
 
             # TODO StreamK need this packing code???
             # if self.asmCaps["HasWMMA"] and kernel["EnableMatrixInstructionStore"] and kernel["ProblemType"]["DestDataType"].isHalf() and (not kernel["ProblemType"]["HighPrecisionAccumulate"]):
@@ -2950,10 +3015,14 @@ class StreamKTwoTileDPFirst(StreamK):
         stmpPartialIdx = writer.sgprPool.checkOut(1, "PartialIdx")
         tmpVgpr = writer.vgprPool.checkOut(2, "div")
         tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
+        # SkSplit aliases a reusable SGPR when persistent constants live in VGPRs.
+        # Keep the restored split count live through partition and remainder setup.
+        sSplit = writer.acquirePersistentConstSgpr(kernel, "skTiles")
         sIdx = writer.acquirePersistentConstSgpr(kernel, "PersistentWorkGroupIndex")
         if skConstsInVgprs:
+            module.add(VReadfirstlaneB32(dst=sgpr(sSplit), src=vgpr(writer.states.persistentConstVgprs["skTiles"])))
             module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.persistentConstVgprs["PersistentWorkGroupIndex"])))
-        module.add(scalarUInt32DivideAndRemainder(qReg=stmpTileIdx, dReg=sIdx, divReg="SkSplit", rReg=stmpPartialIdx, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True, comment="TileIdx = SKIdx // WGsPerTile, PartialIdx = SKIdx % WGsPerTile"))
+        module.add(scalarUInt32DivideAndRemainder(qReg=stmpTileIdx, dReg=sIdx, divReg=sSplit, rReg=stmpPartialIdx, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True, comment="TileIdx = SKIdx // WGsPerTile, PartialIdx = SKIdx % WGsPerTile"))
         writer.releasePersistentConstSgpr(sIdx)
         tmpVgprRes = None
         writer.vgprPool.checkIn(tmpVgpr)
@@ -2970,7 +3039,8 @@ class StreamKTwoTileDPFirst(StreamK):
         if skConstsInVgprs:
             module.add(VReadfirstlaneB32(dst=sgpr(sIpw), src=vgpr(writer.states.persistentConstVgprs["SKItersPerWG"])))
             module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.persistentConstVgprs["ItersPerTile"])))
-        module.add(SMulI32(dst=sgpr(sSkExtraIters), src0=sgpr("SkSplit"), src1=sgpr(sIpw)))
+        module.add(SMulI32(dst=sgpr(sSkExtraIters), src0=sgpr(sSplit), src1=sgpr(sIpw)))
+        writer.releasePersistentConstSgpr(sSplit)
         module.add(SSubU32(dst=sgpr(sSkExtraIters), src0=sgpr(sIpt), src1=sgpr(sSkExtraIters), comment="extraIters = itersPerTile - SkSplit * skItersPerWG"))
 
         module.add(SMulI32(dst=sgpr("PersistentIteration"), src0=sgpr(stmpPartialIdx), src1=sgpr(sIpw), comment="StreamK starting iteration (case: after extra iters)"))
@@ -3168,10 +3238,24 @@ class StreamKTwoTileDPFirst(StreamK):
         # If WG does not start tile, skip to end of persistent loop to check for other SK tile
         alphaLabel = Label(writer.labels.getNameInc("SKAlphaCheck"), "")
         module.add(BranchIfNotZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(), alphaLabel))
+        if isStreamKSpatialCluster(kernel):
+            # The post kernel reads every split, including alpha-zero partials.
+            # Keep the interval and store zero; calculateLoopNumIterCommon
+            # already skips the multiply loop.
+            module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=0,
+                                  comment="Parallel alpha-zero initializes every split"))
+            module.add(SCBranchSCC1(labelName=alphaLabel.getLabelName()))
         # Skip to end if not doing the global write
         module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
         skCloseLoopLabel = Label("PersistentLoopClose", "")
-        module.add(writer.longBranchScc0(skCloseLoopLabel, posNeg=1))
+        if isStreamKSpatialCluster(kernel) and kernel["ClusterBarrier"]:
+            alphaOwner = Label(writer.labels.getNameInc("SKClusterAlphaOwner"), "")
+            module.add(SCBranchSCC1(labelName=alphaOwner.getLabelName()))
+            module.add(SBarrier(True, True, True, comment="alpha-zero nonowner consumes cluster arrive"))
+            module.add(writer.longBranchScc0(skCloseLoopLabel, posNeg=1))
+            module.add(alphaOwner)
+        else:
+            module.add(writer.longBranchScc0(skCloseLoopLabel, posNeg=1))
         sIpt = writer.acquirePersistentConstSgpr(kernel, "ItersPerTile")
         if writer.isPersistentConstantsToVgprEnabled(kernel):
             module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.persistentConstVgprs["ItersPerTile"])))
@@ -4226,14 +4310,62 @@ class StreamKHybrid(StreamK):
 
 
 class StreamKKernelState:
-  def isPersistentConstantsToVgprEnabled(self, kernel):
+  def isPersistentConstantsToVgprEnabled(self, kernel, name=None):
+    # With `name`, additionally asks whether that particular constant is parked.
+    # The parked set is not all-or-nothing: see persistentConstVgprNames.
+    if name is not None:
+      return name in self.persistentConstVgprNames(kernel)
     # Variants that mark keepsConstantsInSgpr=True (the dynamic
     # per-XCD path references SK kernarg constants directly) cannot
     # cache them in VGPRs on gfx1250.
-    return not isPersistentDataParallel(kernel) and kernel["ISA"] == IsaVersion(12,5,0) and not self.states.tileProcessing.keepsConstantsInSgpr
+    if isPersistentDataParallel(kernel) or self.states.tileProcessing.keepsConstantsInSgpr:
+      return False
+    if kernel["ISA"] == IsaVersion(12,5,0):
+      return True
+    # gfx950 + PostLoopStoreInNll: the fused epilogue store (subtile) needs
+    # transient SGPRs while the main-loop + StreamK SGPRs are still live, and the
+    # base kernel already sits near the SGPR cap (~100/102). Caching the persistent
+    # constant kernargs in statically-allocated VGPRs -- values preserved across the
+    # persistent tile loop, read back via v_readfirstlane at use sites -- frees
+    # those SGPRs for the fused store. Scoped to PLSIN so non-fused gfx950 StreamK
+    # kernels are unaffected.
+    if kernel["ISA"] == IsaVersion(9,5,0) and kernel.get("PostLoopStoreInNll"):
+      return True
+    return False
+
+  def persistentConstVgprNames(self, kernel):
+    """Persistent constants parked in VGPRs, in VGPR-slot order.
+
+    gfx1250 parks the whole set -- that is what the mechanism was built for.
+
+    gfx950 + PostLoopStoreInNll parks the same set. Its store epilogue peaks at
+    104 against a MaxSgpr of 102 on the large tiles, so only 2 registers are
+    missing, and what matters is that the freed slots form a CONTIGUOUS run: the
+    allocations that set the peak (SrdA/B/MXSA/MXSB, then the store batch temp)
+    need 4- and 2-aligned blocks, so scattered single-register holes let nothing
+    compact. Parking the whole kernarg run is what keeps it contiguous.
+    """
+    if not self.isPersistentConstantsToVgprEnabled(kernel):
+      return []
+    names = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile", "SKItersPerWG"]
+    if hasStaticAssignment(kernel):
+      names += ["skGrid", "skTiles"]
+    # PersistentWorkGroupIndex is a var rather than a kernel arg; it gets a slot
+    # but no save, so it trails the kernarg run.
+    names.append("PersistentWorkGroupIndex")
+    return names
+
+  def readbackPersistentConst(self, kernel, dst, name):
+    """Read a parked persistent constant back into `dst`, or nothing if it is not
+    parked -- in which case `dst` is already the constant's own SGPR name, as
+    returned by acquirePersistentConstSgpr."""
+    module = Module("readback %s" % name)
+    if self.isPersistentConstantsToVgprEnabled(kernel, name):
+      module.add(VReadfirstlaneB32(dst=sgpr(dst), src=vgpr(self.states.persistentConstVgprs[name])))
+    return module
 
   def acquirePersistentConstSgpr(self, kernel, name):
-    if self.isPersistentConstantsToVgprEnabled(kernel):
+    if self.isPersistentConstantsToVgprEnabled(kernel, name):
       idx = self.sgprPool.checkOut(1, name, preventOverflow=False)
       if idx + 1 > self.states.regCaps["MaxSgpr"]:
         self.states.overflowedResources = 2
@@ -4254,9 +4386,8 @@ class StreamKKernelState:
     module = Module("Move StreamK constants to VGPRs")
     self.states.persistentConstVgprs = {}
 
-    consts = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile", "SKItersPerWG"]
-    if hasStaticAssignment(kernel):
-      consts += ["skGrid", "skTiles"]
+    consts = [n for n in self.persistentConstVgprNames(kernel)
+              if n != "PersistentWorkGroupIndex"]
 
     baseVgpr = self.states.startVgprPersistentConsts
     for i, name in enumerate(consts):
