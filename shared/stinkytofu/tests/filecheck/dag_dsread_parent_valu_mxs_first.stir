@@ -1,6 +1,6 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --print-output
 #
-# Parent-VALU (feedsWmma / wmmaParentValuQueue) input families issue their
+# Parent-VALU (feedsWmma) input families issue their
 # ds_loads first. Remaining families keep the default A→B→MXSA→MXSB order.
 # gfx1250 MX WMMA srcs: B, A, C, MXSB, MXSA.
 #

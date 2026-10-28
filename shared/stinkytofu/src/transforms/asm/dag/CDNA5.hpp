@@ -63,7 +63,7 @@ namespace {
 using namespace stinkytofu;
 using namespace stinkytofu::dag;
 
-enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu, kPrefetch, kWmmaParentValu };
+enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu, kPrefetch };
 
 // -------------------------------------------------------------------------
 // Hardware hazard rules (HazardRules.hpp). The queue keeps only the pipe-op rule
@@ -370,17 +370,12 @@ static std::vector<BarrierTokenGroup> groupBarrierTokens(
 //  (1) Program order — prefer WMMA in Phase B, but not before a pickable
 //      non-WMMA node with a smaller DAG id (preload / double-buffer).
 //  (1b) WMMA-parent VALU — a VALU/transcendental with a direct matrix DAG
-//      successor is routed to wmmaParentValuQueue and picked in Phase B
-//      *before* pickOneFromWMMA (same pipeline level as issuing WMMA). Only
-//      parents of the WMMA about to issue are eligible (the ready WMMA if
-//      wmmaQueue is nonempty, otherwise the most-ready matrix successor of a
-//      ready parent). Remaining parents stay queued until their WMMA is the
-//      target. These ops unlock that WMMA (ds_ -> v_* -> v_wmma); they are
-//      not co-issue fillers and must not share valuQueue policy.
+//      successor is an ordinary valuQueue candidate. A DAG-only edge from the
+//      WMMA before its first consumer holds it to that WMMA's window
+//      (onInitRegion), so it does not hold its VGPR longer.
 //  (2) DS / VGPR latency — block WMMA until modeled ds_load latency for WMMA
 //      src VGPRs has decayed; seed from the BB prefix before each region.
-//  (3) VALU is only gated by the co-issue window (filler valuQueue; parent
-//      VALUs also respect the window when one is active).
+//  (3) VALU is only gated by the co-issue window.
 //  (4) ds_load pacing — the ds credit queue (dsReadQueueDepth) bounds ds_loads in flight; with
 //      dagFeatures.dsSpread, DsSpreadPacer also spreads them evenly over the region's timeline
 //      (cycles).
@@ -398,11 +393,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     ReadySetByDAGid wmmaQueue;
     ReadySetByDAGid globalReadQueue;  // tensor_load_to_lds when distributeGlobalRead
     ReadySetByDAGid localReadQueue;   // ds_load
-    ReadySetByDAGid valuQueue;        // VALU/transcendental co-issue fillers
-    // VALU/transcendental with a direct matrix DAG successor (WMMA unlock path).
-    // Picked in Phase B ahead of pickOneFromWMMA, but only parents of the
-    // current target WMMA; not mixed with valuQueue.
-    ReadySetByDAGid wmmaParentValuQueue;
+    ReadySetByDAGid valuQueue;        // VALU and transcendental instructions
     ReadySetByDAGid barrierQueue;
     ReadySetByDAGid otherQueue;  // scalars, waits in region, etc.
     // global prefetches (flat ones appear only after PrefetchBridgeSubstitutionPass), placed
@@ -953,8 +944,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     const StinkyInstruction* formWmma_ = nullptr;
     // Planned WMMA windows of the region's s_barrier_wait instructions, ascending.
     std::vector<int> barrierWaitWindows_;
-    // The region DAG being drained (live inDegree), for unblocksWork() and for
-    // finding which ready parent VALU unlocks which not-yet-ready WMMA.
+    // The region DAG being drained (live inDegree), for unblocksWork().
     const RegionDAG* regionDag_ = nullptr;
     bool unblocksWork(const DAGNode* node, int depth) const {
         if (regionDag_ == nullptr || node->id >= regionDag_->graph.size()) return true;
@@ -969,20 +959,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void stampPipeOpGates(const StinkyInstruction& inst);
     int nodeElapseKey(DAGNode* node) const;
     DAGNode* pickFreeBest(const ReadySetByDAGid& queue, int* outWait = nullptr,
-                          bool allowHiddenStall = false, const DAGNode* mustFeed = nullptr) const;
+                          bool allowHiddenStall = false) const;
     std::pair<DAGNode*, int> findMostReadyWMMA() const;
-    // Next matrix op in program order, if it is still blocked and a queued
-    // parent VALU feeds it. nullptr otherwise.
-    DAGNode* nextWmmaFedByReadyParent() const;
-    // WMMA Phase B is about to issue, or the blocked WMMA currently being
-    // unlocked by wmmaParentValuQueue. nullptr if neither exists.
-    DAGNode* selectTargetWmma() const;
-    bool parentFeedsWmma(const DAGNode* parent, const DAGNode* wmma) const;
-    bool wmmaStillPending(const DAGNode* wmma) const;
     DAGNode* pickOneFromWMMA(DAGNode* pick = nullptr);
-    // Phase B unlock path: a ready parent VALU of selectTargetWmma() that can
-    // issue now (co-issue window / RAW / dest-overlap gates). nullptr if none.
-    DAGNode* tryPickWmmaParentValu() const;
     bool findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut,
                                      int* outWait = nullptr) const;
 
@@ -1263,9 +1242,8 @@ bool CDNA5ReadyQueue::isValuPickable() const {
     return (activeWindowSlots_[coIssueCyclePos_] & kValuSlot) != 0;
 }
 
-// Remove a specific non-WMMA node from its queue by kind (0=global, 1=local,
-// 2=other, 3=valu, 4=prefetch, 5=wmma-parent valu), update all scheduling
-// counters, and return the node.
+// Remove a specific non-WMMA node from its queue by kind (0=global, 1=local, 4=prefetch,
+// 2=other, 3=valu), update all scheduling counters, and return the node.
 DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     assert(node != nullptr);
     if (pickKind == kGlobalRead) {
@@ -1281,17 +1259,14 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         otherQueue.erase(node);
     } else if (pickKind == kPrefetch) {
         prefetchQueue.erase(node);
-    } else if (pickKind == kWmmaParentValu) {
-        wmmaParentValuQueue.erase(node);
     } else {
         assert(pickKind == kValu);
         valuQueue.erase(node);
     }
-    const bool isValuPipe = (pickKind == kValu || pickKind == kWmmaParentValu);
     // WMMA->VALU: if this VALU depends on the active WMMA's D and fewer than
     // slots fills landed (no independent VALU left to space it), emit the
     // shortfall as v_nops before it.
-    if (isValuPipe) {
+    if (pickKind == kValu) {
         for (const DAGNode* wmma : queuedWmmas_) {
             if (!wmmaToValuCoexecOverlap(*wmma->inst, *node->inst)) continue;
             const int slots = popcount16(wmma->inst->coIssueWindow);
@@ -1305,7 +1280,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         }
     }
     // Only VALU-pipe ops fill a coexec slot.
-    if (isValuPipe) nonWmmaFillsSinceActiveWmma_++;
+    if (pickKind == kValu) nonWmmaFillsSinceActiveWmma_++;
     if (pickKind == kOther || pickKind == kValu) {
         fillsThisWindow_++;  // a prefetch issued from otherQueue (no lead) still takes a slot
         if (!isGlobalPrefetch(*node->inst)) fillersIssuedThisRegion_++;  // as regionFillerCount
@@ -1485,15 +1460,13 @@ static bool considerBest(DAGNode* cand, Key key, DAGNode*& best, Key& bestKey) {
 // WMMA's latency shadow is also eligible (the wait is hidden by the in-flight
 // WMMA, so it is free to co-issue). Within the same free/hazard tier the
 // operand touched longest ago wins (largest elapse), tie broken by DAG id.
-// When \p mustFeed is set, only nodes with a direct DAG edge into that WMMA
-// are considered (used to unlock one WMMA at a time from wmmaParentValuQueue).
 // Producer-side hazard hoisting is handled separately by decidePromote(), not
 // here — this function only decides whether a candidate is safe to issue *now*,
 // not whether it should be forced early. \p outWait (optional) receives the
 // cycles the caller must advanceTime() before issuing the returned node (0 for
 // a free pick). Returns nullptr if none is eligible.
 DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWait,
-                                       bool allowHiddenStall, const DAGNode* mustFeed) const {
+                                       bool allowHiddenStall) const {
     // A stall is only hidden if the instruction can actually issue when it
     // expires, so the shadow stops at the first blocked cycle.
     const int coIssueSpace = freeCoIssueSpace();
@@ -1509,7 +1482,6 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
         if (heldBackForLead(n) || needsWaitAlu(n, need) || prefetchHeldForLead(n) ||
             unplacedMemWaitsOut(n))
             continue;
-        if (mustFeed && regionDag_ && !parentFeedsWmma(n, mustFeed)) continue;
         const int wait = getMaxSrcDataWait(n);
         // Tolerate a wait only if it fits the WMMA latency shadow and the dest does
         // not clobber a live WMMA src, or if the node finishes issuing before the
@@ -1566,65 +1538,6 @@ std::pair<DAGNode*, int> CDNA5ReadyQueue::findMostReadyWMMA() const {
         considerBest(n, std::make_tuple(getMaxSrcDataWait(n), (int)n->id), best, bestKey);
     }
     return {best, std::get<0>(bestKey)};
-}
-
-bool CDNA5ReadyQueue::parentFeedsWmma(const DAGNode* parent, const DAGNode* wmma) const {
-    if (!parent || !wmma || !regionDag_) return false;
-    if (parent->id >= regionDag_->graph.size()) return false;
-    return regionDag_->graph[parent->id].contains(wmma->id);
-}
-
-bool CDNA5ReadyQueue::wmmaStillPending(const DAGNode* wmma) const {
-    if (!wmma) return false;
-    // Not yet ready, or ready and still waiting in the WMMA queue.
-    return wmma->inDegree > 0 || wmmaQueue.contains(const_cast<DAGNode*>(wmma));
-}
-
-// The matrix op a queued parent VALU may unlock: only the next one in program
-// order. Ordering by DAG id rather than data-readiness is deliberate:
-// getMaxSrcDataWait only sees producers that have already issued and are still
-// counting down, so a later WMMA whose ds_loads are not out yet reports wait 0
-// and outranks an earlier one that is legitimately waiting on in-flight loads.
-// Restricting to the next one keeps each splat v_perm in the issue window of
-// the WMMA just before its consumer. Any earlier pending WMMA, even one only
-// waiting on its own parent's latency, would otherwise let the following
-// WMMA's parent issue a window early and hold its VGPR that much longer.
-DAGNode* CDNA5ReadyQueue::nextWmmaFedByReadyParent() const {
-    if (!regionDag_ || wmmaParentValuQueue.empty()) return nullptr;
-
-    DAGNode* next = nullptr;
-    for (const DAGNode& n : regionDag_->nodes) {
-        if (isMatrixInstruction(*n.inst) && wmmaStillPending(&n)) {
-            next = const_cast<DAGNode*>(&n);
-            break;
-        }
-    }
-    // in-degree 0 means every predecessor already issued, so nothing in
-    // wmmaParentValuQueue feeds it and it needs no unlocking.
-    if (next == nullptr || next->inDegree == 0) return nullptr;
-    for (DAGNode* parent : wmmaParentValuQueue)
-        if (parentFeedsWmma(parent, next)) return next;
-    return nullptr;
-}
-
-// Ready WMMA if one can issue; otherwise the blocked matrix op a ready parent
-// VALU is unlocking. Ties: smallest DAG id.
-DAGNode* CDNA5ReadyQueue::selectTargetWmma() const {
-    // Every WMMA in wmmaQueue has in-degree 0, so no queued parent VALU feeds
-    // one: naming it the target makes pickFreeBest(mustFeed=...) match nothing
-    // and leaves the unlock path dead for as long as any other WMMA is ready.
-    // Aim at the next WMMA in program order when a queued parent unlocks it --
-    // during the co-issue window so that parent rides the in-flight WMMA, and
-    // after the window too so a later already-ready WMMA (C+32, wait 0) cannot
-    // drain before an earlier one that only needs its v_perm (C+24).
-    DAGNode* blocked = nextWmmaFedByReadyParent();
-    if (coIssueCyclePos_ < activeWmmaLatency_ && blocked) return blocked;
-    if (!wmmaQueue.empty()) {
-        DAGNode* ready = findMostReadyWMMA().first;
-        if (blocked && ready && blocked->id < ready->id) return blocked;
-        return ready;
-    }
-    return blocked;
 }
 
 // Pick a WMMA: start a new co-issue timeline from its coIssueWindow,
@@ -1690,29 +1603,16 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     return node;
 }
 
-// Phase B unlock: issue a VALU that directly feeds the target WMMA when the
-// co-issue window (if any) allows and the node is RAW/hazard/dest-overlap free.
-DAGNode* CDNA5ReadyQueue::tryPickWmmaParentValu() const {
-    if (wmmaParentValuQueue.empty()) return nullptr;
-    if (!isValuPickable()) return nullptr;
-    const DAGNode* target = selectTargetWmma();
-    if (!target) return nullptr;
-    DAGNode* t = pickFreeBest(wmmaParentValuQueue, nullptr, /*allowHiddenStall=*/false, target);
-    if (t == nullptr || destOverlapsActiveWmmaSrc(t)) return nullptr;
-    return t;
-}
-
 // Pick among ready non-WMMA nodes, preferring genuinely RAW-free work.
-// Queues: globalReadQueue (throttled), localReadQueue, wmmaParentValuQueue
-// (WMMA unlock), valuQueue (co-issue gated), otherQueue. SALU/other and VALU
-// picks go through pickFreeBest (elapse
+// Queues: globalReadQueue (throttled), localReadQueue, valuQueue (co-issue
+// gated), otherQueue. SALU/other and VALU picks go through pickFreeBest (elapse
 // ordering — defers a reg-overwrite behind other work). SALU/other may
 // additionally be co-issued with a hidden stall when its src RAW wait fits
 // under the active WMMA's latency shadow; that wait is returned via \p outWait
 // so the caller advances the timeline before issuing. A hidden-stall candidate
 // never outranks a genuinely free one. When nothing qualifies, these queues
 // contribute nothing and Phase G falls back to the oldest. kind: 0=global,
-// 1=local, 2=other, 3=valu, 4=prefetch, 5=wmma-parent valu.
+// 1=local, 2=other, 3=valu, 4=prefetch.
 bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** outNode,
                                                   int* kindOut, int* outWait) const {
     *outNode = nullptr;
@@ -1728,15 +1628,15 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
 
     // Ordering, lowest key first: (1) genuinely free work; (2) a ds_load waiting
     // for a credit that fits the active WMMA's scheduling budget; (3) work that
-    // still needs a real RAW/hazard stall. Within a tier, global_read and
-    // WMMA-parent VALU beat other non-WMMA kinds, then smallest id wins.
+    // still needs a real RAW/hazard stall. Within a tier, global_read beats
+    // other non-WMMA kinds, then smallest id wins.
     // Producer-side hazard hoisting is handled separately by
     // decidePromote(), not here — a flagged producer competes on equal terms with
     // everything else unless/until decidePromote() forces it.
     auto consider = [&](DAGNode* cand, int candKind, int candWait) {
         if (!cand) return;
         const int availabilityRank = candWait == 0 ? 0 : (candKind == kLocalRead ? 1 : 2);
-        const int kindRank = (candKind == kGlobalRead || candKind == kWmmaParentValu) ? 0 : 1;
+        const int kindRank = (candKind == kGlobalRead) ? 0 : 1;
         if (considerBest(cand, std::make_tuple(availabilityRank, kindRank, (int)cand->id), best,
                          bestKey)) {
             kind = candKind;
@@ -1826,14 +1726,6 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
         break;
     }
     if (isValuPickable() || best == nullptr) {
-        // WMMA-parent VALUs: only parents of the target WMMA. Not held by the ds
-        // window or the fill quota -- they outrank filler VALU within the same
-        // free tier.
-        const DAGNode* parentTarget = selectTargetWmma();
-        if (DAGNode* t = pickFreeBest(wmmaParentValuQueue, nullptr, /*allowHiddenStall=*/false,
-                                      parentTarget)) {
-            if (!destOverlapsActiveWmmaSrc(t)) consider(t, kWmmaParentValu, 0);
-        }
         if (DAGNode* t = pickFreeBest(valuQueue)) {
             if (!dsWindowOk && !destOverlapsActiveWmmaSrc(t) && fillerAllowed)
                 consider(t, kValu, 0);
@@ -1855,7 +1747,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
 
 // Final-fallback candidate search across non-WMMA queues. Ranks by smallest
 // outstanding wait (not DAG id) so real work fills gaps where possible.
-// kind: 0=global, 1=local, 2=other, 3=valu, 4=prefetch, 5=wmma-parent valu.
+// kind: 0=global, 1=local, 2=other, 3=valu, 4=prefetch.
 bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut,
                                                 int* outWait) const {
     *outNode = nullptr;
@@ -1882,12 +1774,10 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
         return nullptr;
     };
     if (!otherQueue.empty()) consider(firstUnheld(otherQueue), kOther);
-    if (!wmmaParentValuQueue.empty()) consider(firstUnheld(wmmaParentValuQueue), kWmmaParentValu);
     if (!valuQueue.empty()) consider(firstUnheld(valuQueue), kValu);
     if (!prefetchQueue.empty()) consider(firstUnheld(prefetchQueue), kPrefetch);
     if (best == nullptr) {
         if (!otherQueue.empty()) consider(otherQueue.top(), kOther);
-        if (!wmmaParentValuQueue.empty()) consider(wmmaParentValuQueue.top(), kWmmaParentValu);
         if (!valuQueue.empty()) consider(valuQueue.top(), kValu);
         if (!prefetchQueue.empty()) consider(prefetchQueue.top(), kPrefetch);
     }
@@ -2634,22 +2524,9 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         }
     }
 
-    // Phase B — advance the WMMA pipeline: parent VALU of the target WMMA, then
-    // that WMMA if all gates pass. Leftover parents of later WMMAs stay in
-    // wmmaParentValuQueue and must not count as loop-head drain work.
+    // Phase B — try WMMA if all gates pass.
     bool otherQueuesHaveWork = !globalReadQueue.empty() || !localReadQueue.empty() ||
                                !otherQueue.empty() || !valuQueue.empty() || !prefetchQueue.empty();
-
-    // Same level as pickOneFromWMMA: issue a VALU that directly feeds the target
-    // WMMA so that child can enter wmmaQueue. Not subject to the interleaving
-    // blocks that hold back the WMMA itself.
-    if (promotedPhase_ == PromotePhase::None) {
-        if (DAGNode* parentValu = tryPickWmmaParentValu()) {
-            PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase B picked WMMA-parent VALU dagId="
-                                 << parentValu->id << "\n");
-            return rememberPick(popNonWmma(parentValu, kWmmaParentValu));
-        }
-    }
 
     if (promotedPhase_ == PromotePhase::None && !wmmaQueue.empty()) {
         auto [bestWMMA, bestLatency] = findMostReadyWMMA();
@@ -2880,10 +2757,7 @@ void CDNA5ReadyQueue::push(DAGNode* node) {
     }
 
     if (isVectorALU(*node->inst) || isTranscendental(*node->inst)) {
-        if (node->feedsWmma)
-            wmmaParentValuQueue.push(node);
-        else
-            valuQueue.push(node);
+        valuQueue.push(node);
         return;
     }
 
@@ -2902,8 +2776,7 @@ void CDNA5ReadyQueue::push(DAGNode* node) {
 
 bool CDNA5ReadyQueue::empty() const {
     return wmmaQueue.empty() && globalReadQueue.empty() && localReadQueue.empty() &&
-           valuQueue.empty() && wmmaParentValuQueue.empty() && otherQueue.empty() &&
-           barrierQueue.empty() && prefetchQueue.empty();
+           valuQueue.empty() && otherQueue.empty() && barrierQueue.empty() && prefetchQueue.empty();
 }
 
 // Per-BB init. Rule (5): cross-BB loop tail WMMA detection.
@@ -3096,6 +2969,32 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     nonWmmaFillsSinceActiveWmma_ = 0;
     fillsThisWindow_ = 0;
     fillQuotaPerWindow_ = 0;
+
+    // A VALU feeding a WMMA (splat v_perm) issues no earlier than the WMMA just before its first
+    // consumer, so it rides that WMMA's window instead of holding its VGPR a window longer. A
+    // DAG-only edge: the VALU stays an ordinary valuQueue candidate.
+    {
+        std::vector<StinkyInstruction*> wmmaBefore(deps.dag.nodes.size(), nullptr);
+        StinkyInstruction* prevWmma = nullptr;
+        for (unsigned n = 0; n < deps.dag.nodes.size(); ++n) {
+            if (!isMatrixInstruction(*deps.dag.nodes[n].inst)) continue;
+            wmmaBefore[n] = prevWmma;
+            prevWmma = const_cast<StinkyInstruction*>(deps.dag.nodes[n].inst);
+        }
+        for (unsigned n = 0; n < deps.dag.nodes.size(); ++n) {
+            // feedsWmma also marks a WMMA whose D a later WMMA accumulates into.
+            if (!deps.dag.nodes[n].feedsWmma || isMatrixInstruction(*deps.dag.nodes[n].inst))
+                continue;
+            unsigned firstConsumer = UINT_MAX;
+            for (unsigned succ : deps.dag.graph[n])
+                if (isMatrixInstruction(*deps.dag.nodes[succ].inst))
+                    firstConsumer = std::min(firstConsumer, succ);
+            if (firstConsumer != UINT_MAX && wmmaBefore[firstConsumer] != nullptr)
+                deps.requestedConstraints.emplace_back(
+                    wmmaBefore[firstConsumer],
+                    const_cast<StinkyInstruction*>(deps.dag.nodes[n].inst));
+        }
+    }
 
     if (getPassContext().getPassFeatureConfig().loopConfig.unrollGemm == false) return;
 

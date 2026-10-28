@@ -423,7 +423,7 @@ static void scheduleRegionWithMovableSideEffects(
         applyClusterBarrierSccRule(dagNodes, instToId, dagGraph, regionCycles);
 
     // Pre-scan: mark VALU/transcendental nodes that directly feed a matrix op.
-    // CDNA5ReadyQueue routes them to wmmaParentValuQueue (Phase B).
+    // CDNA5ReadyQueue holds each behind the WMMA before its first consumer.
     // Must run before dsReadPriority: parent-VALU inputs are the first DS tier.
     for (unsigned i = 0; i < regionSize; ++i) {
         if (!isVectorALU(*dagNodes[i].inst) && !isTranscendental(*dagNodes[i].inst)) continue;
@@ -436,7 +436,7 @@ static void scheduleRegionWithMovableSideEffects(
     }
 
     // Pre-scan: assign dsReadPriority. Lower = pick first.
-    // A ds_load read by a feedsWmma (wmmaParentValuQueue) VALU is issued first
+    // A ds_load read by a feedsWmma VALU is issued first
     // among loads with the same deadline so splat v_perm can start without
     // waiting dscnt 0; the parent tier ranks kinds A→MXSA→MXSB→B. Remaining
     // loads keep DsReadOrder: affinity, then program order, which Tensile

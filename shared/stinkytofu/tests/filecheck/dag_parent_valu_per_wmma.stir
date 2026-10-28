@@ -1,8 +1,8 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --print-output
 #
-# Two independent MX WMMAs, each with its own v_perm parent. Phase B must unlock
-# one WMMA at a time: perm0, wmma0, then perm1, wmma1 — not dump both perms
-# before the first WMMA.
+# Two independent MX WMMAs, each with its own v_perm parent. The parents go out
+# one WMMA at a time: perm0, wmma0, then perm1, wmma1 — not both perms before the
+# first WMMA. A DAG-only edge from wmma0 holds perm1 (CDNA5ReadyQueue::onInitRegion).
 
 # CHECK-LABEL: @parent_per_wmma
 # CHECK: v0 = {{.*}}v_perm_b32

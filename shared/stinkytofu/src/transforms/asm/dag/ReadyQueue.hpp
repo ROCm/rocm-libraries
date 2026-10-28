@@ -83,7 +83,7 @@ struct DAGNode {
     // then DsReadOrder + WMMA-affinity.
     unsigned dsReadPriority = UINT_MAX;
     // True when this VALU/transcendental has a direct matrix DAG successor.
-    // CDNA5ReadyQueue routes these to wmmaParentValuQueue (Phase B unlock).
+    // CDNA5ReadyQueue holds these behind the WMMA before their first consumer.
     // Set by the pre-scan in scheduleRegionWithMovableSideEffects.
     bool feedsWmma = false;
     // Packed s_set_vgpr_msb immediate this op needs (computeRequiredMsb); -1 = no MSB

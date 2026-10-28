@@ -2433,10 +2433,10 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchOfOneMatchesTheDefault) {
 }
 
 // ---------------------------------------------------------------------------
-// Parent VALUs (feedsWmma) unlock one WMMA at a time: issue the parents of
-// the WMMA about to fire, then that WMMA, then the next WMMA's parents.
-// Without this filter Phase B dumps every ready parent VALU before the first
-// WMMA (perm0, perm1, wmma0, wmma1).
+// Parent VALUs (feedsWmma) go out one WMMA at a time: the parents of a WMMA,
+// then that WMMA, then the next WMMA's parents. A DAG-only edge from the WMMA
+// before a parent's first consumer holds the parent back; without it every
+// ready parent VALU issues before the first WMMA (perm0, perm1, wmma0, wmma1).
 // ---------------------------------------------------------------------------
 TEST_F(DAGSchedulerPassTest, ParentValuIssuesOnlyForTargetWmma) {
     createVAddInBlock(bb, arch, /*destReg=*/10, /*src0Reg=*/11, /*src1Reg=*/13);
@@ -2484,13 +2484,10 @@ TEST_F(DAGSchedulerPassTest, ParentValuIssuesOnlyForTargetWmma) {
 }
 
 // ---------------------------------------------------------------------------
-// The other half of the target-parent rule: a WMMA sitting in wmmaQueue has
-// in-degree 0, so no queued parent VALU feeds it. Naming that WMMA the unlock
-// target matches nothing and starves the parents of the WMMAs still waiting for
-// operands for as long as any other WMMA stays ready. Here wmma2 is
-// independently ready, so under that behavior it issues first and perm20 only
-// goes once the queue drains. While wmma0 is in flight there is a co-issue
-// window to spend, so perm20 (which unlocks wmma1) must ride it instead.
+// A parent VALU is an ordinary VALU candidate, so it co-issues in an in-flight
+// WMMA's window like any other VALU. Here wmma2 is independently ready; perm20
+// (which feeds wmma1) must ride wmma0's window instead of waiting until the
+// ready WMMAs drain.
 // ---------------------------------------------------------------------------
 TEST_F(DAGSchedulerPassTest, ParentValuCoIssuesUnderInFlightWmmaInsteadOfWaitingForQueueDrain) {
     StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
@@ -2518,13 +2515,11 @@ TEST_F(DAGSchedulerPassTest, ParentValuCoIssuesUnderInFlightWmmaInsteadOfWaiting
         << "the unlocked WMMA still has to follow its parent";
 }
 
-// After the in-flight window, findMostReadyWMMA prefers a later WMMA whose
-// sources are already waiting in wmmaQueue (wait 0) over unlocking an earlier
-// blocked WMMA. That is the C+16 then C+32-before-C+24 pattern: C+24 still
-// needs its splat v_perm / matrix_b_reuse partner. Keep the earlier blocked
-// WMMA as the unlock target even when the window has closed, so the parent
-// issues before the later ready WMMA. Filler ds_loads compete for the hide
-// budget the way B_X2 preloads do in the real kernel.
+// After the in-flight window, a later WMMA whose sources are ready must not
+// overtake an earlier WMMA that still waits for its splat v_perm / matrix_b_reuse
+// partner (the C+16 then C+32-before-C+24 pattern): the parent issues before the
+// later ready WMMA. Filler ds_loads compete for the hide budget the way B_X2
+// preloads do in the real kernel.
 TEST_F(DAGSchedulerPassTest, ParentValuUnlocksEarlierBlockedWmmaBeforeLaterReadyWmma) {
     StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
     ASSERT_NE(wmma0, nullptr);
