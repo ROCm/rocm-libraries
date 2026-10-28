@@ -160,6 +160,9 @@ inline bool UseMultiple(const miopen::batchnorm::ProblemDescription& problem)
 }
 
 // Provide the stash method to use for spatial multiple implementation
+// Vectorsize is needed as a parameter for NHWC loads, see `batchnorm_functions.hpp`
+// for its implementation. Note that at the time of writing, earlier functions
+// ensure that c % vectorsize = 0
 inline int GetStashMethod(bool IsLayoutNHWC,
                           miopenDataType_t problem_type,
                           unsigned int stash_values,
@@ -168,7 +171,8 @@ inline int GetStashMethod(bool IsLayoutNHWC,
                           size_t in_cstride,
                           size_t ylocalsize,
                           size_t zlocalsize,
-                          size_t nelements)
+                          size_t nelements,
+                          size_t vectorsize)
 {
     // See `batchnorm_functions.hpp` for stash implementation of different methods
     int stash_method = 0;
@@ -181,7 +185,7 @@ inline int GetStashMethod(bool IsLayoutNHWC,
     {
         stash_method = 1;
     }
-    if(IsLayoutNHWC && !(problem_type == miopenFloat) && (c % 2 != 0) &&
+    if(IsLayoutNHWC && !(problem_type == miopenFloat) && ((c / vectorsize) % 2 != 0) &&
        (last_zlocalsize >= stash_values))
     {
         stash_method = 2;

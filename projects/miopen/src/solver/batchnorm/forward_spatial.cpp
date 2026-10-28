@@ -264,12 +264,13 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
         stash_method = GetStashMethod(problem.IsLayoutNHWC(),
                                       problem.GetXDesc().GetType(),
                                       stash_values_fwd,
-                                      c / vectorsize,
+                                      c,
                                       n,
                                       in_cstride,
                                       ylocalsize,
                                       zlocalsize,
-                                      nelements);
+                                      nelements,
+                                      vectorsize);
 
         // WG size for Final kernels (NHWC)
         if(problem.IsLayoutNHWC() && c % 2 == 0 && xlocalsize % 2 == 0)
