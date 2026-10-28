@@ -423,7 +423,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     endif()
     # The split engine's slots are ops of their own (prep, dkdv, dq); its descriptor-only
     # engine folder has none. The census reads a shard only for an arch where all three slots
-    # ship.
+    # ship, and the suite keys its inventory on the arch the entry names: gfx950 content for
+    # gfx950, gfx11-generic content for every gfx11 member. The merged engine's census above
+    # is registered only where merged content ships (gfx950).
     set(_hkp_split_arches)
     foreach(_arch IN LISTS HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dq)
         if(_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_prep
