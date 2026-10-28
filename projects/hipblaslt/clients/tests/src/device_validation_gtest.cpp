@@ -112,6 +112,94 @@ namespace
         }
     }
 
+    TEST(FreivaldsDevice_pre_checkin, BFloat16RoundingMatchesHostAtTies)
+    {
+        const Stream stream;
+        // BF16 spacing is four here: retain both a tie and rounding away from truncation.
+        for(const auto& values :
+            {std::array{603, 604, 600}, std::array{602, 600, 604}, std::array{-603, -604, -600}})
+        {
+            hn::Tensor a(hn::ScalarType::Float32, hn::Shape{1, 1});
+            hn::Tensor b(hn::ScalarType::Float32, hn::Shape{1, 1});
+            a.storeFrom({0, 0}, values[0]);
+            b.storeFrom({0, 0}, 1);
+            const auto prepared = hn::prepareFreivalds(a,
+                                                       b,
+                                                       hn::MatmulOptions{hn::ScalarType::Float32},
+                                                       hn::EpilogueOptions{hn::ScalarType::Float32},
+                                                       hn::ScalarType::BFloat16,
+                                                       {},
+                                                       {});
+            ASSERT_TRUE(std::holds_alternative<hn::FreivaldsPlan>(prepared));
+            const std::array plans{std::get<hn::FreivaldsPlan>(prepared)};
+            hn::Tensor       stored(hn::ScalarType::BFloat16, hn::Shape{1, 1});
+            HipDeviceBuffer  device(HIP_R_16BF, size_t(1));
+            for(bool correct : {true, false})
+            {
+                stored.storeFrom({0, 0}, values[correct ? 1 : 2]);
+                const auto bytes = stored.rawEncodedBackingStorage();
+                ASSERT_EQ(hipMemcpyAsync(device.buf(),
+                                         bytes.data(),
+                                         bytes.size(),
+                                         hipMemcpyHostToDevice,
+                                         stream.value),
+                          hipSuccess);
+                const auto host = plans[0].check(stored, std::numeric_limits<size_t>::max(), {});
+                const auto observed = verify_freivalds_device(
+                    {device.buf(), HIP_R_16BF, 1, 1, 1, 1}, plans, stream.value);
+                EXPECT_EQ(host.status,
+                          correct ? hn::VerificationStatus::Passed
+                                  : hn::VerificationStatus::Mismatch);
+                EXPECT_EQ(observed.passed, correct) << observed.message;
+                if(!correct)
+                    EXPECT_NE(observed.message.find("row 0, col 0"), std::string::npos);
+            }
+        }
+    }
+
+    TEST(FreivaldsDevice_pre_checkin, IntegerSaturationAndSentinelMatchHost)
+    {
+        const Stream                stream;
+        hn::Tensor                  a(hn::ScalarType::Int8, hn::Layout(hn::Shape{4, 2}, {1, 4}, 0));
+        hn::Tensor                  b(hn::ScalarType::Int8, hn::Shape{2, 1});
+        const std::array<int8_t, 8> inputs{100, -100, -1, 2, 100, -100, 0, 3};
+        std::memcpy(a.rawEncodedBackingStorage().data(), inputs.data(), inputs.size());
+        b.storeFrom({0, 0}, 1);
+        b.storeFrom({1, 0}, 1);
+        const auto prepared = hn::prepareFreivalds(a,
+                                                   b,
+                                                   hn::MatmulOptions{hn::ScalarType::Int32},
+                                                   hn::EpilogueOptions{hn::ScalarType::Int32},
+                                                   hn::ScalarType::Int8,
+                                                   {},
+                                                   {});
+        ASSERT_TRUE(std::holds_alternative<hn::FreivaldsPlan>(prepared));
+        const std::array plans{std::get<hn::FreivaldsPlan>(prepared)};
+        hn::Tensor       stored(hn::ScalarType::Int8, hn::Shape{4, 1});
+        HipDeviceBuffer  device(HIP_R_8I, size_t(4));
+        for(const auto& output : {std::array<int8_t, 4>{127, -128, -1, 5},
+                                  std::array<int8_t, 4>{126, -128, -1, 5},
+                                  std::array<int8_t, 4>{127, -128, -128, 5}})
+        {
+            const bool correct = output[0] == 127 && output[2] == -1;
+            std::memcpy(stored.rawEncodedBackingStorage().data(), output.data(), output.size());
+            ASSERT_EQ(hipMemcpyAsync(device.buf(),
+                                     output.data(),
+                                     output.size(),
+                                     hipMemcpyHostToDevice,
+                                     stream.value),
+                      hipSuccess);
+            EXPECT_EQ(plans[0].check(stored, std::numeric_limits<size_t>::max(), {}).status,
+                      correct ? hn::VerificationStatus::Passed : hn::VerificationStatus::Mismatch);
+            const auto observed = verify_freivalds_device(
+                {device.buf(), HIP_R_8I, 4, 1, 4, 4}, plans, stream.value);
+            EXPECT_EQ(observed.passed, correct) << observed.message;
+            if(!correct)
+                EXPECT_NE(observed.message.find(output[0] == 126 ? "row 0, col 0" : "row 2, col 0"),
+                          std::string::npos);
+        }
+    }
+
     TEST(FreivaldsDevice_pre_checkin, Gfx11AccumulationBound_smoke)
     {
         const Stream stream;
@@ -361,7 +449,7 @@ namespace
     TEST(DeviceBounds_pre_checkin, TypedPaddingStoresCopiesAndFiniteInjection)
     {
         const Stream     stream;
-        constexpr size_t rows = 5, cols = 3, ld = 8, stride = 30, batches = 2, total = 61;
+        constexpr size_t rows = 5, cols = 3, ld = 8, stride = 30, batches = 2, total = 67;
         const auto       logical = [](size_t index) {
             return index / stride < batches && index % stride / ld < cols
                    && index % stride % ld < rows;
@@ -401,6 +489,9 @@ namespace
             ASSERT_EQ(
                 poison_padding_device({device.buf(), apiType, 0, 0, 1, 0}, 1, total, stream.value),
                 hipSuccess);
+            const auto unchanged = count_changed_device(device.buf(), apiType, total, stream.value);
+            ASSERT_TRUE(unchanged.ok);
+            EXPECT_EQ(unchanged.count, size_t(0));
             ASSERT_EQ(corrupt_element_device(matrix, 1, 3, 2, stream.value), hipSuccess);
             const auto changed = count_changed_device(device.buf(), apiType, total, stream.value);
             EXPECT_TRUE(changed.ok);
@@ -412,6 +503,53 @@ namespace
                       hipSuccess);
             for(size_t i = 0; i < batches * rows * cols; ++i)
                 EXPECT_EQ(compact.loadAs<double>({i}), i == 28 ? 0 : kPaddingPoisonValue);
+        }
+    }
+
+    TEST(DeviceBounds_pre_checkin, SentinelModeLocatesUnwrittenAndTailStores)
+    {
+        const Stream     stream;
+        constexpr size_t rows = 5, cols = 3, ld = 8, stride = 30, batches = 2, total = 67;
+        for(auto type : types)
+        {
+            SCOPED_TRACE(int(type));
+            hn::Tensor         host(hipblaslt::hostnumerics::scalarType(type), hn::Shape{total});
+            const auto         bytes = host.rawEncodedBackingStorage();
+            HipDeviceBuffer    device(type, total);
+            const DeviceMatrix matrix{device.buf(), type, rows, cols, ld, stride};
+            ASSERT_EQ(fill_sentinel_device(device.buf(), type, total, stream.value), hipSuccess);
+            ASSERT_EQ(
+                hipMemcpyAsync(
+                    bytes.data(), device.buf(), bytes.size(), hipMemcpyDeviceToHost, stream.value),
+                hipSuccess);
+            ASSERT_EQ(hipStreamSynchronize(stream.value), hipSuccess);
+            for(size_t index = 0; index < total; ++index)
+                if(index / stride < batches && index % stride / ld < cols
+                   && index % stride % ld < rows && index != 33)
+                    host.storeFrom({index}, 3);
+            ASSERT_EQ(
+                hipMemcpyAsync(
+                    device.buf(), bytes.data(), bytes.size(), hipMemcpyHostToDevice, stream.value),
+                hipSuccess);
+            const auto unwritten = scan_padding_device(matrix, batches, total, false, stream.value);
+            const bool integer   = type == HIP_R_8I || type == HIP_R_32I;
+            EXPECT_EQ(unwritten.passed, integer);
+            if(!integer)
+                EXPECT_NE(unwritten.message.find("element offset 33"), std::string::npos);
+            host.storeFrom({33}, 3);
+            ASSERT_EQ(
+                hipMemcpyAsync(
+                    device.buf(), bytes.data(), bytes.size(), hipMemcpyHostToDevice, stream.value),
+                hipSuccess);
+            EXPECT_TRUE(scan_padding_device(matrix, batches, total, false, stream.value).passed);
+            host.storeFrom({66}, 3);
+            ASSERT_EQ(
+                hipMemcpyAsync(
+                    device.buf(), bytes.data(), bytes.size(), hipMemcpyHostToDevice, stream.value),
+                hipSuccess);
+            const auto tail = scan_padding_device(matrix, batches, total, false, stream.value);
+            EXPECT_FALSE(tail.passed);
+            EXPECT_NE(tail.message.find("element offset 66"), std::string::npos);
         }
     }
 
@@ -446,7 +584,7 @@ namespace
         ASSERT_GT(region->span(), bytes);
         const auto   base = reinterpret_cast<uintptr_t>(region->ptr());
         const size_t room = bytes / 2;
-        for(size_t size : {size_t(300), size_t(4096), size_t(1) << 20, room})
+        for(size_t size : {size_t(300), size_t(4096), size_t(1) << 20, size_t(5) << 20, room})
         {
             void* ptr = region->straddle(size, room);
             EXPECT_TRUE(region->crosses(ptr, size));
@@ -471,5 +609,53 @@ namespace
                   std::string::npos);
         EXPECT_FALSE(PlacedRegion::create(4096, 8192, HIP_R_32F, &why, &unsupported));
         EXPECT_FALSE(unsupported);
+        EXPECT_NE(why.find("cannot cross"), std::string::npos);
+        EXPECT_FALSE(PlacedRegion::create(1 << 20, 100, HIP_R_32F, &why, &unsupported));
+        EXPECT_NE(why.find("multiple of the mapping granularity"), std::string::npos);
+    }
+
+    TEST(DeviceBounds_pre_checkin, MemoryPreflightNamesTheShortMemory)
+    {
+        EXPECT_EQ(validation_memory_shortfall(0, 0), "");
+        EXPECT_NE(validation_memory_shortfall(size_t(1) << 60, 0).find("of device memory"),
+                  std::string::npos);
+        EXPECT_NE(validation_memory_shortfall(0, size_t(1) << 60).find("of host memory"),
+                  std::string::npos);
+    }
+
+    TEST(DeviceBounds_pre_checkin, MemoryPreflightReclaimsOnlyIdleBuffers)
+    {
+        auto live = memory_pool<d_memory>::Get(4096);
+        ASSERT_NE(live.get(), nullptr);
+        ASSERT_EQ(hipMemset(live.get(), 42, live.bytes()), hipSuccess);
+        auto cached = memory_pool<d_memory>::Get(size_t(16) << 20);
+        ASSERT_NE(cached.get(), nullptr);
+        const size_t capacity = cached.capacity();
+        memory_pool<d_memory>::Restore(cached);
+        size_t freeBytes = 0, totalBytes = 0;
+        ASSERT_EQ(hipMemGetInfo(&freeBytes, &totalBytes), hipSuccess);
+        EXPECT_EQ(validation_memory_shortfall(freeBytes + capacity / 2, 0), "");
+        unsigned char value = 0;
+        ASSERT_EQ(hipMemcpy(&value, live.get(), 1, hipMemcpyDeviceToHost), hipSuccess);
+        EXPECT_EQ(value, 42);
+        memory_pool<d_memory>::Restore(live);
+    }
+
+    TEST(DeviceBounds_pre_checkin, PlacedBufferSurvivesVectorGrowth)
+    {
+        std::string                  why;
+        bool                         unsupported = false;
+        std::vector<HipDeviceBuffer> buffers;
+        buffers.emplace_back(HIP_R_32F, size_t(1 << 20), size_t(0), &why, &unsupported);
+        if(!buffers.back().buf() && unsupported)
+            GTEST_SKIP() << why;
+        ASSERT_TRUE(buffers.back().buf()) << why;
+        void* placed = buffers[0].buf();
+        for(int n = 0; n < 16; ++n)
+            buffers.emplace_back(HIP_R_32F, size_t(1024));
+        EXPECT_EQ(buffers[0].buf(), placed);
+        ASSERT_TRUE(buffers[0].placement());
+        EXPECT_EQ(buffers[0].placement()->ptr(), placed);
+        EXPECT_EQ(hipMemset(placed, 0, 4 << 20), hipSuccess);
     }
 } // namespace

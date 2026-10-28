@@ -402,6 +402,24 @@ TEST(Freivalds, RejectsInexactNonlinearAndOverBudgetProblems) {
         VerificationStatus::Passed);
 }
 
+TEST(Freivalds, RefusesRepresentableOutputBeyondHalfAccumulatorExactRange) {
+    Tensor a(ScalarType::Float16, Shape{1, 2}), b(ScalarType::Float16, Shape{2, 1});
+    for (size_t k = 0; k < 2; ++k) {
+        a.storeFrom({0, k}, 100.0f);
+        b.storeFrom({k, 0}, 100.0f);
+    }
+    // 20000 is representable as half, but its partial sums exceed half's exact integer range.
+    Tensor output(ScalarType::Float16, Shape{1, 1});
+    output.storeFrom({0, 0}, 20000.0f);
+    ASSERT_EQ(output.loadAs<float>({0, 0}), 20000.0f);
+    const auto prepared =
+        prepareFreivalds(a, b, MatmulOptions{ScalarType::Float16},
+                         EpilogueOptions{ScalarType::Float16}, ScalarType::Float16, {}, {});
+    ASSERT_TRUE(std::holds_alternative<FreivaldsPreparationFailure>(prepared));
+    EXPECT_EQ(std::get<FreivaldsPreparationFailure>(prepared).status,
+              VerificationStatus::Unsupported);
+}
+
 TEST(Freivalds, UsesMatmulOperandScalesAndCertifiesComputeConversion) {
     Tensor a(ScalarType::Float32, Shape{2, 3}), b(ScalarType::Float32, Shape{3, 2});
     for (size_t i = 0; i < 2; ++i)
