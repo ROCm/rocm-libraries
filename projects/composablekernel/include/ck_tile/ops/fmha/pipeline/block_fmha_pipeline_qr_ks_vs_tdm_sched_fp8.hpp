@@ -16,6 +16,20 @@
 
 namespace ck_tile {
 
+// Same intrinsic as __builtin_amdgcn_s_buffer_load_f32, which older clang (e.g. ROCm 10.0) lacks.
+CK_TILE_DEVICE_EXTERN __attribute__((noconvergent)) float llvm_amdgcn_s_buffer_load_fp32(
+    int32x4_t srsrc, index_t soffset, index_t glc_slc) __asm("llvm.amdgcn.s.buffer.load.f32");
+
+// Uses the clang builtin when present, else the intrinsic declaration (e.g. ROCm 10.0).
+CK_TILE_DEVICE float amd_s_buffer_load_fp32(int32x4_t rsrc, index_t offset)
+{
+#if __has_builtin(__builtin_amdgcn_s_buffer_load_f32)
+    return __builtin_amdgcn_s_buffer_load_f32(cast_to_amdgpu_buffer_rsrc_t(rsrc), offset, 0);
+#else
+    return llvm_amdgcn_s_buffer_load_fp32(rsrc, offset, 0);
+#endif
+}
+
 // Hand-scheduled gfx125 TDM pipeline for FP8 D64/D128/D192/D256 (K64 QK WMMA at D64/D192).
 template <typename Problem_,
           typename Policy_        = FmhaTdmSchedFp8PolicyFor<Problem_>,
@@ -412,10 +426,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     CK_TILE_DEVICE static float
     LoadKVDescale(const int32x4_t& res, index_t kv, index_t block_scale_size_kv)
     {
-        return __builtin_amdgcn_s_buffer_load_f32(cast_to_amdgpu_buffer_rsrc_t(res),
-                                                  kv / block_scale_size_kv *
-                                                      static_cast<index_t>(sizeof(float)),
-                                                  0);
+        return amd_s_buffer_load_fp32(
+            res, kv / block_scale_size_kv * static_cast<index_t>(sizeof(float)));
     }
 
     CK_TILE_DEVICE static void LoadKVDescalesAt(const int32x4_t& res,
@@ -470,10 +482,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                                                          KVDescales& v_descales)
     {
         static_for<0, kKVScaleGroups, 1>{}([&](auto g) {
-            k_descales(g) = __builtin_amdgcn_s_buffer_load_f32(
-                cast_to_amdgpu_buffer_rsrc_t(k_res), offsets[g], 0);
-            v_descales(g) = __builtin_amdgcn_s_buffer_load_f32(
-                cast_to_amdgpu_buffer_rsrc_t(v_res), offsets[g], 0);
+            k_descales(g) = amd_s_buffer_load_fp32(k_res, offsets[g]);
+            v_descales(g) = amd_s_buffer_load_fp32(v_res, offsets[g]);
         });
     }
 
