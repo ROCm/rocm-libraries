@@ -57,6 +57,8 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Removed `WARP_SORT` template argument from `hipcub::BlockMergeSortStrategy`.
 * Removed the deprecated `hipcub::AliasTemporaries`.
 * Deprecated `hipcub::MergePathSearch`.
+* Deprecated `hipcub::ThreadLoad(ptr, modifier, is_pointer)`. Use `hipcub::ThreadLoad<MODIFIER>(*itr)` instead.
+* Deprecated `hipcub::ThreadLoadVolatilePointer(ptr, is_primitive)`. Use `hipcub::ThreadLoad<LOAD_VOLATILE>(*itr)` instead.
 
 ## hipCUB-5.0.0 for ROCm 10.2.0
  
