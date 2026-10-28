@@ -80,9 +80,9 @@ The S/D/C/Z variants of a routine are grouped between `/**@{*/` and `/**@}*/` in
 python3 scripts/sync_group_docs.py --write
 ```
 
-The `hipsparse-group-docs` pre-commit hook runs the same script without `--write` on every pull request that touches these headers, and fails if a copy is missing or differs.
+The `hipsparse-group-docs` pre-commit hook runs the same script without `--write` on every pull request that touches the public headers. It fails if a copy is missing or differs, if a group holds anything other than declarations and their copies, or if a `#if`, `#else` or `#endif` line separates any documentation block from its declaration.
 
-To check that Clang attaches a comment to every declaration, as libclang and clangd see them, run `python3 scripts/audit_doc_attachment.py`. It parses `hipsparse.h` with ROCm clang (`/opt/rocm/llvm/bin/clang`, or set `HIPSPARSE_CLANG`) and the HIP headers (`$ROCM_PATH`, default `/opt/rocm`), and fails if any function in `library/include/internal/` is undocumented. Keep each documentation block directly above its declaration: Clang does not attach it across a `#if` or other preprocessor line.
+To check that Clang attaches a comment to every declaration, as libclang and clangd see them, run `python3 scripts/audit_doc_attachment.py`. It parses `hipsparse.h` with ROCm clang (`/opt/rocm/llvm/bin/clang`, or set `HIPSPARSE_CLANG`) and the HIP headers (`$ROCM_PATH`, default `/opt/rocm`), and fails if any function in `library/include/` is undocumented. It checks the AMD build, with `CUDART_VERSION` undefined. Keep each documentation block directly above its declaration: Clang does not attach it across a `#if` or other preprocessor line.
 
 ## Pull Request Guidelines ##
 
