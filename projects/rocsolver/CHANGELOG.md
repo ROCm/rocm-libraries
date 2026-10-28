@@ -15,6 +15,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Changed
 
 * Clarified in the API documentation that rocsolver_rfinfo is an input and output parameter as it could be modified within the functions.
+* Reduced the build time of the GETF2 small-matrix kernels by compiling a few row sizes instead of one kernel per number of columns.
 
 ### Optimized
 
