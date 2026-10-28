@@ -7,9 +7,9 @@ window) must still get the right O.
 The CTA's tile range starts at the window start of its first row, so later rows
 can see a fully masked first tile. The running max must not be pinned at 0 by
 that tile: with every visible score negative, exp2(s - 0) rounds P to 0 and O
-collapses although the row sees keys. P underflows near -17 natural for fp16 and
-near -92 for bf16 (P is cast to bf16 before PV); the scalar kernels keep P in
-fp32, which underflows near -87 to -103 depending on denormal flush. Each
+collapses although the row sees keys. P rounds to 0 below about -17 natural for
+fp16 and -93 for bf16 (P is cast to bf16 before PV); the scalar kernels keep P
+in fp32, which rounds to 0 below about -104 (about -87 with denormals flushed). Each
 epilogue branch is pinned so all three clamp sites are covered, at KV page
 sizes 16 and 64 and head sizes 64, 128 and 256 (256 only where the variant fits
 the LDS budget). One auto-route case per arch (no ``tuning_spec``, D64 bf16)
@@ -75,7 +75,7 @@ _BRANCH_VARIANT = {
 }
 
 # (dtype, natural-log score of every visible key), below the P underflow point
-# when m is pinned at 0: about -17 for fp16 and -92 for bf16.
+# when m is pinned at 0: about -17 for fp16 and -93 for bf16.
 _SCORES = [("fp16", -20.0), ("bf16", -200.0)]
 _WINDOW = 64
 _HQ, _HKV = 32, 8
