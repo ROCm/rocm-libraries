@@ -144,6 +144,12 @@ struct PassFeatureConfig {
         /// released that many WMMAs earlier. Applies with dsSpread (or when set > 0) and the
         /// queue model; < 0 = automatic (72 cycles, at most a full queue), 0 = off.
         int wmmaBarrierCoverCycles = -1;
+        /// In the region that ends at a loop's back-edge branch, the last loopTailWmmaRun WMMAs
+        /// issue back to back, and the non-WMMA work queued before them (the next iteration's
+        /// ds_loads) goes first, also when it has to wait for a ds credit; the ds spread paces
+        /// over the WMMAs ahead of the run. A WMMA that is not ready yet can still be filled.
+        /// 0 = off.
+        int loopTailWmmaRun = 0;
         /// Cycles the LDS needs to return one ds_load (its return rate, the old throttle latency /
         /// queue depth). The windows the ds_loads in front of a barrier need are at least
         /// loads * cycles / WMMA window. 0 = off (the even-spread density only).

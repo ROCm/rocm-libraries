@@ -508,6 +508,12 @@ class CDNA5ReadyQueue : public ReadyQueue {
         }
         return false;
     }
+    // WMMAs at the end of this region kept for the loop tail run (0 = none); see
+    // DagFeatures::loopTailWmmaRun.
+    int loopTailRunWmmas() const {
+        const int run = getPassContext().getPassFeatureConfig().dagFeatures.loopTailWmmaRun;
+        return loopTailRegion_ && run > 0 ? std::min(run, wmmaTotalThisRegion_) : 0;
+    }
     // WMMA refill (see PassFeatureConfig::DagFeatures::wmmaRefillMode). A refill starts when the
     // queued cover drops below the refill line (wmmaQueueCover()) with room in the queue, and
     // keeps issuing WMMAs ahead of other work until it is done: Fixed after wmmaBatchSize
@@ -723,6 +729,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // --- Loop head balancing ---
     bool deferFirstHeadWmmaActive_ = false;
     bool deferHeadBalanceThisRegion_ = false;
+    // This region ends at the loop's back-edge branch (see DagFeatures::loopTailWmmaRun).
+    bool loopTailRegion_ = false;
 
     // Per-barrier forced-issue threshold: maps StinkyInstruction* -> N.
     std::unordered_map<StinkyInstruction*, int> barrierWmmaThresholds_;
@@ -2567,6 +2575,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // Phase B — try WMMA if all gates pass.
     bool otherQueuesHaveWork = !globalReadQueue.empty() || !localReadQueue.empty() ||
                                !otherQueue.empty() || !valuQueue.empty() || !prefetchQueue.empty();
+    bool blockWmmaForLoopTailRun = false;
 
     if (promotedPhase_ == PromotePhase::None && !wmmaQueue.empty()) {
         auto [bestWMMA, bestLatency] = findMostReadyWMMA();
@@ -2621,7 +2630,17 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                                        calibratedCoverCycles() < 2 * calibratedIssueCycles();
         const bool preBarrierRunPreempt =
             bestLatency <= 0 && inPreBarrierRun(bestWMMA->inst->latencyCycles);
+        // Loop tail run: the queued non-WMMA work goes before the run's first WMMA, also when it
+        // has to wait (a ds_load waiting for a credit is forced ahead of Phase E), and once the
+        // run has begun a ready WMMA goes ahead of everything.
+        const int loopTailRun = loopTailRunWmmas();
+        const int loopTailLeft = wmmaTotalThisRegion_ - wmmaIssuedCountThisRegion_;
+        const bool inLoopTail = loopTailRun > 0 && loopTailLeft <= loopTailRun;
+        const bool loopTailRunStarted = inLoopTail && loopTailLeft < loopTailRun;
+        blockWmmaForLoopTailRun = inLoopTail && !loopTailRunStarted && otherQueuesHaveWork;
+        const bool loopTailRunPreempt = loopTailRunStarted && bestLatency <= 0;
         const bool preemptForQueue = burstPreempt || calibratedPreempt || preBarrierRunPreempt ||
+                                     loopTailRunPreempt ||
                                      (refillActive && (!hasPickableNonWmma || pickGivesWay));
         const bool blockWmmaForActiveWindow = !preemptForQueue && !quotaClosedWindow &&
                                               (coIssueCyclePos_ < activeWmmaLatency_) &&
@@ -2653,15 +2672,17 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             << " pickedDS=" << (pickedDS ? int(pickedDS->id) : -1) << " clock=" << clock_
             << " smallest=" << (smallestPickable ? int(smallestPickable->id) : -1)
             << " credFull=" << dsReadInflight_.full() << " preempt=" << preemptForQueue
-            << " preBarrierRun=" << preBarrierRunPreempt
+            << " preBarrierRun=" << preBarrierRunPreempt << " loopTailLeft="
+            << (inLoopTail ? loopTailLeft : 0) << " blockLoopTail=" << blockWmmaForLoopTailRun
             << " outstanding=" << outstandingWmmas() << " cover=" << queuedCoverCycles()
             << " calCover=" << (calibratedOn_ ? calibratedCoverCycles() : -1)
             << " burstLeft=" << burstLeft_ << " fills=" << nonWmmaFillsSinceActiveWmma_
             << " localReadQ=" << localReadQueue.size() << " nonWmmaMinId="
             << (smallestPickable ? std::to_string(smallestPickable->id) : std::string("none"))
             << "\n");
-        if (bestLatency <= 0 && !blockWmmaForLoopHeadBalance && !blockWmmaForActiveWindow &&
-            !blockWmmaForAtLeastOneNonWmmaInterleaving && !blockWmmaForCoexecSpacing) {
+        if (bestLatency <= 0 && !blockWmmaForLoopHeadBalance && !blockWmmaForLoopTailRun &&
+            !blockWmmaForActiveWindow && !blockWmmaForAtLeastOneNonWmmaInterleaving &&
+            !blockWmmaForCoexecSpacing) {
             DAGNode* node = pickOneFromWMMA(bestWMMA);
             PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase B picked WMMA dagId=" << node->id
                                  << "\n");
@@ -2727,6 +2748,19 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             }
             return rememberPick(popNonWmma(smallestPickable, pickKind));
         }
+    }
+
+    // Loop tail run: a ds_load the fill phases could not fit (a credit wait longer than the
+    // window) still goes before the run, and the wave takes the stall. A ds_load gated by the
+    // queued WMMAs' sources is left to Phase E.
+    if (blockWmmaForLoopTailRun && pickedDS != nullptr && !destOverlapsActiveWmmaSrc(pickedDS) &&
+        !pipeOpGateBlocks(pickedDS)) {
+        int wait = std::max(getMaxSrcDataWait(pickedDS), getHazardWait(pickedDS));
+        if (dsReadQueueFull()) wait = std::max(wait, dsReadInflight_.minResidual());
+        if (wait > 0) advanceTime(wait, TimeKind::Elapsed);
+        PASS_DEBUG(std::cerr << "[CDNA5 pickOne] loop tail forced ds_load dagId=" << pickedDS->id
+                             << " wait=" << wait << "\n");
+        return rememberPick(popNonWmma(pickedDS, kLocalRead));
     }
 
     // Phase E — forced WMMA: pick the most-ready WMMA before barriers.
@@ -3055,6 +3089,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // to gate here.
     hazardHoistCandidates_.clear();
     for (auto& gate : hazardGates_) gate.clear();
+    loopTailRegion_ = false;
 
     if (getPassContext().getPassFeatureConfig().loopConfig.unrollGemm == false) return;
 
@@ -3062,6 +3097,10 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     deferHeadBalanceThisRegion_ = deferFirstHeadWmmaActive_ && loop &&
                                   loop->headerBB == blockBegin->getParent() &&
                                   regionStart != blockBegin;
+    if (loop && loop->latchBB == blockBegin->getParent() && regionEnd.getNodePtr() != nullptr) {
+        const auto* endInst = dyn_cast<StinkyInstruction>(regionEnd.getNodePtr());
+        loopTailRegion_ = endInst != nullptr && isBranch(*endInst);
+    }
 
     seedWmmaDsLatencyFromPrefix(blockBegin, regionStart, regDataReadyCounters, crossBBDsResiduals_);
 
@@ -3772,8 +3811,9 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
              dsReadCreditLifetime() - 1) /
             std::max(1, dsReadCreditLifetime()));
         planBursts(loads, drainWindows);
-        dsSpread_.plan(loads, wmmaTotalThisRegion_, batch, dagFeatures.dsCatchUpPace, drainWindows,
-                       maxPerBatch);
+        // The loop tail run takes no ds_load: the pace ends where it starts.
+        dsSpread_.plan(loads, wmmaTotalThisRegion_ - loopTailRunWmmas(), batch,
+                       dagFeatures.dsCatchUpPace, drainWindows, maxPerBatch);
         dsOverflow_ =
             !loads.empty() && static_cast<long long>(loads.size()) *
                                       dsIssueCost(*deps.dag.nodes[loads.front().nodeId].inst) >

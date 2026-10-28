@@ -2554,6 +2554,51 @@ TEST_F(DAGSchedulerPassTest, WmmaRefillOnQueueDrain_DsLoadIssuesWhileTheQueueOut
     EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WddddddWddWWWWWW");
 }
 
+// LoopTailWmmaRun: in the region that ends at the back edge, the last N WMMAs issue back to back
+// and every ds_load goes before them, also the ones that wait for a credit (8 credits, 16 loads).
+// Off, half the ds_loads follow the tail WMMAs; a block that is not a loop latch keeps that
+// schedule with the option on.
+TEST_F(DAGSchedulerPassTest, LoopTailWmmaRun_LastWmmasBeforeTheBackEdgeRunBackToBack) {
+    struct Variant {
+        int run;
+        bool loop;
+    };
+    const Variant variants[] = {{0, true}, {4, true}, {0, false}, {4, false}};
+    std::string shapes[4];
+    for (int v = 0; v < 4; ++v) {
+        SetUp();
+        if (variants[v].loop) bb->addSuccessor(bb);
+        for (int i = 0; i < 8; i++) createWmmaScaleF8(8 * i, 300 + 8 * i);
+        {
+            // A non-movable barrier cuts the block: the region after it ends at the branch.
+            AsmIRBuilder builder(*bb, arch);
+            StinkyInstruction* cut = builder.create(getMCIDByUOp(GFX::s_barrier_signal, arch));
+            cut->addSrcReg(StinkyRegister(-1));
+        }
+        for (int i = 0; i < 16; i++) createWmmaScaleF8(8 * i, 500 + 8 * i);
+        for (int i = 0; i < 16; i++) createMovableDsLoad(900 + i * 4, 80, i + 1);
+        createSCmpWritingScc(bb, /*srcSgpr=*/90);
+        createSCbranchReadingScc(bb);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = 8;
+        pfc.dagFeatures.wmmaQueueDepth = 8;
+        pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+        pfc.dagFeatures.loopTailWmmaRun = variants[v].run;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        shapes[v] = wdShape(mnemonicSequence(*bb));
+    }
+    // The barrier, the compare and the branch are the '.' entries; the branch stays last.
+    const auto tailOf = [](const std::string& s) { return s.substr(s.size() - 5); };
+    EXPECT_NE(tailOf(shapes[0]), "WWWW.") << shapes[0];
+    EXPECT_EQ(tailOf(shapes[1]), "WWWW.") << shapes[1];
+    EXPECT_EQ(std::count(shapes[1].begin(), shapes[1].end(), 'd'), 16) << shapes[1];
+    EXPECT_EQ(shapes[3], shapes[2]);
+}
+
 // Refill modes: a refill only hides a stall, so it runs while the next ds_load would wait (here
 // for a credit: a ds queue of 2). Fixed issues wmmaBatchSize WMMAs per refill, Dynamic up to the
 // refill target in cycles; a refill that finds the queue still low starts again.
