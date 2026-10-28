@@ -36,17 +36,9 @@
 
 #include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD && _THRUST_USE_ROCPRIM
-// #  include <rocprim/type_traits.hpp>
-#  include <rocprim/type_traits_functions.hpp>
-#endif // !_THRUST_HAS_DEVICE_SYSTEM_STD
-
 // TODO(libhipcxx): remove this namespace once libhipcxx gets ready
 namespace internal
 {
-
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-
 using _THRUST_STD::is_arithmetic;
 using _THRUST_STD::is_integral;
 using _THRUST_STD::is_integral_v;
@@ -61,35 +53,6 @@ template <typename T>
 using remove_cvref = _THRUST_STD::remove_cvref<T>;
 template <typename T>
 using remove_cvref_t = _THRUST_STD::remove_cvref_t<T>;
-
-#else // !_THRUST_HAS_DEVICE_SYSTEM_STD
-
-// TODO: Use rocprim version of is_arithmetic, is_integral, make_unsigned and make_unsigned_t for consistency.
-// However, replacing with rocprim::is_arithmetic currently causes issues.
-// Keeping standard versions for now until compatibility is resolved.
-using ::std::is_arithmetic;
-using ::std::is_integral;
-using ::std::is_integral_v;
-using ::std::make_unsigned;
-
-template <typename T>
-using make_unsigned_t = typename ::std::make_unsigned<T>::type;
-
-template <typename T>
-// If we're not on Windows and we have libstdc++ >= 10, we can use the __decay_t
-// builtin to reduce compilation time.
-#  if defined(_WIN32) || (defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE < 10)
-using decay_t = ::std::decay_t<T>;
-#  else
-using decay_t = ::std::__decay_t<T>;
-#  endif
-template <typename T>
-using remove_cvref = ::std::remove_cv<::std::remove_reference_t<T>>;
-template <typename T>
-using remove_cvref_t = ::std::remove_cv_t<::std::remove_reference_t<T>>;
-
-#endif // _THRUST_HAS_DEVICE_SYSTEM_STD
-
 } // namespace internal
 
 THRUST_NAMESPACE_BEGIN
@@ -182,15 +145,7 @@ struct larger_type
 {};
 
 template <class F, class... Us>
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
 using invoke_result = _THRUST_STD::invoke_result<F, Us...>;
-#else // TODO(libhipcxx): remove this path of code once libhipcxx gets ready
-#  if _THRUST_USE_ROCPRIM
-using invoke_result = ::rocprim::invoke_result<F, Us...>;
-#  else
-using invoke_result = ::std::invoke_result<F, Us...>;
-#  endif
-#endif // _THRUST_HAS_DEVICE_SYSTEM_STD
 
 template <class F, class... Us>
 using invoke_result_t = typename invoke_result<F, Us...>::type;
@@ -229,53 +184,6 @@ THRUST_NAMESPACE_END
 // with _THRUST_STD::common_type_t in rocThrust once libhipcxx gets ready
 namespace internal
 {
-
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-
 template <typename... Tp>
 using common_type_t = _THRUST_STD::common_type_t<Tp...>;
-
-#else // !_THRUST_HAS_DEVICE_SYSTEM_STD
-
-namespace detail
-{
-
-template <typename T1, typename T2, typename Enable = void>
-struct common_type;
-
-template <typename T1, typename T2>
-struct common_type<T1,
-                   T2,
-                   typename _THRUST_STD::enable_if<_And<typename _THRUST_STD::is_floating_point<T1>::type,
-                                                        typename _THRUST_STD::is_floating_point<T2>::type>::value>::type>
-{
-  using type = typename THRUST_NS_QUALIFIER::detail::larger_type<T1, T2>::type;
-};
-
-template <typename T1, typename T2>
-struct common_type<
-  T1,
-  T2,
-  typename _THRUST_STD::enable_if<
-    _And<typename is_integral<T1>::type, typename _THRUST_STD::is_floating_point<T2>::type>::value>::type>
-{
-  using type = T2;
-};
-
-template <typename T1, typename T2>
-struct common_type<T1,
-                   T2,
-                   typename _THRUST_STD::enable_if<_And<typename _THRUST_STD::is_floating_point<T1>::type,
-                                                        typename is_integral<T2>::type>::value>::type>
-{
-  using type = T1;
-};
-
-} // namespace detail
-
-template <typename... Tp>
-using common_type_t = typename detail::common_type<Tp...>::type;
-
-#endif // _THRUST_HAS_DEVICE_SYSTEM_STD
-
 } // namespace internal
