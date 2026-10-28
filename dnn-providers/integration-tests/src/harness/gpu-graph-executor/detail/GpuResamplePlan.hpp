@@ -277,6 +277,10 @@ public:
             {
                 return false;
             }
+            if(resampleMode != hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL)
+            {
+                return false;
+            }
             CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->index_tensor_uid().value());
             CHECK_TENSOR_TYPE(
                 tensorMap, nodeAttributes->index_tensor_uid().value(), IndexDataTypeEnum);
@@ -404,6 +408,10 @@ public:
         else
         {
             if(!nodeAttributes->index_tensor_uid().has_value())
+            {
+                return false;
+            }
+            if(resampleMode != hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL)
             {
                 return false;
             }
