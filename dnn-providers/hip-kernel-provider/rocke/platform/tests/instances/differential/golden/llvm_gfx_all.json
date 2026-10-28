@@ -1,4 +1,7 @@
 {
+  "aliases": {
+    "llvm24": "llvm23"
+  },
   "ir_canonical": {
     "add_rmsnorm2d_bf16": {
       "0": "77846fc7b98264e280640fc3615658606c05982646e8c56420623e78e602b9a9",

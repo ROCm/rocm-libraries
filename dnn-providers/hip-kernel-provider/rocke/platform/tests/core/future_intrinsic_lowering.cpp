@@ -189,6 +189,37 @@ void case_gfx1250_standalone_bridge()
     EXPECT_IR(ir, "call void @llvm.amdgcn.tensor.store.from.lds(");
 }
 
+void case_inline_asm_rejects_non_string_minimum_flavor()
+{
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "malformed_minimum_flavor") != ROCKE_OK)
+    {
+        fail("rocke_ir_builder_init", __LINE__);
+        return;
+    }
+    rocke_value_t* operand = rocke_b_const_i32(&b, 0);
+    rocke_value_t* operands[] = {operand};
+    const rocke_type_t* result_types[] = {rocke_i32()};
+    rocke_op_t* op
+        = rocke_b_inline_asm(&b, "v_mov_b32 $0, $1", "=v,v", operands, 1, result_types, 1, nullptr);
+    rocke_attr_set_int(&b, &op->attrs, "minimum_llvm_flavor", 23);
+    rocke_b_ret(&b);
+
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    const rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        rocke_ir_builder_kernel(&b), ROCKE_LLVM_FLAVOR_LLVM20, "gfx950", &ll, err, sizeof(err));
+    if(st != ROCKE_ERR_TYPE)
+        fail("non-string minimum_llvm_flavor did not return ROCKE_ERR_TYPE", __LINE__);
+    const char* expected
+        = "tile.inline_asm failed - minimum_llvm_flavor has a non-string value, expected a string";
+    if(strcmp(err, expected) != 0)
+        fail("non-string minimum_llvm_flavor diagnostic changed", __LINE__);
+    std::free(ll);
+    rocke_ir_builder_free(&b);
+}
+
 void case_scaled_mfma_shared_profile()
 {
     const auto build = [](rocke_ir_builder_t* b) {
@@ -3487,6 +3518,8 @@ const TestCase k_cases[] = {
     {"hip_zext_uses_unsigned_source_cast", case_hip_zext_uses_unsigned_source_cast},
     {"gfx1250_scaled_wmma", case_gfx1250_scaled_wmma},
     {"gfx1250_standalone_bridge", case_gfx1250_standalone_bridge},
+    {"inline_asm_rejects_non_string_minimum_flavor",
+     case_inline_asm_rejects_non_string_minimum_flavor},
     {"flag_ops", case_flag_ops},
     {"fence_system_scope", case_fence_system_scope},
     {"flag_ops_hip", case_flag_ops_hip},

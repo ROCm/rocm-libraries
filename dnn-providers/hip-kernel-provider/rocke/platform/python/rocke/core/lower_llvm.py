@@ -1867,16 +1867,17 @@ class _Lowerer:
         table = arch_domain.load(self._flavor)
         if table is None:
             return
+        flavor = table.flavor
         arch = self._backend.arch.gfx
         cell = table.lookup(key, arch)
         if cell is None or not arch_domain.is_negative(cell.status):
             return
-        waived = arch_domain.is_waived(key, arch, self._flavor)
+        waived = arch_domain.is_waived(key, arch, flavor)
         if mode == arch_domain.MODE_ERROR and not waived:
-            raise ArchDomainError(key, arch, self._flavor, cell.status, cell.evidence)
+            raise ArchDomainError(key, arch, flavor, cell.status, cell.evidence)
         warnings.warn(
             ArchDomainWarning(
-                key, arch, self._flavor, cell.status, cell.evidence, waived=waived
+                key, arch, flavor, cell.status, cell.evidence, waived=waived
             ),
             stacklevel=3,
         )
@@ -5119,6 +5120,11 @@ class _Lowerer:
         required_arch = op.attrs.get("required_arch")
         required_flavor = op.attrs.get("required_llvm_flavor")
         minimum_flavor = op.attrs.get("minimum_llvm_flavor")
+        if minimum_flavor is not None and not isinstance(minimum_flavor, str):
+            raise TypeError(
+                "tile.inline_asm failed - minimum_llvm_flavor has a non-string "
+                "value, expected a string"
+            )
         if required_arch is not None and self._backend.arch.gfx != required_arch:
             raise ValueError(
                 f"tile.inline_asm requires {required_arch}, got {self._backend.arch.gfx}"

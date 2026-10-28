@@ -999,7 +999,16 @@ static void _op_tile_inline_asm(rocke_lower_t* L, const rocke_op_t* op)
 
     const char* required_arch = rocke_attr_get_str(&op->attrs, "required_arch");
     const char* required_flavor = rocke_attr_get_str(&op->attrs, "required_llvm_flavor");
-    const char* minimum_flavor = rocke_attr_get_str(&op->attrs, "minimum_llvm_flavor");
+    const rocke_attr_value_t* minimum_flavor_attr
+        = rocke_attr_get(&op->attrs, "minimum_llvm_flavor");
+    if(minimum_flavor_attr != NULL && minimum_flavor_attr->kind != ROCKE_ATTR_STR)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_TYPE,
+                      "tile.inline_asm failed - minimum_llvm_flavor has a non-string value, "
+                      "expected a string");
+    }
+    const char* minimum_flavor = minimum_flavor_attr != NULL ? minimum_flavor_attr->u.s : NULL;
     if(required_arch
        && (!L->backend || !L->backend->gfx || strcmp(L->backend->gfx, required_arch) != 0))
     {

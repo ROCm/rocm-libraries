@@ -507,7 +507,7 @@ static void ll_check_arch_domain(rocke_lower_t* L, const char* key)
         return;
     }
     char msg[ROCKE_ERR_MSG_CAP];
-    const char* flavor = rocke_llvm_flavor_name(L->flavor);
+    const char* flavor = rocke_arch_domain_column_flavor(rocke_llvm_flavor_name(L->flavor));
     const rocke_arch_domain_cell_t* cell = rocke_arch_domain_negative(flavor, key, L->backend->gfx);
     if(cell == NULL || cell->waived)
     {
