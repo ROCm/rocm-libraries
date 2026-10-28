@@ -56,6 +56,11 @@ class Package:
     )
     cpp_globs: tuple[str, ...] = ("*attention*bwd*.cpp",)
     parity_globs: tuple[str, ...] = ("*attention*bwd*_emit.c",)
+    # A function returning tuple[bool, str] (is_valid_spec's (ok, reason)) is
+    # the platform's validity-gate ABI: `bool f(..., char* reason, size_t
+    # reason_cap)`, the str written into the caller's buffer (designs/
+    # generated_abi.md). Off for attention backward, which keeps its output.
+    ok_reason_abi: bool = False
 
     @property
     def c(self) -> str:
@@ -173,6 +178,7 @@ def platform_instance(
         h_globs=(f"instance_{module}.h", f"instance_{module}_*.h"),
         cpp_globs=(f"{module}.cpp", f"{module}_*.cpp"),
         parity_globs=(f"{module}_emit.c",),
+        ok_reason_abi=True,
     )
 
 

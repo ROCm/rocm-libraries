@@ -79,3 +79,65 @@ def normalize(text: str) -> str:
     """Drop the source hash the banners carry (it changes with any Python edit)."""
     text = re.sub(r"(\.py):[0-9a-f]{12}\b", r"\1:<sha>", text)
     return re.sub(r"\(sha256 [0-9a-f]{12}\)", "(sha256 <sha>)", text)
+
+
+def platform_probe(
+    root: Path,
+    extra: str,
+    fills: dict[str, str] | None = None,
+    package: str = "batched_transpose",
+    arch: str = "common",
+) -> dict:
+    """The environment of a platform-instance probe under root: the package's
+    real module with `extra` appended (its names added to __all__), imported
+    from a symlink overlay of platform/python (TR_LIBRARY), the code maps mined
+    from the tree, no facts, and `fills` (function -> C++) as the hand fills."""
+    real = ROCKE / "platform" / "python"
+    lib = root / "python"
+    path = ["rocke", "instances", arch]
+    src, dst = real, lib
+    for part in path:
+        dst.mkdir(parents=True)
+        for f in (src).iterdir():
+            if f.name != part and f.name != "__pycache__":
+                (dst / f.name).symlink_to(f)
+        src, dst = src / part, dst / part
+    dst.mkdir()
+    for f in src.iterdir():
+        if f.name != f"{package}.py" and f.name != "__pycache__":
+            (dst / f.name).symlink_to(f)
+    text = (src / f"{package}.py").read_text()
+    names = re.findall(r"^def (\w+)", extra, re.M)
+    text = text.replace(
+        "__all__ = [", "__all__ = [\n" + "".join(f'    "{n}",\n' for n in names), 1
+    )
+    (dst / f"{package}.py").write_text(text + "\n\n" + extra)
+    holes = root / "holes" / package
+    holes.mkdir(parents=True)
+    for name, body in (fills or {}).items():
+        (holes / f"{name}.cpp").write_text(body)
+    (root / "data").mkdir()
+    env = dict(os.environ)
+    env.update(
+        TR_PACKAGE=package,
+        TR_LIBRARY=str(lib),
+        TR_DATA=str(root / "data"),
+        TR_MAPS=str(root / "maps"),
+        TR_HOLES=str(root / "holes"),
+        PYTHONDONTWRITEBYTECODE="1",
+    )
+    p = subprocess.run(
+        [sys.executable, "tools/mine_maps.py", "--rocke", str(ROCKE)]
+        + ["--out", str(root / "maps"), "--only", "sigmap", "--only", "twin_map"],
+        cwd=TR,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert p.returncode == 0, p.stdout + p.stderr
+    return env
+
+
+def strip_holes(cpp: str) -> str:
+    """The source without the #error line of each hole (it may be wrapped)."""
+    return re.sub(r'#error (?:\\\n\s*)?".*"\n', "", cpp)

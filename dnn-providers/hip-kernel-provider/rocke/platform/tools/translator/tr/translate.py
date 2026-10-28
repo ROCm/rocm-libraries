@@ -894,6 +894,17 @@ def make_gen_shim(
             body.append(
                 f"for(int i = 0; i < {k}; ++i) {fixed}[i] = (int)res_[(size_t)i];"
             )
+        elif roles.get("reason") == "reason_str":
+            # (ok, reason) as the validity-gate ABI: the reason into the caller's
+            # buffer, ok returned (a raise: with_reason writes its text, false)
+            body.append(f"const auto res_ = {call};")
+            body.append(
+                "if(reason != nullptr && reason_cap > 0) {"
+                " const std::string why_(std::get<1>(res_));"
+                " strncpy(reason, why_.c_str(), reason_cap - 1);"
+                " reason[reason_cap - 1] = '\\0'; }"
+            )
+            body.append("return std::get<0>(res_);")
         elif sig.ret == T.VOID:
             body.append(f"{call};")
         elif "_tuple_" in cf.ret and (

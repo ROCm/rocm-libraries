@@ -737,6 +737,18 @@ class Abi:
             )
         if k == "cls":
             return self.struct_name(r[1]), [], []
+        if (
+            k == "tuple"
+            and PKG.ok_reason_abi
+            and [x[0] for x in r[1]] == ["bool", "str"]
+        ):
+            # (ok, reason): the platform validity gate (instance_*.h): bool, the
+            # reason written into the caller's buffer, a raise is false + its text
+            return (
+                "bool",
+                reason,
+                [dict(reason_roles[0], role="reason_str"), reason_roles[1]],
+            )
         fail_ret = "bool"
         tail, troles = ([], []) if has_b or not raises else (reason, reason_roles)
         if k == "tuple" and all(x[0] == "int" for x in r[1]):

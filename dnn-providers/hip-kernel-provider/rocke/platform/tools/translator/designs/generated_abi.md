@@ -53,6 +53,7 @@ so most declarations come out unchanged.
 | return `list[tuple[A, B]]` | owned parallel arrays `A** out_0, B** out_1, int* n_out` |
 | return `dict[str, V]` | owned `const char*** out_keys, V** out_vals, int* n_out` |
 | return `tuple[int, int, int]` | `int* out` (caller array of 3) |
+| return `tuple[bool, str]` (`is_valid_spec`'s `(ok, reason)`), platform instances only | `bool` plus `char* reason, size_t reason_cap`: the reason written into the caller's buffer, a raise is false plus its text (the validity gate of every `instance_*.h`) |
 | return a dataclass | the struct by value; tuple fields owned by it, free with `_free` |
 | `tuple` of str / int constant | `extern const T NAME[NAME_N]` + `#define NAME_N` |
 | `int` constant | `#define NAME value` |
