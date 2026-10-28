@@ -553,7 +553,8 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
                     local_col,
                 ),
             )
-            values.append(b.smem_load_vN(shared, byte_off, dtype=I8, n=1))
+            loaded = b.smem_load_vN(shared, byte_off, dtype=I8, n=1)
+            values.append(b.vec_extract(loaded, 0))
         return b.bitcast(b.vec_pack(values, I8), I32)
 
     atom_rows = [

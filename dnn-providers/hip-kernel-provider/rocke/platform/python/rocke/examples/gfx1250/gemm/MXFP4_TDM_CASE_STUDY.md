@@ -107,6 +107,7 @@ silicon bench harness (timings outside the repo).
 | `step6_2_mxfp4_gemm` | + `prefetch_gl2` | `bad=0` |
 | `step6_3_mxfp4_gemm` | + `scale_double_buffer` | `bad=0` (YAML `256x256x512`: `vgpr=774`, `vgpr_spill=4`, scratch=20; smoke tile_k=512 spill-free) |
 | `step6_4_mxfp4_gemm` | + `wave_separated_tdm` | `bad=0` |
+| `step6_5_mxfp4_gemm` | + `scale_tdm` (row-major rocKE LDS staging, not Tensile swizzle) | `bad=0` (YAML LDS 278528, `vgpr=768`, spill=0) |
 
 ## Deferred controls
 

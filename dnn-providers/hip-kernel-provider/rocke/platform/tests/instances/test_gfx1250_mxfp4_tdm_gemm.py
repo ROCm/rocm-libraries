@@ -149,10 +149,19 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                     M=128,
                     N=64,
                     K=256,
-                    scale_tdm=True,
-                    scale_double_buffer=True,
+                    lds_pad=True,
                 ),
                 "not implemented yet",
+            ),
+            (
+                MxFp4TdmGemmSpec(
+                    name="bad",
+                    M=128,
+                    N=64,
+                    K=256,
+                    scale_tdm=True,
+                ),
+                "scale_tdm requires scale_double_buffer",
             ),
         )
         for spec, message in cases:
@@ -265,6 +274,46 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
         self.assertGreaterEqual(llvm_sep.count("llvm.amdgcn.tensor.load.to.lds"), 4)
         # Wave-0-only path guards TDM; wave-separated issues without that gate.
         self.assertNotEqual(llvm_sep, llvm_base)
+
+    def test_step6_5_scale_tdm_grows_lds_and_emits(self):
+        self.assertIn("step6_5_mxfp4_gemm", variant_names())
+        spec = variant_spec(
+            "step6_5_mxfp4_gemm",
+            128,
+            64,
+            512,
+            tile_k=512,
+        )
+        self.assertTrue(spec.scale_tdm)
+        self.assertTrue(spec.scale_double_buffer)
+        prior = variant_spec(
+            "step6_4_mxfp4_gemm",
+            128,
+            64,
+            512,
+            tile_k=512,
+        )
+        self.assertGreater(spec.lds_bytes, prior.lds_bytes)
+        self.assertEqual(is_valid_spec(spec), (True, "ok"))
+        yaml = variant_spec(
+            "step6_5_mxfp4_gemm",
+            256,
+            256,
+            512,
+            tile_m=256,
+            tile_n=256,
+            tile_k=512,
+        )
+        self.assertLessEqual(yaml.lds_bytes, 327680)
+        self.assertEqual(is_valid_spec(yaml), (True, "ok"))
+        llvm = _lower_kernel_to_llvm_python(
+            build_mxfp4_tdm_gemm(spec, arch="gfx1250"),
+            arch="gfx1250",
+            llvm_flavor="llvm23",
+        )
+        # A/B data + A/B scale tiles: at least 8 TDM issues across prefill+loop.
+        self.assertGreaterEqual(llvm.count("llvm.amdgcn.tensor.load.to.lds"), 8)
+        self.assertIn("load <4 x i8>, ptr addrspace(3)", llvm)
 
     def test_llvm_contains_double_buffered_tdm_lds_wmma_and_fp8_epilogue(self):
         spec = MxFp4TdmGemmSpec(name="llvm", M=128, N=64, K=256)
