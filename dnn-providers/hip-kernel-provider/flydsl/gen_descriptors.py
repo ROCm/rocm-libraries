@@ -172,17 +172,12 @@ TUNING_FIELDS = {
     "kv_addr_hoist",
 }
 
-# Engines whose catalog ranker has nothing to learn, so their UHD value is an engine
-# estimate (RFC 0019 §3.1 `predict_engine`, L1): the expected tflops of the engine's own
-# pick, which engine selection reads before any catalog is enumerated. Measured by the UHD
-# pipeline: on sdpa_cdna_decode every graph admits one object; on sdpa_cdna_dualwave the
-# native order is within ~1% of the best measured; on rmsnorm and rmsnorm_bwd the objects
-# differ only in graph-determined tier fields (N, n_max), which are no knob, so a ranker
-# cannot tell them apart.
-ENGINE_ESTIMATE_OPS = frozenset(
-    {"rmsnorm", "rmsnorm_bwd", "sdpa_cdna_decode", "sdpa_cdna_dualwave"}
-)
-
+# Every engine carries an engine estimate (RFC 0019 §3.1 `predict_engine`, L1): the
+# expected tflops of the engine's own pick, which engine selection reads before any
+# catalog is enumerated. An engine without one is ordered by static rules whatever the
+# graph, and FlyDSL's engines compete for graphs: on gfx1201 sdpa_rdna, sdpa_rdna_decode
+# and sdpa_aiw each match nearly every graph of the others' corpora.
+#
 # The estimate's `default` slot. No scorer is registered under its symbol, so the loader
 # disables the estimate and keeps the engine (RFC 0019 §11.2), exactly as an engine with no
 # estimate behaves; a trained model installed for an arch (below) is bound under that
@@ -431,15 +426,12 @@ class OpDescriptors:
             **ued,
             "graph_match": {"native": f"{self.symbols}.graph_match"},
         }
-        # Role -> arch key -> [(metric, UHD id)]. The UHD that orders the engine's kernel
-        # catalog on every arch, and for an estimating engine the estimate's slot.
+        # Role -> arch key -> [(metric, UHD id)]: the UHD that orders the engine's kernel
+        # catalog on every arch, and the engine estimate's slot.
         roles: dict[str, dict[str, list[tuple[str | None, str]]]] = {
             "sort_kernel_catalog": {"default": [(None, self.uhd_id)]},
+            "predict_engine": {"default": [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]},
         }
-        if self.op in ENGINE_ESTIMATE_OPS:
-            roles["predict_engine"] = {
-                "default": [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
-            }
         for role, by_arch in self.installed.items():
             for arch, models in by_arch.items():
                 slot = roles.setdefault(role, {}).setdefault(arch, [])
@@ -454,9 +446,8 @@ class OpDescriptors:
                     by_arch.items(), key=lambda item: (item[0] != "default", item[0])
                 )
             }
-        estimate: dict[str, dict[str, Any]] = {}
-        if self.op in ENGINE_ESTIMATE_OPS:
-            estimate[f"{self.stem}_engine_estimate.uhd.json"] = {
+        estimate = {
+            f"{self.stem}_engine_estimate.uhd.json": {
                 "version": DESCRIPTOR_VERSION,
                 "id": self.estimate_uhd_id,
                 "name": f"flydsl {self.op} engine estimate",
@@ -471,6 +462,7 @@ class OpDescriptors:
                 "score": {"metric": ENGINE_ESTIMATE_METRIC},
                 "native": {"symbol": f"{self.symbols}.engine_estimate"},
             }
+        }
         engine["metadata"] = self.kmd_id
         engine["knobs"] = [f for f in self.fields if f in TUNING_FIELDS]
 
