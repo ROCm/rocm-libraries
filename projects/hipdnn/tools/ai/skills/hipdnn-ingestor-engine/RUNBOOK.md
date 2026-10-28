@@ -995,7 +995,7 @@ candidate left after knob and workspace filtering, so its cost grows with the ca
 count. Keep the catalog small enough to stay buildable and searchable; when it grows too
 large, reduce it with this stage. A winner cache cannot ship with the engine: it serves
 only the hipDNN build that wrote it and needs a writable `HIPDNN_CACHE_DIR`
-([Environment Configuration](../../../../docs/Environment.md#hipdnn_force_benchmarking)),
+(`HIPDNN_FORCE_BENCHMARKING` in `projects/hipdnn/docs/Environment.md`),
 so users of every new build pay the cold build. Nothing in CI or the build checks
 `reduction.aot_budget_per_arch`. This stage's `variant_reduce.py` and the stage 7
 `generate.py --strict` dry run gate on it, as does `registry_enumerator.py --strict`, and
