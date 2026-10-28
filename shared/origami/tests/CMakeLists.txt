@@ -22,6 +22,9 @@ target_sources(
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_origami.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_formocast.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_logger.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/test_boost.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/test_boost_eval.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/test_boost_library.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_streamk.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_nn.cpp"
 )
@@ -40,6 +43,9 @@ target_compile_definitions(
 )
 
 target_include_directories(origami-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_compile_definitions(
+    origami-tests PRIVATE ORIGAMI_BOOST_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data/boost"
+)
 
 target_link_libraries(origami-tests PRIVATE roc::origami Catch2::Catch2WithMain)
 

@@ -258,7 +258,7 @@ cmake --install build/
 | `ORIGAMI_ENABLE_PYTHON` | Enable Python bindings | `OFF` |
 | `ORIGAMI_BUILD_TESTING` | Enable Python binding tests | `OFF` |
 | `ORIGAMI_ENABLE_FETCH` | Auto-fetch dependencies with FetchContent | `ON` |
-| `ORIGAMI_ENABLE_NN` | Build NN inference stack (`origami::nn`, TWREC loader, tilewright ranking in `rank_configs`). | `OFF` |
+| `ORIGAMI_ENABLE_NN` | Build NN inference stack (`origami::nn`, TWREC loader, tilewright ranking in `rank_configs`). The boost backend is built either way. | `OFF` |
 
 ## Origami Tests
 
@@ -319,9 +319,9 @@ python -m pytest tests/test_selector.py -v
 
 ## Neural Network (NN) Backend
 
-Origami can rank GEMM kernel candidates with an optional **neural-network backend** in addition to the default analytical roofline model. NN inference is wired through `origami::rank_configs` via `rank_options_t`: callers choose **analytical**, **NN-only**, or **NN with analytical fallback**.
+Origami can rank GEMM kernel candidates with an optional **neural-network backend** in addition to the default analytical roofline model. NN inference is wired through `origami::rank_configs` via `rank_options_t`: callers choose **analytical**, **NN-only**, **NN with analytical fallback**, or **analytical with a re-rank** of its top candidates.
 
-When `ORIGAMI_ENABLE_NN=OFF`, all NN code is compiled out and `rank_configs` always uses the analytical path (`inference_mode_t::nn` throws at runtime).
+When `ORIGAMI_ENABLE_NN=OFF`, the tilewright code is compiled out and `rank_configs` never ranks with it (`inference_mode_t::nn` throws at runtime). The boost re-rank backend has no NN or YAML dependency and is built either way.
 
 ### Supported Backends
 
@@ -329,6 +329,7 @@ When `ORIGAMI_ENABLE_NN=OFF`, all NN code is compiled out and `rank_configs` alw
 |---------|----------------|--------|----------------|
 | **tilewright** | `tilewright` | Implemented (TWREC loader + in-tree inference) | TWREC YAML manifest (`.tilewright.yaml`) + int4 sidecar (`.tilewright.wts.yaml`) |
 | **embedding_similarity** | `embedding_similarity` | API stub only (not yet loadable) | — |
+| **boost** | `boost` | Implemented (ORIBOOST loader + in-tree evaluation); re-rank only (`analytical_rerank`) | ORIBOOST binary (`.orr`) |
 
 **tilewright** is a split-tree, per-cell two-tower MLP recommender. Models are keyed by Tensile logic-library stem (dtype + transpose) and discovered from `origami_nn_index` colocated with the kernel library.
 
@@ -341,6 +342,10 @@ When `ORIGAMI_ENABLE_NN=OFF`, all NN code is compiled out and `rank_configs` alw
 | mxfp8 S_MX_B | `SS_SS` | TN, NN, TT, NT (all four) |
 
 If no model exists for a given logic stem, `load_models_for_logic` returns `invalid_handle` (`-1`) and `rank_configs` falls back to analytical when `ORIGAMI_INFERENCE_MODE=nn_fallback`.
+
+**boost** (Origami Boost) is a gradient-boosted tree ensemble that predicts each candidate's `log(measured / origami_latency)`. With `inference_mode_t::analytical_rerank`, `rank_configs` ranks analytically and hands the results to the caller's `rerank_source_t::prepare` (its own adjustment of the order, if any); the backend then takes the first `top_n` (10) results the caller accepts, orders them by `origami_latency * exp(yhat)` (the prepared order on ties) and moves them to the front; every other result keeps its prepared order. Its 161 features (`features/gemm_boost`, schema c6-4) are a name mapping of Origami's own intermediates (`compute_gemm_intermediates` in `origami/gemm_intermediates.hpp`, also in the Python bindings) plus kernel fields the caller supplies per candidate (`nn/boost/types.hpp`: `rerank_source_t`, `kernel_fields_t`, including the kernel's Stream-K launch). One model serves a dtype class on one arch, shared by the class's logic stems: bf16 (A/B BFloat16), tf32 (A/B/C/D f32 with xf32 math) or fp8 (F8BS: A/B Float8 into Float8 math, C/D BFloat16, no MX blocks).
+
+A boost model is checked when it loads (`nn/boost/load_validate.hpp`) and refused unless it matches: arch, dtype class, feature-schema hash and Origami source hash (sha256 of the analytical sources at configure time; the `nn/` tree is excluded), and the kernel library by manifest diff (`nn/boost/library_stamp.hpp`): kernels may be removed, and added when their gated structural values (DTL, MFMA, LDS mode, one LDS buffer, MT_K) were seen in training. Every call it declines (problem of another dtype class or outside the training M/N/K/batch ranges, fewer than two candidates, a feature it cannot compute) leaves the prepared order unchanged and reports why to the caller (`rerank_source_t::outcome`). A CU budget (`problem_t::num_cus`) is not a range: the features see it. A model's RNGE section holds exactly M, N, K and batch, each once; a file with any other range (for example `num_cus`) is refused at load.
 
 ### Building with NN On or Off
 
@@ -369,7 +374,7 @@ cmake -S . -B build/ \
 cmake --build build/ --parallel
 ```
 
-With `ORIGAMI_ENABLE_NN=ON`, Origami can load TWREC YAML manifests/sidecars from `data/nn/tilewright/,<arch>` (typically fetched externally).
+With `ORIGAMI_ENABLE_NN=ON`, Origami can load TWREC YAML manifests/sidecars from `data/nn/tilewright/,<arch>` (typically fetched externally). Boost models (`data/nn/boost/<arch>`) load in both configurations.
 
 **hipBLASLt** uses the same `ORIGAMI_ENABLE_NN` option (default **OFF**). Enable NN when configuring hipBLASLt:
 
@@ -377,7 +382,7 @@ With `ORIGAMI_ENABLE_NN=ON`, Origami can load TWREC YAML manifests/sidecars from
 cmake -S projects/hipblaslt -B build/ -DORIGAMI_ENABLE_NN=ON
 ```
 
-After a hipBLASLt build, YAML weights are copied next to each arch's Tensile library under `Tensile/library/<arch>/`.
+After a hipBLASLt build, YAML weights (with `ORIGAMI_ENABLE_NN=ON`) and boost models are copied next to each arch's Tensile library under `Tensile/library/<arch>/`, with one `origami_nn_index` holding both backends' entries.
 
 Check whether NN was built:
 
@@ -414,6 +419,26 @@ auto models = origami::nn::load_models_for_logic(logic_stem, library_dir);
 
 For tests, override the manifest path with `ORIGAMI_NN_WEIGHTS` when tilewright integration tests are added.
 
+Boost models live under `shared/origami/data/nn/boost/<arch>/` (`origami_nn_index` tracked, `origami_boost_<arch>_<dtype>.orr` released separately) with index lines
+
+```
+<logic_stem>  boost  origami_boost_<arch>_<dtype>.orr
+```
+
+A boost model is loaded for the library it serves, since its checks need that library's manifest:
+
+```cpp
+#include "origami/nn/nn.hpp"
+
+const std::string path =
+    origami::nn::index_weights_path(logic_stem, origami::nn::backend_id_t::boost_v1, library_dir);
+origami::nn::boost::deployment_t target{"gfx950", "bf16", &library_manifest};
+origami::nn::boost::status_t status;
+std::string detail;
+auto handle = origami::nn::load_boost_model(path, target, &status, &detail);
+// handle >= 0 on success; -1 with status / detail saying why the model was refused
+```
+
 
 ### Runtime Configuration
 
@@ -427,6 +452,8 @@ NN routing is controlled by `rank_options_t` fields and environment variables. E
 | `nn` | ML ranking only; throws if no model resolves or inference fails |
 | `nn_fallback` | ML when a model is available; otherwise analytical |
 
+`inference_mode_t::analytical_rerank` (analytical, then the boost re-rank) is set through `rank_options_t` only, with the caller's `rank_options.nn.rerank_source`.
+
 #### Backend selection
 
 | `ORIGAMI_NN_BACKEND` | Behavior |
@@ -435,11 +462,13 @@ NN routing is controlled by `rank_options_t` fields and environment variables. E
 | `tilewright` | Force tilewright backend |
 | `embedding_similarity` | Force embedding-similarity backend (not yet implemented) |
 
+With `analytical_rerank`, `auto_select` and `nn_backend_t::boost` resolve the boost handle (`nn_model`, then `library_models->boost`, then the session default).
+
 #### Diagnostics
 
 | Variable | Description |
 |----------|-------------|
-| `ORIGAMI_NN_DIAG` | Print model-load diagnostics when a TWREC manifest is loaded (`arch`, feature dims, cell/split counts) |
+| `ORIGAMI_NN_DIAG` | Print model-load diagnostics when a TWREC manifest is loaded (`arch`, feature dims, cell/split counts) or a boost model (`arch`, dtype, schema, columns, trees) |
 | `ORIGAMI_NN_WEIGHTS` | Tests: override path to a `.tilewright.yaml` manifest |
 | `ORIGAMI_TW_LOG` | Log top-1 tilewright pick per `rank_configs` call (`[TW_PICK]` line on stderr) |
 | `ORIGAMI_TW_CELL` | Debug: force TWREC cell index (overrides routing); also via `rank_options.nn.force_cell` |
@@ -449,6 +478,7 @@ NN routing is controlled by `rank_options_t` fields and environment variables. E
 | Variable | Description |
 |----------|-------------|
 | `TENSILE_PREDICTION_LIB=1` | Use `PredictionMatching` rows in `ExactLogicLibrary` (required for NN path in hipBLASLt bench) |
+| `HIPBLASLT_ORIGAMI_BOOST=1` | Load boost models with the prediction rows that use them and re-rank their candidates (default off) |
 
 ### hipBLASLt Integration
 
@@ -465,6 +495,19 @@ hipblaslt-bench -m 3405 -n 4000 -k 5000 -r bf16_r \
 ```
 
 Use `ORIGAMI_INFERENCE_MODE=nn` to require ML ranking (no silent analytical fallback). Set `ORIGAMI_NN_DIAG=1` to verify model load for the active logic stem.
+
+Example: the same layout with the boost re-rank:
+
+```bash
+export TENSILE_PREDICTION_LIB=1
+export HIPBLASLT_ORIGAMI_BOOST=1
+export HIPBLASLT_TENSILE_LIBPATH=/path/to/build/Tensile/library/gfx950
+
+hipblaslt-bench -m 3405 -n 4000 -k 5000 -r bf16_r \
+  --transA T --transB N --bias_vector
+```
+
+hipBLASLt loads a prediction row's boost model when it deserializes the row (`OrigamiBoost::loadForLogic`: once per model file, against the build and the library directory's prediction-row manifest) and passes `analytical_rerank` with a `rerank_source_t`: its `prepare` applies the row's Stream-K cluster charge (as for the analytical order), and its candidates are the configs that pass the row's predicates, one per kernel name; their kernel fields are the solution's `NumLoadsCoalesced` and its Stream-K launch on the call (`ContractionSolution::computeStreamKDecisions`, including the `--sm_count_target` CU budget). FP8 re-ranks plain F8BS calls (Float8 compute input, A/B scales unset or scalar); vector-scaled (A/B or alpha), MX and swizzled calls keep Origami's order. Tuned `Equality`/`Range` rows still take precedence: only the `PredictionMatching` row's candidates are re-ranked. A boost request in `rank_options_t` takes precedence over `ORIGAMI_INFERENCE_MODE` / `ORIGAMI_NN_BACKEND`, as explicit options do. With `HIPBLASLT_LOG_MASK` including info, each call logs `Origami Boost ok ...` or `Origami Boost fallback (<reason>) ...`.
 
 ### NN Tests
 
@@ -483,7 +526,7 @@ cmake --build build/ --parallel
 ./build/tests/origami-tests "[nn]"
 ```
 
-When `ORIGAMI_ENABLE_NN=OFF` (the default), `[nn]` filter tests are compiled out.
+When `ORIGAMI_ENABLE_NN=OFF` (the default), `[nn]` filter tests are compiled out; the boost tests (`[nn][boost]`) run in both configurations. Their models and feature-parity samples (bf16, tf32, fp8) are the small fixtures in `tests/data/boost/`.
 
 ## Debug Logging
 
