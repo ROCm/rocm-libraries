@@ -1578,6 +1578,13 @@ def translate(modname: str, rocke: str, abi_dir: str | None = None) -> Result:
     joined = "\n".join("\n".join(x) for x in internals + shims)
     if "py_adapt::" in joined:
         lines.append('#include "rocke_py_adapters.hpp"')
+        # the package's own adapters (they need its headers), only when used
+        own = PKG.adapters_header()
+        if own is not None and any(
+            f"py_adapt::{n}(" in joined or f"py_adapt::{n}<" in joined
+            for n in PKG.adapter_names()
+        ):
+            lines.append(f'#include "{own}"')
     incs = set()
     for fname in re.findall(r"\b(rocke_\w+)\(", joined):
         f = env.headers.funcs.get(fname)

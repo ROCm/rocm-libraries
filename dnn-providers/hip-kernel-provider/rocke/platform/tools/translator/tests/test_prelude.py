@@ -31,15 +31,19 @@ def _compiler(name: str) -> str | None:
 
 
 @pytest.mark.parametrize("name", ["g++", "clang++"])
-def test_prelude_compiles_alone(name):
-    """rocke_py.hpp needs only the installed rocKE headers. (The attention
-    backward adapters header needs that package's module headers, so it is
-    not compiled alone.)"""
+@pytest.mark.parametrize("header", ["rocke_py.hpp", "rocke_py_adapters.hpp"])
+def test_prelude_compiles_alone(name, header):
+    """The prelude (rocke_py.hpp and the generic adapters) needs only the
+    installed rocKE headers, so a source of any package can include it. (The
+    attention backward adapters, rocke_py_adapters_attention_bwd.hpp, need that
+    package's module headers, so they are not compiled alone.)"""
     exe = _compiler(name)
     if exe is None:
         pytest.skip(f"no {name}")
     cmd = [exe, "-std=c++17", "-fsyntax-only", "-Wall", "-Wextra", "-Werror"]
-    cmd += ["-I", str(INCLUDE), "-x", "c++", str(PRELUDE)]
+    # the rocKE headers as system headers: only the prelude's own warnings count
+    cmd += ["-isystem", str(INCLUDE), "-I", str(PRELUDE.parent), "-x", "c++"]
+    cmd += [str(PRELUDE.parent / header)]
     p = subprocess.run(cmd, capture_output=True, text=True)
     assert p.returncode == 0, p.stderr
 
@@ -52,12 +56,17 @@ def test_prelude_not_in_installed_headers():
 def test_support_files_resolve():
     assert support_file("rocke_py.hpp") == str(PRELUDE)
     adapters = support_file("rocke_py_adapters.hpp")
-    assert adapters == os.path.join(PKG.data_dir, "rocke_py_adapters.hpp")
+    assert adapters == str(PRELUDE.parent / "rocke_py_adapters.hpp")
+    own = support_file("rocke_py_adapters_attention_bwd.hpp")
+    assert own == os.path.join(PKG.data_dir, "rocke_py_adapters_attention_bwd.hpp")
     assert support_file("no_such_header.hpp") is None
-    # the adapters include the prelude from the same directory
+    # the adapters include the prelude from the same directory, and the
+    # package's own adapters include the generic ones
     text = open(adapters).read()
     assert '#include "rocke_py.hpp"' in text
     assert "rocke/rocke_py" not in text
+    assert "attn_bwd" not in text and "attention_bwd" not in text
+    assert '#include "rocke_py_adapters.hpp"' in open(own).read()
 
 
 def test_goldens_include_support_by_quoted_name():

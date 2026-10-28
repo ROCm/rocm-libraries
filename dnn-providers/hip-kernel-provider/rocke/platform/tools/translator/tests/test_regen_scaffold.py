@@ -19,6 +19,8 @@ HEADERS = [INC / f"helper_rocke.instances.common.{m}.h" for m in CPP_MODULES]
 TARGETS = (
     [SRC / f"{m}.cpp" for m in CPP_MODULES]
     + [SRC / "rocke_py.hpp", SRC / "rocke_py_adapters.hpp"]
+    # valu uses eval_layout, the one adapter that needs the backward headers
+    + [SRC / "rocke_py_adapters_attention_bwd.hpp"]
     + HEADERS
 )
 EDIT = "// edited by hand\n"

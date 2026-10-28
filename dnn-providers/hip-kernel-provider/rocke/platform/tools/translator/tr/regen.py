@@ -28,8 +28,8 @@ Steps:
    and the generated headers into
    platform/cpp/include/rocke/ of --into (default: the --rocke tree itself).
 4. Support headers: every quoted same-directory include of a written source
-   (#include "rocke_py.hpp", "rocke_py_adapters.hpp") is copied from its
-   master copy (tr/prelude/, else tr/packages/<package>/) into the same
+   (#include "rocke_py.hpp", "rocke_py_adapters.hpp", and the support
+   headers those include in turn) is copied from its master copy (tr/prelude/, else tr/packages/<package>/) into the same
    C++ directory. It is not installed.
 
 Every target that already exists in --into (source, header or support
@@ -195,6 +195,14 @@ def regen(a, scratch: list) -> int:
                     f"error: {m}.cpp includes {name!r}, which is in neither tr/prelude/ nor {PKG.data_dir}"
                 )
             support[name] = path
+    # and the support headers those include (a package's adapters include the generic ones)
+    todo = list(support.values())
+    while todo:
+        text = open(todo.pop()).read()
+        for name in re.findall(r'^#include "([^"/]+)"', text, re.M):
+            if name not in support and (path := support_file(name)) is not None:
+                support[name] = path
+                todo.append(path)
 
     SRC = os.path.join(*PKG.cpp_dir.split("/"))
     INC = os.path.join("platform", "cpp", "include", "rocke")
@@ -247,10 +255,12 @@ def existing_targets(into: str, modules: list, support_file) -> list | None:
             return None
         sources.append(cpp)
         headers.append(h)
-        code = open(cpp).read()
-        for name in re.findall(r'^#include "([^"/]+)"', code, re.M):
-            if support_file(name) is not None:
-                support.add(name)
+        todo = [open(cpp).read()]
+        while todo:
+            for name in re.findall(r'^#include "([^"/]+)"', todo.pop(), re.M):
+                if name not in support and (path := support_file(name)) is not None:
+                    support.add(name)
+                    todo.append(open(path).read())
     support_paths = [os.path.join(src, n) for n in sorted(support)]
     if not all(os.path.exists(p) for p in support_paths):
         return None

@@ -15,14 +15,16 @@ tr.regen --package sets it). The default is attention backward.
 
 Per-function adapters stay data keyed by module name (tr/adapters.py); they
 are not part of this table. Support headers the translated sources include by
-a quoted same-directory name come from tr/prelude/ (rocke_py.hpp, generic) or
-tr/packages/<package>/ (package data, such as the attention backward
-rocke_py_adapters.hpp); support_file() finds them.
+a quoted same-directory name come from tr/prelude/ (rocke_py.hpp and
+rocke_py_adapters.hpp, generic) or tr/packages/<package>/ (package data, such
+as rocke_py_adapters_attention_bwd.hpp, the adapters that need the attention
+backward headers); support_file() finds them.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import sys
 from dataclasses import dataclass
 
@@ -118,6 +120,20 @@ class Package:
                 if m and "." not in m:
                     return m
         return None
+
+    def adapters_header(self) -> str | None:
+        """The package's own adapters header, rocke_py_adapters_<name>.hpp in
+        its data directory (adapters that need the package's headers), or None."""
+        name = f"rocke_py_adapters_{self.name}.hpp"
+        return name if os.path.isfile(os.path.join(self.data_dir, name)) else None
+
+    def adapter_names(self) -> tuple[str, ...]:
+        """The py_adapt functions the package's own adapters header defines."""
+        own = self.adapters_header()
+        if own is None:
+            return ()
+        text = open(os.path.join(self.data_dir, own)).read()
+        return tuple(sorted(set(re.findall(r"^[^\s/*#][^(\n]*?\b(\w+)\(", text, re.M))))
 
     @property
     def iv_t(self) -> str:

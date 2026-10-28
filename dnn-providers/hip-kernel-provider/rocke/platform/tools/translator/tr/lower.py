@@ -2893,7 +2893,7 @@ class Fn:
                 base_ = f"{obj.code}{sep}{cf}"
                 if it == "rocke_int_or_value_t":
                     return CE(
-                        f"({base_}.has ? std::optional<{T.IV}>(py_adapt::iv_of({base_}.{inner_f})) : std::optional<{T.IV}>())",
+                        f"({base_}.has ? std::optional<{T.IV}>(py_adapt::iv_of<{T.IV}>({base_}.{inner_f})) : std::optional<{T.IV}>())",
                         T.optional(T.IV),
                         obj.pure,
                     )
@@ -2903,7 +2903,9 @@ class Fn:
                     obj.pure,
                 )
             if ft == "rocke_int_or_value_t":
-                return CE(f"py_adapt::iv_of({obj.code}{sep}{cf})", T.IV, obj.pure)
+                return CE(
+                    f"py_adapt::iv_of<{T.IV}>({obj.code}{sep}{cf})", T.IV, obj.pure
+                )
             n_f, cap_f = "n_" + cf, "cap_" + cf
             if n_f in s.fields and ft.endswith("*"):
                 el = T.pointee_elem(

@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: MIT
 /*
  * rocke_py_adapters.hpp -- adapters between Python helper shapes and their C
- * twins, for C++ translated from the attention backward kernel builders
- * (tr/adapters.py lists them).
+ * twins, for C++ translated from any rocKE kernel-builder package
+ * (tr/adapters.py lists them). Adapters that need one package's own headers
+ * live in that package's rocke_py_adapters_<package>.hpp, which includes this.
  *
  * PRIVATE: support for translated sources in this directory; not installed,
- * not API; EXPERIMENTAL. Package data of tools/translator (attention_bwd):
- * tr.regen copies it next to the sources that use it and never over an
- * existing copy.
+ * not API; EXPERIMENTAL. Part of the prelude of tools/translator: tr.regen
+ * copies it next to the sources that use it and never over an existing copy.
  */
 #ifndef ROCKE_ROCKE_PY_ADAPTERS_HPP
 #define ROCKE_ROCKE_PY_ADAPTERS_HPP
@@ -18,7 +18,6 @@
 
 #include "rocke/arch_target.h"
 #include "rocke/error.hpp"
-#include "rocke/helper_rocke.instances.common._attention_bwd_frag.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
 
@@ -226,29 +225,6 @@ inline const rocke_layout_map_t* layout_of(const rocke_mma_op_t* op, const rocke
     return m;
 }
 
-/* _attention_bwd_frag.eval_layout(layout): lanes[lane][slot] = (row, col). */
-inline py::tuple<py::tuple<std::array<int64_t, 2>>> eval_layout(rocke_ir_builder_t* b,
-                                                                const rocke_layout_map_t* m)
-{
-    const int lanes = m->wave_size;
-    const int n = m->frag_len;
-    std::vector<int> flat((size_t)lanes * (size_t)n * 2);
-    if(!rocke_attn_bwd_eval_layout(b, m, flat.data(), (int)flat.size()))
-        throw ckc::ValueError("eval_layout failed");
-    py::tuple<py::tuple<std::array<int64_t, 2>>> out;
-    for(int l = 0; l < lanes; ++l)
-    {
-        py::tuple<std::array<int64_t, 2>> lane;
-        for(int s = 0; s < n; ++s)
-        {
-            const size_t k = ((size_t)l * (size_t)n + (size_t)s) * 2;
-            lane.push_back({(int64_t)flat[k], (int64_t)flat[k + 1]});
-        }
-        out.push_back(lane);
-    }
-    return out;
-}
-
 /* ArchTarget.has_mfma / has_wmma: an atom of that family in the catalog. */
 inline bool arch_has_family(const rocke_arch_target_t* t, const char* family)
 {
@@ -259,26 +235,6 @@ inline bool arch_has_family(const rocke_arch_target_t* t, const char* family)
             return true;
     }
     return false;
-}
-
-/* eval_layout with no builder in scope: on a scratch builder of its own
- * (the lane map's integer ops are interpreted; nothing reaches a kernel). */
-inline py::tuple<py::tuple<std::array<int64_t, 2>>> eval_layout_scratch(const rocke_layout_map_t* m)
-{
-    rocke_ir_builder_t s;
-    if(rocke_ir_builder_init(&s, "rocke_eval_layout_scratch") != ROCKE_OK)
-        throw ckc::OOMError("scratch builder init failed");
-    try
-    {
-        auto r = eval_layout(&s, m);
-        rocke_ir_builder_free(&s);
-        return r;
-    }
-    catch(...)
-    {
-        rocke_ir_builder_free(&s);
-        throw;
-    }
 }
 
 /* U2 host twins of platform emitters (designs/host_clones.md): the IR twin runs
@@ -363,9 +319,10 @@ int64_t host_fold(const rocke_value_t* v, Ops&& ops)
 }
 
 /* == of two int | Value: both ints and equal, or the same Value */
-/* the platform's IntOrValue (rocke_int_or_value_t) as the backward one:
- * IV is deduced from the caller, so this header needs neither header */
-template <class IV = struct rocke_attn_bwd_iv, class P>
+/* the platform's IntOrValue (rocke_int_or_value_t) as a package's int | Value
+ * union: the caller names IV (rocke_<prefix>_iv_t), so this header needs
+ * neither header */
+template <class IV, class P>
 IV iv_of(const P& p)
 {
     IV x{};
@@ -392,7 +349,9 @@ int64_t iv_int_of(const IV& x)
     return x.i;
 }
 
-template <class IV> /* rocke_attn_bwd_iv_t: a template, so this header needs no addr header */
+template <
+    class
+    IV> /* a package's int | Value union: a template, so this header needs no package header */
 bool iv_eq(const IV& a, const IV& b)
 {
     return a.v == b.v && (a.v != nullptr || a.i == b.i);

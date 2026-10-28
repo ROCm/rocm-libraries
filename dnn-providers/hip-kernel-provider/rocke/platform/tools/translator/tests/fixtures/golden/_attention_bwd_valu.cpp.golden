@@ -19,6 +19,7 @@
 #include "rocke/ir_internal.h"
 #include "rocke_py.hpp"
 #include "rocke_py_adapters.hpp"
+#include "rocke_py_adapters_attention_bwd.hpp"
 
 const char* const ROCKE_ATTN_BWD_BF16_CASTS[ROCKE_ATTN_BWD_BF16_CASTS_N]
     = {"generic", "rne_noguard"};

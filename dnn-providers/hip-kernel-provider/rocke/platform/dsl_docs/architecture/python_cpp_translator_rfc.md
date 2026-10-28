@@ -118,7 +118,7 @@ A hole is a function no rule covers. The translated `.cpp` holds `#error "hole: 
 
 ### 4.5 Prelude
 
-`rocke_py.hpp` holds the C++ helpers with Python semantics that translated code calls: floor division and modulo, negative indexing, `str` indexing and slicing, and `dict` and `list` shapes. Its master copy ships with the translator in `tools/translator/tr/prelude/`. A package may add an adapters header (`rocke_py_adapters.hpp`, package data in `tr/packages/<package>/`) for calls whose C twin has a different shape than the Python; a translated source includes it only when it uses an adapter. Translated sources include both by a quoted same-directory name.
+`rocke_py.hpp` holds the C++ helpers with Python semantics that translated code calls: floor division and modulo, negative indexing, `str` indexing and slicing, and `dict` and `list` shapes. Its master copy ships with the translator in `tools/translator/tr/prelude/`. Calls whose C twin has a different shape than the Python go through adapters: the generic ones are in `rocke_py_adapters.hpp`, next to `rocke_py.hpp`, and the few that need one package's own headers are in that package's `rocke_py_adapters_<package>.hpp` (package data in `tr/packages/<package>/`). A translated source includes each only when it uses one of its adapters, so a source of one package never includes another package's headers. Translated sources include both by a quoted same-directory name.
 
 `tr.regen` copies the ones a written source includes into `platform/cpp/instances/common/`, never over an existing copy. There they are private: compiled into `rocke_core` with the sources, not installed (the install rule covers only `cpp/include/`) and not API. The in-tree copy is hand code like the sources: a fix to it, for example for a new compiler warning, is made in the tree. The prelude grows with the rules (most changes to it came with a new rule), so it is not a fixed file.
 
@@ -212,7 +212,7 @@ On the attention backward package:
 - `tests/`: the self-test (pytest) and its fixture root (pinned modules, their data, goldens).
 - `HOWTO.md`: setup, the one command, holes, the self-test, the gate, limits.
 
-`platform/tools/translator/tr/prelude/rocke_py.hpp`, `platform/tools/translator/tr/packages/attention_bwd/rocke_py_adapters.hpp`
+`platform/tools/translator/tr/prelude/rocke_py.hpp`, `platform/tools/translator/tr/prelude/rocke_py_adapters.hpp`, `platform/tools/translator/tr/packages/attention_bwd/rocke_py_adapters_attention_bwd.hpp`
 
 - The prelude and the attention backward adapters (master copies; nothing under `platform/cpp`).
 
