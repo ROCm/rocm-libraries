@@ -38,6 +38,30 @@
 namespace
 {
 
+    TEST(ComputeInputType, allows_only_A_override)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.compute_type        = HIPBLAS_COMPUTE_32F;
+        arg.compute_input_typeA = HIP_R_16F;
+        arg.compute_input_typeB = HIPBLASLT_DATATYPE_INVALID;
+
+        const auto [typeA, typeB] = derive_unset_compute_input_type(arg);
+        EXPECT_EQ(typeA, HIP_R_16F);
+        EXPECT_EQ(typeB, HIP_R_32F);
+    }
+
+    TEST(ComputeInputType, rejects_invalid_B_only_override)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.compute_type        = HIPBLAS_COMPUTE_32F;
+        arg.compute_input_typeA = HIPBLASLT_DATATYPE_INVALID;
+        arg.compute_input_typeB = HIP_R_8I;
+
+        EXPECT_THROW(derive_unset_compute_input_type(arg), std::invalid_argument);
+    }
+
     void expect_preswizzled_layout_error(const Arguments& arg, const char* expected)
     {
         try
