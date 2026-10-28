@@ -323,21 +323,27 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
     using mfma_selector =
         MfmaSelector<ComputeTypeA, MPerXdl, NPerXdl, ComputeTypeB, is_single_rate_mfma>;
 
-    // A padding spec with 8-element FP8 B vectors still uses KPack 16.
-    // Each lane reads its 16 K elements as two 8-element vectors.
+    static constexpr index_t KLane =
+        mfma_selector::GetKPerXdlops() / mfma_selector::GetK1PerXdlops();
+
+    // A 16-byte FP8 K vector holds 16 elements, and a half-width one holds 8.
+    static constexpr index_t FP8KVec     = 16;
+    static constexpr index_t FP8HalfKVec = FP8KVec / 2;
+    // A padding spec with half-width FP8 B vectors still uses a full-width KPack.
+    // Each lane reads its full K vector as two half-width vectors.
     static constexpr bool BSplitKPack =
 #if defined(__gfx125__)
         false;
 #else
-        (is_same_v<remove_cvref_t<BDataType>, f8_t> || is_same_v<remove_cvref_t<BDataType>, bf8_t>) &&
-        BK1Value == 8 && GemmSpec != tensor_operation::device::GemmSpecialization::Default &&
-        KPerBlock % (mfma_selector::GetKPerXdlops() / mfma_selector::GetK1PerXdlops() * 16) == 0;
+        (is_same_v<remove_cvref_t<BDataType>, f8_t> ||
+         is_same_v<remove_cvref_t<BDataType>, bf8_t>) &&
+        BK1Value == FP8HalfKVec &&
+        GemmSpec != tensor_operation::device::GemmSpecialization::Default &&
+        KPerBlock % (KLane * FP8KVec) == 0;
 #endif
-    static constexpr index_t KPack =
-        math::max(math::max(math::lcm(AK1Number, BK1Number), mfma_selector::selected_mfma.k_per_blk),
-                  BSplitKPack ? 16 : 1);
-    static constexpr index_t KLane =
-        mfma_selector::GetKPerXdlops() / mfma_selector::GetK1PerXdlops();
+    static constexpr index_t KPack = math::max(
+        math::max(math::lcm(AK1Number, BK1Number), mfma_selector::selected_mfma.k_per_blk),
+        BSplitKPack ? FP8KVec : 1);
 
     static constexpr index_t KGroup = []() {
 #if defined(__gfx125__)
@@ -572,14 +578,13 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         }
     }
 
-    __host__ __device__ static auto
-    MakeBGridDescriptor_Preshuffled(index_t N0,
-                                    index_t K0,
-                                    index_t K0Pad,
-                                    index_t K,
-                                    index_t N,
-                                    index_t NPad,
-                                    index_t RowOffset)
+    __host__ __device__ static auto MakeBGridDescriptor_Preshuffled(index_t N0,
+                                                                    index_t K0,
+                                                                    index_t K0Pad,
+                                                                    index_t K,
+                                                                    index_t N,
+                                                                    index_t NPad,
+                                                                    index_t RowOffset)
     {
         constexpr index_t MWave           = MPerBlock / (MXdlPerWave * MPerXdl);
         constexpr index_t WaveSize        = BlockSize / (MWave * NWave);
@@ -626,11 +631,11 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                 make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
             const auto b_split_desc = transform_tensor_descriptor(
                 b_pad_desc,
-                make_tuple(make_unmerge_transform(
-                               make_tuple(NPad / NLane / NWave, NWave, Number<NLane>{})),
-                           make_unmerge_transform(
-                               make_tuple(K0Pad, Number<KLane>{}, Number<KSub>{})),
-                           make_pass_through_transform(Number<KVec>{})),
+                make_tuple(
+                    make_unmerge_transform(
+                        make_tuple(NPad / NLane / NWave, NWave, Number<NLane>{})),
+                    make_unmerge_transform(make_tuple(K0Pad, Number<KLane>{}, Number<KSub>{})),
+                    make_pass_through_transform(Number<KVec>{})),
                 make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}),
                 make_tuple(Sequence<0, 1, 2>{}, Sequence<3, 4, 5>{}, Sequence<6>{}));
             ignore = N0;
@@ -640,10 +645,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                 make_tuple(make_pass_through_transform(NPad / NLane / NWave),
                            make_pass_through_transform(NWave),
                            make_pass_through_transform(K0Pad),
-                           make_merge_transform(make_tuple(Number<KLane>{},
-                                                           Number<NLane>{},
-                                                           Number<KSub>{},
-                                                           Number<KVec>{}))),
+                           make_merge_transform(make_tuple(
+                               Number<KLane>{}, Number<NLane>{}, Number<KSub>{}, Number<KVec>{}))),
                 make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<3>{}, Sequence<4, 2, 5, 6>{}),
                 make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
         }
@@ -659,10 +662,11 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
             constexpr index_t KSub = KPack / KGroup / KVec;
             static_assert(NkSwizzleNumber == KLane * NLane * KSub * KVec,
                           "unexpected preshuffle swizzle size");
-            const index_t KVecs = K / KVec;
+            const index_t KVecs   = K / KVec;
             const auto b_vec_desc = make_naive_tensor_descriptor(
                 make_tuple(N0 / NWave, NWave, KVecs, Number<NLane>{}, Number<KVec>{}),
-                make_tuple(NWave * K * NLane, K * NLane, Number<NLane * KVec>{}, Number<KVec>{}, I1));
+                make_tuple(
+                    NWave * K * NLane, K * NLane, Number<NLane * KVec>{}, Number<KVec>{}, I1));
             const auto b_vec_pad_desc = transform_tensor_descriptor(
                 b_vec_desc,
                 make_tuple(make_pass_through_transform(N0 / NWave),
@@ -670,27 +674,32 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                            make_right_pad_transform(KVecs, K0Pad * KLane * KSub - KVecs),
                            make_pass_through_transform(Number<NLane>{}),
                            make_pass_through_transform(Number<KVec>{})),
-                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}, Sequence<4>{}),
-                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}, Sequence<4>{}));
+                make_tuple(
+                    Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}, Sequence<4>{}),
+                make_tuple(
+                    Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}, Sequence<4>{}));
             const auto b_k0_klane_desc = transform_tensor_descriptor(
                 b_vec_pad_desc,
-                make_tuple(make_pass_through_transform(N0 / NWave),
-                           make_pass_through_transform(NWave),
-                           make_unmerge_transform(
-                               make_tuple(K0Pad, Number<KLane>{}, Number<KSub>{})),
-                           make_pass_through_transform(Number<NLane>{}),
-                           make_pass_through_transform(Number<KVec>{})),
-                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}, Sequence<4>{}),
-                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2, 3, 4>{}, Sequence<5>{}, Sequence<6>{}));
+                make_tuple(
+                    make_pass_through_transform(N0 / NWave),
+                    make_pass_through_transform(NWave),
+                    make_unmerge_transform(make_tuple(K0Pad, Number<KLane>{}, Number<KSub>{})),
+                    make_pass_through_transform(Number<NLane>{}),
+                    make_pass_through_transform(Number<KVec>{})),
+                make_tuple(
+                    Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}, Sequence<4>{}),
+                make_tuple(Sequence<0>{},
+                           Sequence<1>{},
+                           Sequence<2, 3, 4>{},
+                           Sequence<5>{},
+                           Sequence<6>{}));
             return transform_tensor_descriptor(
                 b_k0_klane_desc,
                 make_tuple(make_pass_through_transform(N0 / NWave),
                            make_pass_through_transform(NWave),
                            make_pass_through_transform(K0Pad),
-                           make_merge_transform(make_tuple(Number<KLane>{},
-                                                           Number<NLane>{},
-                                                           Number<KSub>{},
-                                                           Number<KVec>{}))),
+                           make_merge_transform(make_tuple(
+                               Number<KLane>{}, Number<NLane>{}, Number<KSub>{}, Number<KVec>{}))),
                 make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3, 5, 4, 6>{}),
                 make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
         }
@@ -703,7 +712,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
             ignore = RowOffset;
             return make_naive_tensor_descriptor(
                 make_tuple(N0 / NWave, NWave, K0, NkSwizzleNumber),
-                make_tuple(NWave * K0 * NkSwizzleNumber, K0 * NkSwizzleNumber, NkSwizzleNumber, I1));
+                make_tuple(
+                    NWave * K0 * NkSwizzleNumber, K0 * NkSwizzleNumber, NkSwizzleNumber, I1));
         }
     }
 
@@ -1576,9 +1586,11 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const float* p_scale_b          = p_ds_grid[I1];
         // This is the column of this thread's first per-channel weight scale.
         // With N padding, columns past N read the scale of the last real column.
-        index_t scale_col0 = 0;
-        auto scale_n       = [&](index_t n_off) {
-            return PadsN ? math::min(scale_col0 + n_off, problem.N - 1) - scale_col0 : n_off;
+        index_t thread_scale_n_begin = 0;
+        auto clamped_scale_n_offset  = [&](index_t n_off) {
+            return PadsN ? math::min(thread_scale_n_begin + n_off, problem.N - 1) -
+                               thread_scale_n_begin
+                          : n_off;
         };
 
         static_assert(M0 * M1 * M2 * M3 * M4 == MPerBlock);
@@ -1591,9 +1603,10 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
             if constexpr(PerTokenQuant)
             {
                 constexpr index_t scale_stride = (IsInputGemm ? 2 : 1);
-                scale_col0 = block_n_id * NPerBlock + get_warp_local_1d_id() % NWave * NPerXdl +
-                             threadIdx.x % NPerXdl;
-                p_scale_b += expert_id * problem.N * scale_stride + scale_col0;
+                thread_scale_n_begin           = block_n_id * NPerBlock +
+                                       get_warp_local_1d_id() % NWave * NPerXdl +
+                                       threadIdx.x % NPerXdl;
+                p_scale_b += expert_id * problem.N * scale_stride + thread_scale_n_begin;
             }
             else
             {
@@ -1603,7 +1616,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
             vector_type<int32_t, M4> scale_token_ids;
             vector_type<float, M4> topk_weights;
             static_for<0, NXdlPerWave, 1>{}([&](auto n0) {
-                const float scale_b = p_scale_b[scale_n(n0 * NWave * NPerXdl) * PerTokenQuant];
+                const float scale_b =
+                    p_scale_b[clamped_scale_n_offset(n0 * NWave * NPerXdl) * PerTokenQuant];
                 static_for<0, MXdlPerWave, 1>{}([&](auto m0) { // MXDLPerWave
                     static_for<0, M2, 1>{}([&](auto m2) {      // m_inst_num_groups_per_blk
                         const index_t m_pos = block_m_id * MPerBlock + m0 * M1 * M2 * M3 * M4 +
@@ -1648,7 +1662,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                 if constexpr(ActivationOperation == Activation::silu_and_mul)
                                 {
                                     const float scale_up =
-                                        p_scale_b[(scale_n(n0 * NWave * NPerXdl) + problem.N) *
+                                        p_scale_b[(clamped_scale_n_offset(n0 * NWave * NPerXdl) +
+                                                   problem.N) *
                                                   PerTokenQuant];
                                     float gate = scale_a * scale_b * c_thread_buf[cidx];
                                     float up   = scale_a * scale_up * c_thread_buf_up[cidx];
@@ -1668,7 +1683,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                 else if(ActivationOperation == Activation::gelu_and_mul)
                                 {
                                     const float scale_up =
-                                        p_scale_b[(scale_n(n0 * NWave * NPerXdl) + problem.N) *
+                                        p_scale_b[(clamped_scale_n_offset(n0 * NWave * NPerXdl) +
+                                                   problem.N) *
                                                   PerTokenQuant];
                                     float gate = scale_a * scale_b * c_thread_buf[cidx];
                                     float up   = scale_a * scale_up * c_thread_buf_up[cidx];
@@ -1688,7 +1704,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                 else if(ActivationOperation == Activation::gelu_tanh_and_mul)
                                 {
                                     const float scale_up =
-                                        p_scale_b[(scale_n(n0 * NWave * NPerXdl) + problem.N) *
+                                        p_scale_b[(clamped_scale_n_offset(n0 * NWave * NPerXdl) +
+                                                   problem.N) *
                                                   PerTokenQuant];
                                     float gate = scale_a * scale_b * c_thread_buf[cidx];
                                     float up   = scale_a * scale_up * c_thread_buf_up[cidx];
@@ -1709,7 +1726,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                                   Activation::swiglustep_and_mul)
                                 {
                                     const float scale_up =
-                                        p_scale_b[(scale_n(n0 * NWave * NPerXdl) + problem.N) *
+                                        p_scale_b[(clamped_scale_n_offset(n0 * NWave * NPerXdl) +
+                                                   problem.N) *
                                                   PerTokenQuant];
                                     float gate = scale_a * scale_b * c_thread_buf[cidx];
                                     float up   = scale_a * scale_up * c_thread_buf_up[cidx];
@@ -1729,7 +1747,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                                   Activation::swiglu_oai_and_mul)
                                 {
                                     const float scale_up =
-                                        p_scale_b[(scale_n(n0 * NWave * NPerXdl) + problem.N) *
+                                        p_scale_b[(clamped_scale_n_offset(n0 * NWave * NPerXdl) +
+                                                   problem.N) *
                                                   PerTokenQuant];
                                     float gate = scale_a * scale_b * c_thread_buf[cidx];
                                     float up   = scale_a * scale_up * c_thread_buf_up[cidx];
@@ -1869,20 +1888,19 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                       false,
                                       IsInputGemm,
                                       IndexType,
-                                      PadsN>(
-            blockwise_gemm_pipeline,
-            c_grid_desc_mblock_mperblock_nblock_nperblock,
-            ds_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_thread_buf_fp32,
-            block_m_id,
-            block_n_id,
-            p_shared,
-            p_sorted_token_ids,
-            p_c_grid,
-            p_ds_grid,
-            c_element_op,
-            problem.TopK,
-            problem.N);
+                                      PadsN>(blockwise_gemm_pipeline,
+                                             c_grid_desc_mblock_mperblock_nblock_nperblock,
+                                             ds_grid_desc_mblock_mperblock_nblock_nperblock,
+                                             c_thread_buf_fp32,
+                                             block_m_id,
+                                             block_n_id,
+                                             p_shared,
+                                             p_sorted_token_ids,
+                                             p_c_grid,
+                                             p_ds_grid,
+                                             c_element_op,
+                                             problem.TopK,
+                                             problem.N);
     }
 
     template <bool HasMainKBlockLoop,
@@ -2180,9 +2198,11 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const float* p_scale_b          = p_ds_grid[I1];
         // This is the column of this thread's first per-channel weight scale.
         // With N padding, columns past N read the scale of the last real column.
-        index_t scale_col0 = 0;
-        auto scale_n       = [&](index_t n_off) {
-            return PadsN ? math::min(scale_col0 + n_off, problem.N - 1) - scale_col0 : n_off;
+        index_t thread_scale_n_begin = 0;
+        auto clamped_scale_n_offset  = [&](index_t n_off) {
+            return PadsN ? math::min(thread_scale_n_begin + n_off, problem.N - 1) -
+                               thread_scale_n_begin
+                          : n_off;
         };
 
         static_assert(M0 * M1 * M2 * M3 * M4 == MPerBlock);
@@ -2195,9 +2215,10 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
             if constexpr(PerTokenQuant)
             {
                 constexpr index_t scale_stride = (IsInputGemm ? 2 : 1);
-                scale_col0 = block_n_id * NPerBlock + get_warp_local_1d_id() % NWave * NPerXdl +
-                             threadIdx.x % NPerXdl;
-                p_scale_b += expert_id * problem.N * scale_stride + scale_col0;
+                thread_scale_n_begin           = block_n_id * NPerBlock +
+                                       get_warp_local_1d_id() % NWave * NPerXdl +
+                                       threadIdx.x % NPerXdl;
+                p_scale_b += expert_id * problem.N * scale_stride + thread_scale_n_begin;
             }
             else
             {
@@ -2207,7 +2228,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
             vector_type<int32_t, M4> scale_token_ids;
             vector_type<float, M4> topk_weights;
             static_for<0, NXdlPerWave, 1>{}([&](auto n0) {
-                const float scale_b = p_scale_b[scale_n(n0 * NWave * NPerXdl) * PerTokenQuant];
+                const float scale_b =
+                    p_scale_b[clamped_scale_n_offset(n0 * NWave * NPerXdl) * PerTokenQuant];
                 static_for<0, MXdlPerWave, 1>{}([&](auto m0) { // MXDLPerWave
                     static_for<0, M2, 1>{}([&](auto m2) {      // m_inst_num_groups_per_blk
                         const index_t m_pos = block_m_id * MPerBlock + m0 * M1 * M2 * M3 * M4 +
@@ -2252,7 +2274,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                 if constexpr(ActivationOperation == Activation::silu_and_mul)
                                 {
                                     const float scale_up =
-                                        p_scale_b[(scale_n(n0 * NWave * NPerXdl) + problem.N) *
+                                        p_scale_b[(clamped_scale_n_offset(n0 * NWave * NPerXdl) +
+                                                   problem.N) *
                                                   PerTokenQuant];
                                     float gate = scale_a * scale_b * c_thread_buf[cidx];
                                     float up   = scale_a * scale_up * c_thread_buf_up[cidx];
@@ -2272,7 +2295,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                 else if(ActivationOperation == Activation::gelu_and_mul)
                                 {
                                     const float scale_up =
-                                        p_scale_b[(scale_n(n0 * NWave * NPerXdl) + problem.N) *
+                                        p_scale_b[(clamped_scale_n_offset(n0 * NWave * NPerXdl) +
+                                                   problem.N) *
                                                   PerTokenQuant];
                                     float gate = scale_a * scale_b * c_thread_buf[cidx];
                                     float up   = scale_a * scale_up * c_thread_buf_up[cidx];
@@ -2292,7 +2316,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                 else if(ActivationOperation == Activation::gelu_tanh_and_mul)
                                 {
                                     const float scale_up =
-                                        p_scale_b[(scale_n(n0 * NWave * NPerXdl) + problem.N) *
+                                        p_scale_b[(clamped_scale_n_offset(n0 * NWave * NPerXdl) +
+                                                   problem.N) *
                                                   PerTokenQuant];
                                     float gate = scale_a * scale_b * c_thread_buf[cidx];
                                     float up   = scale_a * scale_up * c_thread_buf_up[cidx];
@@ -2313,7 +2338,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                                   Activation::swiglustep_and_mul)
                                 {
                                     const float scale_up =
-                                        p_scale_b[(scale_n(n0 * NWave * NPerXdl) + problem.N) *
+                                        p_scale_b[(clamped_scale_n_offset(n0 * NWave * NPerXdl) +
+                                                   problem.N) *
                                                   PerTokenQuant];
                                     float gate = scale_a * scale_b * c_thread_buf[cidx];
                                     float up   = scale_a * scale_up * c_thread_buf_up[cidx];
@@ -2333,7 +2359,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                                   Activation::swiglu_oai_and_mul)
                                 {
                                     const float scale_up =
-                                        p_scale_b[(scale_n(n0 * NWave * NPerXdl) + problem.N) *
+                                        p_scale_b[(clamped_scale_n_offset(n0 * NWave * NPerXdl) +
+                                                   problem.N) *
                                                   PerTokenQuant];
                                     float gate = scale_a * scale_b * c_thread_buf[cidx];
                                     float up   = scale_a * scale_up * c_thread_buf_up[cidx];
@@ -2474,20 +2501,19 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                       false,
                                       IsInputGemm,
                                       IndexType,
-                                      PadsN>(
-            blockwise_gemm_pipeline,
-            c_grid_desc_mblock_mperblock_nblock_nperblock,
-            ds_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_thread_buf_fp32,
-            block_m_id,
-            block_n_id,
-            p_shared,
-            p_sorted_token_ids,
-            p_c_grid,
-            p_ds_grid,
-            c_element_op,
-            problem.TopK,
-            problem.N);
+                                      PadsN>(blockwise_gemm_pipeline,
+                                             c_grid_desc_mblock_mperblock_nblock_nperblock,
+                                             ds_grid_desc_mblock_mperblock_nblock_nperblock,
+                                             c_thread_buf_fp32,
+                                             block_m_id,
+                                             block_n_id,
+                                             p_shared,
+                                             p_sorted_token_ids,
+                                             p_c_grid,
+                                             p_ds_grid,
+                                             c_element_op,
+                                             problem.TopK,
+                                             problem.N);
     }
 };
 

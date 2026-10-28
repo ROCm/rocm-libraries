@@ -100,13 +100,26 @@ void preShuffleBuffer(const B0DataType* src, B0DataType* dst, int N, int K, int 
 {
     int KPack = MOE_KVEC / sizeof(B0DataType);
     int NLane = NXdl;
-    // N, K -> N0 K0 NLane KPack, which also holds for a K that no KPerBlock divides.
+    int KLane = 64 / NLane;
+
+    // K -> K0 KLane KPack
+    // N -> N0 NLane
+    // N, K -> N0 K0 KLane NLane KPack
+    int tempk;
     for(int n = 0; n < N; ++n)
     {
         for(int k = 0; k < K; ++k)
         {
-            int outputIndex = (n / NLane) * NLane * K + (k / KPack) * NLane * KPack +
-                              (n % NLane) * KPack + k % KPack;
+            int n0 = n / NLane;
+            int n1 = n % NLane;
+
+            int k0 = k / (KLane * KPack);
+            tempk  = k % (KLane * KPack);
+            int k1 = tempk / KPack;
+            int k2 = tempk % KPack;
+
+            int outputIndex =
+                n0 * NLane * K + k0 * KPack * NLane * KLane + k1 * KPack * NLane + n1 * KPack + k2;
 
             dst[outputIndex] = src[n * K + k];
         }
@@ -124,8 +137,8 @@ static constexpr auto GemmSpec = ck::tensor_operation::device::GemmSpecializatio
 #else
 static constexpr auto GemmSpec = ck::tensor_operation::device::GemmSpecialization::Default;
 #endif
-static constexpr ck::index_t MPerBlock = 256;
-static constexpr ck::index_t BLOCKSIZE = 256;
+static constexpr ck::index_t MPerBlock   = 256;
+static constexpr ck::index_t BLOCKSIZE   = 256;
 static constexpr ck::index_t MXDLPerWave = 16;
 static constexpr ck::index_t NXDLPerWave = 4;
 static constexpr ck::index_t NPerBlock   = 256;

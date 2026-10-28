@@ -400,14 +400,14 @@ struct ThreadwiseTensorSliceTransfer_v7r3_scatter
             }
             // copy data from buf_vectors into dst_bufs
             static_for<0, nDst, 1>{}([&](auto i) {
-                using dst_vector_t      = typename remove_cvref_t<decltype(dst_vectors[i])>::type;
-                IndexType dst_offset    = scatter_offset + (dst_coords_[i].GetOffset());
-                bool is_dst_valid = dst_offset < dst_descs[i].GetElementSpaceSize();
+                using dst_vector_t   = typename remove_cvref_t<decltype(dst_vectors[i])>::type;
+                IndexType dst_offset = scatter_offset + (dst_coords_[i].GetOffset());
+                bool is_dst_valid    = dst_offset < dst_descs[i].GetElementSpaceSize();
                 if constexpr(CheckDstValidity)
                 {
-                    is_dst_valid = is_dst_valid &&
-                                   coordinate_has_valid_offset_assuming_visible_index_is_valid(
-                                       dst_descs[i], dst_coords_[i]);
+                    is_dst_valid =
+                        is_dst_valid && coordinate_has_valid_offset_assuming_visible_index_is_valid(
+                                            dst_descs[i], dst_coords_[i]);
                 }
                 constexpr InMemoryDataOperationEnum DstInMemOp =
                     static_cast<InMemoryDataOperationEnum>(DstInMemOps::At(i.value));

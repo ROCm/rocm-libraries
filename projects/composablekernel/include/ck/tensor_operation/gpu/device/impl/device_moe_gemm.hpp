@@ -453,14 +453,12 @@ struct DeviceMoeGemm : public DeviceGemmMultipleDSplitKBPreShuffle<ALayout,
         {
             return false;
         }
-        constexpr bool kPadsK = GemmSpec == GemmSpecialization::KPadding ||
-                                GemmSpec == GemmSpecialization::MKPadding ||
-                                GemmSpec == GemmSpecialization::NKPadding ||
-                                GemmSpec == GemmSpecialization::MNKPadding;
-        constexpr bool kPadsN = GemmSpec == GemmSpecialization::NPadding ||
-                                GemmSpec == GemmSpecialization::MNPadding ||
-                                GemmSpec == GemmSpecialization::NKPadding ||
-                                GemmSpec == GemmSpecialization::MNKPadding;
+        constexpr bool kPadsK =
+            GemmSpec == GemmSpecialization::KPadding || GemmSpec == GemmSpecialization::MKPadding ||
+            GemmSpec == GemmSpecialization::NKPadding || GemmSpec == GemmSpecialization::MNKPadding;
+        constexpr bool kPadsN =
+            GemmSpec == GemmSpecialization::NPadding || GemmSpec == GemmSpecialization::MNPadding ||
+            GemmSpec == GemmSpecialization::NKPadding || GemmSpec == GemmSpecialization::MNKPadding;
         if((arg.N % NPerBlock != 0 && !kPadsN) || (arg.K % KPerBlock != 0 && !kPadsK))
         {
             return false;
