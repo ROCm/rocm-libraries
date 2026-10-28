@@ -522,17 +522,9 @@ def build_unified_attention_3d_tiled(
             iterations=spec.binary_search_iters,
         )
     if bounds is not None:
-        with b.scf_if(
-            b.lor(
-                b.cmp_ge(seq_idx, num_seqs_p),
-                b.lor(
-                    b.cmp_ge(kv_head_idx, b.const_i32(NUM_KV)),
-                    b.cmp_ge(seg_idx, b.const_i32(NUM_SEG)),
-                ),
-            )
-        ):
-            b.ret()
-        bounds.start(seq_idx, kv_head_idx, seg_idx, tid, NUM_KV, NUM_SEG)
+        bounds.checked_start(
+            seq_idx, kv_head_idx, seg_idx, tid, num_seqs_p, NUM_KV, NUM_SEG
+        )
     cu_q_start = b.global_load_i32(cu_q, seq_idx)
     cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
     cur_batch_q_len = None if bounds is not None else b.sub(cu_q_stop, cu_q_start)
@@ -543,35 +535,22 @@ def build_unified_attention_3d_tiled(
         q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
     seq_len = b.global_load_i32(seq_lens, seq_idx)
     if bounds is not None:
-        bad_cu = b.lor(
-            b.cmp_ne(cu_q_start, seq_idx),
-            b.cmp_ne(cu_q_stop, b.add(seq_idx, b.const_i32(1))),
+        cu_q_start, cur_batch_q_len, seq_len = bounds.checked_metadata(
+            seq_idx,
+            kv_head_idx,
+            seg_idx,
+            tid,
+            cu_q_start,
+            cu_q_stop,
+            seq_len,
+            segm_output_ptr,
+            segm_max_ptr,
+            segm_expsum_ptr,
+            HD,
+            NQK,
+            NUM_QH,
+            NUM_SEG,
         )
-        bad_length = b.lor(
-            b.cmp_lt(seq_len, b.const_i32(0)), b.cmp_gt(seq_len, bounds.capacity)
-        )
-        invalid_metadata = b.lor(bad_cu, bad_length)
-        bounds.mark(invalid_metadata)
-        cu_q_start = seq_idx
-        cur_batch_q_len = b.const_i32(1)
-        seq_len = b.select(invalid_metadata, b.const_i32(0), seq_len)
-        with b.scf_if(invalid_metadata):
-            neutral_segment(
-                b,
-                seq_idx,
-                kv_head_idx,
-                seg_idx,
-                tid,
-                segm_output_ptr,
-                segm_max_ptr,
-                segm_expsum_ptr,
-                HD,
-                NQK,
-                NUM_QH,
-                NUM_SEG,
-            )
-            bounds.finish()
-            b.ret()
     context_len = b.sub(seq_len, cur_batch_q_len)
 
     qb_start_pos = b.mul(q_block_local_idx, b.const_i32(BLOCK_Q))

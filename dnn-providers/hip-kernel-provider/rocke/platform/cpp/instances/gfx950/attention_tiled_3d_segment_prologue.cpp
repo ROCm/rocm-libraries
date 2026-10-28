@@ -378,27 +378,15 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
     /* ---- cu_q bounds / per-sequence geometry (lines 373-379) ---- */
     if(ctx->metadata_containment)
     {
-        rocke_value_t* t1 = rocke_b_cmp_ge(B, ctx->seq_idx, ctx->num_seqs_p);
-        rocke_value_t* t2 = rocke_b_const_i32(B, CFG.NUM_KV);
-        rocke_value_t* t3 = rocke_b_cmp_ge(B, ctx->kv_head_idx, t2);
-        rocke_value_t* t4 = rocke_b_const_i32(B, CFG.NUM_SEG);
-        rocke_value_t* t5 = rocke_b_cmp_ge(B, ctx->seg_idx, t4);
-        rocke_value_t* t6 = rocke_b_lor(B, t3, t5);
-        rocke_value_t* t7 = rocke_b_lor(B, t1, t6);
-        {
-            rocke_if_t g8 = rocke_b_scf_if(B, t7);
-            rocke_b_region_enter(B, g8.then_region);
-            rocke_b_ret(B);
-            rocke_b_region_leave(B);
-        }
-        rocke_bounds_start(B,
-                           &ctx->bounds,
-                           ctx->seq_idx,
-                           ctx->kv_head_idx,
-                           ctx->seg_idx,
-                           ctx->tid,
-                           CFG.NUM_KV,
-                           CFG.NUM_SEG);
+        rocke_bounds_checked_start(B,
+                                   &ctx->bounds,
+                                   ctx->seq_idx,
+                                   ctx->kv_head_idx,
+                                   ctx->seg_idx,
+                                   ctx->tid,
+                                   ctx->num_seqs_p,
+                                   CFG.NUM_KV,
+                                   CFG.NUM_SEG);
     }
     ctx->cu_q_start = rocke_b_global_load_i32(B, ctx->cu_q, ctx->seq_idx, 0);
     ctx->cu_q_stop = rocke_b_global_load_i32(
@@ -419,45 +407,25 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
     ctx->seq_len = rocke_b_global_load_i32(B, ctx->seq_lens, ctx->seq_idx, 0);
     if(ctx->metadata_containment)
     {
-        rocke_value_t* t1 = rocke_b_cmp_ne(B, ctx->cu_q_start, ctx->seq_idx);
-        rocke_value_t* t2 = rocke_b_const_i32(B, 1);
-        rocke_value_t* t3 = rocke_b_add(B, ctx->seq_idx, t2);
-        rocke_value_t* t4 = rocke_b_cmp_ne(B, ctx->cu_q_stop, t3);
-        rocke_value_t* t5 = rocke_b_lor(B, t1, t4);
-        rocke_value_t* bad_cu = t5;
-        rocke_value_t* t6 = rocke_b_const_i32(B, 0);
-        rocke_value_t* t7 = rocke_b_cmp_lt(B, ctx->seq_len, t6);
-        rocke_value_t* t8 = rocke_b_cmp_gt(B, ctx->seq_len, ctx->bounds.capacity);
-        rocke_value_t* t9 = rocke_b_lor(B, t7, t8);
-        rocke_value_t* bad_length = t9;
-        rocke_value_t* t10 = rocke_b_lor(B, bad_cu, bad_length);
-        rocke_value_t* invalid_metadata = t10;
-        rocke_bounds_mark(B, &ctx->bounds, invalid_metadata);
-        ctx->cu_q_start = ctx->seq_idx;
-        rocke_value_t* t11 = rocke_b_const_i32(B, 1);
-        ctx->cur_batch_q_len = t11;
-        rocke_value_t* t12 = rocke_b_const_i32(B, 0);
-        rocke_value_t* t13 = rocke_b_select(B, invalid_metadata, t12, ctx->seq_len);
-        ctx->seq_len = t13;
-        {
-            rocke_if_t g14 = rocke_b_scf_if(B, invalid_metadata);
-            rocke_b_region_enter(B, g14.then_region);
-            rocke_bounds_neutral(B,
-                                 ctx->seq_idx,
-                                 ctx->kv_head_idx,
-                                 ctx->seg_idx,
-                                 ctx->tid,
-                                 ctx->segm_output_ptr,
-                                 ctx->segm_max_ptr,
-                                 ctx->segm_expsum_ptr,
-                                 CFG.HD,
-                                 CFG.NQK,
-                                 CFG.NUM_QH,
-                                 CFG.NUM_SEG);
-            rocke_bounds_finish(B, &ctx->bounds);
-            rocke_b_ret(B);
-            rocke_b_region_leave(B);
-        }
+        rocke_bounds_row_t row = rocke_bounds_checked_metadata(B,
+                                                               &ctx->bounds,
+                                                               ctx->seq_idx,
+                                                               ctx->kv_head_idx,
+                                                               ctx->seg_idx,
+                                                               ctx->tid,
+                                                               ctx->cu_q_start,
+                                                               ctx->cu_q_stop,
+                                                               ctx->seq_len,
+                                                               ctx->segm_output_ptr,
+                                                               ctx->segm_max_ptr,
+                                                               ctx->segm_expsum_ptr,
+                                                               CFG.HD,
+                                                               CFG.NQK,
+                                                               CFG.NUM_QH,
+                                                               CFG.NUM_SEG);
+        ctx->cu_q_start = row.query_start;
+        ctx->cur_batch_q_len = row.query_length;
+        ctx->seq_len = row.sequence_length;
     }
     ctx->context_len = rocke_b_sub(B, ctx->seq_len, ctx->cur_batch_q_len);
 

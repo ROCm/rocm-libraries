@@ -113,6 +113,32 @@ static inline void rocke_bounds_start(rocke_ir_builder_t* B,
     rocke_bounds_smem_store(B, state->failures, tid, t8);
 }
 
+static inline void rocke_bounds_checked_start(rocke_ir_builder_t* B,
+                                              rocke_paged_bounds_t* state,
+                                              rocke_value_t* seq,
+                                              rocke_value_t* head,
+                                              rocke_value_t* seg,
+                                              rocke_value_t* tid,
+                                              rocke_value_t* num_seqs,
+                                              int heads,
+                                              int segments)
+{
+    rocke_value_t* t1 = rocke_b_cmp_ge(B, seq, num_seqs);
+    rocke_value_t* t2 = rocke_b_const_i32(B, heads);
+    rocke_value_t* t3 = rocke_b_cmp_ge(B, head, t2);
+    rocke_value_t* t4 = rocke_b_const_i32(B, segments);
+    rocke_value_t* t5 = rocke_b_cmp_ge(B, seg, t4);
+    rocke_value_t* t6 = rocke_b_lor(B, t3, t5);
+    rocke_value_t* t7 = rocke_b_lor(B, t1, t6);
+    {
+        rocke_if_t g8 = rocke_b_scf_if(B, t7);
+        rocke_b_region_enter(B, g8.then_region);
+        rocke_b_ret(B);
+        rocke_b_region_leave(B);
+    }
+    rocke_bounds_start(B, state, seq, head, seg, tid, heads, segments);
+}
+
 static inline void
     rocke_bounds_mark(rocke_ir_builder_t* B, rocke_paged_bounds_t* state, rocke_value_t* invalid)
 {
@@ -305,6 +331,61 @@ static inline void rocke_bounds_neutral(rocke_ir_builder_t* B,
             rocke_b_global_store(B, out, idx, t21, 4);
         }
     }
+}
+
+typedef struct rocke_bounds_row_t
+{
+    rocke_value_t* query_start;
+    rocke_value_t* query_length;
+    rocke_value_t* sequence_length;
+} rocke_bounds_row_t;
+
+static inline rocke_bounds_row_t rocke_bounds_checked_metadata(rocke_ir_builder_t* B,
+                                                               rocke_paged_bounds_t* state,
+                                                               rocke_value_t* seq,
+                                                               rocke_value_t* head,
+                                                               rocke_value_t* seg,
+                                                               rocke_value_t* tid,
+                                                               rocke_value_t* cu_q_start,
+                                                               rocke_value_t* cu_q_stop,
+                                                               rocke_value_t* seq_len,
+                                                               rocke_value_t* out,
+                                                               rocke_value_t* maximum,
+                                                               rocke_value_t* expsum,
+                                                               int hd,
+                                                               int nqk,
+                                                               int nqh,
+                                                               int segments)
+{
+    rocke_value_t* t1 = rocke_b_cmp_ne(B, cu_q_start, seq);
+    rocke_value_t* t2 = rocke_b_const_i32(B, 1);
+    rocke_value_t* t3 = rocke_b_add(B, seq, t2);
+    rocke_value_t* t4 = rocke_b_cmp_ne(B, cu_q_stop, t3);
+    rocke_value_t* t5 = rocke_b_lor(B, t1, t4);
+    rocke_value_t* bad_cu = t5;
+    rocke_value_t* t6 = rocke_b_const_i32(B, 0);
+    rocke_value_t* t7 = rocke_b_cmp_lt(B, seq_len, t6);
+    rocke_value_t* t8 = rocke_b_cmp_gt(B, seq_len, state->capacity);
+    rocke_value_t* t9 = rocke_b_lor(B, t7, t8);
+    rocke_value_t* bad_length = t9;
+    rocke_value_t* t10 = rocke_b_lor(B, bad_cu, bad_length);
+    rocke_value_t* invalid_metadata = t10;
+    rocke_bounds_mark(B, state, invalid_metadata);
+    cu_q_start = seq;
+    rocke_value_t* t11 = rocke_b_const_i32(B, 1);
+    rocke_value_t* cur_batch_q_len = t11;
+    rocke_value_t* t12 = rocke_b_const_i32(B, 0);
+    rocke_value_t* t13 = rocke_b_select(B, invalid_metadata, t12, seq_len);
+    seq_len = t13;
+    {
+        rocke_if_t g14 = rocke_b_scf_if(B, invalid_metadata);
+        rocke_b_region_enter(B, g14.then_region);
+        rocke_bounds_neutral(B, seq, head, seg, tid, out, maximum, expsum, hd, nqk, nqh, segments);
+        rocke_bounds_finish(B, state);
+        rocke_b_ret(B);
+        rocke_b_region_leave(B);
+    }
+    return {cu_q_start, cur_batch_q_len, seq_len};
 }
 
 static inline void rocke_bounds_reject(rocke_ir_builder_t* B,

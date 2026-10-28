@@ -28,6 +28,71 @@ class PagedBounds:
         self.failures = b.smem_alloc(I32, [64], name_hint="metadata_failures")
         b.smem_store_vN(self.failures, [tid], b.const_i32(0), 1)
 
+    def checked_start(self, seq, head, seg, tid, num_seqs, heads, segments):
+        """Reject surplus CTAs before declaring their per-lane failure state."""
+        b = self.b
+        with b.scf_if(
+            b.lor(
+                b.cmp_ge(seq, num_seqs),
+                b.lor(
+                    b.cmp_ge(head, b.const_i32(heads)),
+                    b.cmp_ge(seg, b.const_i32(segments)),
+                ),
+            )
+        ):
+            b.ret()
+        self.start(seq, head, seg, tid, heads, segments)
+
+    def checked_metadata(
+        self,
+        seq,
+        head,
+        seg,
+        tid,
+        cu_q_start,
+        cu_q_stop,
+        seq_len,
+        out,
+        maximum,
+        expsum,
+        hd,
+        nqk,
+        nqh,
+        segments,
+    ):
+        """Publish invalid rows and return trusted one-query row geometry."""
+        b = self.b
+        bad_cu = b.lor(
+            b.cmp_ne(cu_q_start, seq),
+            b.cmp_ne(cu_q_stop, b.add(seq, b.const_i32(1))),
+        )
+        bad_length = b.lor(
+            b.cmp_lt(seq_len, b.const_i32(0)), b.cmp_gt(seq_len, self.capacity)
+        )
+        invalid_metadata = b.lor(bad_cu, bad_length)
+        self.mark(invalid_metadata)
+        cu_q_start = seq
+        cur_batch_q_len = b.const_i32(1)
+        seq_len = b.select(invalid_metadata, b.const_i32(0), seq_len)
+        with b.scf_if(invalid_metadata):
+            neutral_segment(
+                b,
+                seq,
+                head,
+                seg,
+                tid,
+                out,
+                maximum,
+                expsum,
+                hd,
+                nqk,
+                nqh,
+                segments,
+            )
+            self.finish()
+            b.ret()
+        return cu_q_start, cur_batch_q_len, seq_len
+
     def mark(self, invalid):
         b = self.b
         old = b.vec_extract(b.smem_load_vN(self.failures, self.tid, dtype=I32, n=1), 0)
