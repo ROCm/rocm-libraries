@@ -123,10 +123,17 @@ struct _rocblaslt_handle
     hipblaslt_check_numerics_mode check_numerics = hipblaslt_check_numerics_mode_no_check;
 
     // 4-byte device slot; scanner does atomicCAS(0, call_id) so the slot
-    // holds the FIRST matmul's call_id whose D contained a NaN.
-    uint32_t*             check_numerics_flag       = nullptr;
-    // Host-mapped alias of the flag under STOP_ON_FIRST (null otherwise).
-    uint32_t*             check_numerics_flag_host  = nullptr;
+    // holds the FIRST matmul's call_id whose D contained a NaN. Always a
+    // hipMalloc allocation: a device atomic against mapped host memory is a
+    // PCIe AtomicOp, and root ports without an AtomicOp completer drop it
+    // (ROCM-30523).
+    uint32_t*             check_numerics_flag          = nullptr;
+    // STOP_ON_FIRST host mirror (null otherwise). The CAS winner publishes
+    // call_id here with a plain store so scan_D can peek without syncing.
+    // check_numerics_flag_host is the CPU address; _dev is the device
+    // address of the same allocation passed into the scanner kernel.
+    uint32_t*             check_numerics_flag_host     = nullptr;
+    uint32_t*             check_numerics_flag_host_dev = nullptr;
     // Per-matmul counter; 1-indexed so 0 stays the "no NaN" sentinel.
     std::atomic<uint32_t> check_numerics_call_id{0};
     uint32_t              check_numerics_scan_every = 1u;

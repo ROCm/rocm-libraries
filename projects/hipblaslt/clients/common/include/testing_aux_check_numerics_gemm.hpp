@@ -335,18 +335,61 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
         return n;
     };
 
-    // STOP_ON_FIRST=1: NaN at #3 trips the host-peek auto-drain on a
-    // later call; the device flag is sticky so the on-demand drain still
-    // reports 3. The per-call hipStreamSynchronize in run_scenario is what
-    // makes #3's atomicCAS host-visible to the peek.
-    //
-    // Behavioral coverage of the new auto-drain log path:
-    //   1. Exactly one "auto-drain on host peek" log line (CAS-elect dedup
-    //      in scan_D's host-peek block).
-    //   2. That line must reference call #3 (the injected first-NaN id).
-    //   3. The on-demand drain that follows must NOT re-emit a duplicate
-    //      log line for the same NaN (drain helper's CAS-elect on
-    //      short_circuit suppresses the second log).
+    // STOP_ON_FIRST=1: NaN at #3 is claimed by atomicCAS on the device flag,
+    // so the on-demand drain reports 3 on every GPU. The CAS winner also
+    // plain-stores that id into a host mirror. When the mirror is visible by
+    // the next matmul (the per-call hipStreamSynchronize in run_scenario),
+    // scan_D emits exactly one "auto-drain on host peek" line and the drain
+    // helper's CAS-elect suppresses the duplicate on-demand and teardown
+    // lines. A link that cannot complete PCIe AtomicOps
+    // (hipDeviceAttributeHostNativeAtomicSupported == 0, typical of a
+    // PCH-attached GPU) may not observe that store; the on-demand drain then
+    // emits the single NaN report instead. Either way the call id is reported
+    // once (ROCM-30523).
+    int host_native_atomics = 0;
+    ASSERT_EQ(hipDeviceGetAttribute(&host_native_atomics,
+                                    hipDeviceAttributeHostNativeAtomicSupported,
+                                    /*device=*/0),
+              hipSuccess);
+    auto expect_one_nan_report = [&](const std::string& captured_log,
+                                     const char*        call_token,
+                                     const char*        extra_token) {
+        const auto peek_n  = count_substr(captured_log, "auto-drain on host peek");
+        const auto drain_n = count_substr(captured_log, "on-demand drain");
+        if(host_native_atomics)
+        {
+            EXPECT_EQ(peek_n, 1u)
+                << "host native atomics are supported; expected the host-peek "
+                   "auto-drain line; captured:\n"
+                << captured_log;
+            EXPECT_EQ(drain_n, 0u)
+                << "drain helper must suppress the duplicate on-demand log; captured:\n"
+                << captured_log;
+        }
+        else
+        {
+            EXPECT_EQ(peek_n + drain_n, 1u)
+                << "expected exactly one NaN report (host peek or on-demand drain); captured:\n"
+                << captured_log;
+        }
+        EXPECT_NE(captured_log.find(call_token), std::string::npos)
+            << "NaN report should reference " << call_token << "; captured:\n"
+            << captured_log;
+        if(extra_token != nullptr)
+        {
+            EXPECT_NE(captured_log.find(extra_token), std::string::npos)
+                << "NaN report should contain \"" << extra_token << "\"; captured:\n"
+                << captured_log;
+        }
+        // Match the drain helper's NaN-event line specifically -- the bare
+        // substring "handle teardown" also appears in the STOP_ON_FIRST tail
+        // report ("handle teardown: matmul calls (X..Y] were intentionally
+        // skipped...") emitted from a separate code path in handle.cpp, which
+        // is not what the dedup is meant to suppress.
+        EXPECT_EQ(count_substr(captured_log, "handle teardown: first NaN"), 0u)
+            << "drain helper must suppress the duplicate teardown log; captured:\n"
+            << captured_log;
+    };
     {
         reset_env();
         setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
@@ -360,35 +403,13 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
         }
 
         EXPECT_EQ(reported, 3u);
-        EXPECT_EQ(count_substr(captured_log, "auto-drain on host peek"), 1u)
-            << "expected exactly one auto-drain log line; captured:\n"
-            << captured_log;
-        EXPECT_NE(captured_log.find("call #3"), std::string::npos)
-            << "auto-drain log should reference the first-NaN call id (#3); captured:\n"
-            << captured_log;
-        // Both on-demand drain (hipblasLtCheckNumericsDrain) and handle
-        // teardown drain (~handle dtor) call the drain helper with
-        // short_circuit_out non-null; the CAS-elect must suppress both
-        // duplicate log emissions for the same first-NaN event.
-        EXPECT_EQ(count_substr(captured_log, "on-demand drain"), 0u)
-            << "drain helper must suppress the duplicate on-demand log; captured:\n"
-            << captured_log;
-        // Match the drain helper's NaN-event line specifically -- the bare
-        // substring "handle teardown" also appears in the STOP_ON_FIRST tail
-        // report ("handle teardown: matmul calls (X..Y] were intentionally
-        // skipped...") emitted from a separate code path in handle.cpp, which
-        // is not what the dedup is meant to suppress.
-        EXPECT_EQ(count_substr(captured_log, "handle teardown: first NaN"), 0u)
-            << "drain helper must suppress the duplicate teardown log; captured:\n"
-            << captured_log;
+        expect_one_nan_report(captured_log, "call #3", nullptr);
     }
 
-    // STOP_ON_FIRST=1 + SCAN_EVERY=2: covers the under-tested interaction
-    // where the host-peek path runs under sampling. Calls 2,4,6,... are
-    // sampled; injecting NaN at #4 (sampled) trips the auto-drain on a
-    // later call. The bisect-hint branch in the log helper fires when
-    // every>1 -- this case ensures the auto-drain path correctly threads
-    // scan_every into the log line and the sticky drain still reports 4.
+    // STOP_ON_FIRST=1 + SCAN_EVERY=2: calls 2,4,6,... are sampled; injecting
+    // NaN at #4 (sampled) is the one the drain reports. The bisect-hint
+    // branch in the log helper fires when every>1, so the single NaN report
+    // (host peek or on-demand drain; see above) must thread scan_every.
     {
         reset_env();
         setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
@@ -403,26 +424,7 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
         }
 
         EXPECT_EQ(reported, 4u);
-        EXPECT_EQ(count_substr(captured_log, "auto-drain on host peek"), 1u)
-            << "expected exactly one auto-drain log line under SCAN_EVERY=2; captured:\n"
-            << captured_log;
-        EXPECT_NE(captured_log.find("call #4"), std::string::npos)
-            << "auto-drain log should reference call #4; captured:\n"
-            << captured_log;
-        EXPECT_NE(captured_log.find("scan_every=2"), std::string::npos)
-            << "auto-drain log should thread the effective scan_every; captured:\n"
-            << captured_log;
-        EXPECT_EQ(count_substr(captured_log, "on-demand drain"), 0u)
-            << "drain helper must suppress the duplicate on-demand log under "
-               "sampling; captured:\n"
-            << captured_log;
-        // See note on the matching assertion above: tighten to the drain
-        // helper's NaN-event prefix so the always-fires STOP_ON_FIRST tail
-        // report doesn't false-trigger this check.
-        EXPECT_EQ(count_substr(captured_log, "handle teardown: first NaN"), 0u)
-            << "drain helper must suppress the duplicate teardown log under "
-               "sampling; captured:\n"
-            << captured_log;
+        expect_one_nan_report(captured_log, "call #4", "scan_every=2");
     }
 
     // Pointer-array batched matmul (HIPBLASLT_BATCH_MODE_POINTER_ARRAY): D is a

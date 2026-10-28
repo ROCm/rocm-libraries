@@ -76,9 +76,13 @@ inline std::string hipblaslt_check_numerics_ts()
 
 // One thread per element of D. The first NaN seen claims the device flag with
 // this call's id via atomicCAS(0, call_id); subsequent NaNs no-op so the slot
-// retains the FIRST call_id that observed a NaN. With ptr_array set, D is a
-// device array holding one matrix pointer per batch and stride_d is unused.
-// offset_d is added to each matrix pointer in elements.
+// retains the FIRST call_id that observed a NaN. The CAS winner also publishes
+// call_id to host_flag with a plain store (STOP_ON_FIRST mirror; null
+// otherwise). That store is not an atomic: device atomics to mapped host
+// memory require a PCIe AtomicOp completer, which a PCH-attached GPU often
+// lacks (ROCM-30523). With ptr_array set, D is a device array holding one
+// matrix pointer per batch and stride_d is unused. offset_d is added to each
+// matrix pointer in elements.
 template <int DIM_X, int DIM_Y, typename T>
 __global__ void hipblaslt_check_nan_kernel(int64_t               m,
                                            int64_t               n,
@@ -90,6 +94,7 @@ __global__ void hipblaslt_check_nan_kernel(int64_t               m,
                                            int64_t               offset_d,
                                            int32_t               batch_base,
                                            uint32_t* __restrict__ flag,
+                                           uint32_t* __restrict__ host_flag,
                                            uint32_t              call_id)
 {
     int64_t tx = blockIdx.x * (int64_t)blockDim.x + threadIdx.x;
@@ -101,8 +106,15 @@ __global__ void hipblaslt_check_nan_kernel(int64_t               m,
         const T*      batch_D = ptr_array ? static_cast<const T* const*>(D)[batch] + offset_d
                                           : static_cast<const T*>(D) + (int64_t)batch * stride_d;
         const int64_t offset  = row_major ? (tx * ldd + ty) : (tx + ldd * ty);
-        if(hipblaslt_isnan(batch_D[offset]))
-            atomicCAS(flag, 0u, call_id);
+        if(hipblaslt_isnan(batch_D[offset]) && atomicCAS(flag, 0u, call_id) == 0u
+           && host_flag != nullptr)
+        {
+            // Plain store, not an atomic. threadfence_system publishes it to
+            // the host so the next scan_D peek can observe it without the
+            // caller synchronizing.
+            *static_cast<volatile uint32_t*>(host_flag) = call_id;
+            __threadfence_system();
+        }
     }
 }
 
@@ -118,7 +130,8 @@ inline rocblaslt_status hipblaslt_launch_nan_kernel(int64_t     m,
                                                     int64_t     offset_d,
                                                     uint32_t*   d_flag,
                                                     uint32_t    call_id,
-                                                    hipStream_t stream)
+                                                    hipStream_t stream,
+                                                    uint32_t*   host_flag = nullptr)
 {
     constexpr int     DIM_X      = 16;
     constexpr int32_t MAX_GRID_Z = 65535;
@@ -143,6 +156,7 @@ inline rocblaslt_status hipblaslt_launch_nan_kernel(int64_t     m,
                            offset_d,
                            base,
                            d_flag,
+                           host_flag,
                            call_id);
 
         if(hipGetLastError() != hipSuccess)
@@ -171,7 +185,8 @@ inline rocblaslt_status hipblaslt_check_numerics_output_D(hipStream_t stream,
                                                           uint32_t    scan_from,
                                                           uint32_t    scan_until,
                                                           bool        ptr_array = false,
-                                                          int64_t     offset_d  = 0)
+                                                          int64_t     offset_d  = 0,
+                                                          uint32_t*   host_flag = nullptr)
 {
     if(!d_flag || !D || m == 0 || n == 0 || batch == 0)
         return rocblaslt_status_success;
@@ -194,28 +209,36 @@ inline rocblaslt_status hipblaslt_check_numerics_output_D(hipStream_t stream,
     {
     case HIP_R_32F:
         return hipblaslt_launch_nan_kernel<float>(
-            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream,
+            host_flag);
     case HIP_R_64F:
         return hipblaslt_launch_nan_kernel<double>(
-            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream,
+            host_flag);
     case HIP_R_16F:
         return hipblaslt_launch_nan_kernel<hipblasLtHalf>(
-            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream,
+            host_flag);
     case HIP_R_16BF:
         return hipblaslt_launch_nan_kernel<hip_bfloat16>(
-            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream,
+            host_flag);
     case HIP_R_8F_E4M3_FNUZ:
         return hipblaslt_launch_nan_kernel<hipblaslt_f8_fnuz>(
-            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream,
+            host_flag);
     case HIP_R_8F_E5M2_FNUZ:
         return hipblaslt_launch_nan_kernel<hipblaslt_bf8_fnuz>(
-            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream,
+            host_flag);
     case HIP_R_8F_E4M3:
         return hipblaslt_launch_nan_kernel<hipblaslt_f8>(
-            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream,
+            host_flag);
     case HIP_R_8F_E5M2:
         return hipblaslt_launch_nan_kernel<hipblaslt_bf8>(
-            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream,
+            host_flag);
     default:
         return rocblaslt_status_success;
     }
@@ -384,11 +407,10 @@ inline rocblaslt_status hipblaslt_check_numerics_scan_D(rocblaslt_handle handle,
     if(handle->check_numerics_short_circuit.load(std::memory_order_acquire))
         return rocblaslt_status_success;
 
-    // Best-effort host peek of the mapped flag. RELAXED is sufficient: the
-    // load does NOT establish host<->device happens-before -- on PCIe parts
-    // the device-side atomicCAS may not become host-visible until the next
-    // stream/device sync. A miss here just means the next explicit drain
-    // (or handle teardown) will observe the flag instead.
+    // Best-effort host peek of the STOP_ON_FIRST mirror. The scanner publishes
+    // it with a plain store plus threadfence_system; a miss (mirror not
+    // allocated, or the store not yet host-visible) just means the next
+    // explicit drain or handle teardown observes the device flag instead.
     if(handle->check_numerics_stop_on_first && handle->check_numerics_flag_host)
     {
         const uint32_t h_flag
@@ -433,7 +455,8 @@ inline rocblaslt_status hipblaslt_check_numerics_scan_D(rocblaslt_handle handle,
                                              handle->check_numerics_scan_from,
                                              handle->check_numerics_scan_until,
                                              ptr_array,
-                                             offset_d);
+                                             offset_d,
+                                             handle->check_numerics_flag_host_dev);
 }
 
 // Public on-demand drain (hipblasLtCheckNumericsDrain). Forces sync+read+reset

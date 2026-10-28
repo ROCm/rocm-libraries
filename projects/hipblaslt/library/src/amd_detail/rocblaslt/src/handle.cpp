@@ -154,71 +154,74 @@ _rocblaslt_handle::_rocblaslt_handle()
         check_numerics_stop_on_first = (s == "1" || s == "on" || s == "true");
     }
 
-    // Allocate the device flag. STOP_ON_FIRST uses hipHostMalloc(MAPPED) so
-    // scan_D can poll without sync; on any failure we fall back to hipMalloc
-    // (the cross-call short-circuit then only trips on drains). If hipMalloc
-    // also fails we disable scanning -- the matmul itself is unaffected.
+    // Allocate the device flag the scanner claims with atomicCAS. The atomic
+    // stays in device memory: targeting hipHostMalloc(MAPPED) makes it a PCIe
+    // AtomicOp, and a root port without an AtomicOp completer (typical of a
+    // PCH-attached GPU) drops it. The slot then stays 0 through a later device
+    // sync, so both the host peek and hipblasLtCheckNumericsDrain miss the NaN
+    // (ROCM-30523). STOP_ON_FIRST publishes the winning call_id with a plain
+    // store to a coherent host mirror so scan_D can still peek without syncing.
+    // If that mirror cannot be allocated, drains and teardown still report the
+    // device flag. If hipMalloc itself fails we disable scanning -- the matmul
+    // is unaffected.
     if(check_numerics != hipblaslt_check_numerics_mode_no_check)
     {
-        bool       ok         = false;
-        hipError_t mapped_err = hipSuccess;
-        if(check_numerics_stop_on_first)
+        const hipError_t alloc_err = hipMalloc(&check_numerics_flag, sizeof(uint32_t));
+        const hipError_t memset_err
+            = (alloc_err == hipSuccess)
+                  ? hipMemset(check_numerics_flag, 0, sizeof(uint32_t))
+                  : hipSuccess;
+        if(alloc_err != hipSuccess || memset_err != hipSuccess)
         {
-            mapped_err = hipHostMalloc(reinterpret_cast<void**>(&check_numerics_flag_host),
-                                       sizeof(uint32_t),
-                                       hipHostMallocMapped);
+            if(check_numerics_flag)
+            {
+                static_cast<void>(hipFree(check_numerics_flag));
+                check_numerics_flag = nullptr;
+            }
+            check_numerics = hipblaslt_check_numerics_mode_no_check;
+            std::lock_guard<std::mutex> lk(log_mutex);
+            std::ostream*               sink = get_logger_os();
+            if(!sink)
+                sink = &std::cerr;
+            *sink << hipblaslt_check_numerics_ts()
+                  << "[hipBLASLt CHECK_NUMERICS] scanner disabled: hipMalloc(4B) failed (hipError="
+                  << static_cast<int>(alloc_err != hipSuccess ? alloc_err : memset_err) << "). "
+                  << kEnvCheckNumerics
+                  << " was set but no scans will run for this handle." << std::endl;
+        }
+        else if(check_numerics_stop_on_first)
+        {
+            hipError_t mapped_err
+                = hipHostMalloc(reinterpret_cast<void**>(&check_numerics_flag_host),
+                                sizeof(uint32_t),
+                                hipHostMallocMapped | hipHostMallocCoherent);
             if(mapped_err == hipSuccess && check_numerics_flag_host)
             {
-                *check_numerics_flag_host = 0u;
-                mapped_err                = hipHostGetDevicePointer(
-                    reinterpret_cast<void**>(&check_numerics_flag),
+                __atomic_store_n(check_numerics_flag_host, 0u, __ATOMIC_RELAXED);
+                mapped_err = hipHostGetDevicePointer(
+                    reinterpret_cast<void**>(&check_numerics_flag_host_dev),
                     check_numerics_flag_host,
                     0);
-                ok = (mapped_err == hipSuccess);
             }
-            if(!ok)
+            if(mapped_err != hipSuccess || !check_numerics_flag_host
+               || !check_numerics_flag_host_dev)
             {
                 if(check_numerics_flag_host)
                 {
                     static_cast<void>(hipHostFree(check_numerics_flag_host));
                     check_numerics_flag_host = nullptr;
                 }
-                check_numerics_flag = nullptr;
+                check_numerics_flag_host_dev = nullptr;
                 std::lock_guard<std::mutex> lk(log_mutex);
                 std::ostream*               sink = get_logger_os();
                 if(!sink)
                     sink = &std::cerr;
                 *sink << hipblaslt_check_numerics_ts()
                       << "[hipBLASLt CHECK_NUMERICS] " << kEnvStopOnFirst
-                      << ": hipHostMalloc(MAPPED) failed (hipError=" << static_cast<int>(mapped_err)
-                      << "); falling back to device-only flag -- cross-call short-circuit"
-                      << " will only trip on explicit drains." << std::endl;
-            }
-        }
-        if(!ok)
-        {
-            const hipError_t alloc_err = hipMalloc(&check_numerics_flag, sizeof(uint32_t));
-            const hipError_t memset_err
-                = (alloc_err == hipSuccess)
-                      ? hipMemset(check_numerics_flag, 0, sizeof(uint32_t))
-                      : hipSuccess;
-            if(alloc_err != hipSuccess || memset_err != hipSuccess)
-            {
-                if(check_numerics_flag)
-                {
-                    static_cast<void>(hipFree(check_numerics_flag));
-                    check_numerics_flag = nullptr;
-                }
-                check_numerics = hipblaslt_check_numerics_mode_no_check;
-                std::lock_guard<std::mutex> lk(log_mutex);
-                std::ostream*               sink = get_logger_os();
-                if(!sink)
-                    sink = &std::cerr;
-                *sink << hipblaslt_check_numerics_ts()
-                      << "[hipBLASLt CHECK_NUMERICS] scanner disabled: hipMalloc(4B) failed (hipError="
-                      << static_cast<int>(alloc_err != hipSuccess ? alloc_err : memset_err) << "). "
-                      << kEnvCheckNumerics
-                      << " was set but no scans will run for this handle." << std::endl;
+                      << ": host-mapped mirror unavailable (hipError="
+                      << static_cast<int>(mapped_err)
+                      << "); host-peek auto-drain disabled. Explicit drains and"
+                      << " handle teardown still report the first NaN." << std::endl;
             }
         }
     }
@@ -261,6 +264,13 @@ _rocblaslt_handle::~_rocblaslt_handle()
                                                 "handle teardown",
                                                 check_numerics_stop_on_first,
                                                 &check_numerics_short_circuit);
+    // Free while this handle's device is current. The flag is device memory.
+    if(check_numerics_flag_host)
+        static_cast<void>(hipHostFree(check_numerics_flag_host));
+    static_cast<void>(hipFree(check_numerics_flag));
+    check_numerics_flag_host     = nullptr;
+    check_numerics_flag_host_dev = nullptr;
+    check_numerics_flag          = nullptr;
     if(prev_device != -1 && prev_device != device)
         static_cast<void>(hipSetDevice(prev_device));
 
@@ -313,14 +323,6 @@ _rocblaslt_handle::~_rocblaslt_handle()
                       << std::endl;
         }
     }
-
-    // Mapped path: host pointer owns; device pointer is an alias.
-    if(check_numerics_flag_host)
-        static_cast<void>(hipHostFree(check_numerics_flag_host));
-    else
-        static_cast<void>(hipFree(check_numerics_flag));
-    check_numerics_flag_host = nullptr;
-    check_numerics_flag      = nullptr;
 }
 
 _rocblaslt_attribute::~_rocblaslt_attribute()
