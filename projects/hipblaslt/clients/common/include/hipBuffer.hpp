@@ -249,7 +249,7 @@ inline hipError_t synchronize(HipDeviceBuffer&     dBuf,
     // Identical rotating blocks share one host upload. The stream orders device copies after it.
     for(size_t i_block = 1; i_block < block_count; i_block++)
     {
-        hip_err = hipMemcpyAsync(firstBlock + i_block * blockBytes,
+        hip_err = hipMemcpyAsync(firstBlock + i_block * dBuf.getNumBytes() / block_count,
                                  firstBlock,
                                  blockBytes,
                                  dBuf.use_HMM ? hipMemcpyHostToHost : hipMemcpyDeviceToDevice,
