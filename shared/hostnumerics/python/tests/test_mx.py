@@ -5,6 +5,26 @@ from _hostnumerics_test_support import *  # noqa: F403
 
 
 class MxTests(unittest.TestCase):  # noqa: F405
+    def test_leading_dimension_defaults_to_contiguous_columns(self):
+        options = hv.MxGenerationOptions()
+        self.assertIsNone(options.leading_dimension)
+        options.block_axis = 0
+        options.block_size = 4
+        data_generation = hv.MxDataGeneration.quantize(
+            real_generation_recipe_last_dimension_fastest(
+                hv.GenerationRecipe.uniform_real(
+                    hv.UniformRealGenerationParameters(-1, 1)
+                ),
+                seed=0,
+            )
+        )
+        self.assertEqual(
+            hv.generate_mx((5, 3), data_generation, options).data.strides, [1, 5]
+        )
+        options.leading_dimension = 0
+        with self.assertRaises(RuntimeError):
+            hv.generate_mx((5, 3), data_generation, options)
+
     def test_mx_generation_matches_decoded_numpy_values(self):
         for dimensions, block_axis in (((64, 3), 0), ((3, 64), 1)):
             with self.subTest(dimensions=dimensions, block_axis=block_axis):
