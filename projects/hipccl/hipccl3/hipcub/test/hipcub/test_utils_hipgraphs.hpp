@@ -51,9 +51,24 @@ namespace test_utils
                 HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
             }
 
+            inline void createGraph(unsigned int flags = 0)
+            {
+                HIP_CHECK(hipGraphCreate(&graph, flags));
+            }
+
             inline void endStreamCapture(hipStream_t & stream)
             {
                 HIP_CHECK(hipStreamEndCapture(stream, &graph));
+            }
+
+            inline void getGraphNodes(hipGraphNode_t* nodes, size_t* numNodes)
+            {
+                HIP_CHECK(hipGraphGetNodes(graph, nodes, numNodes));
+            }
+
+            inline void instantiateGraph(uint64_t flags = 0)
+            {
+                HIP_CHECK(hipGraphInstantiate(&graph_instance, graph, nullptr, nullptr, flags));
             }
 
             inline void createAndLaunchGraph(hipStream_t & stream, const bool launchGraph=true, const bool sync=true)
@@ -62,7 +77,7 @@ namespace test_utils
                 endStreamCapture(stream);
 
                 // Create the graph instance
-                HIP_CHECK(hipGraphInstantiate(&graph_instance, graph, nullptr, nullptr, 0));
+                instantiateGraph();
 
                 // Optionally launch the graph
                 if (launchGraph)
