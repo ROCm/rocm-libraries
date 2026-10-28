@@ -50,12 +50,14 @@ add_executable(
     utilities/TestDynamicTolerancesSdpa.cpp
     utilities/TestGraphTestHelpers.cpp
     utilities/TestFlatbufferDatatypeMapping.cpp
+    utilities/TestFlatbufferGraphMutators.cpp
     utilities/TestFlatbufferTensorAttributesUtils.cpp
     utilities/TestLoadGraphAndTensors.cpp
     utilities/TestLoggingUtils.cpp
     utilities/TestLogRecorder.cpp
     utilities/TestScopedDirectory.cpp
     utilities/TestScopedEnvironmentVariableSetter.cpp
+    utilities/TestSdpaGraphMutators.cpp
     utilities/TestScratchDirectory.cpp
     utilities/TestSeeds.cpp
     utilities/TestTensorDiff.cpp
