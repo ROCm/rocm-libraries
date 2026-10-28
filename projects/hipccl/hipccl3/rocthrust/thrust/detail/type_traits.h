@@ -40,8 +40,6 @@
 namespace internal
 {
 using _THRUST_STD::is_arithmetic;
-using _THRUST_STD::is_integral;
-using _THRUST_STD::is_integral_v;
 using _THRUST_STD::make_unsigned;
 
 template <typename T>
@@ -70,7 +68,7 @@ using true_type         = _THRUST_STD::true_type;
 using false_type        = _THRUST_STD::false_type;
 
 template <typename T>
-struct is_non_bool_integral : public ::internal::is_integral<T>
+struct is_non_bool_integral : public _THRUST_STD::is_integral<T>
 {};
 template <>
 struct is_non_bool_integral<bool> : public false_type

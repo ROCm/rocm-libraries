@@ -26,13 +26,15 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/use_default.h>
 #include <thrust/iterator/iterator_facade.h>
 #include <thrust/iterator/iterator_traits.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_STD_INCLUDE(__type_traits/add_lvalue_reference.h)
+#include _THRUST_STD_INCLUDE(__type_traits/conditional.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_same.h)
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -50,8 +52,8 @@ namespace detail
 {
 // If T is use_default, return the result of invoking DefaultNullaryFn, otherwise return T.
 template <class T, class DefaultNullaryFn>
-using replace_if_use_default =
-  typename ::internal::If<_THRUST_STD::is_same_v<T, use_default>, DefaultNullaryFn, _THRUST_STD::type_identity<T>>::type;
+using replace_if_use_default = typename _THRUST_STD::
+  _If<_THRUST_STD::is_same_v<T, use_default>, DefaultNullaryFn, _THRUST_STD::type_identity<T>>::type;
 
 // A metafunction which computes an iterator_adaptor's base class, a specialization of iterator_facade.
 template <typename Derived,
@@ -69,9 +71,9 @@ private:
   using traversal = replace_if_use_default<Traversal, iterator_traversal<Base>>;
   using reference =
     replace_if_use_default<Reference,
-                           ::internal::If<_THRUST_STD::is_same_v<Value, use_default>,
-                                          lazy_trait<it_reference_t, Base>,
-                                          _THRUST_STD::add_lvalue_reference<Value>>>;
+                           _THRUST_STD::_If<_THRUST_STD::is_same_v<Value, use_default>,
+                                            lazy_trait<it_reference_t, Base>,
+                                            _THRUST_STD::add_lvalue_reference<Value>>>;
   using difference = replace_if_use_default<Difference, lazy_trait<it_difference_t, Base>>;
 
 public:

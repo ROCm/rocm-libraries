@@ -27,7 +27,6 @@
 #endif // no system header
 
 #include <thrust/detail/internal_functional.h>
-#include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/iterator/is_output_iterator.h>
@@ -41,6 +40,7 @@
 #  include _THRUST_STD_INCLUDE(iterator)
 #endif
 
+#include _THRUST_STD_INCLUDE(__type_traits/conditional.h)
 #include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
@@ -172,9 +172,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   OutputIterator2 values_output,
   BinaryPredicate binary_pred)
 {
-  using T = ::internal::
-
-    If<thrust::detail::is_output_iterator<OutputIterator2>,
+  using T = _THRUST_STD::_If<thrust::detail::is_output_iterator<OutputIterator2>,
        thrust::detail::it_value_t<InputIterator2>,
        thrust::detail::it_value_t<OutputIterator2>>;
 

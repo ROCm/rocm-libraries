@@ -42,7 +42,6 @@
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/detail/alignment.h>
-#  include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
 #  include <thrust/detail/raw_reference_cast.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/detail/type_traits/iterator/is_output_iterator.h>
@@ -59,6 +58,7 @@
 #    include _THRUST_STD_INCLUDE(iterator)
 #  endif
 
+#  include _THRUST_STD_INCLUDE(__type_traits/conditional.h)
 #  include _THRUST_STD_INCLUDE(cstdint)
 
 // rocprim include
@@ -334,9 +334,9 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
   ValOutputIt values_output,
   BinaryPred binary_pred)
 {
-  using value_type = ::internal::If<thrust::detail::is_output_iterator<ValOutputIt>,
-                                    thrust::detail::it_value_t<ValInputIt>,
-                                    thrust::detail::it_value_t<ValOutputIt>>;
+  using value_type = _THRUST_STD::_If<thrust::detail::is_output_iterator<ValOutputIt>,
+                                      thrust::detail::it_value_t<ValInputIt>,
+                                      thrust::detail::it_value_t<ValOutputIt>>;
   return hip_rocprim::reduce_by_key(
     policy, keys_first, keys_last, values_first, keys_output, values_output, binary_pred, plus<value_type>());
 }
