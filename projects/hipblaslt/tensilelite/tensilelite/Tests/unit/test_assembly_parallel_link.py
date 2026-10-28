@@ -26,7 +26,11 @@ class _RecordingLinker:
 
 
 class _StubBundler:
+    def __init__(self):
+        self.calls = []
+
     def compress(self, raw, co, gfx):
+        self.calls.append((Path(raw).name, Path(co).name, gfx))
         Path(co).write_text("co")
 
 
@@ -69,6 +73,24 @@ def test_largest_links_start_first_and_output_order_is_kept(tmp_path, monkeypatc
         "Small.co.raw",
     ]
     assert [p.name for p in coFiles] == ["Small.co", "Large.co", "Medium.co"]
+
+
+def test_link_and_bundle_compresses_the_linked_code_object(tmp_path):
+    linker, bundler = _RecordingLinker(), _StubBundler()
+    raw, co = tmp_path / "A.co.raw", tmp_path / "A.co"
+    A._linkAndBundle(linker, bundler, True, 3, (["a.o", "b.o"], raw, co, "gfx942"))
+    assert linker.calls == [("A.co.raw", 2, 3)]
+    assert bundler.calls == [("A.co.raw", "A.co", "gfx942")]
+    assert co.read_text() == "co"
+
+
+def test_link_and_bundle_moves_the_code_object_without_compression(tmp_path):
+    linker, bundler = _RecordingLinker(), _StubBundler()
+    raw, co = tmp_path / "A.co.raw", tmp_path / "A.co"
+    A._linkAndBundle(linker, bundler, False, 1, (["a.o"], raw, co, "gfx942"))
+    assert bundler.calls == []
+    assert not raw.exists()
+    assert co.read_text() == "raw"
 
 
 def _linker(monkeypatch):

@@ -23,6 +23,7 @@
 ################################################################################
 
 import collections
+import functools
 import math
 import shutil
 import subprocess
@@ -84,6 +85,16 @@ def validateCustomKernelMetadataAtBuild(kernels, directory=None):
         print1(f"Metadata: validated {len(validated)} custom kernel(s), {issues} issue(s)")
 
     return issues
+
+
+def _linkAndBundle(linker, bundler, compress, linkThreads, job):
+    """Links one code object, then bundles it or moves it into place."""
+    objFiles, coFileRaw, coFile, gfx = job
+    linker(objFiles, str(coFileRaw), threads=linkThreads)
+    if compress:
+        bundler.compress(str(coFileRaw), str(coFile), gfx)
+    else:
+        shutil.move(coFileRaw, coFile)
 
 
 def buildAssemblyCodeObjectFiles(
@@ -169,14 +180,7 @@ def buildAssemblyCodeObjectFiles(
     linkThreads = max(1, cpus // workers)
     jobs.sort(key=lambda job: len(job[0]), reverse=True)
 
-    def linkAndBundle(job):
-      objFiles, coFileRaw, coFile, gfx = job
-      linker(objFiles, str(coFileRaw), threads=linkThreads)
-      if compress:
-        bundler.compress(str(coFileRaw), str(coFile), gfx)
-      else:
-        shutil.move(coFileRaw, coFile)
-
+    linkAndBundle = functools.partial(_linkAndBundle, linker, bundler, compress, linkThreads)
     with ThreadPoolExecutor(max_workers=workers) as executor:
       for _ in executor.map(linkAndBundle, jobs):
         pass
