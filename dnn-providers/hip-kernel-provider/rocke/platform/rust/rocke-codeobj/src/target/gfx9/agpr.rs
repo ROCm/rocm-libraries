@@ -123,7 +123,7 @@ pub fn bank(f: &mut MFunc) -> Option<u32> {
     for inst in f.blocks.iter().flat_map(|b| &b.insts) {
         let inside = match inst.op {
             Opc::Copy | Opc::ImplicitDef => true,
-            op if is_mfma(op) => inst.uses.get(2) == Some(&inst.defs[0]),
+            op if is_mfma(op) => inst.uses.get(2) == Some(&inst.defs[0]) || matches!(inst.uses.get(2), Some(Opnd::Imm(_))),
             _ => false,
         };
         for d in &inst.defs {
@@ -141,6 +141,8 @@ pub fn bank(f: &mut MFunc) -> Option<u32> {
         if is_mfma(inst.op) {
             match (whole(&inst.defs[0]), inst.uses.get(2).and_then(whole)) {
                 (Some(d), Some(c)) if d == c && eligible(d) => seed[d as usize] = true,
+                // C an inline constant (`zero_acc`): the web starts at this D.
+                (Some(d), None) if matches!(inst.uses.get(2), Some(Opnd::Imm(_))) && eligible(d) => seed[d as usize] = true,
                 _ => {
                     for o in inst.defs.iter().chain(inst.uses.get(2)) {
                         if let Opnd::R(v) = o {
@@ -452,8 +454,11 @@ fn rewrite(f: &mut MFunc, base_of: &[u32]) {
             }
             if is_mfma(inst.op) && banked(&inst.defs[0]) {
                 let Opnd::R(d) = inst.defs[0] else { unreachable!("a banked register") };
+                let tied = inst.uses[2] == inst.defs[0];
                 inst.defs[0] = agpr(d);
-                inst.uses[2] = agpr(d);
+                if tied {
+                    inst.uses[2] = agpr(d);
+                }
             }
             let mut reads: Vec<(VRef, VRef)> = Vec::new();
             for u in 0..inst.uses.len() {

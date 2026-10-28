@@ -7,7 +7,14 @@
 //!
 //! - A literal only in a VOP1 or VOP2 short form. A VOP3-encoded
 //!   instruction (VOP3B, a compare, VOP3P) reads it from an SGPR when
-//!   nothing else of it uses the constant bus, else from a VGPR.
+//!   nothing else of it uses the constant bus, else from a VGPR. A block
+//!   in a loop moves each literal into a register once and reuses it while
+//!   each use is within `REUSE` instructions of the last (a VGPR one up to
+//!   the next EXEC write, past which it may lack lanes): the rows of an
+//!   attention tile read the same exponent bounds and infinities, which
+//!   COMGR keeps in registers across the loop. Straight-line code moves a
+//!   literal at each use: reused there, four G1 kernels (elementwise,
+//!   `topk_softmax`) ran 3 to 7% slower.
 //! - One constant-bus read per VALU instruction: an SGPR tuple, a special
 //!   register, a literal, or the implicit VCC of `v_div_fmas`. Sources that
 //!   may be VGPRs take copies of the other scalars; scalar-only operands
@@ -26,15 +33,51 @@ pub fn run(f: &mut MFunc) {
             info.align = info.align.max(2);
         }
     }
+    let reuse = !crate::rir::debug_flag("noliteralreuse");
     let mut blocks = std::mem::take(&mut f.blocks);
     for block in &mut blocks {
         let mut out = Vec::with_capacity(block.insts.len());
+        let mut cache = Literals { reuse: reuse && block.loop_depth > 0, held: Vec::new() };
         for inst in block.insts.drain(..) {
-            legalize(f, inst, &mut out);
+            legalize(f, inst, &mut out, &mut cache);
         }
         block.insts = out;
     }
     f.blocks = blocks;
+}
+
+/// Instructions within which a literal register of the block serves another use.
+const REUSE: usize = 64;
+
+/// The literal registers of the block being legalized: (value, dwords, literal kind, class), the register, and
+/// the output position of its last use.
+struct Literals {
+    reuse: bool,
+    held: Vec<((u32, u8, Lit, Class), Opnd, usize)>,
+}
+
+impl Literals {
+    /// A register holding literal `v` for source `k`'s kind: the block's, if a use within `REUSE`
+    /// instructions read it, else a fresh one (`materialize`).
+    fn get(&mut self, f: &mut MFunc, class: Class, v: u32, dwords: u8, lit: Lit, out: &mut Vec<MInst>) -> Opnd {
+        let key = (v, dwords, lit, class);
+        let at = out.len();
+        if let Some(e) = self.held.iter_mut().find(|e| e.0 == key && at - e.2 <= REUSE) {
+            e.2 = at;
+            return e.1;
+        }
+        let reg = materialize(f, class, v, dwords, lit, out);
+        if self.reuse {
+            self.held.retain(|e| e.0 != key);
+            self.held.push((key, reg, out.len()));
+        }
+        reg
+    }
+
+    /// After an EXEC write a VGPR literal may lack the lanes it now runs in.
+    fn exec_written(&mut self) {
+        self.held.retain(|e| e.0 .3 != Class::V);
+    }
 }
 
 fn vreg(f: &mut MFunc, class: Class, size: u8) -> VRef {
@@ -57,7 +100,7 @@ fn class_of(f: &MFunc, o: &Opnd) -> Option<Class> {
     }
 }
 
-fn legalize(f: &mut MFunc, mut inst: MInst, out: &mut Vec<MInst>) {
+fn legalize(f: &mut MFunc, mut inst: MInst, out: &mut Vec<MInst>, cache: &mut Literals) {
     for d in inst.defs.iter_mut() {
         if matches!(d, Opnd::P(Phys::Null, _)) {
             *d = Opnd::R(vreg(f, Class::S, 2));
@@ -81,11 +124,15 @@ fn legalize(f: &mut MFunc, mut inst: MInst, out: &mut Vec<MInst>) {
     }
     if let (Some(info), Some(sig)) = (t::info(inst.op), t::signature(inst.op)) {
         if info.table && matches!(info.fmt, Fmt::Vop1 | Fmt::Vop2 | Fmt::Vop3 | Fmt::Vop3b | Fmt::Vopc | Fmt::Vop3p) {
-            constant_bus(f, &mut inst, info, sig, out);
+            constant_bus(f, &mut inst, info, sig, out, cache);
         }
     }
+    let exec = inst.op.flags() & F_DEF_EXEC != 0 || inst.defs.iter().any(|d| matches!(d, Opnd::P(Phys::ExecLo, _)));
     out.push(inst);
     out.extend(after);
+    if exec {
+        cache.exec_written();
+    }
 }
 
 /// An aligned replacement for `o` when it is a VGPR tuple at an odd offset.
@@ -150,7 +197,7 @@ fn materialize(f: &mut MFunc, class: Class, v: u32, dwords: u8, lit: Lit, out: &
     Opnd::R(dst)
 }
 
-fn constant_bus(f: &mut MFunc, inst: &mut MInst, info: t::Info, sig: &t::Sig, out: &mut Vec<MInst>) {
+fn constant_bus(f: &mut MFunc, inst: &mut MInst, info: t::Info, sig: &t::Sig, out: &mut Vec<MInst>, cache: &mut Literals) {
     let lits = valu_lits(info.form, info.flags);
     let encoded = if info.form == Form::Writelane { 2 } else { inst.uses.len().min(3) };
     let dwords = |k: usize| sig.uses.get(k).map_or(1, |o| o.dwords);
@@ -173,7 +220,7 @@ fn constant_bus(f: &mut MFunc, inst: &mut MInst, info: t::Info, sig: &t::Sig, ou
                 None => {
                     let class = if bus_free { Class::S } else { Class::V };
                     bus_free = false;
-                    let reg = materialize(f, class, v, dwords(k), lits[k], out);
+                    let reg = cache.get(f, class, v, dwords(k), lits[k], out);
                     done.push((key, reg));
                     reg
                 }
@@ -202,7 +249,7 @@ fn constant_bus(f: &mut MFunc, inst: &mut MInst, info: t::Info, sig: &t::Sig, ou
             continue;
         }
         let copy = match s {
-            Scalar::Literal(v) => materialize(f, Class::V, v, dwords(k), lits[k], out),
+            Scalar::Literal(v) => cache.get(f, Class::V, v, dwords(k), lits[k], out),
             _ => {
                 let src = inst.uses[k];
                 let dst = vreg(f, Class::V, src.dwords());
@@ -240,6 +287,13 @@ mod tests {
         f.blocks[0].insts.clone()
     }
 
+    /// `run_on` with the block in a loop.
+    fn run_in_loop(f: &mut MFunc, insts: Vec<MInst>) -> Vec<MInst> {
+        f.blocks = vec![MBlock { insts, loop_depth: 1 }];
+        run(f);
+        f.blocks[0].insts.clone()
+    }
+
     fn class(f: &MFunc, o: &Opnd) -> Class {
         class_of(f, o).expect("a register")
     }
@@ -270,6 +324,36 @@ mod tests {
         let code = run_on(&mut f, vec![MInst::new(Opc::VFmaF64, [r(0, 2)], [r(1, 2), r(2, 2), Opnd::Imm(0x4000_1000)])]);
         assert_eq!(code.iter().map(|i| i.uses[0]).take(2).collect::<Vec<_>>(), [Opnd::Imm(0), Opnd::Imm(0x4000_1000)]);
         assert_eq!(code[2].uses[2].dwords(), 2);
+    }
+
+    #[test]
+    fn a_block_in_a_loop_moves_a_literal_into_a_register_once() {
+        // Two compares and two selects reading one literal: one SGPR and one VGPR for all four.
+        let mut f = func(&[(Class::V, 1), (Class::S, 2), (Class::S, 2), (Class::V, 1), (Class::V, 1)]);
+        let inf = Opnd::Imm(0x7f80_0000);
+        let cmp = |d: u32| MInst::new(Opc::VCmp(0x11), [r(d, 2)], [inf, r(0, 1)]);
+        let sel = |d: u32, m: u32| MInst::new(Opc::VCndmaskB32, [r(d, 1)], [inf, r(0, 1), r(m, 2)]);
+        let code = run_in_loop(&mut f, vec![cmp(1), sel(3, 1), cmp(2), sel(4, 2)]);
+        let copies: Vec<&MInst> = code.iter().filter(|i| i.op == Opc::Copy).collect();
+        assert_eq!(copies.len(), 2, "{code:?}");
+        let classes: Vec<Class> = copies.iter().map(|c| class(&f, &c.defs[0])).collect();
+        assert_eq!(classes, [Class::S, Class::V]);
+        let reads = |k: usize| code.iter().filter(|i| i.op != Opc::Copy).map(|i| i.uses[k]).collect::<Vec<_>>();
+        assert_eq!(reads(0), [copies[0].defs[0], copies[1].defs[0], copies[0].defs[0], copies[1].defs[0]]);
+        // Straight-line code moves it at each use.
+        let code = run_on(&mut f, vec![cmp(1), sel(3, 1), cmp(2), sel(4, 2)]);
+        assert_eq!(code.iter().filter(|i| i.op == Opc::Copy).count(), 4, "{code:?}");
+        // Past an EXEC write the VGPR is moved again; the SGPR stays.
+        let exec = MInst::new(Opc::SAndSaveexecB64, [r(2, 2)], [r(1, 2)]);
+        let code = run_in_loop(&mut f, vec![cmp(1), sel(3, 1), exec, cmp(2), sel(4, 2)]);
+        let copies: Vec<&MInst> = code.iter().filter(|i| i.op == Opc::Copy).collect();
+        assert_eq!(copies.iter().map(|c| class(&f, &c.defs[0])).collect::<Vec<_>>(), [Class::S, Class::V, Class::V]);
+        // A use more than REUSE instructions after the last moves it again.
+        let mut far = vec![cmp(1)];
+        far.extend((0..REUSE).map(|_| MInst::new(Opc::VAddF32, [r(3, 1)], [r(0, 1), r(0, 1)])));
+        far.push(cmp(2));
+        let code = run_in_loop(&mut f, far);
+        assert_eq!(code.iter().filter(|i| i.op == Opc::Copy).count(), 2);
     }
 
     #[test]

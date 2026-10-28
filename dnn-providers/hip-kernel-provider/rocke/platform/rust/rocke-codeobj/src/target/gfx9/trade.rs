@@ -45,7 +45,16 @@ pub fn trade(
     let room = super::rules::workgroup_registers(t, wg);
     let agprs = func.agpr_limit != Some(0);
     let have = waves(&chosen.0);
-    let bar = sched::cost(func).cycles(have) * 4 / 5;
+    let cost = sched::cost(func);
+    let bar = cost.cycles(have) * 4 / 5;
+    // Every candidate is a reordering of these blocks (with AGPR moves added
+    // when banked), so none issues or holds the pipe less than `floor`; and
+    // none fits a workgroup at fewer waves than the fewest any fitting
+    // register count gives. Past either, nothing below can pass.
+    let fewest = (1..=room.min(hw.vgprs + AGPRS)).map(|v| t.occupancy(v, lds_size, wg)).min().unwrap_or(0);
+    if cost.floor() >= bar || have <= fewest.max(1) {
+        return chosen;
+    }
     let cap = Limits { vgprs: hw.vgprs + AGPRS, sgprs: hw.sgprs };
     let mut best: Option<(u64, MFunc, Allocation, usize)> = None;
     for window in WINDOWS.into_iter().filter(|&w| w > chosen.1) {

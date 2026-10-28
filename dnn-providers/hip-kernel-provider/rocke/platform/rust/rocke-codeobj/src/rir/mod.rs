@@ -55,6 +55,12 @@ use ast::{Scalar, Type};
 /// `nomix` keeps shared f16 conversions (`fma_mix`); `nomasks` evaluates a row's guard at each use (`uniform_masks`).
 /// `nodivbypass` runs the 64-bit expansion of every 64-bit division by a runtime value (`isel::div_bypass`).
 /// `nointerleave` keeps long FMA accumulator chains in program order (`fma_chains`).
+/// gfx950: `norelief` tries no window with its SGPR results sunk (`gfx9::relief`); `nozeroacc` keeps
+/// the copies of a zero accumulator (`gfx9::zero_acc`); `noliteralreuse` moves a literal into a
+/// register at each use (`gfx9::legalize`); `nom0hoist` reads an LDS DMA address's first lane at
+/// each load (`gfx9::m0_hoist`); `notight` takes load sinking alone or program order before a window
+/// that fits only by packing tuples first (`schedule_and_allocate`); `nowideadd` keeps the carry
+/// adds of a pair and a zero-extended VGPR (`gfx9::wide_add`).
 pub(crate) fn debug_flag(name: &str) -> bool {
     std::env::var("ROCKE_DIRECT_DEBUG").is_ok_and(|v| v.split(',').any(|f| f.trim() == name))
 }
@@ -212,32 +218,62 @@ fn schedule_and_allocate(
     // hardware, or past the most VGPRs up to it that keep `target` waves.
     let cap = regalloc::Limits { vgprs: (0..=hw.vgprs).rev().find(|&v| waves(v) >= target).unwrap_or(0), sgprs: hw.sgprs };
     let mut lowered = false;
+    // gfx950: the widest window that fits only by packing tuples first, kept
+    // for when load sinking alone or program order is all that remains.
+    let mut tight: Option<(mir::MFunc, regalloc::Allocation, usize)> = None;
+    let keeps_tight = func.target == Target::Gfx950 && !debug_flag("notight");
+    let mut keep_tight = |a: Option<regalloc::Allocation>, g: &mir::MFunc, p: regalloc::Pressure, window: usize, target: u32| match a {
+        Some(a) if a.tight && keeps_tight => {
+            if tight.is_none() && waves(a.num_vgprs) >= target {
+                tight = Some((g.clone(), regalloc::Allocation { pressure: p, ..a }, window));
+            }
+            None
+        }
+        a => a.filter(|a| !a.tight),
+    };
     for &window in windows {
-        let schedule = if lowered { None } else { known.schedule_capped(window, cap) };
+        let mut schedule = if lowered { None } else { known.schedule_capped(window, cap) };
+        // gfx950: a window past the cap, or whose assignment does not fit, may
+        // fit once its SGPR results sink to their readers (`gfx9::relief`).
+        let mut relief = !lowered && func.target == Target::Gfx950 && !debug_flag("norelief");
+        if schedule.is_none() && relief {
+            schedule = known.schedule_relieved(sunk, window, cap);
+            relief = false;
+        }
         let mut tried = None;
-        if let Some((orders, p)) = schedule.as_ref().filter(|(_, p)| fits_hw(p) && waves(p.vgprs) >= target) {
-            let (orders, p) = (orders, *p);
-            let mut g = post::reordered(sunk, orders);
-            // A window whose first fit overflows the hardware stays out even
-            // when packing tuples first squeezes it in: measured slower than
-            // the narrower window at the same occupancy (v2 d256 prefill).
-            if let Some(a) = known.allocate(&mut g, budget(target)).ok().filter(|a| !a.tight) {
-                if waves(a.num_vgprs) >= target {
-                    *func = g;
-                    return Ok((regalloc::Allocation { pressure: p, ..a }, window));
-                }
-                // Fragmentation cost a wave: if load sinking alone loses it
-                // too, the occupancy to keep is what that reaches.
-                if base.is_none() && fits_hw(&base_pressure) {
-                    base = base_alloc(target);
-                }
-                if let Some((_, ba)) = &base {
-                    if waves(ba.num_vgprs) < target {
-                        target = waves(ba.num_vgprs);
-                        lowered = true;
+        loop {
+            if let Some((orders, p)) = schedule.as_ref().filter(|(_, p)| fits_hw(p) && waves(p.vgprs) >= target) {
+                let (orders, p) = (orders, *p);
+                let mut g = post::reordered(sunk, orders);
+                // A window whose first fit overflows the hardware stays out even
+                // when packing tuples first squeezes it in: measured slower than
+                // the narrower window at the same occupancy (v2 d256 prefill).
+                if let Some(a) = keep_tight(known.allocate(&mut g, budget(target)).ok(), &g, p, window, target) {
+                    if waves(a.num_vgprs) >= target {
+                        *func = g;
+                        return Ok((regalloc::Allocation { pressure: p, ..a }, window));
                     }
+                    // Fragmentation cost a wave: if load sinking alone loses it
+                    // too, the occupancy to keep is what that reaches.
+                    if base.is_none() && fits_hw(&base_pressure) {
+                        base = base_alloc(target);
+                    }
+                    if let Some((_, ba)) = &base {
+                        if waves(ba.num_vgprs) < target {
+                            target = waves(ba.num_vgprs);
+                            lowered = true;
+                        }
+                    }
+                    tried = Some((g, a));
                 }
-                tried = Some((g, a));
+            }
+            if tried.is_some() || !relief {
+                break;
+            }
+            relief = false;
+            match known.schedule_relieved(sunk, window, cap) {
+                Some(relieved) => schedule = Some(relieved),
+                None => break,
             }
         }
         scheduled.push((window, schedule));
@@ -269,6 +305,14 @@ fn schedule_and_allocate(
                 }
             }
         }
+    }
+    // gfx950: a window that fits only by packing tuples first, rather than
+    // load sinking alone or program order, which leave each lane mask just
+    // before its select and, in program order, each load just before its
+    // first use (the band-mask attention backward kernels past 102 SGPRs).
+    if let Some((g, a, window)) = tight.take_if(|(_, a, _)| waves(a.num_vgprs) >= target) {
+        *func = g;
+        return Ok((a, window));
     }
     if let Some((b, ba)) = base.take_if(|(_, ba)| !ba.tight) {
         *func = b;
@@ -539,6 +583,13 @@ impl Schedules {
     /// `cap` in a class.
     fn schedule_capped(&self, window: usize, cap: regalloc::Limits) -> Option<(Vec<Vec<u32>>, regalloc::Pressure)> {
         self.live.pressure_capped(&self.units, cap, |b| self.dags.block_order(b, window))
+    }
+
+    /// `schedule_capped` with gfx950's SGPR relief of each block's order
+    /// (`gfx9::relief::sink`); `sunk` is the function these are of.
+    fn schedule_relieved(&self, sunk: &mir::MFunc, window: usize, cap: regalloc::Limits) -> Option<(Vec<Vec<u32>>, regalloc::Pressure)> {
+        let order = |b: usize| crate::target::gfx9::relief::sink(sunk, b, self.dags.block_order(b, window), |i| self.dags.successors(b, i));
+        self.live.pressure_capped(&self.units, cap, order)
     }
 
     /// `regalloc::pressure` of the function these are of.

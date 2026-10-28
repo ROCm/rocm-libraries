@@ -740,6 +740,12 @@ impl Dags {
     pub(super) fn block_order(&self, block: usize, window: usize) -> Vec<u32> {
         self.0[block].order(window)
     }
+
+    /// The instructions of block `block` that depend on its instruction `i`.
+    pub(super) fn successors(&self, block: usize, i: usize) -> impl Iterator<Item = usize> + '_ {
+        let dag = &self.0[block];
+        dag.succs[dag.succ_start[i] as usize..dag.succ_start[i + 1] as usize].iter().map(|&(j, _)| j as usize)
+    }
 }
 
 /// `f` with the instructions of each block in `orders`.

@@ -63,6 +63,13 @@ impl Cost {
         let w = u64::from(waves.max(1));
         self.blocks.iter().map(|&(weight, latency, issue, pipe)| weight * (latency / w).max(issue).max(pipe)).sum()
     }
+
+    /// The weighted slots no number of waves gets below: each block's issue
+    /// and pipe time. A reordering of the blocks issues the same instructions,
+    /// so this bounds `cycles` of every schedule of them from below.
+    pub fn floor(&self) -> u64 {
+        self.blocks.iter().map(|&(weight, _, issue, pipe)| weight * issue.max(pipe)).sum()
+    }
 }
 
 /// Keys of physical registers: VGPRs and AGPRs from 0, SGPRs after them.

@@ -31,9 +31,11 @@ pub mod lds_dma;
 pub mod lds_tr;
 pub mod mask_splat;
 pub mod legalize;
+pub mod m0_hoist;
 pub mod mfma;
 pub mod model;
 pub mod pack;
+pub mod relief;
 pub mod rules;
 pub mod sched;
 pub mod select;
@@ -41,15 +43,23 @@ pub mod spill;
 pub mod trade;
 pub mod vectorize;
 pub mod waitcnt;
+pub mod wide_add;
+pub mod zero_acc;
 
 /// What gfx950 does between the shared instruction selection and `legalize`:
-/// the peephole rules confirmed on gfx950 (`rules`), its own instructions
-/// (`select`, whose conversions also take the peephole's `PACK_F16`), VALU
-/// fusion under gfx9's operand rule, then packed f32 (`pack`) over what the
-/// fusion leaves. `ROCKE_DIRECT_DEBUG=nofuse` and `nopack` skip those two.
+/// MFMAs that start from zero read C as the constant (`zero_acc`), LDS DMA
+/// addresses read into SGPRs where they are defined (`m0_hoist`), the
+/// peephole rules confirmed on gfx950 (`rules`), its own instructions
+/// (`select`, whose conversions also take the peephole's `PACK_F16`, and
+/// `wide_add`), VALU fusion under gfx9's operand rule, then packed f32
+/// (`pack`) over what the fusion leaves. `ROCKE_DIRECT_DEBUG=nofuse` and
+/// `nopack` skip those two.
 pub fn prepare(f: &mut MFunc) {
+    zero_acc::run(f);
+    m0_hoist::run(f);
     rules::peephole(f);
     select::run(f);
+    wide_add::run(f);
     if !crate::rir::debug_flag("nofuse") {
         crate::rir::post::fuse_valu(f);
     }
@@ -60,11 +70,13 @@ pub fn prepare(f: &mut MFunc) {
 
 /// The passes after register allocation on gfx950: pseudos become moves
 /// and conversions (the shared expansion: a gfx9 copy is the same moves),
-/// the 64-bit shift fix, `s_waitcnt`, then the hazard `s_nop`s. gfx950 has
-/// no `s_delay_alu`, clauses, VOPD or VGPR release message, so none of the
-/// gfx11 passes that place them run.
+/// MFMAs read the zeros moved into their C as the constant
+/// (`zero_acc::after_allocation`), the 64-bit shift fix, `s_waitcnt`, then
+/// the hazard `s_nop`s. gfx950 has no `s_delay_alu`, clauses, VOPD or VGPR
+/// release message, so none of the gfx11 passes that place them run.
 pub fn finish(func: &mut MFunc, num_vgprs: u32) -> Result<(), CompileError> {
     crate::rir::post::expand_pseudos(func)?;
+    zero_acc::after_allocation(func);
     hazards::fix_shift64(func, num_vgprs)?;
     waitcnt::insert(func);
     hazards::insert_nops(func);

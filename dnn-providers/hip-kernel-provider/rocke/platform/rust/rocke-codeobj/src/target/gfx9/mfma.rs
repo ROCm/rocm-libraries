@@ -285,6 +285,12 @@ mod tests {
         format!("%c : vec<f32x{cd}> = arith.constant_vec (  ) {{ elem = s:\"f32\", fill = f:0.0, vec = i:{cd} }}")
     }
 
+    /// C of ones: a zero C reads as the constant 0 after allocation
+    /// (`zero_acc::after_allocation`), so D on C is seen with another.
+    fn ones(cd: u32) -> String {
+        format!("%c : vec<f32x{cd}> = arith.constant_vec (  ) {{ elem = s:\"f32\", fill = f:1.0, vec = i:{cd} }}")
+    }
+
     /// The MFMA lines of a listing, without their address and encoding.
     fn mfma_lines(listing: &str) -> Vec<String> {
         listing.lines().filter(|l| l.contains("v_mfma")).map(|l| l.split("//").next().unwrap_or(l).trim().to_string()).collect()
@@ -304,7 +310,7 @@ mod tests {
             ("mfma_f32_32x32x16_bf16", "vec<bf16x8>", 4, 16, "v_mfma_f32_32x32x16_bf16"),
             ("mfma_f32_32x32x8_f16", "vec<f16x4>", 2, 16, "v_mfma_f32_32x32x8_f16"),
         ] {
-            let text = kernel(op_id, ab, dwords, cd, &zero(cd));
+            let text = kernel(op_id, ab, dwords, cd, &ones(cd));
             let compiled = rir::compile_any_target(&text, Target::Gfx950).unwrap_or_else(|e| panic!("{op_id}: {e}"));
             let listing = compiled.listing();
             let lines = mfma_lines(&listing);
@@ -356,7 +362,7 @@ mod tests {
     fn emulated_tf32_atoms_issue_three_bf16_mfmas_in_order() {
         for (op_id, cd, mnemonic) in [("mfma_f32_16x16x32_xf32", 4, "v_mfma_f32_16x16x32_bf16"), ("mfma_f32_32x32x16_xf32", 16, "v_mfma_f32_32x32x16_bf16")] {
             let splat = format!(
-                "%z : f32 = arith.constant (  ) {{ ity = s:\"f32\", value = f:0.0 }}\n    %c : vec<f32x{cd}> = vector.splat ( %z ) {{ vec = i:{cd} }}"
+                "%z : f32 = arith.constant (  ) {{ ity = s:\"f32\", value = f:1.0 }}\n    %c : vec<f32x{cd}> = vector.splat ( %z ) {{ vec = i:{cd} }}"
             );
             let text = kernel(op_id, "vec<tf32x8>", 8, cd, &splat);
             let compiled = rir::compile_any_target(&text, Target::Gfx950).unwrap_or_else(|e| panic!("{op_id}: {e}"));
@@ -415,7 +421,7 @@ mod tests {
                     %c8 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:8 }\n    %o : i32 = arith.mul ( %tid, %c8 )\n    \
                     %a : vec<i32x8> = memref.global_load_vN ( %X, %o ) { align = i:32, elem_type = s:\"i32\", vec = i:8 }\n    \
                     %sa : i32 = memref.global_load_typed ( %S, %tid ) { align = i:4, elem_type = s:\"i32\" }\n    \
-                    %c : vec<f32x16> = arith.constant_vec (  ) { elem = s:\"f32\", fill = f:0.0, vec = i:16 }\n    \
+                    %c : vec<f32x16> = arith.constant_vec (  ) { elem = s:\"f32\", fill = f:1.0, vec = i:16 }\n    \
                     %d : vec<f32x16> = tile.mma ( %a, %a, %c, %sa, %sa ) { op_id = s:\"mfma_gfx950_f32_32x32x64_fp6_fp4_scale_e8m0_e8m0_k32\" }\n    \
                     %e : f32 = vector.extract ( %d ) { index = i:15 }\n    \
                     memref.global_store_typed ( %Y, %tid, %e ) { align = i:4, elem_type = s:\"f32\" }\n    cf.return (  )\n  }\n}\n";
