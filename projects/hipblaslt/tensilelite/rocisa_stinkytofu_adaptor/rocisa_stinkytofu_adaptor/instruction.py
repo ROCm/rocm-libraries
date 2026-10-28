@@ -1707,6 +1707,8 @@ VSubU32 = _make_scalar_alu_class("VSubU32", "v_sub_nc_u32", InstType.INST_U32)
 VMulF32 = _make_scalar_alu_class("VMulF32", "v_mul_f32", InstType.INST_F32)
 # logicalIR: VMulLOU32
 VMulLOU32 = _make_scalar_alu_class("VMulLOU32", "v_mul_lo_u32", InstType.INST_LO_U32)
+# logicalIR: VMacF16
+VMacF16 = _make_scalar_alu_class("VMacF16", "v_mac_f16", InstType.INST_F16)
 # logicalIR: VMulHIU32
 VMulHIU32 = _make_scalar_alu_class("VMulHIU32", "v_mul_hi_u32", InstType.INST_HI_U32)
 # logicalIR: VMulHII32
@@ -3846,6 +3848,8 @@ VMadI32I24 = _make_ternary_class("VMadI32I24", "v_mad_i32_i24", InstType.INST_I3
 VMadU32U24 = _make_ternary_class("VMadU32U24", "v_mad_u32_u24", InstType.INST_U32)
 # logicalIR: VMadMixF32
 VMadMixF32 = _make_ternary_class("VMadMixF32", "v_mad_mix_f32", InstType.INST_F32)
+# logicalIR: VDot4I32I8
+VDot4I32I8 = _make_ternary_class("VDot4I32I8", "v_dot4_i32_i8", InstType.INST_I32)
 # logicalIR: VExpF16
 VExpF16 = _make_scalar_unary_class("VExpF16", "v_exp_f16", InstType.INST_F16)
 # logicalIR: VExpF32

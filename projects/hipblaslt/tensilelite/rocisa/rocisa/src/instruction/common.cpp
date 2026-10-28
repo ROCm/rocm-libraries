@@ -1658,6 +1658,34 @@ void common_inst(nb::module_ m_common)
             return new rocisa::VMadMixF32(self);
         });
 
+    nb::class_<rocisa::VMacF16, rocisa::CommonInstruction>(m_common, "VMacF16")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VMacF16& self, nb::dict&) {
+            return new rocisa::VMacF16(self);
+        });
+
+    nb::class_<rocisa::VDot4I32I8, rocisa::CommonInstruction>(m_common, "VDot4I32I8")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("src2"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VDot4I32I8& self, nb::dict&) {
+            return new rocisa::VDot4I32I8(self);
+        });
+
     nb::class_<rocisa::VExpF16, rocisa::CommonInstruction>(m_common, "VExpF16")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,

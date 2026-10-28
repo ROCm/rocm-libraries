@@ -4892,6 +4892,70 @@ namespace rocisa
         }
     };
 
+    // v_mac_f16: packed half-precision multiply-accumulate.  The destination
+    // is both an input and the output -- vdst = vdst + src0 * src1 -- so it is
+    // emitted with two sources; the accumulation is in the instruction, not in
+    // a separate add.
+    struct VMacF16 : public CommonInstruction
+    {
+        VMacF16(const std::shared_ptr<Container>& dst,
+                const InstructionInput&           src0,
+                const InstructionInput&           src1,
+                const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_F16,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("v_mac_f16");
+        }
+
+        VMacF16(const VMacF16& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VMacF16>(*this);
+        }
+    };
+
+    // v_dot4_i32_i8: four-way signed 8-bit dot product, accumulating into a
+    // 32-bit destination -- vdst = src2 + dot4(src0, src1).  This is the VOP3
+    // form with three sources; the assembler rejects the shorter one.
+    struct VDot4I32I8 : public CommonInstruction
+    {
+        VDot4I32I8(const std::shared_ptr<Container>& dst,
+                   const InstructionInput&           src0,
+                   const InstructionInput&           src1,
+                   const InstructionInput&           src2,
+                   const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_I32,
+                                dst,
+                                {src0, src1, src2},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("v_dot4_i32_i8");
+        }
+
+        VDot4I32I8(const VDot4I32I8& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VDot4I32I8>(*this);
+        }
+    };
+
     struct VExpF16 : public CommonInstruction
     {
         VExpF16(const std::shared_ptr<Container>& dst,
