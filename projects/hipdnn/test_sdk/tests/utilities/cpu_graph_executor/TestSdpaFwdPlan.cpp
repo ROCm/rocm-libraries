@@ -1014,10 +1014,7 @@ TEST(TestSdpaFwdPlanBand, LeftBoundZeroIsRejected)
 {
     const auto extract = [](std::optional<int64_t> left) {
         SdpaAttributesT attrs;
-        if(left.has_value())
-        {
-            attrs.left_bound = *left;
-        }
+        attrs.left_bound = left;
         attrs.right_bound = 0;
         auto graphBuilder = makeRawSdpaFwdGraph(attrs);
         const auto* node = GetGraph(graphBuilder.GetBufferPointer())->nodes()->Get(0);
