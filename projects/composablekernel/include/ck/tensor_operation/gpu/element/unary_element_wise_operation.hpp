@@ -189,27 +189,9 @@ struct PassThroughPack8
                                                   const ck::pk_i4x4_t& x) const
     {
 #if CK_USE_PK4_LAYOUT_SHUFFLE
-        const auto packed = i4_to_fp8x8(bit_cast<int>(x));
-        if constexpr(is_native_fp8_type<T>())
-        {
-            y = bit_cast<non_native_vector_base<T, 8>>(packed);
-        }
-        else
-        {
-#if defined(__gfx94__) && !defined(__gfx950__)
-            using NativeType = f8_fnuz_t;
-#else
-            using NativeType = f8_ocp_t;
-#endif
-            const vector_type<NativeType, 8> native{
-                bit_cast<typename vector_type<NativeType, 8>::type>(packed)};
-            vector_type<T, 8> result;
-            static_for<0, 8, 1>{}([&](auto i) {
-                result.template AsType<T>()(i) =
-                    type_convert<T>(type_convert<float>(native.template AsType<NativeType>()[i]));
-            });
-            y = result.template AsType<non_native_vector_base<T, 8>>()[Number<0>{}];
-        }
+        if constexpr(!is_same_v<T, f8_t> && !is_native_fp8_type<T>())
+            __builtin_trap();
+        y = bit_cast<non_native_vector_base<T, 8>>(i4_to_fp8x8(bit_cast<int>(x)));
 
 #else
         // Added pk_i4_t to f8x2_fnuz_t conversion

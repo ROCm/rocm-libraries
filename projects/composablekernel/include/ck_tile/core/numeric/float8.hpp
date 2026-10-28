@@ -899,7 +899,7 @@ CK_TILE_HOST_DEVICE typename numeric_traits<DstT>::bitwise_type float_to_fp8_sr_
 #endif
 
 #if CK_TILE_FP8_CVT_DEVICE
-    if constexpr(is_native_fp8_type<DstT>())
+    if constexpr(!fp8_format_traits<DstT>::explicit_format || is_native_fp8_type<DstT>())
     {
         return impl::cast_to_f8_from_f32<numeric_traits<DstT>::f8_interpret, clip, true>(x, rng);
     }
@@ -924,7 +924,7 @@ CK_TILE_HOST_DEVICE typename numeric_traits<DstT>::bitwise_type float_to_fp8_rtn
 {
     constexpr bool clip = true;
 #if CK_TILE_FP8_CVT_DEVICE
-    if constexpr(is_native_fp8_type<DstT>())
+    if constexpr(!fp8_format_traits<DstT>::explicit_format || is_native_fp8_type<DstT>())
     {
         return impl::cast_to_f8_from_f32<numeric_traits<DstT>::f8_interpret, clip, false>(x, 0);
     }
@@ -1084,31 +1084,27 @@ CK_TILE_HOST_DEVICE bf8_raw_t fp16_to_bf8_raw(fp16_t x, constant<rounding>)
 CK_TILE_HOST_DEVICE float fp8_to_float_raw(fp8_raw_t x)
 {
 #if CK_TILE_FP8_CVT_DEVICE
-    if constexpr(is_native_fp8_type<fp8_t>())
-    {
-        float fval;
-        uint32_t i32val = static_cast<uint32_t>(x);
-        fval            = __builtin_amdgcn_cvt_f32_fp8(i32val, 0);
-        // asm volatile("v_cvt_f32_fp8 %0, %1 src0_sel:BYTE_0" : "=v"(fval) : "v"(i32val));
-        return fval;
-    }
-#endif
+    float fval;
+    uint32_t i32val = static_cast<uint32_t>(x);
+    fval            = __builtin_amdgcn_cvt_f32_fp8(i32val, 0);
+    // asm volatile("v_cvt_f32_fp8 %0, %1 src0_sel:BYTE_0" : "=v"(fval) : "v"(i32val));
+    return fval;
+#else
     return impl::run_cast_from_f8<fp8_t, float>(bit_cast<fp8_t>(x));
+#endif
 }
 
 CK_TILE_HOST_DEVICE float bf8_to_float_raw(bf8_raw_t x)
 {
 #if CK_TILE_FP8_CVT_DEVICE
-    if constexpr(is_native_fp8_type<bf8_t>())
-    {
-        float fval;
-        uint32_t i32val = static_cast<uint32_t>(x);
-        fval            = __builtin_amdgcn_cvt_f32_bf8(i32val, 0);
-        // asm volatile("v_cvt_f32_bf8 %0, %1 src0_sel:BYTE_0" : "=v"(fval) : "v"(i32val));
-        return fval;
-    }
-#endif
+    float fval;
+    uint32_t i32val = static_cast<uint32_t>(x);
+    fval            = __builtin_amdgcn_cvt_f32_bf8(i32val, 0);
+    // asm volatile("v_cvt_f32_bf8 %0, %1 src0_sel:BYTE_0" : "=v"(fval) : "v"(i32val));
+    return fval;
+#else
     return impl::run_cast_from_f8<bf8_t, float>(bit_cast<bf8_t>(x));
+#endif
 }
 
 CK_TILE_HOST_DEVICE fp16_t fp8_to_fp16_raw(fp8_raw_t x)

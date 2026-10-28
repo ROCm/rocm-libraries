@@ -83,22 +83,6 @@ enum class ck_saturation_t
     CK_SATFINITE = 1, // Saturate to finite
 };
 
-// Hardware conversions have an implicit encoding. Availability of both formats in
-// a build does not make both formats native on each device.
-__host__ __device__ constexpr bool is_native_fp8_interpretation(ck_fp8_interpretation_t interp)
-{
-#if defined(__gfx94__) && !defined(__gfx950__)
-    return interp == ck_fp8_interpretation_t::CK_E4M3_FNUZ ||
-           interp == ck_fp8_interpretation_t::CK_E5M2_FNUZ;
-#elif defined(__gfx950__) || defined(__gfx12__)
-    return interp == ck_fp8_interpretation_t::CK_E4M3_OCP ||
-           interp == ck_fp8_interpretation_t::CK_E5M2_OCP;
-#else
-    ignore = interp;
-    return false;
-#endif
-}
-
 namespace fp8_impl {
 
 typedef fp8_storage_t fp8x2_storage_t __attribute__((ext_vector_type(2)));
@@ -295,14 +279,6 @@ __host__ __device__ static inline T cast_from_f8(fp8_storage_t x)
 template <ck_fp8_interpretation_t interpret>
 static __host__ __device__ float cast_to_f32_from_f8(fp8_storage_t v)
 {
-    if constexpr(!is_native_fp8_interpretation(interpret))
-    {
-        constexpr bool e4m3 = interpret == ck_fp8_interpretation_t::CK_E4M3_FNUZ ||
-                              interpret == ck_fp8_interpretation_t::CK_E4M3_OCP;
-        constexpr bool fnuz = interpret == ck_fp8_interpretation_t::CK_E4M3_FNUZ ||
-                              interpret == ck_fp8_interpretation_t::CK_E5M2_FNUZ;
-        return cast_from_f8 < float, e4m3 ? 3 : 2, e4m3 ? 4 : 5, fnuz > (v);
-    }
     union
     {
         unsigned int i32val;
@@ -330,10 +306,6 @@ static __host__ __device__ float cast_to_f32_from_f8(fp8_storage_t v)
 template <ck_fp8_interpretation_t interpret>
 static __device__ float2_t cast_to_f32_from_f8(fp8x2_storage_t v)
 {
-    if constexpr(!is_native_fp8_interpretation(interpret))
-    {
-        return float2_t{cast_to_f32_from_f8<interpret>(v[0]), cast_to_f32_from_f8<interpret>(v[1])};
-    }
     const auto i16val = bit_cast<uint16_t>(v);
 
     static_assert(interpret == ck_fp8_interpretation_t::CK_E4M3_FNUZ ||
@@ -373,7 +345,11 @@ struct f8_ocp_t
         return (data == other.data) && (fp8_impl::ocp_f8_is_nan(data) == false); // NaN != NaN
     }
 
+#if CK_USE_OCP_FP8
     __host__ __device__ explicit operator float() const
+#else
+    __host__ explicit operator float() const
+#endif
     {
 #if CK_OCP_FP8_CVT_FAST_PATH
         return fp8_impl::cast_to_f32_from_f8<default_interpret>(this->data);
@@ -383,7 +359,11 @@ struct f8_ocp_t
 #endif
     }
 
+#if CK_USE_OCP_FP8
     __host__ __device__ explicit operator _Float16() const
+#else
+    __host__ explicit operator _Float16() const
+#endif
     {
 #if CK_OCP_FP8_CVT_FAST_PATH
         return static_cast<_Float16>(fp8_impl::cast_to_f32_from_f8<default_interpret>(this->data));
@@ -426,7 +406,11 @@ struct bf8_ocp_t
 #endif
     }
 
+#if CK_USE_OCP_FP8
     __host__ __device__ explicit operator _Float16() const
+#else
+    __host__ explicit operator _Float16() const
+#endif
     {
 #if defined(__gfx950__) || defined(__gfx12__)
         return static_cast<_Float16>(fp8_impl::cast_to_f32_from_f8<default_interpret>(this->data));
@@ -446,15 +430,17 @@ inline constexpr bool is_bf8_type_v = is_same_v<T, bf8_fnuz_t> || is_same_v<T, b
 template <typename T>
 inline constexpr bool is_fp8_type_v = is_f8_type_v<T> || is_bf8_type_v<T>;
 
+// Native FP8 instructions interpret the same bits differently on gfx942 and gfx950.
 template <typename T>
 __host__ __device__ constexpr bool is_native_fp8_type()
 {
-    if constexpr(is_same_v<T, f8_fnuz_t> || is_same_v<T, bf8_fnuz_t>)
-        return is_native_fp8_interpretation(ck_fp8_interpretation_t::CK_E4M3_FNUZ);
-    else if constexpr(is_same_v<T, f8_ocp_t> || is_same_v<T, bf8_ocp_t>)
-        return is_native_fp8_interpretation(ck_fp8_interpretation_t::CK_E4M3_OCP);
-    else
-        return false;
+#if defined(__gfx94__) && !defined(__gfx950__)
+    return is_same_v<T, f8_fnuz_t> || is_same_v<T, bf8_fnuz_t>;
+#elif defined(__gfx950__) || defined(__gfx12__)
+    return is_same_v<T, f8_ocp_t> || is_same_v<T, bf8_ocp_t>;
+#else
+    return false;
+#endif
 }
 
 template <typename T>
@@ -1549,8 +1535,36 @@ __host__ __device__ static inline fp8_storage_t cast_to_f8(T _x, unsigned int rn
 template <ck_fp8_interpretation_t interp,
           ck_saturation_t sat      = ck_saturation_t::CK_SATFINITE,
           bool stochastic_rounding = false>
+#if CK_FP8_CVT_FAST_PATH
 __host__ __device__ static inline fp8_storage_t cvt_float_to_fp8(const float f)
 {
+    __is_interpret_supported(interp);
+    uint32_t rng = 0;
+    if constexpr(stochastic_rounding)
+    {
+#if defined(__gfx950__) || defined(__gfx125__)
+        // use HW clock for stochastic input multiply by incremented thread id
+        rng = __builtin_amdgcn_prng_b32(__builtin_readcyclecounter() *
+                                        (get_thread_global_1d_id() + 1));
+#else
+        constexpr int seed = 1254739;
+#ifndef CK_CODE_GEN_RTC
+        rng = prand_generator<float, seed>(reinterpret_cast<uintptr_t>(&f), f);
+#else
+        rng = prand_generator<float, seed>(reinterpret_cast<size_t>(&f), f);
+#endif // #ifndef CK_CODE_GEN_RTC
+#endif // #if defined(__gfx950__)
+    }
+    return cast_to_f8_from_f32<interp, sat == ck_saturation_t::CK_SATFINITE, stochastic_rounding>(
+        f, rng);
+#else // #if CK_FP8_CVT_FAST_PATH
+#if CK_USE_OCP_FP8
+__host__ __device__ static inline fp8_storage_t cvt_float_to_fp8(const float f)
+{
+#else
+__host__ static inline fp8_storage_t cvt_float_to_fp8(const float f)
+{
+#endif
     uint32_t rng = 0;
     if constexpr(stochastic_rounding)
     {
@@ -1568,14 +1582,6 @@ __host__ __device__ static inline fp8_storage_t cvt_float_to_fp8(const float f)
 #endif // #if defined(__gfx950__)
     }
 
-#if CK_FP8_CVT_FAST_PATH
-    if constexpr(is_native_fp8_interpretation(interp))
-    {
-        return cast_to_f8_from_f32<interp,
-                                   sat == ck_saturation_t::CK_SATFINITE,
-                                   stochastic_rounding>(f, rng);
-    }
-#endif
     if constexpr(interp == ck_fp8_interpretation_t::CK_E4M3_FNUZ)
     {
         return cast_to_f8<float,
@@ -1617,6 +1623,7 @@ __host__ __device__ static inline fp8_storage_t cvt_float_to_fp8(const float f)
         __hip_assert(false && "FP8 type is not supported by current target device");
         return 0;
     }
+#endif // #if CK_FP8_CVT_FAST_PATH
 }
 
 /**
@@ -1634,11 +1641,7 @@ template <ck_fp8_interpretation_t interp,
 #if CK_FP8_CVT_FAST_PATH
 __device__ static inline fp8x2_storage_t cvt_float_to_fp8(const float2_t f)
 {
-    if constexpr(!is_native_fp8_interpretation(interp))
-    {
-        return fp8x2_storage_t{cvt_float_to_fp8<interp, sat, stochastic_rounding>(f[0]),
-                               cvt_float_to_fp8<interp, sat, stochastic_rounding>(f[1])};
-    }
+    __is_interpret_supported(interp);
     uint32_t rng = 0;
     if constexpr(stochastic_rounding)
     {
@@ -1689,6 +1692,7 @@ __host__ static inline fp8_storage_t cvt_half_t_to_fp8(const _Float16 x)
 #endif
 {
     {
+        __is_interpret_supported(interp);
         uint32_t rng = 0;
         if constexpr(stochastic_rounding)
         {
@@ -1706,19 +1710,14 @@ __host__ static inline fp8_storage_t cvt_half_t_to_fp8(const _Float16 x)
 #endif // #if defined(__gfx950__)
         }
 #if defined(__gfx950__) || defined(__gfx125__)
-        if constexpr(is_native_fp8_interpretation(interp))
-        {
-            return cast_to_f8_from_f16<interp,
-                                       sat == ck_saturation_t::CK_SATFINITE,
-                                       stochastic_rounding>(x, rng);
-        }
-        else
-#endif
-        {
-            ignore = rng;
-            return cvt_float_to_fp8<interp, ck_saturation_t::CK_SATFINITE, stochastic_rounding>(
-                static_cast<float>(x));
-        }
+        return cast_to_f8_from_f16<interp,
+                                   sat == ck_saturation_t::CK_SATFINITE,
+                                   stochastic_rounding>(x, rng);
+#else
+        ignore = rng;
+        return cvt_float_to_fp8<interp, ck_saturation_t::CK_SATFINITE, stochastic_rounding>(
+            static_cast<float>(x));
+#endif // defined(__gfx950__)
     }
 }
 
@@ -1741,6 +1740,7 @@ __host__ static inline fp8x2_storage_t cvt_half_t_to_fp8(const half2_t x)
 #endif
 {
     {
+        __is_interpret_supported(interp);
         uint32_t rng = 0;
         if constexpr(stochastic_rounding)
         {
@@ -1758,19 +1758,14 @@ __host__ static inline fp8x2_storage_t cvt_half_t_to_fp8(const half2_t x)
 #endif // #if defined(__gfx950__)
         }
 #if defined(__gfx950__) || defined(__gfx125__)
-        if constexpr(is_native_fp8_interpretation(interp))
-        {
-            return cast_to_f8_from_f16<interp,
-                                       sat == ck_saturation_t::CK_SATFINITE,
-                                       stochastic_rounding>(x, rng);
-        }
-        else
-#endif
-        {
-            ignore = rng;
-            return cvt_float_to_fp8<interp, ck_saturation_t::CK_SATFINITE, stochastic_rounding>(
-                float2_t{static_cast<float>(x[0]), static_cast<float>(x[1])});
-        }
+        return cast_to_f8_from_f16<interp,
+                                   sat == ck_saturation_t::CK_SATFINITE,
+                                   stochastic_rounding>(x, rng);
+#else
+        ignore = rng;
+        return cvt_float_to_fp8<interp, ck_saturation_t::CK_SATFINITE, stochastic_rounding>(
+            float2_t{static_cast<float>(x[0]), static_cast<float>(x[1])});
+#endif // defined(__gfx950__)
     }
 }
 
@@ -1793,6 +1788,7 @@ __host__ static inline fp8_storage_t cvt_bhalf_t_to_fp8(const bhalf_t x)
 #endif
 {
     {
+        __is_interpret_supported(interp);
         uint32_t rng = 0;
         if constexpr(stochastic_rounding)
         {
@@ -1811,20 +1807,15 @@ __host__ static inline fp8_storage_t cvt_bhalf_t_to_fp8(const bhalf_t x)
 #endif // #if defined(__gfx950__)
         }
 #if defined(__gfx950__)
-        if constexpr(is_native_fp8_interpretation(interp))
-        {
-            return cast_to_f8_from_bf16<interp,
-                                        sat == ck_saturation_t::CK_SATFINITE,
-                                        stochastic_rounding>(x, rng);
-        }
-        else
-#endif
-        {
-            ignore                = rng;
-            const uint32_t x_bits = static_cast<uint32_t>(bit_cast<uint16_t>(x));
-            return cvt_float_to_fp8<interp, ck_saturation_t::CK_SATFINITE, stochastic_rounding>(
-                bit_cast<float>(x_bits << 16)); // convert value to float
-        }
+        return cast_to_f8_from_bf16<interp,
+                                    sat == ck_saturation_t::CK_SATFINITE,
+                                    stochastic_rounding>(x, rng);
+#else
+        ignore                = rng;
+        const uint32_t x_bits = static_cast<uint32_t>(bit_cast<uint16_t>(x));
+        return cvt_float_to_fp8<interp, ck_saturation_t::CK_SATFINITE, stochastic_rounding>(
+            bit_cast<float>(x_bits << 16)); // convert value to float
+#endif // defined(__gfx950__)
     }
 }
 
@@ -1853,6 +1844,7 @@ __host__ static inline fp8x2_storage_t cvt_bhalf_t_to_fp8(const bhalf2_t x)
         bit_cast<float>(x0_bits << 16), bit_cast<float>(x1_bits << 16)}); // convert values to float
 #else // CK_WORKAROUND_BF16_TO_FP8_CONVERSION
     {
+        __is_interpret_supported(interp);
         uint32_t rng = 0;
         if constexpr(stochastic_rounding)
         {
@@ -1872,22 +1864,17 @@ __host__ static inline fp8x2_storage_t cvt_bhalf_t_to_fp8(const bhalf2_t x)
 #endif // #if defined(__gfx950__)
         }
 #if defined(__gfx950__)
-        if constexpr(is_native_fp8_interpretation(interp))
-        {
-            return cast_to_f8_from_bf16<interp,
-                                        sat == ck_saturation_t::CK_SATFINITE,
-                                        stochastic_rounding>(x, rng);
-        }
-        else
-#endif
-        {
-            ignore                 = rng;
-            const uint32_t x0_bits = static_cast<uint32_t>(bit_cast<uint16_t>(x[0]));
-            const uint32_t x1_bits = static_cast<uint32_t>(bit_cast<uint16_t>(x[1]));
-            return cvt_float_to_fp8<interp, ck_saturation_t::CK_SATFINITE, stochastic_rounding>(
-                float2_t{bit_cast<float>(x0_bits << 16),
-                         bit_cast<float>(x1_bits << 16)}); // convert values to float
-        }
+        return cast_to_f8_from_bf16<interp,
+                                    sat == ck_saturation_t::CK_SATFINITE,
+                                    stochastic_rounding>(x, rng);
+#else
+        ignore                 = rng;
+        const uint32_t x0_bits = static_cast<uint32_t>(bit_cast<uint16_t>(x[0]));
+        const uint32_t x1_bits = static_cast<uint32_t>(bit_cast<uint16_t>(x[1]));
+        return cvt_float_to_fp8<interp, ck_saturation_t::CK_SATFINITE, stochastic_rounding>(
+            float2_t{bit_cast<float>(x0_bits << 16),
+                     bit_cast<float>(x1_bits << 16)}); // convert values to float
+#endif // defined(__gfx950__)
     }
 #endif // CK_WORKAROUND_BF16_TO_FP8_CONVERSION
 }
