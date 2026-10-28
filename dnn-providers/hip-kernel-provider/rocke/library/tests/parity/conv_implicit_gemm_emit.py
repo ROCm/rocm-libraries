@@ -554,6 +554,50 @@ def _spec_raw(idx: int):
             ),
             "gfx1250",
         )
+    if idx in (36, 37, 38):
+        # Grouped pointwise (1x1, stride 1, no pad): the flat fast path with the
+        # group's channel slab on A, the within-group filter bound on B and the
+        # group's columns in D's K-wide rows. groups=4, cpg=kpg=16. 36: direct
+        # store, 37: cshuffle store, 38: async_dma loaders.
+        p = _cp(N=2, Hi=14, Wi=14, C=64, K=64, fy=1, fx=1, groups=4)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle" if idx == 37 else "default",
+                async_dma=(idx == 38),
+            ),
+            "gfx950",
+        )
+    if idx == 39:
+        # Grouped pointwise on the WMMA direct store, whose C++ port spells the
+        # pointwise D offset out inline rather than through d_addr.
+        p = _cp(N=2, Hi=14, Wi=14, C=64, K=64, fy=1, fx=1, groups=4)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                warp_m=2,
+                warp_n=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                wave_size=32,
+                pipeline="mem",
+                epilogue="default",
+            ),
+            "gfx1250",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
