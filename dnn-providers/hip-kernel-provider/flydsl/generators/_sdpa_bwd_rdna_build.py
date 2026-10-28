@@ -1,233 +1,357 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Build the RDNA SDPA backward smoke object (``sdpa_bwd_rdna_dbias_reduce``) from a ``Spec``.
+"""Build the gfx11-generic SDPA backward code objects from ``Spec`` strings (``_sdpa_bwd_spec``).
 
-    python -m generators.gen_sdpa_bwd_rdna_dbias_reduce --arch gfx11-generic --out-dir <content root>
+    python -m generators.gen_sdpa_bwd_<prep|dkdv|dq> --arch gfx11-generic --out-dir <content root> --reference-dir <S1 reference dir>
 
-The op is the backward's landing place on ``gfx11-generic``: the dBias reduction of
-``kernels/attention_bwd_rdna/fmha_bwd_dbias_reduce_rdna.py``, built through the same
-generator machinery as the CDNA backward ops (a ``_sdpa_bwd_spec.Spec`` per row, one
-compile per spec, ``ok`` / ``dual_object`` / ``error`` outcomes, the manifest and
-SOURCE.md of ``_manifest``). What differs is the target: the arch allow-list below is
-checked before anything compiles, the FlyDSL generic-target shim is installed, the
-object's ELF header must name the generic target, and the compile carries the gfx11
-LLVM options. The CDNA gates (resource row, #1087 detectors, R-MIR scan) are gfx950
-checks and do not apply; the manifest records them as ``n/a``.
+The gfx11 counterpart of ``_sdpa_bwd_cdna_build``, which owns the command line, the compile worker pool and the
+manifest of the gfx950 objects; the ``gen_sdpa_bwd_{prep,dkdv,dq}`` modules hand ``gfx11-generic`` to ``generate`` here.
+The rows are the gfx11 tables of ``_instances`` (``SDPA_BWD_GFX11_TABLES``), each the pin of the S1 catalogue
+(``tests/data/sdpa_bwd_gfx11_reference.csv``). The kernels are the ones under ``kernels_src/kernels/attention_bwd_rdna/``
+(16-bit and fp32 families); they take the knob record of their tuning module and are built as the sweep built them:
+``SWEEP_ARCH``-free, through the FlyDSL generic-target shim (``_flydsl_env.prepare``), in cache mode, under the module's own
+compile hints.
 
-Nothing is retried: one build per spec, and ``dual_object`` is reported as such. The
-exit status is 0 when every row is ``ok`` or ``dual_object`` and 1 on any ``error``
-or a refused arch.
+What differs from gfx950:
+
+* the launch grid of dK/dV is ``(kv_blocks, num_head_k, seqs)`` (``grid`` of the row; gfx950's is ``(num_head_k, kv_blocks, seqs)``);
+* the workgroup is a multiple of the 32-lane wave, and the LDS limit is 64 KiB;
+* the gfx950 gates (resource row, #1087 detectors, R-MIR scan) read gfx950 objects, so a row records ``gates: n/a``
+  and its pinned resource row instead. What replaces them is the pin check: the build must be the S1 object, byte for byte;
+* the dBias reduce kernel is not part of a dQ object. A bias dQ row names the standalone reduce kernel of its dtype
+  (``reduce_symbol``) and the manifest lists the three standalone reduce objects under ``companions`` of ``sdpa_bwd_dq``.
+
+A row that does not build ``ok`` or is not its pin stops the run, and nothing is shipped.
 """
 
 from __future__ import annotations
 
-import argparse
-import dataclasses
+import json
+import os
 import shutil
-import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import _flydsl_env as env
-from . import _generic_targets
+from . import _sdpa_bwd_cdna_build as cdna
 from ._codeobject import (
     GeneratorError,
     arg_records,
     describe,
-    hkp_pack_module,
     verify_arch,
     verify_generic,
 )
-from ._extract_hsaco import HsacoExtractionError, hsaco_from_dump
-from ._instances import instances_for
-from ._manifest import refresh_source_md, sha256, write_op_manifest
-from ._parallel import compile_all
-from ._sdpa_bwd_spec import Spec, to_spec
+from ._extract_hsaco import HsacoExtractionError, extract_bin_attr
+from ._instances import (
+    SDPA_BWD_GFX11_KNOBS,
+    SDPA_BWD_GFX11_SPLIT_KINDS,
+    SDPA_BWD_GFX11_TABLES,
+    SDPA_BWD_GFX11_TARGET,
+    instances_for,
+)
+from ._manifest import (
+    FLYDSL_DIR,
+    MANIFEST_NAME,
+    _dumps,
+    refresh_source_md,
+    source_md_path,
+    sha256,
+    write_op_manifest,
+)
+from ._sdpa_bwd_spec import FP32, UNSET_INT, UNSET_WORD, Spec
 
-OP = "sdpa_bwd_rdna_dbias_reduce"
+ARCH = SDPA_BWD_GFX11_TARGET
 
-# The arches each op is built for; enforced before compiling.
-_OP_ARCHES = {OP: ("gfx11-generic",)}
+# The ops that build for gfx11-generic.
+OPS = tuple(f"sdpa_bwd_{kind}" for kind in SDPA_BWD_GFX11_SPLIT_KINDS)
 
-# `_extract_hsaco.extract_bin_attr` words a dump with two different objects this way.
-_DUAL_OBJECT_MARK = "embedded objects are not identical"
+# The S1 catalogue's pins: ``hash, spec, sha256`` and the resource row of each object.
+_REFERENCE_CSV = FLYDSL_DIR / "tests" / "data" / "sdpa_bwd_gfx11_reference.csv"
 
-# LDS one workgroup may allocate on gfx11 (64 KiB). The compiler reports an object over
-# it as an error, yet still emits the object, which then fails to launch.
-_LDS_LIMIT_BYTES = {"gfx11-generic": 65536}
+# Lanes of the gfx11 wave: a workgroup is `num_waves * WARP_SIZE` threads.
+WARP_SIZE = 32
 
-# LLVM codegen options per target, added to the kernel's own compile hints. Copied from
-# the RDNA prefill build: the AMDGPU trackers' tighter register accounting is what fits
-# gfx11-generic kernels without a spill.
-_LLVM_OPTIONS = {"gfx11-generic": {"amdgpu-use-amdgpu-trackers": True}}
+# LDS one workgroup may allocate on gfx11 (64 KiB). The compiler reports an object over it as an error, yet still emits the
+# object, which then fails to launch.
+_LDS_LIMIT_BYTES = 65536
 
-# One kernel argument is its pointer (8 bytes, `global_buffer`) or a by-value scalar.
-_ARG_KINDS = {
-    "ptr": ("global_buffer", 8),
-    "i32": ("by_value", 4),
-    "i64": ("by_value", 8),
+# Launch grid, as the launchers' `.launch(grid=...)` compute it (`seqs` is `num_seqlens` when non-zero, else the batch size):
+#   prep          (ceil(max_seqlen_q / rows_per_block), num_head_q, seqs)
+#   dkdv          (ceil(max_seqlen_k / BLOCK_KV), num_head_k, seqs)
+#   dq            (num_head_q, ceil(max_seqlen_q / BLOCK_M), seqs)
+#   dbias_reduce  (blocks over the plane, planes, 1)
+_GRID_RULE = {
+    "prep": "qblocks_by_heads_by_seqs",
+    "dkdv": "kvblocks_by_kheads_by_seqs",
+    "dq": "qheads_by_qblocks_by_seqs",
+    "dbias_reduce": "blocks_by_planes",
 }
 
-# The kernel's own parameter list, in order: the `@flyc.kernel` signature of
-# `fmha_bwd_dbias_reduce_rdna.py`. The native dispatch marshals by position, so a
-# parameter list that changes is a change of this declaration, of the dispatch and of the
-# descriptors together.
-_PARAMS: tuple[tuple[str, str], ...] = (
-    ("DB", "ptr"),
-    ("DBias", "ptr"),
-    ("num_batch", "i32"),
-    ("num_head", "i32"),
-    ("seqlen_q", "i32"),
-    ("seqlen_k", "i32"),
-    ("reduce_batch", "i32"),
-    ("reduce_head", "i32"),
-    ("stride_ws_batch", "i64"),
-    ("stride_ws_head", "i64"),
-    ("stride_ws_seq", "i64"),
-    ("stride_out_batch", "i64"),
-    ("stride_out_head", "i64"),
-    ("stride_out_seq", "i64"),
+_RESOURCE_COLUMNS = (
+    "vgpr",
+    "agpr",
+    "vgpr_total",
+    "sgpr",
+    "sgpr_spill",
+    "vgpr_spill",
+    "scratch_bytes",
+    "lds_bytes",
+    "occupancy",
 )
 
-_BLOCK_THREADS = 256
-_GRID_RULE = "blocks_by_planes"
 
-# Pointers the kernel assumes 16-byte aligned.
-_ALIGNED_POINTERS = {"DB", "DBias"}
+@dataclass(frozen=True)
+class Meta:
+    """The functional inputs of a dK/dV or dQ build: what the knob resolution and the builder are given."""
 
-
-def _signature() -> tuple[tuple, tuple]:
-    """The (kind, size, offset) layout and the argument names of ``_PARAMS``."""
-    layout, names, offset = [], [], 0
-    for name, kind in _PARAMS:
-        value_kind, size = _ARG_KINDS[kind]
-        offset = (offset + size - 1) // size * size
-        layout.append((value_kind, size, offset))
-        names.append(name)
-        offset += size
-    return tuple(layout), tuple(names)
+    dtype: str
+    tile: int
+    cls: str
+    dropout: int
+    padded: int
+    hdim_qk: int
+    hdim_vo: int
 
 
-def _refuse(arch: str) -> str | None:
-    """The message refusing @p arch for this op, if it does."""
-    if arch in _OP_ARCHES[OP]:
-        return None
-    return f"{OP} cannot be built for {arch!r}; allowed: {', '.join(_OP_ARCHES[OP])}"
+def specs_for(kind: str) -> list[Spec]:
+    """The Specs of the gfx11 table of @p kind, in table order (``_instances._sdpa_bwd_gfx11_instances`` spells the same rows)."""
+    names = SDPA_BWD_GFX11_KNOBS[kind]
+    specs = []
+    for (
+        dtype,
+        tile,
+        cls,
+        dform,
+        dropout,
+        padded,
+        floor,
+        hdv,
+        hints,
+        *perf,
+    ) in SDPA_BWD_GFX11_TABLES[kind]:
+        pins = {
+            name: value
+            for name, value in zip(names, perf, strict=True)
+            if value not in (UNSET_INT, UNSET_WORD)
+        }
+        specs.append(
+            Spec(
+                kind,
+                dtype,
+                tile,
+                cls,
+                dform,
+                dropout,
+                padded,
+                floor,
+                hdv,
+                hints,
+                arch=ARCH,
+                **pins,
+            )
+        )
+    return specs
 
 
-def _single_jit(launch):
-    """The one JitFunction a module's launcher closes over."""
-    from flydsl.compiler.jit_function import JitFunction  # noqa: PLC0415
+def _family(spec: Spec, kernel: str):
+    """(module, builder) of @p kernel's family for the spec's dtype: ``fmha_bwd_<kernel>_gfx11`` for 16-bit, ``fmha_bwd_<kernel>_f32_gfx11`` for fp32.
 
-    jfs = [
-        c.cell_contents
-        for c in (launch.__closure__ or ())
-        if isinstance(c.cell_contents, JitFunction)
-    ]
-    assert len(jfs) == 1, f"{len(jfs)} JitFunctions"
-    return jfs[0]
+    Static imports only: the inputs digest follows import statements.
+    """
+    if spec.dtype == FP32:
+        if kernel == "prep":
+            from kernels.attention_bwd_rdna import fmha_bwd_prep_f32_gfx11 as mod
 
+            return mod, mod.build_fmha_bwd_prep_f32_gfx11_module_primary
+        if kernel == "dkdv":
+            from kernels.attention_bwd_rdna import fmha_bwd_dkdv_f32_gfx11 as mod
 
-def _synth_compile_args(jf):
-    """Arguments that trace @p jf: null pointers, zero scalars, the null stream."""
-    import flydsl.compiler as flyc  # noqa: PLC0415
-    import flydsl.expr as fx  # noqa: PLC0415
-    from flydsl.compiler.jit_argument import resolve_signature  # noqa: PLC0415
+            return mod, mod.build_fmha_bwd_dkdv_f32_gfx11_module_primary
+        if kernel == "dq":
+            from kernels.attention_bwd_rdna import fmha_bwd_dq_f32_gfx11 as mod
 
-    args = []
-    for p in resolve_signature(jf.func).parameters.values():
-        n = getattr(p.annotation, "__name__", str(p.annotation))
-        if n == "Pointer":
-            align = 16 if p.name in _ALIGNED_POINTERS else None
-            args.append(flyc.from_c_void_p(fx.Uint8, 0, assumed_align=align))
-        elif n in ("Int32", "Int64"):
-            args.append(0)
-        elif n == "Stream":
-            args.append(fx.Stream(None))
-        else:
-            raise NotImplementedError(f"annotation {n} for {p.name}")
-    return args
+            return mod, mod.build_fmha_bwd_dq_f32_gfx11_module_primary
+        from kernels.attention_bwd_rdna import fmha_bwd_dbias_reduce_f32_gfx11 as mod
 
+        return mod, mod.build_fmha_bwd_dbias_reduce_f32_gfx11_module_primary
+    if kernel == "prep":
+        from kernels.attention_bwd_rdna import fmha_bwd_prep_gfx11 as mod
 
-@dataclass
-class Outcome:
-    """One spec's build: its status, the object and why it failed."""
+        return mod, mod.build_fmha_bwd_prep_gfx11_module_primary
+    if kernel == "dkdv":
+        from kernels.attention_bwd_rdna import fmha_bwd_dkdv_gfx11 as mod
 
-    status: str
-    blob: bytes | None = None
-    detail: str = ""
+        return mod, mod.build_fmha_bwd_dkdv_gfx11_module_primary
+    if kernel == "dq":
+        from kernels.attention_bwd_rdna import fmha_bwd_dq_gfx11 as mod
+
+        return mod, mod.build_fmha_bwd_dq_gfx11_module_primary
+    from kernels.attention_bwd_rdna import fmha_bwd_dbias_reduce_gfx11 as mod
+
+    return mod, mod.build_fmha_bwd_dbias_reduce_gfx11_module_primary
 
 
-def _compile_one(task: tuple[str, str]) -> Outcome:
-    """Compile one spec for ``arch``. Never raises for a build failure."""
-    spec_s, arch = task
+def _tuning(spec: Spec, kernel: str):
+    """The tuning module of the dK/dV or dQ family (the same call shape for both dtypes)."""
+    if spec.dtype == FP32:
+        if kernel == "dkdv":
+            from kernels.attention_bwd_rdna import (
+                fmha_tuning_bwd_dkdv_f32_gfx11 as tuning,
+            )
+
+            return tuning
+        from kernels.attention_bwd_rdna import fmha_tuning_bwd_dq_f32_gfx11 as tuning
+
+        return tuning
+    if kernel == "dkdv":
+        from kernels.attention_bwd_rdna import fmha_tuning_bwd_dkdv_gfx11 as tuning
+
+        return tuning
+    from kernels.attention_bwd_rdna import fmha_tuning_bwd_dq_gfx11 as tuning
+
+    return tuning
+
+
+def build(spec: Spec) -> cdna.Built:
+    """A fresh launcher for @p spec; nothing is compiled yet.
+
+    prep takes ``(dtype, tile, padded)`` and the dBias reduce ``(dtype)``; dK/dV and dQ take the ``Meta`` and the knob record of
+    ``bwd_<kernel>_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **the Spec's knobs)``. ``hdim_vo`` is the
+    tile unless the Spec spells a V head dim.
+    """
+    if spec.arch != ARCH:
+        raise GeneratorError(f"{spec.key()} is not a {ARCH} Spec")
+    mod, builder = _family(spec, spec.kernel)
+    if spec.kernel == "prep":
+        launch = builder(spec.dtype, spec.tile, bool(spec.padded))
+        return cdna.Built(
+            spec, cdna._single_jit(launch), mod, None, None, cdna._hints_of(mod, spec)
+        )
+    if spec.kernel == "dbias_reduce":
+        launch = builder(spec.dtype)
+        return cdna.Built(
+            spec,
+            cdna._single_jit(launch),
+            mod,
+            None,
+            None,
+            dict(mod._COMPILE_HINTS),
+        )
+    meta = Meta(
+        spec.dtype,
+        spec.tile,
+        spec.cls,
+        spec.dropout,
+        spec.padded,
+        spec.tile,
+        spec.hdv or spec.tile,
+    )
+    knobs = getattr(_tuning(spec, spec.kernel), f"bwd_{spec.kernel}_knobs")(
+        spec.arch,
+        meta.dtype,
+        meta.tile,
+        meta.cls,
+        meta.dropout,
+        meta.padded,
+        meta.hdim_qk,
+        meta.hdim_vo,
+        **spec.knobs,
+    )
+    if not knobs.legal:
+        raise ValueError(f"{spec.key()}: the knob record is not legal: {knobs}")
+    launch = builder(
+        meta, knobs, runtime_axes=("dropout",) if spec.dform == "rt" else ()
+    )
+    return cdna.Built(
+        spec, cdna._single_jit(launch), mod, meta, knobs, cdna._hints_of(mod, spec)
+    )
+
+
+def geometry_of(built: cdna.Built) -> dict:
+    """The schedule and launch geometry the knob record resolved, which replaces the row's ``-1`` knobs.
+
+    dK/dV: ``num_waves``, ``block_q``, ``waves_per_eu`` (``-1`` where the record leaves it unset), ``block_threads``, ``block_kv``;
+    dQ: ``num_waves``, ``block_m``, ``block_n``, ``waves_per_eu``, ``block_threads``. The prep and reduce kernels fix their
+    block; the engine derives it.
+    """
+    spec, knobs = built.spec, built.knobs
+    if spec.kernel not in ("dkdv", "dq"):
+        return {}
+    waves_per_eu = knobs.waves_per_eu or -1
+    threads = knobs.num_waves * WARP_SIZE
+    if spec.kernel == "dkdv":
+        return {
+            "num_waves": knobs.num_waves,
+            "block_q": knobs.block_q,
+            "waves_per_eu": waves_per_eu,
+            "block_threads": threads,
+            "block_kv": knobs.block_kv,
+        }
+    return {
+        "num_waves": knobs.num_waves,
+        "block_m": knobs.block_m,
+        "block_n": knobs.block_n,
+        "waves_per_eu": waves_per_eu,
+        "block_threads": threads,
+    }
+
+
+def _compile_one(task: tuple[str]) -> cdna.Outcome:
+    """Compile one spec. Never raises for a build failure.
+
+    Cache mode, as the sweep built the pins: no IR dump is requested (FlyDSL skips its disk cache when one is), and the object is
+    read back from the one artifact this compile wrote to a fresh cache directory.
+    """
+    (spec_s,) = task
+    geometry = None
     try:
         spec = Spec.parse(spec_s)
-        if spec.kernel != "dbias_reduce":
-            raise ValueError(f"{OP} builds dbias_reduce specs, not {spec.kernel}")
-        from flydsl.compiler.kernel_function import (  # noqa: PLC0415
-            CompilationContext,
-        )
-        from kernels.attention_bwd_rdna import (  # noqa: PLC0415
-            fmha_bwd_dbias_reduce_rdna as mod,
-        )
-
-        launch = mod.build_fmha_bwd_dbias_reduce_rdna_module_primary(spec.dtype)
-        jf = _single_jit(launch)
-        # FlyDSL merges hint layers shallowly: `llvm_options` passed here would replace
-        # the kernel's own, not extend it. Merge onto them explicitly.
-        hints = {k: v for k, v in mod._COMPILE_HINTS.items()}
-        options = dict(hints.get("llvm_options") or {})
-        options.update(_LLVM_OPTIONS[arch])
-        hints["llvm_options"] = options
-        dump_dir = Path(tempfile.mkdtemp(prefix=f"sdpa_bwd_rdna_{spec.hash()}_"))
+        built = build(spec)
+        geometry = geometry_of(built) or None
+        work = Path(tempfile.mkdtemp(prefix=f"sdpa_bwd_gfx11_{spec.hash()}_"))
         try:
-            env.set_dump_dir(dump_dir / "ir")
-            with CompilationContext.compile_hints(hints):
-                jf(*_synth_compile_args(jf))
-            blob, _ = hsaco_from_dump(dump_dir / "ir")
+            os.environ.pop("FLYDSL_DUMP_IR", None)
+            os.environ["FLYDSL_RUNTIME_CACHE_DIR"] = str(work / "cache")
+            with cdna.hints_ctx(built):
+                built.jf(*cdna.synth_compile_args(built.jf))
+            ((_, artifact),) = built.jf._mem_cache.items()
+            blob = extract_bin_attr(artifact._ir_text, f"{spec.key()} cache artifact")
+            if blob[:4] != b"\x7fELF":
+                raise GeneratorError(
+                    f"{spec.key()}: the extracted object is not an ELF"
+                )
         finally:
-            shutil.rmtree(dump_dir, ignore_errors=True)
+            shutil.rmtree(work, ignore_errors=True)
     except HsacoExtractionError as exc:
-        status = "dual_object" if _DUAL_OBJECT_MARK in str(exc) else "error"
-        return Outcome(status, detail=" ".join(str(exc).split())[:500])
+        status = "dual_object" if cdna._DUAL_OBJECT_MARK in str(exc) else "error"
+        return cdna.Outcome(
+            status, detail=" ".join(str(exc).split())[:500], geometry=geometry
+        )
     except Exception as exc:  # noqa: BLE001 - reported per spec, never retried
-        return Outcome(
+        return cdna.Outcome(
             "error",
             detail=f"{type(exc).__name__}: {' '.join(str(exc).split())}"[:500],
+            geometry=geometry,
         )
-    return Outcome("ok", blob)
+    return cdna.Outcome("ok", blob, geometry=geometry)
 
 
-def _max_flat_workgroup_size(blob: bytes, where: str, symbol: str) -> int:
-    hkp = hkp_pack_module()
-    document = hkp._metadata_document(hkp.amdgcn_object(blob, where), where)
-    kernel = next(
-        k
-        for k in document["amdhsa.kernels"]
-        if k[".symbol"].removesuffix(".kd") == symbol
-    )
-    return int(kernel[".max_flat_workgroup_size"])
-
-
-def verify(blob: bytes, arch: str, where: str) -> dict:
-    """The facts of @p blob, or ``GeneratorError``: its target (name and ELF header),
-    kernarg layout, LDS and block size must be the declared ones."""
+def verify(blob: bytes, spec: Spec, where: str) -> dict:
+    """The facts of @p blob, or ``GeneratorError``: its target (name and ELF header), kernarg layout, LDS and block size must be the declared ones."""
     described = describe(blob, where)
-    verify_arch(described, arch, where)
-    verify_generic(blob, arch, where)
-    limit = _LDS_LIMIT_BYTES[arch]
-    if described["group_segment_fixed_size"] > limit:
+    verify_arch(described, ARCH, where)
+    verify_generic(blob, ARCH, where)
+    if described["group_segment_fixed_size"] > _LDS_LIMIT_BYTES:
         raise GeneratorError(
             f"{where}: needs {described['group_segment_fixed_size']} bytes of LDS; "
-            f"{arch} allows {limit} per workgroup"
+            f"{ARCH} allows {_LDS_LIMIT_BYTES} per workgroup"
         )
-    expected, _ = _signature()
+    expected, _ = cdna._signature(cdna._PARAMS[spec.kernel])
     if described["signature"] != expected:
         raise GeneratorError(
-            f"{where}: kernarg layout is\n  {described['signature']}\nbut {OP} is declared as\n"
+            f"{where}: kernarg layout is\n  {described['signature']}\nbut {spec.kernel} is declared as\n"
             f"  {expected}\nThe kernel's parameter list changed; update _PARAMS, the native "
             "dispatch and its signature together."
         )
@@ -236,25 +360,29 @@ def verify(blob: bytes, arch: str, where: str) -> dict:
         raise GeneratorError(
             f"{where}: kernarg segment is {described['kernarg_segment_size']} bytes, expected {size}"
         )
-    threads = _max_flat_workgroup_size(blob, where, described["symbol"])
-    if threads != _BLOCK_THREADS:
+    threads = cdna._max_flat_workgroup_size(blob, where, described["symbol"])
+    wanted = cdna._FIXED_BLOCK.get(spec.kernel)
+    if wanted is not None and threads != wanted:
         raise GeneratorError(
-            f"{where}: built for {threads} threads per workgroup, declared {_BLOCK_THREADS}"
+            f"{where}: built for {threads} threads per workgroup, declared {wanted}"
         )
+    if threads % WARP_SIZE or not WARP_SIZE <= threads <= 1024:
+        raise GeneratorError(f"{where}: {threads} threads per workgroup")
     return {**described, "block_threads": threads}
 
 
-def _empty_dir(path: Path) -> bool:
-    return not path.exists() or not any(path.iterdir())
+def _number(text: str):
+    """A resource-row cell of the reference CSV: an int, or null where the pin has none."""
+    return int(text) if text else None
 
 
-def _spec_of(instance) -> Spec:
-    """The Spec of a row of this op: the CDNA dBias-reduce spelling of the same row."""
-    return to_spec(dataclasses.replace(instance, op="sdpa_bwd_dbias_reduce"))
+def _record(
+    instance, spec: Spec, outcome: cdna.Outcome, pin: dict, op_dir: Path
+) -> dict:
+    """The manifest record of one row: its build status, and for an ``ok`` row the object, its facts and its pinned resource row.
 
-
-def _record(instance, spec: Spec, outcome: Outcome, op_dir: Path, arch: str) -> dict:
-    """The manifest record of one row: its build status, and for an ``ok`` row the object."""
+    The record has the fields of a gfx950 row of the op, ``grid`` last.
+    """
     record = instance.to_record()
     record.update(
         {
@@ -265,20 +393,36 @@ def _record(instance, spec: Spec, outcome: Outcome, op_dir: Path, arch: str) -> 
             "sha256": "",
         }
     )
+    record["knobs"].update(outcome.geometry or {})
+    if spec.kernel in cdna.SPLIT_KERNELS:
+        record["knobs"]["grid"] = _GRID_RULE[spec.kernel]
     if outcome.status != "ok":
         record["detail"] = outcome.detail
         return record
     filename = f"{instance.name}.hsaco"
-    where = f"{arch}/{instance.op}/{filename}"
+    where = f"{ARCH}/{instance.op}/{filename}"
     blob = outcome.blob
-    described = verify(blob, arch, where)
+    if sha256(blob) != pin["sha256"]:
+        raise GeneratorError(
+            f"{where}: the build is not the S1 object {pin['hash']} "
+            f"({sha256(blob)[:16]} != {pin['sha256'][:16]})"
+        )
+    described = verify(blob, spec, where)
+    if (
+        outcome.geometry
+        and outcome.geometry["block_threads"] != described["block_threads"]
+    ):
+        raise GeneratorError(
+            f"{where}: built for {outcome.geometry['block_threads']} threads per workgroup, "
+            f"the object says {described['block_threads']}"
+        )
     (op_dir / filename).write_bytes(blob)
     delivered = sha256((op_dir / filename).read_bytes())
-    _, names = _signature()
+    _, names = cdna._signature(cdna._PARAMS[spec.kernel])
     record.update(
         {
             "block": [described["block_threads"], 1, 1],
-            "grid_rule": _GRID_RULE,
+            "grid_rule": _GRID_RULE[spec.kernel],
             "args": arg_records(names, described["signature"]),
             "file": filename,
             "symbol": described["symbol"],
@@ -288,92 +432,183 @@ def _record(instance, spec: Spec, outcome: Outcome, op_dir: Path, arch: str) -> 
             "lds_bytes": described["group_segment_fixed_size"],
             "vgprs": described["vgpr_count"],
             "vgpr_spills": described.get("vgpr_spill_count", 0),
-            "llvm_options": _LLVM_OPTIONS[arch],
             "named_args": described["named_args"],
+            "resources": {c: _number(pin[c]) for c in _RESOURCE_COLUMNS},
             "gates": "n/a",
         }
     )
     return record
 
 
-def generate(arch: str, out_root: Path, only: set[str] | None = None) -> int:
-    """Build every row of the op (or the rows whose Spec hash is in @p only) for @p arch.
+def _write_companions(op_dir: Path, companions: list[dict]) -> None:
+    """List the companion objects in the manifest of @p op_dir (``companions``, after ``instances``) and in its SOURCE.md."""
+    path = op_dir / MANIFEST_NAME
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["companions"] = companions
+    path.write_text(_dumps(manifest) + "\n", encoding="utf-8")
+    source_md = source_md_path(op_dir)
+    lines = [
+        "",
+        "## Companion objects",
+        "",
+        "Objects the instances launch beside their own, named by Spec hash.",
+        "",
+        "| Object | Symbol | SHA256 |",
+        "| --- | --- | --- |",
+    ]
+    lines += [
+        f"| `{c['file']}` (`{c['spec']}`) | `{c['symbol']}` | `{c['sha256'][:16]}` |"
+        for c in companions
+    ]
+    text = source_md.read_text(encoding="utf-8").rstrip("\n")
+    source_md.write_text(text + "\n" + "\n".join(lines) + "\n", encoding="utf-8")
 
-    Writes ``<out_root>/<op>/<arch>/``; returns the number of ``error`` rows. The
-    directory must not hold files already.
+
+def _companion(spec: Spec, outcome: cdna.Outcome, pin: dict, op_dir: Path) -> dict:
+    """The manifest entry of one standalone reduce object, written to ``<hash>.hsaco``; ``GeneratorError`` for one that is not its pin."""
+    filename = f"{spec.hash()}.hsaco"
+    where = f"{ARCH}/companion/{filename}"
+    if outcome.status != "ok":
+        raise GeneratorError(f"{where}: {outcome.status}: {outcome.detail}")
+    blob = outcome.blob
+    if sha256(blob) != pin["sha256"]:
+        raise GeneratorError(
+            f"{where}: the build is not the S1 object {pin['hash']} "
+            f"({sha256(blob)[:16]} != {pin['sha256'][:16]})"
+        )
+    described = verify(blob, spec, where)
+    (op_dir / filename).write_bytes(blob)
+    return {
+        "hash": spec.hash(),
+        "spec": spec.key(),
+        "file": filename,
+        "symbol": described["symbol"],
+        "sha256": sha256((op_dir / filename).read_bytes()),
+    }
+
+
+def generate(
+    op: str,
+    out_root: Path,
+    only: set[str] | None = None,
+    reference_dir: Path | None = None,
+    reference_csv: Path = _REFERENCE_CSV,
+) -> int:
+    """Build every row of @p op (or the rows whose Spec hash is in @p only) for gfx11-generic.
+
+    Writes ``<out_root>/<op>/gfx11-generic/``; returns the number of ``error`` rows. The directory must not hold files already.
+    @p reference_dir holds the S1 objects (``<hash>.hsaco``): every built object must be its sha256, which the rows of @p reference_csv
+    record, and the run raises ``GeneratorError`` with nothing left in the op directory when one is not or does not build. The dQ op
+    also builds the standalone dBias reduce objects of every dtype (its companions, ``manifest.json`` ``companions``) and checks
+    that every bias row names the reduce symbol of its dtype's companion.
     """
-    refusal = _refuse(arch)
-    if refusal:
-        raise GeneratorError(refusal)
-    instances = instances_for(OP, arch)
+    if op not in OPS:
+        raise GeneratorError(
+            f"{op} cannot be built for {ARCH!r}; allowed: {', '.join(OPS)}"
+        )
+    if reference_dir is None:
+        raise GeneratorError(
+            f"{op} checks its objects against the S1 pins and needs --reference-dir"
+        )
+    if env.rocm_version() == "unknown":
+        raise GeneratorError(
+            "the ROCm version is unknown: set ROCM_PATH to the ROCm install the build compiles against"
+        )
+    kind = op.removeprefix("sdpa_bwd_")
+    instances = instances_for(op, ARCH)
+    specs = specs_for(kind)
+    for instance, spec in zip(instances, specs, strict=True):
+        knobs = instance.knobs
+        if (instance.dtype, knobs["head_dim"], knobs["dropout"], knobs["padded"]) != (
+            spec.dtype,
+            spec.tile,
+            spec.dropout,
+            spec.padded,
+        ) or (knobs["causal"], knobs["has_bias"]) != (
+            int(spec.cls == "causal"),
+            int(spec.cls == "bias"),
+        ):
+            raise GeneratorError(f"{instance.name} is not the row of {spec.key()}")
     if only is not None:
-        unknown = only - {_spec_of(i).hash() for i in instances}
+        unknown = only - {spec.hash() for spec in specs}
         if unknown:
-            raise GeneratorError(f"{OP} has no row with hash {sorted(unknown)}")
-        instances = [i for i in instances if _spec_of(i).hash() in only]
-    op_dir = out_root / OP / arch
-    if not _empty_dir(op_dir):
+            raise GeneratorError(f"{op} has no row with hash {sorted(unknown)}")
+        keep = [i for i, spec in enumerate(specs) if spec.hash() in only]
+        instances = [instances[i] for i in keep]
+        specs = [specs[i] for i in keep]
+    companions = specs_for("dbias_reduce") if kind == "dq" else []
+    op_dir = out_root / op / ARCH
+    if not cdna._empty_dir(op_dir):
         raise GeneratorError(f"{op_dir} is not empty")
+    reference = cdna.read_reference(reference_csv)
+    for spec in (*specs, *companions):
+        row = reference.get(spec.hash())
+        if row is None or row["spec"] != spec.key():
+            raise GeneratorError(f"the reference has no row for {spec.key()}")
+        path = reference_dir / f"{spec.hash()}.hsaco"
+        if not path.is_file() or sha256(path.read_bytes()) != row["sha256"]:
+            raise GeneratorError(f"{path} is not the pin its reference row names")
     env.assert_flydsl_version()
-    env.prepare(arch)
-    _generic_targets.install(arch)
-    specs = [_spec_of(instance) for instance in instances]
-    outcomes = compile_all(
+    env.prepare(ARCH)
+    everything = [*specs, *companions]
+    outcomes = cdna._compile_all(
         _compile_one,
-        [(spec.key(), arch) for spec in specs],
-        arch,
-        lambda task: task[0],
+        [(spec.key(),) for spec in everything],
+        ARCH,
+        lambda task: Spec.parse(task[0]).hash(),
     )
 
     op_dir.mkdir(parents=True, exist_ok=True)
     records = []
+    reasons = []
     for instance, spec, outcome in zip(instances, specs, outcomes):
         try:
-            records.append(_record(instance, spec, outcome, op_dir, arch))
+            records.append(
+                _record(instance, spec, outcome, reference[spec.hash()], op_dir)
+            )
         except GeneratorError as exc:
-            failed = Outcome("error", detail=" ".join(str(exc).split())[:500])
-            records.append(_record(instance, spec, failed, op_dir, arch))
-    # This kernel does not come from AITER, so its pin is no part of how the bytes came to be.
-    provenance = env.provenance(arch)
+            failed = cdna.Outcome(
+                "error",
+                detail=" ".join(str(exc).split())[:500],
+                geometry=outcome.geometry,
+            )
+            records.append(
+                _record(instance, spec, failed, reference[spec.hash()], op_dir)
+            )
+        if records[-1]["build_status"] != "ok":
+            reasons.append(
+                f"{instance.name}: {records[-1]['build_status']}: {records[-1].get('detail', '')}"
+            )
+    entries = []
+    for spec, outcome in zip(companions, outcomes[len(specs) :]):
+        try:
+            entries.append(_companion(spec, outcome, reference[spec.hash()], op_dir))
+        except GeneratorError as exc:
+            reasons.append(" ".join(str(exc).split())[:500])
+    if not reasons and entries:
+        symbols = {
+            Spec.parse(entry["spec"]).dtype: entry["symbol"] for entry in entries
+        }
+        for record in records:
+            wanted = record["knobs"].get("reduce_symbol", "")
+            dtype = record["dtype"]
+            if wanted and wanted != symbols.get(dtype):
+                reasons.append(
+                    f"{record['name']}: names reduce symbol {wanted!r}, the {dtype} companion is {symbols.get(dtype)!r}"
+                )
+    if reasons:
+        for written in op_dir.iterdir():
+            written.unlink()
+        raise GeneratorError(
+            f"{len(reasons)} row(s) stop the run, nothing is shipped:\n  "
+            + "\n  ".join(reasons)
+        )
+    provenance = env.provenance(ARCH)
     provenance.pop("aiter_kernels_commit", None)
-    write_op_manifest(op_dir, arch, OP, provenance, records)
-    source_md = refresh_source_md(op_dir)
-
-    status = {
-        s: sum(r["build_status"] == s for r in records)
-        for s in ("ok", "dual_object", "error")
-    }
-    print(f"{OP}: {status}; wrote {op_dir}")
+    write_op_manifest(op_dir, ARCH, op, provenance, records)
+    source_md = cdna._complete_source_md(refresh_source_md(op_dir), op, ARCH, records)
+    if companions:
+        _write_companions(op_dir, entries)
+    print(f"{op}: {len(records)} ok, {len(entries)} companion(s); wrote {op_dir}")
     print(f"refreshed {source_md}")
-    return status["error"]
-
-
-def run_op(description: str, argv: list[str] | None = None) -> int:
-    """The command line of the op's generator (``gen_sdpa_bwd_rdna_dbias_reduce.py``)."""
-    parser = argparse.ArgumentParser(description=description)
-    parser.add_argument(
-        "--arch", required=True, help="GPU target; one arch per invocation"
-    )
-    parser.add_argument(
-        "--out-dir",
-        required=True,
-        type=Path,
-        help="content root to write <op>/<arch>/ under; <op>/<arch>/ must be empty",
-    )
-    parser.add_argument(
-        "--only",
-        default=None,
-        help="comma-separated Spec hashes: build just those rows (debugging)",
-    )
-    args = parser.parse_args(argv)
-    refusal = _refuse(args.arch)
-    if refusal:
-        print(f"error: {refusal}", file=sys.stderr)
-        return 1
-    only = set(args.only.split(",")) if args.only else None
-    try:
-        errors = generate(args.arch, args.out_dir, only)
-    except (GeneratorError, env.FlydslEnvError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
-    return 1 if errors else 0
+    return 0

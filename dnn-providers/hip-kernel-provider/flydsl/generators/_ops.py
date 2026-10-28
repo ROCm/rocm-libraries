@@ -16,6 +16,15 @@ each.
 
 from __future__ import annotations
 
+# The split ops build gfx950 objects from the CDNA backward kernels and gfx11-generic objects from the RDNA ones, which import
+# the RDNA forward's Philox.
+_SDPA_BWD_SPLIT_DIRS = (
+    "attention_bwd_cdna",
+    "attention_cdna",
+    "attention_bwd_rdna",
+    "attention_rdna4",
+)
+
 OP_KERNEL_DIRS = {
     "rmsnorm": ("norm",),
     "rmsnorm_bwd": ("norm",),
@@ -25,11 +34,10 @@ OP_KERNEL_DIRS = {
     "sdpa_cdna_dualwave": ("attention_cdna",),
     "sdpa_cdna_decode": ("attention_cdna",),
     "sdpa_aiw": ("attention_rdna4",),
-    "sdpa_bwd_prep": ("attention_bwd_cdna", "attention_cdna"),
-    "sdpa_bwd_dkdv": ("attention_bwd_cdna", "attention_cdna"),
-    "sdpa_bwd_dq": ("attention_bwd_cdna", "attention_cdna"),
+    "sdpa_bwd_prep": _SDPA_BWD_SPLIT_DIRS,
+    "sdpa_bwd_dkdv": _SDPA_BWD_SPLIT_DIRS,
+    "sdpa_bwd_dq": _SDPA_BWD_SPLIT_DIRS,
     "sdpa_bwd_merged": ("attention_bwd_cdna", "attention_cdna"),
     "sdpa_bwd_dbias_reduce": ("attention_bwd_cdna", "attention_cdna"),
     "sdpa_bwd_dsink_reduce": ("attention_bwd_cdna", "attention_cdna"),
-    "sdpa_bwd_rdna_dbias_reduce": ("attention_bwd_rdna",),
 }

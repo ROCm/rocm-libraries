@@ -3,6 +3,9 @@
 
 """Build the CDNA SDPA backward code objects from ``Spec`` strings (``_sdpa_bwd_spec``).
 
+The split ops (prep, dkdv, dq) also build ``gfx11-generic``: their generator modules pass that arch to
+``_sdpa_bwd_rdna_build``, which reuses this module's pool, parameter lists and helpers (``run_op``'s ``other_arches``).
+
 Two entry points share one compile:
 
     python -m generators._sdpa_bwd_cdna_build --specs specs.csv --arch gfx950 --out-dir /path/to/empty
@@ -64,6 +67,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
@@ -92,8 +96,11 @@ from ._sdpa_bwd_spec import (  # noqa: F401  (LADDER is part of this module's su
     to_spec,
 )
 
-# The arches each op is built for. One entry per op, by `sdpa_bwd_<kernel>`.
+# The arches each op is built for here. One entry per op, by `sdpa_bwd_<kernel>`.
 _OP_ARCHES = {f"sdpa_bwd_{kernel}": ("gfx950",) for kernel in KERNELS}
+
+# The kernels of the split engine's slots: their rows carry `grid`.
+SPLIT_KERNELS = ("prep", "dkdv", "dq")
 
 # `_extract_hsaco.extract_bin_attr` words a dump with two different objects this way.
 _DUAL_OBJECT_MARK = "embedded objects are not identical"
@@ -1532,6 +1539,8 @@ def _record(
         }
     )
     record["knobs"].update(outcome.geometry or {})
+    if spec.kernel in SPLIT_KERNELS:
+        record["knobs"]["grid"] = _GRID_RULE[spec.kernel]
     reduce_symbol = instance.knobs.get("reduce_symbol", "")
     if reduce_symbol != reduce_symbol_of(spec):
         raise GeneratorError(
@@ -1734,8 +1743,17 @@ def generate(
     return status["error"]
 
 
-def run_op(op: str, description: str, argv: list[str] | None = None) -> int:
-    """The command line of one backward op's generator (``gen_<op>.py``)."""
+def run_op(
+    op: str,
+    description: str,
+    argv: list[str] | None = None,
+    other_arches: dict[str, Callable] | None = None,
+) -> int:
+    """The command line of one backward op's generator (``gen_<op>.py``).
+
+    @p other_arches maps an arch this module does not build to ``generate(op, out_root, only, reference_dir)`` of the module that does.
+    """
+    other_arches = other_arches or {}
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
         "--arch", required=True, help="GPU target; one arch per invocation"
@@ -1759,15 +1777,17 @@ def run_op(op: str, description: str, argv: list[str] | None = None) -> int:
             help="the sweep's pinned objects, <hash>.hsaco (required): the exception rows ship them, the combined rows are gated against them",
         )
     args = parser.parse_args(argv)
-    refusal = _refuse({op}, args.arch)
+    refusal = None if args.arch in other_arches else _refuse({op}, args.arch)
     if refusal:
         print(f"error: {refusal}", file=sys.stderr)
         return 1
     only = set(args.only.split(",")) if args.only else None
+    reference_dir = getattr(args, "reference_dir", None)
     try:
-        errors = generate(
-            op, args.arch, args.out_dir, only, getattr(args, "reference_dir", None)
-        )
+        if args.arch in other_arches:
+            errors = other_arches[args.arch](op, args.out_dir, only, reference_dir)
+        else:
+            errors = generate(op, args.arch, args.out_dir, only, reference_dir)
     except (GeneratorError, env.FlydslEnvError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

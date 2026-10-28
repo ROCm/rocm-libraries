@@ -169,3 +169,62 @@ def test_a_dq_row_names_the_reduce_symbol_its_object_holds() -> None:
         assert row.knobs["reduce_symbol"] == (
             SDPA_BWD_REDUCE_SYMBOL[spec.dtype] if stores_db else ""
         )
+
+
+GFX11_KEYS = {
+    "prep,f16,16,plain,bk,0,1,tail,0,1;arch=gfx11-generic": "112ee1714865",
+    "dq,bf16,16,bias,bk,0,1,g1,0,1;arch=gfx11-generic;rne=1": None,
+    "dbias_reduce,fp32,32,plain,bk,0,0,tail,0,1;arch=gfx11-generic": "f5f59e54fb48",
+}
+
+
+@pytest.mark.parametrize(("key", "digest"), GFX11_KEYS.items())
+def test_a_gfx11_key_round_trips_with_the_arch_before_the_knobs(
+    key: str, digest: str | None
+) -> None:
+    spec = Spec.parse(key)
+    assert spec.key() == key
+    assert spec.arch == "gfx11-generic"
+    if digest:
+        assert spec.hash() == digest
+
+
+def test_every_pinned_gfx11_spec_keeps_its_hash() -> None:
+    """The S1 catalogue's hashes are the evidence keys of the gfx11 objects: the grammar must reproduce all 432."""
+    with (Path(__file__).parent / "data" / "sdpa_bwd_gfx11_reference.csv").open(
+        newline="", encoding="utf-8"
+    ) as fh:
+        rows = list(csv.DictReader(fh))
+    assert len(rows) == 432
+    for row in rows:
+        spec = Spec.parse(row["spec"])
+        assert (spec.key(), spec.hash()) == (row["spec"], row["hash"])
+
+
+def test_the_arch_is_spelled_once_and_never_as_gfx950() -> None:
+    with pytest.raises(ValueError, match="arch is spelled"):
+        Spec.parse("prep,f16,16,plain,bk,0,1,tail,0,1;arch=gfx950")
+    with pytest.raises(ValueError, match="arch is spelled"):
+        Spec.parse(
+            "prep,f16,16,plain,bk,0,1,tail,0,1;arch=gfx11-generic;arch=gfx12-generic"
+        )
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        # a gfx950 tile on a generic ladder
+        "dkdv,bf16,384,plain,bk,0,1,g1,0,1;arch=gfx11-generic",
+        # a padded generic dkdv carries floor g1
+        "dkdv,bf16,64,plain,bk,0,1,tail,0,1;arch=gfx11-generic",
+        # rne is a bf16 knob
+        "dq,f16,64,plain,bk,0,1,g1,0,1;arch=gfx11-generic;rne=1",
+        # the merged kernel has no generic build
+        "merged,bf16,64,plain,bk,0,0,tail,0,1;arch=gfx11-generic",
+        # contraction shards leave a column slice that is not a multiple of 16
+        "dq,bf16,16,plain,bk,0,1,g1,0,1;arch=gfx11-generic;contraction_shards=2",
+    ],
+)
+def test_a_gfx11_spec_outside_the_grammar_is_refused(key: str) -> None:
+    with pytest.raises(ValueError):
+        Spec.parse(key)

@@ -1054,4 +1054,4 @@ fp32 is a native f32 MFMA family. A graph none of the shipped rows can compute i
 declined with a named cause (data type, operand layout, mask, workspace overflow), so
 another engine gets the plan. The kernels and how the shipped objects are pinned are in
 [`kernels_src/kernels/attention_bwd_cdna/`](kernels_src/kernels/attention_bwd_cdna/README.md);
-a gfx11-generic dBias-reduce smoke object (`sdpa_bwd_rdna_dbias_reduce`) has no engine.
+the split ops also carry the gfx11-generic set (432 objects: prep 33, dK/dV 198, dQ 198 and the 3 standalone dBias reduce objects, which are companions of the dQ op), built from [`kernels_src/kernels/attention_bwd_rdna/`](kernels_src/kernels/attention_bwd_rdna/README.md).
