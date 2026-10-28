@@ -26,12 +26,12 @@
 #define GUARD_HIPSPARSE_MANAGE_PTR
 
 #include "arg_check.hpp"
+#include "utility.hpp"
 
 #include <cstdio>
 #include <hip/hip_runtime_api.h>
 #include <hipsparse.h>
 #include <memory>
-#include <sstream>
 #include <stdexcept>
 
 #define PRINT_IF_HIP_ERROR(INPUT_STATUS_FOR_CHECK)                \
@@ -107,22 +107,17 @@ namespace hipsparse_test
     // while another exception is unwinding.
     static void throw_if_hipsparse_error(hipsparseStatus_t status, const char* call)
     {
-        if(status == HIPSPARSE_STATUS_SUCCESS)
+        if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            return;
+            throw_hipsparse_error(call, status);
         }
-
-        std::ostringstream message;
-        message << call << " failed: hipsparse status " << hipsparseGetErrorName(status);
-        throw std::runtime_error(message.str());
     }
 
     static void log_if_hipsparse_error(hipsparseStatus_t status, const char* call)
     {
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            fprintf(
-                stderr, "%s failed: hipsparse status %s\n", call, hipsparseGetErrorName(status));
+            log_hipsparse_error(call, status);
         }
     }
 
