@@ -88,6 +88,25 @@ void testStructuredSparsity() {
     require(compare(fusedMetadata, metadata, {}).passed(),
             "Fused structured sparsity metadata mismatch.");
 
+    // Without a slice count, a range extends through the last slice.
+    for (const StructuredSparsitySliceRange& range :
+         {StructuredSparsitySliceRange{}, StructuredSparsitySliceRange{.sliceCount = 2}}) {
+        Tensor rangeMetadata(ScalarType::UInt8, Shape{2, 1});
+        applyStructuredSparsityInto(input,
+                                    {.pruned = Tensor(ScalarType::Float32, Shape{2, 8}),
+                                     .compressed = Tensor(ScalarType::Float32, Shape{2, 4}),
+                                     .twoOfFourMetadata = rangeMetadata},
+                                    pattern, range);
+        require(compare(rangeMetadata, metadata, {}).passed(),
+                "Structured sparsity full slice range mismatch.");
+    }
+    requireError(
+        [&] {
+            applyStructuredSparsityInto(input, fusedOutputs, pattern,
+                                        {.firstSlice = 1, .sliceCount = 2});
+        },
+        "Structured sparsity accepted a slice range beyond the last slice.");
+
     Tensor inPlace =
         Tensor::copyNativeValues<float>(Shape{8}, std::array<float, 8>{1, 2, 3, 4, 5, 6, 7, 8});
     Tensor inPlaceCompressed(ScalarType::Float32, Shape{4});
