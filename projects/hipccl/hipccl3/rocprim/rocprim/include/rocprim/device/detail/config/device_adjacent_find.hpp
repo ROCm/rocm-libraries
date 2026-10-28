@@ -40,9 +40,7 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 // TARGET: {'gen': 'rdna2', 'arch': 'gfx1030', 'gpu': 'rx6900', 'rep': 'amdgcn'}
-
-template<class Target, class input_type>
-
+template<class Target, class key_type, class value_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target,
@@ -116,9 +114,7 @@ constexpr auto adjacent_find_config_picker()
 }
 
 // TARGET: {'gen': 'rdna3', 'arch': 'gfx1100', 'gpu': 'rx7900', 'rep': 'amdgcn'}
-
-template<class Target, class input_type>
-
+template<class Target, class key_type, class value_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target,
@@ -192,9 +188,7 @@ constexpr auto adjacent_find_config_picker()
 }
 
 // TARGET: {'gen': 'rdna4', 'arch': 'gfx1200', 'gpu': 'rx9060', 'rep': 'amdgcn'}
-
-template<class Target, class input_type>
-
+template<class Target, class key_type, class value_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target,
@@ -260,9 +254,7 @@ constexpr auto adjacent_find_config_picker()
 }
 
 // TARGET: {'gen': 'rdna4', 'arch': 'gfx1201', 'gpu': 'rx9070', 'rep': 'amdgcn'}
-
-template<class Target, class input_type>
-
+template<class Target, class key_type, class value_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target,
@@ -336,9 +328,7 @@ constexpr auto adjacent_find_config_picker()
 }
 
 // TARGET: {'gen': 'gcn5', 'arch': 'gfx906', 'gpu': 'mi50', 'rep': 'amdgcn'}
-
-template<class Target, class input_type>
-
+template<class Target, class key_type, class value_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target, comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>,
@@ -411,9 +401,7 @@ constexpr auto adjacent_find_config_picker()
 }
 
 // TARGET: {'gen': 'cdna1', 'arch': 'gfx908', 'gpu': 'mi100', 'rep': 'amdgcn'}
-
-template<class Target, class input_type>
-
+template<class Target, class key_type, class value_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target,
@@ -487,9 +475,7 @@ constexpr auto adjacent_find_config_picker()
 }
 
 // TARGET: {'gen': 'cdna2', 'arch': 'gfx90a', 'gpu': 'mi210', 'rep': 'amdgcn'}
-
-template<class Target, class input_type>
-
+template<class Target, class key_type, class value_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target,
@@ -563,9 +549,7 @@ constexpr auto adjacent_find_config_picker()
 }
 
 // TARGET: {'gen': 'cdna3', 'arch': 'gfx942', 'gpu': 'mi300x', 'rep': 'amdgcn'}
-
-template<class Target, class input_type>
-
+template<class Target, class key_type, class value_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target,
@@ -638,8 +622,156 @@ constexpr auto adjacent_find_config_picker()
     return adjacent_find_config_params_base<input_type>();
 }
 
+// TARGET: {'gen': 'cdna4', 'arch': 'gfx950', 'gpu': 'mi350x', 'rep': 'amdgcn'}
+template<class Target, class key_type, class value_type>
+constexpr auto adjacent_find_config_picker()
+    -> std::enable_if_t<
+        std::is_same_v<Target,
+                       comp_target<gen::cdna4, target_arch::gfx950, gpu::mi350x, rep::amdgcn>>,
+        adjacent_find_config_params>
+{
+    // CONFIG: {'input_type': 'rocprim::int128_t', 'block_size_x': 1024, 'ipt': 8}
+    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 8)
+                 && (sizeof(input_type) <= 16))
+    {
+        return adjacent_find_config_params{
+            {1024, 8}
+        };
+    }
+    // CONFIG: {'input_type': 'int64_t', 'block_size_x': 512, 'ipt': 16}
+    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
+                 && (sizeof(input_type) <= 8))
+    {
+        return adjacent_find_config_params{
+            {512, 16}
+        };
+    }
+    // CONFIG: {'input_type': 'int', 'block_size_x': 1024, 'ipt': 16}
+    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
+                 && (sizeof(input_type) <= 4))
+    {
+        return adjacent_find_config_params{
+            {1024, 16}
+        };
+    }
+    // CONFIG: {'input_type': 'short', 'block_size_x': 512, 'ipt': 32}
+    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 1)
+                 && (sizeof(input_type) <= 2))
+    {
+        return adjacent_find_config_params{
+            {512, 32}
+        };
+    }
+    // CONFIG: {'input_type': 'int8_t', 'block_size_x': 1024, 'ipt': 8}
+    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 1))
+    {
+        return adjacent_find_config_params{
+            {1024, 8}
+        };
+    }
+    // CONFIG: {'input_type': 'double', 'block_size_x': 1024, 'ipt': 8}
+    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
+                 && (sizeof(input_type) <= 8))
+    {
+        return adjacent_find_config_params{
+            {1024, 8}
+        };
+    }
+    // CONFIG: {'input_type': 'float', 'block_size_x': 1024, 'ipt': 16}
+    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
+                 && (sizeof(input_type) <= 4))
+    {
+        return adjacent_find_config_params{
+            {1024, 16}
+        };
+    }
+    // CONFIG: {'input_type': 'rocprim::half', 'block_size_x': 1024, 'ipt': 16}
+    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 2))
+    {
+        return adjacent_find_config_params{
+            {1024, 16}
+        };
+    }
+    // Default case if none of the conditions match
+    return adjacent_find_config_params_base<input_type>();
+}
+
+// TARGET: {'gen': 'cdna4', 'arch': 'gfx950', 'gpu': 'mi355x', 'rep': 'amdgcn'}
+template<class Target, class key_type, class value_type>
+constexpr auto adjacent_find_config_picker()
+    -> std::enable_if_t<
+        std::is_same_v<Target,
+                       comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>>,
+        adjacent_find_config_params>
+{
+    // CONFIG: {'input_type': 'rocprim::int128_t', 'block_size_x': 1024, 'ipt': 8}
+    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 8)
+                 && (sizeof(input_type) <= 16))
+    {
+        return adjacent_find_config_params{
+            {1024, 8}
+        };
+    }
+    // CONFIG: {'input_type': 'int64_t', 'block_size_x': 512, 'ipt': 16}
+    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
+                 && (sizeof(input_type) <= 8))
+    {
+        return adjacent_find_config_params{
+            {512, 16}
+        };
+    }
+    // CONFIG: {'input_type': 'int', 'block_size_x': 1024, 'ipt': 16}
+    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
+                 && (sizeof(input_type) <= 4))
+    {
+        return adjacent_find_config_params{
+            {1024, 16}
+        };
+    }
+    // CONFIG: {'input_type': 'short', 'block_size_x': 512, 'ipt': 32}
+    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 1)
+                 && (sizeof(input_type) <= 2))
+    {
+        return adjacent_find_config_params{
+            {512, 32}
+        };
+    }
+    // CONFIG: {'input_type': 'int8_t', 'block_size_x': 1024, 'ipt': 8}
+    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 1))
+    {
+        return adjacent_find_config_params{
+            {1024, 8}
+        };
+    }
+    // CONFIG: {'input_type': 'double', 'block_size_x': 1024, 'ipt': 8}
+    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
+                 && (sizeof(input_type) <= 8))
+    {
+        return adjacent_find_config_params{
+            {1024, 8}
+        };
+    }
+    // CONFIG: {'input_type': 'float', 'block_size_x': 1024, 'ipt': 16}
+    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
+                 && (sizeof(input_type) <= 4))
+    {
+        return adjacent_find_config_params{
+            {1024, 16}
+        };
+    }
+    // CONFIG: {'input_type': 'rocprim::half', 'block_size_x': 1024, 'ipt': 16}
+    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 2))
+    {
+        return adjacent_find_config_params{
+            {1024, 16}
+        };
+    }
+    // Default case if none of the conditions match
+    return adjacent_find_config_params_base<input_type>();
+}
+
 // TARGET: {'gen': 'unknown', 'arch': 'unknown', 'gpu': 'generic', 'rep': 'amdgcn'}
-template<class Target, class... Args>
+template<class Target, class key_type, class value_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target,
@@ -648,7 +780,8 @@ constexpr auto adjacent_find_config_picker()
 {
     return adjacent_find_config_picker<
         comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
-        Args...>();
+        key_type,
+        value_type>();
 }
 
 // All the existing configs should be auto generated
@@ -661,6 +794,8 @@ using adjacent_find_targets
                    comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
                    comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>,
                    comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>,
+                   comp_target<gen::cdna4, target_arch::gfx950, gpu::mi350x, rep::amdgcn>,
+                   comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>,
                    comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
 
 } // end namespace detail
