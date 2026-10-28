@@ -23,7 +23,10 @@
 ################################################################################
 
 from rocisa.code import Module
+from rocisa.container import vgpr
 from rocisa.enum import DataTypeEnum
+from rocisa.instruction import VDot4I32I8
+
 from ..Common.DataType import DataType
 from ..Component import Component, MAC
 
@@ -48,11 +51,19 @@ class MAC_I8X4_Plain(MAC):
                 for iui in range(0, innerUnroll):
                     vars["iui"]  = iui
                     cidx         = a + b*kernel["ThreadTile0"] + 0
-                    cStr         = "v[vgprValuC+{a}+{b}*{ThreadTile0}]".format_map(vars)
-                    aStr         = "v[vgprValuA_X{m}_I{iui}+{a}]".format_map(vars)
-                    bStr         = "v[vgprValuB_X{m}_I{iui}+{b}]".format_map(vars)
-                    module.addInst("v_dot4_i32_i8", cStr, aStr, bStr, cStr, "valuC[%u]" % cidx)
-                    module.add(priority(writer, 1, "Raise priority while processing macs"))
+                    cStr         = "ValuC+{a}+{b}*{ThreadTile0}".format_map(vars)
+                    aStr         = "ValuA_X{m}_I{iui}+{a}".format_map(vars)
+                    bStr         = "ValuB_X{m}_I{iui}+{b}".format_map(vars)
+                    module.add(VDot4I32I8(dst=vgpr(cStr),
+                                          src0=vgpr(aStr),
+                                          src1=vgpr(bStr),
+                                          src2=vgpr(cStr),
+                                          comment="valuC[%u]" % cidx))
+                    prio = priority(writer, 1, "Raise priority while processing macs")
+                    if prio:
+                        module.add(prio)
 
-        module.add(priority(writer, 0, "Reset priority after macs"))
+        prio = priority(writer, 0, "Reset priority after macs")
+        if prio:
+            module.add(prio)
         return module
