@@ -53,9 +53,8 @@
 /// - Search (3): Uses cached results if available, searches only on cache miss
 /// - SearchDbUpdate (4): Always re-searches, ignoring cached results
 ///
-/// Search (3) matches PyTorch's benchmark=true behavior: first run searches and
-/// caches, subsequent runs with same config use the cached optimal kernel.
-/// This is more efficient for production use.
+/// The policy only controls per-solver perf-db tuning. It does not change the
+/// convolution find mode; see setBenchmarkingFindMode() for that.
 
 class ScopedTuningPolicy
 {
@@ -194,6 +193,17 @@ constexpr size_t paddedConvSpatialDimCount(size_t spatialDimCount)
     return spatialDimCount < MIOPEN_MIN_CONV_SPATIAL_DIM_COUNT ? MIOPEN_MIN_CONV_SPATIAL_DIM_COUNT
                                                                : spatialDimCount;
 }
+
+/// @brief Matches PyTorch's torch.backends.cudnn.benchmark=True for convolution Find.
+///
+/// When benchmarking is enabled, sets the descriptor's find mode to
+/// miopenConvolutionFindModeNormal. The default (DYNAMIC_HYBRID) returns a find-db
+/// entry without measuring it and, on a find-db miss, considers only dynamic
+/// solvers. Normal mode measures every applicable solver. Callers also pass
+/// exhaustiveSearch=true to Find so that solvers without a perf-db entry are tuned.
+/// When benchmarking is disabled the descriptor keeps MIOpen's default find mode.
+void setBenchmarkingFindMode(miopenConvolutionDescriptor_t convDescriptor,
+                             bool benchmarkingEnabled);
 
 using hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue;
 using hipdnn_flatbuffers_sdk::utilities::extractValueFromTensorValue;

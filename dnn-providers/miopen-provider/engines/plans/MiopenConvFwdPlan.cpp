@@ -109,6 +109,9 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnMiopenHandle& handle,
                 + " dimensions, expected " + std::to_string(expectedDims));
     }
 
+    miopen_utils::setBenchmarkingFindMode(_params.conv().convDescriptor(),
+                                          _executionSettings.benchmarkingEnabled());
+
     // Validate that there are solutions available for this configuration.
     size_t solutionCount;
     THROW_ON_MIOPEN_FAILURE(
@@ -214,7 +217,7 @@ void ConvFwdPlan::execute(const HipdnnMiopenHandle& handle,
                                                       perfResults.data(),
                                                       workspace,
                                                       workspaceSize,
-                                                      false));
+                                                      _executionSettings.benchmarkingEnabled()));
 
             if(returnedAlgoCount <= 0)
             {

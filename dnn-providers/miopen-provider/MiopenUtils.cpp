@@ -190,4 +190,13 @@ ActivationParams mapPointwiseModeToMiopenActivation(
                                                        "Unsupported activation operation");
     }
 }
+
+void setBenchmarkingFindMode(miopenConvolutionDescriptor_t convDescriptor, bool benchmarkingEnabled)
+{
+    if(benchmarkingEnabled)
+    {
+        THROW_ON_MIOPEN_FAILURE(
+            miopenSetConvolutionFindMode(convDescriptor, miopenConvolutionFindModeNormal));
+    }
+}
 }

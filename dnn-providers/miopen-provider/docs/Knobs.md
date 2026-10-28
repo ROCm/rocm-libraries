@@ -67,6 +67,9 @@ When **disabled** (default):
 
 When **enabled**:
 - MIOpen benchmarks multiple solver candidates
+- Convolution Find runs in MIOpen's Normal find mode with exhaustive search, matching
+  PyTorch's `torch.backends.cudnn.benchmark = True`: every applicable solver is measured, even
+  when the find-db has an entry, and solvers without a perf-db entry are tuned
 - First execution is significantly slower (seconds to minutes)
 - Subsequent executions use the cached optimal solver
 - Provides best performance for production workloads
