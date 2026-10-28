@@ -2675,8 +2675,7 @@ Tests:
   scaleAlpha_vector: [0, 1]
   activation_type: relu
   unit_check: 1
-  # gfx1030 is included: its int8 logic tree writes an int8 output and was
-  # measured on a Radeon PRO V620.
+  # gfx1030 ships both int8 destination kinds; both were measured on a V620.
   gpu_arch: '1030|1[1-2]\d{2}'
 
 - name: matmul_gemm_i8_dst_i32_1xxx
@@ -2694,8 +2693,7 @@ Tests:
   scaleAlpha_vector: [0, 1]
   activation_type: relu
   unit_check: 1
-  # gfx1030 is included: its int8 logic tree writes an int32 output, and
-  # the path was measured on a Radeon PRO V620.
+  # gfx1030 ships both int8 destination kinds; both were measured on a V620.
   gpu_arch: '1030|1[1-2]\d{2}'
 
 - name: matmul_gemm_mix_precisions
@@ -3139,8 +3137,7 @@ Tests:
     - {a_type: f32_r, b_type: f32_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r }
     - {a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r }
     - {a_type: f16_r, b_type: f16_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r }
-    # gfx1030 (RDNA2) has no bf16 hardware, so the two bf16 variants do not
-    # run there.
+    # RDNA2 has no bf16 hardware.
     - {a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r , gpu_arch_exclude: '1030'}
     - {a_type: bf16_r, b_type: bf16_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r , gpu_arch_exclude: '1030'}
   M: [128, 129]

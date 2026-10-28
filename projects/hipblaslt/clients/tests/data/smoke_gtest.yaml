@@ -548,8 +548,7 @@ Tests:
   scaleAlpha_vector: [0, 1]
   activation_type: [relu, sigmoid]
   unit_check: 1
-  # gfx1030 is included: its int8 logic tree writes an int8 output and was
-  # measured on a Radeon PRO V620.
+  # gfx1030 ships both int8 destination kinds; both were measured on a V620.
   gpu_arch: '1030|1[1-2]\d{2}'
 
 - name: matmul_gemm_i8_dst_i32_1xxx_smoke
@@ -564,8 +563,7 @@ Tests:
   scaleAlpha_vector: [0, 1]
   activation_type: [relu, sigmoid]
   unit_check: 1
-  # gfx1030 is included: its int8 logic tree writes an int32 output,
-  # and the path was measured on a Radeon PRO V620.
+  # gfx1030 ships both int8 destination kinds; both were measured on a V620.
   gpu_arch: '1030|1[1-2]\d{2}'
 
 - name: matmul_gemm_tn_mxf4_dst_bf16_1250_smoke

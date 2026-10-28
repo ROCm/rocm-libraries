@@ -40,19 +40,11 @@ set(BASE_ARCHITECTURES)
 # but are NOT included in the default "all" build in hipBLASLt. This is because "extops" builds are not supported
 # for legacy devices. Including these architectures would result in build failures or incomplete feature support.
 #
-# gfx1030 (RDNA2) is the one gfx10 target that can be built:
-#  - It has no matrix instructions (no MFMA/WMMA), so it uses the non-MatrixInstruction
-#    (V_DOT2 / FMA) kernel path, which tensilelite supports.
-#  - The ExtOp device-library generators (Amax, LayerNorm, Softmax) emit no matrix
-#    instructions and already list gfx1030 in their supported-architecture set; they
-#    select the legacy SDWA code path (no true16) for gfx1030.
-#  - gfx1010/gfx1011/gfx1012 (RDNA1) remain excluded: they lack the packed dot
-#    instructions (v_dot2c_f32_f16, v_dot4c_i32_i8) the ExtOp generators rely on.
-#
-# gfx1030 is a selectable target (-DGPU_TARGETS=gfx1030) but is kept out of the
-# default "all" build, like the other legacy architectures above: its Tensile
-# library has to be compiled from source and it is not an architecture the
-# packaged hipBLASLt is tested against.
+# gfx1030 (RDNA2) can be built: it has no matrix instructions, so it uses the
+# non-MatrixInstruction (V_DOT2 / FMA) kernel path.  The ExtOp device-library
+# generators take their architecture from GPU_TARGETS, and both the wavefront
+# size they emit and the assembly flags in device-library/extops/CMakeLists.txt
+# cover gfx1030.
 if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN")
     # For device address sanitizer builds, "all" is just the architectures that
     # support xnack+.
