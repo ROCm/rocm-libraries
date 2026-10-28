@@ -420,6 +420,8 @@ families `instances/common/gemm_universal.py:43,643-659`,
 [integer WMMA GEMM](../../python/rocke/instances/gfx1151/wmma_gemm_iu8.py),
 [integer WMMA GEMM with dequantization](../../python/rocke/instances/gfx1151/wmma_gemm_iu8_dequant.py),
 `library/kernels/common/attention_unified.py` (`UNIFIED_DTYPES=("fp16","bf16")`),
+`library/kernels/common/attention_dense_spec.py` (`_KV_STORAGE_DTYPES`),
+`library/kernels/gfx950/attention_dense.py` (`supports_attention_dense`),
 `library/kernels/common/fmha_fwd_fp8.py`; atoms
 `core/arch/data/arch_specs.json`, `helpers/atoms.py:302`,
 `cpp/core/lower_llvm/mma.cpp:659-670` (scalar f32 MFMA);
@@ -635,6 +637,7 @@ scheduled to gain.
 | Convolution (`_conv_implicit_gemm_common.py`) | f16, bf16, f32 | **reduced-precision compute over f32 storage** — no selector exists to request it (gpu-ref carries a `USE_TF32` switch; see §1); **fp8/bf8** |
 | Attention unified (`attention_unified.py`) | Q/V f16, bf16; f32 accum | fp8/bf8 K/V is **not uniform across instances**; no int8 Q/V |
 | Attention FP8 (`fmha_fwd_fp8.py`) | fp8/bf8 K/V decode (gfx950 preferred) | on gfx942 the FNUZ dialect must be selected explicitly (§4E) |
+| Attention dense (`attention_dense.py`) | Q/K/V/O f16, bf16 on gfx942 and gfx950; on gfx950, fp8 e4m3 (OCP) K/V with per-tensor `k_scale`/`v_scale` and f16/bf16 Q/O (default-order grid body, aligned contiguous KV) | FNUZ fp8; fp8 K/V on gfx942; fp8 with persistent, paged, ragged, varlen or sinks; bf8 |
 | Grouped convolution (dispatch) | f16, bf16 | fp8/bf8/int8 |
 | Quant epilogues (`add_rmsnorm2d_rdquant`) | out i8, fp8e4m3, bf8e5m2 | — |
 

@@ -685,6 +685,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_fmha_mfma_free_stride.py"
         "tests/library/tests/test_sdpa_free_stride_layouts.py"
         "tests/library/tests/test_attention_dense_gfx942.py"
+        "tests/library/tests/test_attention_combo_sweep_fp8.py"
         "tests/library/tests/dispatch/attention/test_review_followups.py")
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
     foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
