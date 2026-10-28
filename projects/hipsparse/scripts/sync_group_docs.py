@@ -190,7 +190,9 @@ def main() -> int:
 
     if stale_count and not args.write:
         print(
-            f"{stale_count} declaration(s) have missing or stale documentation",
+            f"{stale_count} declaration(s) have missing or stale documentation."
+            " Edit only the block before /**@{*/ and run"
+            " projects/hipsparse/scripts/sync_group_docs.py --write.",
             file=sys.stderr,
         )
         return 1

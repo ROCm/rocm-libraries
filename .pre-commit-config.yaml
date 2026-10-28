@@ -28,7 +28,6 @@ exclude: |
     projects/hipfft/.*|
     projects/hiprand/.*|
     projects/hipsolver/.*|
-    projects/hipsparse/.*|
     projects/hipsparselt/.*|
     projects/hiptensor/.*|
     projects/hipthreads/.*|
@@ -90,6 +89,7 @@ repos:
         exclude: &opted_out_but_scanned |
           (?x)
           projects/hipblaslt/.*|
+          projects/hipsparse/.*|
           shared/tensile/.*
       - id: end-of-file-fixer
         exclude: *opted_out_but_scanned
@@ -97,6 +97,7 @@ repos:
         exclude: |
           (?x)
           projects/hipblaslt/.*|
+          projects/hipsparse/.*|
           shared/tensile/.*|
           ^projects/hipdnn/\.clang-format$|
           ^projects/miopen/\.clang-format$|
@@ -295,6 +296,24 @@ repos:
           )$
         pass_filenames: false
 
+      # Every S/D/C/Z declaration in a /**@{*/ group carries a copy of the
+      # block before /**@{*/, so libclang and clangd see it. Fails when a copy
+      # differs from that block; fix with sync_group_docs.py --write. Reads
+      # the whole header tree, so pass_filenames is false.
+      - id: hipsparse-group-docs
+        name: hipSPARSE grouped documentation is in sync
+        entry: python projects/hipsparse/scripts/sync_group_docs.py
+        language: python
+        files: ^projects/hipsparse/(library/include/internal/.*\.h|scripts/sync_group_docs\.py)$
+        pass_filenames: false
+
+      - id: hipsparse-group-docs-tests
+        name: hipSPARSE sync_group_docs self-tests
+        entry: python -m unittest discover -s projects/hipsparse/scripts -p test_sync_group_docs.py
+        language: python
+        files: ^projects/hipsparse/scripts/(test_)?sync_group_docs\.py$
+        pass_filenames: false
+
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.10
     hooks:
@@ -302,6 +321,7 @@ repos:
         exclude: |
           (?x)
           projects/hipblaslt/.*|
+          projects/hipsparse/.*|
           shared/tensile/.*|
           # MIOpen CMake files have not been audited for cmake-lint compliance yet.
           ^projects/miopen/.*
