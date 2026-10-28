@@ -160,7 +160,12 @@ headers) are removed on exit.
    `python -m tr.rekey <module>` converts it while its lines still match.
 2. Look before writing:
    `python -m tr.translate <module> --abi <dir> --analyze` lists each function
-   as `translated`, `filled` or `hole`, with the reason and the Python line.
+   as `translated`, `derived` (a C-only companion such as `_free` or
+   `_default`, generated whole), `filled` (a hand fill, with the reason the
+   rule failed) or `hole` (with the reason and the Python line), then one
+   summary line: `<m>/<n> functions mechanical (<t> translated, <d> derived),
+   <f> hand fills, <h> holes`. Mechanical is translated plus derived; a hand
+   fill is not a hole. `tr.regen` prints the same line per module.
    `TR_DEBUG=1` adds tracebacks for internal errors.
 3. Fill only the holes it reports (next section).
 4. Run `tr.regen`, then the gate.

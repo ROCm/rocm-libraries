@@ -144,7 +144,7 @@ def regen(a, scratch: list) -> int:
     from . import abi as A
     from .env import maps_dir, rocke_root
     from .package import PKG, support_file
-    from .translate import clang_format, set_clang_format, translate
+    from .translate import clang_format, set_clang_format, summary, translate
 
     if a.package and PKG.name != a.package:
         sys.exit(f"error: package {PKG.name} was already selected in this process")
@@ -181,11 +181,8 @@ def regen(a, scratch: list) -> int:
     holes = []
     for m in a.modules:
         res = translate(m, rocke, abi_dir)
-        n = len(res.functions)
-        mech = sum(f["status"] not in ("hole", "filled") for f in res.functions)
-        filled = sum(f["status"] == "filled" for f in res.functions)
         left = [f for f in res.functions if f["status"] == "hole"]
-        print(f"{m}: {mech}/{n} mechanical, {filled} hand fills, {len(left)} holes")
+        print(f"{m}: {summary(res.functions)}")
         holes += [f"  {m}: {f['name']} ({f['reason']} at line {f['at']})" for f in left]
         out[m] = clang_format(res.code, rocke)
     if holes:

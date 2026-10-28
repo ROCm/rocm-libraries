@@ -52,13 +52,50 @@ CLANG_FORMAT: str | None = None  # --clang-format; see find_clang_format
 
 class Result:
     def __init__(self):
-        self.functions = (
-            []
-        )  # dicts: name, status (translated|hole|filled), reason, line
+        self.functions = []  # dicts: name, status (STATUSES), reason, line
         self.clones = (
             []
         )  # host clones: dicts name, host, status (translated|hole), reason
         self.code = ""
+
+
+# a function's status: translated by rule, derived (a C-only companion such
+# as _free or _default, generated whole), filled by hand, or still a hole.
+# The first two are mechanical.
+STATUSES = ("translated", "derived", "filled", "hole")
+
+
+def tally(functions: list[dict]) -> dict[str, int]:
+    """How many functions have each status (STATUSES)."""
+    out = dict.fromkeys(STATUSES, 0)
+    for f in functions:
+        out[f["status"]] += 1
+    return out
+
+
+def summary(functions: list[dict]) -> str:
+    """The one summary line of a module, shared by --analyze and tr.regen:
+    "<mech>/<n> functions mechanical (<t> translated, <d> derived),
+    <f> hand fills, <h> holes"."""
+    c = tally(functions)
+    mech = c["translated"] + c["derived"]
+    return (
+        f"{mech}/{len(functions)} functions mechanical"
+        f" ({c['translated']} translated, {c['derived']} derived),"
+        f" {c['filled']} hand fills, {c['hole']} holes"
+    )
+
+
+def report_line(f: dict) -> str:
+    """One function's --analyze line: its status, name and, for a hole, why;
+    for a hand fill, the reason the rule failed that the fill stands in for."""
+    if f["status"] == "hole":
+        extra = f" ({f['reason']} at line {f['at']})"
+    elif f["status"] == "filled":
+        extra = f" (hand fill for: {f['reason']} at line {f['at']})"
+    else:
+        extra = ""
+    return f"{f['status']:10} {f['name']}{extra}"
 
 
 def own_header(env: Env, modname: str) -> str | None:
@@ -1814,20 +1851,12 @@ def main(argv=None) -> int:
     a.rocke = rocke_root(a.rocke)
     set_clang_format(a.clang_format)
     res = translate(a.module, a.rocke, a.abi)
-    holes = [f for f in res.functions if f["status"] in ("hole", "filled")]
     for f in res.functions:
-        extra = (
-            f" ({f['reason']} at line {f['at']})"
-            if f["status"] in ("hole", "filled")
-            else ""
-        )
-        print(f"{f['status']:10} {f['name']}{extra}")
+        print(report_line(f))
     for c in res.clones:
         extra = f" ({c['reason']} at line {c['at']})" if c["status"] == "hole" else ""
         print(f"clone-{c['status']:4} {c['name']}@{c['host']}{extra}")
-    print(
-        f"{len(res.functions) - len(holes)}/{len(res.functions)} functions mechanical, {len(holes)} holes"
-    )
+    print(summary(res.functions))
     if a.report:
         json.dump(res.functions, open(a.report, "w"), indent=1)
     if a.analyze:
