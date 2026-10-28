@@ -762,3 +762,73 @@ RppStatus rppt_emboss(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
 
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
 }
+
+/******************** prewitt_filter ********************/
+
+#define PREWITT_TYPE_X_GRADIENT 0
+#define PREWITT_TYPE_Y_GRADIENT 1
+#define PREWITT_TYPE_XY_GRADIENT 2
+
+RppStatus rppt_prewitt_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
+                              RpptDescPtr dstDescPtr, Rpp32u prewittType,
+                              RpptImageBorderType borderType, RpptROIPtr roiTensorPtrSrc,
+                              RpptRoiType roiType, rppHandle_t rppHandle,
+                              RppBackend executionBackend) {
+    if ((prewittType != PREWITT_TYPE_X_GRADIENT) && (prewittType != PREWITT_TYPE_Y_GRADIENT) &&
+        (prewittType != PREWITT_TYPE_XY_GRADIENT))
+        return RPP_ERROR_INVALID_ARGUMENTS;
+    if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
+    if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
+        return RPP_ERROR_INVALID_SRC_LAYOUT;
+    if ((dstDescPtr->layout != RpptLayout::NCHW) && (dstDescPtr->layout != RpptLayout::NHWC))
+        return RPP_ERROR_INVALID_DST_LAYOUT;
+    if ((srcDescPtr->c != 1) && (srcDescPtr->c != 3)) return RPP_ERROR_INVALID_SRC_CHANNELS;
+    // Each channel is filtered on its own, so the destination keeps the source's channel count.
+    if (dstDescPtr->c != srcDescPtr->c) return RPP_ERROR_INVALID_DST_CHANNELS;
+    if (srcDescPtr->n != dstDescPtr->n) return RPP_ERROR_INVALID_ARGUMENTS;
+    if (borderType != RpptImageBorderType::REPLICATE) return RPP_ERROR_NOT_IMPLEMENTED;
+
+    rpp::Handle& handle = rpp::deref(rppHandle);
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
+
+    if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
+        RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
+
+        if ((srcDescPtr->dataType == RpptDataType::U8) &&
+            (dstDescPtr->dataType == RpptDataType::U8)) {
+            return prewitt_filter_host_tensor(
+                static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
+                static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr, prewittType,
+                roiTensorPtrSrc, roiType, layoutParams, handle);
+        } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
+                   (dstDescPtr->dataType == RpptDataType::F16)) {
+            return prewitt_filter_host_tensor(
+                reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
+                srcDescPtr,
+                reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
+                dstDescPtr, prewittType, roiTensorPtrSrc, roiType, layoutParams, handle);
+        } else if ((srcDescPtr->dataType == RpptDataType::F32) &&
+                   (dstDescPtr->dataType == RpptDataType::F32)) {
+            return prewitt_filter_host_tensor(
+                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
+                srcDescPtr,
+                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
+                dstDescPtr, prewittType, roiTensorPtrSrc, roiType, layoutParams, handle);
+        } else if ((srcDescPtr->dataType == RpptDataType::I8) &&
+                   (dstDescPtr->dataType == RpptDataType::I8)) {
+            return prewitt_filter_host_tensor(
+                static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
+                static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr, prewittType,
+                roiTensorPtrSrc, roiType, layoutParams, handle);
+        } else
+            return RPP_ERROR_NOT_IMPLEMENTED;
+    }
+#ifdef GPU_SUPPORT
+    else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
+             (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
+        return RPP_ERROR_NOT_IMPLEMENTED;  // HIP kernel not yet available
+    }
+#endif
+
+    return RPP_ERROR_INCOMPATIBLE_BACKEND;
+}
