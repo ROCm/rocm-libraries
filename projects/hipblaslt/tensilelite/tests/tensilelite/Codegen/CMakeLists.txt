@@ -7,6 +7,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/Kernel_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Registers_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RocisaCore_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Saxpy_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Target_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestSupport.cpp"
 )
