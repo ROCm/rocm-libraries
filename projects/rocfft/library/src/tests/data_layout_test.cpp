@@ -30,7 +30,9 @@
 #include <string>
 #include <vector>
 
-extern size_t random_seed; // internal_test_main.cpp
+// internal_test_main.cpp
+extern size_t random_seed;
+extern size_t num_random_cases;
 
 struct data_layout_test_access
 {
@@ -42,8 +44,6 @@ struct data_layout_test_access
 
 namespace
 {
-    constexpr size_t num_random_cases = 200;
-
     std::vector<size_t> reversed(std::vector<size_t> v)
     {
         std::reverse(v.begin(), v.end());
@@ -60,7 +60,7 @@ namespace
 }
 
 // Every test restarts its generator from random_seed, so a failing case replays
-// with --seed <value> --gtest_filter=<test>.
+// with --seed <value> --gtest_filter=<test>, and at least as many --num_random_cases.
 class data_layout_test : public ::testing::Test
 {
 protected:
