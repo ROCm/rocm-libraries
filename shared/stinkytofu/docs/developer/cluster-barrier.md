@@ -128,6 +128,17 @@ load whose segment contains a preceding workgroup `s_barrier_signal -1` (the
 
 Multiple loads sharing the same workgroup signal receive one handshake.
 
+`ReduceClusterBarrierPerLoop` (module option, `<0` unset, `0` off, `>0` on)
+selects the reduced cadence. On, the first Rule 3 trigger of each enclosing
+loop handshakes, and a later trigger in that same loop handshakes again only
+after 2000 estimated cycles (`kReducedClusterBarrierIntervalCycles`). Nearby
+HalfPLR / ExpandPointerSwap copies still share one handshake. Off, every loop
+trigger handshakes. Unset resolves through `SchedulingKnobHeuristics`.
+`propose()` turns it on when the `loopWithPrefetch` WMMA latency sum is greater
+than 2500 and that sum covers at least 5 cycles per ds_load (integer division,
+`sumWmmaLatencyCycles / dsLoadCount >= 5`). A main loop missing WMMAs or
+ds_loads stays off, so every trigger still handshakes.
+
 ### Anchor resolution
 
 1. The **wait anchor** (Rule 3(b)) is the workgroup `s_barrier_signal -1`.
