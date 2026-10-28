@@ -113,7 +113,9 @@ For each module this generates the header (`tr.abi`) and the `.cpp`
 (`tr.translate`), then writes the sources to
 `platform/cpp/instances/common/` and the headers to
 `platform/cpp/include/rocke/`. If any hole is left, it lists the holes and
-writes nothing (exit 1).
+writes nothing (exit 1). It prints each module's summary (as `--analyze`
+does, below) and lists every ABI refusal: a refused item is missing from the
+generated header, so callers that need it will not compile.
 
 Only files that do not exist yet are written. For every source, header or
 support header already in the tree it prints `skip <path> (exists)` and
@@ -164,8 +166,13 @@ headers) are removed on exit.
    `_default`, generated whole), `filled` (a hand fill, with the reason the
    rule failed) or `hole` (with the reason and the Python line), then one
    summary line: `<m>/<n> functions mechanical (<t> translated, <d> derived),
-   <f> hand fills, <h> holes`. Mechanical is translated plus derived; a hand
-   fill is not a hole. `tr.regen` prints the same line per module.
+   <f> hand fills, <h> holes, <r> ABI refusals`. Mechanical is translated
+   plus derived; a hand fill is not a hole. An ABI refusal is a struct,
+   function or constant `tr.abi` left out of the generated header (no C type
+   for it); each is listed as `refused <name> (not exported: <why>)`, and
+   `tr.abi` prints them as `not exported: ...`. While any is left the header
+   is incomplete, even with no hole. `tr.regen` prints the same summary per
+   module and lists the refusals.
    `TR_DEBUG=1` adds tracebacks for internal errors.
 3. Fill only the holes it reports (next section).
 4. Run `tr.regen`, then the gate.

@@ -56,6 +56,9 @@ class Result:
         self.clones = (
             []
         )  # host clones: dicts name, host, status (translated|hole), reason
+        # what tr.abi refused to put in the generated header (--abi only):
+        # name -> reason; the header lacks each of them
+        self.abi_refused: dict[str, str] = {}
         self.code = ""
 
 
@@ -73,17 +76,25 @@ def tally(functions: list[dict]) -> dict[str, int]:
     return out
 
 
-def summary(functions: list[dict]) -> str:
+def summary(functions: list[dict], abi_refused: dict | None = None) -> str:
     """The one summary line of a module, shared by --analyze and tr.regen:
     "<mech>/<n> functions mechanical (<t> translated, <d> derived),
-    <f> hand fills, <h> holes"."""
+    <f> hand fills, <h> holes, <r> ABI refusals". An ABI refusal is a
+    struct, function or constant tr.abi left out of the generated header
+    (Result.abi_refused): the header is incomplete while any is left."""
     c = tally(functions)
     mech = c["translated"] + c["derived"]
     return (
         f"{mech}/{len(functions)} functions mechanical"
         f" ({c['translated']} translated, {c['derived']} derived),"
-        f" {c['filled']} hand fills, {c['hole']} holes"
+        f" {c['filled']} hand fills, {c['hole']} holes,"
+        f" {len(abi_refused or {})} ABI refusals"
     )
+
+
+def refusal_line(name: str, why: str) -> str:
+    """One ABI refusal's --analyze line."""
+    return f"refused    {name} (not exported: {why})"
 
 
 def report_line(f: dict) -> str:
@@ -115,14 +126,23 @@ def generated_modules(abi_dir: str) -> list[str]:
     return out
 
 
+def abi_refusals(abi) -> dict[str, str]:
+    """abi.refused by name (a name refused twice, for two reasons, once)."""
+    out: dict[str, str] = {}
+    for name, why in abi.refused:
+        if name not in out:
+            out[name] = why
+        elif why not in out[name].split("; "):
+            out[name] += f"; {why}"
+    return out
+
+
 def install_abi(env: Env, mod: Module):
     """Generated ABI: the module's own sigmap entries come from tr/abi.py, not
     from the mined hand header."""
     from .abi import Abi
 
     abi = Abi(env, mod).run()
-    for name, why in abi.refused:
-        print(f"not exported: {name} ({why})", file=sys.stderr)
     for k in [k for k in env.sig.helpers if k.startswith(mod.modname + ":")]:
         if k.split(":", 1)[1] not in abi.hand_quals:  # ABI holes keep the hand entry
             del env.sig.helpers[k]
@@ -1128,7 +1148,9 @@ def translate(modname: str, rocke: str, abi_dir: str | None = None) -> Result:
                         f"generated ABI of {other} not installed: {exc}",
                         file=sys.stderr,
                     )
-        undeclared = install_abi(env, mod).undeclared
+        own = install_abi(env, mod)
+        undeclared = own.undeclared
+        res.abi_refused = abi_refusals(own)
     else:
         undeclared = {}
     struct_lines = private_structs(env, mod, mod.facts, mod.tmap)
@@ -1856,7 +1878,9 @@ def main(argv=None) -> int:
     for c in res.clones:
         extra = f" ({c['reason']} at line {c['at']})" if c["status"] == "hole" else ""
         print(f"clone-{c['status']:4} {c['name']}@{c['host']}{extra}")
-    print(summary(res.functions))
+    for name, why in res.abi_refused.items():
+        print(refusal_line(name, why))
+    print(summary(res.functions, res.abi_refused))
     if a.report:
         json.dump(res.functions, open(a.report, "w"), indent=1)
     if a.analyze:

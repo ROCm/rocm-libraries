@@ -51,7 +51,10 @@ rocke_status_t rocke_attn_bwd_probe_name(const char* prefix, char* out, size_t o
 }
 """
 
-SUMMARY = "2/3 functions mechanical (1 translated, 1 derived), 1 hand fills, 0 holes"
+SUMMARY = (
+    "2/3 functions mechanical (1 translated, 1 derived), 1 hand fills, 0 holes,"
+    " 0 ABI refusals"
+)
 
 
 @pytest.fixture(scope="module")
@@ -105,3 +108,70 @@ def test_regen_reports_the_same_counts(probe, tmp_path):
         "--pretend",
     )
     assert f"{MODULE}: {SUMMARY}" in p.stdout.splitlines(), p.stdout
+
+
+# a function whose parameter has no C type: tr.abi leaves it out of the header
+REFUSED_MODULE = "_attention_bwd_refusal_probe"
+REFUSED_SOURCE = """\
+from __future__ import annotations
+
+__all__ = ["probe_add", "probe_names"]
+
+
+def probe_add(a: int, b: int) -> int:
+    return a + b
+
+
+def probe_names(names: list[str] | None = None) -> int:
+    return 0
+"""
+
+
+@pytest.fixture(scope="module")
+def refusal(tmp_path_factory, clang_format):
+    """(root, env): the fixture modules plus a module tr.abi refuses a function of."""
+    root = tmp_path_factory.mktemp("refusal")
+    lib = root / "library"
+    shutil.copytree(FIXTURES / "library", lib)
+    (lib / "kernels" / "common" / f"{REFUSED_MODULE}.py").write_text(REFUSED_SOURCE)
+    env = Tr(lib).env()
+    abi = root / "abi"
+    abi.mkdir()
+    p = run(env, "tr.abi", REFUSED_MODULE, "--header", str(abi))
+    assert "not exported: probe_names (" in p.stderr, p.stderr
+    assert "1 ABI refusals" in p.stderr, p.stderr
+    assert "probe_names" not in next(abi.iterdir()).read_text()
+    return root, env
+
+
+def test_analyze_counts_abi_refusals(refusal):
+    root, env = refusal
+    p = run(
+        env, "tr.translate", REFUSED_MODULE, "--abi", str(root / "abi"), "--analyze"
+    )
+    lines = p.stdout.strip().splitlines()
+    assert any(
+        re.match(r"^refused +probe_names \(not exported: ", x) for x in lines
+    ), lines
+    assert lines[-1].endswith(", 1 ABI refusals"), lines
+
+
+def test_regen_counts_abi_refusals(refusal, tmp_path):
+    _root, env = refusal
+    p = run(
+        env,
+        "tr.regen",
+        REFUSED_MODULE,
+        "--generated-abi",
+        "--into",
+        str(tmp_path),
+        "--pretend",
+    )
+    out = p.stdout.splitlines()
+    assert any(
+        x.startswith(f"{REFUSED_MODULE}: ") and x.endswith(", 1 ABI refusals")
+        for x in out
+    ), p.stdout
+    assert any(
+        x.startswith(f"  {REFUSED_MODULE}: probe_names (") for x in out
+    ), p.stdout

@@ -29,7 +29,7 @@ def test_fully_mechanical(module, generated):
     _out, runs = generated
     last = runs[module].stdout.strip().splitlines()[-1]
     n, total = last.split()[0].split("/")
-    assert n == total and last.endswith(", 0 holes"), last
+    assert n == total and last.endswith(", 0 holes, 0 ABI refusals"), last
     assert "facts stale" not in runs[module].stderr
 
 

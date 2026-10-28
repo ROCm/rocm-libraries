@@ -179,12 +179,20 @@ def regen(a, scratch: list) -> int:
 
     out = {}
     holes = []
+    refused = []
     for m in a.modules:
         res = translate(m, rocke, abi_dir)
         left = [f for f in res.functions if f["status"] == "hole"]
-        print(f"{m}: {summary(res.functions)}")
+        print(f"{m}: {summary(res.functions, res.abi_refused)}")
+        refused += [f"  {m}: {n} ({w})" for n, w in res.abi_refused.items()]
         holes += [f"  {m}: {f['name']} ({f['reason']} at line {f['at']})" for f in left]
         out[m] = clang_format(res.code, rocke)
+    if refused:
+        print(
+            "ABI refusals: the generated headers lack these (fix the Python's"
+            " types or the ABI rules, see tr.abi --diff):"
+        )
+        print("\n".join(refused))
     if holes:
         print("holes left (fill them, see HOWTO.md); nothing written:")
         print("\n".join(holes))

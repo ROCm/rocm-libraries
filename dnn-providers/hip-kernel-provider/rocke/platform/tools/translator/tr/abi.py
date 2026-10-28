@@ -1955,6 +1955,13 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     a.rocke = rocke_root(a.rocke)
     abi, env, _mod = build(a.module, a.rocke)
+    from .translate import abi_refusals
+
+    refused = abi_refusals(abi)
+    for name, why in refused.items():
+        print(f"not exported: {name} ({why})", file=sys.stderr)
+    if refused:
+        print(f"{len(refused)} ABI refusals: the header lacks them", file=sys.stderr)
     if a.diff:
         print("\n".join(diff(abi, env, a.module)))
     if a.header:
