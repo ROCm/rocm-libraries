@@ -37,8 +37,11 @@ header) is left as it is: "skip <path> (exists)", exit 0. When every
 module's source, its header and the support headers those sources include
 already exist in --into, nothing is translated (so the ABI choice of step 1
 does not matter): the skips are listed and the exit code is 0. --overwrite
-writes over existing files; --pretend lists what would be written or
-skipped and writes nothing. Temporary directories (maps, headers) are
+writes over the named modules' existing sources and headers only; the
+support headers are shared by every translated source in the directory and
+may carry hand fixes, so an existing one is replaced only with
+--overwrite-support. --pretend lists what would be written or skipped and
+writes nothing. Temporary directories (maps, headers) are
 removed on exit.
 
 Name every module whose generated header the others use in the same command
@@ -103,7 +106,14 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--overwrite",
         action="store_true",
-        help="write over files that already exist in --into",
+        help="write over the named modules' sources and headers that already"
+        " exist in --into (not the shared support headers)",
+    )
+    ap.add_argument(
+        "--overwrite-support",
+        action="store_true",
+        help="write over the shared support headers (rocke_py.hpp,"
+        " rocke_py_adapters*.hpp) that already exist in --into",
     )
     ap.add_argument(
         "--pretend",
@@ -141,7 +151,7 @@ def regen(a, scratch: list) -> int:
     rocke = rocke_root(a.rocke)
     into = a.into or rocke
     set_clang_format(a.clang_format)
-    if not a.overwrite:
+    if not (a.overwrite or a.overwrite_support):
         present = existing_targets(into, a.modules, support_file)
         if present:
             for path in present:
@@ -206,14 +216,22 @@ def regen(a, scratch: list) -> int:
 
     SRC = os.path.join(*PKG.cpp_dir.split("/"))
     INC = os.path.join("platform", "cpp", "include", "rocke")
-    targets = [(os.path.join(SRC, f"{m}.cpp"), code, None) for m, code in out.items()]
-    targets += [
-        (os.path.join(SRC, name), None, path) for name, path in sorted(support.items())
+    # (path, code, file to copy, may write over an existing file)
+    targets = [
+        (os.path.join(SRC, f"{m}.cpp"), code, None, a.overwrite)
+        for m, code in out.items()
     ]
-    targets += [(os.path.join(INC, os.path.basename(h)), None, h) for h in generated]
-    for rel, code, src in targets:
+    targets += [
+        (os.path.join(SRC, name), None, path, a.overwrite_support)
+        for name, path in sorted(support.items())
+    ]
+    targets += [
+        (os.path.join(INC, os.path.basename(h)), None, h, a.overwrite)
+        for h in generated
+    ]
+    for rel, code, src, replace in targets:
         path = os.path.join(into, rel)
-        if os.path.exists(path) and not a.overwrite:
+        if os.path.exists(path) and not replace:
             print(f"skip    {path} (exists)")
             continue
         if a.pretend:

@@ -14,7 +14,9 @@ What the translator writes is a first draft. Its first lines say so
 hand-maintained from here`). Once a file is in the tree it is ordinary hand
 code: edit it by hand or with an agent like any other twin. `tr.regen` never
 writes over an existing file unless it is given `--overwrite`, and nothing
-checks that a file still matches the translator's output. The byte-identity
+checks that a file still matches the translator's output. `--overwrite`
+replaces only the named modules' sources and headers, never the shared
+support headers (`--overwrite-support` does that). The byte-identity
 gate is the correctness guard, as for every twin.
 
 The translator is an experimental porting assistant. It owns no file outside
@@ -116,8 +118,13 @@ writes nothing (exit 1).
 Only files that do not exist yet are written. For every source, header or
 support header already in the tree it prints `skip <path> (exists)` and
 leaves the file alone; the exit code stays 0. `--overwrite` writes over
-existing files (review the diff: it drops any hand edit), and `--pretend`
-lists what would be written or skipped and writes nothing. When every file
+the named modules' existing sources and headers (review the diff: it drops
+any hand edit) and nothing else. The support headers (`rocke_py.hpp`,
+`rocke_py_adapters*.hpp`) are shared by every translated source in the
+directory and may carry hand fixes, so `--overwrite` keeps an existing one;
+`--overwrite-support` replaces them (alone, or with `--overwrite` to replace
+everything). `--pretend` lists what would be written or skipped and writes
+nothing. When every file
 a run would write is already there (each module's source and header, and the
 support headers they include), nothing is translated: a second run of the
 same command lists the skips and exits 0. Temporary directories (mined maps,

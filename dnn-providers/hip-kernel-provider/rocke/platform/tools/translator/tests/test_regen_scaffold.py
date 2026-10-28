@@ -16,13 +16,14 @@ from trtest import CPP_MODULES, GOLDEN, ROCKE, TR, normalize
 SRC = Path("platform/cpp/instances/common")
 INC = Path("platform/cpp/include/rocke")
 HEADERS = [INC / f"helper_rocke.instances.common.{m}.h" for m in CPP_MODULES]
-TARGETS = (
-    [SRC / f"{m}.cpp" for m in CPP_MODULES]
-    + [SRC / "rocke_py.hpp", SRC / "rocke_py_adapters.hpp"]
+SUPPORT = [
+    SRC / "rocke_py.hpp",
+    SRC / "rocke_py_adapters.hpp",
     # valu uses eval_layout, the one adapter that needs the backward headers
-    + [SRC / "rocke_py_adapters_attention_bwd.hpp"]
-    + HEADERS
-)
+    SRC / "rocke_py_adapters_attention_bwd.hpp",
+]
+TARGETS = [SRC / f"{m}.cpp" for m in CPP_MODULES] + SUPPORT + HEADERS
+OWN = [t for t in TARGETS if t not in SUPPORT]  # what --overwrite replaces
 EDIT = "// edited by hand\n"
 
 
@@ -96,12 +97,50 @@ def test_second_regen_keeps_hand_edits(first, fixture_tr, addr_abi, tmp_path):
 
 
 def test_overwrite(first, fixture_tr, addr_abi, tmp_path):
+    """--overwrite replaces the modules' sources and headers; a hand fix to a
+    shared support header survives it."""
     into = edited_copy(first, tmp_path)
+    edited = snapshot(into)
     p = regen(
         fixture_tr, "--into", str(into), "--abi-dir", str(addr_abi), "--overwrite"
     )
     assert p.returncode == 0, p.stdout + p.stderr
-    assert p.stdout.count("wrote   ") == len(TARGETS)
+    assert p.stdout.count("wrote   ") == len(OWN), p.stdout
+    for t in SUPPORT:
+        assert f"skip    {into / t} (exists)" in p.stdout
+    after = snapshot(into)
+    assert {t: after[t] for t in OWN} == {t: snapshot(first)[t] for t in OWN}
+    assert {t: after[t] for t in SUPPORT} == {t: edited[t] for t in SUPPORT}
+
+
+def test_overwrite_support(first, fixture_tr, addr_abi, tmp_path):
+    """--overwrite-support replaces the shared support headers, and only them."""
+    into = edited_copy(first, tmp_path)
+    edited = snapshot(into)
+    p = regen(
+        fixture_tr,
+        "--into",
+        str(into),
+        "--abi-dir",
+        str(addr_abi),
+        "--overwrite-support",
+    )
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert p.stdout.count("wrote   ") == len(SUPPORT), p.stdout
+    after = snapshot(into)
+    assert {t: after[t] for t in SUPPORT} == {t: snapshot(first)[t] for t in SUPPORT}
+    assert {t: after[t] for t in OWN} == {t: edited[t] for t in OWN}
+    p = regen(
+        fixture_tr,
+        "--into",
+        str(into),
+        "--abi-dir",
+        str(addr_abi),
+        "--overwrite",
+        "--overwrite-support",
+    )
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert p.stdout.count("wrote   ") == len(TARGETS), p.stdout
     assert snapshot(into) == snapshot(first)
 
 
@@ -114,7 +153,7 @@ def test_pretend_writes_nothing(first, fixture_tr, addr_abi, tmp_path, overwrite
     extra = ["--overwrite"] if overwrite else []
     for tree, writes in (
         (empty, len(TARGETS)),
-        (into, len(TARGETS) if overwrite else 0),
+        (into, len(OWN) if overwrite else 0),
     ):
         p = regen(
             fixture_tr,
