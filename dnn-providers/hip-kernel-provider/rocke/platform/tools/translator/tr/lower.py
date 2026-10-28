@@ -7208,8 +7208,11 @@ class Fn:
             return CE(tmp, st_, True)
         if outs:
             ret_ann = e["python"].get("returns") or ""
-            if cf.ret != "void" or not (
-                ret_ann.startswith("tuple") or (not ret_ann and len(outs) >= 2)
+            # a builder helper may return its success flag (1 / 0 with the
+            # builder's sticky error set) beside the out parameters
+            checked = cf.ret in ("int", "bool") and any(t == T.B for t, _ in cf.params)
+            if (cf.ret != "void" and not checked) or not (
+                ret_ann.lower().startswith("tuple") or (not ret_ann and len(outs) >= 2)
             ):
                 raise Refuse(
                     node, f"{cf.name} returns through out parameters: needs an adapter"
@@ -7229,7 +7232,11 @@ class Fn:
                 node,
                 outs={o: "&" + names[o][0] for o in outs},
             )
-            self.emit(self.err_wrap(f"{cf.name}({', '.join(args)})", "void") + ";")
+            if checked:
+                call = self.err_wrap(f"{cf.name}({', '.join(args)})", cf.ret)
+                self.emit(f"if(!{call}) py_adapt::raise_builder({self.builder});")
+            else:
+                self.emit(self.err_wrap(f"{cf.name}({', '.join(args)})", "void") + ";")
             els = {names[o][1] for o in outs}
             if len(els) != 1:
                 raise Refuse(node, "out parameters of different types")

@@ -5,7 +5,9 @@
 
 - a call of a rocke.* helper with a C twin (sigmap external_helpers): a str
   result through a caller buffer (kernel_name_join), a None sequence argument
-  with its companions NULL / 0, owned strings into a C string array."""
+  with its companions NULL / 0, owned strings into a C string array;
+- such a helper that returns a tuple through out parameters and its success
+  flag (block_lds_reduce_with_index)."""
 
 from __future__ import annotations
 
@@ -18,6 +20,21 @@ import pytest
 from trtest import ROCKE, TR, platform_probe, strip_holes
 
 PROBE = ""
+
+# qwen3_sampler imports block_lds_reduce_with_index (the maps list a helper
+# only when the package imports it)
+PROBE_SAMPLER = """\
+def probe_argmax(spec: Qwen3GreedySamplerSpec) -> KernelDef:
+    b = IRBuilder("probe_argmax")
+    tid = b.thread_id_x()
+    lds_val = b.smem_alloc(F32, [64], name_hint="v")
+    lds_idx = b.smem_alloc(F32, [64], name_hint="i")
+    val, idx = block_lds_reduce_with_index(
+        b, b.const_f32(1.0), tid, lds_val, lds_idx, tid, block_size=64, combine="argmin"
+    )
+    b.add(idx, tid)
+    return b.kernel
+"""
 
 
 def _run(env, abi, out=None, m="batched_transpose"):
@@ -51,6 +68,19 @@ def probe(tmp_path_factory, clang_format):
     return _run(env, abi), re.sub(r"\s+", " ", cpp), cpp, abi
 
 
+@pytest.fixture(scope="module")
+def sampler(tmp_path_factory, clang_format):
+    """(analyze output, source with whitespace folded) of the qwen3_sampler probe."""
+    root = tmp_path_factory.mktemp("platform_helpers_sampler")
+    m = "qwen3_sampler"
+    env = platform_probe(root, PROBE_SAMPLER, package=m, arch="gfx1250")
+    abi = root / "abi"
+    abi.mkdir()
+    out = root / f"{m}.cpp"
+    _run(env, abi, out, m)
+    return _run(env, abi, m=m), re.sub(r"\s+", " ", out.read_text())
+
+
 def _body(cpp: str, fn: str) -> str:
     m = re.search(rf"\b{fn}\(.*?\{{(.*?)\}} /\* py:|\b{fn}\(.*?\{{(.*?)$", cpp)
     assert m, fn
@@ -82,6 +112,17 @@ def test_kernel_name_join_through_its_c_twin(probe):
         body,
     ), body
     assert 'throw ckc::ValueError("string result does not fit")' in body
+
+
+def test_out_parameter_helper_checks_its_flag(sampler):
+    assert re.search(r"^translated +probe_argmax$", sampler[0], re.M), sampler[0]
+    body = _body(sampler[1], "py_probe_argmax")
+    assert re.search(
+        r"if\(!rocke_block_lds_reduce_with_index\( ?b, \w+, tid, lds_val, lds_idx, "
+        r"tid, 64, ROCKE_INDEX_ARGMIN, &val_\d+, &idx_\d+\)\) "
+        r"py_adapt::raise_builder\(b\);",
+        body,
+    ), body
 
 
 def test_source_compiles(probe, tmp_path):
