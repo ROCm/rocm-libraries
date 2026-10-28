@@ -2077,6 +2077,10 @@ namespace
         assignAlphaBeta(compute_type, a_type, prob.alpha, prob.beta, &alpha, &beta);
         auto k = prob.k && alpha ? prob.k : 0;
 
+        // The caller pointer keeps this width. The f16 fallback below widens only
+        // the tensile compute type, because those kernels accumulate in float.
+        const auto scalarStorageType = compute_type;
+
         // fallback to f32 for f16 compute type after alpha/beta assignment
         if(prob.compute_type == rocblaslt_compute_f16)
         {
@@ -2197,6 +2201,8 @@ namespace
                                || a_type == rocisa::DataType::ComplexDouble);
 
         auto alphaBetaType = isComplexInput ? a_type : compute_type;
+        // Do not load through alphaBetaType: for f16 compute it is the f32 fallback.
+        const auto scalarLoadType = isComplexInput ? a_type : scalarStorageType;
 
         tensileProblem.setAlphaType(alphaBetaType);
         tensileProblem.setBetaType(alphaBetaType);
@@ -2219,10 +2225,10 @@ namespace
             tensileProblem.setAlphaRestriction(TensileLite::toScalarValueEnum(0.0));
         else
             tensileProblem.setAlphaRestriction(
-                get_scalar_value_from_void_ptr(prob.alpha, alphaBetaType));
+                get_scalar_value_from_void_ptr(prob.alpha, scalarLoadType));
 
         tensileProblem.setBetaRestriction(
-            get_scalar_value_from_void_ptr(prob.beta, alphaBetaType));
+            get_scalar_value_from_void_ptr(prob.beta, scalarLoadType));
 
         // Add problem predicates for CEqualsD
         tensileProblem.setCEqualsD(prob.C == prob.D);
@@ -2486,6 +2492,10 @@ namespace
         double alpha = 0, beta = 0;
         assignAlphaBeta(compute_type, a_type, prob.alpha, prob.beta, &alpha, &beta);
 
+        // The caller pointer keeps this width. The f16 fallback below widens only
+        // the tensile compute type, because those kernels accumulate in float.
+        const auto scalarStorageType = compute_type;
+
         // fallback to f32 for f16 compute type after alpha/beta assignment
         if(prob.compute_type == rocblaslt_compute_f16)
         {
@@ -2503,6 +2513,8 @@ namespace
                                || a_type == rocisa::DataType::ComplexDouble);
 
         auto alphaBetaType = isComplexInput ? a_type : compute_type;
+        // Do not load through alphaBetaType: for f16 compute it is the f32 fallback.
+        const auto scalarLoadType = isComplexInput ? a_type : scalarStorageType;
 
         tensileProblem.setAlphaType(alphaBetaType);
         tensileProblem.setBetaType(alphaBetaType);
@@ -2525,10 +2537,10 @@ namespace
             tensileProblem.setAlphaRestriction(TensileLite::toScalarValueEnum(0.0));
         else
             tensileProblem.setAlphaRestriction(
-                get_scalar_value_from_void_ptr(prob.alpha, alphaBetaType));
+                get_scalar_value_from_void_ptr(prob.alpha, scalarLoadType));
 
         tensileProblem.setBetaRestriction(
-            get_scalar_value_from_void_ptr(prob.beta, alphaBetaType));
+            get_scalar_value_from_void_ptr(prob.beta, scalarLoadType));
 
         // Add problem predicates for CEqualsD
         tensileProblem.setCEqualsD(prob.C == prob.D);
