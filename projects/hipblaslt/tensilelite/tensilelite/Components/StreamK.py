@@ -43,6 +43,63 @@ from copy import deepcopy
 
 
 # ----------------------------------------------------------------------------
+# Scale-epoch granularity
+#
+# Under a pre-shuffled MX scale layout the scale period is a fixed 256 K for
+# every MX data type, so a DepthU below that makes one scale fetch serve
+# 256/DepthU consecutive data iterations. The kernel selects the K phase within
+# that epoch from a compile-time constant (the unrolled copy index), and the
+# swizzle block is atomic, so a workgroup handed a range that begins partway
+# through an epoch cannot address it: it applies the wrong half of every scale
+# for its whole range.
+#
+# Stream-K therefore has to divide K in whole epochs. Every mapping site below
+# distributes the leftover in units of skKGranularity instead of single
+# iterations, which keeps every workgroup start on an epoch boundary. The host
+# packs SKItersPerWG already rounded down to a multiple of the same quantum
+# (streamKStaticSplit in ContractionSolution.cpp), so the leftover is a whole
+# number of epochs and the closed-form inverses in the fixup path stay valid.
+#
+# This is a no-op (granularity 1) for every non-dual-period kernel.
+
+SCALE_SWIZZLE_K = 256
+
+
+def skKGranularity(kernel):
+    """Iterations per scale epoch: the quantum Stream-K must not split inside.
+
+    Derived from DepthU rather than from _ScaleReuse so that it is the same
+    expression as the host's ContractionSolution::skKGranularity(), which has no
+    access to the derived scale parameters. The assert pins the two descriptions
+    of the same quantity together.
+    """
+    if kernel.get("MXScaleFormat") != "HostPreSwizzle":
+        return 1
+    depthU = kernel["DepthU"]
+    if depthU >= SCALE_SWIZZLE_K or SCALE_SWIZZLE_K % depthU != 0:
+        return 1
+    granularity = SCALE_SWIZZLE_K // depthU
+    assert granularity == max(kernel.get("_ScaleReuseA") or 1, kernel.get("_ScaleReuseB") or 1), \
+        "scale-epoch granularity disagrees with the kernel's scale reuse factor"
+    return granularity
+
+
+def skExtraWgCount(module, kernel, dst, src, comment):
+    """Emit `dst = <number of workgroups that get one extra epoch>`.
+
+    The leftover the device derives is in iterations. With a granularity above
+    one it is a whole number of epochs, and it is the epoch count -- not the
+    iteration count -- that says how many workgroups carry an extra one.
+    """
+    g = skKGranularity(kernel)
+    if g == 1:
+        return src
+    module.add(SLShiftRightB32(dst=sgpr(dst), src=sgpr(src), shiftHex=log2(g),
+                               comment=comment))
+    return dst
+
+
+# ----------------------------------------------------------------------------
 # Uniform-summation-order (USO) runtime bit
 #
 # USO is host-side runtime state and defaults OFF. The kernel therefore carries
@@ -693,12 +750,17 @@ class StreamK(TileProcessingStrategy):
                            comment="Add extra iters"))
         module.add(SAddU32(dst=sgpr("PersistentIterationEnd"), src0=sgpr("PersistentIteration"), src1=sgpr(sIpw),
                            comment="StreamK ending iteration (case: after extra iters)"))
-        module.add(SAddU32(dst=sgpr(sIter+1), src0=sgpr(sIpw), src1=1, comment="Spread out extra iterations"))
+        g = skKGranularity(kernel)
+        module.add(SAddU32(dst=sgpr(sIter+1), src0=sgpr(sIpw), src1=g, comment="Spread out extra iterations"))
         module.add(SMulI32(dst=sgpr(sIter), src0=sgpr(sIdx), src1=sgpr(sIter+1),
                            comment="StreamK starting iteration (case: before extra iters)"))
         module.add(SAddU32(dst=sgpr(sIter+1), src0=sgpr(sIter), src1=sgpr(sIter+1),
                            comment="StreamK ending iteration (case: before extra iters)"))
-        module.add(SCmpLtU32(src0=sgpr(sIdx), src1=sgpr(sSkExtraIters),
+        # sSkExtraIters has already been consumed as an iteration count above, so
+        # it can be reduced in place to the workgroup count the compare wants.
+        sExtraWgs = skExtraWgCount(module, kernel, sSkExtraIters, sSkExtraIters,
+                                   "extra epochs = leftover iters / granularity")
+        module.add(SCmpLtU32(src0=sgpr(sIdx), src1=sgpr(sExtraWgs),
                              comment="Check if lane gets an extra iteration"))
         module.add(SCSelectB32(dst=sgpr("PersistentIteration"), src0=sgpr(sIter), src1=sgpr("PersistentIteration"),
                                comment="Set start iter"))
@@ -757,14 +819,21 @@ class StreamK(TileProcessingStrategy):
         module.add(SSubU32(dst=sgpr(sIter), src0=sgpr(sIpt), src1=sgpr(sIter),
                            comment="remI = ItersPerTile - F*SKItersPerWG"))
         writer.releasePersistentConstSgpr(sIpt)
+        # remI is a whole number of epochs because W is, so the leftover is
+        # handed out an epoch at a time: min(s, remI/g) epochs, g iterations each.
+        g = skKGranularity(kernel)
+        skExtraWgCount(module, kernel, sIter, sIter, "remI in epochs")
         module.add(SMinU32(dst=sgpr(sF), src0=sgpr(sIter+1), src1=sgpr(sIter), comment="min(s, remI)"))
+        if g > 1:
+            module.add(SLShiftLeftB32(dst=sgpr(sF), src=sgpr(sF), shiftHex=log2(g),
+                                      comment="extra epochs -> iterations"))
         module.add(SAddU32(dst=sgpr("PersistentIteration"), src0=sgpr("PersistentIteration"), src1=sgpr(sF),
                            comment="start = q*I + s*W + min(s, remI)"))
-        # end = start + W + (s < remI ? 1 : 0)
+        # end = start + W + (s < remI ? g : 0)
         module.add(SAddU32(dst=sgpr("PersistentIterationEnd"), src0=sgpr("PersistentIteration"), src1=sgpr(sW),
                            comment="start + SKItersPerWG"))
         module.add(SCmpLtU32(src0=sgpr(sIter+1), src1=sgpr(sIter), comment="s < remI?"))
-        module.add(SCSelectB32(dst=sgpr(sF), src0=1, src1=0, comment="extra iter within tile"))
+        module.add(SCSelectB32(dst=sgpr(sF), src0=g, src1=0, comment="extra iter within tile"))
         module.add(SAddU32(dst=sgpr("PersistentIterationEnd"), src0=sgpr("PersistentIterationEnd"), src1=sgpr(sF),
                            comment="end = start + W + (s < remI)"))
 
@@ -906,8 +975,11 @@ class StreamK(TileProcessingStrategy):
         module.add(SSubU32(dst=sgpr(sSkExtraIters), src0=sgpr(sIpt), src1=sgpr(sSkExtraIters),
                            comment="remI = ItersPerTile - F*W"))
         writer.releasePersistentConstSgpr(sIpt)
+        # Must mirror skAssignItersPerTile exactly: leftover handed out in epochs.
+        g = skKGranularity(kernel)
+        skExtraWgCount(module, kernel, sSkExtraIters, sSkExtraIters, "remI in epochs")
         module.add(SCmpLtU32(src0=sgpr(sIterCount), src1=sgpr(sSkExtraIters), comment="s < remI?"))
-        module.add(SCSelectB32(dst=sgpr(sIterCount), src0=1, src1=0, comment="extra iter within tile"))
+        module.add(SCSelectB32(dst=sgpr(sIterCount), src0=g, src1=0, comment="extra iter within tile"))
         module.add(SAddU32(dst=sgpr(sIterCount), src0=sgpr(sIpw), src1=sgpr(sIterCount),
                            comment="chunk = W + (s < remI)"))
         writer.releasePersistentConstSgpr(sIpw)
@@ -920,8 +992,12 @@ class StreamK(TileProcessingStrategy):
         sIpw = writer.acquirePersistentConstSgpr(kernel, "SKItersPerWG")
         if skConstsInVgprs:
             module.add(VReadfirstlaneB32(dst=sgpr(sIpw), src=vgpr(writer.states.persistentConstVgprs["SKItersPerWG"])))
-        module.add(SAddU32(dst=sgpr(sIterCount), src0=sgpr(sIpw), src1=1, comment="Add extra iter"))
-        module.add(SCmpLtU32(src0=sgpr(sCtaIdx), src1=sgpr(sSkExtraIters),
+        # Must mirror skAssignItersGlobal exactly: one extra epoch, not one iter.
+        module.add(SAddU32(dst=sgpr(sIterCount), src0=sgpr(sIpw),
+                           src1=skKGranularity(kernel), comment="Add extra iter"))
+        sExtraWgs = skExtraWgCount(module, kernel, sSkExtraIters, sSkExtraIters,
+                                   "extra epochs = leftover iters / granularity")
+        module.add(SCmpLtU32(src0=sgpr(sCtaIdx), src1=sgpr(sExtraWgs),
                              comment="Check if next WG had an extra iteration"))
         module.add(SCSelectB32(dst=sgpr(sIterCount), src0=sgpr(sIterCount), src1=sgpr(sIpw),
                                comment="Select correct number of iterations for next WG"))
@@ -1273,9 +1349,16 @@ class StreamK(TileProcessingStrategy):
             module.add(scalarUInt24DivideAndRemainder(qReg=tmpSgpr+0, dReg=tmpSgpr+1, divReg=sIpt, rReg=-1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False, comment="wgCount = tileStart / (itersPerTile)"))
             module.add(SMulI32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr+0), src1=sgpr(sIpt), comment="tileStart=tileIdx * ItersPerTile"))
             writer.releasePersistentConstSgpr(sIpt)
-            module.add(SAddU32(dst=sgpr(tmpSgpr+0), src0=sgpr(sIpw), src1=1, comment="ItersPerWG w/ extraIter"))
+            # Inverse of skAssignItersGlobal, so it carries the same quantum: the
+            # long stride is W+g and the count of workgroups holding one is the
+            # leftover in epochs. sSkExtraIters itself stays in iterations, which
+            # is what the "tileStart - extraIters" term below needs.
+            module.add(SAddU32(dst=sgpr(tmpSgpr+0), src0=sgpr(sIpw),
+                               src1=skKGranularity(kernel), comment="ItersPerWG w/ extraIter"))
             module.add(scalarUInt24DivideAndRemainder(qReg=tmpSgpr+2, dReg=tmpSgpr+1, divReg=tmpSgpr+0, rReg=-1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False, comment="wgCount = tileStart / (itersPerWG+1)"))
-            module.add(SCmpLtU32(src0=sgpr(tmpSgpr+2), src1=sgpr(sSkExtraIters), comment="find co-op group start"))
+            sExtraWgs = skExtraWgCount(module, kernel, tmpSgpr+0, sSkExtraIters,
+                                       "extra epochs = leftover iters / granularity")
+            module.add(SCmpLtU32(src0=sgpr(tmpSgpr+2), src1=sgpr(sExtraWgs), comment="find co-op group start"))
             module.add(SCBranchSCC1(labelName=skFixupCalcPartialIdx.getLabelName(), comment="All WG have extra iter so far, skip following calcs"))
             module.add(SSubU32(dst=sgpr(tmpSgpr+0), src0=sgpr(tmpSgpr+1), src1=sgpr(sSkExtraIters), comment="tileStart - extraIters"))
             module.add(scalarUInt24DivideAndRemainder(qReg=tmpSgpr+2, dReg=tmpSgpr+0, divReg=sIpw, rReg=-1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False, comment="wgExtraIters = (tileStart - extraIters) / itersPerWG"))
@@ -3082,7 +3165,14 @@ class StreamKTwoTileDPFirst(StreamK):
         module.add(SSubU32(dst=sgpr(sSkExtraIters), src0=sgpr(sIpt), src1=sgpr(sSkExtraIters), comment="extraIters = itersPerTile - SkSplit * skItersPerWG"))
 
         module.add(SMulI32(dst=sgpr("PersistentIteration"), src0=sgpr(stmpPartialIdx), src1=sgpr(sIpw), comment="StreamK starting iteration (case: after extra iters)"))
-        module.add(SCmpLtU32(src0=sgpr(stmpPartialIdx), src1=sgpr(sSkExtraIters), comment="Check if WG gets an extra iteration"))
+        # Same quantum as the static mappings: the leftover is whole epochs, so
+        # it is the epoch count that decides how many workgroups carry an extra
+        # one, and each of those carries g iterations rather than one.
+        g = skKGranularity(kernel)
+        sExtraTmp = writer.sgprPool.checkOut(1, "skExtraEpochs") if g > 1 else None
+        sExtraWgs = skExtraWgCount(module, kernel, sExtraTmp, sSkExtraIters,
+                                   "extra epochs = leftover iters / granularity")
+        module.add(SCmpLtU32(src0=sgpr(stmpPartialIdx), src1=sgpr(sExtraWgs), comment="Check if WG gets an extra iteration"))
         module.add(SCBranchSCC1(labelName=skHasExtraLabel.getLabelName(), comment="Has extra iter"))
         # No extra
         module.add(SAddU32(dst=sgpr("PersistentIteration"), src0=sgpr("PersistentIteration"), src1=sgpr(sSkExtraIters), comment="This WG does not have an extra iteration"))
@@ -3090,10 +3180,15 @@ class StreamKTwoTileDPFirst(StreamK):
         module.add(SBranch(labelName=skDoneExtraLabel.getLabelName(), comment="Done init for parallel reduction"))
         # Has extra
         module.add(skHasExtraLabel)
-        module.add(SAddU32(dst=sgpr("PersistentIteration"), src0=sgpr("PersistentIteration"), src1=sgpr(stmpPartialIdx), comment="This WG has an extra iteration"))
+        if g > 1:
+            module.add(SLShiftLeftB32(dst=sgpr(sExtraTmp), src=sgpr(stmpPartialIdx),
+                                      shiftHex=log2(g), comment="partialIdx epochs -> iterations"))
+        module.add(SAddU32(dst=sgpr("PersistentIteration"), src0=sgpr("PersistentIteration"), src1=sgpr(sExtraTmp if g > 1 else stmpPartialIdx), comment="This WG has an extra iteration"))
         module.add(SAddU32(dst=sgpr("PersistentIterationEnd"), src0=sgpr("PersistentIteration"), src1=sgpr(sIpw), comment="StreamK ending iteration (case: after extra iters)"))
-        module.add(SAddU32(dst=sgpr("PersistentIterationEnd"), src0=sgpr("PersistentIterationEnd"), src1=1, comment="StreamK ending iteration (case: after extra iters)"))
+        module.add(SAddU32(dst=sgpr("PersistentIterationEnd"), src0=sgpr("PersistentIterationEnd"), src1=g, comment="StreamK ending iteration (case: after extra iters)"))
         module.add(skDoneExtraLabel)
+        if sExtraTmp is not None:
+            writer.sgprPool.checkIn(sExtraTmp)
         writer.releasePersistentConstSgpr(sIpw)
         # Offset to tile
         module.add(SMulI32(dst=sgpr(stmpTileIdx), src0=sgpr(stmpTileIdx), src1=sgpr(sIpt), comment="Tile offset = tilesIdx * itersPerTile"))
@@ -3805,7 +3900,13 @@ class StreamKHybrid(StreamK):
             mod.add(SMulI32(dst=sgpr("PersistentIteration"), src0=sgpr(stmpPartialIdx),
                             src1=sgpr("SKItersPerWG"),
                             comment="StreamK starting iteration (case: after extra iters)"))
-            mod.add(SCmpLtU32(src0=sgpr(stmpPartialIdx), src1=sgpr(sSkExtraIters),
+            # Mirrors the non-PAP parallel-reduction init above, including the
+            # scale-epoch quantum.
+            g = skKGranularity(kernel)
+            sExtraTmp = writer.sgprPool.checkOut(1, "skExtraEpochs") if g > 1 else None
+            sExtraWgs = skExtraWgCount(mod, kernel, sExtraTmp, sSkExtraIters,
+                                       "extra epochs = leftover iters / granularity")
+            mod.add(SCmpLtU32(src0=sgpr(stmpPartialIdx), src1=sgpr(sExtraWgs),
                               comment="Check if WG gets an extra iteration"))
             mod.add(SCBranchSCC1(labelName=skHasExtraLabel.getLabelName(),
                                  comment="Has extra iter"))
@@ -3820,16 +3921,22 @@ class StreamKHybrid(StreamK):
                             comment="Done init for parallel reduction"))
             # Has extra
             mod.add(skHasExtraLabel)
+            if g > 1:
+                mod.add(SLShiftLeftB32(dst=sgpr(sExtraTmp), src=sgpr(stmpPartialIdx),
+                                       shiftHex=log2(g),
+                                       comment="partialIdx epochs -> iterations"))
             mod.add(SAddU32(dst=sgpr("PersistentIteration"), src0=sgpr("PersistentIteration"),
-                            src1=sgpr(stmpPartialIdx),
+                            src1=sgpr(sExtraTmp if g > 1 else stmpPartialIdx),
                             comment="This WG has an extra iteration"))
             mod.add(SAddU32(dst=sgpr("PersistentIterationEnd"), src0=sgpr("PersistentIteration"),
                             src1=sgpr("SKItersPerWG"),
                             comment="StreamK ending iteration (case: after extra iters)"))
             mod.add(SAddU32(dst=sgpr("PersistentIterationEnd"), src0=sgpr("PersistentIterationEnd"),
-                            src1=1,
+                            src1=g,
                             comment="StreamK ending iteration (case: after extra iters)"))
             mod.add(skDoneExtraLabel)
+            if sExtraTmp is not None:
+                writer.sgprPool.checkIn(sExtraTmp)
 
             # Offset to tile
             mod.add(SMulI32(dst=sgpr(stmpTileIdx), src0=sgpr(stmpTileIdx),

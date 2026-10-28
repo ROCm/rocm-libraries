@@ -84,3 +84,10 @@ BenchmarkProblems:
           # Multi-tile shapes — exercise StreamK partial tiles with scales.
           - Exact: [512, 512, 1, 1024]
           - Exact: [4096, 4096, 1, 8192]
+          # A tile count past the point where the runtime picks a Stream-K grid
+          # rather than one workgroup per tile (576 tiles, 24x24).  Note this
+          # client launches grid == tiles, so it does not itself produce a range
+          # that splits a tile's K; the K-unit quantisation that makes such a
+          # range safe is pinned by RowUniformityScaleEpoch in
+          # clients/tests/src/row_uniformity_gtest.cpp.
+          - Exact: [6144, 6144, 1, 512]

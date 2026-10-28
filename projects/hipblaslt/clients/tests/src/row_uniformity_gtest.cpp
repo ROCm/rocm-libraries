@@ -1244,6 +1244,145 @@ namespace
         }
     }
 
+    // Stream-K must not cut K inside a scale epoch.
+    //
+    // A dual-period MXFP8 kernel reuses one 256-K scale fetch across several
+    // 128-K data iterations and picks the phase within the epoch from a
+    // compile-time constant, so a workgroup handed a range that starts partway
+    // through one silently applies the wrong half of every scale. Both mappings
+    // therefore hand their leftover out in whole epochs, and the property the
+    // kernel depends on is that every start is a multiple of the granularity.
+    //
+    // Checked here rather than in a GEMM config because the Tests/common client
+    // launches with a grid equal to the tile count, which never splits K; it
+    // takes a forced grid to make a kernel reach a ragged range at all.
+    TEST(RowUniformityScaleEpoch_pre_checkin, EveryWorkgroupStartsOnAKUnit)
+    {
+        constexpr size_t g = 2; // 256-K epoch over a 128-K DepthU
+
+        // Shapes whose unquantised SKItersPerWG is odd, which is exactly when
+        // the historical mapping lands a workgroup mid-epoch.
+        struct Shape
+        {
+            size_t tiles;
+            size_t itersPerTile;
+            size_t grid;
+        };
+        const Shape shapes[] = {
+            {1, 64, 3},    {1, 64, 7},     {1, 64, 9},     {1, 64, 11},
+            {576, 4, 448}, {576, 8, 320},  {576, 16, 512}, {256, 64, 448},
+            {4, 16, 3},    {12, 8, 5},     {48, 12, 7},
+        };
+
+        for(const Shape& s : shapes)
+        {
+            const size_t total = s.tiles * s.itersPerTile;
+            SCOPED_TRACE("tiles=" + std::to_string(s.tiles) + " itersPerTile="
+                         + std::to_string(s.itersPerTile) + " grid=" + std::to_string(s.grid));
+
+            for(bool perTile : {false, true})
+            {
+                size_t covered = 0;
+                for(size_t w = 0; w < s.grid; ++w)
+                {
+                    const auto range = TensileLite::streamKWorkgroupIterRange(
+                        w, s.tiles, s.itersPerTile, s.grid, perTile,
+                        /*uniformSummationOrder=*/true, g);
+
+                    EXPECT_EQ(range.start % g, size_t{0})
+                        << "w=" << w << " perTile=" << perTile << " start=" << range.start;
+                    EXPECT_LE(range.start, range.end) << "w=" << w;
+                    covered += range.end - range.start;
+                }
+                // Quantising must not drop or duplicate work.
+                EXPECT_EQ(covered, total) << "perTile=" << perTile;
+            }
+
+            // The packed stride is itself a whole number of units, so the
+            // device's w*W term cannot land mid-epoch either, and the leftover
+            // it distributes is a whole number of units.
+            const TensileLite::StreamKStaticSplit split = TensileLite::streamKStaticSplit(
+                s.tiles, s.itersPerTile, s.grid, /*skFullTiles=*/1, /*forceDPOnly=*/false, g);
+            EXPECT_EQ(split.skItersPerWG % g, size_t{0}) << "packed SKItersPerWG";
+            EXPECT_EQ(split.extraIters % g, size_t{0}) << "leftover";
+        }
+    }
+
+    // A tile whose K is not a whole number of units cannot be quantised: the
+    // leftover would be a fraction of a unit, and the device places leftovers a
+    // whole unit at a time, so the fraction would go to nobody. Such a problem
+    // keeps the historical mapping, which also keeps the unsplit case -- one
+    // workgroup covering a K shorter than one unit -- working as it always has.
+    TEST(RowUniformityScaleEpoch_pre_checkin, PartialUnitTileFallsBack)
+    {
+        constexpr size_t g = 2;
+
+        const size_t oddIters[] = {1, 3, 5, 15, 33};
+        const size_t tiles[]    = {1, 4, 17, 576};
+        const size_t grids[]    = {1, 2, 3, 8, 320};
+
+        for(size_t i : oddIters)
+            for(size_t t : tiles)
+                for(size_t grid : grids)
+                {
+                    SCOPED_TRACE("tiles=" + std::to_string(t) + " itersPerTile="
+                                 + std::to_string(i) + " grid=" + std::to_string(grid));
+
+                    const auto quantised
+                        = TensileLite::streamKStaticSplit(t, i, grid, 1, false, g);
+                    const auto historical
+                        = TensileLite::streamKStaticSplit(t, i, grid, 1, false, 1);
+                    EXPECT_EQ(quantised.skItersPerWG, historical.skItersPerWG);
+                    EXPECT_EQ(quantised.extraIters, historical.extraIters);
+
+                    size_t covered = 0;
+                    for(size_t w = 0; w < grid; ++w)
+                        for(bool perTile : {false, true})
+                        {
+                            const auto a = TensileLite::streamKWorkgroupIterRange(
+                                w, t, i, grid, perTile, true, g);
+                            const auto b = TensileLite::streamKWorkgroupIterRange(
+                                w, t, i, grid, perTile, true, 1);
+                            EXPECT_EQ(a.start, b.start) << "w=" << w;
+                            EXPECT_EQ(a.end, b.end) << "w=" << w;
+                            if(!perTile)
+                                covered += a.end - a.start;
+                        }
+                    EXPECT_EQ(covered, t * i) << "work dropped";
+                }
+    }
+
+    // Granularity one has to leave every existing kernel exactly as it was.
+    TEST(RowUniformityScaleEpoch_pre_checkin, GranularityOneIsTheDefault)
+    {
+        const size_t tiles[]        = {1, 4, 17, 256, 576};
+        const size_t itersPerTile[] = {1, 7, 16, 64};
+        const size_t grids[]        = {1, 3, 8, 64, 448};
+
+        for(size_t t : tiles)
+            for(size_t i : itersPerTile)
+                for(size_t grid : grids)
+                {
+                    const auto implicit = TensileLite::streamKStaticSplit(t, i, grid, 1, false);
+                    const auto explicit1 = TensileLite::streamKStaticSplit(t, i, grid, 1, false, 1);
+                    EXPECT_EQ(implicit.skTiles, explicit1.skTiles);
+                    EXPECT_EQ(implicit.skItersPerWG, explicit1.skItersPerWG);
+                    EXPECT_EQ(implicit.extraIters, explicit1.extraIters);
+
+                    for(size_t w = 0; w < grid; ++w)
+                        for(bool perTile : {false, true})
+                        {
+                            const auto a = TensileLite::streamKWorkgroupIterRange(
+                                w, t, i, grid, perTile, true);
+                            const auto b = TensileLite::streamKWorkgroupIterRange(
+                                w, t, i, grid, perTile, true, 1);
+                            EXPECT_EQ(a.start, b.start) << "t=" << t << " i=" << i
+                                                        << " grid=" << grid << " w=" << w;
+                            EXPECT_EQ(a.end, b.end);
+                        }
+                }
+    }
+
     // =======================================================================
     // StreamK configurations that cannot be shown row-uniform.
     //
