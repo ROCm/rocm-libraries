@@ -24,11 +24,14 @@ whenever the pair has more than one. A lookup of a selectable integer pair witho
 
 from __future__ import annotations
 
+import functools
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 
+from ....core.arch import ArchTarget, MmaOp
 from ....core.lower_llvm import LLVM_FLAVORS
 from .mma_traits import INTEGER_OPERAND_DTYPES
 
@@ -37,6 +40,7 @@ __all__ = [
     "DEFAULT_COVERAGE_PATH",
     "BackendCoverage",
     "CoverageEntry",
+    "committed_backend_coverage",
     "load_backend_coverage",
 ]
 
@@ -140,12 +144,19 @@ class BackendCoverage:
 
     ``llvm_flavor`` is the LLVM flavor the classes were measured at. ``entries`` maps each
     (catalog op_id, target) pair to its entries: one, or one per variant (module docstring).
-    ``ops_without_row`` maps each target to the backend ops no row was matched to.
+    ``ops_without_row`` maps each target to the backend ops no row was matched to. Both mappings
+    are read-only copies of the ones given, so a record shared between callers cannot change.
     """
 
     llvm_flavor: str
     entries: Mapping[tuple[str, str], tuple[CoverageEntry, ...]]
     ops_without_row: Mapping[str, tuple[str, ...]]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "entries", MappingProxyType(dict(self.entries)))
+        object.__setattr__(
+            self, "ops_without_row", MappingProxyType(dict(self.ops_without_row))
+        )
 
     def entry(
         self,
@@ -239,6 +250,35 @@ class BackendCoverage:
                 f"(backend coverage: {found.status})"
             )
         return found.backend_op
+
+    def mma_op(
+        self,
+        op_id: str,
+        target: str,
+        *,
+        scale_format: Variant | None = None,
+        operand_dtypes: Variant | None = None,
+    ) -> MmaOp:
+        """The ``core.arch`` :class:`~rocke.core.arch.MmaOp` the record matched to (``op_id``,
+        ``target``), fetched from the target's registered ops by the recorded op id
+        (:meth:`backend_op`).
+
+        Raises ``KeyError`` as :meth:`backend_op` does, and ``ValueError`` when the target has no op
+        of the recorded id: the record no longer matches the ops core registers and must be
+        regenerated. The variant arguments follow :meth:`entry`.
+        """
+        name = self.backend_op(
+            op_id, target, scale_format=scale_format, operand_dtypes=operand_dtypes
+        )
+        op = ArchTarget.from_gfx(target).mma.by_op_id(name)
+        if op is None:
+            raise ValueError(
+                f"backend coverage names backend op {name!r} for {op_id!r} on {target!r}, but "
+                f"{target!r} has no such op -- the record no longer matches the ops core "
+                f"registers; regenerate it as helpers/tiling/traits/README.md describes under "
+                f"Backend coverage"
+            )
+        return op
 
     def backend_ops_without_row(self, target: str) -> tuple[str, ...]:
         """The backend ops on ``target`` that no catalog row was matched to."""
@@ -346,3 +386,14 @@ def load_backend_coverage(path: Path = DEFAULT_COVERAGE_PATH) -> BackendCoverage
     return BackendCoverage(
         llvm_flavor=flavor, entries=entries, ops_without_row=ops_without_row
     )
+
+
+@functools.cache
+def committed_backend_coverage() -> BackendCoverage:
+    """The committed record (``DEFAULT_COVERAGE_PATH``), loaded and validated once per process.
+
+    It is package data, fixed while rocke runs, and :meth:`TileMmaPlan.emit_op` reads it on every MMA
+    a kernel issues. Every caller shares it; its mappings are read-only (:class:`BackendCoverage`).
+    :func:`load_backend_coverage` reads its path afresh on every call.
+    """
+    return load_backend_coverage()

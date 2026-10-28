@@ -122,7 +122,7 @@ Source: `tests/instances/test_rocke_multiarch.py`, `tests/golden/rocke_represent
    namespace mismatch. Ids deliberately left out of the catalog are recorded with their reason in
    its `_meta.excluded_targets`.
 
-7. **A matrix capability flag is not sufficient to emit a primitive** — a registered target can report a matrix capability TRUE while the catalog offers zero usable rows for it. Authority for "can I emit this" is the row carrying the layout parameters, not the flag.
+7. **A matrix capability flag is not sufficient to emit a primitive** — a registered target can report a matrix capability TRUE while the catalog offers zero usable rows for it. Authority for "can I emit this" is the backend coverage record (`helpers/tiling/traits/data/backend_coverage.json`): an instruction is emitted on a target only where the record classes the pair `issuable` (`TileMmaPlan.emit_op`), not where a flag is set or a catalog row exists.
 
 ## Proposed gap-closure priority
 Ordering for follow-up stories (to be confirmed with the team):

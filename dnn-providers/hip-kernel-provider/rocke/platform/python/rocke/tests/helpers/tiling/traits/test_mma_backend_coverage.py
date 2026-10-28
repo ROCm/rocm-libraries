@@ -762,6 +762,15 @@ def test_reader_answers_status_and_backend_op(tmp_path: Path) -> None:
     assert coverage.backend_ops_without_row("gfx90a") == ()
 
 
+def test_a_loaded_record_cannot_be_changed(tmp_path: Path) -> None:
+    # One record is shared by every kernel in the process, so its mappings refuse writes.
+    coverage = load_backend_coverage(_write(tmp_path, _minimal()))
+    with pytest.raises(TypeError, match="does not support item assignment"):
+        coverage.entries[("some_op", "gfx942")] = ()  # type: ignore[index]
+    with pytest.raises(TypeError, match="does not support item assignment"):
+        coverage.ops_without_row["gfx942"] = ()  # type: ignore[index]
+
+
 def test_reader_refuses_an_unknown_class(tmp_path: Path) -> None:
     document = _minimal()
     document["pairs"]["x"]["gfx942"][0]["class"] = "issueable"
@@ -878,6 +887,32 @@ def test_an_inconsistent_entry_is_refused_at_construction(
     with pytest.raises(error_type) as error:
         CoverageEntry(**fields)
     assert str(error.value) == message
+
+
+def test_a_record_naming_an_op_core_does_not_register_is_refused(
+    tmp_path: Path,
+) -> None:
+    # A stale record: the op a pair recorded has since been removed from the target's ops.
+    document = _minimal()
+    document["pairs"]["mfma_f32_16x16x16f16"] = {
+        "gfx90a": [{"class": "issuable", "backend_op": "mfma_gfx90a_retired"}]
+    }
+    coverage = load_backend_coverage(_write(tmp_path, document))
+    with pytest.raises(ValueError) as error:
+        coverage.mma_op("mfma_f32_16x16x16f16", "gfx90a")
+    assert str(error.value) == (
+        "backend coverage names backend op 'mfma_gfx90a_retired' for "
+        "'mfma_f32_16x16x16f16' on 'gfx90a', but 'gfx90a' has no such op -- the record no "
+        "longer matches the ops core registers; regenerate it as "
+        "helpers/tiling/traits/README.md describes under Backend coverage"
+    )
+
+
+def test_mma_op_returns_the_core_op_the_record_names() -> None:
+    coverage = load_backend_coverage()
+    name = coverage.backend_op("mfma_f32_16x16x16f16", "gfx90a")
+    op = coverage.mma_op("mfma_f32_16x16x16f16", "gfx90a")
+    assert isinstance(op, MmaOp) and op.op_id == name
 
 
 def test_reader_refuses_an_unknown_flavor(tmp_path: Path) -> None:

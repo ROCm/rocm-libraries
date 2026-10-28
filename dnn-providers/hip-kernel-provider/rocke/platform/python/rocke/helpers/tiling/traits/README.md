@@ -8,6 +8,17 @@ it through `load_mma_traits()` (`mma_traits.py`); `TileMma` selects its atom fro
 The catalog is maintained by hand. The loader is strict: any data error fails the load with a
 message naming the row and the field, so an edit cannot load half-right.
 
+## Start here
+
+| If you want to | Go to |
+|---|---|
+| add or change a row | [Editing the catalog](#editing-the-catalog) |
+| add a dtype an instruction takes | [Adding a dtype](#adding-a-dtype) |
+| know what a field means | [Schema](#schema-schema_version-2) |
+| know how far a row's layout is checked | [Where the layouts come from](#where-the-layouts-come-from-and-what-checks-them) |
+| know why `TileMma` will or will not issue an instruction | [Backend coverage](#backend-coverage-databackend_coveragejson) |
+| change a backend MMA op in core and see the tiling test fail | [Regenerating the record](#regenerating-the-record) |
+
 ## Schema (`schema_version: 2`)
 
 ```json
@@ -213,10 +224,11 @@ variant beside the dedicated fp8 instruction), keep the dedicated one selectable
 `auto_select: false` on the other: it stays reachable by name (`atom_override`), never by selection.
 Multi-block rows are never selected; they are reachable by name.
 
-`TileMma` drives only rows whose result dtype is the accumulator dtype (`d_dtype == c_dtype`): its
-driver keeps the result in the accumulator. It refuses any other row on both paths, by intent and
-by `atom_override` (today only `wmma_bf16f32_16x16x32_bf16`). `select(d=...)` still returns
-such a row to a caller that asks for it.
+A row whose result dtype differs from its accumulator dtype (`d_dtype != c_dtype`; today only
+`wmma_bf16f32_16x16x32_bf16`) is selected by naming its result, `select(d=...)` or
+`TileMma(..., d=...)`, or pinned by `atom_override`. The `TileMma` driver issues it once per C
+subtile along K and returns the result in `d_dtype`: such a result cannot be the next
+instruction's accumulator, so a tile that needs more than one instruction along K is refused.
 
 A pin-only row lays out A, B and C exactly as its selectable twin does, with one exception: the
 gfx1250 `f8f6f4` 8-bit x 8-bit rows are another instruction than the dedicated fp8 rows beside
@@ -251,7 +263,27 @@ identically.
 
 5. Re-run the backend coverage test (`traits/test_mma_backend_coverage.py`, see Backend
    coverage). A changed row can change what the backend issues; regenerate the record when it
-   reports a change.
+   reports a change (Regenerating the record).
+
+## Adding a dtype
+
+A dtype an instruction takes as A, B, C or D has one spelling per layer, and each must know it:
+
+| Where | Spelling | Example |
+|---|---|---|
+| `core.dtypes` (the name every layer keys on) | canonical name | `fp8e4m3` |
+| this catalog (`a_dtype` ... `d_dtype`) | the canonical name | `fp8e4m3` |
+| `rocke.core.ir` (what `TileMma(a=...)` takes) | constant, the name upper-cased | `FP8E4M3` |
+| an IR type's `.name` | the canonical name | `fp8e4m3` |
+
+1. The dtype exists in `core.dtypes` (`dtype_info(name).name == name`) and as a `rocke.core.ir`
+   constant; the catalog loader refuses any other spelling.
+2. Its storage: `helpers/mma_io.storage_ir_type` (the type a register of it is held in) and, for a
+   sub-byte dtype, `core.storage.register_packing` (how its elements pack into 32-bit words). The
+   fragment storage table (`helpers/tiling/fragments.py` module docstring) follows from these two.
+3. An integer operand dtype: `INTEGER_OPERAND_DTYPES` and, if the instruction also takes an unsigned
+   form, `UNSIGNED_TWIN` (`mma_traits.py`).
+4. Add the rows that take it (Editing the catalog), then regenerate the backend coverage record.
 
 The catalog has no C++ counterpart: the tiling layer is Python only, and the C++ engine does not
 read this file.
@@ -263,7 +295,8 @@ backend issues. For every (row, target) pair it holds one class and the backend 
 `MmaOp.op_id`) the row was matched to, read through `load_backend_coverage()`
 (`backend_coverage.py`): `status(op_id, target)` and `backend_op(op_id, target)`. Only `issuable`
 means the backend issues the row's instruction on that target; it is the one fact a layer that
-issues MMA instructions reads, and `backend_op` is the op it emits.
+issues MMA instructions reads, and `backend_op` is the op it emits. `TileMmaPlan.emit_op()` reads
+it exactly so: it returns the recorded op of an `issuable` pair and refuses any other class.
 
 `tests/helpers/tiling/traits/test_mma_backend_coverage.py` measures the record and requires it to
 equal the committed file exactly, so a backend op that is added, removed or rewired fails the test

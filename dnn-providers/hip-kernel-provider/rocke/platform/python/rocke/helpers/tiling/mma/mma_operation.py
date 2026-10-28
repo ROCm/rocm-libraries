@@ -16,6 +16,7 @@ customise. The front door hides neither.
 
 from __future__ import annotations
 
+from ....core.arch import MmaOp
 from ....core.ir import Type
 from ..traits import MmaTraitsCatalog
 from .driver import TileMmaDriver
@@ -169,8 +170,12 @@ class TileMma:
     def style(self):
         return self._plan.style
 
-    def emit_op(self):
-        return self._plan.emit_op()
+    def emit_op(self, *, scale_format: tuple[str, str] | None = None) -> MmaOp:
+        """The backend op that issues this instruction on the target, for a hand-written
+        ``b.mma`` call (:meth:`TileMmaPlan.emit_op`): ``NotImplementedError`` when rocke does not
+        issue it there; ``scale_format`` names a scaled instruction's (A, B) scale dtypes.
+        """
+        return self._plan.emit_op(scale_format=scale_format)
 
     # ---- iteration, delegated to the driver -----------------------------------------------------
     def __call__(self, b, a_fragment, b_fragment, accumulator):
