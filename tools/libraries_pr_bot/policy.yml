@@ -112,16 +112,18 @@ pr:
       - '*_test.*'
       - '*_tests.*'
       - 'Test*'
-      # rocSPARSE (and rocWMMA helpers) name tests unit_test_*.cpp, which
-      # matches none of the patterns above.
+      # Suites that name tests unit_test_*.cpp (rocSPARSE, rocWMMA helpers)
+      # match none of the patterns above. The pattern is the basename, so it
+      # applies in every project.
       - 'unit_test_*'
       # Path-based: any file under a 'test/gtest/' directory is a unit test
       # (e.g. projects/miopen/test/gtest/unit_conv_solver_ConvWinoRageRxS.cpp).
       - '**/test/gtest/**'
       - '*_gtest.*'
-      # rocSPARSE's harness is rocsparse_unit_test_main.cpp, which does not
-      # match unit_test_*. The whole directory is the unit-test suite.
-      - 'projects/rocsparse/clients/unittests/**'
+      # Any unittests/ directory is a unit-test suite, in any project.
+      # rocSPARSE's harness (rocsparse_unit_test_main.cpp) does not match
+      # unit_test_*, so the directory pattern is what counts it.
+      - '**/unittests/**'
     # Unit tests are required for source code ANYWHERE in the repository — there
     # are NO folder-based exemptions. A test file may also live in any folder;
     # it is recognised by its name or path pattern, not its location alone.

@@ -178,8 +178,8 @@ PRs that change real source code must include at least one accompanying unit tes
 Any file located under a `test/gtest/` directory is also treated as a unit
 test, regardless of its filename — e.g.
 `projects/miopen/test/gtest/unit_conv_solver_ConvWinoRageRxS.cpp`.
-Any file under `projects/rocsparse/clients/unittests/` is too, including
-`rocsparse_unit_test_main.cpp`.
+Any file under an `unittests/` directory is too, in any project,
+including `projects/rocsparse/clients/unittests/rocsparse_unit_test_main.cpp`.
 
 **How to fix**
 Add a unit test for the code you changed, named `test_<something>`:
