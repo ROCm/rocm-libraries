@@ -137,7 +137,7 @@ Tests:
   denseld: [131073]
   matrix: [rocsparse_matrix_zero]
 
-# Lower-bidiagonal repair must finish in one sweep. This size is nightly only.
+# Large one-sided bidiagonal system. Nightly only.
 - name: gtsv_no_pivot
   category: nightly
   function: gtsv_no_pivot
