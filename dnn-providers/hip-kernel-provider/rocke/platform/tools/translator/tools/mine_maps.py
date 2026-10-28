@@ -546,19 +546,19 @@ def helper_emits(tree: rsrc.Tree, emit_methods: Set[str]) -> Dict[str, bool]:
 
 
 def external_imports(tree: rsrc.Tree) -> Dict[str, Set[str]]:
-    """Names the backward modules import from rocke.* other than core.ir."""
+    """Names the package's modules import from rocke.* other than core.ir (an
+    import from a parent package, `from ...helpers.spec import`, by its
+    absolute name)."""
     out: Dict[str, Set[str]] = {}
     for f in tree.bwd_py():
         t = ast.parse(open(f, encoding="utf-8").read())
         for n in ast.walk(t):
-            if (
-                isinstance(n, ast.ImportFrom)
-                and n.module
-                and n.module.startswith("rocke.")
-                and n.module != "rocke.core.ir"
-            ):
+            if not isinstance(n, ast.ImportFrom):
+                continue
+            mod = rsrc.PKG.import_source(n.module, n.level)
+            if mod.startswith("rocke.") and mod != "rocke.core.ir":
                 for a in n.names:
-                    out.setdefault(n.module, set()).add(a.name)
+                    out.setdefault(mod, set()).add(a.name)
     return out
 
 

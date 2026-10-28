@@ -172,7 +172,14 @@ def main(argv=None) -> int:
     a.rocke = rocke_root(a.rocke)
     # the package's parity drivers come first: both driver directories have
     # an _emit_common.py
-    for p in ("platform/python", library_dir(a.rocke), parity_dir(a.rocke)):
+    # (with $TR_PARITY, the drafted drivers come first and the package's
+    # directory still supplies _emit_common)
+    for p in (
+        "platform/python",
+        library_dir(a.rocke),
+        os.path.join(a.rocke, *PKG.parity_dir.split("/")),
+        parity_dir(a.rocke),
+    ):
         full = os.path.join(a.rocke, p)
         if full not in sys.path:
             sys.path.insert(0, full)

@@ -5,7 +5,7 @@ declarations in the sigmap entry format (so the translator's shim code
 consumes them unchanged) plus the header text.
 
     python -m tr.abi <module> --diff     # each declaration vs the hand header
-    python -m tr.abi <module> --header   # print the generated header
+    python -m tr.abi <module> --header DIR  # write the generated header into DIR
 """
 
 from __future__ import annotations

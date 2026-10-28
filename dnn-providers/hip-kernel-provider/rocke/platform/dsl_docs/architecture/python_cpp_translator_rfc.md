@@ -124,7 +124,7 @@ A hole is a function no rule covers. The translated `.cpp` holds `#error "hole: 
 
 ### 4.6 Packages
 
-`tr/package.py` maps a package to its C naming and its modules. The one package today is `attention_bwd` (`rocke_attn_bwd_*`, `ROCKE_ATTN_BWD_*`). Not yet built: entries for the other packages on `develop`, such as the forward attention modules (`rocke_fmha_varlen_*`) and the convolution modules. Until a package has an entry, the translator cannot pair that package's Python functions with their C twins, and `--analyze` reports every function as a hole.
+`tr/package.py` maps a package to its C naming, its modules and where its files live: the directory the modules are read and imported from, the C++ directory a source goes to, the header name, the parity drivers' directory, and the files the code maps are mined from. `attention_bwd` (`rocke_attn_bwd_*`, `ROCKE_ATTN_BWD_*`) reads `library/kernels/common`. `platform_instance()` builds the entry for a kernel instance of the platform (`platform/python/rocke/instances/<arch>/<m>.py`, `instance_<m>.h`, `platform/tests/instances/parity`, one C prefix per instance); entries exist for `transpose` (ported by hand, the self-test's check of these paths), `batched_transpose`, `transpose_bc`, `batched_contraction` and four gfx1250 Qwen3 instances. Those are recorded and analyzed, not yet ported. Not yet built: entries for the other packages on `develop`, such as the forward attention modules (`rocke_fmha_varlen_*`) and the convolution modules. Until a package has an entry, the translator cannot find that package's files or pair its Python functions with their C twins.
 
 ### 4.7 Ownership of Translated Files
 
@@ -267,7 +267,7 @@ Not yet built: unit tests for individual rules, with each rule's counterexamples
 - **Fill**: The hand-written C++ for a hole, in `holes/<module>/`.
 - **Prelude**: `rocke_py.hpp`, the hand-written C++ helpers with Python semantics.
 - **First draft**: The translator's output for a module. Once checked in it is hand code.
-- **Package**: A set of modules that share a C naming scheme (`tr/package.py`).
+- **Package**: A set of modules that share a C naming scheme and a location in the tree (`tr/package.py`).
 - **Mechanical share**: The share of Python lines whose C++ the translator writes with no fill.
 
 ## Appendix A: Changes from Version 1.0

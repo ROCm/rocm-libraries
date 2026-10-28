@@ -80,6 +80,20 @@ class Package:
         a dotted name is already one."""
         return m if "." in m else f"{self.py_package}.{m}"
 
+    def import_source(self, module: str | None, level: int) -> str:
+        """The module an import statement of a package module names, as the
+        translator keys it: absolute and sibling imports as written
+        ('rocke.helpers.spec', '_attention_bwd_valu' from `from ._attention_bwd_valu
+        import`), an import from a parent package made absolute
+        (`from ...helpers.spec import` in rocke.instances.common.<m> ->
+        'rocke.helpers.spec')."""
+        module = module or ""
+        if level <= 1:
+            return module
+        parts = self.py_package.split(".")
+        base = parts[: max(0, len(parts) - (level - 1))]
+        return ".".join(base + ([module] if module else []))
+
     def header_name(self, m: str) -> str:
         """The generated header of module m."""
         return self.header.format(m=m)
@@ -156,13 +170,26 @@ PACKAGES = {
     ),
 }
 for _p in (
+    # mirrored by hand already: the platform port's end-to-end check
+    platform_instance("transpose", "transpose2d", "Transpose2D"),
     platform_instance("batched_transpose", "batched_transpose", "BatchedTranspose2D"),
     platform_instance("transpose_bc", "transpose_bc", "TransposeBc"),
-    platform_instance("batched_contraction", "batched_contraction", "BatchedContraction"),
+    platform_instance(
+        "batched_contraction", "batched_contraction", "BatchedContraction"
+    ),
     platform_instance("qwen3_kv_cache", "qwen3_kv_cache", "Qwen3Kv", "gfx1250"),
-    platform_instance("qwen3_qk_norm_rope", "qwen3_qk_norm_rope", "Qwen3QkNormRope", "gfx1250"),
-    platform_instance("qwen3_sampler", "qwen3_sampler", "Qwen3GreedySampler", "gfx1250"),
-    platform_instance("qwen3_token_embedding", "qwen3_token_embedding", "Qwen3TokenEmbedding", "gfx1250"),
+    platform_instance(
+        "qwen3_qk_norm_rope", "qwen3_qk_norm_rope", "Qwen3QkNormRope", "gfx1250"
+    ),
+    platform_instance(
+        "qwen3_sampler", "qwen3_sampler", "Qwen3GreedySampler", "gfx1250"
+    ),
+    platform_instance(
+        "qwen3_token_embedding",
+        "qwen3_token_embedding",
+        "Qwen3TokenEmbedding",
+        "gfx1250",
+    ),
 ):
     PACKAGES[_p.name] = _p
 

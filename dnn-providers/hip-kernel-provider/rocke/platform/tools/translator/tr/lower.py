@@ -278,9 +278,8 @@ class Module:
                     self.type_aliases[n.targets[0].id] = txt
         for n in self.tree.body:
             if isinstance(n, ast.ImportFrom):
-                mod = n.module or ""
-                if n.level:
-                    mod = mod  # relative: a sibling in kernels.common
+                # a sibling stays bare; a parent-package import becomes absolute
+                mod = PKG.import_source(n.module, n.level)
                 for a in n.names:
                     self.imports[a.asname or a.name] = (mod, a.name)
             elif isinstance(n, ast.FunctionDef):
@@ -1164,12 +1163,10 @@ class Fn:
         """A function-local `from .m import name`: the name resolves like a module import."""
         for a in st.names:
             local = a.asname or a.name
-            if local in self.mod.imports and self.mod.imports[local] != (
-                st.module or "",
-                a.name,
-            ):
+            src = PKG.import_source(st.module, st.level)
+            if local in self.mod.imports and self.mod.imports[local] != (src, a.name):
                 raise Refuse(st, f"local import of {local} shadows another import")
-            self.mod.imports[local] = (st.module or "", a.name)
+            self.mod.imports[local] = (src, a.name)
 
     def st_Raise(self, st):
         exc = st.exc

@@ -63,8 +63,11 @@ def module_path(rocke: str, modname: str) -> str:
 
 
 def parity_dir(rocke: str) -> str:
-    """The directory of the package's parity drivers (<module>_emit.py)."""
-    return os.path.join(rocke, *PKG.parity_dir.split("/"))
+    """The directory of the package's parity drivers (<module>_emit.py):
+    $TR_PARITY (a driver drafted outside the tree), else the package's."""
+    return os.environ.get("TR_PARITY") or os.path.join(
+        rocke, *PKG.parity_dir.split("/")
+    )
 
 
 def maps_dir() -> str:

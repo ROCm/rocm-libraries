@@ -1,9 +1,10 @@
 # Python to C++ translator
 
-The translator (`tr/`) turns a rocKE Python kernel-builder module
-(`library/kernels/common/<module>.py`) into its C++ twin
+The translator (`tr/`) turns a rocKE Python kernel-builder module (for
+attention backward `library/kernels/common/<module>.py`) into its C++ twin
 (`platform/cpp/instances/common/<module>.cpp`) and, with the generated ABI,
-the module's C header (`platform/cpp/include/rocke/`). It translates every
+the module's C header (`platform/cpp/include/rocke/`). Other packages, such
+as the platform's kernel instances, live elsewhere (Packages, below). It translates every
 function it has a rule for, uses a hand-written fill for the rest, and refuses
 to write output while any function is still a hole. The byte-identity gate
 then proves the C++ emits the same IR as the Python on every parity config.
@@ -54,9 +55,46 @@ listed in the RFC
 - Code maps (`sigmap.json`, `twin_map.json`): `TR_MAPS`, else `data/maps`.
   Neither is checked in here, so `tr.regen` mines them from the tree first
   (`tools/mine_maps.py`, a few seconds).
-- Naming: `TR_PACKAGE` (or `tr.regen --package`) picks the C naming in
-  `tr/package.py`. The default, `attention_bwd`, gives `rocke_attn_bwd_*` and
-  `ROCKE_ATTN_BWD_*`. Another package is one more entry in `PACKAGES`.
+- Package: `TR_PACKAGE` (or `tr.regen --package`) picks the package in
+  `tr/package.py`: its C naming and where its files live (next section). The
+  default, `attention_bwd`, gives `rocke_attn_bwd_*` and `ROCKE_ATTN_BWD_*`.
+  Another package is one more entry in `PACKAGES`.
+- Parity drivers: `TR_PARITY` replaces the package's driver directory, for a
+  driver drafted outside the tree.
+
+## Packages
+
+A package says where its files live, so the same commands work on any of them:
+
+| | Attention backward | A platform instance (`platform_instance()`) |
+|---|---|---|
+| Python module | `library/kernels/common/<m>.py`, imported as `kernels.common.<m>` | `platform/python/rocke/instances/<arch>/<m>.py`, imported as `rocke.instances.<arch>.<m>` |
+| C++ source | `platform/cpp/instances/common/<m>.cpp` | `platform/cpp/instances/<arch>/<m>.cpp` |
+| Header | `helper_rocke.instances.common.<m>.h` | `instance_<m>.h` |
+| Parity driver | `library/tests/parity/<m>_emit.py` | `platform/tests/instances/parity/<m>_emit.py` |
+| C names | `rocke_attn_bwd_*` | `rocke_<prefix>_*`, one prefix per instance |
+
+The code maps are mined from the package's own files (its `*_globs`), so
+`tr.regen` mines them per package. An import from a parent package
+(`from ...helpers.spec import kernel_name_join`) is read by its absolute name
+(`rocke.helpers.spec`).
+
+A platform instance needs its parity driver before it can be recorded. An
+instance with no C++ twin has none yet: write `<m>_emit.py` first, in the
+style of the drivers next to it (a `_spec(idx)` that returns one spec per
+config index, a build function and `run_emit`). The byte-identity gate needs
+it anyway, with its C side (`<m>_emit.c`), which calls the header the
+translator generates. For example, for `batched_transpose`:
+
+```
+export TR_PACKAGE=batched_transpose
+python -m tr.record batched_transpose_emit batched_transpose
+python -m tr.abi batched_transpose --header /tmp/abi
+python -m tr.translate batched_transpose --abi /tmp/abi --analyze
+```
+
+`transpose` (the 2D transpose, ported by hand) is a package too: the
+self-test records it from the tree to check the platform paths.
 
 ## The one command
 
@@ -104,7 +142,8 @@ headers) are removed on exit.
 1. Record types. The translator types unannotated code from a recording of
    the parity configs:
    `python -m tr.record <module>_emit <module>` writes
-   `data/facts/<module>.json`. Functions are keyed by qualname, so moving code
+   `data/facts/<module>.json`. The driver is read from the package's parity
+   directory. Functions are keyed by qualname, so moving code
    around does not lose the types. Each entry also stamps the function's
    source; when a body changes after the recording, the translator prints
    `facts stale for <module>.<function>; re-run tr.record` and translates as
@@ -149,7 +188,8 @@ modules (with `addr`'s header) from `tests/fixtures/` and compares the
 headers and sources with `tests/fixtures/golden/`, checks that two runs are
 byte-identical, and checks the facts keys and stale warnings. It needs the
 pinned clang-format (it skips without it), no GPU and no build, and takes
-about 15 seconds. No CMake target or CI lane runs it. A change that is meant
+about 40 seconds. It also records the `transpose` platform instance from the
+real tree, to check the platform paths. No CMake target or CI lane runs it. A change that is meant
 to alter the output updates the goldens explicitly:
 
 ```
@@ -182,9 +222,17 @@ eight larger backward modules (addr, band, sinks, ring, frag, gemm, sched,
 lds), about 77% of the Python lines translate mechanically; hand fills count
 as not mechanical.
 
-- Naming: `tr/package.py` has one package, `attention_bwd`. Modules that name
-  their C entries another way (for example `rocke_fmha_varlen_*`) need another
-  entry before the translator pairs their functions with the C twins.
+- Packages: `tr/package.py` has `attention_bwd` and the platform instances
+  `transpose`, `batched_transpose`, `transpose_bc`, `batched_contraction` and
+  the gfx1250 `qwen3_kv_cache`, `qwen3_qk_norm_rope`, `qwen3_sampler` and
+  `qwen3_token_embedding`. Only attention backward has been translated and
+  gated; the instances are recorded and analyzed, not yet ported. A module
+  that names its C entries another way (for example `rocke_fmha_varlen_*`)
+  needs its own entry before the translator pairs its functions with the C
+  twins.
+- Platform helpers: the maps list the `rocke.helpers` functions a package
+  imports and their C twins, but a call to one is still a hole unless it has
+  an adapter (for example `kernel_name_join`).
 - Types come from a parity driver `<module>_emit` (`tr.record`); a module
   with no driver cannot be recorded.
 - Not handled yet: mixed-arity tuples, `next()` over a generator, a
