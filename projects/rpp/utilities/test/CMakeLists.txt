@@ -43,6 +43,17 @@ if(NOT TARGET rpp)
     set(RPP_TEST_LINK_LIB rpp::rpp)
 else()
     set(RPP_TEST_LINK_LIB rpp)
+
+    # The rpp target exports flat api/ dirs, but the suite includes <rpp/...> like an installed
+    # consumer. Stage an installed-style layout so a stale ${ROCM_PATH}/include/rpp is never used.
+    set(RPP_TEST_STAGED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
+    file(GLOB RPP_TEST_API_HEADERS CONFIGURE_DEPENDS
+        "${rpp_SOURCE_DIR}/api/*.h"
+        "${rpp_BINARY_DIR}/api/*.h")
+    foreach(header IN LISTS RPP_TEST_API_HEADERS)
+        get_filename_component(header_name "${header}" NAME)
+        configure_file("${header}" "${RPP_TEST_STAGED_INCLUDE_DIR}/rpp/${header_name}" COPYONLY)
+    endforeach()
 endif()
 
 include(cmake/gtest.cmake)
@@ -61,6 +72,9 @@ endif()
 
 add_executable(rpp_tests ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp ${RPP_TEST_SOURCES})
 target_include_directories(rpp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+if(RPP_TEST_STAGED_INCLUDE_DIR)
+    target_include_directories(rpp_tests BEFORE PRIVATE ${RPP_TEST_STAGED_INCLUDE_DIR})
+endif()
 
 # Warnings are errors for the suite's own sources.
 target_compile_options(rpp_tests PRIVATE -Wall -Wextra -Werror)
@@ -80,7 +94,12 @@ endif()
 
 # Installed next to the ROCm libraries, so librpp and the HIP runtime resolve from ../lib.
 include(GNUInstallDirs)
-set_target_properties(rpp_tests PROPERTIES INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+if(APPLE)
+    set(RPP_TEST_RPATH_ORIGIN "@loader_path")
+else()
+    set(RPP_TEST_RPATH_ORIGIN "$ORIGIN")
+endif()
+set_target_properties(rpp_tests PROPERTIES INSTALL_RPATH "${RPP_TEST_RPATH_ORIGIN}/../${CMAKE_INSTALL_LIBDIR}")
 install(TARGETS rpp_tests RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT test)
 
 # Tier labels (quick/standard/...) for TheRock.
@@ -93,6 +112,13 @@ if(DEFINED ROCM_LIBRARIES_ROOT AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/T
         "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
         "${CMAKE_CURRENT_BINARY_DIR}"
         "${RPP_TEST_INSTALL_CTEST_FILE}")
+    # Emulator tiers select HIP cases only, which a CPU build does not generate.
+    if("${BACKEND}" STREQUAL "HIP")
+        apply_test_category_labels(rpp_tests
+            "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_ffm.yaml"
+            "${CMAKE_CURRENT_BINARY_DIR}"
+            "${RPP_TEST_INSTALL_CTEST_FILE}")
+    endif()
     install(FILES "${RPP_TEST_INSTALL_CTEST_FILE}"
         DESTINATION ${CMAKE_INSTALL_BINDIR}/rpp
         COMPONENT test
