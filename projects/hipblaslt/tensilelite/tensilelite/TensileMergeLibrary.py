@@ -523,6 +523,13 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
 
         if mergedData.get("DefaultSolution"):
             removeDefaultInitParams(mergedData)
+        # reNameSolutions rebuilds each solution from the policy normalizer, which
+        # appends new keys. Dict-format output still needs the naming keys first
+        # and the rest alphabetical, independent of that insertion order.
+        mergedData["Solutions"] = [
+            LibraryIO.reorderSolutionDictForDictMerge(solution)
+            for solution in mergedData.get("Solutions", [])
+        ]
         normalizeDictLibraryLayout(mergedData)
         if isinstance(mergedData.get("ProblemType"), dict):
             mergedData["ProblemType"] = dict(sorted(mergedData["ProblemType"].items()))

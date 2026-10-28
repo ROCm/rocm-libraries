@@ -2294,7 +2294,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               iterCode.add(waitDsRead)
         else:
           if (kernel["UnrollMajorLDSB"] and not (kernel["ProblemType"]["DataTypeB"].isAnyFloat8() and kernel["ConvertAfterDS"])) and not kernel["UseF32XEmulation"]:
-            if iteration == 0 and i == (kernel["MIWaveTileA"] // kernel["numSubTiles"]):
+            # Complex products use four MFMAs before advancing B. Negations add
+            # scheduler slots, so waiting at index 4 also covers every conjugation.
+            secondWaitIndex = 4 if kernel["ProblemType"]["DataType"].isComplex() else kernel["MIWaveTileA"] // kernel["numSubTiles"]
+            if iteration == 0 and i == secondWaitIndex:
               # add 1 more waitcnt before using ds read data
               waitCode2 = deepcopy(waitCode)
               waitCode2.dscnt = localReadsIssuedInThisIter
