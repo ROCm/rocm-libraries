@@ -29,6 +29,7 @@
 #         [ENVIRONMENT <VAR=value>...]
 #         [INSTALL_ENVIRONMENT <VAR=value>...]
 #         [GTEST_FILTER <filter>...]
+#         [BENCHMARK_REFERENCE_SMOKE_FILTER <filter>]
 #     )
 #
 #   ``TARGET_NAME``
@@ -70,6 +71,16 @@
 #     with ``:`` to form the final filter string passed via ``--gtest_filter``.
 #     If omitted, all tests run. Patterns can be specified one per line for
 #     readability.
+#
+#   ``BENCHMARK_REFERENCE_SMOKE_FILTER``
+#     Optional Google Test filter for a small set of bundle tests. When
+#     provided, also register ``<TARGET_NAME>-benchmark-reference-smoke``,
+#     which runs those tests with ``--benchmark-reference`` and passes only
+#     when the run prints a reference-benchmark summary with at least one
+#     verified measurement and no failed test. A runner without a HIP device
+#     passes, as the binary skips itself there. The entry is staged for the
+#     install tree alongside the base test when ``INSTALL_SUBDIR`` is set;
+#     label it through the provider's CTest categories YAML.
 #
 #   ``TEST_CATEGORIES_YAML``
 #     Optional path to a GTest ``test_categories.yaml``. When provided, this
@@ -199,6 +210,101 @@ macro(_stage_external_integration_install_test)
     endif()
 endmacro()
 
+# What --benchmark-reference smoke output must and must not contain. No backslashes,
+# so the same text survives being written into the staged install-tree CTest file:
+# [[] and []] match a literal bracket. A device-less runner passes, as the binary
+# skips itself there.
+set(_HIPDNN_IT_REFERENCE_SMOKE_PASS
+    "[[] REFERENCE BENCHMARK SUMMARY []] reference=[a-z]+ measured=[1-9]|No HIP devices available")
+set(_HIPDNN_IT_REFERENCE_SMOKE_FAIL "[[]  FAILED  []]")
+
+# Registers the --benchmark-reference smoke test, and stages its install-tree entry
+# next to the base test's.
+#
+# PASS_REGULAR_EXPRESSION replaces the exit-code check, so FAIL_REGULAR_EXPRESSION
+# catches a failed test instead, and a crash before the summary prints fails on the
+# missing pass match.
+#
+# Uses the ARG_* variables parsed by add_external_integration_test_target() and the
+# install paths _stage_external_integration_install_test() computed.
+# ~~~
+macro(_add_benchmark_reference_smoke)
+    if(ARG_BENCHMARK_REFERENCE_SMOKE_FILTER)
+        set(_smoke_name "${ARG_TARGET_NAME}-benchmark-reference-smoke")
+        set(_smoke_labels "integration_test;external_integration_test;${_engine_label}")
+        set(_smoke_tail
+            "--gtest_filter=${ARG_BENCHMARK_REFERENCE_SMOKE_FILTER}" "--benchmark-reference"
+        )
+
+        set(_smoke_cmd
+            $<TARGET_FILE:hipdnn_integration_tests>
+            --test-article $<TARGET_FILE:${ARG_PLUGIN_TARGET}>
+            --test-engine ${ARG_ENGINE_NAME}
+        )
+        if(ARG_TEST_CONFIG)
+            list(APPEND _smoke_cmd "--test-config" "${ARG_TEST_CONFIG}")
+        endif()
+        list(APPEND _smoke_cmd ${_smoke_tail})
+        add_test(NAME ${_smoke_name} COMMAND ${_smoke_cmd})
+        set_tests_properties(${_smoke_name} PROPERTIES
+            LABELS "${_smoke_labels}"
+            PASS_REGULAR_EXPRESSION "${_HIPDNN_IT_REFERENCE_SMOKE_PASS}"
+            FAIL_REGULAR_EXPRESSION "${_HIPDNN_IT_REFERENCE_SMOKE_FAIL}"
+        )
+        if(ARG_ENVIRONMENT)
+            set_tests_properties(${_smoke_name} PROPERTIES ENVIRONMENT "${ARG_ENVIRONMENT}")
+        endif()
+        if(ARG_ENVIRONMENT_MODIFICATION)
+            set_tests_properties(${_smoke_name} PROPERTIES
+                ENVIRONMENT_MODIFICATION "${ARG_ENVIRONMENT_MODIFICATION}")
+        endif()
+        if(ARG_FIXTURES_REQUIRED)
+            set_tests_properties(${_smoke_name} PROPERTIES
+                FIXTURES_REQUIRED "${ARG_FIXTURES_REQUIRED}")
+        endif()
+
+        if(_install_bin)
+            set(_smoke_install_cmd
+                "add_test(\"${_smoke_name}\" \"${_install_bin}\" \"--test-article\" \"${_install_plugin}\" \"--test-engine\" \"${ARG_ENGINE_NAME}\""
+            )
+            if(ARG_TEST_CONFIG)
+                string(APPEND _smoke_install_cmd " \"--test-config\" \"${_install_config}\"")
+            endif()
+            foreach(_smoke_arg IN LISTS _smoke_tail)
+                string(APPEND _smoke_install_cmd " \"${_smoke_arg}\"")
+            endforeach()
+            string(APPEND _smoke_install_cmd ")\n")
+
+            set(_smoke_install_properties
+                "LABELS \"${_smoke_labels}\" PASS_REGULAR_EXPRESSION \"${_HIPDNN_IT_REFERENCE_SMOKE_PASS}\" FAIL_REGULAR_EXPRESSION \"${_HIPDNN_IT_REFERENCE_SMOKE_FAIL}\""
+            )
+            if(ARG_INSTALL_ENVIRONMENT)
+                set(_smoke_install_environment "${ARG_INSTALL_ENVIRONMENT}")
+            else()
+                set(_smoke_install_environment "${ARG_ENVIRONMENT}")
+            endif()
+            if(_smoke_install_environment)
+                string(REPLACE ";" "\\;" _smoke_install_environment
+                       "${_smoke_install_environment}")
+                string(APPEND _smoke_install_properties
+                       " ENVIRONMENT \"${_smoke_install_environment}\"")
+            endif()
+            string(APPEND _smoke_install_cmd
+                "set_tests_properties(\"${_smoke_name}\" PROPERTIES ${_smoke_install_properties})\n"
+            )
+
+            set(_smoke_staging_key "${ARG_INSTALL_SUBDIR}")
+            if(ARG_INSTALL_STAGING_KEY)
+                set(_smoke_staging_key "${ARG_INSTALL_STAGING_KEY}")
+            endif()
+            set_property(GLOBAL APPEND_STRING
+                PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_${_smoke_staging_key}"
+                "${_smoke_install_cmd}"
+            )
+        endif()
+    endif()
+endmacro()
+
 # Adds category-specific GTest-filtered CTest suites.
 #
 # Uses the ARG_* variables parsed by add_external_integration_test_target().
@@ -288,7 +394,7 @@ function(add_external_integration_test_target)
     cmake_parse_arguments(
         ARG
         ""
-        "TARGET_NAME;PLUGIN_TARGET;ENGINE_NAME;INSTALL_SUBDIR;TEST_CONFIG;REFERENCE_EXECUTOR;TEST_CATEGORIES_YAML;INSTALL_TEST_FILE;TEST_NAME_PREFIX;INSTALL_DESTINATION;INSTALL_STAGING_KEY"
+        "TARGET_NAME;PLUGIN_TARGET;ENGINE_NAME;INSTALL_SUBDIR;TEST_CONFIG;REFERENCE_EXECUTOR;TEST_CATEGORIES_YAML;INSTALL_TEST_FILE;TEST_NAME_PREFIX;INSTALL_DESTINATION;INSTALL_STAGING_KEY;BENCHMARK_REFERENCE_SMOKE_FILTER"
         "GTEST_FILTER;ENVIRONMENT;INSTALL_ENVIRONMENT;ENVIRONMENT_MODIFICATION;FIXTURES_REQUIRED"
         ${ARGN}
     )
@@ -357,5 +463,6 @@ function(add_external_integration_test_target)
     # can include this test in the installed CTestTestfile.cmake. Required for
     # CI flows that invoke ctest from the install tree (e.g. TheRock).
     _stage_external_integration_install_test()
+    _add_benchmark_reference_smoke()
     _add_external_integration_category_suites()
 endfunction()

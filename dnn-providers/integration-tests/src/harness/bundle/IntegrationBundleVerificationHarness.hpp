@@ -240,11 +240,13 @@ public:
         {
             reportBenchmark(*_benchmark);
         }
+        // An attempt still pending here ended in a throw that skipped the code that
+        // settles it, and reporting it as pending would read as "still running".
         for(auto& result : _referenceBenchmarks)
         {
-            if(result.status == "pending")
+            if(result.status == ReferenceBenchmarkStatus::PENDING)
             {
-                result.status = "error";
+                result.status = ReferenceBenchmarkStatus::ERRORED;
             }
             reportReferenceBenchmark(result);
         }

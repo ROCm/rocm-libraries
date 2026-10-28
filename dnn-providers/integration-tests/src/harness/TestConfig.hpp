@@ -498,12 +498,14 @@ public:
         return _captureDir.value();
     }
 
-    /// Set by --benchmark: how to time each verified graph. Empty when off.
+    /// Set by --benchmark-reference: time the reference of each bundle test.
     bool benchmarkReference() const
     {
+        throwIfNotInitialized();
         return _benchmarkReference;
     }
 
+    /// Set by --benchmark: how to time each verified graph. Empty when off.
     const std::optional<BenchmarkSettings>& benchmarkSettings() const
     {
         throwIfNotInitialized();

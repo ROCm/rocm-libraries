@@ -202,24 +202,32 @@ Each timed test prints one line:
 
 ### 5. Time the reference (`--benchmark-reference`)
 
-`--benchmark-reference` measures one normal reference invocation per test, without
-adding engine executions. It works independently of `--benchmark`, which times
+`--benchmark-reference` measures one normal reference invocation per bundle test,
+without adding engine executions. The engine still runs once and its output is
+still compared, so a mismatch fails the test as usual; only their cost is left
+out of the reference timing. It works independently of `--benchmark`, which times
 the engine. Both flags may be enabled together; engine warmup and timed
 iterations do not contribute to reference timings.
+
+The flag applies to bundle tests only. Tests built on the C++ graph harness are
+not measured: the `BUILD_CPP_GRAPH_TESTS` suites, which are being retired in
+favour of bundles, and the default-built `ConvForwardSerializeRoundTrip` and
+`ResampleBackward` tests. They run their reference as normal and print no
+`[ REFERENCE BENCHMARK ]` line. A bundle test whose engine declines or fails, or
+whose support claim stops it, never reaches a reference and records nothing.
 
 The metric is the incremental wall-clock cost of obtaining comparison-ready
 expected outputs:
 
 | Field | Includes |
 |---|---|
-| `prepare_ms` | Reference-specific tensor allocation and initialization, graph serialization, executor creation and applicability checking, variant-pack setup, and required input transfers. |
+| `prepare_ms` | Executor creation and applicability checking, reference output allocation, variant-pack setup, and any input transfer the reference needs. Inputs are shared with the engine, so filling or loading them is not included. Zero for golden outputs. |
 | `execute_ms` | CPU/GPU reference computation, or loading and constructing golden expected-output tensors from their blobs. |
 | `materialize_ms` | Making expected outputs available on the selected validator's host/device, including any required transfers. |
 | `total_ms` | Sum of the three phases. |
 
 Engine discovery, plan construction, engine execution, shared input generation
 and loading, engine-output transfers, and numerical comparison are excluded.
-Reference-specific setup that runs before the engine is still included.
 Outstanding engine work is synchronized before starting reference timing;
 reference device work is synchronized before stopping each phase. Synchronization
 errors fail the test rather than triggering reference fallback.
@@ -229,7 +237,8 @@ the reference needs it incurs no additional transfer. They include first-use
 reference initialization or compilation where it occurs, but are not a
 cold-cache or repeated-kernel microbenchmark. Golden output files are loaded
 separately from shared inputs when this flag is enabled; filesystem cache state
-affects their loading time.
+affects their loading time. An unreadable golden blob fails the test with the
+same `tensor data failed to load` message as without the flag.
 
 For example, compare batchnorm inference CPU and GPU references on MLOps with
 the same CPU validator, including the GPU reference's output download:
@@ -241,7 +250,6 @@ for reference in cpu gpu; do
     --test-engine HIP_MLOPS_ENGINE \
     --test-config /path/to/HIP_MLOPS_ENGINE.toml \
     --gtest_filter='*BatchnormForwardInference*:*BatchnormFwdInference*:*BatchnormInference*' \
-    --reference-executor "$reference" \
     --verification-mode "$reference" \
     --validator cpu \
     --benchmark-reference \
@@ -249,10 +257,9 @@ for reference in cpu gpu; do
 done
 ```
 
-`--reference-executor` selects the C++ graph reference;
-`--verification-mode` selects the bundle reference. Use
-`--verification-mode golden` for bundles with golden outputs. `auto` reports
-whichever oracle actually ran, including declined or errored fallback attempts.
+`--verification-mode` selects the reference. Use `--verification-mode golden`
+for bundles with golden outputs. `auto` reports whichever oracle actually ran,
+including declined or errored fallback attempts.
 
 Each attempted reference prints `[ REFERENCE BENCHMARK ]` with `reference`,
 `status`, and `validator`. Completed measurements include `samples=1` and the
@@ -267,6 +274,13 @@ no verified measurements explicitly reports `measured=0`. Compare matching,
 verified test names only; skipped or failed tests do not establish a speedup.
 Repeat separate CPU/GPU invocations with distinct output files to estimate
 variance, and keep validator placement and input-fill settings identical.
+
+Two CTest checks cover the flag. `hipdnn_integration_tests_benchmark_reference_refusal`
+needs no plugin and checks a refused combination. A provider lane that passes
+`BENCHMARK_REFERENCE_SMOKE_FILTER` to `add_external_integration_test_target()`
+gets `<lane>-benchmark-reference-smoke`, which runs that filter with the flag on
+and fails unless at least one reference is verified and measured. The MIOpen
+lane runs `quick_BatchnormFwdInference_Inference.*` this way in the quick tier.
 
 ### The build reads a copy of the bundles
 
@@ -298,7 +312,7 @@ Otherwise, you test the old tree.
 | `--benchmark` | | off | Time each verified test. See [Time the engine](#4-time-the-engine---benchmark). |
 | `--benchmark-iterations` | | 20 | Timed executions per test. Requires `--benchmark`. |
 | `--benchmark-warmup` | | 30 | Untimed executions before timing. Requires `--benchmark`. |
-| `--benchmark-reference` | | off | Time reference preparation, compute or golden-output loading, and expected-output transfers. See [Time the reference](#5-time-the-reference---benchmark-reference). |
+| `--benchmark-reference` | | off | Time each bundle test's reference: preparation, compute or golden-output loading, and expected-output transfers. See [Time the reference](#5-time-the-reference---benchmark-reference). |
 | `--gtest_*` | | | Passed through to GTest. |
 
 The binary refuses these flag combinations (exit 1):
@@ -310,11 +324,9 @@ The binary refuses these flag combinations (exit 1):
   (`--golden-data-dir` or `HIPDNN_TEST_GOLDEN_DATA_DIR`).
 - `--benchmark-iterations` or `--benchmark-warmup` without `--benchmark`, or
   `--benchmark-iterations` less than 1, or `--benchmark-warmup` less than 0.
-- `--benchmark` together with `--skip-graph-validation`, `--capture-bundles`
-  or `--write-support-claims`. These modes do not execute the graph.
-- `--benchmark-reference` together with `--skip-graph-validation`,
-  `--capture-bundles` or `--write-support-claims`. These modes do not execute
-  the reference.
+- `--benchmark` or `--benchmark-reference` together with
+  `--skip-graph-validation`, `--capture-bundles` or `--write-support-claims`.
+  These modes do not execute the graph or the reference.
 
 `--enforce-support-claims=false` is accepted in every combination. If
 enforcement is only inherited and there is no `--test-engine`, the run
