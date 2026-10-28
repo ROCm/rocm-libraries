@@ -104,6 +104,9 @@ struct BlockFmhaPipelineQRKSVSTdm
     // fp8 double-buffer K/V loads pack their TDM descriptor in SGPRs (load_tile_tdm_uniform):
     // the strides are taken once before the loop instead of riding a VGPR through it.
     static constexpr bool kUniformTdmLoad = is_any_of<KDataType, fp8_t, bf8_t>::value;
+    // fp8 O goes to global through LDS and one TDM store per wave (the kernel's tdm_store_2d),
+    // so no per-lane O address is carried through the mainloop.
+    static constexpr bool kTdmOStore = is_any_of<KDataType, fp8_t, bf8_t>::value;
 
     static constexpr bool kStoreLSE        = Problem::kStoreLSE;
     static constexpr bool kHasUnevenSplits = true;

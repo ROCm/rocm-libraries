@@ -214,6 +214,67 @@ template <typename Epilogue>
 inline constexpr bool is_tdm_epilogue_v =
     impl::is_tdm_epilogue(static_cast<const remove_cvref_t<Epilogue>*>(nullptr));
 
+/// LDS row pitch of tdm_store_2d: one 16 B pad per row, so the 16 rows a WMMA C fragment spans
+/// start on distinct bank groups.
+template <typename ODataType, index_t kNPerBlock>
+CK_TILE_HOST_DEVICE constexpr index_t tdm_store_2d_row_pitch()
+{
+    static_assert(16 % sizeof(ODataType) == 0, "rows are padded by one 16 B vector");
+    return kNPerBlock + 16 / sizeof(ODataType);
+}
+
+template <typename ODataType, index_t kMPerBlock, index_t kNPerBlock>
+CK_TILE_HOST_DEVICE constexpr index_t tdm_store_2d_smem_bytes()
+{
+    return kMPerBlock * tdm_store_2d_row_pitch<ODataType, kNPerBlock>() * sizeof(ODataType);
+}
+
+/// One-tile sibling of tdm_store_2d_pair: stage acc_tile in padded LDS rows, then each wave
+/// stores whole rows with one TDM store. The TDM reads LDS densely, so its box spans the pad;
+/// the store drops the columns past the tensor width. p_smem holds tdm_store_2d_smem_bytes()
+/// and may still be read by in-flight LDS loads of the caller; the leading barrier retires them.
+template <typename ODataType,
+          index_t kBlockSize,
+          index_t kMPerBlock,
+          index_t kNPerBlock,
+          typename DramWindow,
+          typename AccTile>
+CK_TILE_DEVICE void tdm_store_2d(DramWindow& dram_window, const AccTile& acc_tile, void* p_smem)
+{
+    constexpr index_t kPitch = tdm_store_2d_row_pitch<ODataType, kNPerBlock>();
+
+    const auto in_lds = make_tensor_view<address_space_enum::lds>(
+        static_cast<ODataType*>(p_smem),
+        make_naive_tensor_descriptor(make_tuple(number<kMPerBlock>{}, number<kNPerBlock>{}),
+                                     make_tuple(number<kPitch>{}, number<1>{}),
+                                     number<16 / sizeof(ODataType)>{},
+                                     number<1>{}));
+    const auto out_lds = impl::tdm_row_major_lds_view<ODataType, kMPerBlock, kPitch>(p_smem);
+
+    auto in   = make_tile_window(in_lds,
+                               make_tuple(number<kMPerBlock>{}, number<kNPerBlock>{}),
+                                 {0, 0},
+                               acc_tile.get_tile_distribution());
+    auto out  = make_tile_window(out_lds,
+                                make_tuple(number<kMPerBlock>{}, number<kPitch>{}),
+                                 {0, 0},
+                                impl::tdm_wave_linear_distr<kBlockSize, kMPerBlock, kPitch>());
+    auto dram = make_tile_window(dram_window.get_bottom_tensor_view(),
+                                 make_tuple(number<kMPerBlock>{}, number<kPitch>{}),
+                                 dram_window.get_window_origin());
+
+    TDMConfig tdm_config;
+
+    s_wait_tensorcnt_barrier<0 /*tensorcnt*/, 0 /*lgkmcnt*/>();
+
+    store_tile(in, cast_tile_pk<ODataType>(acc_tile));
+    block_sync_lds();
+
+    store_tile_tdm(tdm_config, dram, out);
+    // The store reads p_smem asynchronously; retire it before the workgroup's LDS is released.
+    s_wait_tensorcnt();
+}
+
 template <typename ODataType,
           index_t kBlockSize,
           index_t kMPerBlock,

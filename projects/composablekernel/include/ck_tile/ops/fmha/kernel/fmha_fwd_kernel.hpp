@@ -5,6 +5,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common.hpp"
+#include "ck_tile/ops/epilogue/tdm_epilogue.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/block/variants.hpp"
@@ -47,6 +48,20 @@ struct uses_qr_tdm_lds_arena<Pipeline, std::void_t<decltype(Pipeline::kUsesLdsAr
 
 template <typename Pipeline>
 inline constexpr bool uses_qr_tdm_lds_arena_v = uses_qr_tdm_lds_arena<Pipeline>::value;
+
+template <typename Pipeline, typename = void>
+struct uses_tdm_o_store : std::false_type
+{
+};
+
+template <typename Pipeline>
+struct uses_tdm_o_store<Pipeline, std::void_t<decltype(Pipeline::kTdmOStore)>>
+    : std::bool_constant<Pipeline::kTdmOStore>
+{
+};
+
+template <typename Pipeline>
+inline constexpr bool uses_tdm_o_store_v = uses_tdm_o_store<Pipeline>::value;
 
 // A helper struct for detecting n0loop
 template <typename T, typename = void>
@@ -3469,7 +3484,35 @@ struct FmhaFwdKernel
                     return FmhaPipeline{}(static_cast<decltype(args)&&>(args)...);
             };
 
-            auto o_acc_tile = [&]() {
+            // Oacc DRAM and Oacc DRAM window
+            auto make_o_dram_window = [&] {
+                const auto o_dram_naive = make_naive_tensor_view<address_space_enum::global>(
+                    o_ptr,
+                    make_tuple(kargs.seqlen_q, kargs.hdim_v),
+                    make_tuple(kargs.stride_o, 1),
+                    number<FmhaPipeline::kAlignmentOacc>{},
+                    number<1>{});
+                const auto o_dram = pad_tensor_view(
+                    o_dram_naive,
+                    make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN1>{}),
+                    sequence<kPadSeqLenQ, kPadHeadDimV>{});
+                return make_tile_window(
+                    o_dram,
+                    make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN1>{}),
+                    {i_m0, i_n1});
+            };
+
+            // fp8 qr_tdm stages O in its LDS arena, free once the pipeline returns, and writes
+            // it out with one TDM store per wave.
+            constexpr bool kTdmOStore = detail::uses_qr_tdm_lds_arena_v<FmhaPipeline> &&
+                                        detail::uses_tdm_o_store_v<FmhaPipeline>;
+            auto store_o_through_arena = [&](const auto& o_acc, void* smem_arena) {
+                auto o_dram_window = make_o_dram_window();
+                tdm_store_2d<ODataType, kBlockSize, FmhaPipeline::kM0, FmhaPipeline::kN1>(
+                    o_dram_window, o_acc, smem_arena);
+            };
+
+            [[maybe_unused]] auto o_acc_tile = [&]() {
                 if constexpr(PrefillCase)
                 {
                     if constexpr(kUsesFixedSegmentedLdsArena)
@@ -3495,17 +3538,25 @@ struct FmhaFwdKernel
                     {
                         using Layout = typename FmhaPipeline::Policy::template LdsArenaLayout<
                             typename FmhaPipeline::Problem>;
+                        static_assert(!kTdmOStore || tdm_store_2d_smem_bytes<ODataType,
+                                                                             FmhaPipeline::kM0,
+                                                                             FmhaPipeline::kN1>() <=
+                                                         Layout::kArenaBytes,
+                                      "the padded O tile must fit the pipeline's LDS arena");
                         alignas(256) __shared__ char smem_arena[Layout::kArenaBytes];
-                        return invoke_fmha_pipeline(q_dram_window,
-                                                    k_dram_window,
-                                                    v_dram_window,
-                                                    bias_dram_window,
-                                                    lse_dram_window,
-                                                    mask,
-                                                    position_encoding,
-                                                    scale_s,
-                                                    sink_value,
-                                                    smem_arena);
+                        auto o_acc = invoke_fmha_pipeline(q_dram_window,
+                                                          k_dram_window,
+                                                          v_dram_window,
+                                                          bias_dram_window,
+                                                          lse_dram_window,
+                                                          mask,
+                                                          position_encoding,
+                                                          scale_s,
+                                                          sink_value,
+                                                          smem_arena);
+                        if constexpr(kTdmOStore)
+                            store_o_through_arena(o_acc, smem_arena);
+                        return o_acc;
                     }
                     else
                     {
@@ -3543,17 +3594,25 @@ struct FmhaFwdKernel
                     {
                         using Layout = typename FmhaPipeline::Policy::template LdsArenaLayout<
                             typename FmhaPipeline::Problem>;
+                        static_assert(!kTdmOStore || tdm_store_2d_smem_bytes<ODataType,
+                                                                             FmhaPipeline::kM0,
+                                                                             FmhaPipeline::kN1>() <=
+                                                         Layout::kArenaBytes,
+                                      "the padded O tile must fit the pipeline's LDS arena");
                         alignas(256) __shared__ char smem_arena[Layout::kArenaBytes];
-                        return invoke_fmha_pipeline(q_dram_window,
-                                                    k_dram_window,
-                                                    v_dram_window,
-                                                    bias_dram_window,
-                                                    lse_dram_window,
-                                                    mask,
-                                                    position_encoding,
-                                                    scale_s,
-                                                    smem_arena,
-                                                    sink_value);
+                        auto o_acc = invoke_fmha_pipeline(q_dram_window,
+                                                          k_dram_window,
+                                                          v_dram_window,
+                                                          bias_dram_window,
+                                                          lse_dram_window,
+                                                          mask,
+                                                          position_encoding,
+                                                          scale_s,
+                                                          smem_arena,
+                                                          sink_value);
+                        if constexpr(kTdmOStore)
+                            store_o_through_arena(o_acc, smem_arena);
+                        return o_acc;
                     }
                     else
                     {
@@ -3572,30 +3631,11 @@ struct FmhaFwdKernel
                 }
             }();
 
-            // Oacc DRAM and Oacc DRAM window
-            auto o_dram = [&] {
-                const auto o_dram_naive = [&] {
-                    {
-                        return make_naive_tensor_view<address_space_enum::global>(
-                            o_ptr,
-                            make_tuple(kargs.seqlen_q, kargs.hdim_v),
-                            make_tuple(kargs.stride_o, 1),
-                            number<FmhaPipeline::kAlignmentOacc>{},
-                            number<1>{});
-                    }
-                }();
-
-                return pad_tensor_view(
-                    o_dram_naive,
-                    make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN1>{}),
-                    sequence<kPadSeqLenQ, kPadHeadDimV>{});
-            }();
-
-            auto o_dram_window = make_tile_window(
-                o_dram,
-                make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN1>{}),
-                {i_m0, i_n1});
-            EpiloguePipeline{}(o_dram_window, o_acc_tile, nullptr);
+            if constexpr(!kTdmOStore)
+            {
+                auto o_dram_window = make_o_dram_window();
+                EpiloguePipeline{}(o_dram_window, o_acc_tile, nullptr);
+            }
         }
     }
 };
