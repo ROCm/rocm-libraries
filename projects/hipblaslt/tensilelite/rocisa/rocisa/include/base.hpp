@@ -131,8 +131,10 @@ namespace rocisa
             std::vector<std::map<std::string, int>> asmCaps(isaVersions.size());
             std::vector<std::exception_ptr>         errors(isaVersions.size());
             {
-                nb::gil_scoped_release   release;
-                std::vector<std::thread> threads;
+                nb::gil_scoped_release release;
+                // jthread joins on destruction, so the probes already started are
+                // joined even if starting a later thread throws.
+                std::vector<std::jthread> threads;
                 for(size_t i = 0; i < isaVersions.size(); ++i)
                     threads.emplace_back([&, i]() {
                         try
@@ -144,8 +146,6 @@ namespace rocisa
                             errors[i] = std::current_exception();
                         }
                     });
-                for(auto& t : threads)
-                    t.join();
             }
             for(auto& e : errors)
                 if(e)
