@@ -33,6 +33,7 @@
 #include <miopen/solver/problem_description_interpreter.hpp>
 #include <miopen/datatype.hpp>
 #include <miopen/solver/zero_tensor.hpp>
+#include <algorithm>
 #include <ostream>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT_NAIVE_USE_PACKED_KERNELS);
@@ -49,11 +50,21 @@ using ProblemDescription = miopen::conv::ProblemDescription;
 constexpr size_t NAIVE_CONV_BLOCK_SIZE = 256;
 
 // Minimum spatial work (n * ho * wo, or n * do * ho * wo for 3D) before WRW
-// enables cross-block tiling with atomicAdd. Below this threshold, a single
+// enables cross-block tiling. Below this threshold, a single
 // block per filter position is sufficient and avoids the cost of zeroing the
 // weight buffer and atomic contention. 262144 = 1024 * 256, roughly the point
 // where one block can no longer cover the spatial dimension in its thread-loop.
 constexpr size_t WRW_SPATIAL_TILING_THRESHOLD = 262144;
+
+// Limits for deterministic WRW tiling. Each tile writes its partial sums to its own
+// workspace slice (one fp32 value for each weight element). A second kernel adds the
+// slices in a fixed order. More tiles than this do not make the kernel faster, and the
+// workspace must stay small.
+constexpr size_t WRW_DETERMINISTIC_MAX_TILES     = 2048;
+constexpr size_t WRW_DETERMINISTIC_MAX_WORKSPACE = size_t{256} << 20;
+
+// The name of the kernel that adds the deterministic WRW workspace slices.
+constexpr const char* WRW_TILE_REDUCE_KERNEL_NAME = "naive_conv_wrw_tile_reduce_float";
 
 // The fp8 naive conv path lives in a separate source file. The BWD-data block-size
 // heuristic special-cases it (see NaiveConv2DBWDBlockSize), and the invoker uses it
@@ -130,6 +141,59 @@ bool IsOutputInt32(const ProblemDescription& problem)
 {
     return problem.GetInDataType() == miopenInt8 && problem.GetWeightsDataType() == miopenInt8 &&
            problem.GetOutDataType() == miopenInt32;
+}
+
+// Number of spatial tiles (gridDim.y) for the WRW kernel. 1 means no tiling.
+//
+// Cross-block WRW tiling gives each tile-block (blockIdx.y) a part of the N*(Do)*Ho*Wo
+// reduction. Only fp32 output is tiled: naive_atomic_add<float> (naive_conv.hpp) forwards to
+// hardware atomicAdd. Everything else is excluded:
+//  - int32 (int8-input) and fp8: unimplemented — no naive_atomic_add<int32_t> overload
+//    (would race), and fp8_naive_conv.cpp never reads gridDim.y.
+//  - fp16/bf16: implemented but unsafe — CAS-based atomicAdd rounds to 16-bit per block,
+//    causing catastrophic cancellation once the running sum is large.
+// IsOutputFp32 also matches int8-in/int8-weights/float-out, so !IsAccInt32 must stay too.
+//
+// Non-deterministic mode: one tile for each NAIVE_CONV_BLOCK_SIZE positions. The tiles add
+// their sums into the weights with atomicAdd. The order of the adds changes from run to run,
+// and fp32 addition is not associative, thus the result is not reproducible bit for bit.
+//
+// Deterministic mode: the kernel is compiled with MIOPEN_NAIVE_WRW_TILE_WS=1. Each tile
+// writes its sums to its own workspace slice, and a second kernel adds the slices in a fixed
+// order. This requires packed weights (the slice uses the weight layout). The tile count is
+// limited by WRW_DETERMINISTIC_MAX_TILES and WRW_DETERMINISTIC_MAX_WORKSPACE. If fewer than
+// two tiles are possible, the kernel does not tile, and each thread adds all terms in order.
+static size_t WrwSpatialTileCount(const ExecutionContext& ctx, const ProblemDescription& problem)
+{
+    const size_t spatial = static_cast<size_t>(ProblemInterpreter::GetBatchN(problem)) *
+                           (problem.Is3d() ? ProblemInterpreter::GetOutputDepthDo(problem) : 1) *
+                           ProblemInterpreter::GetOutputHeightHo(problem) *
+                           ProblemInterpreter::GetOutputWidthWo(problem);
+    if(IsAccInt32(problem) || !IsOutputFp32(problem) || spatial <= WRW_SPATIAL_TILING_THRESHOLD)
+        return 1;
+
+    const size_t tiles = (spatial + NAIVE_CONV_BLOCK_SIZE - 1) / NAIVE_CONV_BLOCK_SIZE;
+    if(!problem.GetConv().attribute.deterministic)
+        return tiles;
+
+    if(ConvDirectNaiveConvIsAssemblyKernel(ctx, problem) || !problem.GetWeights().IsPacked())
+        return 1;
+    const size_t slice_bytes = problem.GetWeights().GetElementSize() * sizeof(float);
+    const size_t det_tiles   = std::min({tiles,
+                                       WRW_DETERMINISTIC_MAX_TILES,
+                                       WRW_DETERMINISTIC_MAX_WORKSPACE / slice_bytes});
+    return det_tiles < 2 ? 1 : det_tiles;
+}
+
+size_t ConvDirectNaiveConvWrwWorkspaceSize(const ExecutionContext& ctx,
+                                           const ProblemDescription& problem)
+{
+    if(!problem.GetConv().attribute.deterministic)
+        return 0;
+    const size_t tiles = WrwSpatialTileCount(ctx, problem);
+    if(tiles < 2)
+        return 0;
+    return tiles * problem.GetWeights().GetElementSize() * sizeof(float);
 }
 
 std::string ConvDirectNaiveConvKernelName(const ProblemDescription& problem)
@@ -850,6 +914,31 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     return result;
 }
 
+// Deterministic WRW tiling: the kernel that adds the workspace slices in a fixed order and
+// applies alpha and beta. It uses the same file and options as the WRW kernel.
+static KernelInfo MakeWrwTileReduceKernel(const KernelInfo& wrw_kernel, size_t wei_elems)
+{
+    KernelInfo reduce;
+    reduce.kernel_file  = wrw_kernel.kernel_file;
+    reduce.kernel_name  = WRW_TILE_REDUCE_KERNEL_NAME;
+    reduce.comp_options = wrw_kernel.comp_options;
+    const size_t blocks =
+        std::min<size_t>((wei_elems + NAIVE_CONV_BLOCK_SIZE - 1) / NAIVE_CONV_BLOCK_SIZE, 1024);
+    reduce.g_wk = {blocks * NAIVE_CONV_BLOCK_SIZE, 1, 1};
+    reduce.l_wk = {NAIVE_CONV_BLOCK_SIZE, 1, 1};
+    return reduce;
+}
+
+static Data_t GetWrwTileWorkspace(const miopen::conv::WrWInvokeParams& params, size_t ws_size)
+{
+    if(params.workSpace == nullptr || params.workSpaceSize < ws_size)
+        MIOPEN_THROW("ConvDirectNaiveConvWrw: not enough workspace for deterministic tiling. "
+                     "Required: " +
+                     std::to_string(ws_size) +
+                     ", provided: " + std::to_string(params.workSpaceSize));
+    return params.workSpace;
+}
+
 ::miopen::solver::ConvSolution
 GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem)
 {
@@ -877,18 +966,9 @@ GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     size_t block_size = NAIVE_CONV_BLOCK_SIZE;
     size_t grid_size  = static_cast<size_t>(k);
 
-    // Cross-block WRW tiling accumulates partial sums into the weight buffer via atomicAdd
-    // across gridDim.y tile-blocks. Only fp32 is safe: naive_atomic_add<float> (naive_conv.hpp)
-    // forwards to hardware atomicAdd, exact, no rounding. Everything else is excluded:
-    //  - int32 (int8-input) and fp8: unimplemented — no naive_atomic_add<int32_t> overload
-    //    (would race), and fp8_naive_conv.cpp never reads gridDim.y.
-    //  - fp16/bf16: implemented but unsafe — CAS-based atomicAdd rounds to 16-bit per block,
-    //    causing catastrophic cancellation once the running sum is large.
-    // IsOutputFp32 also matches int8-in/int8-weights/float-out, so !IsAccInt32 must stay too.
-    size_t spatial           = static_cast<size_t>(n) * ho * wo;
-    size_t num_spatial_tiles = 1;
-    if(!IsAccInt32(problem) && IsOutputFp32(problem) && spatial > WRW_SPATIAL_TILING_THRESHOLD)
-        num_spatial_tiles = (spatial + block_size - 1) / block_size;
+    // See WrwSpatialTileCount for the tiling and for deterministic mode.
+    const size_t num_spatial_tiles = WrwSpatialTileCount(ctx, problem);
+    const size_t ws_size           = ConvDirectNaiveConvWrwWorkspaceSize(ctx, problem);
 
     KernelInfo kernel;
 
@@ -907,6 +987,9 @@ GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     const auto is_f8 = (kernel.kernel_file == FP8_NAIVE_CONV_KERNEL_FILE);
 
     kernel.comp_options = ConvDirectNaiveConvCompileOption(ctx, problem);
+    if(ws_size > 0)
+        kernel.comp_options += " -DMIOPEN_NAIVE_WRW_TILE_WS=1";
+    const size_t wei_elems = problem.GetWeights().GetElementSize();
 
     int G_stride_idx = GetGroupStrideIndex(problem);
 
@@ -957,7 +1040,12 @@ GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
                 double beta_val  = data_ctx.beta.GetAsDouble();
 
                 auto kern_copy = kern;
-                if(num_spatial_tiles > 1)
+                Data_t wei_buf = tensors.dw;
+                if(ws_size > 0)
+                {
+                    wei_buf = GetWrwTileWorkspace(data_ctx, ws_size);
+                }
+                else if(num_spatial_tiles > 1)
                 {
                     if(alpha_val == 1.0 && beta_val == 0.0)
                     {
@@ -974,7 +1062,7 @@ GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
                 }
 
                 handle.Run(kern_copy)(tensors.x,
-                                      tensors.dw,
+                                      wei_buf,
                                       alpha_val,
                                       beta_val,
                                       tensors.dy,
@@ -997,6 +1085,18 @@ GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
                                       fy,
                                       fx,
                                       group);
+
+                if(ws_size > 0)
+                {
+                    if(handle.IsProfilingEnabled())
+                        elapsed += handle.GetKernelTime();
+                    handle.Run(kernels[1])(data_ctx.workSpace,
+                                           tensors.dw,
+                                           wei_elems,
+                                           static_cast<int>(num_spatial_tiles),
+                                           alpha_val,
+                                           beta_val);
+                }
             }
             if(handle.IsProfilingEnabled())
                 elapsed += handle.GetKernelTime();
@@ -1009,6 +1109,11 @@ GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     };
 
     result.construction_params.push_back(kernel);
+    if(ws_size > 0)
+    {
+        result.construction_params.push_back(MakeWrwTileReduceKernel(kernel, wei_elems));
+        result.workspace_sz = ws_size;
+    }
     return result;
 }
 
@@ -1045,11 +1150,9 @@ GetConv3DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     size_t block_size = NAIVE_CONV_BLOCK_SIZE;
     size_t grid_size  = static_cast<size_t>(k);
 
-    // Cross-block spatial tiling for WRW — see 2D WRW comment for details.
-    size_t spatial           = static_cast<size_t>(n) * do_ * ho * wo;
-    size_t num_spatial_tiles = 1;
-    if(!IsAccInt32(problem) && IsOutputFp32(problem) && spatial > WRW_SPATIAL_TILING_THRESHOLD)
-        num_spatial_tiles = (spatial + block_size - 1) / block_size;
+    // See WrwSpatialTileCount for the tiling and for deterministic mode.
+    const size_t num_spatial_tiles = WrwSpatialTileCount(ctx, problem);
+    const size_t ws_size           = ConvDirectNaiveConvWrwWorkspaceSize(ctx, problem);
 
     KernelInfo kernel;
 
@@ -1066,6 +1169,9 @@ GetConv3DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     kernel.l_wk.push_back(1);
 
     kernel.comp_options = ConvDirectNaiveConvCompileOption(ctx, problem);
+    if(ws_size > 0)
+        kernel.comp_options += " -DMIOPEN_NAIVE_WRW_TILE_WS=1";
+    const size_t wei_elems = problem.GetWeights().GetElementSize();
 
     int G_stride_idx = GetGroupStrideIndex(problem);
 
@@ -1087,7 +1193,12 @@ GetConv3DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
             double beta_val  = data_ctx.beta.GetAsDouble();
 
             auto kern_copy = kern;
-            if(num_spatial_tiles > 1)
+            Data_t wei_buf = tensors.dw;
+            if(ws_size > 0)
+            {
+                wei_buf = GetWrwTileWorkspace(data_ctx, ws_size);
+            }
+            else if(num_spatial_tiles > 1)
             {
                 if(alpha_val == 1.0 && beta_val == 0.0)
                 {
@@ -1104,7 +1215,7 @@ GetConv3DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
             }
 
             handle.Run(kern_copy)(tensors.x,
-                                  tensors.dw,
+                                  wei_buf,
                                   alpha_val,
                                   beta_val,
                                   tensors.dy,
@@ -1134,6 +1245,18 @@ GetConv3DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
                                   fx,
                                   group);
 
+            if(ws_size > 0)
+            {
+                if(handle.IsProfilingEnabled())
+                    elapsed += handle.GetKernelTime();
+                handle.Run(kernels[1])(data_ctx.workSpace,
+                                       tensors.dw,
+                                       wei_elems,
+                                       static_cast<int>(num_spatial_tiles),
+                                       alpha_val,
+                                       beta_val);
+            }
+
             if(handle.IsProfilingEnabled())
                 elapsed += handle.GetKernelTime();
             if(handle.IsProfilingEnabled())
@@ -1144,6 +1267,11 @@ GetConv3DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
         };
     };
     result.construction_params.push_back(kernel);
+    if(ws_size > 0)
+    {
+        result.construction_params.push_back(MakeWrwTileReduceKernel(kernel, wei_elems));
+        result.workspace_sz = ws_size;
+    }
     return result;
 }
 
