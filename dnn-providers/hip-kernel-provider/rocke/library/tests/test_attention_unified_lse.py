@@ -166,6 +166,20 @@ def test_gfx942_4warp_cohort_is_ineligible_when_lse_is_on():
     assert au._gfx942_4warp_route(replace(swa, emit_lse=True), "gfx942") is None
 
 
+def test_gfx942_4warp_builder_refuses_an_lse_spec():
+    """The last gate: a spec built directly (no runner, no dispatcher) with
+    emit_lse=True must not become a 4-warp kernel that has no LSE store."""
+    from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
+
+    d256 = _problem(
+        total_q=256, num_seqs=1, max_seqlen_q=256, max_seqlen_k=256, head_size=256
+    )
+    spec = au._tiled_spec_from_problem(d256, "gfx942")
+    assert "lse" not in build_gfx942_4warp_gqa(spec, arch="gfx942").name
+    with pytest.raises(NotImplementedError, match="4-warp GQA builder"):
+        build_gfx942_4warp_gqa(replace(spec, emit_lse=True), arch="gfx942")
+
+
 def test_split_kv_gate_declines_lse_off_cdna3_cdna4():
     ok, why = au.supports_native_unified_attention_3d_tiled(
         _problem(emit_lse=True), "gfx1250"
@@ -258,7 +272,7 @@ def test_attn_signature_appends_lse_last():
     on = [p["name"] for p in au._attn_signature("bf16", emit_lse=True, **kw)]
     assert on == off + ["lse_ptr"]
     assert off[-1] == "qq_bias_stride_0"
-    # #13120: the additive-bias params come after qq_bias_stride_0; lse_ptr
+    # The additive-bias params come after qq_bias_stride_0; lse_ptr
     # stays last, after them, matching the gfx950 kernel's declaration order.
     kw["include_additive_bias"] = True
     off = [p["name"] for p in au._attn_signature("bf16", **kw)]
@@ -582,7 +596,7 @@ def test_runner_refuses_lse_for_a_gfx942_4warp_tuning_spec(runner):
 
 
 def test_runner_validates_the_2d_lse_buffer_with_the_shared_overlap_set(runner):
-    """#13120: the LSE buffer must not overlap the additive bias either. The
+    """The LSE buffer must not overlap the additive bias either. The
     runner calls validate_unified_lse (_check_lse_buffer) once, before any
     path is chosen, so the tiled 2D path reuses it rather than adding its own."""
     lse = object()

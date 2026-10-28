@@ -6155,8 +6155,13 @@ def build_gfx942_4warp_gqa(
 ) -> KernelDef:
     """Emit the gfx942 4-warp GQA D256 paged-attention ``KernelDef``."""
     from ..common.attention_arch import require_tiled_attention_arch
+    from ..common.attention_unified import _GFX942_4WARP_LSE_REFUSAL
 
     require_tiled_attention_arch(arch)
+    if spec.emit_lse:
+        # This body has no LSE store; refuse rather than build a kernel that
+        # carries the "lse" name but takes no lse_ptr and writes nothing.
+        raise NotImplementedError(_GFX942_4WARP_LSE_REFUSAL)
     if spec.use_i64_kv_addr:
         # K/V are i32 element offsets. Refuse rather than emit an i32 kernel
         # under a spec that claims i64; dispatch keeps the flag off through
