@@ -283,6 +283,77 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
         "Error: COO format is not supported");
     verify_hipsparse_status_success(hipsparseDestroySpMat(A_coo), "success");
 
+    // Half precision is rejected while reading the scalars in hipsparseSpGEAM_nnz and
+    // hipsparseSpGEAM. bufferSize does not take that path.
+#if !defined(CUDART_VERSION)
+    hipsparseSpMatDescr_t A_f16, B_f16, C_f16;
+    verify_hipsparse_status_success(hipsparseCreateCsr(&A_f16,
+                                                       m,
+                                                       n,
+                                                       nnz_A,
+                                                       dcsr_row_ptr_A,
+                                                       dcsr_col_ind_A,
+                                                       dcsr_val_A,
+                                                       idxType,
+                                                       idxType,
+                                                       idxBase,
+                                                       HIP_R_16F),
+                                    "success");
+    verify_hipsparse_status_success(hipsparseCreateCsr(&B_f16,
+                                                       m,
+                                                       n,
+                                                       nnz_B,
+                                                       dcsr_row_ptr_B,
+                                                       dcsr_col_ind_B,
+                                                       dcsr_val_B,
+                                                       idxType,
+                                                       idxType,
+                                                       idxBase,
+                                                       HIP_R_16F),
+                                    "success");
+    verify_hipsparse_status_success(hipsparseCreateCsr(&C_f16,
+                                                       m,
+                                                       n,
+                                                       nnz_C,
+                                                       dcsr_row_ptr_C,
+                                                       dcsr_col_ind_C,
+                                                       dcsr_val_C,
+                                                       idxType,
+                                                       idxType,
+                                                       idxBase,
+                                                       HIP_R_16F),
+                                    "success");
+    verify_hipsparse_status_not_supported(hipsparseSpGEAM_nnz(handle,
+                                                              transA,
+                                                              transB,
+                                                              &alpha,
+                                                              A_f16,
+                                                              &beta,
+                                                              B_f16,
+                                                              C_f16,
+                                                              HIP_R_16F,
+                                                              alg,
+                                                              descr,
+                                                              dbuf),
+                                          "Error: f16 is not supported");
+    verify_hipsparse_status_not_supported(hipsparseSpGEAM(handle,
+                                                          transA,
+                                                          transB,
+                                                          &alpha,
+                                                          A_f16,
+                                                          &beta,
+                                                          B_f16,
+                                                          C_f16,
+                                                          HIP_R_16F,
+                                                          alg,
+                                                          descr,
+                                                          dbuf),
+                                          "Error: f16 is not supported");
+    verify_hipsparse_status_success(hipsparseDestroySpMat(A_f16), "success");
+    verify_hipsparse_status_success(hipsparseDestroySpMat(B_f16), "success");
+    verify_hipsparse_status_success(hipsparseDestroySpMat(C_f16), "success");
+#endif
+
     verify_hipsparse_status_success(hipsparseDestroySpMat(A), "success");
     verify_hipsparse_status_success(hipsparseDestroySpMat(B), "success");
     verify_hipsparse_status_success(hipsparseDestroySpMat(C), "success");
