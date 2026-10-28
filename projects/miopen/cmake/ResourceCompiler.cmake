@@ -35,7 +35,9 @@ set(MIOPEN_WINDOWS_SDK_ROOT
 
 set(MIOPEN_RC_PROBE_DIR "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/miopen-rc-probe")
 # /nologo suppresses the resource compiler's two-line banner, which would otherwise print on every
-# .rc compile. Accepted by both Microsoft rc.exe and llvm-rc.
+# .rc compile. Only affects this rule, i.e. the SDK rc.exe fallback below; a build that keeps the
+# rule CMake selected (the CMakeRCInformation.cmake default, or the llvm-rc two-stage rule) still
+# gets whatever banner that compiler emits.
 set(MIOPEN_RC_SINGLE_STAGE_RULE
     "<CMAKE_RC_COMPILER> /nologo <DEFINES> <INCLUDES> <FLAGS> /fo <OBJECT> <SOURCE>"
 )
@@ -110,12 +112,19 @@ endfunction()
 
 # Best-effort explanation for a failed two-stage probe, so the report names a cause, not a symptom.
 #
-# Reachable only when CMake selects its two-stage llvm-rc rule (cmake -E cmake_llvm_rc). That is
-# not what the MSVC-ABI toolchains used here normally get: Platform/Windows-MSVC.cmake installs a
-# single-stage rule that invokes the resource compiler directly, with no separate preprocessing
-# pass to go wrong, so this diagnosis returns empty and the caller falls back to the generic
-# report. It is kept for toolchains (notably GNU-ABI clang) where CMake does pick the two-stage
-# rule, which is the configuration the pipe-deadlock described at the top of this file applies to.
+# Applies when CMAKE_RC_COMPILE_OBJECT is CMake's two-stage "cmake -E cmake_llvm_rc" rule, which is
+# the common case for this toolchain rather than an edge case: Platform/Windows-Clang.cmake's
+# __enable_llvm_rc_preprocessing installs that rule whenever CMAKE_RC_COMPILER matches "llvm-rc",
+# and cmake/ClangToolChain.cmake prefers llvm-rc when one sits next to the selected clang++. The
+# macro's single-stage variant is reached only under the FASTBuild generator, not by LLVM version,
+# despite the adjacent LLVM-13 comment upstream. So on a host that ships llvm-rc, this is the
+# pipeline the build actually uses, and the pipe-deadlock described at the top of this file is a
+# live risk rather than a theoretical one.
+#
+# The single-stage rule observed when a path to rc.exe is supplied instead (as TheRock does) is the
+# default from CMakeRCInformation.cmake; Platform/Windows-MSVC.cmake does not set
+# CMAKE_RC_COMPILE_OBJECT at all. In that configuration there is no separate preprocessing pass to
+# go wrong, this diagnosis returns empty, and the caller falls back to the generic report.
 function(_miopen_diagnose_rc_preprocessor OUT_VAR)
     set(${OUT_VAR} "" PARENT_SCOPE)
 
