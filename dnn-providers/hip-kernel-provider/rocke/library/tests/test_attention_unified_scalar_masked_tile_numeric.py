@@ -16,6 +16,8 @@ Covered:
   reaches them), where a whole segment can be masked for a row and must not
   set the merge's overall max;
 * rows that see no key at all (top-left, ``q_len > kv_len``): O must be 0.
+* a NaN per-segment sum must make the reduce give NaN for that row, not be
+  skipped as an empty segment.
 
 Not covered: the default-mask scalar 3D body, which applies no window (and
 whose prefill rows with fully masked trailing segments are a separate
@@ -144,8 +146,12 @@ def _run_scalar_2d(problem, data):
     return out
 
 
-def _run_scalar_3d(problem, data):
-    """Scalar split-3D segment kernel then the scalar reduce, launched directly."""
+def _run_scalar_3d(problem, data, between=None):
+    """Scalar split-3D segment kernel then the scalar reduce, launched directly.
+
+    ``between(segm_max, segm_sum)``, if given, runs after the segment launch and
+    before the reduce launch, so a test can edit the per-segment workspace.
+    """
     from rocke.helpers.compile import compile_kernel
     from rocke.helpers.spec import SignatureBuilder
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
@@ -235,6 +241,9 @@ def _run_scalar_3d(problem, data):
         },
         config=LaunchConfig(grid=(q_len, _HQ, _NUM_SEGMENTS * _D), block=(64, 1, 1)),
     )
+    if between is not None:
+        torch.cuda.synchronize()
+        between(segm_max, segm_sum)
     red(
         {
             "output_ptr": out,
@@ -303,3 +312,48 @@ def test_scalar_3d_masked_leading_keys_and_segments(case, dtype):
     torch.cuda.synchronize()
     ref, has_key = _reference(data, kv_len, top_left)
     _check(out, ref, has_key, dtype)
+
+
+@requires_cdna3_or_4
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_scalar_3d_reduce_propagates_nan_segment_sum(dtype):
+    """A NaN per-segment sum must reach O, not be skipped as an empty segment.
+
+    The reduce treats only an exact-zero sum as an empty segment (``fcmp oeq``).
+    A guard of the form ``sum > 0`` (``fcmp ogt``) is false for NaN, so it would
+    drop the segment and leave the row finite, hiding the corruption.
+    """
+    q_len, kv_len, top_left = _CASES["top_left"]
+    # Row 100 sees keys 69..100 (top-left causal, window 32). The workspace
+    # segm_ml is [max_seqlen_q + 1, Hq, num_segments], indexed by the global
+    # token (one sequence starting at 0), so [row, head, seg] is the slot the
+    # segment kernel wrote and the reduce reads for (row, head).
+    row, head = 100, 3
+    picked = {}
+
+    def poison(segm_max, segm_sum):
+        sums = segm_sum[row, head]
+        with_keys = (sums > 0).nonzero().flatten()
+        assert with_keys.numel() > 0, f"row {row} head {head}: no segment has keys"
+        seg = int(with_keys[0])
+        picked["seg"] = seg
+        segm_sum[row, head, seg] = float("nan")
+
+    data = _inputs(dtype, q_len, kv_len)
+    problem = _problem(dtype, q_len, kv_len, data["num_blocks"], top_left)
+    out = _run_scalar_3d(problem, data, between=poison)
+    torch.cuda.synchronize()
+    ref, has_key = _reference(data, kv_len, top_left)
+    assert bool(has_key[row])
+
+    assert torch.isnan(out[row, head]).all(), (
+        f"row {row} head {head}: NaN sum in segment {picked['seg']} did not "
+        "reach O (reduce skipped it as empty)"
+    )
+    others = torch.ones(out.shape[:2], dtype=torch.bool, device=out.device)
+    others[row, head] = False
+    assert torch.isfinite(out[others]).all(), "NaN leaked into another (row, head)"
+    tol = 2e-2 if dtype == "fp16" else 4e-2
+    err = (out.float() - ref).abs().amax(dim=-1)[others]
+    assert err.max().item() < tol, f"{(err >= tol).sum().item()} (row, head) wrong"
