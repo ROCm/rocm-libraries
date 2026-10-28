@@ -46,6 +46,10 @@
     {
       "name": "sink",
       "type": "int"
+    },
+    {
+      "name": "grid",
+      "type": "string"
     }
   ]
 }

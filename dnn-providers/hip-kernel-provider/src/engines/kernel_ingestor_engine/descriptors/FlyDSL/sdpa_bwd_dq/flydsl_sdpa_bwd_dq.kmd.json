@@ -79,6 +79,10 @@
       "name": "block_threads",
       "type": "int",
       "default_value": 256
+    },
+    {
+      "name": "grid",
+      "type": "string"
     }
   ]
 }
