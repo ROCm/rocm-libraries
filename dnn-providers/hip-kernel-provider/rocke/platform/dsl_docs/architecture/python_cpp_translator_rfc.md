@@ -272,7 +272,7 @@ Not yet built: unit tests for individual rules, with each rule's counterexamples
 
 ## Appendix A: Changes from Version 1.0
 
-This appendix records how this design differs from the first draft of this RFC and tool (version 1.0, #14447 at d690ff4f662), for the review only. Remove it before merge; git history keeps the rest.
+This appendix records how this design differs from version 1.0 of this RFC and tool (#14447 at d690ff4f662), for the review only. Version 2.0 is an experiment: both versions are open so they can be compared, and which one goes forward, if either, is for the review to decide. Remove this appendix before merge; git history keeps the rest.
 
 Version 1.0 treated the translator as the **owner** of the C++: translated files said not to edit them, `tr.regen` rewrote them on every change, and a CI check failed when they differed. Version 2.0 treats it as a **porting assistant**: it writes a first draft, and from then on the C++ is hand code like every other twin.
 
