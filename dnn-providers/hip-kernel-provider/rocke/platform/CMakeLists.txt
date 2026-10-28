@@ -601,6 +601,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
         "tests/library/tests/test_conv_aot_grid_limits.py"
+        "tests/library/tests/test_dgrad_stem_wmma.py"
         "tests/library/tests/test_direct_dgrad_wmma.py"
         "tests/library/tests/test_direct_kernel_cache.py"
         "tests/library/tests/test_conv_gradient_contract.py"

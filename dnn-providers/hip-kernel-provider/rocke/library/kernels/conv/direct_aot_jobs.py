@@ -21,6 +21,8 @@ from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
 from kernels.conv.aot_jobs import BuildJob
 from kernels.conv.direct_variants import (
+    DIRECT_DGRAD_PATCH_WMMA as _DGRAD_PATCH,
+    DIRECT_DGRAD_SMALLC_WMMA as _DGRAD_SMALLC,
     DIRECT_DGRAD_WMMA as _DGRAD_WMMA,
     DIRECT_DEPTHWISE_TILED_DGRAD as _DW_TILED_DGRAD,
     DIRECT_GROUPED_HALO as _GROUPED_HALO,
@@ -250,6 +252,48 @@ WGRAD_WAVES_FIXED = (
 WGRAD_WAVES_C_WIDE = (3, 4, 6, 8, 12, 16)
 WGRAD_WAVES_K_WIDE = (1, 2, 4)
 WGRAD_HPB = (30, 60, 120)
+# Stem dgrad (direct_dgrad_patch_wmma / direct_dgrad_smallc_wmma): the patch
+# sizes of the patch embeddings the cache serves.
+DGRAD_PATCH_SIZES = (4, 14, 16)
+# (filter, pad, stride, C) of the overlapping stems the cache serves.
+DGRAD_SMALLC_STEMS = ((3, 1, 1, 4), (3, 1, 2, 3), (7, 3, 2, 3))
+# dgrad_patch_wmma: (waves_c, waves_p, tiles_c, tiles_p, tile_w, r_blk, ck,
+# prefetch). Each tuple fits one block_c = r_blk*P*C (validated per patch
+# size; the rest drop out): the best few per patch size of a tuning sweep.
+DGRAD_PATCH_KNOBS = (
+    (1, 2, 3, 4, 32, 4, 32, True),
+    (1, 2, 3, 4, 32, 4, 64, True),
+    (1, 4, 3, 2, 32, 4, 64, True),
+    (2, 1, 3, 8, 16, 2, 64, True),
+    (2, 2, 3, 8, 16, 2, 64, True),
+    (2, 4, 3, 4, 16, 2, 64, True),
+    (3, 1, 1, 8, 16, 4, 32, True),
+    (3, 1, 1, 8, 32, 4, 32, False),
+    (3, 1, 1, 8, 32, 4, 32, True),
+    (3, 4, 1, 2, 16, 4, 64, True),
+    (4, 2, 5, 4, 32, 7, 32, False),
+    (4, 2, 6, 4, 8, 8, 32, False),
+    (4, 2, 6, 4, 16, 8, 32, False),
+    (4, 4, 6, 4, 16, 8, 32, False),
+    (8, 2, 5, 4, 32, 14, 32, False),
+    (8, 2, 5, 4, 32, 14, 32, True),
+)
+# dgrad_smallc_wmma: (waves_c, waves_p, tiles_c, tiles_p, out_h, out_w, ck,
+# prefetch); the best few per stem of a tuning sweep.
+DGRAD_SMALLC_KNOBS = (
+    (1, 3, 3, 8, 8, 32, 64, True),
+    (1, 4, 3, 6, 8, 32, 64, True),
+    (1, 5, 3, 5, 8, 32, 64, True),
+    (1, 7, 3, 3, 16, 16, 64, True),
+    (2, 4, 1, 5, 32, 32, 32, False),
+    (2, 4, 1, 5, 32, 32, 32, True),
+    (2, 4, 5, 6, 32, 32, 32, True),
+    (2, 4, 5, 6, 32, 32, 64, True),
+    (2, 6, 1, 6, 32, 64, 32, True),
+    (2, 6, 5, 4, 32, 32, 64, True),
+    (3, 3, 1, 8, 16, 16, 64, True),
+    (3, 5, 1, 5, 8, 32, 64, True),
+)
 # Wave32 WMMA direct dgrad (direct_dgrad_wmma): (waves_c, waves_p, tiles_c,
 # tiles_p, tile_w, tile_n, ck, stages, prefetch), prefetch builds with the
 # iterative-ilp scheduler. The union of the five best configurations per
@@ -852,6 +896,22 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for pad, dh, dw in DGRAD_WMMA_DILATIONS
         ),
     ),
+    # Stem dgrad on wave32 WMMA: patch embeddings (stride == filter, no
+    # padding) of 3-channel images, and the overlapping 3- / 4-channel stems
+    # of the reference workloads. dX channels baked, dY channels runtime.
+    _DGRAD_PATCH: (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=p, PAD=0, stride=p, cpg=3, kpg=0) for p in DGRAD_PATCH_SIZES
+        ),
+    ),
+    _DGRAD_SMALLC: (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=st, cpg=c, kpg=0)
+            for k, pad, st, c in DGRAD_SMALLC_STEMS
+        ),
+    ),
     # Tiled wgrad: dense and grouped, channel counts runtime, stride 1.
     "direct_wgrad_tiled": (
         "wgrad",
@@ -1248,6 +1308,22 @@ def _knob_grid(
                 rows_per_seg=rps,
                 target_blocks=tb,
             )
+    elif variant in (_DGRAD_PATCH, _DGRAD_SMALLC):
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return
+        patch = variant == _DGRAD_PATCH
+        for wc, wp, tc, tp, a, c, ck, pf in (
+            DGRAD_PATCH_KNOBS if patch else DGRAD_SMALLC_KNOBS
+        ):
+            knobs = dict(
+                waves_c=wc, waves_p=wp, tiles_c=tc, tiles_p=tp, ck=ck, stages=2
+            )
+            knobs.update(dict(tile_w=a, r_blk=c) if patch else dict(out_h=a, out_w=c))
+            if pf:
+                knobs.update(prefetch=True, sched="iterative-ilp")
+            yield knobs
     elif variant == "direct_wgrad":
         for (wk, wc, wq), hpb, mk in itertools.product(
             wgrad_waves(), WGRAD_HPB, WGRAD_MFMA_K
@@ -1673,6 +1749,22 @@ def probe_problem(
             W=64,
             groups=16,
             cpg=64,
+            kpg=64,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            dtype=dtype,
+        )
+    if variant in (_DGRAD_PATCH, _DGRAD_SMALLC):
+        # Ungrouped stems: dX channels baked, 64 dY channels, a 64x64 image
+        # (whole patches for every patch size up to 16 but 14).
+        return DirectConvProblem(
+            N=1,
+            H=64,
+            W=64,
+            groups=1,
+            cpg=caps.cpg,
             kpg=64,
             KH=caps.KH,
             KW=caps.KW,
