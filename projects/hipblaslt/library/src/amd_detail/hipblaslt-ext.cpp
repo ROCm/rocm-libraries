@@ -860,8 +860,10 @@ namespace hipblaslt_ext
         rocblaslt::Debug::Instance().markerStart("hipblasLtIsAlgoSupportedCpp");
         auto                    gemmType = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
         applyStreamKTileSchedulingMode(m_data, gemmType, m_streamk_tile_scheduling_mode);
-        applyUniformSummationOrder(
-            m_data, gemmType, uniformSummationOrderEnabled(m_handle, m_uniform_summation_order));
+        // -1 inherits the value setProblem resolved from the matmul descriptor.
+        // Applying the handle here would clear an explicit descriptor 0.
+        if(m_uniform_summation_order != -1)
+            applyUniformSummationOrder(m_data, gemmType, m_uniform_summation_order);
         auto                    rocalgo  = reinterpret_cast<rocblaslt_matmul_algo*>(&algo);
         rocblaslt::RocTuningV2* tuning   = nullptr;
         auto                    status = RocBlasLtStatusToHIPStatus(rocblaslt_is_algo_supported_cpp(
@@ -882,8 +884,10 @@ namespace hipblaslt_ext
         rocblaslt::Debug::Instance().markerStart("hipblasLtIsAlgoSupportedTuningV2Cpp");
         auto gemmType  = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
         applyStreamKTileSchedulingMode(m_data, gemmType, m_streamk_tile_scheduling_mode);
-        applyUniformSummationOrder(
-            m_data, gemmType, uniformSummationOrderEnabled(m_handle, m_uniform_summation_order));
+        // -1 inherits the value setProblem resolved from the matmul descriptor.
+        // Applying the handle here would clear an explicit descriptor 0.
+        if(m_uniform_summation_order != -1)
+            applyUniformSummationOrder(m_data, gemmType, m_uniform_summation_order);
         auto rocalgo   = reinterpret_cast<rocblaslt_matmul_algo*>(&algo);
         auto roctuning = reinterpret_cast<rocblaslt::RocTuningV2*>(tuning.pimpl.get());
         auto status
