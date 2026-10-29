@@ -354,6 +354,17 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.deep_fused_conv_pool.DeepFusedConvPoolSpec": ("problem",),
     "kernels.common.img2col.Img2ColSpec": ("problem",),
     "kernels.gfx1151.deep_fused_conv_pool.Gfx1151DeepFusedConvPoolSpec": ("problem",),
+    # Winograd forward (gfx1250)
+    "kernels.common.conv_winograd_fwd.WinogradFwdSpec": ("problem",),
+    "kernels.common.conv_winograd_gemm_wmma.WinogradGemmReduceSpec": (),
+    "kernels.common.conv_winograd_gemm_wmma.WinogradGemmWmmaSpec": (),
+    # Winograd forward: merged transform launch
+    "kernels.common.conv_winograd_fwd.WinogradMergedSpec": ("fwd",),
+    # Generalized Winograd forward
+    "kernels.common.conv_winograd_gen.WinoAxis": ("m", "r"),
+    "kernels.common.conv_winograd_gen.WinogradGenSpec": ("ax_x", "ax_y", "problem"),
+    # Fused 1-D Winograd forward
+    "kernels.common.conv_winograd_fused_1d_wmma.FusedWino1DSpec": ("ax", "problem"),
 }
 
 
