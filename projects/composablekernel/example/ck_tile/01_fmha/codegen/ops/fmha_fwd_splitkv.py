@@ -1035,6 +1035,15 @@ def get_fwd_splitkv_blobs(
                 # Use qr_nwarp_sshuffle with multiple N warps and qr otherwise
                 if (tile.F_rn0 != 1) != (pipeline.tag == "qr_nwarp_sshuffle"):
                     continue
+                # qr_tdm's unpadded head-dim check reads the TDM length map. Where
+                # that exceeds the head dim this bucket dispatches on, the
+                # predicate can never hold and the instance is unreachable.
+                if (
+                    pipeline.tag == "qr_tdm"
+                    and pipeline.F_dpad == "f"
+                    and TDM_K0_MAX_SUBMAX_MAP[tile.F_bk0max] > hdim
+                ):
+                    continue
                 if mode == "group":
                     if pipeline.F_spad != "t" or pipeline.F_skpad != "t":
                         # in group mode, spad/skpad must be true, since we can't predict if seqlen of current batch need pad or not
