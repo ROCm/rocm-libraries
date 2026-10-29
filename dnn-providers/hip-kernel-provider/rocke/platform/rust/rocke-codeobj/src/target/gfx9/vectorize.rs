@@ -24,7 +24,7 @@
 //! from LDS stay inserted: selection writes those in place.
 
 use crate::rir::ast::*;
-use std::collections::HashMap;
+use crate::rir::fx::{FxHashMap, FxHashSet};
 
 /// Bytes a merged load may have: a dword, two or four.
 const WIDTHS: [i64; 3] = [16, 8, 4];
@@ -165,6 +165,12 @@ enum Lanes {
     Same(ValueId),
 }
 
+/// Whether `op` may pair: a scalar f16 add, multiply or fma of f16 values.
+fn pairable(kernel: &Kernel, op: &Op) -> bool {
+    let f16 = |v: ValueId| *kernel.ty(v) == Type::Scalar(Scalar::F16);
+    matches!(op.kind, OpKind::Fadd | OpKind::Fmul | OpKind::Fma) && op.results.len() == 1 && f16(op.results[0]) && op.operands.iter().all(|&o| f16(o))
+}
+
 /// Pairs the f16 ops of `kernel` that can be; returns whether any were.
 pub fn pair_f16_ops(kernel: &mut Kernel) -> bool {
     let mut body = std::mem::take(&mut kernel.body);
@@ -181,9 +187,12 @@ fn pair_region(kernel: &mut Kernel, region: &mut Region) -> bool {
         }
     }
     let ops = &region.ops;
+    if !ops.iter().any(|op| pairable(kernel, op)) {
+        return changed;
+    }
     let f16 = |kernel: &Kernel, v: ValueId| *kernel.ty(v) == Type::Scalar(Scalar::F16);
     // Each value an extract of an f16 vector or a paired op gives: its source and lane.
-    let mut lane: HashMap<ValueId, (Lanes, u32)> = HashMap::new();
+    let mut lane: FxHashMap<ValueId, (Lanes, u32)> = FxHashMap::default();
     for op in ops {
         if op.kind == OpKind::Extract && op.results.len() == 1 && f16(kernel, op.results[0]) {
             if let (Type::Vec(Scalar::F16, _), Some(i)) = (kernel.ty(op.operands[0]), op.int_attr("index")) {
@@ -195,12 +204,9 @@ fn pair_region(kernel: &mut Kernel, region: &mut Region) -> bool {
     let mut paired = vec![false; ops.len()];
     loop {
         let before = pairs.len();
-        let mut first: HashMap<(OpKind, String, Vec<Lanes>), usize> = HashMap::new();
+        let mut first: FxHashMap<(OpKind, String, Vec<Lanes>), usize> = FxHashMap::default();
         for (i, op) in ops.iter().enumerate() {
-            if paired[i] || !matches!(op.kind, OpKind::Fadd | OpKind::Fmul | OpKind::Fma) || op.results.len() != 1 {
-                continue;
-            }
-            if !f16(kernel, op.results[0]) || !op.operands.iter().all(|&o| f16(kernel, o)) {
+            if paired[i] || !pairable(kernel, op) {
                 continue;
             }
             let (mut parity, mut lanes) = (None, Vec::with_capacity(op.operands.len()));
@@ -332,9 +338,13 @@ fn pack_region(kernel: &Kernel, region: &mut Region, uses: &[u32]) -> bool {
         }
     }
     let ops = &region.ops;
-    let inserts: HashMap<ValueId, usize> =
+    // Only an MFMA's operands become packs.
+    if !ops.iter().any(|op| op.kind == OpKind::Mma) {
+        return changed;
+    }
+    let inserts: FxHashMap<ValueId, usize> =
         ops.iter().enumerate().filter(|(_, op)| op.kind == OpKind::Insert && op.results.len() == 1).map(|(i, op)| (op.results[0], i)).collect();
-    let global_loads: std::collections::HashSet<ValueId> = ops.iter().filter(|op| op.kind == OpKind::GLoad).flat_map(|op| op.results.iter().copied()).collect();
+    let global_loads: FxHashSet<ValueId> = ops.iter().filter(|op| op.kind == OpKind::GLoad).flat_map(|op| op.results.iter().copied()).collect();
     let mut heads: Vec<(usize, Vec<ValueId>)> = Vec::new();
     for op in ops.iter().filter(|op| op.kind == OpKind::Mma) {
         for &v in op.operands.iter().take(2) {
@@ -459,5 +469,289 @@ mod tests {
         let listing = rir::compile_any_target(&kernel(store), Target::Gfx950).unwrap_or_else(|e| panic!("{e}")).listing();
         // Each half of the loads still merges, but not across the store: two dwordx2 loads per tensor.
         assert_eq!((count(&listing, "global_load_dwordx2"), count(&listing, "global_load_dwordx4")), (4, 0), "{listing}");
+    }
+
+    /// `pair_f16_ops` and `pack_mfma_operands` as they were before their
+    /// checks for ops that may pair and MFMAs, kept verbatim to compare
+    /// against.
+    mod reference {
+        use super::super::{count_uses, Lanes};
+        use crate::rir::ast::*;
+        use std::collections::HashMap;
+
+        pub fn pair_f16_ops(kernel: &mut Kernel) -> bool {
+            let mut body = std::mem::take(&mut kernel.body);
+            let changed = pair_region(kernel, &mut body);
+            kernel.body = body;
+            changed
+        }
+
+        fn pair_region(kernel: &mut Kernel, region: &mut Region) -> bool {
+            let mut changed = false;
+            for op in region.ops.iter_mut() {
+                for inner in op.regions.iter_mut() {
+                    changed |= pair_region(kernel, inner);
+                }
+            }
+            let ops = &region.ops;
+            let f16 = |kernel: &Kernel, v: ValueId| *kernel.ty(v) == Type::Scalar(Scalar::F16);
+            let mut lane: HashMap<ValueId, (Lanes, u32)> = HashMap::new();
+            for op in ops {
+                if op.kind == OpKind::Extract && op.results.len() == 1 && f16(kernel, op.results[0]) {
+                    if let (Type::Vec(Scalar::F16, _), Some(i)) = (kernel.ty(op.operands[0]), op.int_attr("index")) {
+                        lane.insert(op.results[0], (Lanes::Of(op.operands[0], i as u32 / 2), i as u32 % 2));
+                    }
+                }
+            }
+            let mut pairs: Vec<(usize, usize, Vec<Lanes>)> = Vec::new();
+            let mut paired = vec![false; ops.len()];
+            loop {
+                let before = pairs.len();
+                let mut first: HashMap<(OpKind, String, Vec<Lanes>), usize> = HashMap::new();
+                for (i, op) in ops.iter().enumerate() {
+                    if paired[i] || !matches!(op.kind, OpKind::Fadd | OpKind::Fmul | OpKind::Fma) || op.results.len() != 1 {
+                        continue;
+                    }
+                    if !f16(kernel, op.results[0]) || !op.operands.iter().all(|&o| f16(kernel, o)) {
+                        continue;
+                    }
+                    let (mut parity, mut lanes) = (None, Vec::with_capacity(op.operands.len()));
+                    for &o in op.operands.iter() {
+                        match lane.get(&o) {
+                            Some(&(l, p)) if parity.is_none_or(|q| q == p) => {
+                                parity = Some(p);
+                                lanes.push(l);
+                            }
+                            Some(_) => parity = Some(2),
+                            None => lanes.push(Lanes::Same(o)),
+                        }
+                    }
+                    let key = (op.kind, format!("{:?}", op.attrs), lanes);
+                    match parity {
+                        Some(0) => {
+                            first.entry(key).or_insert(i);
+                        }
+                        Some(1) => {
+                            if let Some(a) = first.remove(&key) {
+                                let j = pairs.len();
+                                lane.insert(ops[a].results[0], (Lanes::Pair(j), 0));
+                                lane.insert(op.results[0], (Lanes::Pair(j), 1));
+                                (paired[a], paired[i]) = (true, true);
+                                pairs.push((a, i, key.2));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if pairs.len() == before {
+                    break;
+                }
+            }
+            if pairs.is_empty() {
+                return changed;
+            }
+            let mut at: Vec<Option<usize>> = vec![None; ops.len()];
+            for (j, &(a, b, _)) in pairs.iter().enumerate() {
+                at[a] = Some(j);
+                at[b] = Some(j);
+            }
+            let vec2 = Type::Vec(Scalar::F16, 2);
+            let mut result: Vec<Option<ValueId>> = vec![None; pairs.len()];
+            let old = std::mem::take(&mut region.ops);
+            let mut out = Vec::with_capacity(old.len() + 4 * pairs.len());
+            let op = |kind: OpKind, results: &[ValueId], operands: &[ValueId], attrs: Vec<(Text, Attr)>| Op {
+                kind,
+                results: results.iter().copied().collect(),
+                operands: operands.iter().copied().collect(),
+                attrs,
+                regions: Vec::new(),
+                block_args: Vec::new(),
+            };
+            let index = |i: u32| vec![("index".into(), Attr::Int(i64::from(i)))];
+            let mut taken: Vec<Option<Op>> = old.into_iter().map(Some).collect();
+            for i in 0..taken.len() {
+                let Some(j) = at[i] else {
+                    out.push(taken[i].take().expect("an op not paired"));
+                    continue;
+                };
+                let (a, b, lanes) = &pairs[j];
+                if i != *a {
+                    continue;
+                }
+                let mut operands = Vec::with_capacity(lanes.len());
+                for &l in lanes {
+                    operands.push(match l {
+                        Lanes::Pair(p) => result[p].expect("a pair is made before its readers"),
+                        Lanes::Of(v, d) => {
+                            let (lo, hi) = (kernel.new_value("lo", Type::Scalar(Scalar::F16)), kernel.new_value("hi", Type::Scalar(Scalar::F16)));
+                            out.push(op(OpKind::Extract, &[lo], &[v], index(2 * d)));
+                            out.push(op(OpKind::Extract, &[hi], &[v], index(2 * d + 1)));
+                            let packed = kernel.new_value("pair", vec2.clone());
+                            out.push(op(OpKind::Pack, &[packed], &[lo, hi], Vec::new()));
+                            packed
+                        }
+                        Lanes::Same(x) => {
+                            let packed = kernel.new_value("pair", vec2.clone());
+                            out.push(op(OpKind::Pack, &[packed], &[x, x], Vec::new()));
+                            packed
+                        }
+                    });
+                }
+                let (first, second) = (taken[*a].take().expect("the first of a pair"), taken[*b].take().expect("the second of a pair"));
+                let kind = match first.kind {
+                    OpKind::Fadd => OpKind::VecAdd,
+                    OpKind::Fmul => OpKind::VecMul,
+                    _ => OpKind::VecFma,
+                };
+                let r = kernel.new_value("packed", vec2.clone());
+                out.push(op(kind, &[r], &operands, first.attrs.clone()));
+                out.push(op(OpKind::Extract, &[first.results[0]], &[r], index(0)));
+                out.push(op(OpKind::Extract, &[second.results[0]], &[r], index(1)));
+                result[j] = Some(r);
+            }
+            region.ops = out;
+            true
+        }
+
+        pub fn pack_mfma_operands(kernel: &mut Kernel) -> bool {
+            let mut uses = vec![0u32; kernel.values.len()];
+            count_uses(&kernel.body, &mut uses);
+            let mut body = std::mem::take(&mut kernel.body);
+            let changed = pack_region(kernel, &mut body, &uses);
+            kernel.body = body;
+            changed
+        }
+
+        fn pack_region(kernel: &Kernel, region: &mut Region, uses: &[u32]) -> bool {
+            let mut changed = false;
+            for op in region.ops.iter_mut() {
+                for inner in op.regions.iter_mut() {
+                    changed |= pack_region(kernel, inner, uses);
+                }
+            }
+            let ops = &region.ops;
+            let inserts: HashMap<ValueId, usize> =
+                ops.iter().enumerate().filter(|(_, op)| op.kind == OpKind::Insert && op.results.len() == 1).map(|(i, op)| (op.results[0], i)).collect();
+            let global_loads: std::collections::HashSet<ValueId> =
+                ops.iter().filter(|op| op.kind == OpKind::GLoad).flat_map(|op| op.results.iter().copied()).collect();
+            let mut heads: Vec<(usize, Vec<ValueId>)> = Vec::new();
+            for op in ops.iter().filter(|op| op.kind == OpKind::Mma) {
+                for &v in op.operands.iter().take(2) {
+                    let Type::Vec(elem, n) = *kernel.ty(v) else { continue };
+                    let Some(&head) = inserts.get(&v) else { continue };
+                    if elem.bytes() != 2 || heads.iter().any(|(h, _)| *h == head) {
+                        continue;
+                    }
+                    let mut elems: Vec<Option<ValueId>> = vec![None; n as usize];
+                    let mut cur = v;
+                    while let Some(&i) = inserts.get(&cur) {
+                        if cur != v && uses[cur.0 as usize] != 1 {
+                            break;
+                        }
+                        let Some(index) = ops[i].int_attr("index").filter(|&k| (0..i64::from(n)).contains(&k)) else { break };
+                        elems[index as usize].get_or_insert(ops[i].operands[1]);
+                        cur = ops[i].operands[0];
+                    }
+                    if let Some(elems) = elems.into_iter().collect::<Option<Vec<_>>>().filter(|e| e.iter().all(|x| global_loads.contains(x))) {
+                        heads.push((head, elems));
+                    }
+                }
+            }
+            for (head, elems) in &heads {
+                let op = &mut region.ops[*head];
+                op.kind = OpKind::Pack;
+                op.operands = elems.iter().copied().collect();
+                op.attrs.clear();
+            }
+            changed | !heads.is_empty()
+        }
+    }
+
+    /// f16 loads summed and multiplied element by element from a vector or
+    /// one by one, f32 math beside them, some in an `scf.if`, and MFMAs whose
+    /// A or B are vectors of loaded halves inserted one by one, partly.
+    fn random_vector_math(seed: u64) -> String {
+        let mut s = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
+        let mut next = |n: u64| {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            s % n
+        };
+        let mut t = String::from(
+            "ckdsl.ir v1\nkernel @k {\n  attrs { max_workgroup_size = i:64 }\n  params {\n    %X : ptr<f16,global>\n    \
+             %Y : ptr<f16,global>\n    %F : ptr<f32,global>\n    %n : i32\n  }\n  region @entry {\n    \
+             %tid : i32 = gpu.thread_id (  ) { axis = s:\"x\" }\n    %c8 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:8 }\n    \
+             %b : i32 = arith.mul ( %tid, %c8 )\n    %c : i1 = arith.cmp ( %tid, %n ) { pred = s:\"lt\" }\n    \
+             %v : vec<f16x8> = memref.global_load_vN ( %X, %b ) { align = i:16, elem_type = s:\"f16\", vec = i:8 }\n    \
+             %acc : vec<f32x16> = arith.constant_vec (  ) { elem = s:\"f32\", fill = f:0.0, vec = i:16 }\n",
+        );
+        let elems = 2 + 2 * next(4);
+        for k in 0..elems {
+            let (index, offset) = if next(6) == 0 { (next(8), next(10)) } else { (k, k) };
+            t += &format!(
+                "    %e{k} : f16 = vector.extract ( %v ) {{ index = i:{index} }}\n    %c{k} : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{offset} }}\n    \
+                 %i{k} : i32 = arith.add ( %b, %c{k} )\n    %x{k} : f16 = memref.global_load ( %Y, %i{k} ) {{ align = i:2 }}\n"
+            );
+        }
+        let mut kind = 0;
+        for k in 0..elems {
+            if k % 2 == 0 || next(5) == 0 {
+                kind = next(5);
+            }
+            let (a, b) = (next(elems), next(elems));
+            let math = match kind {
+                0 => format!("%s{k} : f16 = arith.fadd ( %e{a}, %x{b} )"),
+                1 => format!("%s{k} : f16 = arith.fmul ( %e{k}, %e{k} )"),
+                2 => format!("%s{k} : f16 = arith.fadd ( %x{k}, %x{k} )"),
+                3 => format!("%s{k} : f16 = arith.fadd ( %e{k}, %x{k} )"),
+                _ => format!("%s{k} : f16 = arith.fmul ( %e{k}, %x{k} )"),
+            };
+            let store = format!("memref.global_store_typed ( %Y, %i{k}, %s{k} ) {{ align = i:2, elem_type = s:\"f16\" }}");
+            t += &if next(5) == 0 {
+                format!("    scf.if ( %c )\n      region @then {{\n    {math}\n    {store}\n      }}\n")
+            } else {
+                format!("    {math}\n    {store}\n")
+            };
+        }
+        if next(3) != 0 {
+            let mut vector = "%v".to_string();
+            for k in 0..next(9) {
+                t += &format!("    %w{k} : vec<f16x8> = vector.insert ( {vector}, %x{} ) {{ index = i:{} }}\n", k % elems, next(8));
+                vector = format!("%w{k}");
+            }
+            t += &format!(
+                "    %d : vec<f32x16> = tile.mma ( {vector}, %v, %acc ) {{ op_id = s:\"mfma_f32_32x32x16_f16\" }}\n    \
+                 %r : f32 = vector.extract ( %d ) {{ index = i:0 }}\n    \
+                 memref.global_store_typed ( %F, %tid, %r ) {{ align = i:4, elem_type = s:\"f32\" }}\n"
+            );
+        }
+        t + "    cf.return (  )\n  }\n}\n"
+    }
+
+    #[test]
+    fn f16_pairing_and_mfma_packing_change_what_they_changed() {
+        let (mut changed, mut kept) = (0, 0);
+        for seed in 0..300u64 {
+            let text = random_vector_math(seed);
+            let mut k = rir::parse::parse(&text).unwrap_or_else(|e| panic!("{e}\n{text}"));
+            let (mut lds, _) = rir::analysis::lds_layout(&k);
+            rir::opt::optimize(&mut k, &mut lds).unwrap_or_else(|e| panic!("{e}"));
+            k.wave = 64;
+            super::combine_global_loads(&mut k);
+            let mut old = k.clone();
+            let paired = reference::pair_f16_ops(&mut old);
+            assert_eq!(super::pair_f16_ops(&mut k), paired, "seed {seed}");
+            let packed = reference::pack_mfma_operands(&mut old);
+            assert_eq!(super::pack_mfma_operands(&mut k), packed, "seed {seed}");
+            assert_eq!(rir::print::dump(&k), rir::print::dump(&old), "seed {seed}");
+            assert_eq!(format!("{:?}", k.values), format!("{:?}", old.values), "seed {seed}");
+            if paired || packed {
+                changed += 1;
+            } else {
+                kept += 1;
+            }
+        }
+        assert!(changed > 60 && kept > 20, "{changed} kernels changed, {kept} kept");
     }
 }

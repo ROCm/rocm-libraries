@@ -79,30 +79,32 @@ New to the DSL? Read in this order:
 15. [`runtime/compile_launch_and_manifest.md`](./runtime/compile_launch_and_manifest.md)
 16. [`runtime/manifest_schema.md`](./runtime/manifest_schema.md)
 17. [`runtime/comgr_and_hipmodule.md`](./runtime/comgr_and_hipmodule.md)
-18. [`runtime/limitations.md`](./runtime/limitations.md)
-19. [`optimization/optimization_runbook.md`](./optimization/optimization_runbook.md) — current evidence-first optimization workflow
-20. [`optimization/scheduler-policy.md`](./optimization/scheduler-policy.md) — typed AMDGPU machine-scheduler tuning
-21. [`optimization/runbook_compliance.md`](./optimization/runbook_compliance.md) — code and test anchors for each workflow stage
-22. [`optimization/runbook_mapping.md`](./optimization/runbook_mapping.md) — compatibility pointer to the compliance map
-23. [`optimization/measured_results.md`](./optimization/measured_results.md) — measurement retention policy and scoped evidence index
-24. [`fusion/overview.md`](./fusion/overview.md)
-25. [`fusion/adding_fused_kernels.md`](./fusion/adding_fused_kernels.md) — decision guide: when a fusion pays, when it doesn't, how to land one
-26. [`autotune/overview.md`](./autotune/overview.md)
-27. [`development/testing.md`](./development/testing.md)
-28. [`development/extending.md`](./development/extending.md)
-29. [`development/setup_guide.md`](./development/setup_guide.md) — prerequisites (ROCm 7.2 / PyTorch 2.12), venv setup, building the C++ engine, env-variable reference; Linux & Windows
-30. [`development/onboarding.md`](./development/onboarding.md) — guided learning path for kernel authors
-31. [`development/engine_contributing.md`](./development/engine_contributing.md) — the dual-backend contract; required reading before editing engine internals
-32. [`development/engine_parity.md`](./development/engine_parity.md) — the Python⇄C++ parity rule: every optimization needs both engines (for humans and AI agents)
-33. [`development/invariants.md`](./development/invariants.md) — non-obvious rules (the landmines) for engine contributors
-34. [`development/troubleshooting.md`](./development/troubleshooting.md) — engine/build failure catalog (stale-artifact class, gate failures)
-35. [`development/debugging_rocgdb.md`](./development/debugging_rocgdb.md) — driving rocgdb: fault → authoring line, workgroup/lane, precise-memory
-36. [`reference/file_index.md`](./reference/file_index.md)
-37. [`reference/api_index.md`](./reference/api_index.md)
-38. [`reference/env_flags.md`](./reference/env_flags.md) — every environment variable (core, provider, tooling, diagnostic)
-39. [`reference/op_vocabulary.md`](./reference/op_vocabulary.md)
-40. [`reference/mfma_atom_catalog.md`](./reference/mfma_atom_catalog.md)
-41. [`reference/glossary.md`](./reference/glossary.md)
+18. [`runtime/code_object_compiler.md`](./runtime/code_object_compiler.md) — the code-object compiler contract: COMGR results and the direct compiler's C ABI entry points
+19. [`runtime/direct_compiler.md`](./runtime/direct_compiler.md) — the direct rocKE IR to HSACO compiler for gfx1151 and gfx950: usage, stages, limits, debug controls
+20. [`runtime/limitations.md`](./runtime/limitations.md)
+21. [`optimization/optimization_runbook.md`](./optimization/optimization_runbook.md) — current evidence-first optimization workflow
+22. [`optimization/scheduler-policy.md`](./optimization/scheduler-policy.md) — typed AMDGPU machine-scheduler tuning
+23. [`optimization/runbook_compliance.md`](./optimization/runbook_compliance.md) — code and test anchors for each workflow stage
+24. [`optimization/runbook_mapping.md`](./optimization/runbook_mapping.md) — compatibility pointer to the compliance map
+25. [`optimization/measured_results.md`](./optimization/measured_results.md) — measurement retention policy and scoped evidence index
+26. [`fusion/overview.md`](./fusion/overview.md)
+27. [`fusion/adding_fused_kernels.md`](./fusion/adding_fused_kernels.md) — decision guide: when a fusion pays, when it doesn't, how to land one
+28. [`autotune/overview.md`](./autotune/overview.md)
+29. [`development/testing.md`](./development/testing.md)
+30. [`development/extending.md`](./development/extending.md)
+31. [`development/setup_guide.md`](./development/setup_guide.md) — prerequisites (ROCm 7.2 / PyTorch 2.12), venv setup, building the C++ engine, env-variable reference; Linux & Windows
+32. [`development/onboarding.md`](./development/onboarding.md) — guided learning path for kernel authors
+33. [`development/engine_contributing.md`](./development/engine_contributing.md) — the dual-backend contract; required reading before editing engine internals
+34. [`development/engine_parity.md`](./development/engine_parity.md) — the Python⇄C++ parity rule: every optimization needs both engines (for humans and AI agents)
+35. [`development/invariants.md`](./development/invariants.md) — non-obvious rules (the landmines) for engine contributors
+36. [`development/troubleshooting.md`](./development/troubleshooting.md) — engine/build failure catalog (stale-artifact class, gate failures)
+37. [`development/debugging_rocgdb.md`](./development/debugging_rocgdb.md) — driving rocgdb: fault → authoring line, workgroup/lane, precise-memory
+38. [`reference/file_index.md`](./reference/file_index.md)
+39. [`reference/api_index.md`](./reference/api_index.md)
+40. [`reference/env_flags.md`](./reference/env_flags.md) — every environment variable (core, provider, tooling, diagnostic)
+41. [`reference/op_vocabulary.md`](./reference/op_vocabulary.md)
+42. [`reference/mfma_atom_catalog.md`](./reference/mfma_atom_catalog.md)
+43. [`reference/glossary.md`](./reference/glossary.md)
 
 ## One-Screen Summary
 
@@ -124,6 +126,7 @@ spec dataclass
 Hard facts:
 
 - The production compile path is **LLVM IR text -> libamd_comgr -> HSACO -> hipModule**. There is no MLIR pipeline at runtime. `print_ir()` emits MLIR-style text for humans only.
+- An optional second code-object compiler, the [direct compiler](./runtime/direct_compiler.md) (`ROCKE_CODEOBJ_BACKEND=direct`), compiles serialized rocKE IR to HSACO for gfx1151 and gfx950 with no LLVM component. COMGR stays the default, and it is the reference the direct compiler is tested against.
 - `core/lower_hip.py` (`lower_kernel_to_hip`) is a debugging/inspection backend that emits readable HIP C++. It is not the production runtime path. Op coverage is narrower than LLVM lowering.
 - `core/lower_cktile.py` emits CK Tile C++ from selected high-level specs (`UniversalGemmSpec`, `ImplicitGemmConvSpec`). It does not consume `KernelDef`. It exists for parity/reference.
 - Default target ISA is `amdgcn-amd-amdhsa--gfx950`. Supported target facts

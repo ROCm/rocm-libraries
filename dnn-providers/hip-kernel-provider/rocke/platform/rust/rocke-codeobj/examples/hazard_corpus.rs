@@ -13,7 +13,7 @@
 //! is listed for review. Exits 1 on any failure or unread instruction.
 
 use rocke_codeobj_ffi::target::gfx9::gen_isa as t;
-use rocke_codeobj_ffi::target::gfx9::hazards::{demand, mfma_kind, Fact, Kind, MfmaClass, Regs, EXEC, M0, VCC};
+use rocke_codeobj_ffi::target::gfx9::hazards::{demand, mfma_kind, Fact, Kind, MfmaClass, RegList, Regs, EXEC, M0, VCC};
 
 /// An MFMA's class and pass count, by its row's mnemonic; the block-scaled
 /// f8f6f4 form (no row) as the 16-pass XDL kind its fp8 formats are.
@@ -105,7 +105,7 @@ fn two_defs(base: &str) -> bool {
 fn read(mnemonic: &str, rest: &str) -> Option<Fact> {
     let (ops, mods) = operands(rest);
     let base = ["_e32", "_e64", "_sdwa", "_dpp"].iter().fold(mnemonic, |m, s| m.strip_suffix(s).unwrap_or(m));
-    let regs_of = |list: &[String]| list.iter().filter_map(|o| reg(o)).collect::<Vec<_>>();
+    let regs_of = |list: &[String]| list.iter().filter_map(|o| reg(o)).collect::<RegList>();
     let mut f = Fact { wait_states: 1, ..Fact::default() };
     if mnemonic == "s_nop" {
         let n: u32 = rest.trim().trim_start_matches("0x").parse().ok().or_else(|| u32::from_str_radix(rest.trim().trim_start_matches("0x"), 16).ok())?;
@@ -311,7 +311,7 @@ fn copy_runs(insts: &mut [Inst]) {
         let n = members.len() as u16;
         let tuple = Regs { start: if dir < 0 { v0 + 1 - n } else { v0 }, n };
         for &m in &members {
-            insts[m].fact.uses = vec![tuple];
+            insts[m].fact.uses = [tuple].into_iter().collect();
         }
         k = j.max(k + 1);
     }

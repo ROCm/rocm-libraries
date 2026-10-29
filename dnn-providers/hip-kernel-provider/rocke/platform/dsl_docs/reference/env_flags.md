@@ -14,14 +14,28 @@ For setup and the most common flags in context, see
 | Variable | Values (default) | Purpose |
 |---|---|---|
 | `ROCKE_BACKEND` | `cpp` \| `python` \| `both` (**cpp**) | Which engine lowers Python-authored kernels. `cpp` = C++ engine (auto-falls back to Python if `rocke_engine` isn't built); `python` = native lowerer; `both` = run both and assert byte-identical (the differential check). |
-| `ROCKE_CODEOBJ_BACKEND` | `comgr` (**comgr**) | Which compiler turns emitted LLVM IR into HSACO. COMGR is the only value; the setting is independent of `ROCKE_BACKEND`. |
-| `ROCKE_CODEOBJ_DIRECT_LIB` | path (unset) | Explicit Rust FFI library (`rocke_codeobj_ffi`) for the fixed gfx1151 WMMA direct-HSACO emitter. When unset, rocKE searches the platform library path. This path uses no COMGR and no LLVM. |
+| `ROCKE_CODEOBJ_BACKEND` | `comgr` \| `direct` (**comgr**) | Which compiler produces the HSACO. `comgr` compiles the emitted LLVM IR; `direct` compiles the serialized rocKE IR for gfx1151 or gfx950 with the [direct compiler](../runtime/direct_compiler.md), without LLVM, and `compile_kernel` falls back to COMGR for a kernel it refuses as unsupported. The setting is independent of `ROCKE_BACKEND`; `code_object_backend=` is the per-call equivalent. |
+| `ROCKE_CODEOBJ_DIRECT_LIB` | path (unset) | Explicit path of the direct compiler's library (`rocke_codeobj_ffi`). When unset, rocKE searches the platform library path. |
 | `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (auto) | Override the emitted LLVM IR flavor. AUTO loads COMGR, queries its compiler, and maps LLVM <=20 to `llvm20`, 21/22 to `llvm22`, and >=23 to `llvm23`. If no compiler can be queried, AUTO raises; select a flavor explicitly for offline IR emission. An override selects emission; it does not change or bypass validation against the loaded compiler. |
 | `ROCKE_CPP_STRICT` | `1` (unset) | Make `cpp` backend **raise** instead of silently falling back to Python when `rocke_engine` is unavailable. |
 | `ROCKE_DEBUG` | `1` (unset) | Verbose engine diagnostics during build/lowering. |
 | `ROCKE_DEBUG_LOC` | `1` (unset) | Record the Python call stack behind every op while the kernel builds, and lower it to DWARF inlining scopes, so an ATT trace maps instructions back to the source that authored them. Off by default for two reasons: it costs a stack walk per op (material on sweeps that build thousands of kernels), and populating `op.loc` **changes the emitted `.ll` bytes**, so the byte-identity gate and the IR goldens run without it. The added metadata does not change the generated ISA, so a trace captured with it on is still representative. `IRBuilder(capture_loc=True)` is the per-builder equivalent. Set it on the process that **builds** the kernel, not on the compiler; [`capture_wavescope_trace.py`](../optimization/utilities/tools/wavescope/capture_wavescope_trace.py) does that and the rest of the capture in one command. The same DWARF is what lets `rocgdb` name the authoring line behind a memory fault — see [`../development/debugging_rocgdb.md`](../development/debugging_rocgdb.md). |
 | `ROCKE_TIME` | `1` (unset) | Print phase timings for the build/lower/compile pipeline. |
 | `ROCKE_USE_SUDO` | `1` (unset) | Benchmark/sweep harness launches kernels via `sudo -n -E` (for boxes where the user lacks GPU device-group access). |
+
+## Direct code-object compiler
+
+Read by the direct compiler's library in the process that compiles. They are
+diagnostic controls, not a tuning interface; see
+[`../runtime/direct_compiler.md`](../runtime/direct_compiler.md#debug-controls)
+for the switches.
+
+| Variable | Values (default) | Purpose |
+|---|---|---|
+| `ROCKE_DIRECT_DEBUG` | switch names, comma-separated (unset) | Turns compiler stages off, or on, to bisect a miscompile or a regression. Code objects compiled with a switch set are not qualified. |
+| `ROCKE_DIRECT_THREADS` | integer (the machine's parallelism, at most 4) | Threads one compile may use when a large kernel spills. The output does not change. |
+| `ROCKE_DIRECT_PARSE_THREADS` | integer (by input size) | Threads that parse one input. By default, 1 below 256 KiB of text, then one per 128 KiB, at most 4 and the machine's parallelism; in a session, 1 below 128 KiB, then one per 64 KiB, at most 3 and the session's threads. The output does not change. |
+| `ROCKE_DIRECT_SCAN` | `scalar` \| `avx2` (the best level the CPU has) | A lower SIMD level for the parser's byte scanner. The output does not change. |
 
 ## GEMM dispatch
 

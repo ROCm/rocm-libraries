@@ -21,11 +21,16 @@
 use super::gen_isa::Gfx9Op;
 use crate::rir::mir::*;
 
+/// Whether `add` and `addc` are an add and a carry add, without modifiers.
+fn carry_pair(add: &MInst, addc: &MInst) -> bool {
+    add.op == Opc::VAddCoU32 && addc.op == Opc::VAddCoCiU32 && add.mods == 0 && addc.mods == 0
+}
+
 /// `base + zext(y)` with `d` its result: an add and the carry add just
 /// after it of the halves of one result pair `d`, the carry read by the
 /// second alone and its carry out unused.
 fn matched(f: &MFunc, defs: &[u32], uses: &[u32], add: &MInst, addc: &MInst) -> Option<(VRef, Opnd, VRef)> {
-    if add.op != Opc::VAddCoU32 || addc.op != Opc::VAddCoCiU32 || add.mods != 0 || addc.mods != 0 {
+    if !carry_pair(add, addc) {
         return None;
     }
     if add.defs.len() != 2 || add.uses.len() != 2 || addc.uses.len() != 3 {
@@ -60,6 +65,10 @@ fn matched(f: &MFunc, defs: &[u32], uses: &[u32], add: &MInst, addc: &MInst) -> 
 /// returns how many adds became one. `ROCKE_DIRECT_DEBUG=nowideadd` skips it.
 pub fn run(f: &mut MFunc) -> usize {
     if crate::rir::debug_flag("nowideadd") {
+        return 0;
+    }
+    // Only an add and the carry add right after it become one.
+    if !f.blocks.iter().any(|b| b.insts.windows(2).any(|w| carry_pair(&w[0], &w[1]))) {
         return 0;
     }
     let (mut defs, mut uses) = (vec![0u32; f.vregs.len()], vec![0u32; f.vregs.len()]);
@@ -171,5 +180,86 @@ mod tests {
         hi.uses[1] = r(2, 0, 1);
         let mut f = func(vec![lo, hi]);
         assert_eq!(run(&mut f), 0);
+    }
+
+    /// `run` as it was before its check for an add and its carry add, kept
+    /// verbatim to compare against.
+    fn run_reference(f: &mut MFunc) -> usize {
+        if crate::rir::debug_flag("nowideadd") {
+            return 0;
+        }
+        let (mut defs, mut uses) = (vec![0u32; f.vregs.len()], vec![0u32; f.vregs.len()]);
+        for inst in f.blocks.iter().flat_map(|b| &b.insts) {
+            inst.defs.iter().filter_map(Opnd::vref).for_each(|v| defs[v.reg as usize] += 1);
+            inst.uses.iter().filter_map(Opnd::vref).for_each(|v| uses[v.reg as usize] += 1);
+        }
+        let mut fused = 0;
+        for b in 0..f.blocks.len() {
+            let insts = std::mem::take(&mut f.blocks[b].insts);
+            let mut out = Vec::with_capacity(insts.len());
+            let mut pairs: std::collections::HashMap<VRef, VRef> = std::collections::HashMap::new();
+            let mut k = 0;
+            while k < insts.len() {
+                let found = insts.get(k + 1).and_then(|addc| matched(f, &defs, &uses, &insts[k], addc));
+                let Some((d, base, y)) = found else {
+                    let inst = insts[k].clone();
+                    if inst.op.flags() & F_DEF_EXEC != 0 || inst.defs.iter().any(|o| matches!(o, Opnd::P(Phys::ExecLo, _))) {
+                        pairs.clear();
+                    }
+                    out.push(inst);
+                    k += 1;
+                    continue;
+                };
+                let once = defs[y.reg as usize] <= 1;
+                let p = match pairs.get(&y).filter(|_| once) {
+                    Some(&p) => p,
+                    None => {
+                        f.vregs.push(VRegInfo { class: Class::V, size: 2, align: 1, fixed: None });
+                        let p = VRef { reg: f.vregs.len() as u32 - 1, off: 0, n: 2 };
+                        out.push(MInst::new(Opc::Copy, [Opnd::R(VRef { n: 1, ..p })], [Opnd::R(y)]));
+                        out.push(MInst::new(Opc::VMovB32, [Opnd::R(VRef { off: 1, n: 1, ..p })], [Opnd::Imm(0)]));
+                        if once {
+                            pairs.insert(y, p);
+                        }
+                        p
+                    }
+                };
+                out.push(MInst::new(Opc::Gfx9(Gfx9Op::VLshlAddU64), [Opnd::R(d)], [Opnd::R(p), Opnd::Imm(0), base]));
+                fused += 1;
+                k += 2;
+            }
+            f.blocks[b].insts = out;
+        }
+        fused
+    }
+
+    #[test]
+    fn wide_adds_fuse_what_they_fused() {
+        let mut fused = 0;
+        for seed in 0..400u64 {
+            let mut x = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
+            let mut next = |n: u64| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                (x % n) as u32
+            };
+            let mut insts = Vec::new();
+            for _ in 0..next(8) {
+                match next(5) {
+                    0 | 1 if seed % 4 != 0 => insts.extend(add(3 + next(2), 1 + next(2), 5 + next(2))),
+                    2 => insts.push(MInst::new(Opc::SMovB64, [Opnd::P(Phys::ExecLo, 2)], [Opnd::Imm(u32::MAX)])),
+                    3 => insts.push(MInst::new(Opc::VCndmaskB32, [r(2, 0, 1)], [Opnd::Imm(0), Opnd::Imm(1), r(5 + next(2), 0, 2)])),
+                    _ => insts.push(MInst::new(Opc::VAddF32, [r(1 + next(2), 0, 1)], [r(1, 0, 1), r(2, 0, 1)])),
+                }
+            }
+            let f = func(insts);
+            let (mut old, mut new) = (f.clone(), f);
+            let n = run_reference(&mut old);
+            assert_eq!(run(&mut new), n, "seed {seed}");
+            assert_eq!(format!("{:?}{:?}", new.blocks, new.vregs), format!("{:?}{:?}", old.blocks, old.vregs), "seed {seed}");
+            fused += usize::from(n > 0);
+        }
+        assert!(fused > 50, "{fused} functions fused");
     }
 }

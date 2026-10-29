@@ -109,6 +109,20 @@ fn find(parent: &mut [u32], x: u32) -> u32 {
 /// Moves the accumulator webs of `f` (virtual registers) to AGPRs, as many as
 /// fit; returns the AGPRs they take, or None when no web moves.
 pub fn bank(f: &mut MFunc) -> Option<u32> {
+    let (base_of, agprs) = place(f)?;
+    rewrite(f, &base_of);
+    Some(agprs)
+}
+
+/// Where `bank` puts each register of the webs that move (from AGPR 0, NONE
+/// for the others), and the AGPRs they take.
+pub(super) fn place(f: &MFunc) -> Option<(Vec<u32>, u32)> {
+    place_with(f, false)
+}
+
+/// `place`; with `in_loops`, a web also moves when an access to it sits in
+/// its MFMAs' innermost loop, the move running there every iteration.
+pub(super) fn place_with(f: &MFunc, in_loops: bool) -> Option<(Vec<u32>, u32)> {
     let nv = f.vregs.len();
     let whole = |o: &Opnd| -> Option<u32> {
         match *o {
@@ -209,7 +223,7 @@ pub fn bank(f: &mut MFunc) -> Option<u32> {
             }
             for v in moved {
                 let r = root[v as usize] as usize;
-                if hot[r] > 0 && depth >= hot[r] {
+                if !in_loops && hot[r] > 0 && depth >= hot[r] {
                     bad[r] = true;
                 }
             }
@@ -272,31 +286,7 @@ pub fn bank(f: &mut MFunc) -> Option<u32> {
     }
     // Interference: a member defined while another is live, except the source
     // of the copy that defines it.
-    let mut adj = vec![Bits::new(m); m];
-    let mut copies: Vec<(u32, usize, usize, usize, usize)> = Vec::new();
-    for (b, block) in f.blocks.iter().enumerate() {
-        let mut live = live_out[b].clone();
-        for (k, inst) in block.insts.iter().enumerate().rev() {
-            let source = (inst.op == Opc::Copy).then(|| whole_member(&inst.uses[0])).flatten();
-            if let (Some(d), Some(s)) = ((inst.op == Opc::Copy).then(|| whole_member(&inst.defs[0])).flatten(), source) {
-                copies.push((block.loop_depth, b, k, d, s));
-            }
-            for i in inst.defs.iter().filter_map(member) {
-                for j in live.ones().collect::<Vec<_>>() {
-                    if j != i && Some(j) != source {
-                        adj[i].set(j);
-                        adj[j].set(i);
-                    }
-                }
-            }
-            for i in inst.defs.iter().filter_map(whole_member) {
-                live.clear(i);
-            }
-            for i in inst.uses.iter().filter_map(member) {
-                live.set(i);
-            }
-        }
-    }
+    let (adj, mut copies) = interference(f, m, &live_out, &member, &whole_member);
     // Groups: members joined by copies while they do not interfere, the
     // innermost copies first.
     copies.sort_by(|a, b| b.0.cmp(&a.0).then((a.1, a.2).cmp(&(b.1, b.2))));
@@ -353,8 +343,57 @@ pub fn bank(f: &mut MFunc) -> Option<u32> {
     for (i, &v) in members.iter().enumerate() {
         base_of[v as usize] = base[i];
     }
-    rewrite(f, &base_of);
-    Some(placed.iter().map(|&(_, at, size)| at + size).max().unwrap_or(0))
+    Some((base_of, placed.iter().map(|&(_, at, size)| at + size).max().unwrap_or(0)))
+}
+
+/// `bank`'s interference of its `m` members (`member` and `whole_member` map
+/// an operand to one) given each block's live-out members: both bits of
+/// each pair where one is defined while the other is live, except the source
+/// of the copy defining it; and the copies between members as (loop depth,
+/// block, position, destination, source), last first in each block. Each
+/// definition ORs the live set into its row a word at a time and sets its
+/// column in the rows of the live members alone.
+fn interference(
+    f: &MFunc,
+    m: usize,
+    live_out: &[Bits],
+    member: &dyn Fn(&Opnd) -> Option<usize>,
+    whole_member: &dyn Fn(&Opnd) -> Option<usize>,
+) -> (Vec<Bits>, Vec<(u32, usize, usize, usize, usize)>) {
+    let mut adj = vec![Bits::new(m); m];
+    let mut copies: Vec<(u32, usize, usize, usize, usize)> = Vec::new();
+    let mut others = Bits::new(m);
+    for (b, block) in f.blocks.iter().enumerate() {
+        let mut live = live_out[b].clone();
+        for (k, inst) in block.insts.iter().enumerate().rev() {
+            let source = (inst.op == Opc::Copy).then(|| whole_member(&inst.uses[0])).flatten();
+            if let (Some(d), Some(s)) = ((inst.op == Opc::Copy).then(|| whole_member(&inst.defs[0])).flatten(), source) {
+                copies.push((block.loop_depth, b, k, d, s));
+            }
+            for i in inst.defs.iter().filter_map(member) {
+                others.0.copy_from_slice(&live.0);
+                others.clear(i);
+                if let Some(s) = source {
+                    others.clear(s);
+                }
+                adj[i].or(&others);
+                for (w, &word) in others.0.iter().enumerate() {
+                    let mut bits = word;
+                    while bits != 0 {
+                        adj[w * 64 + bits.trailing_zeros() as usize].set(i);
+                        bits &= bits - 1;
+                    }
+                }
+            }
+            for i in inst.defs.iter().filter_map(whole_member) {
+                live.clear(i);
+            }
+            for i in inst.uses.iter().filter_map(member) {
+                live.set(i);
+            }
+        }
+    }
+    (adj, copies)
 }
 
 fn acc(op: Gfx9Op, def: Opnd, src: Opnd) -> MInst {
@@ -386,7 +425,7 @@ fn width(o: &Opnd) -> u8 {
 
 /// Puts the registers with a `base_of` in AGPRs `base_of + dword`, then drops
 /// the moves whose results nothing reads any more.
-fn rewrite(f: &mut MFunc, base_of: &[u32]) {
+pub(super) fn rewrite(f: &mut MFunc, base_of: &[u32]) {
     let banked = |o: &Opnd| matches!(o, Opnd::R(v) if base_of[v.reg as usize] != NONE);
     let agpr = |v: VRef| Opnd::P(Phys::V(AGPR0 + (base_of[v.reg as usize] + v.off as u32) as u16), v.n);
     // Dwords whose one definition is a move of an inline constant: a copy of
@@ -705,5 +744,120 @@ mod tests {
         // Without the limit the accumulators stay in VGPRs.
         let plain = crate::rir::compile_any_target(&text, Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(plain.stats.spill.agpr_dwords, 0);
+    }
+
+    /// `bank`'s interference loop as it was before `interference`, kept
+    /// verbatim to compare against.
+    fn interference_reference(
+        f: &MFunc,
+        m: usize,
+        live_out: &[Bits],
+        member: &dyn Fn(&Opnd) -> Option<usize>,
+        whole_member: &dyn Fn(&Opnd) -> Option<usize>,
+    ) -> (Vec<Bits>, Vec<(u32, usize, usize, usize, usize)>) {
+        let mut adj = vec![Bits::new(m); m];
+        let mut copies: Vec<(u32, usize, usize, usize, usize)> = Vec::new();
+        for (b, block) in f.blocks.iter().enumerate() {
+            let mut live = live_out[b].clone();
+            for (k, inst) in block.insts.iter().enumerate().rev() {
+                let source = (inst.op == Opc::Copy).then(|| whole_member(&inst.uses[0])).flatten();
+                if let (Some(d), Some(s)) = ((inst.op == Opc::Copy).then(|| whole_member(&inst.defs[0])).flatten(), source) {
+                    copies.push((block.loop_depth, b, k, d, s));
+                }
+                for i in inst.defs.iter().filter_map(member) {
+                    for j in live.ones().collect::<Vec<_>>() {
+                        if j != i && Some(j) != source {
+                            adj[i].set(j);
+                            adj[j].set(i);
+                        }
+                    }
+                }
+                for i in inst.defs.iter().filter_map(whole_member) {
+                    live.clear(i);
+                }
+                for i in inst.uses.iter().filter_map(member) {
+                    live.set(i);
+                }
+            }
+        }
+        (adj, copies)
+    }
+
+    /// Blocks of whole and partial copies, MFMAs and VALU instructions over
+    /// registers of one to sixteen dwords, a random set of them members, and
+    /// random live-out members per block (past 64 and 128 members too).
+    #[test]
+    fn interference_marks_what_it_marked() {
+        for seed in 0..300u64 {
+            let mut x = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
+            let mut next = |n: u64| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                (x % n) as u32
+            };
+            let nv = 4 + next(200) as usize;
+            let mut f = MFunc { target: Target::Gfx950, ..MFunc::default() };
+            for _ in 0..nv {
+                let size = [1, 2, 4, 16][next(4) as usize];
+                f.vregs.push(VRegInfo { class: Class::V, size, align: 1, fixed: None });
+            }
+            let mut idx = vec![NONE; nv];
+            let mut m = 0;
+            for slot in idx.iter_mut() {
+                if next(3) != 0 {
+                    *slot = m as u32;
+                    m += 1;
+                }
+            }
+            let size = |r: u32| f.vregs[r as usize].size;
+            let r = |reg: u32, whole: bool, k: &mut dyn FnMut(u64) -> u32| {
+                let n = size(reg);
+                if whole || n == 1 {
+                    Opnd::R(VRef { reg, off: 0, n })
+                } else {
+                    Opnd::R(VRef { reg, off: k(u64::from(n)) as u8 % n, n: 1 })
+                }
+            };
+            let mut blocks = Vec::new();
+            for _ in 0..1 + next(4) {
+                let mut insts = Vec::new();
+                for _ in 0..next(40) {
+                    let (a, b, c) = (next(nv as u64), next(nv as u64), next(nv as u64));
+                    insts.push(match next(4) {
+                        0 => MInst::new(Opc::Copy, [r(a, true, &mut next)], [r(b, next(4) != 0, &mut next)]),
+                        1 => MInst::new(Opc::Gfx9(Gfx9Op::VMfma16x16x32F16), [r(a, true, &mut next)], [r(b, false, &mut next), r(c, false, &mut next), r(a, true, &mut next)]),
+                        2 => MInst::new(Opc::VAddF32, [r(a, false, &mut next)], [r(b, false, &mut next), r(c, false, &mut next)]),
+                        _ => MInst::new(Opc::VAddF32, [r(a, next(2) == 0, &mut next)], [r(a, false, &mut next), Opnd::Imm(1)]),
+                    });
+                }
+                blocks.push(MBlock { insts, loop_depth: next(3) });
+            }
+            f.blocks = blocks;
+            let whole = |o: &Opnd| match *o {
+                Opnd::R(v) if v.off == 0 && v.n == f.vregs[v.reg as usize].size => Some(v.reg),
+                _ => None,
+            };
+            let member = |o: &Opnd| match o {
+                Opnd::R(v) if idx[v.reg as usize] != NONE => Some(idx[v.reg as usize] as usize),
+                _ => None,
+            };
+            let whole_member = |o: &Opnd| whole(o).filter(|&v| idx[v as usize] != NONE).map(|v| idx[v as usize] as usize);
+            let live_out: Vec<Bits> = (0..f.blocks.len())
+                .map(|_| {
+                    let mut live = Bits::new(m);
+                    for i in 0..m {
+                        if next(4) == 0 {
+                            live.set(i);
+                        }
+                    }
+                    live
+                })
+                .collect();
+            let (adj, copies) = interference(&f, m, &live_out, &member, &whole_member);
+            let (want, want_copies) = interference_reference(&f, m, &live_out, &member, &whole_member);
+            assert_eq!(copies, want_copies, "seed {seed}");
+            assert!(adj.iter().zip(&want).all(|(a, b)| a.0 == b.0), "seed {seed}");
+        }
     }
 }

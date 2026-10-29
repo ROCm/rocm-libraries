@@ -24,8 +24,8 @@
 //! `ROCKE_DIRECT_DEBUG=noselect9` skips these rewrites, `nopack` the packing.
 
 use super::gen_isa::Gfx9Op;
+use crate::rir::fx::FxHashMap;
 use crate::rir::mir::*;
-use std::collections::HashMap;
 
 /// Definitions and uses of each virtual register in the function.
 struct Counts {
@@ -69,7 +69,7 @@ pub fn run(f: &mut MFunc) {
 struct Block<'a> {
     code: Vec<Option<MInst>>,
     /// Where each register written so far in the block was last written.
-    def_at: HashMap<u32, usize>,
+    def_at: FxHashMap<u32, usize>,
     sizes: &'a [u8],
     counts: &'a mut Counts,
 }
@@ -80,7 +80,7 @@ const PERM_HIGH_THEN_LOW: u32 = 0x0504_0302;
 
 impl<'a> Block<'a> {
     fn new(insts: Vec<MInst>, sizes: &'a [u8], counts: &'a mut Counts) -> Self {
-        Block { code: insts.into_iter().map(Some).collect(), def_at: HashMap::new(), sizes, counts }
+        Block { code: insts.into_iter().map(Some).collect(), def_at: FxHashMap::default(), sizes, counts }
     }
 
     fn run(mut self) -> Vec<MInst> {

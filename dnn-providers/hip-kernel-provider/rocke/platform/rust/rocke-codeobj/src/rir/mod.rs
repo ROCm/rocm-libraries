@@ -385,6 +385,8 @@ fn spill_best(
     let needs = par_map(&candidates, threads, |(_, f, _)| {
         regalloc::assignment_need(f).unwrap_or(regalloc::Pressure { vgprs: u32::MAX / 4, sgprs: u32::MAX / 4 })
     });
+    // gfx950: each candidate with its accumulator webs in AGPRs, moves in loops and all, where that fits (`gfx9::agpr_spill`).
+    let mut banked = crate::target::gfx9::agpr_spill::banked_fits(&candidates, hw, room);
     let ((window, mut f, _), _) = candidates
         .into_iter()
         .zip(needs)
@@ -400,7 +402,14 @@ fn spill_best(
             Target::Gfx1151 => 0,
         },
     };
+    // gfx950: also the accumulator webs in AGPRs beside the spilled values; the cheapest wins (`gfx9::agpr_spill`).
+    let spilled = crate::target::gfx9::agpr_spill::banked_spill(&f, cfg, room, |g, cfg| regalloc::allocate_spilling_on(g, hw, cfg, threads));
+    banked.extend(spilled.into_iter().map(|(g, b)| (window, g, b)));
     let a = regalloc::allocate_spilling_on(&mut f, hw, cfg, threads)?;
+    if let Some((w, g, b)) = crate::target::gfx9::agpr_spill::cheapest(banked, (&f, &a), lds_size, wg) {
+        *func = g;
+        return Ok((b, w));
+    }
     *func = f;
     Ok((a, window))
 }
@@ -552,7 +561,8 @@ fn schedule_and_widen(
         return Ok(widened);
     }
     let schedule = |window: usize, cap: regalloc::Limits| known.schedule_capped(window, cap).map(|(orders, p)| (post::reordered(&sunk, &orders), p));
-    Ok(crate::target::gfx9::trade::trade(func, widened, schedule, |f, budget| known.allocate(f, budget), lds_size, wg))
+    let traded = crate::target::gfx9::trade::trade(func, widened, &schedule, |f, budget| known.allocate(f, budget), lds_size, wg);
+    Ok(crate::target::gfx9::bank_wide::widen_banked(func, traded, schedule, lds_size, wg))
 }
 
 /// What every schedule `schedule_and_widen` tries of one function after load
@@ -995,6 +1005,9 @@ fn compile_with(
         }
         None => facts,
     };
+    if target == Target::Gfx950 {
+        crate::target::gfx9::widen::after_unroll(&mut kernel);
+    }
     let merged_loads = facts.merged_loads;
     if target == Target::Gfx1151 {
         fma_chains::interleave(&mut kernel);
@@ -1018,8 +1031,11 @@ fn compile_with(
     if target == Target::Gfx950 {
         // gfx950 takes the peephole rules and VALU fusion valid on gfx9
         // (`prepare`); guard reuse is gfx11's.
+        laps.lap("isel");
         crate::target::gfx9::prepare(&mut sel.func);
+        laps.lap("prepare");
         crate::target::gfx9::legalize::run(&mut sel.func);
+        crate::target::gfx9::lits::share(&mut sel.func);
     } else {
         peephole::optimize(&mut sel.func);
         uniform_masks::reuse_masks(&mut sel.func);
@@ -1027,7 +1043,7 @@ fn compile_with(
             post::fuse_valu(&mut sel.func);
         }
     }
-    laps.lap("isel");
+    laps.lap(if target == Target::Gfx950 { "legalize" } else { "isel" });
     if !lds_cse || spill {
         mma_order::fit(&mut sel.func);
     }
@@ -1127,8 +1143,15 @@ fn complete(
     let lds_total = sel.lds_size + alloc.spill.lds_bytes;
     reload::hoist(&mut sel.func, &alloc, sel.lds_size, target.info().occupancy(alloc.unified_vgprs().max(1), lds_total, kernel.max_workgroup_size));
     laps.lap("regalloc");
-    let (vopd_pairs, vopd_weighted) = finish(&mut sel.func, alloc.num_vgprs)?;
-    laps.lap("post");
+    let (vopd_pairs, vopd_weighted) = match target {
+        // gfx950's passes lap themselves: `expand`, `waitcnt`, `hazards`.
+        Target::Gfx950 => crate::target::gfx9::finish_lapped(&mut sel.func, alloc.num_vgprs, &mut |name| laps.lap(name)).map(|()| (0, 0))?,
+        Target::Gfx1151 => {
+            let pairs = finish(&mut sel.func, alloc.num_vgprs)?;
+            laps.lap("post");
+            pairs
+        }
+    };
     let code = match target {
         Target::Gfx1151 => asm::assemble(&sel.func)?,
         Target::Gfx950 => crate::target::gfx9::asm::assemble(&sel.func)?,
@@ -1136,6 +1159,7 @@ fn complete(
     laps.lap("encode");
 
     let vgprs = alloc.num_vgprs.max(1);
+    let vgprs = if target == Target::Gfx950 { vgprs.max(crate::target::gfx9::pack::vgprs_named(&sel.func)) } else { vgprs };
     let rsrc1 = 0xe0af_0000 | (vgprs.div_ceil(8) - 1);
     let rsrc2 = (2 << 1)
         | (sel.wg_ids[0] as u32) << 7

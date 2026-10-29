@@ -21,8 +21,8 @@
 //! instruction reads.
 
 use super::gen_isa::Gfx9Op;
+use crate::rir::fx::FxHashMap;
 use crate::rir::mir::*;
-use std::collections::HashMap;
 
 /// The lane selects of `imm=pksel`: op_sel of source `k`, and its
 /// op_sel_hi cleared.
@@ -43,7 +43,7 @@ pub fn run(f: &mut MFunc) {
             early[d.reg as usize] |= inst.op.flags() & F_EARLY != 0;
         }
     }
-    let mut p = Packer { f_vregs: std::mem::take(&mut f.vregs), defs, early, rename: HashMap::new() };
+    let mut p = Packer { f_vregs: std::mem::take(&mut f.vregs), defs, early, rename: FxHashMap::default() };
     for block in f.blocks.iter_mut() {
         let insts = std::mem::take(&mut block.insts);
         block.insts = p.block(insts);
@@ -52,7 +52,7 @@ pub fn run(f: &mut MFunc) {
     if p.rename.is_empty() {
         return;
     }
-    let rename = |o: &mut Opnd, map: &HashMap<u32, (u32, u8)>| {
+    let rename = |o: &mut Opnd, map: &FxHashMap<u32, (u32, u8)>| {
         if let Opnd::R(v) = o {
             if let Some(&(pair, off)) = map.get(&v.reg) {
                 *v = VRef { reg: pair, off: off + v.off, n: v.n };
@@ -73,7 +73,7 @@ struct Packer {
     /// sources: never made half of a pair.
     early: Vec<bool>,
     /// One-dword registers that became the half `off` of a pair.
-    rename: HashMap<u32, (u32, u8)>,
+    rename: FxHashMap<u32, (u32, u8)>,
 }
 
 /// One packed source: the 64-bit operand (or the plan's pair `Joined(j)`
@@ -248,6 +248,25 @@ impl Packer {
     }
 }
 
+/// The VGPRs the packed instructions of `f`, after allocation, name: a
+/// broadcast source at an even register is encoded as that register's pair,
+/// so the code names the register after it too (with the allocation's last
+/// register, one past the allocation), as `.vgpr_count` must cover.
+pub fn vgprs_named(f: &MFunc) -> u32 {
+    let packed = |op: Opc| matches!(op, Opc::Gfx9(Gfx9Op::VPkMulF32 | Gfx9Op::VPkAddF32 | Gfx9Op::VPkFmaF32));
+    let mut top = 0;
+    for inst in f.blocks.iter().flat_map(|b| &b.insts).filter(|i| packed(i.op)) {
+        for u in &inst.uses {
+            if let Opnd::P(Phys::V(r), 1) = u {
+                if r % 2 == 0 {
+                    top = top.max(u32::from(*r) + 2);
+                }
+            }
+        }
+    }
+    top
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,6 +331,18 @@ mod tests {
         run(&mut f);
         let pk = &f.blocks[0].insts[0];
         assert_eq!((&pk.uses[..], pk.imm), (&[r(2, 0, 2), r(1, 0, 1)][..], 0x11 | 0x20));
+    }
+
+    #[test]
+    fn a_broadcast_at_an_even_register_names_the_one_after() {
+        let v = |r: u16, n: u8| Opnd::P(Phys::V(r), n);
+        let pk = |b: u16| MInst::new(Opc::Gfx9(Gfx9Op::VPkFmaF32), [v(4, 2)], [v(22, 2), v(b, 1), v(4, 2)]).with_imm(0x20);
+        let mut f = MFunc { target: crate::target::Target::Gfx950, ..MFunc::default() };
+        f.blocks = vec![MBlock { insts: vec![pk(24)], loop_depth: 0 }];
+        assert_eq!(vgprs_named(&f), 26);
+        // At an odd register it is the high half of the pair below.
+        f.blocks[0].insts = vec![pk(23)];
+        assert_eq!(vgprs_named(&f), 0);
     }
 
     #[test]

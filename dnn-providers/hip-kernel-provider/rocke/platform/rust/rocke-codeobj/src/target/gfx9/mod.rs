@@ -14,8 +14,10 @@ use crate::error::CompileError;
 use crate::rir::mir::MFunc;
 
 pub mod agpr;
+pub mod agpr_spill;
 pub mod asm;
 pub mod atomics;
+pub mod bank_wide;
 pub mod attn_ops;
 pub mod conv_ops;
 pub mod cpol;
@@ -24,18 +26,23 @@ pub mod gen_isa;
 pub mod hazards;
 pub mod iglp;
 pub mod isel_hooks;
+pub mod lane_cse;
 pub mod early_constants;
 pub mod fp8;
 pub mod lanes;
 pub mod lds_dma;
 pub mod lds_tr;
+pub mod lits;
+pub mod m0_order;
 pub mod mask_splat;
+pub mod masks;
 pub mod legalize;
 pub mod m0_hoist;
 pub mod mfma;
 pub mod model;
 pub mod pack;
 pub mod relief;
+pub mod ro_loads;
 pub mod rules;
 pub mod sched;
 pub mod select;
@@ -45,6 +52,7 @@ pub mod vectorize;
 pub mod waitcnt;
 pub mod wide_add;
 pub mod zero_acc;
+pub mod widen;
 
 /// What gfx950 does between the shared instruction selection and `legalize`:
 /// MFMAs that start from zero read C as the constant (`zero_acc`), LDS DMA
@@ -66,6 +74,7 @@ pub fn prepare(f: &mut MFunc) {
     if !crate::rir::debug_flag("nopack") {
         pack::run(f);
     }
+    masks::reuse(f);
 }
 
 /// The passes after register allocation on gfx950: pseudos become moves
@@ -75,11 +84,20 @@ pub fn prepare(f: &mut MFunc) {
 /// the hazard `s_nop`s. gfx950 has no `s_delay_alu`, clauses, VOPD or VGPR
 /// release message, so none of the gfx11 passes that place them run.
 pub fn finish(func: &mut MFunc, num_vgprs: u32) -> Result<(), CompileError> {
+    finish_lapped(func, num_vgprs, &mut |_| ())
+}
+
+/// `finish`, calling `lap` after each of its stages with the stage's name
+/// (`expand`, `waitcnt`, `hazards`), for the compile's phase times.
+pub fn finish_lapped(func: &mut MFunc, num_vgprs: u32, lap: &mut dyn FnMut(&'static str)) -> Result<(), CompileError> {
     crate::rir::post::expand_pseudos(func)?;
     zero_acc::after_allocation(func);
     hazards::fix_shift64(func, num_vgprs)?;
+    lap("expand");
     waitcnt::insert(func);
+    lap("waitcnt");
     hazards::insert_nops(func);
+    lap("hazards");
     Ok(())
 }
 

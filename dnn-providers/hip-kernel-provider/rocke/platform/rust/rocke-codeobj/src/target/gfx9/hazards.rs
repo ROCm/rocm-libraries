@@ -72,10 +72,89 @@ use crate::rir::mir::*;
 
 /// A register range: VGPRs from 0, SGPRs from 256 (VCC at 256+106, M0 at
 /// 256+124, EXEC at 256+126), AGPRs from 384.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Regs {
     pub start: u16,
     pub n: u16,
+}
+
+/// The register ranges an instruction writes or reads: inline while there
+/// are four or fewer (as for every instruction of ours), in `spill` past
+/// that (as a disassembled instruction may have).
+#[derive(Clone, Default)]
+pub struct RegList {
+    len: u8,
+    inline: [Regs; 4],
+    spill: Vec<Regs>,
+}
+
+impl RegList {
+    pub fn push(&mut self, r: Regs) {
+        if self.spill.is_empty() && usize::from(self.len) < self.inline.len() {
+            self.inline[usize::from(self.len)] = r;
+            self.len += 1;
+        } else {
+            if self.spill.is_empty() {
+                self.spill.extend_from_slice(&self.inline[..usize::from(self.len)]);
+            }
+            self.spill.push(r);
+        }
+    }
+}
+
+impl std::ops::Deref for RegList {
+    type Target = [Regs];
+    fn deref(&self) -> &[Regs] {
+        if self.spill.is_empty() {
+            &self.inline[..usize::from(self.len)]
+        } else {
+            &self.spill
+        }
+    }
+}
+
+impl std::fmt::Debug for RegList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
+    }
+}
+
+impl Extend<Regs> for RegList {
+    fn extend<I: IntoIterator<Item = Regs>>(&mut self, iter: I) {
+        for r in iter {
+            self.push(r);
+        }
+    }
+}
+
+impl FromIterator<Regs> for RegList {
+    fn from_iter<I: IntoIterator<Item = Regs>>(iter: I) -> Self {
+        let mut list = RegList::default();
+        list.extend(iter);
+        list
+    }
+}
+
+impl From<Vec<Regs>> for RegList {
+    fn from(regs: Vec<Regs>) -> Self {
+        regs.into_iter().collect()
+    }
+}
+
+impl IntoIterator for RegList {
+    type Item = Regs;
+    type IntoIter = std::vec::IntoIter<Regs>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.to_vec().into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a RegList {
+    type Item = &'a Regs;
+    type IntoIter = std::slice::Iter<'a, Regs>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
 }
 
 impl Regs {
@@ -147,9 +226,9 @@ pub struct Fact {
     /// buffer store with an SGPR soffset.
     pub wide_data: Option<Regs>,
     pub buffer_sgpr_soffset: bool,
-    pub defs: Vec<Regs>,
+    pub defs: RegList,
     /// Register sources, src0 first.
-    pub uses: Vec<Regs>,
+    pub uses: RegList,
     pub src0: Option<Regs>,
     pub src1: Option<Regs>,
     /// Reads VCC without naming it (v_div_fmas).
@@ -278,9 +357,9 @@ pub fn fact(inst: &MInst) -> Fact {
         Fmt::Mubuf if store && inst.defs.is_empty() => inst.uses.first(),
         _ => None,
     };
-    let soffset = t::signature(op).and_then(|s| s.uses.iter().position(|o| o.role == Role::Soffset));
-    let sgpr_soffset = fmt == Fmt::Mubuf && soffset.and_then(|k| inst.uses.get(k)).and_then(regs).is_some_and(|r| r.is_sgpr());
-    let uses: Vec<Regs> = inst.uses.iter().filter_map(regs).collect();
+    let soffset = || t::signature(op).and_then(|s| s.uses.iter().position(|o| o.role == Role::Soffset));
+    let sgpr_soffset = fmt == Fmt::Mubuf && soffset().and_then(|k| inst.uses.get(k)).and_then(regs).is_some_and(|r| r.is_sgpr());
+    let uses: RegList = inst.uses.iter().filter_map(regs).collect();
     let mfma = mfma_kind(op);
     let dot = match op {
         Opc::VDot2F32F16 => 1,
@@ -321,49 +400,104 @@ pub fn fact(inst: &MInst) -> Fact {
     }
 }
 
-/// Wait states from just before instruction `i` of block `b` back to the
-/// nearest instruction `hit` accepts, the least over every path; `limit`
-/// when there is none that close.
-fn since(blocks: &[Vec<Fact>], preds: &[Vec<usize>], b: usize, i: usize, limit: u32, hit: &dyn Fn(&Fact) -> bool) -> u32 {
-    let mut acc = 0;
-    for f in blocks[b][..i].iter().rev() {
-        if hit(f) {
-            return acc;
-        }
-        acc += f.wait_states;
-        if acc >= limit {
-            return limit;
-        }
-    }
-    let mut best = limit;
-    let mut entered = vec![u32::MAX; blocks.len()];
-    let mut stack = vec![(b, acc)];
-    while let Some((blk, at)) = stack.pop() {
-        for &p in &preds[blk] {
-            if at >= entered[p] || at >= best {
-                continue;
+/// The walks of `since` into predecessor blocks, with their scratch kept
+/// from one walk to the next: each block's entry distance (valid while its
+/// stamp is the walk's) and the blocks left to walk.
+#[derive(Default)]
+struct Walk {
+    entered: std::cell::RefCell<Vec<(u32, u32)>>,
+    stack: std::cell::RefCell<Vec<(usize, u32)>>,
+    stamp: std::cell::Cell<u32>,
+}
+
+impl Walk {
+    /// Wait states from just before instruction `i` of block `b` back to the
+    /// nearest instruction `hit` accepts, the least over every path; `limit`
+    /// when there is none that close.
+    fn since(&self, blocks: &[Vec<Fact>], preds: &[Vec<usize>], b: usize, i: usize, limit: u32, hit: &dyn Fn(&Fact) -> bool) -> u32 {
+        let mut acc = 0;
+        for f in blocks[b][..i].iter().rev() {
+            if hit(f) {
+                return acc;
             }
-            entered[p] = at;
-            let mut acc = at;
-            let mut open = true;
-            for f in blocks[p].iter().rev() {
-                if hit(f) {
-                    best = best.min(acc);
-                    open = false;
-                    break;
+            acc += f.wait_states;
+            if acc >= limit {
+                return limit;
+            }
+        }
+        let mut best = limit;
+        let (mut entered, mut stack) = (self.entered.borrow_mut(), self.stack.borrow_mut());
+        if entered.len() < blocks.len() {
+            entered.resize(blocks.len(), (0, u32::MAX));
+        }
+        let stamp = self.stamp.get().wrapping_add(1);
+        if stamp == 0 {
+            entered.fill((0, u32::MAX));
+        }
+        self.stamp.set(stamp);
+        stack.clear();
+        stack.push((b, acc));
+        while let Some((blk, at)) = stack.pop() {
+            for &p in &preds[blk] {
+                let was = if entered[p].0 == stamp { entered[p].1 } else { u32::MAX };
+                if at >= was || at >= best {
+                    continue;
                 }
-                acc += f.wait_states;
-                if acc >= best {
-                    open = false;
-                    break;
+                entered[p] = (stamp, at);
+                let mut acc = at;
+                let mut open = true;
+                for f in blocks[p].iter().rev() {
+                    if hit(f) {
+                        best = best.min(acc);
+                        open = false;
+                        break;
+                    }
+                    acc += f.wait_states;
+                    if acc >= best {
+                        open = false;
+                        break;
+                    }
+                }
+                if open {
+                    stack.push((p, acc));
                 }
             }
-            if open {
-                stack.push((p, acc));
-            }
         }
+        best
     }
-    best
+}
+
+/// The MFMA kinds and DOT instructions a function has. A rule of `demand`
+/// whose producer is of a kind the function lacks finds none, so leaving it
+/// out changes nothing.
+#[derive(Clone, Copy)]
+struct Present {
+    kinds: [bool; MFMA_KINDS.len()],
+    mfma: bool,
+    dot: bool,
+}
+
+impl Present {
+    /// Every kind: `demand` of facts it has not seen whole.
+    const ALL: Present = Present { kinds: [true; MFMA_KINDS.len()], mfma: true, dot: true };
+
+    fn of(blocks: &[Vec<Fact>]) -> Present {
+        let mut present = Present { kinds: [false; MFMA_KINDS.len()], mfma: false, dot: false };
+        for f in blocks.iter().flatten() {
+            if let Some(kind) = f.mfma {
+                present.mfma = true;
+                if let Some(at) = MFMA_KINDS.iter().position(|&k| k == kind) {
+                    present.kinds[at] = true;
+                }
+            }
+            present.dot |= f.dot != 0;
+        }
+        present
+    }
+
+    fn has(&self, kind: (MfmaClass, u32)) -> bool {
+        MFMA_KINDS.iter().position(|&k| k == kind).is_some_and(|at| self.kinds[at])
+    }
 }
 
 /// H11: whether `mem` would join a soft clause (the run of same-kind
@@ -396,11 +530,17 @@ fn valu_writes(r: Regs) -> impl Fn(&Fact) -> bool {
 
 /// The wait states instruction `i` of block `b` needs before it.
 pub fn demand(blocks: &[Vec<Fact>], preds: &[Vec<usize>], b: usize, i: usize) -> u32 {
+    demand_in(&Walk::default(), Present::ALL, blocks, preds, b, i)
+}
+
+/// `demand`, walking with `walk`'s scratch and passing over the rules whose
+/// producers `present` says the function lacks.
+fn demand_in(walk: &Walk, present: Present, blocks: &[Vec<Fact>], preds: &[Vec<usize>], b: usize, i: usize) -> u32 {
     let f = &blocks[b][i];
     // A clause is broken by one wait state between it and `f`.
     let mut need = u32::from(matches!(f.kind, Kind::Vmem | Kind::Smem) && breaks_clause(blocks, b, i, f));
     let mut want = |w: u32, hit: &dyn Fn(&Fact) -> bool| {
-        need = need.max(w - since(blocks, preds, b, i, w, hit));
+        need = need.max(w - walk.since(blocks, preds, b, i, w, hit));
     };
     if f.kind == Kind::Vmem {
         for &u in f.uses.iter().filter(|u| u.is_sgpr()) {
@@ -460,7 +600,7 @@ pub fn demand(blocks: &[Vec<Fact>], preds: &[Vec<usize>], b: usize, i: usize) ->
         for &u in f.uses.iter().filter(|u| !u.is_sgpr()) {
             want(2, &|p: &Fact| legacy_valu(p) && p.dot == 0 && p.defs.iter().any(|d| d.overlaps(u)));
         }
-        for k in MFMA_KINDS {
+        for k in MFMA_KINDS.into_iter().filter(|&k| present.has(k)) {
             if let Some(c) = f.srcc {
                 for full in [true, false] {
                     let w = mfma_srcc_waits(k, kind.0, full);
@@ -474,9 +614,9 @@ pub fn demand(blocks: &[Vec<Fact>], preds: &[Vec<usize>], b: usize, i: usize) ->
                 want(mfma_srcab_waits(k), &mfma_wrote(k, ab));
             }
         }
-    } else if matches!(f.kind, Kind::Valu | Kind::Vmem | Kind::Lds) && since(blocks, preds, b, i, 20, &|p| p.mfma.is_some()) < 20 {
+    } else if present.mfma && matches!(f.kind, Kind::Valu | Kind::Vmem | Kind::Lds) && walk.since(blocks, preds, b, i, 20, &|p| p.mfma.is_some()) < 20 {
         let memory = f.kind != Kind::Valu;
-        for k in MFMA_KINDS {
+        for k in MFMA_KINDS.into_iter().filter(|&k| present.has(k)) {
             for &u in f.uses.iter().filter(|u| !u.is_sgpr()) {
                 want(mfma_result_waits(k, memory, false), &mfma_wrote(k, u));
             }
@@ -487,7 +627,7 @@ pub fn demand(blocks: &[Vec<Fact>], preds: &[Vec<usize>], b: usize, i: usize) ->
             }
         }
     }
-    if f.kind == Kind::Valu && since(blocks, preds, b, i, 3, &|p| p.dot != 0) < 3 {
+    if present.dot && f.kind == Kind::Valu && walk.since(blocks, preds, b, i, 3, &|p| p.dot != 0) < 3 {
         for &u in &f.uses {
             let own_c = f.dot != 0 && f.srcc == Some(u);
             want(3, &|p: &Fact| p.dot != 0 && !(own_c && p.dot == f.dot) && p.defs.first().is_some_and(|d| d.overlaps(u)));
@@ -520,10 +660,13 @@ pub fn predecessors(f: &MFunc) -> Vec<Vec<usize>> {
 pub fn insert_nops(f: &mut MFunc) {
     let preds = predecessors(f);
     let mut facts: Vec<Vec<Fact>> = f.blocks.iter().map(|b| b.insts.iter().map(fact).collect()).collect();
+    // The `s_nop`s put in are neither MFMAs nor DOTs.
+    let present = Present::of(&facts);
+    let walk = Walk::default();
     for b in 0..f.blocks.len() {
         let mut i = 0;
         while i < facts[b].len() {
-            let mut need = demand(&facts, &preds, b, i);
+            let mut need = demand_in(&walk, present, &facts, &preds, b, i);
             while need > 0 {
                 let n = need.min(8);
                 let nop = MInst::new(Opc::SNop, [], []).with_imm(n as i64 - 1);
@@ -933,5 +1076,290 @@ mod tests {
         // s_sendmsg has a row but nothing selects it for gfx950 (the VGPR
         // release message is gfx11's).
         assert!(t::info(Opc::SSendmsg).is_some());
+    }
+
+    /// `since`, `demand` and `insert_nops` as they were before the walks kept
+    /// their scratch and the rules of kinds a function lacks were passed
+    /// over, kept verbatim to compare against.
+    mod reference {
+        use super::super::*;
+
+        fn since(blocks: &[Vec<Fact>], preds: &[Vec<usize>], b: usize, i: usize, limit: u32, hit: &dyn Fn(&Fact) -> bool) -> u32 {
+            let mut acc = 0;
+            for f in blocks[b][..i].iter().rev() {
+                if hit(f) {
+                    return acc;
+                }
+                acc += f.wait_states;
+                if acc >= limit {
+                    return limit;
+                }
+            }
+            let mut best = limit;
+            let mut entered = vec![u32::MAX; blocks.len()];
+            let mut stack = vec![(b, acc)];
+            while let Some((blk, at)) = stack.pop() {
+                for &p in &preds[blk] {
+                    if at >= entered[p] || at >= best {
+                        continue;
+                    }
+                    entered[p] = at;
+                    let mut acc = at;
+                    let mut open = true;
+                    for f in blocks[p].iter().rev() {
+                        if hit(f) {
+                            best = best.min(acc);
+                            open = false;
+                            break;
+                        }
+                        acc += f.wait_states;
+                        if acc >= best {
+                            open = false;
+                            break;
+                        }
+                    }
+                    if open {
+                        stack.push((p, acc));
+                    }
+                }
+            }
+            best
+        }
+
+        pub fn demand(blocks: &[Vec<Fact>], preds: &[Vec<usize>], b: usize, i: usize) -> u32 {
+            let f = &blocks[b][i];
+            let mut need = u32::from(matches!(f.kind, Kind::Vmem | Kind::Smem) && breaks_clause(blocks, b, i, f));
+            let mut want = |w: u32, hit: &dyn Fn(&Fact) -> bool| {
+                need = need.max(w - since(blocks, preds, b, i, w, hit));
+            };
+            if f.kind == Kind::Vmem {
+                for &u in f.uses.iter().filter(|u| u.is_sgpr()) {
+                    want(5, &valu_writes(u));
+                }
+            }
+            if f.kind == Kind::Valu {
+                if !f.trans {
+                    want(1, &|p: &Fact| p.kind == Kind::Valu && p.trans && p.defs.first().is_some_and(|d| f.uses.iter().any(|u| u.overlaps(*d))));
+                }
+                want(1, &|p: &Fact| {
+                    p.forwards_dst && p.defs.first().is_some_and(|d| f.uses.iter().chain(&f.defs).any(|u| u.overlaps(*d)))
+                });
+                for &u in f.uses.iter().filter(|u| u.is_sgpr()) {
+                    want(2, &valu_writes(u));
+                }
+                if f.reads_vcc {
+                    want(2, &valu_writes(VCC));
+                }
+                if f.lane_read {
+                    if let Some(src0) = f.src0 {
+                        want(1, &valu_writes(src0));
+                    }
+                }
+                if f.lane_read || f.writelane {
+                    want(4, &valu_writes(EXEC));
+                }
+                for &d in f.defs.iter().filter(|d| d.is_vgpr()) {
+                    want(1, &|p: &Fact| p.wide_data.is_some_and(|w| w.overlaps(d)));
+                    want(2, &|p: &Fact| p.wide_data.is_some_and(|w| w.overlaps(d)) && !p.buffer_sgpr_soffset);
+                }
+            }
+            if f.dpp {
+                for &u in f.uses.iter().filter(|u| u.is_vgpr()) {
+                    want(2, &|p: &Fact| p.defs.iter().any(|d| d.overlaps(u)));
+                }
+                want(5, &valu_writes(EXEC));
+            }
+            if f.permlane {
+                for &u in f.uses.iter().filter(|u| u.is_vgpr()) {
+                    want(2, &valu_writes(u));
+                }
+                want(4, &valu_writes(EXEC));
+            }
+            if f.div_fmas {
+                want(4, &valu_writes(VCC));
+            }
+            if f.lane_select {
+                if let Some(select) = f.src1.filter(|r| r.is_sgpr()) {
+                    want(4, &valu_writes(select));
+                }
+            }
+            let legacy_valu = |p: &Fact| p.kind == Kind::Valu && p.mfma.is_none();
+            let mfma_wrote = |k: (MfmaClass, u32), r: Regs| move |p: &Fact| p.mfma == Some(k) && p.defs.first().is_some_and(|d| d.overlaps(r));
+            if let Some(kind) = f.mfma {
+                want(4, &|p: &Fact| legacy_valu(p) && p.defs.iter().any(|d| d.overlaps(EXEC)));
+                for &u in f.uses.iter().filter(|u| !u.is_sgpr()) {
+                    want(2, &|p: &Fact| legacy_valu(p) && p.dot == 0 && p.defs.iter().any(|d| d.overlaps(u)));
+                }
+                for k in MFMA_KINDS {
+                    if let Some(c) = f.srcc {
+                        for full in [true, false] {
+                            let w = mfma_srcc_waits(k, kind.0, full);
+                            let hit = |p: &Fact| p.mfma == Some(k) && p.defs.first().is_some_and(|&d| if full { d == c } else { d.overlaps(c) && d != c });
+                            if w > 0 {
+                                want(w, &hit);
+                            }
+                        }
+                    }
+                    for &ab in f.srcab.iter().flatten() {
+                        want(mfma_srcab_waits(k), &mfma_wrote(k, ab));
+                    }
+                }
+            } else if matches!(f.kind, Kind::Valu | Kind::Vmem | Kind::Lds) && since(blocks, preds, b, i, 20, &|p| p.mfma.is_some()) < 20 {
+                let memory = f.kind != Kind::Valu;
+                for k in MFMA_KINDS {
+                    for &u in f.uses.iter().filter(|u| !u.is_sgpr()) {
+                        want(mfma_result_waits(k, memory, false), &mfma_wrote(k, u));
+                    }
+                    for &d in f.defs.iter().filter(|d| !d.is_sgpr()) {
+                        want(mfma_result_waits(k, false, true), &mfma_wrote(k, d));
+                        want(k.1 - 1, &|p: &Fact| p.mfma == Some(k) && p.srcc.is_some_and(|c| c.overlaps(d)));
+                    }
+                }
+            }
+            if f.kind == Kind::Valu && since(blocks, preds, b, i, 3, &|p| p.dot != 0) < 3 {
+                for &u in &f.uses {
+                    let own_c = f.dot != 0 && f.srcc == Some(u);
+                    want(3, &|p: &Fact| p.dot != 0 && !(own_c && p.dot == f.dot) && p.defs.first().is_some_and(|d| d.overlaps(u)));
+                }
+                for &d in &f.defs {
+                    want(3, &|p: &Fact| p.dot != 0 && p.dot != f.dot && p.defs.first().is_some_and(|x| x.overlaps(d)));
+                }
+            }
+            if f.fma64 {
+                want(2, &|p: &Fact| p.mfma.is_some_and(|(c, _)| c == MfmaClass::Dgemm));
+            }
+            if f.m0_reader {
+                want(1, &|p: &Fact| p.kind == Kind::Salu && p.defs.iter().any(|d| d.overlaps(M0)));
+            }
+            need
+        }
+
+        pub fn insert_nops(f: &mut MFunc) {
+            let preds = predecessors(f);
+            let mut facts: Vec<Vec<Fact>> = f.blocks.iter().map(|b| b.insts.iter().map(fact).collect()).collect();
+            for b in 0..f.blocks.len() {
+                let mut i = 0;
+                while i < facts[b].len() {
+                    let mut need = demand(&facts, &preds, b, i);
+                    while need > 0 {
+                        let n = need.min(8);
+                        let nop = MInst::new(Opc::SNop, [], []).with_imm(n as i64 - 1);
+                        facts[b].insert(i, fact(&nop));
+                        f.blocks[b].insts.insert(i, nop);
+                        need -= n;
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
+        }
+    }
+
+    /// Blocks of instructions over a few registers drawn from every rule's
+    /// producers and consumers (MFMAs of each class, with AGPRs, DOTs, DPP,
+    /// lane reads and writes, transcendental and forwarding VALU, wide and
+    /// buffer stores, vector, scalar and LDS loads, EXEC and VCC writes),
+    /// ending in a branch forward or back, a jump, a fall through or the end;
+    /// some functions have no MFMA, some no DOT.
+    fn random_function(seed: u64) -> MFunc {
+        use super::super::asm::AGPR0;
+        use t::Gfx9Op::*;
+        let mut x = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
+        let mut next = |n: u64| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x % n) as u16
+        };
+        let mfmas = seed % 4 != 0;
+        let dots = seed % 3 == 0;
+        let mut f = MFunc { target: crate::target::Target::Gfx950, ..MFunc::default() };
+        let blocks = 1 + next(5) as usize;
+        for b in 0..blocks {
+            let mut insts = Vec::new();
+            for _ in 0..next(16) {
+                let (d, a, c) = (next(12), next(12), next(12));
+                let r = |k: u16, n: u8| v(k, n);
+                let acc = |k: u16, n: u8| v(AGPR0 + k, n);
+                let mfma = |op: t::Gfx9Op, dst: Opnd, ab: (Opnd, Opnd), src: Opnd| MInst::new(Opc::Gfx9(op), [dst], [ab.0, ab.1, src]);
+                insts.push(match next(26) {
+                    0 => MInst::new(Opc::VCmp(0x14), [VCC2], [r(a, 1), r(c, 1)]),
+                    1 => MInst::new(Opc::VCmp(0x14), [EXEC2], [r(a, 1), r(c, 1)]),
+                    2 => MInst::new(Opc::VCndmaskB32, [r(d, 1)], [r(a, 1), r(c, 1), VCC2]),
+                    3 => MInst::new(Opc::VReadfirstlaneB32, [s(4 + d % 4, 1)], [r(a, 1)]),
+                    4 => MInst::new(Opc::VReadlaneB32, [s(8, 1)], [r(a, 1), s(4 + c % 4, 1)]),
+                    5 => MInst::new(Opc::VDivScaleF32, [r(d, 1), VCC2], [r(a, 1), r(a, 1), r(c, 1)]),
+                    6 => MInst::new(Opc::VDivFmasF32, [r(d, 1)], [r(a, 1), r(c, 1), r(c, 1)]),
+                    7 => MInst::new(Opc::VMovB32Dpp, [r(d, 1)], [r(a, 1)]).with_imm(0x00ff_08b1),
+                    8 => MInst::new(Opc::VExpF32, [r(d, 1)], [r(a, 1)]),
+                    9 => MInst::new(Opc::VFmaMixloF16, [r(d, 1)], [r(a, 1), r(c, 1), r(c, 1)]),
+                    10 => MInst::new(Opc::VPkAddF16, [r(d, 1)], [r(a, 1), r(c, 1)]),
+                    11 => MInst::new(Opc::GLoadB32, [r(d, 1)], [r(a, 2)]),
+                    12 => MInst::new(Opc::GLoadB32, [r(d, 1)], [r(a, 1), s(4, 2)]).with_mods(M_SADDR),
+                    13 => MInst::new(Opc::GStoreB128, [], [r(a, 2), r(c, 4)]),
+                    14 => MInst::new(Opc::BufStoreB128, [], [r(c, 4), r(a, 1), s(8, 4), s(12, 1)]),
+                    15 => MInst::new(Opc::SLoadB64, [s(4 + 2 * (d % 2), 2)], [s(2 * (a % 4), 2)]),
+                    16 => MInst::new(Opc::DsStoreB32, [], [r(a, 1), r(c, 1)]),
+                    17 if mfmas => mfma(VMfma16x16x32F16, r(d, 4), (r(a, 4), r(c, 4)), r(d, 4)),
+                    18 if mfmas => mfma(VMfma32x32x16F16, acc(0, 16), (r(a, 4), r(c, 4)), acc(0, 16)),
+                    19 if mfmas => mfma(VMfma4x4x4F16, r(d, 4), (r(a, 2), r(c, 2)), r(a, 4)),
+                    20 if mfmas => mfma(VMfma16x16x4F32, acc(d, 4), (r(a, 1), r(c, 1)), acc(c, 4)),
+                    21 if mfmas => mfma(VMfma16x16x4F64, r(d, 8), (r(a, 2), r(c, 2)), r(d, 8)),
+                    22 if mfmas => MInst::new(Opc::Gfx9(VAccvgprReadB32), [r(d, 1)], [acc(a, 1)]),
+                    23 if dots => MInst::new(Opc::VDot2F32F16, [r(d, 1)], [r(a, 1), r(c, 1), r(d, 1)]),
+                    24 => MInst::new(Opc::VFmaF64, [r(d, 2)], [r(a, 2), r(c, 2), r(d, 2)]),
+                    25 => MInst::new(Opc::Gfx9(VPermlane32SwapB32), [r(d, 1), r(a, 1)], [r(d, 1), r(a, 1)]),
+                    _ => valu(r(d, 1), r(a, 1), if next(4) == 0 { s(4 + c % 4, 1) } else { r(c, 1) }),
+                });
+            }
+            let target = next(blocks as u64) as i64;
+            match next(5) {
+                _ if b + 1 == blocks => insts.push(MInst::new(Opc::SEndpgm, [], [])),
+                0 => insts.push(MInst::new(Opc::SBranch, [], []).with_imm(target)),
+                1 | 2 => insts.push(MInst::new(Opc::SCbranchExecz, [], []).with_imm(target)),
+                _ => {}
+            }
+            f.blocks.push(MBlock { insts, loop_depth: 0 });
+        }
+        f
+    }
+
+    #[test]
+    fn reg_lists_hold_what_vectors_held() {
+        let regs: Vec<Regs> = (0..9).map(|k| Regs { start: k, n: 1 + k % 3 }).collect();
+        for n in 0..=regs.len() {
+            let mut list = RegList::default();
+            for &r in &regs[..n] {
+                list.push(r);
+            }
+            assert_eq!(&list[..], &regs[..n]);
+            assert_eq!(&RegList::from(regs[..n].to_vec())[..], &regs[..n]);
+            assert_eq!(format!("{list:?}"), format!("{:?}", &regs[..n]));
+            let mut twice = list.clone();
+            twice.extend(list.clone());
+            assert_eq!(twice.to_vec(), [&regs[..n], &regs[..n]].concat());
+            assert_eq!(list.into_iter().collect::<Vec<_>>(), regs[..n]);
+        }
+    }
+
+    #[test]
+    fn nops_go_where_they_went() {
+        let mut waited = 0;
+        for seed in 0..1500 {
+            let f = random_function(seed);
+            let preds = predecessors(&f);
+            let facts: Vec<Vec<Fact>> = f.blocks.iter().map(|b| b.insts.iter().map(fact).collect()).collect();
+            for b in 0..facts.len() {
+                for i in 0..facts[b].len() {
+                    assert_eq!(demand(&facts, &preds, b, i), reference::demand(&facts, &preds, b, i), "seed {seed} at {b}:{i}");
+                }
+            }
+            let (mut old, mut new) = (f.clone(), f);
+            reference::insert_nops(&mut old);
+            insert_nops(&mut new);
+            assert_eq!(format!("{:?}", new.blocks), format!("{:?}", old.blocks), "seed {seed}");
+            waited += usize::from(old.blocks.iter().flat_map(|b| &b.insts).any(|i| i.op == Opc::SNop));
+        }
+        assert!(waited > 700, "{waited} functions wait");
     }
 }

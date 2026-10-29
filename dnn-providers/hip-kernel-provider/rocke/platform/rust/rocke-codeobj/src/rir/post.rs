@@ -468,6 +468,10 @@ fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, 
         crate::target::Target::Gfx1151 => None,
         crate::target::Target::Gfx950 => crate::target::gfx9::sched::MfmaEdges::new(insts),
     };
+    let mut m0 = match target {
+        crate::target::Target::Gfx1151 => None,
+        crate::target::Target::Gfx950 => crate::target::gfx9::m0_order::M0Order::new(insts),
+    };
     let n = insts.len();
     let DagScratch { edges, last_def, reader_head, readers } = scratch;
     // Dependence edges (from, to, latency); successor order does not matter.
@@ -493,10 +497,11 @@ fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, 
     let mut lds = (None, Vec::new());
     let mut vmem = super::alias::GlobalOrder::default();
     for (i, inst) in insts.iter().enumerate() {
-        let flags = inst.op.flags();
+        let unfenced = m0.is_some() && crate::target::gfx9::m0_order::unfenced(inst);
+        let flags = inst.op.flags() & if unfenced { !F_FENCE } else { !0 };
         if flags & (F_BRANCH | F_END | F_DEF_EXEC | F_USE_VCC | F_SMEM | F_FENCE) != 0
             || matches!(inst.op, Opc::SBarrier | Opc::SSendmsg)
-            || has_phys(inst)
+            || has_phys(inst) && !unfenced
         {
             // Fences stay in order even with nothing between them, as the
             // `s_cbranch_execz` right after its `s_and_saveexec`.
@@ -570,6 +575,9 @@ fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, 
             }
             scc_def = Some(i);
         }
+        if let Some(m) = m0.as_mut() {
+            m.order(insts, i, &result_latency, &mut edge);
+        }
         let memory = if flags & F_LDS != 0 {
             Some((&mut lds, !inst.defs.is_empty()))
         } else if flags & (F_VMEM_LOAD | F_VMEM_STORE) != 0 {
@@ -590,6 +598,9 @@ fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, 
                 }
                 *write = Some(i);
             }
+        }
+        if unfenced && crate::target::gfx9::lds_dma::is_dma(inst.op) {
+            vmem.access(i as u32, super::alias::ANY, true, |from| edge(from as usize, i, 0));
         }
     }
     for u in insts.iter().flat_map(|inst| inst.defs.iter().chain(&inst.uses)).flat_map(|o| units.of(o)) {

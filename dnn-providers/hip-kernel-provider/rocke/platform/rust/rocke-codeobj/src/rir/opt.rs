@@ -2974,9 +2974,11 @@ fn optimize_with(kernel: &mut Kernel, lds: &mut FxHashMap<ValueId, u32>, mut ws:
     sweep(kernel, &mut ws)?;
     dce(kernel);
     if kernel.wave == 64 {
+        crate::target::gfx9::widen::prepare(kernel);
         crate::target::gfx9::vectorize::combine_global_loads(kernel);
         crate::target::gfx9::vectorize::pair_f16_ops(kernel);
         crate::target::gfx9::vectorize::pack_mfma_operands(kernel);
+        crate::target::gfx9::widen::combine_global_stores(kernel);
     }
     place_kernargs(kernel);
     sweep(kernel, &mut ws)?;

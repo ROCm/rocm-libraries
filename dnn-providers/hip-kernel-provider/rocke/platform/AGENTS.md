@@ -479,8 +479,8 @@ dual-engine vs Python-only split.
 |---|---|
 | `ROCKE_ARCH_DOMAIN` | `warn` (default) \| `off` — warn when a kernel demands an intrinsic the committed arch-domain table says the target cannot lower. `off` skips the lookup entirely. Any other value raises rather than falling back to `warn`: every way of misspelling this is an attempt to switch the lane *off*, and defaulting would leave it on |
 | `ROCKE_BACKEND` | `cpp` (default) \| `python` \| `both` (differential assert) |
-| `ROCKE_CODEOBJ_BACKEND` | `comgr` (default and only value); selects `.ll` -> HSACO independently of the lowering engine |
-| `ROCKE_CODEOBJ_DIRECT_LIB` | explicit Rust `rocke_codeobj_ffi` library for the direct gfx1151 WMMA GEMM path, which uses no LLVM; unset searches the platform library path |
+| `ROCKE_CODEOBJ_BACKEND` | `comgr` (default) \| `direct`; selects the code-object compiler independently of the lowering engine. `direct` compiles serialized rocKE IR for gfx1151 and gfx950 with no LLVM, and `compile_kernel` falls back to COMGR for a kernel it refuses as unsupported; see `dsl_docs/runtime/direct_compiler.md` |
+| `ROCKE_CODEOBJ_DIRECT_LIB` | explicit path of the direct compiler's Rust library (`rocke_codeobj_ffi`); unset searches the platform library path |
 | `ROCKE_CPP_STRICT` | `1` = raise instead of silently falling back to Python when `rocke_engine` isn't built |
 | `ROCKE_DEBUG_LOC` | `1` = capture Python source locations while building and emit DWARF, so ATT traces map to source; off by default because it changes the emitted `.ll` |
 | `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (AUTO queries the loaded COMGR compiler: LLVM <=20, 21/22, >=23; unavailable evidence raises; explicit flavors support offline emission) |

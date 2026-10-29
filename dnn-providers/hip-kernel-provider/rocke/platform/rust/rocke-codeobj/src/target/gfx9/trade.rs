@@ -51,8 +51,8 @@ pub fn trade(
     // when banked), so none issues or holds the pipe less than `floor`; and
     // none fits a workgroup at fewer waves than the fewest any fitting
     // register count gives. Past either, nothing below can pass.
-    let fewest = (1..=room.min(hw.vgprs + AGPRS)).map(|v| t.occupancy(v, lds_size, wg)).min().unwrap_or(0);
-    if cost.floor() >= bar || have <= fewest.max(1) {
+    let fewest = || (1..=room.min(hw.vgprs + AGPRS)).map(|v| t.occupancy(v, lds_size, wg)).min().unwrap_or(0);
+    if cost.floor() >= bar || have <= 1 || have <= fewest() {
         return chosen;
     }
     let cap = Limits { vgprs: hw.vgprs + AGPRS, sgprs: hw.sgprs };

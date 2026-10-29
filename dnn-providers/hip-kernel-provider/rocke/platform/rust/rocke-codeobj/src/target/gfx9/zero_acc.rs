@@ -26,22 +26,18 @@
 //! small block-scale GEMMs.
 
 use super::agpr::is_mfma;
+use crate::rir::fx::FxHashMap;
 use crate::rir::mir::*;
 
 /// Whether every dword of `c` is a dword its function defines once, by a
 /// copy (or move) of the immediate 0; `zero` says that per (register, dword).
-fn all_zero(zero: &std::collections::HashMap<(u32, u8), bool>, c: VRef) -> bool {
+fn all_zero(zero: &FxHashMap<(u32, u8), bool>, c: VRef) -> bool {
     (0..c.n).all(|k| zero.get(&(c.reg, c.off + k)).copied().unwrap_or(false))
 }
 
-/// Rewrites `f` (after selection) as the module documentation says; returns
-/// how many MFMAs now read C as 0. `ROCKE_DIRECT_DEBUG=nozeroacc` skips it.
-pub fn run(f: &mut MFunc) -> usize {
-    if crate::rir::debug_flag("nozeroacc") || !f.blocks.iter().flat_map(|b| &b.insts).any(|i| is_mfma(i.op)) {
-        return 0;
-    }
-    // (register, dword) -> defined exactly once, by a copy of 0.
-    let mut zero: std::collections::HashMap<(u32, u8), bool> = std::collections::HashMap::new();
+/// (register, dword) of `f` -> defined exactly once, by a copy of 0.
+fn zero_dwords(f: &MFunc) -> FxHashMap<(u32, u8), bool> {
+    let mut zero = FxHashMap::default();
     for inst in f.blocks.iter().flat_map(|b| &b.insts) {
         let of_zero = matches!(inst.op, Opc::Copy | Opc::VMovB32) && inst.uses.first() == Some(&Opnd::Imm(0));
         for d in &inst.defs {
@@ -51,6 +47,18 @@ pub fn run(f: &mut MFunc) -> usize {
             }
         }
     }
+    zero
+}
+
+/// Rewrites `f` (after selection) as the module documentation says; returns
+/// how many MFMAs now read C as 0. `ROCKE_DIRECT_DEBUG=nozeroacc` skips it.
+pub fn run(f: &mut MFunc) -> usize {
+    if crate::rir::debug_flag("nozeroacc") || !f.blocks.iter().flat_map(|b| &b.insts).any(|i| is_mfma(i.op)) {
+        return 0;
+    }
+    // `zero_dwords` of `f` as it comes, made at the first copy whose zeros
+    // decide (before any rewrite, which takes one).
+    let mut zero = None;
     let fixed = |f: &MFunc, v: VRef| f.vregs[v.reg as usize].fixed.is_some();
     let mut rewritten = 0;
     let looped: Vec<usize> = (0..f.blocks.len()).filter(|&b| f.blocks[b].loop_depth > 0).collect();
@@ -58,13 +66,15 @@ pub fn run(f: &mut MFunc) -> usize {
         let mut k = 1;
         while k < f.blocks[b].insts.len() {
             let (copy, mfma) = (&f.blocks[b].insts[k - 1], &f.blocks[b].insts[k]);
-            let candidate = is_mfma(mfma.op)
-                && copy.op == Opc::Copy
-                && matches!(
-                    (mfma.defs.first(), mfma.uses.get(2), copy.defs.first(), copy.uses.first()),
-                    (Some(&Opnd::R(d)), Some(&Opnd::R(c2)), Some(&Opnd::R(cd)), Some(&Opnd::R(c)))
-                        if d == c2 && d == cd && d.n <= 4 && c.n == d.n && !fixed(f, d) && all_zero(&zero, c)
-                );
+            let source = match (mfma.defs.first(), mfma.uses.get(2), copy.defs.first(), copy.uses.first()) {
+                (Some(&Opnd::R(d)), Some(&Opnd::R(c2)), Some(&Opnd::R(cd)), Some(&Opnd::R(c)))
+                    if is_mfma(mfma.op) && copy.op == Opc::Copy && d == c2 && d == cd && d.n <= 4 && c.n == d.n && !fixed(f, d) =>
+                {
+                    Some(c)
+                }
+                _ => None,
+            };
+            let candidate = source.is_some_and(|c| all_zero(zero.get_or_insert_with(|| zero_dwords(f)), c));
             if candidate {
                 f.blocks[b].insts[k].uses[2] = Opnd::Imm(0);
                 f.blocks[b].insts.remove(k - 1);
@@ -303,5 +313,123 @@ mod tests {
         let mut f = allocated(vec![], vec![mfma(8, 8, 4, v(8, 4))]);
         assert_eq!(super::after_allocation(&mut f), 0);
         assert_eq!(f.blocks[0].insts.len(), 5);
+    }
+
+    /// `run` as it was before its zero map was made on demand, kept verbatim
+    /// to compare against.
+    fn run_reference(f: &mut MFunc) -> usize {
+        if crate::rir::debug_flag("nozeroacc") || !f.blocks.iter().flat_map(|b| &b.insts).any(|i| is_mfma(i.op)) {
+            return 0;
+        }
+        let mut zero: std::collections::HashMap<(u32, u8), bool> = std::collections::HashMap::new();
+        for inst in f.blocks.iter().flat_map(|b| &b.insts) {
+            let of_zero = matches!(inst.op, Opc::Copy | Opc::VMovB32) && inst.uses.first() == Some(&Opnd::Imm(0));
+            for d in &inst.defs {
+                let Opnd::R(v) = *d else { continue };
+                for k in 0..v.n {
+                    zero.entry((v.reg, v.off + k)).and_modify(|z| *z = false).or_insert(of_zero && v.n == 1);
+                }
+            }
+        }
+        let all_zero = |c: VRef| (0..c.n).all(|k| zero.get(&(c.reg, c.off + k)).copied().unwrap_or(false));
+        let fixed = |f: &MFunc, v: VRef| f.vregs[v.reg as usize].fixed.is_some();
+        let mut rewritten = 0;
+        let looped: Vec<usize> = (0..f.blocks.len()).filter(|&b| f.blocks[b].loop_depth > 0).collect();
+        for b in looped {
+            let mut k = 1;
+            while k < f.blocks[b].insts.len() {
+                let (copy, mfma) = (&f.blocks[b].insts[k - 1], &f.blocks[b].insts[k]);
+                let candidate = is_mfma(mfma.op)
+                    && copy.op == Opc::Copy
+                    && matches!(
+                        (mfma.defs.first(), mfma.uses.get(2), copy.defs.first(), copy.uses.first()),
+                        (Some(&Opnd::R(d)), Some(&Opnd::R(c2)), Some(&Opnd::R(cd)), Some(&Opnd::R(c)))
+                            if d == c2 && d == cd && d.n <= 4 && c.n == d.n && !fixed(f, d) && all_zero(c)
+                    );
+                if candidate {
+                    f.blocks[b].insts[k].uses[2] = Opnd::Imm(0);
+                    f.blocks[b].insts.remove(k - 1);
+                    rewritten += 1;
+                } else {
+                    k += 1;
+                }
+            }
+        }
+        if rewritten > 0 {
+            crate::rir::post::remove_dead_copies(f);
+        }
+        rewritten
+    }
+
+    /// A selected function: one-dword registers some defined by zeros, tuples
+    /// built from them by copies, and blocks (some in loops) of MFMAs whose C
+    /// is copied into D just before, from a tuple, a reused D or another
+    /// value, with other writes of the dwords and fixed registers mixed in.
+    fn random_function(seed: u64) -> MFunc {
+        let mut s = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
+        let mut next = |n: u64| {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            (s % n) as u32
+        };
+        let mut f = MFunc { target: Target::Gfx950, ..MFunc::default() };
+        let reg = |f: &mut MFunc, size: u8, fixed: bool| {
+            f.vregs.push(VRegInfo { class: Class::V, size, align: 1, fixed: fixed.then_some(0) });
+            f.vregs.len() as u32 - 1
+        };
+        let r = |reg: u32, off: u8, n: u8| Opnd::R(VRef { reg, off, n });
+        let mut entry = Vec::new();
+        let other = reg(&mut f, 1, false);
+        let tuples: Vec<u32> = (0..4).map(|_| reg(&mut f, 4, false)).collect();
+        for &t in &tuples {
+            for k in 0..4 {
+                let value = if next(12) == 0 { r(other, 0, 1) } else { Opnd::Imm(0) };
+                entry.push(MInst::new(if next(2) == 0 { Opc::Copy } else { Opc::VMovB32 }, [r(t, k, 1)], [value]));
+                if next(16) == 0 {
+                    entry.push(MInst::new(Opc::VAddF32, [r(t, k, 1)], [r(t, k, 1), Opnd::Imm(1)]));
+                }
+            }
+            if next(10) == 0 {
+                entry.push(MInst::new(Opc::Copy, [r(t, 0, 4)], [Opnd::Imm(0)]));
+            }
+        }
+        f.blocks.push(MBlock { insts: entry, loop_depth: 0 });
+        let ab = reg(&mut f, 4, false);
+        for _ in 0..1 + next(4) {
+            let mut insts = Vec::new();
+            for _ in 0..1 + next(6) {
+                let d = reg(&mut f, if next(7) == 0 { 16 } else { 4 }, next(9) == 0);
+                let n = f.vregs[d as usize].size;
+                let c = match next(4) {
+                    0 => r(ab, 0, 4),
+                    _ => r(tuples[next(4) as usize], 0, 4),
+                };
+                let c = if n == 4 { c } else { r(reg(&mut f, n, false), 0, n) };
+                insts.push(MInst::new(Opc::Copy, [r(d, 0, n)], [c]));
+                if next(10) == 0 {
+                    insts.push(MInst::new(Opc::VAddF32, [r(ab, 0, 1)], [r(ab, 0, 1), Opnd::Imm(1)]));
+                }
+                let op = if n == 4 { Gfx9Op::VMfma16x16x32F16 } else { Gfx9Op::VMfma32x32x16F16 };
+                insts.push(MInst::new(Opc::Gfx9(op), [r(d, 0, n)], [r(ab, 0, 4), r(ab, 0, 4), r(d, 0, n)]));
+                insts.push(MInst::new(Opc::GStoreB32, [], [r(ab, 0, 2), r(d, 0, 1)]));
+            }
+            f.blocks.push(MBlock { insts, loop_depth: next(3) });
+        }
+        f
+    }
+
+    #[test]
+    fn zero_accumulators_rewrite_what_they_rewrote() {
+        let mut rewrote = 0;
+        for seed in 0..500 {
+            let f = random_function(seed);
+            let (mut old, mut new) = (f.clone(), f);
+            let n = run_reference(&mut old);
+            assert_eq!(super::run(&mut new), n, "seed {seed}");
+            assert_eq!(format!("{:?}{:?}", new.blocks, new.vregs), format!("{:?}{:?}", old.blocks, old.vregs), "seed {seed}");
+            rewrote += usize::from(n > 0);
+        }
+        assert!(rewrote > 50, "{rewrote} functions rewritten");
     }
 }
