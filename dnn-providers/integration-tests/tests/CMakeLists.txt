@@ -22,6 +22,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     ../src/harness/bundle/SweepManifestCache.cpp
     ../src/harness/bundle/VariantPackBuilder.cpp
     ../src/harness/input-init/FillInputs.cpp
+    ../src/harness/input-init/SdpaBackwardInputs.cpp
     ../src/harness/reference-validation/BundleReferenceValidationHarness.cpp
     ../src/harness/reference-validation/GoldenDataPlan.cpp
     ../src/harness/reference-validation/GoldenOutputProbe.cpp
@@ -50,6 +51,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuSdpaFwdPlan.cpp
     TestGpuReductionSignatureKey.cpp
     TestGpuReductionPlan.cpp
+    TestGpuResampleSignatureKey.cpp
+    TestGpuResamplePlan.cpp
     TestGpuRMSNormSignatureKey.cpp
     TestGpuRMSNormPlan.cpp
     TestGpuSdpaRaggedFwdSignatureKey.cpp
