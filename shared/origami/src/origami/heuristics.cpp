@@ -40,18 +40,18 @@ struct cms_kernel_entry_t {
 };
 
 // Register new architectures by adding a table here.
-constexpr std::array<cms_kernel_entry_t, 38> gfx950_cms_kernels = {{
+constexpr std::array<cms_kernel_entry_t, 37> gfx950_cms_kernels = {{
     // BF16 NT
     {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 160, 256, 64,
      cms_speedup::X120},
     {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 192, 256, 64,
      cms_speedup::X110},
     {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 208, 256, 64,
-     cms_speedup::X120},
+     cms_speedup::X105},
     {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 256, 160, 64,
-     cms_speedup::X120},
+     cms_speedup::X105},
     {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 256, 192, 64,
-     cms_speedup::X120},
+     cms_speedup::X105},
     {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 256, 256, 64,
      cms_speedup::X115},
     // BF16 NN
@@ -59,10 +59,8 @@ constexpr std::array<cms_kernel_entry_t, 38> gfx950_cms_kernels = {{
      cms_speedup::X110},
     {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::N, 208, 256, 64,
      cms_speedup::X110},
-    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::N, 256, 192, 64,
-     cms_speedup::X100},
     {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::N, 256, 256, 64,
-     cms_speedup::X105},
+     cms_speedup::X120},
     // BF16 TN
     {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::N, 160, 256, 64,
      cms_speedup::X110},
@@ -75,7 +73,7 @@ constexpr std::array<cms_kernel_entry_t, 38> gfx950_cms_kernels = {{
     {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::N, 256, 224, 64,
      cms_speedup::X105},
     {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::N, 256, 256, 64,
-     cms_speedup::X105},
+     cms_speedup::X115},
     // BF16 TT
     {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::T, 256, 256, 64,
      cms_speedup::X110},
@@ -155,46 +153,7 @@ namespace origami {
 
 void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   // Latency component weights
-  weight_mem_l2        = other.weight_mem_l2;
-  weight_mem_mall      = other.weight_mem_mall;
-  weight_mem_dram      = other.weight_mem_dram;
-  weight_compute       = other.weight_compute;
-  weight_memory        = other.weight_memory;
-  weight_wg_setup      = other.weight_wg_setup;
-  weight_prologue      = other.weight_prologue;
-  weight_epilogue      = other.weight_epilogue;
-  weight_loop_overhead = other.weight_loop_overhead;
-  weight_tile_total    = other.weight_tile_total;
-
-  // Empirical constants
-  main_memory_load_latency            = other.main_memory_load_latency;
-  occupancy_decay_base                = other.occupancy_decay_base;
-  mall_depth_sq                       = other.mall_depth_sq;
-  mall_cold_floor                     = other.mall_cold_floor;
-  l2_depth_sq                         = other.l2_depth_sq;
-  l2_cold_floor                       = other.l2_cold_floor;
-  l2_pollution_penalty                = other.l2_pollution_penalty;
-  l2_amp_ceiling_batched              = other.l2_amp_ceiling_batched;
-  l2_amp_ceiling_k_split              = other.l2_amp_ceiling_k_split;
-  l2_amp_ceiling_skinny               = other.l2_amp_ceiling_skinny;
-  l2_depth_penalty                    = other.l2_depth_penalty;
-  l1_hit_rate_ceiling_skinny          = other.l1_hit_rate_ceiling_skinny;
-  epilogue_cycles_per_acc_read        = other.epilogue_cycles_per_acc_read;
-  epilogue_acc_read_parallelism       = other.epilogue_acc_read_parallelism;
-  epilogue_cycles_per_bounds_check    = other.epilogue_cycles_per_bounds_check;
-  epilogue_scalar_store_penalty       = other.epilogue_scalar_store_penalty;
-  epilogue_threads_per_wave           = other.epilogue_threads_per_wave;
-  epilogue_bytes_per_vectorized_store = other.epilogue_bytes_per_vectorized_store;
-  epilogue_cache_line_bytes           = other.epilogue_cache_line_bytes;
-  epilogue_workspace_bytes_per_elem   = other.epilogue_workspace_bytes_per_elem;
-  epilogue_salu_overhead              = other.epilogue_salu_overhead;
-  epilogue_l_barrier                  = other.epilogue_l_barrier;
-  epilogue_l_smem                     = other.epilogue_l_smem;
-  epilogue_k_padding_penalty          = other.epilogue_k_padding_penalty;
-  postgsu_compute_bytes               = other.postgsu_compute_bytes;
-  postgsu_kernel_launch_overhead      = other.postgsu_kernel_launch_overhead;
-  postgsu_threads_per_wg              = other.postgsu_threads_per_wg;
-  postgsu_wavefront_size              = other.postgsu_wavefront_size;
+  weight_tile_total = other.weight_tile_total;
 
   // Main loop efficiency
   main_loop_efficiency = other.main_loop_efficiency;
@@ -331,9 +290,6 @@ static void apply_tf32_heuristics(heuristic_params_t& params,
       params.weight_tile_total *= 0.4;
     }
   }
-
-  // Bias for large K-dimension (depth upscaling)
-  if ((K >= (M * 16) && K >= (N * 16)) && (MT_K >= 128)) { params.weight_tile_total *= 0.5; }
 }
 
 heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,
@@ -426,44 +382,8 @@ bool heuristics_database_t::has_hand_optimized_entry(hardware_t::architecture_t 
 }
 
 void heuristics_database_t::initialize_defaults() {
-  // ========================================================================
-  // HEURISTIC 1: Problematic tile configuration (MT64x32x32)
-  // ========================================================================
-  {
-    auto key    = make_tile_key(64, 32, 32, transpose_t::N, transpose_t::N);
-    key.a_dtype = data_type_t::BFloat16;
-    key.b_dtype = data_type_t::BFloat16;
-
-    heuristic_params_t params;
-    params.weight_tile_total = 10.0;
-
-    add_entry(key, params);
-  }
-
-  // ========================================================================
-  // HEURISTIC 2: CMS Kernel Efficiencies
-  // ========================================================================
+  // CMS kernel efficiencies
   register_cms_kernels(*this);
-
-  // ========================================================================
-  // HEURISTIC 3: Reject gfx950 BF16 TN subtile kernels for small K
-  // ========================================================================
-  // Subtile kernels are not competitive when the reduction dimension is small
-  // (K < 512). Scoped to gfx950 BF16 TN (a_transpose=T, b_transpose=N).
-  {
-    heuristic_params_t reject_params;
-    reject_params.reject = true;
-
-    // K < 512
-    heuristic_key_t key;
-    key.arch        = hardware_t::architecture_t::gfx950;
-    key.mi_dtype    = data_type_t::BFloat16;
-    key.a_transpose = transpose_t::T;
-    key.b_transpose = transpose_t::N;
-    key.subtile     = true;
-    key.max_k       = 511;
-    add_entry(key, reject_params);
-  }
 }
 
 // ============================================================================

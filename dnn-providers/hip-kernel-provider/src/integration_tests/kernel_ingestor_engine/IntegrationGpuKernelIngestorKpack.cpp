@@ -18,7 +18,6 @@
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
@@ -29,6 +28,8 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
+#include "IngestorIntegrationSupport.hpp"
+#include "ScopedPluginLogCapture.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -64,8 +65,11 @@ constexpr const char* PACKED_ENGINE_NAME = "hipkernel:pointwise_packed";
 /// ...SurvivesABrokenArchive requires to still serve.
 constexpr const char* SHIPPED_POINTWISE_ENGINE_NAME = "hipkernel:Pointwise";
 
-/// Header-length garbage: long enough that the file exists and is readable, short enough
-/// that no table of contents can be parsed out of it.
+/// In epsilons of the fixture's element type; an elementwise op accumulates nothing, so
+/// one epsilon is the whole budget.
+constexpr float POINTWISE_TOLERANCE_EPSILONS = 1.0f;
+
+/// Header-length garbage: the file stays readable, but no table of contents parses.
 constexpr size_t CORRUPTION_BYTE_COUNT = 64;
 
 /// Holds the pristine archive while ...SurvivesABrokenArchive breaks the staged one.
@@ -75,7 +79,6 @@ constexpr const char* BACKUP_DIR_NAME = "kpack-fixture-backup";
 /// .kpack, so that nothing can mistake it for a staged archive.
 constexpr const char* PRISTINE_SUFFIX = ".pristine";
 
-/// A single-node FLOAT add: the one graph shape the packaged descriptor set claims.
 std::shared_ptr<TensorAttributes> makeScalarTensor(int64_t uid, const std::string& name)
 {
     auto tensor = std::make_shared<TensorAttributes>();
@@ -87,6 +90,7 @@ std::shared_ptr<TensorAttributes> makeScalarTensor(int64_t uid, const std::strin
     return tensor;
 }
 
+/// A single-node FLOAT add: the one graph shape the packaged descriptor set claims.
 std::shared_ptr<Graph> buildPointwiseAddGraph()
 {
     auto graph = std::make_shared<Graph>();
@@ -231,64 +235,6 @@ std::string recoverAbandonedBackups(const std::vector<std::filesystem::path>& ar
     return {};
 }
 
-/// Drops the provider's resident kpack modules, so the next dispatch re-reads its
-/// archive from disk.
-///
-/// The module cache is process-lifetime by design -- one hipModule_t per
-/// (archive, toc_key, arch), deliberately outliving every Container. That is correct
-/// for the product and fatal for ...SurvivesABrokenArchive: if any earlier case has
-/// already executed the packaged kernel, a resident module serves the plan, nothing
-/// reads the corrupt bytes, and the diagnostics this suite asserts on never fire.
-///
-/// Reached by dlsym rather than a direct call because this binary links only the SDKs;
-/// the provider arrives via dlopen. Same route as
-/// IntegrationGpuKernelIngestorDirectAbi.SelfRegistersAllEngineIds, except that this
-/// takes the RTLD_NOLOAD form: the harness has already loaded the plugin, and the point
-/// is to reach the statics in THAT copy. openLibrary() would refcount the same image
-/// rather than produce a second one, but asking for a load at all would misstate the
-/// intent -- if the plugin is somehow not resident, resetting a freshly loaded copy's
-/// empty caches would be a silent no-op rather than the error it should be.
-///
-/// Returns a description of the failure, or an empty string.
-std::string resetProviderModuleCaches()
-{
-    const std::filesystem::path pluginTarget(PLUGIN_PATH);
-    const auto pluginFile = hipdnn_data_sdk::utilities::LIB_PREFIX
-                            + pluginTarget.filename().string()
-                            + hipdnn_data_sdk::utilities::SHARED_LIB_EXT;
-    const auto pluginPath = std::filesystem::weakly_canonical(
-        getCurrentExecutableDirectory() / pluginTarget.parent_path() / pluginFile);
-
-    // RTLD_NOLOAD: returns null rather than throwing when the image is not already
-    // resident, unlike openLibrary().
-    auto* library = hipdnn_data_sdk::utilities::openLoadedLibrary(pluginPath);
-    if(library == nullptr)
-    {
-        return "the provider at " + pluginPath.string()
-               + " is not loaded, so there are no resident modules to reset";
-    }
-
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    auto* reset = reinterpret_cast<void (*)()>(hipdnn_data_sdk::utilities::getSymbol(
-        library, "hipdnnEnginePluginResetKpackModuleCacheForTesting"));
-    if(reset == nullptr)
-    {
-        // Balances the RTLD_NOLOAD reference taken above before bailing out.
-        hipdnn_data_sdk::utilities::closeLibrary(library);
-        return "the provider at " + pluginPath.string()
-               + " exports no hipdnnEnginePluginResetKpackModuleCacheForTesting; it was "
-                 "built without HIPDNN_ENABLE_KERNEL_INGESTOR, or the test-only reset "
-                 "hook was removed";
-    }
-
-    reset();
-
-    // Drops only the reference this call took. The harness holds its own, so the plugin
-    // stays loaded and the statics just reset are the ones the next dispatch will use.
-    hipdnn_data_sdk::utilities::closeLibrary(library);
-    return {};
-}
-
 } // namespace
 
 class IntegrationGpuKernelIngestorKpack
@@ -349,6 +295,22 @@ protected:
         IntegrationGraphVerificationHarness<float, int>::TearDown();
     }
 
+    /// Offsets the seed by UID so the binary operands differ: `a + b` and `a + a` agree
+    /// elementwise when both operands carry the same data, and this engine's catalog is
+    /// entirely elementwise binary ops.
+    void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
+                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
+                          unsigned int seed) override
+    {
+        for(auto& tensorPair : bundle.tensors)
+        {
+            bundle.randomizeTensor(tensorPair.first,
+                                   DEFAULT_MIN,
+                                   DEFAULT_MAX,
+                                   seed + static_cast<unsigned int>(tensorPair.first));
+        }
+    }
+
     static int64_t packedEngineId()
     {
         return hipdnn_data_sdk::utilities::engineNameToId(PACKED_ENGINE_NAME);
@@ -396,8 +358,8 @@ protected:
 
     void executePackagedKernel(hipStream_t selectedStream)
     {
-        // Keep setup and arch discovery on the owned concrete stream. _stream is also
-        // the stream executeAndVerify synchronizes; TearDown restores its ownership.
+        // Setup and arch discovery stay on the owned concrete stream. _stream is also what
+        // verifyBuiltGraph synchronizes; TearDown restores its ownership.
         _ownedStream = _stream;
         _stream = selectedStream;
         ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
@@ -405,14 +367,9 @@ protected:
         auto graph = buildPointwiseAddGraph();
         ASSERT_NO_FATAL_FAILURE(buildAndCompilePacked(*graph));
 
-        // The frontend's route into the engine's getMaxWorkspaceSize().
-        int64_t workspaceSize = 0;
-        auto result = graph->get_workspace_size(workspaceSize);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        ASSERT_GE(workspaceSize, 0);
-        const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
-
-        executeAndVerify(*graph, workspace.get(), /*seed=*/0);
+        GraphVerificationContext context(*graph);
+        registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
+        verifyBuiltGraph(context, /*seed=*/0);
     }
 
     std::vector<std::filesystem::path> _archives;
@@ -517,7 +474,7 @@ protected:
             // it here means the next case in this binary loads the good archive from
             // disk rather than inheriting this suite's damage. Unconditional, so it runs
             // whether the restore above succeeded or not.
-            EXPECT_EQ(resetProviderModuleCaches(), "");
+            EXPECT_EQ(detail::resetProviderModuleCaches(), "");
             _corrupted = false;
         }
         _backup.reset();
@@ -542,7 +499,7 @@ TEST_F(IntegrationGpuKernelIngestorKpackBroken, SurvivesABrokenArchive)
     // is what forces the packaged engine to actually re-read the damaged archive --
     // without it a module left over from an earlier case serves the plan, no diagnostic
     // is emitted, and every EXPECT below fails for a reason that is not the product's.
-    ASSERT_EQ(resetProviderModuleCaches(), "");
+    ASSERT_EQ(detail::resetProviderModuleCaches(), "");
 
     // No preferred engine here, unlike ExecutesAPackagedKernelOnDevice. Both engines claim
     // this graph, and the point of this case is what happens when one of them is broken:
@@ -568,27 +525,12 @@ TEST_F(IntegrationGpuKernelIngestorKpackBroken, SurvivesABrokenArchive)
     result = graph->create_execution_plans();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    hipdnnSeverity_t savedLogLevel = HIPDNN_SEV_OFF;
-    ASSERT_EQ(getGlobalLogLevel(savedLogLevel).code, ErrorCode::OK);
-
     // The diagnostics are the deliverable here as much as the fallback is: a failure the
     // engine swallows silently is indistinguishable from one that never happened.
-    auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    ASSERT_EQ(setUserLogCallback(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
-                                 HIPDNN_SEV_WARN,
-                                 LogCallbackMode::SYNC,
-                                 this)
-                  .code,
-              ErrorCode::OK);
-    ASSERT_EQ(setGlobalLogLevel(HIPDNN_SEV_WARN).code, ErrorCode::OK);
+    const ScopedPluginLogCapture capture(this, HIPDNN_SEV_WARN);
+    auto& recorder = capture.recorder();
 
     result = graph->build_plans(BuildPlanPolicy::ALL);
-
-    setUserLogCallback(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
-                       HIPDNN_SEV_OFF,
-                       LogCallbackMode::SYNC,
-                       this);
-    setGlobalLogLevel(savedLogLevel);
 
     ASSERT_EQ(result.code, ErrorCode::OK)
         << "the shipped " << SHIPPED_POINTWISE_ENGINE_NAME
@@ -626,12 +568,9 @@ TEST_F(IntegrationGpuKernelIngestorKpackBroken, SurvivesABrokenArchive)
     result = graph->check_support();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    // Routing to the surviving engine is not enough: it must still compute the right answer.
-    int64_t workspaceSize = 0;
-    ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
-    ASSERT_GE(workspaceSize, 0);
-    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
-    executeAndVerify(*graph, workspace.get(), /*seed=*/0);
+    GraphVerificationContext context(*graph);
+    registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(context, /*seed=*/0);
 }
 
 // ---------------------------------------------------------------------------

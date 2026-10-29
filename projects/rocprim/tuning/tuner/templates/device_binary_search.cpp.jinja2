@@ -1,0 +1,11 @@
+{% extends "common/base.cpp.jinja2" %}
+{% block config_constructor -%}
+rocprim::binary_search_config<{{ config.block_size_x }}, {{ config.ipt }}>
+{%- endblock %}
+{% block benchmark_type %}
+using benchmark_type = device_binary_search_benchmark<binary_search_subalgorithm, value_type, output_type, 10, false ,config>;
+{% endblock %}
+{% block type_definitions %}
+using value_type = {{ value_type }};
+using output_type = {{ output_type }};
+{% endblock %}

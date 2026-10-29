@@ -2,11 +2,29 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## rocPRIM 5.0.0 for ROCm 10.2.0
+## rocPRIM 4.8.0 for ROCm 10.2.0
+
+### Added
+
+* gfx1250-strict support.
+* Kernel tuner support for all rocPRIM device algorithms.
+
+### Optimizations
+
+* Updated existing `ordered_block_id` and `lookback_scan` optimizations to include gfx1250/gfx1250-strict.
+* Reduce false sharing in lookback_scan.
 
 ### Changed
 
 * Replaced the soon-to-be-deprecated `__hip_atomic_*` builtins with the equivalent `__scoped_atomic_*` builtins.
+
+### Resolved Issues
+
+* Incorrect miscategorization of RDNA4 and CDNA5 GPUs.
+
+### Upcoming changes
+
+* This project location will be deprecated in ROCm 10.3.  See the new hipCCL project folder at https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipccl.
 
 ## rocPRIM 4.7.0 for ROCm 10.1.0
 

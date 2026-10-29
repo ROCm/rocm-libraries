@@ -14,13 +14,39 @@
 #   so "*pre_checkin*" selects the tests whose category is pre_checkin.
 #
 #   Categories present in clients/tests/data today: smoke, quick, pre_checkin,
-#   nightly, HMM, plus known_bug (assigned dynamically, including per-GPU via
-#   known_bug_platforms).
+#   nightly, stress, HMM, sdc_hunt (on demand, deliberately in no tier; see
+#   clients/scripts/sdc_hunt), plus known_bug (assigned by the test generator to
+#   known_bugs.yaml entries with no known_bug_platforms). hipblaslt-test drops every
+#   known-bug case before registration, including per-GPU ones, so no registered test
+#   carries the known_bug token; the tiers below still exclude it.
 #
 #   multi_gpu is the exception: it has no entries in data/, and its tests are
 #   plain gtest suites that carry the token in the suite name. It is deliberately
 #   not folded into the tiers below, all of which run on single-GPU runners where
 #   every multi_gpu test would skip while the run still reported green.
+#
+#   The "*HostUnit*" pattern is different in kind: clients/tests/unit holds
+#   hand-written host-only gtest cases (no device, no data-driven parameters)
+#   registered as plain suites named HostUnit*. They are seconds-fast and cover
+#   pure helpers, so every tier runs them.
+#
+#   This file is what selects them in PR CI. Each shard runs
+#       ctest -L '^<tier>$' -LE ex_gpu --test-dir build/bin/hipblaslt ...
+#   against the installed tree, where the labels below pick the tier and the
+#   tier's patterns have been baked into the hipblaslt-test entry as a gtest
+#   filter. The standard tier therefore invoked
+#       hipblaslt-test --gtest_filter=*smoke*:*quick*:*pre_checkin*:*HostUnit*:*TuningStore.*-*known_bug*
+#
+#   The HostUnit cases also carry a "smoke_" test-name prefix. That is redundant
+#   for the path above, since "*HostUnit*" already selects them in every tier,
+#   but it keeps them selected by test/therock/test_hipblaslt.py, which execs the
+#   binary directly with `--gtest_filter=*smoke*` on its quick tier.
+#
+#   "*TuningStore.*" works the same way: the tuning-store cases are a plain
+#   gtest suite, host-only and well under a second, so every tier runs all of
+#   them. They are compiled into hipblaslt-test, rather than run through the
+#   standalone hipblaslt-test-tuning-store binary, so hipBLASLt keeps one ctest
+#   entry per tier (see the comment on that target in clients/CMakeLists.txt).
 #
 # These tiers are TheRock ctest presets; they are NOT a port of hipBLASLt's
 # rocJenkins job filters (those are wired differently).
@@ -37,6 +63,8 @@ test_categories:
     description: "Smoke surface for fast PR gating (target: ~5 min)"
     test_patterns:
       - "*smoke*"
+      - "*HostUnit*"
+      - "*TuningStore.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -49,6 +77,8 @@ test_categories:
       - "*smoke*"
       - "*quick*"
       - "*pre_checkin*"
+      - "*HostUnit*"
+      - "*TuningStore.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -63,6 +93,8 @@ test_categories:
       - "*quick*"
       - "*pre_checkin*"
       - "*nightly*"
+      - "*HostUnit*"
+      - "*TuningStore.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -78,12 +110,25 @@ test_categories:
       - "*pre_checkin*"
       - "*nightly*"
       - "*HMM*"
+      - "*HostUnit*"
+      - "*TuningStore.*"
     exclude:
       - "*known_bug*"
     labels:
       - "full"
       - "weekly"
       - "hmm"
+
+  stress:
+    description: "Size-threshold and address-overflow cases that need large device and host memory (32 GB+ per GPU for the largest); run on large-memory runners or weekly, not in every nightly"
+    test_patterns:
+      - "*stress*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "stress"
+      - "weekly"
+      - "large_memory"
 
   multi_gpu:
     description: "Cross-device tests; needs two or more GPUs visible to one process"
@@ -108,5 +153,6 @@ execution_settings:
     quick: 600          # smoke can exceed 300s on some hosts
     standard: 3600      # 1 h
     comprehensive: 7200 # 2 h
+    stress: 14400       # 4 h
     full: 86400         # 24 h
-    multi_gpu: 600      # registration only; no GEMM runs here yet
+    multi_gpu: 600      # 10 min

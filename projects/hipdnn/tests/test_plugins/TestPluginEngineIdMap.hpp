@@ -65,6 +65,10 @@ HIPDNN_MAP_TO_ID(AutotunePluginEngineC, -20);
 HIPDNN_MAP_TO_ID(AutotunePluginEngineFails, -21);
 HIPDNN_MAP_TO_ID(AutotunePluginEnginePrimingOnlyFails, -22);
 HIPDNN_MAP_TO_ID(AutotunePluginEngineWorkspaceGrows, -23);
+// Enqueues the same timing work as the other engines, then synchronizes the
+// plugin's own stream from inside executeOpGraph. Reproduces a plugin that
+// blocks the host on the stalled stream during a timed autotune sweep.
+HIPDNN_MAP_TO_ID(AutotunePluginEngineHostSyncs, -30);
 
 // Hashed-name fake: its engine id is the FNV-1a-64 hash of "TEST_HASHED_NAME_ENGINE",
 // precomputed for the same reason as the ids above.
@@ -79,6 +83,14 @@ HIPDNN_MAP_TO_ID(LyingEngineNamePluginErrorStatus, -28);
 // Mismatched-name fake: a well-formed engine name that does not hash back to
 // this id. See TestMismatchedNamePlugin.cpp.
 HIPDNN_MAP_TO_ID(MismatchedNamePlugin, -29);
+
+// No-solver fake: applicable for every graph, but plan creation always fails with
+// HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR. See TestNoSolverPlugin.cpp.
+HIPDNN_MAP_TO_ID(NoSolverPlugin, -31);
+
+// Resource-failure fake: applicable for every graph, but plan creation always fails with
+// HIPDNN_PLUGIN_STATUS_ALLOC_FAILED. See TestResourceFailPlugin.cpp.
+HIPDNN_MAP_TO_ID(ResourceFailPlugin, -32);
 
 namespace hipdnn_tests::plugin_constants
 {

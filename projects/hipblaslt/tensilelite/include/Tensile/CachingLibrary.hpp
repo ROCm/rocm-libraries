@@ -334,19 +334,4 @@ namespace TensileLite
         mutable std::atomic<bool> lastFindTopRetAll = false;
     };
 
-#if 0
-    struct ContractionCachingLibrary: public CachingLibrary<ContractionProblemGemm>
-    {
-        using Super = CachingLibrary<ContractionProblemGemm>;
-        using Library = typename Super::Library;
-        using Key = typename Super::Key;
-
-        ContractionCachingLibrary(std::shared_ptr<Library> subLibrary)
-            : CachingLibrary<ContractionProblemGemm>(subLibrary)
-        {}
-
-    };
-#endif
-
 } // namespace TensileLite
-

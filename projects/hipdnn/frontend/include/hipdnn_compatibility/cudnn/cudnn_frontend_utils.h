@@ -1,23 +1,17 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 //
-// Portions derived from NVIDIA cuDNN frontend (include/cudnn_frontend_utils.h),
-// used under the MIT license.
+// Portions derived from NVIDIA cuDNN frontend, used under the MIT license:
+//   include/cudnn_frontend_utils.h
+//     Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
+//   include/cudnn_frontend/knobs.h
+//     Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+// License text and pinned upstream version: THIRD_PARTY_LICENSES.md
+// (installed to share/doc/hipdnn_frontend).
 
 /**
  * @file cudnn_frontend_utils.h
- * @brief FE-namespace enums and free helpers for the hipDNN cuDNN-compatibility shim.
- *
- * The v9 graph API signatures use cuDNN's FE-namespace enums (`DataType_t`,
- * `PointwiseMode_t`, …), not the C-API ones from `<cudnn.h>`. hipDNN already
- * publishes these as cuDNN-named `_t` typedefs (see `Types.hpp`), so this header
- * just aliases them into `<shim_ns>` with `using` declarations — zero overhead,
- * no numeric cast between enum families.
- *
- * It also carries the `cudnn_frontend::detail` free functions upstream splits
- * across `cudnn_frontend_utils.h` and `cudnn_frontend_shim.h`.
- *
- * @note Internal-to-shim; pulled in by the umbrella `cudnn_frontend.h`.
+ * @brief cuDNN FE enums, knob types, and utility functions for the shim.
  */
 
 #pragma once
@@ -31,8 +25,7 @@
 namespace hipdnn_frontend::compatibility::cudnn_frontend
 {
 
-// FE-namespace enums hipDNN publishes 1:1, aliased so e.g.
-// `cudnn_frontend::DataType_t` *is* `hipdnn_frontend::DataType_t`.
+// cuDNN FE enums, aliased 1:1 to the hipDNN enums of the same name.
 using hipdnn_frontend::AttentionImplementation_t;
 using hipdnn_frontend::BehaviorNote_t;
 using hipdnn_frontend::BuildPlanPolicy_t;
@@ -48,10 +41,7 @@ using hipdnn_frontend::PointwiseMode_t;
 using hipdnn_frontend::ReductionMode_t;
 using hipdnn_frontend::ResampleMode_t;
 
-// cuDNN FE exposes knobs as a fixed enum plus a simple int64 range record. hipDNN
-// native knobs are open-ended string IDs with richer typed constraints, so the
-// shim intentionally owns a cuDNN-shaped type here and maps it explicitly when
-// forwarding to hipDNN.
+/// @brief cuDNN FE knob type; mapped to hipDNN's string knob IDs by name.
 // NOLINTNEXTLINE(readability-identifier-naming)
 enum class KnobType_t
 {
@@ -86,6 +76,7 @@ enum class KnobType_t
     WARP_SPEC_CFG
 };
 
+/// @brief cuDNN FE knob: type plus int64 min/max/stride.
 class Knob
 {
 public:
@@ -104,23 +95,19 @@ public:
     }
 };
 
-// Deliberately-hollow placeholders: they exist only so the cuDNN-spelled setter
-// signatures (set_kernel_cache / set_device_properties) compile against hipified
-// consumer source. They carry none of cuDNN's real API — a consumer that calls
-// methods on them will not compile. Grow real members only when the shim can
-// honor the corresponding feature.
+/// @brief Empty placeholder: `set_kernel_cache()` accepts it; nothing is honored.
 struct KernelCache
 {
 };
 
+/// @brief Empty placeholder: `set_device_properties()` accepts it; nothing is honored.
 struct DeviceProperties
 {
 };
 
-// Shim-owned FE enums. hipDNN publishes no counterpart, and cuDNN's numeric
-// values are not part of its public contract, so these are declared here rather
-// than aliased. They exist so consumer source that names them compiles.
+// Shim-owned: hipDNN publishes no counterpart for these enums.
 // NOLINTBEGIN(readability-identifier-naming)
+/// @brief cuDNN FE tensor reordering mode.
 enum class TensorReordering_t
 {
     NONE,
@@ -129,6 +116,7 @@ enum class TensorReordering_t
     F8_128x4
 };
 
+/// @brief cuDNN FE reshape mode.
 enum class ReshapeMode_t
 {
     NOT_SET,
@@ -137,20 +125,16 @@ enum class ReshapeMode_t
 };
 // NOLINTEND(readability-identifier-naming)
 
-// Remaining cuDNN FE-namespace enums (NormMode_t, RngDistribution_t,
-// DescriptorType_t) are not aliased yet: hipDNN does not publish them and their
-// nodes are out of scope. They are aliased when their node lands.
+// NormMode_t, RngDistribution_t, and DescriptorType_t are not provided yet.
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail
 {
 
-// NOLINTBEGIN(readability-identifier-naming): these mirror cuDNN FE's
-// snake_case spelling for source compatibility.
+// NOLINTBEGIN(readability-identifier-naming): mirrors cuDNN FE's snake_case spelling.
 
-// cuDNN FE resolves this from the loaded libcudnn; the shim has a single
-// compile-time claim, so runtime and compiled version are the same number.
+// Returns CUDNN_VERSION; cuDNN FE queries the loaded libcudnn instead.
 inline size_t get_backend_version()
 {
     return CUDNN_VERSION;
@@ -203,9 +187,7 @@ inline size_t get_element_size_in_bits(DataType_t datatype)
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::detail
 
-// The `graph` sub-namespace is populated by the `cudnn_frontend/*` headers the
-// umbrella pulls in; declared empty here so this header is self-contained when
-// included on its own.
+// Declared so this header is self-contained; populated by the cudnn_frontend/* headers.
 namespace hipdnn_frontend::compatibility::cudnn_frontend::graph
 {
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::graph

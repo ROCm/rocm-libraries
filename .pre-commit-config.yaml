@@ -24,6 +24,7 @@ exclude: |
     projects/hipblas/.*|
     projects/hipblas-common/.*|
     projects/hipcub/.*|
+    projects/hipccl/.*|
     projects/hipfft/.*|
     projects/hiprand/.*|
     projects/hipsolver/.*|
@@ -48,7 +49,15 @@ exclude: |
     projects/hipdnn/.*\.bin$|
     # Generated hipDNN FlatBuffers headers
     projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/.*_generated\.h|
-    # Reference data (auto-generated)
+    # Generated hip-kernel-provider FlatBuffers header
+    dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/serialization/ingestor_plan_generated\.h|
+    # Reference data (auto-generated). The generic hooks would fight the
+    # generators: some graph JSON is written without a final newline, which
+    # end-of-file-fixer would rewrite, and sweep manifests run past 1 MB, over
+    # check-added-large-files' limit. The exclusion also hides the support.json
+    # sidecars from the RFC 0015 hooks below; the real tree is checked instead
+    # by test_render_support_matrix.py, which runs as a ctest in
+    # hipdnn-superbuild-ci on every change under dnn-providers/.
     dnn-providers/integration-tests/integration-test-bundles/.*|
     # Generated files (see rocrand/tools/ _generator.cpp files)
     projects/rocrand/library/.*constants\.(cpp|h)|
@@ -57,6 +66,14 @@ exclude: |
     projects/miopen/.*\.s$|
     projects/miopen/.*\.inc$|
     projects/miopen/.*\.model$|
+    # Machine-generated LGBM assets: native LightGBM text models + baked
+    # catalog/metadata + golden parity fixtures (large, not human-authored;
+    # exceed check-added-large-files and are not lintable/end-of-file-fixable).
+    # Match every lgbm_* asset under kernels/ so new metadata/model files stay
+    # covered without touching this list.
+    projects/miopen/src/conv/heuristics/lgbm_models/.*|
+    projects/miopen/src/conv/heuristics/lgbm_pcfg_models/.*|
+    projects/miopen/src/kernels/lgbm_.*\.(json|txt|bin)|
     # RPP exclusion list - raw test data with no early NUL byte, which pre-commit would
     # otherwise treat as text and corrupt. Matched by extension so new data stays covered.
     projects/rpp/.*\.(bin|rgb|yuv)$
@@ -142,12 +159,52 @@ repos:
         files: ^projects/hipdnn/flatbuffers_sdk/schemas/.*\.fbs$|^projects/hipdnn/scripts/gen_cache_key\.py$|^projects/hipdnn/cmake/default_flatc_version\.txt$
         pass_filenames: false
 
+      # Same trigger set as cache-key-hipdnn, plus the cache-key script it imports its
+      # schema reader from.
+      - id: node-operands-hipdnn
+        name: node operand visitor codegen (hipDNN)
+        entry: python projects/hipdnn/scripts/gen_node_operands.py
+        language: python
+        files: ^projects/hipdnn/flatbuffers_sdk/schemas/.*\.fbs$|^projects/hipdnn/scripts/gen_(cache_key|node_operands)\.py$|^projects/hipdnn/cmake/default_flatc_version\.txt$
+        pass_filenames: false
+
       - id: verify-support-claims
         name: Verify hipDNN support-claim sidecars (RFC 0015)
         entry: python dnn-providers/integration-tests/scripts/verify_support_claims.py
         language: python
         pass_filenames: false
-        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(test_)?verify_support_claims\.py)$
+        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/((test_)?verify_support_claims|bundle_discovery|support_claim_schema)\.py)$
+
+      # SUPPORT_MATRIX.md is generated, not committed (see
+      # dnn-providers/integration-tests/.gitignore for why), so there is no
+      # committed copy to check for staleness. Render and discard to catch
+      # errors in the script itself (import, syntax) and in the sidecars it
+      # reads: a malformed or orphaned sidecar, a claim on an unknown case,
+      # tier copies of a case holding different graphs, a bundle not under
+      # <tier>/<Op>/.
+      # `--output -` rather than /dev/null so the hook works on Windows too;
+      # pre-commit hides the stdout of a hook that passes.
+      # Scoped with `files:` rather than always_run: CI checks out only the
+      # directories a PR touches, so an always_run hook here would fail every
+      # PR outside dnn-providers/integration-tests.
+      # The script reads the tree through support_matrix_units.py, which uses
+      # bundle_discovery.py and support_claim_schema.py, so all of them count.
+      - id: render-support-matrix
+        name: Support matrix renders without errors (RFC 0015)
+        entry: python dnn-providers/integration-tests/scripts/render_support_matrix.py --output -
+        language: python
+        pass_filenames: false
+        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(render_support_matrix|support_matrix_\w+|bundle_discovery|support_claim_schema)\.py)$
+
+      # SUPPORT_MATRIX_OVERVIEW.md *is* committed, so check it for staleness.
+      # It is the by-API-option view, rendered by support_features/feature_matrix.py
+      # through the same support_matrix_units.py collection.
+      - id: check-support-matrix-overview
+        name: Support matrix overview is current (RFC 0015)
+        entry: python dnn-providers/integration-tests/scripts/support_features/feature_matrix.py --check
+        language: python
+        pass_filenames: false
+        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(support_features/\w+|support_matrix_\w+|bundle_discovery|support_claim_schema)\.py|SUPPORT_MATRIX_OVERVIEW\.md)$
 
       - id: gtest-format-miopen
         name: GTest naming conventions (MIOpen)
@@ -156,11 +213,32 @@ repos:
         files: ^projects/miopen/test/gtest/.*\.cpp$
         pass_filenames: false
 
+      # Only the lines a change adds are checked (git diff against the
+      # pre-commit from/to refs in CI, against HEAD otherwise), so the
+      # existing absolute imports do not fail unrelated edits. A package root
+      # with no files in the change simply does not trigger the hook, so this
+      # keeps working while the Tensile -> tensilelite move is in flight.
+      - id: tensilelite-no-absolute-imports
+        name: TensileLite - no new absolute Tensile/tensilelite imports
+        entry: python projects/hipblaslt/tensilelite/scripts/check_no_absolute_imports.py
+        language: python
+        files: ^projects/hipblaslt/tensilelite/(Tensile|tensilelite)/.*\.py$
+        exclude: ^projects/hipblaslt/tensilelite/(Tensile|tensilelite)/Tests/
+
+      # pytest 9 rejects these py.path hook arguments outright, so a conftest
+      # carrying one aborts collection before any test runs.
+      - id: tensilelite-no-legacy-pytest-hook-args
+        name: TensileLite - no py.path pytest hook args (removed in pytest 9)
+        language: pygrep
+        entry: 'def pytest_\w+\([^)]*\b(path|startdir)\s*[:=,)]'
+        args: [--multiline]
+        files: ^projects/hipblaslt/.*conftest\.py$
+
       - id: miopen-public-private-headers
         name: MIOpen public/private header consistency
         entry: python projects/miopen/script/check_public_abi.py check-headers
         language: python
-        files: ^(projects/miopen/(include/miopen/miopen\.h|src/private/(miopen_impl\.h|miopen_private_rename\.h|wrapper\.cpp)|src/convolution_api\.cpp|test/gtest/conv_workspace_size_range\.cpp)|dnn-providers/miopen-provider/MiopenApi(PrivateRename)?\.hpp)$
+        files: ^(projects/miopen/(include/miopen/miopen\.h|include_wrapper/miopen/hipdnn_forwarding\.h|src/private/(miopen_impl\.h|miopen_private_rename\.h|wrapper\.cpp)|src/convolution_api\.cpp|test/gtest/conv_workspace_size_range\.cpp|test/public_abi/wrapper_only_symbols\.txt)|dnn-providers/miopen-provider/MiopenApi(PrivateRename)?\.hpp)$
         pass_filenames: false
 
       # The check above is the only one that can see signature drift in the

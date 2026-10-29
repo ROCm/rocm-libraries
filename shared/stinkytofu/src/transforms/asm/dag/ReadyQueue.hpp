@@ -43,16 +43,35 @@ namespace dag {
 // scheduler drains, rather than rebuilding their own view of it.
 struct RegionDAG;
 
+// WMMAs per TDM stage of a basic block: WMMAs / tensor_load groups (a group ends at a WMMA).
+// A stage under minStageWmmas (PrefetchLeadMinStageWmmas) has no room for a multi-stage
+// prefetch lead, so the block runs as if PrefetchLeadWmmas = 0. A single-stage lead only
+// groups the prefetches in the tensor_load's window and needs no room, so a short stage keeps
+// it. Blocks without WMMAs or tensor_loads keep any lead.
+struct StageWmmaCounter {
+    // A lead below this marks a single-stage loop body (tensilelite: no HalfPLR).
+    static constexpr int kSingleStageLeadBelow = 8;
+    int wmmas = 0;
+    int groups = 0;
+    bool wmmaSinceTensorLoad = true;
+    void add(const StinkyInstruction& inst) {
+        if (inst.getHwInstDesc() == nullptr) return;
+        if (isMatrixInstruction(inst)) {
+            ++wmmas;
+            wmmaSinceTensorLoad = true;
+        } else if (isTensorLoad(inst)) {
+            if (wmmaSinceTensorLoad) ++groups;
+            wmmaSinceTensorLoad = false;
+        }
+    }
+    int effectiveLead(int lead, int minStageWmmas) const {
+        const bool shortStage = groups > 0 && wmmas > 0 && wmmas < minStageWmmas * groups;
+        return lead >= kSingleStageLeadBelow && shortStage ? 0 : lead;
+    }
+};
+
 // REMOVED: Local buildUseDefChain() has been replaced by stinkytofu::buildUseDefChain()
 // from BuildDefUseChain.hpp. All callers now use the shared implementation.
-
-// One (rule, register) hazard this node's issue must stamp: this node is a
-// producer under the arch's hazard rule table [ruleIdx] and writes the register at
-// regKey (regDepKey — register type folded in). Filled by the pre-scan.
-struct HazardFlag {
-    int ruleIdx;
-    int regKey;
-};
 
 struct DAGNode {
     StinkyInstruction* inst;
@@ -65,37 +84,6 @@ struct DAGNode {
     // Packed s_set_vgpr_msb immediate this op needs (computeRequiredMsb); -1 = no MSB
     // opinion. Filled by the pre-scan; drives the MSB-affinity tiebreak in pickFreeBest.
     int requiredMsb = -1;
-    // Hardware hazard: the exact (rule, register) pairs this node writes that some
-    // later consumer reads, per the arch's hazard rule table (a fixed producer->consumer cycle
-    // gap keyed by register file). Filled by the pre-scan via the def-use user walk.
-    // Non-empty means this node's issue must stamp the corresponding hazard gate(s)
-    // (see CDNA5ReadyQueue::hazardGates_) so the consumer waits the gap out. That
-    // gate correctly blocks the consumer whenever *real* intervening instructions are
-    // available to cover the wait; when none are, the scheduler's existing "pay the
-    // remaining wait via advanceTime, then issue anyway" fallback still applies (see
-    // findSmallestPickableNonWmma/pickFreeBest) and advances the simulated clock_
-    // without a matching instruction — so the gate is not a substitute for
-    // hazardDeadline actually reserving enough real cycles; both need to be right.
-    // hazardDeadline below drives a *throughput* heuristic on top of the gate.
-    std::vector<HazardFlag> hazardFlags;
-    // Set by the pre-scan (see scheduleRegionWithMovableSideEffects) only when this
-    // node has hazardFlags: the latest CDNA5ReadyQueue::clock_ value at which this
-    // producer may still be deferred. Computed as X - rule.cycles - (this producer's
-    // own issue/latency cost), where X is the hazarded consumer's estimated absolute
-    // cycle position (a forward prefix sum over the region in original program
-    // order) — i.e. "this producer must FINISH by t = X - cycles" (the gate is
-    // stamped only after the producer's own advanceTime has already run, so the
-    // deadline must reserve that cost too), the tightest (minimum) such deadline over
-    // every rule/consumer this node feeds. INT_MAX (the default) means no deadline
-    // applies. Compared against the live clock_ in CDNA5ReadyQueue::decidePromote():
-    // unlike a readiness check, clock_ only advances via cycles actually issued, so
-    // this can't fire early just because some unrelated node happens to be structurally
-    // ready sooner than it is actually scheduled. Still an estimate (X is computed
-    // from original order, which real scheduling may depart from) — an inaccurate
-    // deadline shifts when the mandatory force kicks in, and (per above) can leave the
-    // gate short of real cycles to cover the gap with, falling back to a simulated
-    // wait that has no matching instruction.
-    int hazardDeadline = INT_MAX;
     // --- Cluster-barrier SCC (ClusterBarrier kernels; see cluster-barrier.md) ---
     bool handshakeBarrier = false;
     unsigned sccChainId = 0;
@@ -152,6 +140,13 @@ struct BBScheduleState {
     // successor BBs in a loop. Kept separate from dsResiduals.
     int globalReadInflightCount = 0;  // credits still in flight at BB end
     int globalReadResidual = 0;       // max remaining drain latency among them
+    // Cross-BB ds_load (LDS return queue) credit state: each credit's own
+    // remaining drain latency at BB end (InFlightQueue::residuals()), carried
+    // to successor BBs in a loop so a fresh region doesn't model the LDS queue
+    // as empty when hardware still has the prior iteration's tail draining.
+    // Kept as the full per-entry list, not collapsed to a count/worst-case
+    // pair, so seeding doesn't overstate how long every entry has left.
+    std::vector<int> dsReadResiduals;
 };
 
 // Cache for cross-BB scheduling state. Lives in the scheduler's run() scope
@@ -220,6 +215,12 @@ class ReadyQueue {
         (void)regionEnd;
         (void)blockBegin;
         (void)deps;
+    }
+
+    // Hook called for every instruction appended to the BB's final order, in order: picks,
+    // filler instructions, and the side-effect instructions between regions.
+    virtual void onScheduled(const StinkyInstruction& inst) {
+        (void)inst;
     }
 
     // Hook called after a basic block has been fully scheduled. When the queue is

@@ -14,11 +14,14 @@ Usage:
     python attention_dense_prefill.py --bn 128        # sweep block_n
     python attention_dense_prefill.py --exact-shape --sq 8192 --hq 32 --dtype fp16 \\
         --persistent --json-out result.json
+
+``--exact-shape`` resolves the registered dispatch candidate for the body
+(grid, persistent, or persistent + wide DMA) and applies the tile and the
+other flags as its knobs.
 """
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import json
 import math
 import os
@@ -32,18 +35,21 @@ sys.path.insert(0, _RK + "/library")
 
 import torch  # noqa: E402
 
-from dispatch.attention import AttentionRequest, dense_spec_for_request  # noqa: E402
-from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES  # noqa: E402
+from dispatch.attention import AttentionRequest, tuning_spec_with_knobs  # noqa: E402
+from kernels.common.attention_dense_spec import (  # noqa: E402
+    DENSE_TILE_GEOMETRIES,
+)
 from kernels.gfx950.attention_dense import (  # noqa: E402
     GFX950_DENSE_LAYOUTS,
     Gfx950AttentionDenseSpec,
+    _has_shape_params,
     attention_dense_block,
     attention_dense_grid,
+    attention_dense_signature,
     build_attention_dense,
     supports_attention_dense,
 )
 from rocke.helpers.compile import compile_kernel  # noqa: E402
-from rocke.helpers.spec import SignatureBuilder  # noqa: E402
 from rocke.runtime import (  # noqa: E402
     KernelLauncher,
     LaunchConfig,
@@ -66,26 +72,11 @@ def _make_launcher(spec: Gfx950AttentionDenseSpec):
         backend="python",
         capture_ir_text=False,
     )
-    sb = (
-        SignatureBuilder()
-        .ptr("q_ptr", spec.dtype)
-        .ptr("k_ptr", spec.dtype)
-        .ptr("v_ptr", spec.dtype)
-        .ptr("o_ptr", spec.dtype)
-        .scalar("scale", "f32")
+    return KernelLauncher(
+        hsaco=art.hsaco,
+        kernel_name=art.kernel_name,
+        signature=attention_dense_signature(spec),
     )
-    if spec.runtime_shape:
-        sb = (
-            sb.scalar("batch", "i32")
-            .scalar("seqlen_q", "i32")
-            .scalar("seqlen_kv", "i32")
-        )
-    if spec.use_sinks:
-        sb = sb.ptr("sink_ptr", spec.dtype)
-    if spec.varlen:
-        sb = sb.ptr("cu_seqlens_q", "i32").ptr("cu_seqlens_kv", "i32")
-    sig = sb.build()
-    return KernelLauncher(hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig)
 
 
 def _launch_config(spec: Gfx950AttentionDenseSpec, stream) -> LaunchConfig:
@@ -108,8 +99,50 @@ def _causal_flops(spec: Gfx950AttentionDenseSpec) -> int:
     return 2 * 2 * B * Hq * D * Sq * Skv
 
 
+def _auto_wide_lds_dma(shape: dict[str, Any]) -> bool:
+    """The shipped wide-DMA choice for a shape that does not set one."""
+    default = DENSE_TILE_GEOMETRIES["default"]
+    block_m = int(shape.get("block_m", default["block_m"]))
+    block_n = int(shape.get("block_n", default["block_n"]))
+    sq = int(shape["seqlen_q"])
+    sk = int(shape.get("seqlen_kv", sq))
+    ragged = sq == sk and (sq % block_m != 0 or sk % block_n != 0)
+    return (
+        bool(shape.get("persistent", False))
+        and int(shape["head_size"]) == 128
+        and block_n == 64
+        and str(shape.get("dtype", "fp16")) in ("fp16", "bf16")
+        and bool(shape.get("causal", True))
+        and int(shape.get("sliding_window", 0)) == 0
+        and not bool(shape.get("use_sinks", False))
+        and not ragged
+    )
+
+
+def _dense_spec_id(shape: dict[str, Any]) -> str:
+    """The gfx950 dense candidate the shape names: the grid or persistent body,
+    and wide DMA under persistent. A shape without ``wide_lds_dma`` gets the
+    shipped choice."""
+    persistent = bool(shape.get("persistent", False))
+    if "wide_lds_dma" in shape:
+        wide = bool(shape["wide_lds_dma"])
+    else:
+        wide = _auto_wide_lds_dma(shape)
+    if wide and not persistent:
+        raise ValueError("wide_lds_dma runs only on the persistent body (--persistent)")
+    if not persistent:
+        return "gfx950_dense_grid"
+    return "gfx950_dense_persist_widedma" if wide else "gfx950_dense_persist"
+
+
 def make_spec_from_shape(shape: dict[str, Any]) -> Gfx950AttentionDenseSpec:
-    """Resolve the gfx950 dispatch spec, then apply explicit harness overrides."""
+    """The gfx950 dense candidate the shape names, with its knob overrides
+    applied.
+
+    Persist and wide DMA pick the candidate (``spec_id``); every other field in
+    the shape, the tile included, is a knob of it, applied through
+    :func:`dispatch.attention.tuning_spec_with_knobs` so the kernel validates it.
+    """
     req = AttentionRequest(
         batch=int(shape.get("batch", 1)),
         nhead_q=int(shape["num_query_heads"]),
@@ -121,15 +154,9 @@ def make_spec_from_shape(shape: dict[str, Any]) -> Gfx950AttentionDenseSpec:
         arch="gfx950",
         mask_type=1 if bool(shape.get("causal", True)) else 0,
         dtype=str(shape.get("dtype", "fp16")),
-        algorithm="attention_dense",
-        spec_id="gfx950_attention_dense",
-        dense_persistent="on" if bool(shape.get("persistent", False)) else "off",
-        dense_num_persistent=int(shape.get("num_persistent", 256)),
-        dense_persist_decode=str(shape.get("persist_decode", "auto")),
         sliding_window=int(shape.get("sliding_window", 0)),
         use_sinks=bool(shape.get("use_sinks", False)),
     )
-    spec = dense_spec_for_request(req)
     coercers = {
         "block_m": int,
         "block_n": int,
@@ -137,12 +164,14 @@ def make_spec_from_shape(shape: dict[str, Any]) -> Gfx950AttentionDenseSpec:
         "waves_per_eu": int,
         "interleave": bool,
         "lazy_rescale": bool,
-        "wide_lds_dma": bool,
+        "num_persistent": int,
+        "persist_decode": str,
+        "nonpersist_decode": str,
     }
-    overrides = {
+    knobs = {
         name: coerce(shape[name]) for name, coerce in coercers.items() if name in shape
     }
-    return dataclasses.replace(spec, **overrides)
+    return tuning_spec_with_knobs(req, _dense_spec_id(shape), knobs).kernel_spec
 
 
 def run_benchmark(
@@ -157,7 +186,11 @@ def run_benchmark(
     ok = (not check) or (err < _TOL)
     return {
         "kernel_name": spec.kernel_name(),
-        "persist_decode": spec.resolved_persist_decode,
+        # Only the decode the body uses; the other one is None.
+        "persist_decode": spec.resolved_persist_decode if spec.persistent else None,
+        "nonpersist_decode": (
+            None if spec.persistent else spec.resolved_nonpersist_decode
+        ),
         "ms": ms,
         "tflops": tf,
         "max_abs": err,
@@ -196,7 +229,7 @@ def run(
     stream = torch.cuda.current_stream().cuda_stream
     cfg = _launch_config(spec, stream)
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
-    if spec.runtime_shape:
+    if _has_shape_params(spec):
         vals["batch"] = int(spec.batch)
         vals["seqlen_q"] = int(spec.seqlen_q)
         vals["seqlen_kv"] = int(spec.seqlen_kv)
@@ -325,13 +358,12 @@ def main():
     ap.add_argument(
         "--persist-decode",
         default="auto",
-        choices=[
-            "auto",
-            "qb_major",
-            "hkv_major",
-            "gqa_pair",
-            "gqa_pair_2phase",
-        ],
+        choices=sorted(Gfx950AttentionDenseSpec.supported_persist_decodes()),
+    )
+    ap.add_argument(
+        "--nonpersist-decode",
+        default="auto",
+        choices=sorted(Gfx950AttentionDenseSpec.supported_nonpersist_decodes()),
     )
     ap.add_argument(
         "--sw", type=int, default=0, help="sliding_window (0=off; multiple of --bn)"
@@ -375,6 +407,7 @@ def main():
             "sliding_window": args.sw,
             "use_sinks": args.use_sinks,
             "persist_decode": args.persist_decode,
+            "nonpersist_decode": args.nonpersist_decode,
             "wide_lds_dma": args.wide_lds_dma,
         }
         spec = make_spec_from_shape(shape)
@@ -410,6 +443,7 @@ def main():
             sliding_window=args.sw,
             use_sinks=args.use_sinks,
             persist_decode=args.persist_decode,
+            nonpersist_decode=args.nonpersist_decode,
             wide_lds_dma=args.wide_lds_dma,
         )
         run(spec)

@@ -12,7 +12,6 @@
 #include <memory>
 #include <sstream>
 
-#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_frontend/Graph.hpp>
@@ -30,8 +29,10 @@
 #include <random>
 #include <vector>
 
+#include "harness/GraphBenchmark.hpp"
 #include "harness/GraphDescription.hpp"
 #include "harness/IReferenceGraphExecutor.hpp"
+#include "harness/PlanWorkspace.hpp"
 #include "harness/ReferenceGraphExecutorFactory.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
@@ -139,7 +140,9 @@ protected:
     InputFillRecipes _inputFillRecipes;
     std::unordered_map<int64_t, std::string> _tensorIdToNameMap;
     std::unordered_map<int64_t, TensorValidationEntry> _tensorValidationMap;
-    std::vector<std::function<void()>> _deferredValidators;
+    /// Built in validateOutputs(), once the reference executor says where its output
+    /// lives: that — or --validator, when set — is where each comparison runs.
+    std::vector<std::function<void(ValidationSite)>> _deferredValidators;
 
     void SetUp() override
     {
@@ -258,6 +261,14 @@ protected:
         ASSERT_NO_FATAL_FAILURE(executeReferenceGraph(graph, refBundle));
 
         ASSERT_NO_FATAL_FAILURE(validateOutputs(gpuBundle, refBundle));
+
+        // Only a verified graph is timed.
+        const auto& benchmark = TestConfig::get().benchmarkSettings();
+        if(benchmark.has_value() && !::testing::Test::HasFailure())
+        {
+            auto variantPack = gpuBundle.toDeviceVariantPack();
+            reportBenchmark(benchmarkGraph(graph, getSharedHandle(), variantPack, *benchmark));
+        }
     }
 
     void registerValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
@@ -276,7 +287,7 @@ protected:
     {
         const auto testName = currentTestName();
         _deferredValidators.emplace_back(
-            [this, attr, testName, absoluteTolerance, relativeTolerance]() {
+            [this, attr, testName, absoluteTolerance, relativeTolerance](ValidationSite site) {
                 const auto sdkDataType
                     = hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type());
                 const auto label = bundle::tensorLabel(attr->get_uid(), attr->get_name());
@@ -286,7 +297,7 @@ protected:
                 const auto tolerance
                     = gradingForTensor(testName, label, absoluteTolerance, relativeTolerance);
 
-                auto selection = bundle::makeValidator(sdkDataType, label, tolerance);
+                auto selection = bundle::makeValidator(sdkDataType, label, tolerance, site);
                 auto [it, inserted] = _tensorValidationMap.insert(
                     {attr->get_uid(),
                      TensorValidationEntry{std::move(selection.validator),
@@ -383,12 +394,18 @@ protected:
         HIPDNN_PLUGIN_LOG_INFO("Validating " << gpuBundle.outputTensorIds.size()
                                              << " output tensors");
 
+        // A GPU reference leaves its output on the device, next to the engine's, so by
+        // default the comparison runs there; a CPU reference's output is compared on the
+        // host. --validator overrides either.
+        const bool referenceUsesDevice = getReferenceExecutor().requiresDeviceMemory();
+        const auto site = resolveValidationSite(TestConfig::get().getValidatorDevice(),
+                                                referenceUsesDevice ? ValidationSite::DEVICE
+                                                                    : ValidationSite::HOST);
+
         for(const auto& registerValidator : _deferredValidators)
         {
-            registerValidator();
+            registerValidator(site);
         }
-
-        const bool referenceUsesDevice = getReferenceExecutor().requiresDeviceMemory();
 
         for(const auto& tensorId : gpuBundle.outputTensorIds)
         {
@@ -441,7 +458,9 @@ protected:
             }
         }
 
-        auto fillResult = fillInputs(fb, bundle.tensors, leafInputUids, _inputFillRecipes);
+        // No device filler: these tests read the tensors on the host through const
+        // accessors, which cannot migrate device-generated data.
+        auto fillResult = fillInputs(fb, bundle.tensors, leafInputUids, _inputFillRecipes, nullptr);
         if(!fillResult.filled)
         {
             return fillResult;
@@ -538,14 +557,12 @@ public:
                          hipdnn_frontend::graph::Graph& graph,
                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
     {
-        int64_t workspaceSize;
-        auto result = graph.get_workspace_size(workspaceSize);
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-        ASSERT_GE(workspaceSize, 0) << result.err_msg;
-        utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+        std::string error;
+        auto workspace = allocatePlanWorkspace(graph, error);
+        ASSERT_TRUE(workspace.has_value()) << error;
 
         auto variantPack = bundle.toDeviceVariantPack();
-        result = graph.execute(handle, variantPack, workspace.get());
+        auto result = graph.execute(handle, variantPack, workspace->get());
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
     }
 
