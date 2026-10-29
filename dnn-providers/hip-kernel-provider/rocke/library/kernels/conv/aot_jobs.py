@@ -37,7 +37,13 @@ Per direction, on top of that:
 * **fwd** -- vector widths: a = b in {1, 2, 4, 8} (X and W run along cpg),
   c in {1, 2, 4, 8} (Y along kpg). K loop: plain, ``unroll_k`` (double-
   buffered 2x loop), and ``async_dma`` (direct-to-LDS; built once per
-  geometry, under pipeline "mem", since it ignores the pipeline). Plus
+  geometry, under pipeline "mem", since it ignores the pipeline); on the
+  wave64 MFMA pipelines also ``reg_prefetch`` 1 / 2 (register-prefetch loop,
+  one / two LDS buffers), ``uniform_k_decode`` (per-tile filter-tap decode
+  with the plain loop as its fallback) and the two together; the
+  ``uniform_k_decode`` + ``reg_prefetch`` = 1 loop also in the XCD-contiguous
+  tile orders of :data:`CACHE_FWD_XCD_REMAP` (``xcd_remap``) and on
+  XOR-swizzled unpadded LDS tiles (``lds_xor``, tile_k >= 32). Plus
   group-merged depthwise kernels (``group_merge`` in 4..64, cshuffle, plain
   and ``unroll_k`` loops, load widths derived by the builder, on the tile
   subset the ``CACHE_FWD_GROUP_MERGE_*`` constants allow), served only to
@@ -515,16 +521,63 @@ def _aot_pipeline(direction: str, pipeline: str) -> bool:
     return pipeline not in _AOT_ALIAS_PIPELINES[direction]
 
 
-def _fwd_k_loops(pipeline: str) -> List[Tuple[bool, bool]]:
-    """``(unroll_k, async_dma)`` K-loop drivers emitted per forward geometry.
+# XCD-contiguous tile orders (ImplicitGemmConvSpec.xcd_remap) built per arch:
+# the XCD count is baked into the binary, and one gfx target spans parts with
+# different counts (gfx942: MI300A has 6 XCDs, MI300X / MI325X 8), so each
+# count is its own binary and the sweep picks the one that runs fastest on the
+# device. Built only on the uniform_k_decode + reg_prefetch=1 loop -- the loop
+# that won every large-spatial 3-D shape it was measured on -- so the grid grows
+# by two kernels per geometry rather than doubling.
+CACHE_FWD_XCD_REMAP: Dict[str, Tuple[int, ...]] = {"gfx942": (6, 8), "gfx950": (8,)}
+
+
+def _fwd_k_loops(pipeline: str, arch: Optional[str] = None) -> List[dict]:
+    """K-loop driver kwargs emitted per forward geometry.
 
     async_dma replaces the K-loop driver entirely and ignores the pipeline
     string, so it is only emitted once per geometry instead of as identical
     binaries under different pipeline labels.
+
+    ``reg_prefetch`` (the next tile's global reads in flight across the
+    MFMAs; one or two LDS buffers) and ``uniform_k_decode`` (per-tile filter-tap
+    decode, with the plain loop kept as the fallback for cpg % tile_k != 0)
+    are built on the wave64 MFMA pipelines, alone and together.
     """
-    k_loops = [(False, False), (True, False)]
+    k_loops = [dict(unroll_k=False, async_dma=False), dict(unroll_k=True, async_dma=False)]
     if pipeline == "mem":
-        k_loops.append((False, True))
+        k_loops.append(dict(unroll_k=False, async_dma=True))
+    if pipeline != "wavelet":
+        for ukd, rpf in ((False, 1), (False, 2), (True, 0), (True, 1), (True, 2)):
+            k_loops.append(
+                dict(
+                    unroll_k=False,
+                    async_dma=False,
+                    uniform_k_decode=ukd,
+                    reg_prefetch=rpf,
+                )
+            )
+        # The same loop on XOR-swizzled, unpadded A/B LDS tiles (lds_xor;
+        # the validator drops tile_k < 32): the saved pad is what lets a
+        # 128x128x64 tile run two workgroups per CU.
+        k_loops.append(
+            dict(
+                unroll_k=False,
+                async_dma=False,
+                uniform_k_decode=True,
+                reg_prefetch=1,
+                lds_xor=True,
+            )
+        )
+        for xcds in CACHE_FWD_XCD_REMAP.get(arch, ()):
+            k_loops.append(
+                dict(
+                    unroll_k=False,
+                    async_dma=False,
+                    uniform_k_decode=True,
+                    reg_prefetch=1,
+                    xcd_remap=xcds,
+                )
+            )
     return k_loops
 
 
@@ -697,8 +750,8 @@ def _fwd_jobs(
         # fwd's A (X) and B (W) are both contiguous along cpg, so they share
         # one width; D (Y) runs along kpg.
         for vec_ab, vec_c in itertools.product(_VECS, _VECS):
-            for (unroll_k, async_dma), caps in itertools.product(
-                _fwd_k_loops(pipeline), _layout_caps()
+            for kloop, caps in itertools.product(
+                _fwd_k_loops(pipeline, arch), _layout_caps()
             ):
                 grouped = caps["grouped"]
                 cfg = dict(
@@ -716,8 +769,7 @@ def _fwd_jobs(
                     vector_size_a=vec_ab,
                     vector_size_b=vec_ab,
                     vector_size_c=vec_c,
-                    unroll_k=unroll_k,
-                    async_dma=async_dma,
+                    **kloop,
                 )
                 yield BuildJob(
                     identity=KernelIdentity(
@@ -1652,7 +1704,7 @@ def count_jobs(
             if not _aot_pipeline(direction, pipeline):
                 continue
             if direction == "fwd":
-                total += vecs * len(_fwd_k_loops(pipeline)) * layouts
+                total += vecs * len(_fwd_k_loops(pipeline, target.gfx)) * layouts
                 if _fwd_merged_geometry(geo):
                     total += len(_FWD_GROUP_MERGES) * len(_fwd_merged_k_loops())
             elif direction == "wgrad":

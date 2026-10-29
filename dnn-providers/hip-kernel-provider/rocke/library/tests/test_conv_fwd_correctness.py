@@ -683,6 +683,30 @@ class TestConvFwdDoubleBufferedOddTiles(unittest.TestCase):
     def test_unroll_k_odd_tiles(self):
         self._sweep(unroll_k=True)
 
+    # The register-prefetch loops and the per-tile filter-tap decode. C=32
+    # (cpg a multiple of tile_k) takes the uniform-tap loop, C=16 its plain
+    # fallback; 9 and 5 tiles exercise the odd tail of the two-buffer loop.
+    def test_reg_prefetch_one_buffer(self):
+        self._sweep(reg_prefetch=1)
+
+    def test_reg_prefetch_two_buffers(self):
+        self._sweep(reg_prefetch=2)
+
+    def test_uniform_k_decode(self):
+        self._sweep(uniform_k_decode=True)
+
+    def test_uniform_k_decode_reg_prefetch(self):
+        self._sweep(uniform_k_decode=True, reg_prefetch=1)
+        self._sweep(uniform_k_decode=True, reg_prefetch=2)
+
+    def test_lds_xor(self):
+        self._sweep(uniform_k_decode=True, reg_prefetch=1, lds_xor=True)
+        self._sweep(reg_prefetch=2, lds_xor=True)
+
+    def test_xcd_remap(self):
+        self._sweep(xcd_remap=6)
+        self._sweep(xcd_remap=8, uniform_k_decode=True, reg_prefetch=2)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -328,6 +328,47 @@ class ImplicitGemmConvSpec:
     # cshuffle store width derived from kpg is a separate Gm=1 change.)
     group_merge: int = 1
 
+    # Per-tile reduction decode (the forward counterpart of
+    # ``DgradConvSpec.uniform_k_decode``). When cpg is a multiple of tile_k
+    # every K tile lies inside one filter tap ([z,] y, x) and one run of
+    # tile_k channels, so the tap is carried across the loop as uniform
+    # counters (no per-element division chain), each load offset splits into a
+    # loop-invariant per-element part (the output pixel) plus a uniform
+    # per-tile part (the tap and channel base), and the bounds test compares
+    # the invariant pixel origin against the tap's shifted extents. The binary
+    # also carries the plain K loop and picks one of the two per problem from
+    # the kernargs, so it serves every problem the plain kernel serves.
+    # Default False: strictly additive (byte-identical IR, same name).
+    uniform_k_decode: bool = False
+    # Register-prefetch K loop: the global reads of K tile t+1 are issued
+    # into registers *before* the MFMAs of tile t and written to LDS after
+    # them, so their DRAM/L2 latency hides behind the MFMA phase of the same
+    # wave. The plain ``unroll_k`` loop writes each prefetched tile to LDS
+    # before the MFMAs, which makes every wave wait for its loads first.
+    #   1: one LDS buffer -- a barrier retires the tile's ds_reads before the
+    #      write and a second publishes it (no extra LDS, so large tiles fit);
+    #   2: two LDS buffers, x2-unrolled ping-pong, one barrier per tile.
+    # Replaces the ``unroll_k`` loop (setting both is rejected). 0 = off.
+    reg_prefetch: int = 0
+    # XCD-contiguous tile order: the hardware hands workgroups to the XCDs
+    # round-robin in launch order and every XCD has its own L2, so in launch
+    # order the neighbouring M tiles -- which read overlapping input rows
+    # (the filter's y/z taps) -- all land on different L2s. With
+    # ``xcd_remap = n`` (the GPU's XCD count) each XCD instead walks one
+    # contiguous run of ``num_wgs / n`` tiles (M-major, the N tiles of one M
+    # tile adjacent), so the input-row reuse between neighbouring tiles stays
+    # inside one L2. A bijection of the launch grid (the tail past the last
+    # full block keeps launch order). 0 (default) = launch order.
+    xcd_remap: int = 0
+    # XOR-swizzled A/B LDS tiles in place of the +8 row pad: the 16-byte chunk
+    # ``j`` of tile row ``r`` is stored at chunk ``j ^ (r % (tile_k / 8))``, so
+    # the MFMA fragment reads of consecutive rows still spread over the banks
+    # while the row stride stays tile_k. Saves the pad's LDS (1/9 of the A/B
+    # tile at tile_k = 64), which is what lets e.g. a 128x128x64 tile run two
+    # workgroups per CU. Applies to the uniform_k_decode / reg_prefetch loops
+    # (their LDS writes and the MFMA reads); tile_k >= 32. Default False.
+    lds_xor: bool = False
+
     @property
     def block_size(self) -> int:
         return self.warp_m * self.warp_n * self.wave_size
@@ -420,6 +461,10 @@ class ImplicitGemmConvSpec:
                 # that would otherwise share the plain kernel's name. Only
                 # tagged when set, so every other kernel keeps its name.
                 "unroll": self.unroll_k,
+                "ukd": self.uniform_k_decode,
+                f"rpf{self.reg_prefetch}": self.reg_prefetch > 0,
+                f"xcd{self.xcd_remap}": self.xcd_remap > 0,
+                "lxor": self.lds_xor,
                 # Gm changes the emitted body, so it must reach the symbol:
                 # without it two degrees collide on one name and the compile
                 # cache hands the second the first's binary.
@@ -474,10 +519,15 @@ class ImplicitGemmConvSpec:
         _gm_ok, _gm_why = fwd_group_merge_available(self)
         if not _gm_ok:
             raise ValueError(_gm_why)
+        _kl_why = _fwd_kloop_conflict(self)
+        if _kl_why:
+            raise ValueError(_kl_why)
 
     def effective_lds_layout(self) -> LdsLayout:
         if self.lds_layout is not None:
             layout = self.lds_layout
+        elif self.lds_xor:
+            layout = LdsLayout.padded_k(self.tile_k, 0)
         elif self.lds_k_pad is not None:
             layout = LdsLayout.padded_k(self.tile_k, self.lds_k_pad)
         elif self.async_dma:
@@ -503,6 +553,40 @@ class ImplicitGemmConvSpec:
 
         vec_c = _vec(C)
         return vec_c, vec_c, _vec(K)
+
+
+def _fwd_kloop_conflict(spec: "ImplicitGemmConvSpec") -> str:
+    """Why ``uniform_k_decode`` / ``reg_prefetch`` cannot be honoured, or ``""``.
+
+    Both rewrite the synchronous wave64 MFMA K loop; every K-loop driver that
+    never reaches it (async DMA, the wavelet split, the hand-unrolled
+    ``unroll_k`` loop) is rejected rather than silently renamed. Shared by
+    ``validate`` and ``is_valid_spec``.
+    """
+    if spec.xcd_remap < 0:
+        return "xcd_remap must be >= 0"
+    if spec.xcd_remap and spec.chiplet_swizzle:
+        return "xcd_remap and chiplet_swizzle both remap the grid; set one"
+    if spec.lds_xor:
+        if not (spec.uniform_k_decode or spec.reg_prefetch):
+            return "lds_xor is implemented in the uniform_k_decode / reg_prefetch loops only"
+        if spec.tile_k < 32 or spec.lds_layout is not None or spec.lds_k_pad:
+            return "lds_xor needs tile_k >= 32 and the default (unpadded) LDS layout"
+    if spec.reg_prefetch not in (0, 1, 2):
+        return f"reg_prefetch must be 0, 1 or 2, got {spec.reg_prefetch}"
+    if not (spec.uniform_k_decode or spec.reg_prefetch):
+        return ""
+    if spec.async_dma:
+        return "uniform_k_decode/reg_prefetch rewrite the synchronous K loop; async_dma has its own"
+    if spec.pipeline == "wavelet" or spec.wave_size != 64:
+        return "uniform_k_decode/reg_prefetch are wave64 MFMA K loops"
+    if spec.unroll_k:
+        return "reg_prefetch/uniform_k_decode replace the unroll_k loop; set one of them"
+    if spec.group_merge > 1:
+        return "uniform_k_decode/reg_prefetch are not implemented with group_merge"
+    if spec.uniform_k_decode and spec.problem.is_pointwise:
+        return "uniform_k_decode: the pointwise fast path has no filter tap to decode"
+    return ""
 
 
 # ---------------------------------------------------------------------
@@ -660,7 +744,7 @@ def implicit_gemm_lds_bytes(spec: ImplicitGemmConvSpec) -> Tuple[int, int, int, 
     # single-buffer scf.for_iter body with "mem"/"compv3" -- it differs only in
     # scheduling hints -- so charging it for a second A/B tile rejected specs for
     # LDS the kernel never allocates.
-    _double = spec.async_dma or spec.unroll_k
+    _double = spec.async_dma or spec.unroll_k or spec.reg_prefetch == 2
     _ab_lds = _ab_bytes * (2 if _double else 1)
     # cshuffle stages tile_m×tile_n elements at dtype_d (fp16/bf16 = 2B, fp32 = 4B).
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
@@ -714,6 +798,9 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     _gm_ok, _gm_why = fwd_group_merge_available(spec, arch)
     if not _gm_ok:
         return False, _gm_why
+    _kl_why = _fwd_kloop_conflict(spec)
+    if _kl_why:
+        return False, _kl_why
 
     # Check global store vector size and disable default epilogue for
     # vec_size_c > 1 — whether set explicitly or auto-derived from kpg.
@@ -1305,6 +1392,17 @@ def _build_implicit_gemm_conv_impl(
         block_m_off_v = b.mul(swz.row, b.const_i32(block_m))
         block_n_off_v = b.mul(swz.col, b.const_i32(block_n))
         grid = dc_replace(grid, block_m_off=block_m_off_v, block_n_off=block_n_off_v)
+    elif spec.xcd_remap:
+        from rocke.helpers.grid import chiplet_transform_chunked_runtime
+
+        num_wgs = b.mul(p_num_pid_m, p_num_pid_n)
+        wgid_flat = b.add(b.mul(b.block_id_y(), p_num_pid_n), b.block_id_x())
+        logical = chiplet_transform_chunked_runtime(
+            b, wgid_flat, num_wgs=num_wgs, num_xcds=spec.xcd_remap
+        )
+        block_m_off_v = b.mul(b.div(logical, p_num_pid_n), b.const_i32(block_m))
+        block_n_off_v = b.mul(b.mod(logical, p_num_pid_n), b.const_i32(block_n))
+        grid = dc_replace(grid, block_m_off=block_m_off_v, block_n_off=block_n_off_v)
     else:
         block_m_off_v = grid.block_m_off
         block_n_off_v = grid.block_n_off
@@ -1360,7 +1458,7 @@ def _build_implicit_gemm_conv_impl(
     # See the LDS budget note in is_valid_*_spec: "compv4" alone does not reach a
     # buffer-alternating K-loop, so allocating a second tile for it produced a
     # dead allocation that the LDS pool then stripped anyway.
-    double_buffer = spec.async_dma or spec.unroll_k
+    double_buffer = spec.async_dma or spec.unroll_k or spec.reg_prefetch == 2
     if double_buffer:
         A_smem2 = b.smem_alloc(
             ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem2"
@@ -1830,6 +1928,12 @@ def _build_implicit_gemm_conv_impl(
                     flat += 1
         return new_accs
 
+    def lds_swz(b_: IRBuilder, row: Value, col: Value) -> Value:
+        """``lds_xor`` column of tile element ``(row, col)``: its 16-byte
+        chunk XOR ``row % (tile_k / 8)`` (the in-chunk offset is kept)."""
+        rmask = b_.land(row, b_.const_i32(block_k // 8 - 1))
+        return b_.xor(col, b_.shl(rmask, b_.const_i32(3)))
+
     def emit_mfma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]
     ) -> List[Value]:
@@ -1887,7 +1991,7 @@ def _build_implicit_gemm_conv_impl(
                             b,
                             A_src,
                             a_row,
-                            col_base,
+                            lds_swz(b, a_row, col_base) if spec.lds_xor else col_base,
                             a_per_lane,
                             smem_dtype=_smem_dtype,
                         )
@@ -1900,7 +2004,12 @@ def _build_implicit_gemm_conv_impl(
                 )
                 b_cols.append(
                     _emit_smem_load(
-                        b, B_src, b_row, col_base, b_per_lane, smem_dtype=_smem_dtype
+                        b,
+                        B_src,
+                        b_row,
+                        lds_swz(b, b_row, col_base) if spec.lds_xor else col_base,
+                        b_per_lane,
+                        smem_dtype=_smem_dtype,
                     )
                 )
 
@@ -2165,7 +2274,284 @@ def _build_implicit_gemm_conv_impl(
         )
         return b.kernel
 
-    if spec.unroll_k:
+    def _emit_fwd_kloops() -> List[Value]:
+        """The ``uniform_k_decode`` / ``reg_prefetch`` K loops (final accs).
+
+        Up to two loops over the same reduction, exactly one of which has a
+        non-empty range for a given problem:
+
+        * the uniform-tap loop (``uniform_k_decode``), taken when cpg is a
+          multiple of tile_k. It carries the tile's channel base and filter tap
+          ``(c, x, y[, z])`` as uniform counters and advances them by one tile
+          per iteration, so the per-element address is a loop-invariant pixel
+          part plus a uniform tap part and the per-element ``k -> (z, y, x, c)``
+          division chain disappears. Its bounds test is an unsigned compare of
+          the invariant pixel origin shifted by the uniform tap offset.
+        * the plain loop over the descriptor DAG otherwise (or always, when
+          only ``reg_prefetch`` is set).
+
+        With ``reg_prefetch`` the global reads of tile t+1 are issued into
+        registers ahead of the MFMAs of tile t (pinned there with
+        ``sched_barrier``) and written to LDS after them. ``reg_prefetch=1``
+        keeps one LDS buffer (a barrier before the write retires the tile's
+        ds_reads, a second publishes it); ``reg_prefetch=2`` ping-pongs two
+        buffers in an x2-unrolled loop, one barrier per tile, with an odd last
+        tile in a 0/1-trip tail loop. A prefetch past the end of the reduction
+        addresses an out-of-range tap / k and loads zeros without touching
+        memory.
+        """
+        if (
+            a_load_override is not None
+            or a_operand_override is not None
+            or m_index_fn is not None
+            or a_mhw_index_fn is not None
+        ):
+            raise ValueError(
+                "uniform_k_decode/reg_prefetch do not support the builder's "
+                "A-operand override hooks"
+            )
+        c1 = b.const_i32(1)
+        is3 = p.is_3d
+        state0: List[Tuple[str, Value]] = []
+        uk_cap: List[Optional[Tuple[Value, ...]]] = [None]
+
+        def fetch(desc_a, desc_b) -> Tuple[list, list]:
+            a_st = a_sync_loader.load_global(
+                b, tid=tid, descriptor=desc_a, rsrc=a_rsrc
+            )
+            b_st = b_sync_loader.load_global(
+                b, tid=tid, descriptor=desc_b, rsrc=b_rsrc
+            )
+            return a_st, b_st
+
+        def store(staged, A_dst: Value, B_dst: Value) -> None:
+            if not spec.lds_xor:
+                a_sync_loader.store_lds(b, smem_dst=A_dst, staged=staged[0])
+                b_sync_loader.store_lds(b, smem_dst=B_dst, staged=staged[1])
+                return
+            for dst, st, vec in ((A_dst, staged[0], load_vec_a), (B_dst, staged[1], load_vec_b)):
+                for row, col, v in st:
+                    b.smem_store_vN(dst, [row, lds_swz(b, row, col)], v, vec)
+
+        def run_loop(lo, hi, accs_in, state_in, fetch_tile, advance, tag):
+            """One K loop over [lo, hi). ``fetch_tile(k, state)`` issues the
+            global reads of the tile at ``k`` and returns them staged;
+            ``advance(state)`` steps the carried tile state by one tile."""
+            n_acc = len(accs_in)
+            names = [f"{tag}_{n}" for n, _ in state_in]
+            if not spec.reg_prefetch:
+                it = [(f"{tag}_{n}", v) for (n, _), v in zip(accs, accs_in)] + [
+                    (nm, v) for nm, (_, v) in zip(names, state_in)
+                ]
+                for_op = b.scf_for_iter(lo, hi, c_block_k, it, iv_name=f"{tag}_k")
+                with for_op as (kv, iv):
+                    st = list(iv[n_acc:])
+                    staged = fetch_tile(kv, st)
+                    store(staged, A_smem, B_smem)
+                    b.sync()
+                    new_accs = emit_mfma_phase(A_smem, B_smem, list(iv[:n_acc]))
+                    b.sync()
+                    b.scf_yield(*new_accs, *advance(st))
+                return list(for_op.results)[:n_acc]
+            # Prologue: tile `lo` into buffer 0, published. Guarded only by
+            # the loads' own validity: an empty range loads one zero tile that
+            # no MFMA reads.
+            st0 = [v for _, v in state_in]
+            store(fetch_tile(lo, st0), A_smem, B_smem)
+            b.sync()
+            it1 = [(f"{tag}_{n}", v) for (n, _), v in zip(accs, accs_in)] + [
+                (nm, v) for nm, (_, v) in zip(names, state_in)
+            ]
+            if spec.reg_prefetch == 1:
+                # One buffer: read tile t+1 into registers, MFMA tile t, retire
+                # every wave's ds_reads, then overwrite the buffer and publish.
+                # The last iteration reads a tile past the end (zeros, no
+                # memory traffic) that no MFMA consumes.
+                for_op = b.scf_for_iter(lo, hi, c_block_k, it1, iv_name=f"{tag}_k")
+                with for_op as (kv, iv):
+                    st = list(iv[n_acc:])
+                    st1 = advance(st)
+                    staged = fetch_tile(b.add(kv, c_block_k), st1)
+                    b.sched_barrier(0)
+                    k_off_capture[0] = kv
+                    acc_n = emit_mfma_phase(A_smem, B_smem, list(iv[:n_acc]))
+                    b.sched_barrier(0)
+                    b.sync()
+                    store(staged, A_smem, B_smem)
+                    b.sync()
+                    b.scf_yield(*acc_n, *st1)
+                return list(for_op.results)[:n_acc]
+            c_2bk = b.const_i32(2 * block_k)
+            it = [(f"{tag}_{n}", v) for (n, _), v in zip(accs, accs_in)] + [
+                (nm, v) for nm, (_, v) in zip(names, state_in)
+            ]
+            # Whole pairs of tiles in the unrolled loop; an odd last tile was
+            # prefetched into buffer 0 by the last pair and runs in a 0/1-trip
+            # tail loop, so no MFMA phase is spent on a tile past the end.
+            n_tiles = b.div(b.add(b.sub(hi, lo), b.const_i32(block_k - 1)), c_block_k)
+            pair_hi = b.add(lo, b.mul(b.div(n_tiles, b.const_i32(2)), c_2bk))
+            tail_hi = b.add(lo, b.mul(n_tiles, c_block_k))
+            for_op = b.scf_for_iter(lo, pair_hi, c_2bk, it, iv_name=f"{tag}_k")
+            with for_op as (kv, iv):
+                st = list(iv[n_acc:])
+                k1 = b.add(kv, c_block_k)
+                st1 = advance(st)
+                staged = fetch_tile(k1, st1)
+                # Pin the reads ahead of the MFMAs and the LDS writes behind
+                # them: left alone, the scheduler sinks the buffer loads next
+                # to their ds_write and the wave waits on them again.
+                b.sched_barrier(0)
+                k_off_capture[0] = kv
+                acc_a = emit_mfma_phase(A_smem, B_smem, list(iv[:n_acc]))
+                b.sched_barrier(0)
+                store(staged, A_smem2, B_smem2)
+                b.sync()
+                k2 = b.add(kv, c_2bk)
+                st2 = advance(st1)
+                staged = fetch_tile(k2, st2)
+                b.sched_barrier(0)
+                k_off_capture[0] = k1
+                acc_b = emit_mfma_phase(A_smem2, B_smem2, acc_a)
+                b.sched_barrier(0)
+                store(staged, A_smem, B_smem)
+                b.sync()
+                b.scf_yield(*acc_b, *st2)
+            pair_accs = list(for_op.results)[:n_acc]
+            t_it = [(f"{tag}_t_{n}", v) for (n, _), v in zip(accs, pair_accs)]
+            for_t = b.scf_for_iter(pair_hi, tail_hi, c_block_k, t_it, iv_name=f"{tag}_kt")
+            with for_t as (kt, tv):
+                k_off_capture[0] = kt
+                acc_t = emit_mfma_phase(A_smem, B_smem, list(tv))
+                b.sync()
+                b.scf_yield(*acc_t)
+            return list(for_t.results)
+
+        def plain_fetch(k_val, _st):
+            k_off_capture[0] = k_val
+            return fetch(a_descriptor, b_descriptor)
+
+        def plain_adv(st):
+            return list(st)
+
+        if not spec.uniform_k_decode:
+            return run_loop(c0, c_K_gemm, [v for _, v in accs], state0,
+                            plain_fetch, plain_adv, "k")
+
+        # ---- uniform-tap loop ----
+        c_bk_mask = b.const_i32(block_k - 1)
+        uk_ok = b.cmp_eq(b.land(p_cpg, c_bk_mask), c0)
+        uk_hi = b.select(uk_ok, c_K_gemm, c0)
+        s_n = params["p_A_stride_n"]
+        s_hi = params["p_A_stride_hi"]
+        s_wi = params["p_A_stride_wi"]
+        a_ystep = b.mul(p_dH, s_hi)
+        a_xstep = b.mul(p_dW, s_wi)
+        if is3:
+            s_di = params["p_A_stride_di"]
+            a_zstep = b.mul(p_dD, s_di)
+        a_gbase = b.mul(group_idx, p_cpg) if grouped else None
+
+        def tile_uniforms(st):
+            # st = (c, x, y[, z]): channel base and filter tap of the tile.
+            if is3:
+                c_t, x_t, y_t, z_t = st
+            else:
+                c_t, x_t, y_t = st
+            hsh = b.mul(y_t, p_dH)
+            wsh = b.mul(x_t, p_dW)
+            a_off = b.add(b.add(b.mul(y_t, a_ystep), b.mul(x_t, a_xstep)), c_t)
+            b_off = b.add(
+                b.add(b.mul(y_t, params["p_B_stride_y"]),
+                      b.mul(x_t, params["p_B_stride_x"])),
+                c_t,
+            )
+            if is3:
+                dsh = b.mul(z_t, p_dD)
+                a_off = b.add(a_off, b.mul(z_t, a_zstep))
+                b_off = b.add(b_off, b.mul(z_t, params["p_B_stride_z"]))
+                t_ok = b.cmp_lt(z_t, p_Z)
+            else:
+                dsh = None
+                t_ok = b.cmp_lt(y_t, p_Y)
+            return (hsh, wsh, dsh, a_off, b_off, t_ok)
+
+        def a_uk(b_: IRBuilder, row: Value, col: Value):
+            hsh, wsh, dsh, a_off, _b_off, t_ok = uk_cap[0]
+            m_val = b_.add(block_m_off_v, row)
+            q_wo, wo = magic_divmod(
+                b_, m_val, params["p_magic_m_Wo_mult"],
+                params["p_magic_m_Wo_shift"], p_Wo,
+            )
+            q_ho, ho = magic_divmod(
+                b_, q_wo, params["p_magic_m_Ho_mult"],
+                params["p_magic_m_Ho_shift"], p_Ho,
+            )
+            if is3:
+                n, do_ = magic_divmod(
+                    b_, q_ho, params["p_magic_m_Do_mult"],
+                    params["p_magic_m_Do_shift"], p_Do,
+                )
+            else:
+                n = q_ho
+            hi0 = b_.sub(b_.mul(ho, p_sH), p_pH)
+            wi0 = b_.sub(b_.mul(wo, p_sW), p_pW)
+            base = b_.add(
+                b_.add(b_.mul(n, s_n), b_.mul(hi0, s_hi)), b_.mul(wi0, s_wi)
+            )
+            # (u32)(origin + shift) < extent  <=>  0 <= origin + shift < extent
+            ok = b_.land(
+                b_.cmp_ult(b_.add(hi0, hsh), p_Hi),
+                b_.cmp_ult(b_.add(wi0, wsh), p_Wi),
+            )
+            if is3:
+                di0 = b_.sub(b_.mul(do_, p_sD), p_pD)
+                base = b_.add(base, b_.mul(di0, s_di))
+                ok = b_.land(ok, b_.cmp_ult(b_.add(di0, dsh), p_Di))
+            if grouped:
+                base = b_.add(base, a_gbase)
+            ok = b_.land(ok, t_ok)
+            return b_.add(b_.add(base, col), a_off), ok
+
+        def b_uk(b_: IRBuilder, row: Value, col: Value):
+            _h, _w, _d, _a, b_off, t_ok = uk_cap[0]
+            k_out = b_.add(block_n_off_v, row)
+            if grouped:
+                k_out = b_.add(k_out_group_base, k_out)
+            off = b_.add(b_.add(b_.mul(k_out, params["p_B_stride_k"]), col), b_off)
+            return off, t_ok
+
+        def uk_fetch(_k_val, st):
+            uk_cap[0] = tile_uniforms(st)
+            return fetch(a_uk, b_uk)
+
+        def uk_adv(st):
+            if is3:
+                c_t, x_t, y_t, z_t = st
+            else:
+                c_t, x_t, y_t = st
+            nc = b.add(c_t, c_block_k)
+            w_c = b.cmp_ge(nc, p_cpg)
+            nc = b.select(w_c, c0, nc)
+            nx = b.add(x_t, b.select(w_c, c1, c0))
+            w_x = b.cmp_ge(nx, p_X)
+            nx = b.select(w_x, c0, nx)
+            ny = b.add(y_t, b.select(w_x, c1, c0))
+            if not is3:
+                return [nc, nx, ny]
+            w_y = b.cmp_ge(ny, p_Y)
+            ny = b.select(w_y, c0, ny)
+            nz = b.add(z_t, b.select(w_y, c1, c0))
+            return [nc, nx, ny, nz]
+
+        uk_state = [("uc", c0), ("ux", c0), ("uy", c0)] + ([("uz", c0)] if is3 else [])
+        uk_accs = run_loop(c0, uk_hi, [v for _, v in accs], uk_state,
+                           uk_fetch, uk_adv, "uk")
+        fb_lo = b.select(uk_ok, c_K_gemm, c0)
+        return run_loop(fb_lo, c_K_gemm, uk_accs, state0, plain_fetch, plain_adv, "fb")
+
+    if spec.uniform_k_decode or spec.reg_prefetch:
+        final_accs = _emit_fwd_kloops()
+    elif spec.unroll_k:
         # Double-buffered K-loop software pipeline.
         #
         # Stage tile it+1 into the alternate LDS buffer while the MFMA for
