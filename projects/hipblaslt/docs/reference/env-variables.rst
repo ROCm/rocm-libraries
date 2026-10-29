@@ -101,14 +101,27 @@ information, see :doc:`Use hipBLASLt offline tuning <../how-to/how-to-use-hipbla
 for the first ``HIPBLASLT_TUNING_COLD_ITERS`` visits of a problem it launches the ranked first
 choice untouched, then dispatches each of the top ``HIPBLASLT_TUNING_MAX_CANDIDATES`` in turn
 ``HIPBLASLT_TUNING_HOT_ITERS`` times, timing each with a HIP event pair that is read back on a
-later visit to the same problem, and pins the fastest for every call after that. It explores only
-``hipblasLtMatmul`` calls that pass no algorithm, where the library chooses the kernel and launches
-it in the same call. An algorithm the caller supplies, including one returned by
-``hipblasLtMatmulAlgoGetHeuristic``, is launched as given and never timed, and
-``hipblasLtMatmulAlgoGetHeuristic`` is answered with a winner ``online`` has already measured
-for the problem, or otherwise with its usual ranking. The ``hipblaslt_ext`` GEMM and grouped GEMM
-interfaces are not tuned online. A shape the cache file already serves is replayed from the
-cache, not explored.
+later visit to the same problem, and pins the fastest for every call after that. A shape the cache
+file already serves is replayed from the cache, not explored.
+
+``online`` mode tunes only ``hipblasLtMatmul`` calls that pass no algorithm (``algo`` is
+``nullptr``), where the library chooses the kernel and launches it in the same call. Nothing else
+is tuned online:
+
+* ``hipblasLtMatmul`` with an algorithm the caller supplies, from any source, launches that
+  algorithm as given. It is never timed and never changed.
+* ``hipblasLtMatmulAlgoGetHeuristic`` is never handed a candidate to try. It returns the winner
+  ``online`` has already measured for the problem, if there is one, and otherwise its usual
+  ranking.
+* So an application that calls ``hipblasLtMatmulAlgoGetHeuristic`` and passes the returned
+  algorithm to ``hipblasLtMatmul`` is not tuned. It is served only the winners that calls passing
+  no algorithm for the same problem, or the cache file, already provide.
+* The ``hipblaslt_ext`` GEMM and grouped GEMM interfaces, and pointer-array batched problems, are
+  not tuned online.
+
+With ``HIPBLASLT_LOG_LEVEL=4`` or higher, or ``HIPBLASLT_LOG_MASK`` including ``8``, the first
+``hipblasLtMatmulAlgoGetHeuristic`` call and the first ``hipblasLtMatmul`` call with a supplied
+algorithm in a process each log one ``online-not-tuned`` line saying that the call is not tuned.
 
 A pinned winner is appended to ``HIPBLASLT_TUNING_CACHE_PATH`` as it is pinned, in the same row
 format ``tune`` writes and ``cache`` replays, so a file filled online is replayed by ``cache`` mode
@@ -142,7 +155,8 @@ closing summary. Replaying a cache adds no output per call. Where the notices go
       - | ``off``: Disable runtime tuning (default)
         | ``cache``: Replay valid entries from the cache file
         | ``tune``: Benchmark uncached supported problems and append winners
-        | ``online``: Time top ranked candidates on live calls and pin the winner
+        | ``online``: Time top ranked candidates on live ``hipblasLtMatmul`` calls that pass no
+          algorithm, and pin the winner
 
     * - | ``HIPBLASLT_TUNING_CACHE_PATH``
         | Specifies the runtime cache file.

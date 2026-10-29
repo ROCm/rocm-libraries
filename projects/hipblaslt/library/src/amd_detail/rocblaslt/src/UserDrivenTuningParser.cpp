@@ -159,6 +159,8 @@ namespace TensileLite
 
             std::atomic<bool> announced{false};
 
+            std::atomic<bool> onlineScopeLogged[static_cast<size_t>(OnlineScopeEvent::Count)]{};
+
             mutable std::mutex                        mutex;
             std::unordered_set<ProblemOverride>       startKeys;
             std::unordered_set<ProblemOverride>       doneKeys;
@@ -430,10 +432,38 @@ namespace TensileLite
         return false;
     }
 
+    void noteOnlineScopeEvent(OnlineScopeEvent kind)
+    {
+        DiagnosticsState& state = DiagnosticsState::instance();
+        if(!state.infoOn())
+            return;
+
+        // Loaded before the exchange so every call after the first is a plain
+        // read of a line nothing writes any more.
+        std::atomic<bool>& logged = state.onlineScopeLogged[static_cast<size_t>(kind)];
+        if(logged.load(std::memory_order_relaxed) || logged.exchange(true))
+            return;
+
+        const bool query = kind == OnlineScopeEvent::HeuristicQuery;
+
+        std::ostringstream msg;
+        msg << "tuning-cache: online-not-tuned "
+            << (query ? "hipblasLtMatmulAlgoGetHeuristic" : "hipblasLtMatmul with an algo")
+            << "; online tuning explores only hipblasLtMatmul calls that pass no algo. "
+            << (query ? "A heuristic query is answered with a winner those calls have measured, "
+                        "or else with its usual ranking, and the algo it returns is launched "
+                        "untimed"
+                      : "A supplied algo is launched as given and never timed")
+            << ". Logged once per process";
+        log_info(__func__, msg.str());
+    }
+
     void resetTuningDiagnosticsForTest()
     {
         DiagnosticsState& state = DiagnosticsState::instance();
         state.announced         = false;
+        for(std::atomic<bool>& logged : state.onlineScopeLogged)
+            logged = false;
 
         std::lock_guard<std::mutex> lock(state.mutex);
         state.startKeys.clear();

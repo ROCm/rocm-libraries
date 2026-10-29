@@ -93,6 +93,35 @@ namespace rocblaslt
      *
      * Every entry point is a branch on a member flag when the configuration does
      * not switch the tuner on, so the feature costs nothing when it is off.
+     *
+     * SCOPE: WHICH CALLS ARE TUNED. This is the authoritative statement; the
+     * hooks in tensile_host.cpp and the comments elsewhere in this class refer
+     * here rather than restating it.
+     *
+     *  - Tuned: hipblasLtMatmul with algo == nullptr. The library chooses the
+     *    kernel (SolutionLookup::PerDispatch) and launches it in the same call
+     *    on the same thread, so a probe can be offered at selection and paired
+     *    exactly with the launch that measures it.
+     *  - Not tuned: hipblasLtMatmul with an algo the caller supplies, whatever
+     *    its source. It is launched as given, never measured and never
+     *    harvested, and the tuner is not consulted for it.
+     *  - Not tuned: hipblasLtMatmulAlgoGetHeuristic (SolutionLookup::Heuristic).
+     *    It is inert: it is answered with the measured winner if there is one,
+     *    and otherwise with its normal ranking, and is never offered a probe;
+     *    nothing is registered or counted for it. So the GetHeuristic-then-
+     *    hipblasLtMatmul(algo) flow is not tuned. It is served only what
+     *    null-algo dispatches of the same problem, or the cache file, provide.
+     *  - Not tuned: the hipblaslt_ext GEMM and grouped GEMM interfaces, and
+     *    problems tuningCacheKeyable() refuses.
+     *
+     * Why the line is drawn there: a caller-supplied launch cannot be paired
+     * with the selection visit that produced it (see t_offer in
+     * OnlineTuner.cpp), and a probe handed to a caller that keeps the algo
+     * would be kept unmeasured. With info logging on, the first
+     * hipblasLtMatmulAlgoGetHeuristic call and the first caller-supplied algo
+     * of a process each log one online-not-tuned line saying so; see
+     * TensileLite::noteOnlineScopeEvent().
+     * docs/reference/env-variables.rst states the same scope for users.
      */
     class OnlineTuner
     {
@@ -446,9 +475,8 @@ namespace rocblaslt
          * rather than being asked again on its next dispatch -- a heuristic query.
          * It is treated as a capture is: served a measured winner if there is
          * one, and otherwise left its own ordering, with nothing registered,
-         * counted or offered. The algo it is handed is launched as a caller-supplied
-         * one, which is never measured, so a probe promoted into it could only be
-         * kept unmeasured. See selectCandidateImpl().
+         * counted or offered. Heuristic queries are outside what online tunes;
+         * see the scope note on this class.
          */
         int selectCandidate(size_t                  problemKey,
                             size_t                  problem,
@@ -600,7 +628,8 @@ namespace rocblaslt
         // offer a launch claims is the one that call's own visit made and no
         // caller on any thread can take it. That is exact.
         //
-        // It is also the only path that is measured. A launch of an algo the
+        // It is also the only path that is measured; the scope note on this
+        // class is the authoritative list. A launch of an algo the
         // caller supplied -- what hipblasLtMatmulAlgoGetHeuristic hands out --
         // reaches neither measurement hook, and a heuristic query is offered
         // nothing. The application holds such an algo and dispatches it when

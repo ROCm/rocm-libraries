@@ -3096,6 +3096,29 @@ namespace
             return true;
         }
 
+        /** The heuristic's answer at one position of its ranking, kept as an application would. */
+        bool rankedHeuristicAlgo(int position, hipblasLtMatmulAlgo_t* algo)
+        {
+            std::vector<hipblasLtMatmulHeuristicResult_t> results(position + 1);
+            int                                           returned = 0;
+            if(hipblasLtMatmulAlgoGetHeuristic(m_handle,
+                                               m_desc,
+                                               m_layoutA,
+                                               m_layoutB,
+                                               m_layoutC,
+                                               m_layoutD,
+                                               m_pref,
+                                               position + 1,
+                                               results.data(),
+                                               &returned)
+                   != HIPBLAS_STATUS_SUCCESS
+               || returned <= position)
+                return false;
+
+            *algo = results[position].algo;
+            return true;
+        }
+
         /** Distinct solution indices the heuristic offers, with no tuning in play. */
         size_t distinctCandidates(int want)
         {
@@ -3659,5 +3682,128 @@ namespace
         EXPECT_EQ(countOccurrences(output, "online-winner not recorded"), 1u)
             << "the write failure was reported more than once, or not at all:\n"
             << output;
+    }
+
+    // Online's scope, on the caller-supplied side: a hipblasLtMatmul that
+    // passes its own algo is launched as given and the tuner is never asked
+    // about it -- no harvest, no measurement, nothing counted. The algo is the
+    // ranking's second answer, taken before the mode is on, so it is neither
+    // what default selection would launch nor something a heuristic query in
+    // online mode handed out; AHeuristicQueryPerCallIsNeverHandedAProbe covers
+    // that flow.
+    //
+    // onlineMisses is what makes this observable. The problem is never
+    // dispatched without an algo, so selection never registers it, and any
+    // launch that reached the measurement hook would be counted as a lookup
+    // under an unregistered key.
+    TEST_F(TuningOnline_pre_checkin, ACallerSuppliedAlgoIsLaunchedAsGivenAndNeverMeasured)
+    {
+        OnlineProblem problem(/*pointerArray=*/false);
+        ASSERT_TRUE(problem.create());
+
+        if(problem.distinctCandidates(kOnlineTopK) < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        hipblasLtMatmulAlgo_t supplied{};
+        ASSERT_TRUE(problem.rankedHeuristicAlgo(1, &supplied));
+        const int suppliedIndex = hipblaslt_ext::getIndexFromAlgo(supplied);
+
+        enterOnline(m_path);
+
+        for(int visit = 0; visit < kOnlineVisits; visit++)
+        {
+            int launched = -1;
+            ASSERT_TRUE(problem.dispatch(&launched, &supplied))
+                << "dispatch " << visit << " failed";
+            ASSERT_EQ(launched, suppliedIndex)
+                << "dispatch " << visit << " did not launch the algo it was given";
+        }
+
+        const Counters after = counters();
+        EXPECT_EQ(after.onlineMisses, 0u)
+            << "a launch of a caller-supplied algo reached online's measurement hook";
+        EXPECT_EQ(after.tuned, 0u);
+        EXPECT_EQ(valueRowCount(m_path), 0u)
+            << "a winner was recorded from launches of a caller-supplied algo";
+    }
+
+    // The calls online leaves untuned are reported, once per kind per process,
+    // and only at info level: a heuristic query and a hipblasLtMatmul with its
+    // own algo each log one online-not-tuned line however often they recur,
+    // and a dispatch with no algo logs none.
+    //
+    // The logger reads its environment once, at startup, so the info-level half
+    // runs in a fresh process that inherits HIPBLASLT_LOG_LEVEL=4 from this
+    // one. This process, with logging off, checks the other half: nothing is
+    // written without the info bit.
+    TEST_F(TuningOnline_pre_checkin, ACallOnlineDoesNotTuneIsReportedOnceAtInfoLevel)
+    {
+        // Each query and each dispatch with an algo is made twice, so a line
+        // per call is distinguishable from a line per process.
+        auto exercise = [this](std::string* output) {
+            OnlineProblem problem(/*pointerArray=*/false);
+            if(!problem.create())
+                return false;
+
+            enterOnline(m_path);
+
+            CerrCapture capture;
+            for(int call = 0; call < 2; call++)
+            {
+                hipblasLtMatmulAlgo_t algo{};
+                int                   launched = -1;
+                if(!problem.firstHeuristicAlgo(&algo) || !problem.dispatch(&launched, &algo))
+                    return false;
+            }
+            int launched = -1;
+            if(!problem.dispatch(&launched))
+                return false;
+
+            *output = capture.str();
+            return true;
+        };
+
+        if(loggingEnvIsClean())
+        {
+            std::string output;
+            ASSERT_TRUE(exercise(&output));
+            EXPECT_EQ(countOccurrences(output, "online-not-tuned"), 0u)
+                << "the scope notes are info-level, and info logging is off:\n"
+                << output;
+        }
+
+        std::vector<std::pair<std::string, std::optional<std::string>>> savedEnv;
+        for(const char* name : {"HIPBLASLT_LOG_LEVEL", "HIPBLASLT_LOG_MASK", "HIPBLASLT_LOG_FILE"})
+        {
+            const char* value = getenv(name);
+            savedEnv.emplace_back(name, value ? std::optional<std::string>(value) : std::nullopt);
+            unsetenv(name);
+        }
+        setenv("HIPBLASLT_LOG_LEVEL", "4", 1);
+
+        GTEST_FLAG_SET(death_test_style, "threadsafe");
+        EXPECT_EXIT(
+            {
+                std::string output;
+                if(!exercise(&output))
+                    std::exit(2);
+                const bool ok
+                    = countOccurrences(output, "online-not-tuned hipblasLtMatmulAlgoGetHeuristic")
+                          == 1
+                      && countOccurrences(output, "online-not-tuned hipblasLtMatmul with an algo")
+                             == 1
+                      && countOccurrences(output, "online-not-tuned") == 2;
+                std::exit(ok ? 0 : 3);
+            },
+            ::testing::ExitedWithCode(0),
+            "");
+
+        for(const auto& [name, value] : savedEnv)
+        {
+            if(value)
+                setenv(name.c_str(), value->c_str(), 1);
+            else
+                unsetenv(name.c_str());
+        }
     }
 } // namespace

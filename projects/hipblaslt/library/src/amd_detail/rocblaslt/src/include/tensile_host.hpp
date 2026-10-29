@@ -230,18 +230,23 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
  * dispatches a candidate it does not believe is best, on the understanding
  * that the next visit reconsiders. That understanding holds for one of these
  * and is the caller's business for the other.
+ *
+ * Only PerDispatch is tuned online. The scope note on rocblaslt::OnlineTuner
+ * is the authoritative statement of which calls are and are not.
  */
 enum class SolutionLookup
 {
     /// hipblasLtMatmul with algo == nullptr. The library chooses, this call
-    /// dispatches what it chose, and the next call asks again.
+    /// dispatches what it chose, and the next call asks again. The one lookup
+    /// online tuning explores.
     PerDispatch,
 
     /// hipblasLtMatmulAlgoGetHeuristic. The caller is handed an algo and
     /// dispatches it itself, as often and for as long as it likes. Whether it
     /// ever asks again is not knowable here, and that dispatch is a
     /// caller-supplied algo, which online tuning never measures, so it is
-    /// served a measured winner if there is one and never a probe.
+    /// served a measured winner if there is one and never a probe. Not tuned
+    /// online.
     Heuristic,
 };
 

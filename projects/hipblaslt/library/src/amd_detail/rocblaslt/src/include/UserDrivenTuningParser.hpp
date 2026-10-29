@@ -362,6 +362,31 @@ namespace TensileLite
      */
     bool shouldLogTuningKeyEvent(TuningKeyEvent kind, const ProblemOverride& key);
 
+    /**
+     * Calls online mode does not tune, as rocblaslt::OnlineTuner's scope note
+     * lists them. Logged at most once per kind per process.
+     */
+    enum class OnlineScopeEvent : uint32_t
+    {
+        HeuristicQuery = 0,
+        CallerSuppliedAlgo,
+        Count,
+    };
+
+    /**
+     * Log that online mode saw a call of this kind and leaves it untuned:
+     * only with the info bit set, like the key events above, and once per kind
+     * per process rather than per key, since the line is about the kind of
+     * call and not about any shape. Without it the only sign is the absence of
+     * online-winner lines, which reads exactly like a feature switched off.
+     *
+     * Callers test OnlineTuner::enabled() first. Past that it is a logger-mode
+     * test and, with info on, one atomic load; it takes no lock and reads
+     * nothing off the problem, so a caller-supplied launch stays as free of
+     * the tuner as the measurement hook keeps it.
+     */
+    void noteOnlineScopeEvent(OnlineScopeEvent kind);
+
     /** Drop the announcement latch and every per-key set. Tests only. */
     void resetTuningDiagnosticsForTest();
 

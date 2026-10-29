@@ -3148,6 +3148,12 @@ rocblaslt_status
         }
 #endif
 
+        // A heuristic query is outside what online tuning explores; see the
+        // scope note on rocblaslt::OnlineTuner. Said here, at the entry point,
+        // so it is said whether or not the tuning file answers the query below.
+        if(rocblaslt::OnlineTuner::getInstance().enabled())
+            TensileLite::noteOnlineScopeEvent(TensileLite::OnlineScopeEvent::HeuristicQuery);
+
         const auto tuningFile       = TensileLite::selectTuningFile();
         bool       override_success = false;
 

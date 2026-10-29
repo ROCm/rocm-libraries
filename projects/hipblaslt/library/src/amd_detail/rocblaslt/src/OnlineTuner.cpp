@@ -45,7 +45,7 @@ namespace rocblaslt
          * any thread can take it. That is the only path there is: a launch of
          * an algo the caller supplied, which is what a heuristic query hands
          * out, goes past both measurement hooks, and a heuristic query is never
-         * offered anything to begin with.
+         * offered anything to begin with. See the scope note on OnlineTuner.
          */
         struct ThreadOffer
         {
@@ -224,6 +224,7 @@ namespace rocblaslt
         // and the thread that dispatches it may have made any number of other
         // visits in between. A query is still served a measured winner, by the
         // resolved branch above, once dispatches of the problem have found one.
+        // This is the heuristic half of the scope note on OnlineTuner.
         if(capturing || retained)
             return -1;
 

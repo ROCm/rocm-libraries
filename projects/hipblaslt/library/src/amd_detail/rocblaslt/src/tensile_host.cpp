@@ -5792,7 +5792,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // here, and derives it from the problem as before.
         //
         // A caller-supplied algo is left alone entirely: no harvest and no
-        // measurement. Nothing pairs its launch with the selection visit that
+        // measurement. This is the caller-supplied half of the scope note on
+        // rocblaslt::OnlineTuner, which says what online does and does not
+        // tune. Nothing pairs its launch with the selection visit that
         // produced it -- the algo is a public type, and the thread may have
         // made other visits since -- so a sample of it could be filed under a
         // different problem's candidate. The heuristic query that handed it
@@ -5820,6 +5822,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         if(onlineTuning)
             onlineTuner.harvestPending(onlineKey);
+        else if(callerSuppliedAlgo && onlineTuner.enabled())
+            TensileLite::noteOnlineScopeEvent(TensileLite::OnlineScopeEvent::CallerSuppliedAlgo);
 
         // Tune mode: a shape no entry serves is benchmarked at its first matmul,
         // through either entry point, since a call that passes no algo never
@@ -6324,11 +6328,12 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             // read back on a later visit to this problem rather than here.
             //
             // Only a dispatch online itself chose is sampled; a caller-supplied
-            // algo has already turned onlineTuning off above. A launchIndex
-            // means the tuner named the kernel and replayed means the cache
-            // did, so what ran is not the candidate the rotation asked for, and
-            // timing it would credit one candidate with another's number. The
-            // two modes sharing a file is what makes this reachable: online
+            // algo has already turned onlineTuning off above (see the scope
+            // note on rocblaslt::OnlineTuner). A launchIndex means the tuner
+            // named the kernel and replayed means the cache did, so what ran
+            // is not the candidate the rotation asked for, and timing it would
+            // credit one candidate with another's number. The two modes
+            // sharing a file is what makes this reachable: online
             // replays a row the cache already holds for a shape, rather than
             // measuring it again. Replay is asked separately because it now
             // runs above selection and so leaves launchIndex at -1.
@@ -7513,8 +7518,8 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&         
 //
 // A caller that fetched this answer from the heuristic is told so too, and is
 // likewise offered nothing but a measured winner: it keeps the algo and
-// dispatches it itself, and a caller-supplied algo is never measured. See
-// SolutionLookup.
+// dispatches it itself, and a caller-supplied algo is never measured. See the
+// scope note on rocblaslt::OnlineTuner.
 inline void promoteOnlineTuningCandidate(
     std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
     const TensileLite::ContractionProblemGemm&                      tensile_prob,
@@ -8041,7 +8046,8 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
     // runContractionProblem as the launch this ranking chose, while the
     // second comes back as a caller-supplied algo, which is never measured.
     // lookup carries which of the two this is; a heuristic query is served a
-    // measured winner once there is one and otherwise its own ranking.
+    // measured winner once there is one and otherwise its own ranking. The
+    // scope note on rocblaslt::OnlineTuner is the authoritative statement.
     auto solutions = getSolutions(
         prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount, &prob, lookup);
 
