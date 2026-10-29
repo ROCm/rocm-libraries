@@ -80,6 +80,18 @@ int countPrefetchInstPcRel(const BasicBlock& bb) {
     }
     return c;
 }
+
+int countSWaitXcnt(const BasicBlock& bb) {
+    int c = 0;
+    for (auto it = bb.begin(); it != bb.end(); ++it) {
+        const IRBase* n = it.getNodePtr();
+        if (n->getType() != IRBase::IRType::StinkyTofu) continue;
+        const StinkyInstruction& inst = *cast<StinkyInstruction>(n);
+        const char* m = inst.getHwInstDesc() ? inst.getHwInstDesc()->mnemonic : nullptr;
+        if (m && std::strcmp(m, "s_wait_xcnt") == 0) ++c;
+    }
+    return c;
+}
 }  // namespace
 
 class SwInstructionPrefetchRelDynamicPassTest : public ::testing::Test {
@@ -212,6 +224,44 @@ TEST_F(SwInstructionPrefetchRelDynamicPassTest, AboveP0Wmma_InsertsOnePrefetch) 
     pm.run(*func);
 
     EXPECT_EQ(countPrefetchInstPcRel(*bb), 1);
+}
+
+// The drain follows AsmCapsConfig::enableXnackReplay. These two go through the
+// PassManager rather than calling the insert helper directly, so the capability
+// is read the way a real run reads it. Relative prefetches are scattered, so
+// the count is one wait per prefetch -- unlike the absolute passes, where it is
+// one per contiguous burst.
+TEST_F(SwInstructionPrefetchRelDynamicPassTest, XnackReplayOn_EmitsOneDrainPerPrefetch) {
+    buildAboveP0WmmaKernel(bb, arch);
+
+    PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
+    pm.setGemmTileConfig(gemmConfig);
+    AsmCapsConfig caps;
+    caps.enableXnackReplay = true;
+    pm.setAsmCapsConfig(caps);
+    pm.addPass(createSwInstructionPrefetchRelDynamicPass(std::string{}));
+    pm.run(*func);
+
+    EXPECT_EQ(countPrefetchInstPcRel(*bb), 1);
+    EXPECT_EQ(countSWaitXcnt(*bb), 1);
+}
+
+TEST_F(SwInstructionPrefetchRelDynamicPassTest, XnackReplayOff_KeepsThePrefetchAndDropsTheDrain) {
+    buildAboveP0WmmaKernel(bb, arch);
+
+    PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
+    pm.setGemmTileConfig(gemmConfig);
+    AsmCapsConfig caps;
+    caps.enableXnackReplay = false;
+    pm.setAsmCapsConfig(caps);
+    pm.addPass(createSwInstructionPrefetchRelDynamicPass(std::string{}));
+    pm.run(*func);
+
+    // Only the wait goes: dropping it must not cost the prefetch it guarded.
+    EXPECT_EQ(countPrefetchInstPcRel(*bb), 1);
+    EXPECT_EQ(countSWaitXcnt(*bb), 0);
 }
 
 TEST_F(SwInstructionPrefetchRelDynamicPassTest, AboveP0Wmma_PlanInsertMatchesIrCount) {
@@ -348,11 +398,10 @@ TEST_F(SwInstructionPrefetchRelDynamicPassTest,
     const int64_t anchor = phase1.firstPostCpLayoutByte.at(bb);
     ASSERT_NE(anchor, kSwPrefetchNoPerBbGridAnchor);
 
-    const int inserted = insertSwPrefetchLabelsDynamicPerBbAnchor(*bb, phase1.layoutStart.at(bb),
-                                                                  phase1.accumByte.at(bb), anchor,
-                                                                  0, arch, nullptr, nullptr,
-                                                                  /*emitXnackWait=*/true,
-                                                                  /*allowSwPrefetchInsertion=*/true);
+    const int inserted = insertSwPrefetchLabelsDynamicPerBbAnchor(
+        *bb, phase1.layoutStart.at(bb), phase1.accumByte.at(bb), anchor, 0, arch, nullptr, nullptr,
+        /*emitXnackWait=*/true,
+        /*allowSwPrefetchInsertion=*/true);
     EXPECT_GE(inserted, 1);
     EXPECT_EQ(countPrefetchInstPcRel(*bb), inserted);
 }
