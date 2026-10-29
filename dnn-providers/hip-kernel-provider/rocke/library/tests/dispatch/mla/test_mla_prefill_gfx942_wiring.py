@@ -474,7 +474,7 @@ class TestDispatchResult(unittest.TestCase):
         self.assertEqual(odd.num_warps, 4)
         self.assertEqual(odd.block_q, 64)
         self.assertFalse(odd.agpr_acc)
-        # XCD-aware like the even layouts: _req pins 228 CUs, six XCDs.
+        # XCD-aware like the even layouts, from the CU count _req pins.
         self.assertEqual(odd.num_xcds, 6)
 
     def test_admission_runs_once_per_support_query(self):
@@ -893,16 +893,23 @@ class TestSweepCoverage(unittest.TestCase):
                     ).spec.agpr_acc
                 )
 
-    def test_odd_head_count_has_no_opt_ins(self):
+    def test_odd_head_count_pins_keep_one_head_per_workgroup(self):
+        # The rule never picks agpr_acc for an odd head count, so only the
+        # pinned agpr_acc layout reaches it; row16 repeats the production spec
+        # and the sweep skips it.
         with _flavor("llvm22"):
-            self.assertEqual(len(mla_sweep_space(_req(num_heads=5))), 1)
-            for name in (_AGPR_NAME, _ROW16_NAME):
+            specs = mla_sweep_space(_req(num_heads=5))
+            self.assertEqual(
+                sorted((s.heads_per_wg, s.q_tiles_per_wg, s.agpr_acc) for s in specs),
+                [(1, 4, False), (1, 4, True)],
+            )
+            for name, agpr in ((_AGPR_NAME, True), (_ROW16_NAME, False)):
                 with self.subTest(name=name):
-                    ok, why = MLA_REGISTRY.get(name).admits(
-                        self._pin(name, num_heads=5)
+                    spec = dispatch_mla(self._pin(name, num_heads=5)).spec
+                    self.assertEqual(
+                        (spec.heads_per_wg, spec.q_tiles_per_wg, spec.agpr_acc),
+                        (1, 4, agpr),
                     )
-                    self.assertFalse(ok)
-                    self.assertIn("one head per workgroup", why)
 
     def test_opt_ins_build(self):
         with _flavor("llvm22"):
@@ -1152,12 +1159,14 @@ class TestAbsorbedQueryRequest(unittest.TestCase):
         absorbed = dispatch_mla(_req(absorbed_query=True)).spec
         self.assertEqual(absorbed, dataclasses.replace(fused, absorbed_query=True))
 
-    def test_odd_head_count_is_served(self):
+    def test_odd_head_count_is_refused(self):
+        # Not yet verified on device at one head x four tiles.
         ok, why = MLA_REGISTRY.get(_NAME).admits(_req(num_heads=5, absorbed_query=True))
-        self.assertTrue(ok, why)
-        result = dispatch_mla(_req(num_heads=5, absorbed_query=True))
-        self.assertEqual((result.spec.heads_per_wg, result.spec.q_tiles_per_wg), (1, 4))
-        self._check_absorbed(result)
+        self.assertFalse(ok)
+        self.assertIn("absorbed_query", why)
+        with self.assertRaises(ValueError):
+            dispatch_mla(_req(num_heads=5, absorbed_query=True))
+        self.assertEqual(mla_sweep_space(_req(num_heads=5, absorbed_query=True)), ())
 
     def test_sweep_entry_points_carry_it(self):
         with _flavor("llvm22"):

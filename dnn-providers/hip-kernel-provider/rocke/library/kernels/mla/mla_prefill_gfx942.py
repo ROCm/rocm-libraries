@@ -157,6 +157,7 @@ __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
     "MlaPrefillSpec",
     "supports_mla_prefill",
     "require_mla_prefill",
+    "fwd_layout",
     "supports_mla_score_probe",
     "check_mla_prefill_extents",
     "MLA_BINARY_SEARCH_ITERS",
@@ -170,11 +171,12 @@ __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
     "build_mla_prefill_fwd",
 ]
 
-# AGPR budget of the forward kernel: no AGPRs. A wave holds its head's whole latent accumulator, 128 VGPRs at
-# block_q == 16, and left free the backend parks it in AGPRs and pays a
-# v_accvgpr_read / v_accvgpr_write pair per register for the per-tile rescale.
-# Without them the kernel fits 256 VGPRs, two waves per SIMD. At block_q == 32
-# the accumulator alone is 256 VGPRs and the kernel spills either way.
+# AGPR budget of the forward kernel: no AGPRs. A wave holds its head's whole
+# latent accumulator, 128 VGPRs at block_q == 16, and left free the backend
+# parks it in AGPRs and pays a v_accvgpr_read / v_accvgpr_write pair per
+# register for the per-tile rescale. Without them the kernel fits 256 VGPRs, two
+# waves per SIMD. At block_q == 32 the accumulator alone is 256 VGPRs and the
+# kernel spills either way.
 HPW_AGPR_ALLOC = (0, 0)
 
 # Software pipelining of the k-loop. The loop sits at the
@@ -285,16 +287,17 @@ class MlaPrefillSpec:
     # projection stay inside the wave as well. Requires
     # ``num_warps == heads_per_wg * q_tiles_per_wg``.
     heads_per_wg: int = 1
-    # Query row tiles per workgroup: the workgroup holds heads_per_wg heads x q_tiles_per_wg tiles of 16 queries,
-    # one wave per (head, tile), so block_q == 16 * q_tiles_per_wg and
-    # num_warps == heads_per_wg * q_tiles_per_wg. Waves sharing a head share its
-    # W_UK / W_UV fetches, which cuts the per-row weight traffic.
+    # Query row tiles per workgroup: the workgroup holds heads_per_wg heads x
+    # q_tiles_per_wg tiles of 16 queries, one wave per (head, tile), so
+    # block_q == 16 * q_tiles_per_wg and num_warps == heads_per_wg *
+    # q_tiles_per_wg (see fwd_layout). Waves sharing a head share its W_UK /
+    # W_UV fetches, which cuts the per-row weight traffic.
     q_tiles_per_wg: int = 1
-    # XCDs the device deals workgroups across (6 on a 228-CU gfx942, 8 on a
-    # 304-CU one); 0 keeps launch order. In launch order each
-    # XCD's resident workgroups span every head group, so its L2 holds all of
-    # their W_UK / W_UV; with the XCD count the kernel reorders workgroups so
-    # an XCD walks a few heads at a time. A wrong count costs speed only.
+    # XCDs the device deals workgroups across; 0 keeps launch order. In launch
+    # order each XCD's resident workgroups span every head group, so its L2
+    # holds all of their W_UK / W_UV; with the XCD count the kernel reorders
+    # workgroups so an XCD walks a few heads at a time. A wrong count costs
+    # speed only.
     num_xcds: int = 0
     # Latent accumulator in AGPRs. It lets a wave
     # own 32 query rows -- two M tiles, a 256-register accumulator -- at one
@@ -437,6 +440,25 @@ class MlaPrefillSpec:
         )
 
 
+def fwd_layout(
+    *, heads_per_wg: int, q_tiles_per_wg: int, agpr_acc: bool = False
+) -> dict:
+    """The layout fields of a forward spec, for ``dataclasses.replace``.
+
+    One wave runs per (head, query tile), so ``num_warps`` is their product,
+    and a wave owns 16 query rows -- 32 with ``agpr_acc`` -- so ``block_q`` is
+    that times ``q_tiles_per_wg``. Admission refuses any other combination.
+    """
+    rows = 32 if agpr_acc else MFMA_M
+    return {
+        "heads_per_wg": heads_per_wg,
+        "q_tiles_per_wg": q_tiles_per_wg,
+        "num_warps": heads_per_wg * q_tiles_per_wg,
+        "block_q": rows * q_tiles_per_wg,
+        "agpr_acc": agpr_acc,
+    }
+
+
 def _fwd_lds_bytes(spec: MlaPrefillSpec) -> int:
     """Predict the LDS pool :func:`build_mla_prefill_fwd` will ask for.
 
@@ -467,7 +489,7 @@ def _fwd_lds_bytes(spec: MlaPrefillSpec) -> int:
     return -(-max(kv_lds + qr_lds, wt_all) // 16) * 16
 
 
-def _supports_common(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]:
+def _supports_common(spec: MlaPrefillSpec, *, arch: str) -> tuple[bool, str]:
     """Admission shared by the forward kernel and the score probe."""
     if not arch.startswith("gfx942"):
         return False, f"MLA prefill is gfx942-only for now, got arch={arch!r}"
@@ -497,7 +519,7 @@ def _supports_common(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]:
     return True, ""
 
 
-def _divides_staging(threads: int, stages: dict) -> Tuple[bool, str]:
+def _divides_staging(threads: int, stages: dict) -> tuple[bool, str]:
     """Every staging loop hands each thread a fixed number of fixed-width
     chunks with no remainder handling, so each element count must divide by
     ``threads * width`` -- not merely by ``threads``."""
@@ -531,7 +553,10 @@ def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]
     if not ok:
         return ok, why
     qpw = spec.q_tiles_per_wg
-    if spec.num_warps != spec.heads_per_wg * qpw:
+    want = fwd_layout(
+        heads_per_wg=spec.heads_per_wg, q_tiles_per_wg=qpw, agpr_acc=spec.agpr_acc
+    )
+    if spec.num_warps != want["num_warps"]:
         return False, (
             f"heads_per_wg={spec.heads_per_wg} x q_tiles_per_wg={qpw} runs one "
             f"wave per (head, query tile), so num_warps must be their product, "
@@ -539,10 +564,10 @@ def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]
         )
     # A wave holds its head's whole latent accumulator: 128 VGPRs at 16 rows.
     # At 32 rows it is 256 registers, which only fits held in AGPRs.
-    rows = 32 if spec.agpr_acc else MFMA_M
-    if spec.block_q != rows * qpw:
+    if spec.block_q != want["block_q"]:
+        rows = want["block_q"] // qpw
         return False, (
-            f"the forward kernel needs block_q={rows * qpw} "
+            f"the forward kernel needs block_q={want['block_q']} "
             f"({rows} rows per wave x q_tiles_per_wg={qpw}), got "
             f"block_q={spec.block_q}"
         )
@@ -635,7 +660,7 @@ def _fits_lds(spec: MlaPrefillSpec, *, arch: str) -> tuple[bool, str]:
     return True, ""
 
 
-def supports_mla_score_probe(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]:
+def supports_mla_score_probe(spec: MlaPrefillSpec, *, arch: str) -> tuple[bool, str]:
     """Admission check for :func:`build_mla_prefill_score_probe`.
 
     The probe is a single-tile debug aid: it was never generalized over
@@ -654,7 +679,7 @@ def supports_mla_score_probe(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, 
             f"block_q={spec.block_q}, block_k={spec.block_k}"
         )
     if spec.absorbed_query:
-        return False, "the MLA score probe takes the projected query only"
+        return False, "absorbed_query=True, expected False for the score probe"
     if spec.r_kv_tile % MFMA_K != 0:
         return False, f"r_kv_tile must be a multiple of {MFMA_K}, got {spec.r_kv_tile}"
     if (spec.d_nope // MFMA_N) % spec.num_warps != 0:
@@ -683,7 +708,7 @@ def supports_mla_score_probe(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, 
     )
     budget = attention_lds_capacity_bytes(arch)
     if lds > budget:
-        return False, f"the score probe needs {lds} B of LDS, past the {budget} B"
+        return False, f"the score probe needs {lds} B of LDS, expected <= {budget} B"
     return True, ""
 
 
@@ -884,8 +909,6 @@ def build_mla_prefill_score_probe(
         rows=BQ,
         cols=HDQK,
         row_cols=HDQK,
-        src_col=0,
-        dst_col=0,
         dtype=dtype,
     )
 

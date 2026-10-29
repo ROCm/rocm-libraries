@@ -42,7 +42,6 @@ from kernels.mla._mla_body import (
     half4,
     mfma_16x16_c_row,
     mfma_16x16x16,
-    on_wave,
     shift,
     wave_tile_row,
     zero_tiles,
@@ -399,31 +398,29 @@ def stage_q_cols(
     rows: int,
     cols: int,
     row_cols: int,
-    src_col: int,
-    dst_col: int,
     dtype: Type,
 ) -> None:
-    """Stage ``q[token, head, src_col : src_col + cols]`` of the tile's ``rows``
-    query rows into ``dst[:, dst_col :]``, four columns per chunk."""
+    """Stage ``q[token, head, :cols]`` of the tile's ``rows`` query rows into
+    ``dst``, four columns per chunk."""
     per_row = cols // 4
     for j in range(_chunks("stage_q_cols", rows * cols, threads, 4)):
         m, d0 = chunk_coords(b, tid, j, threads, per_row, 4)
         token = qrows.clamped_token(b.add(qrows.tile.qb_start, m))
-        idx = qrows.offset(token, row_cols, lambda d0=d0: shift(b, src_col, d0))
+        idx = qrows.offset(token, row_cols, d0)
         v = b.global_load_vN(q_ptr, idx, dtype, 4)
-        b.smem_store_vN(dst, [m, shift(b, dst_col, d0)], v, 4)
+        b.smem_store_vN(dst, [m, d0], v, 4)
 
 
 def store_c_frag(
-    b: IRBuilder, lds: Value, frag: Value, lane: Value, *, col: Value, row_off: int = 0
+    b: IRBuilder, lds: Value, frag: Value, lane: Value, *, col: Value
 ) -> None:
     """Scatter one f32x4 C fragment into ``lds`` as bf16, element-wise.
 
-    The C decode puts element ``reg`` at ``[row_off + c_row(lane, reg)][col]``.
+    The C decode puts element ``reg`` at ``[c_row(lane, reg)][col]``.
     """
     packed = b.vec_trunc_f32_to_bf16(frag)
     for reg in range(C_PER_LANE):
-        row = shift(b, row_off, mfma_16x16_c_row(b, lane, reg))
+        row = mfma_16x16_c_row(b, lane, reg)
         b.smem_store_vN(lds, [row, col], b.vec_extract(packed, reg), 1)
 
 
@@ -444,14 +441,10 @@ def w_slice_index(
     r_base: int,
     w_cols: int,
     n0: Value,
-    col_offset: int | None = None,
 ) -> Value:
-    """Element offset of ``W_UK[head, r_base + rl, col_offset + n0]``.
-
-    A ``col_offset`` of ``None`` emits no offset add at all.
-    """
+    """Element offset of ``W_UK[head, r_base + rl, n0]``."""
     row = b.add(head_base, b.mul(b.add(rl, b.const_i32(r_base)), b.const_i32(w_cols)))
-    return b.add(row, n0 if col_offset is None else b.add(n0, b.const_i32(col_offset)))
+    return b.add(row, n0)
 
 
 def expand_k_nope(
@@ -656,19 +649,9 @@ def store_lse(
     q_start: Value,
     lane_row: Value,
     lane: Value,
-    wave: Value | None = None,
 ) -> None:
-    """Natural-log LSE of every M tile's rows, one writer per query.
-
-    The writer is the first 16-lane group -- of wave 0 when ``wave`` is given
-    (every wave holds the same state), else of each wave.
-    """
-    if wave is not None:
-        with on_wave(b, wave, 0):
-            store_lse(
-                b, lse, ms, ls, qrows, q_start=q_start, lane_row=lane_row, lane=lane
-            )
-        return
+    """Natural-log LSE of every M tile's rows, one writer per (query, head):
+    each wave's first 16-lane group."""
     with b.scf_if(b.cmp_lt(lane, b.const_i32(16))):
         for mt, (m, l) in enumerate(zip(ms, ls, strict=True)):
             q_local = row_of(b, q_start, lane_row, mt)

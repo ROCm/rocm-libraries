@@ -26,6 +26,7 @@ from kernels.mla.mla_prefill_gfx942 import (
     _fwd_lds_bytes,
     build_mla_prefill_fwd,
     build_mla_prefill_score_probe,
+    fwd_layout,
     mla_prefill_block,
     mla_prefill_fwd_grid,
     mla_prefill_fwd_signature,
@@ -58,11 +59,11 @@ def _assert_no_private_memory(case: unittest.TestCase, ir: str) -> None:
 
 def _odd_spec(**kw) -> MlaPrefillSpec:
     """The layout dispatch ships for an odd head count: one head x four tiles."""
-    kw.setdefault("heads_per_wg", 1)
-    kw.setdefault("q_tiles_per_wg", 4)
-    kw.setdefault("num_warps", 4)
-    kw.setdefault("block_q", 64)
-    return _spec(num_heads=kw.pop("num_heads", 5), **kw)
+    layout = fwd_layout(
+        heads_per_wg=kw.pop("heads_per_wg", 1),
+        q_tiles_per_wg=kw.pop("q_tiles_per_wg", 4),
+    )
+    return _spec(num_heads=kw.pop("num_heads", 5), **{**layout, **kw})
 
 
 class TestMlaPrefillSpec(unittest.TestCase):
@@ -415,7 +416,16 @@ class TestMlaPrefillAbsorbedQuery(unittest.TestCase):
             _spec(block_q=16, absorbed_query=True), arch="gfx942"
         )
         self.assertFalse(ok)
-        self.assertIn("projected query", reason)
+        self.assertIn("absorbed_query=True", reason)
+
+    def test_probe_lds_refused(self):
+        # r_kv=2048 puts c_lds alone at 64 KiB; with q/kt/wt the probe needs
+        # 86016 B.
+        ok, reason = supports_mla_score_probe(
+            _spec(block_q=16, r_kv=2048), arch="gfx942"
+        )
+        self.assertFalse(ok)
+        self.assertIn("86016 B of LDS, expected <=", reason)
 
 
 if __name__ == "__main__":
@@ -563,11 +573,12 @@ class TestOddHeadsLayoutOccupancy(_OccupancyGuard, unittest.TestCase):
 
 
 def _aa_spec(**kw) -> MlaPrefillSpec:
-    kw.setdefault("heads_per_wg", 2)
-    kw.setdefault("q_tiles_per_wg", 2)
-    kw.setdefault("block_q", 64)
-    kw.setdefault("num_warps", 4)
-    return MlaPrefillSpec(num_heads=kw.pop("num_heads", 128), agpr_acc=True, **kw)
+    layout = fwd_layout(
+        heads_per_wg=kw.pop("heads_per_wg", 2),
+        q_tiles_per_wg=kw.pop("q_tiles_per_wg", 2),
+        agpr_acc=True,
+    )
+    return MlaPrefillSpec(num_heads=kw.pop("num_heads", 128), **{**layout, **kw})
 
 
 class TestAgprAccAdmission(unittest.TestCase):

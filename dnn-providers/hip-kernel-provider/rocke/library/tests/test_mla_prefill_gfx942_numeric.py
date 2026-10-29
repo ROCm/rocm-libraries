@@ -70,15 +70,15 @@ _ALL_SCENARIOS = [
 # ragged long batch -- shapes dispatch runs on the 16-row layout.
 _AGPR_FORCED = ["mixed_varlen_h64", "sk512_h64", "ragged_long_h64"]
 
-# absorbed_query: one short, one masked/ragged, the long cases, H=5, H=6, and
-# the 300-sequence batch.
+# absorbed_query: one short, one masked/ragged, the long cases, H=6, and the
+# 300-sequence batch. Dispatch does not take absorbed_query at an odd head count
+# yet, so H=5 is not listed.
 _ABSORBED = [
     "square_h64",
     "mixed_varlen_h128",
     "sk512_h64",
     "sk4096_h128",
     "ragged_long_h64",
-    "odd_heads_h5",
     "six_heads_h6",
     "many_seqs_h64",
 ]
@@ -163,8 +163,13 @@ def test_absorbed_lane_runs_the_spec_dispatch_selects():
             sc.heads, sc.q_lens, sc.k_lens, "gfx942", absorbed_query=True
         )
         assert spec.absorbed_query, name
-        assert spec.heads_per_wg == (2 if sc.heads % 2 == 0 else 1), name
+        assert spec.heads_per_wg == 2, name
         assert spec.fwd_kernel_name().endswith("_aq"), name
+    sc = probe.SCENARIOS["odd_heads_h5"]
+    with pytest.raises(ValueError, match="absorbed_query"):
+        probe._dispatched_spec(
+            sc.heads, sc.q_lens, sc.k_lens, "gfx942", absorbed_query=True
+        )
 
 
 def test_packed_absorbed_refusal_is_a_failure_not_a_skip():

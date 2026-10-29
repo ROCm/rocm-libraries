@@ -368,7 +368,8 @@ class Lanes:
 
 
 def lane_ids(b: IRBuilder) -> Lanes:
-    """``tid``, ``lane``, ``wave``, ``lane_row`` and ``lane_kq``, in that emission order."""
+    """``tid``, ``lane``, ``wave``, ``lane_row`` and ``lane_kq``, emitted in
+    that order."""
     tid = b.thread_id_x()
     lane = b.mod(tid, b.const_i32(WAVE_SIZE))
     wave = b.div(tid, b.const_i32(WAVE_SIZE))

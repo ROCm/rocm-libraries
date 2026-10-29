@@ -803,7 +803,7 @@ composes it with `torch.bmm` absorb and `W_UV` against the same oracle, and the
 live benchmark times the composition and its per-stage split. Most of the
 removed prologue and epilogue already overlapped the other workgroup's loop, so
 the kernel-only gain is concentrated on long shapes. Dispatch serves it when
-the request sets `MLARequest(absorbed_query=True)`, for any head count; the
+the request sets `MLARequest(absorbed_query=True)` at an even head count; the
 default stays the fused kernel, since the provider API does not carry the
 absorbed query yet.
 
@@ -884,7 +884,8 @@ golden fixture pins a 228-CU device so it does not depend on the host.
 
 - **One head x four query tiles**: the lowest weight traffic and the fastest
   short shapes, but a large regression on chunked shapes with three 64-row
-  blocks per head that was not explained. Not selected.
+  blocks per head that was not explained. Not selected at even head counts;
+  odd head counts run it since the eighth pass.
 - **Larger XCD runs**: faster short shapes, slower long full-prompt shapes.
 - **Accumulators in AGPRs at 32 rows per wave** (the Option 3 route): a
   compile-only probe found LLVM spills whenever the accumulators are IR values
@@ -991,7 +992,7 @@ layout through its opt-in candidate, so each appears once.
 Odd head counts cannot pair heads, so until this pass they ran the original
 single-head kernel: one workgroup per (query tile, head), the score K split
 across waves, and the absorbed query and latent output staged through LDS.
-A gated sweep on a 304-CU gfx942 timed it against the one-wave-per-head layout
+A gated sweep on gfx942 timed it against the one-wave-per-head layout
 at one head per workgroup -- two or four query tiles, at 16 rows per wave or
 with `agpr_acc` -- at H = 5, 7, 15 and 63 over the DeepSeek-V3 full-prompt and
 chunked shape list, every arm gated against the fp32 oracle first. One head x
@@ -1001,7 +1002,9 @@ slower on most shapes.
 
 Dispatch now runs odd head counts as one head x four tiles at 16 rows per wave,
 with the XCD-aware order, and the single-head kernel is gone. Odd head counts
-also gain `absorbed_query`. The score probe keeps its own admission
+do not take `absorbed_query` until it is verified on device at this layout,
+and the rule never picks `agpr_acc` for them; the pinned `agpr_acc` layout
+reaches it. The score probe keeps its own admission
 (`supports_mla_score_probe`); its IR is unchanged.
 
 ## Method
