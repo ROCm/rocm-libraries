@@ -273,6 +273,27 @@ struct MxGemmKernel
         return kOffsetPtrsByTileCoords;
     }
 
+    // Number of int32 scale packs in each row of the packed scale views. Each pack covers
+    // BlockScaleSize * KXdlPackEff elements of K; the count rounds up, so it includes a partial
+    // last pack when K is not a multiple of BlockScaleSize * KXdlPackEff.
+    //
+    // On a K tail the kernel reads scales that multiply only the zeros the TDM loads for A and B
+    // past K. NaN x 0 is NaN, so every scale the caller passes, padding included, must be finite.
+    // Those reads are:
+    // - the K padding columns, if any, of the last pack, GetScalePacksK(K) - 1;
+    // - on the TDM pipelines, when a K tile holds more than one scale pack and K is not a
+    //   multiple of KPerBlock, the packs p >= P = GetScalePacksK(K) that the last K tile can
+    //   read, because the scale views are not padded in K. For row r of the view, pack p is pack
+    //   p % P of row r + (p / P) * MThreadPerXdl (for B, NThreadPerXdl): a scale of a later row,
+    //   which can be one of the caller's M or N padding rows. Reads past the end of the view (for
+    //   an A view shifted to its M tile, the end of that tile) return 0.
+    // The pipelines also load one scale tile past the last K tile when the loop count is odd;
+    // those values are never used.
+    CK_TILE_HOST_DEVICE static constexpr index_t GetScalePacksK(index_t K)
+    {
+        return integer_divide_ceil(K, BlockScaleSize * KXdlPackEff);
+    }
+
     using KernelArgs = MxGemmKernelArgs<NumATensor, NumBTensor, NumDTensor>;
 
     CK_TILE_HOST static constexpr KernelArgs
@@ -407,7 +428,7 @@ struct MxGemmKernel
                           const index_t k_elem_offset = 0)
     {
         const auto&& scale_packs_m = integer_divide_ceil(kargs.M, MThreadPerXdl * MXdlPackEff);
-        const auto&& scale_packs_k = kargs.K / BlockScaleSize / KXdlPackEff;
+        const auto&& scale_packs_k = GetScalePacksK(kargs.K);
 
         // For split-K (k_batch > 1) advance the scale origin into this k_id's packed-K slice.
         const index_t k_scale_offset = k_elem_offset / BlockScaleSize / KXdlPackEff;
@@ -430,8 +451,9 @@ struct MxGemmKernel
             number<NumATensor>{});
 
         // Pad the scale view so partial trailing tiles along M are handled safely (OOB scale
-        // loads return zero; with A also zero on the padded region the contribution is zero
-        // regardless of scale value). kPadK is statically disabled, so K never actually pads.
+        // loads return zero, a finite scale, so with A also zero on the padded region the
+        // contribution is zero). kPadK is statically disabled, so K never actually pads; see
+        // GetScalePacksK for the scale reads past K on a K tail.
         const auto& scale_a_pad_view = generate_tuple(
             [&](auto i) {
                 return pad_tensor_view(
@@ -464,7 +486,7 @@ struct MxGemmKernel
                           const index_t k_elem_offset = 0)
     {
         const auto&& scale_packs_n = integer_divide_ceil(kargs.N, NThreadPerXdl * NXdlPackEff);
-        const auto&& scale_packs_k = kargs.K / BlockScaleSize / KXdlPackEff;
+        const auto&& scale_packs_k = GetScalePacksK(kargs.K);
 
         // For split-K (k_batch > 1) advance the scale origin into this k_id's packed-K slice.
         const index_t k_scale_offset = k_elem_offset / BlockScaleSize / KXdlPackEff;
@@ -484,8 +506,9 @@ struct MxGemmKernel
             number<NumBTensor>{});
 
         // Pad the scale view so partial trailing tiles along N are handled safely (OOB scale
-        // loads return zero; with B also zero on the padded region the contribution is zero
-        // regardless of scale value). kPadK is statically disabled, so K never actually pads.
+        // loads return zero, a finite scale, so with B also zero on the padded region the
+        // contribution is zero). kPadK is statically disabled, so K never actually pads; see
+        // GetScalePacksK for the scale reads past K on a K tail.
         const auto& scale_b_pad_view = generate_tuple(
             [&](auto i) {
                 return pad_tensor_view(
@@ -577,7 +600,7 @@ struct MxGemmKernel
             static_for<0, NumATensor, 1>{}([&](auto i) {
                 as_scale_ptr[i] = reinterpret_cast<ScalePtrType>(kargs.as_scale_ptr[i]) +
                                   static_cast<std::ptrdiff_t>(block_idx_m / MXdlPackEff) *
-                                      (kargs.K / BlockScaleSize / KXdlPackEff);
+                                      GetScalePacksK(kargs.K);
             });
 
             kargs.M      = BaseKernel::ClampMToOffsettedTile(kargs.M, block_idx_m);
