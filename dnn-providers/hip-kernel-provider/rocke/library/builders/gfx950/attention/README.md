@@ -781,9 +781,10 @@ field:
   index width now follows the operand type).
 * **fp8-in-LDS** (decode) — per-block i64 buffer base.
 * **gfx942 cfvst** (conflict-free V store, per-thread flat V load; the
-  default gfx942 bf16 D64 and fp16 D64/D128 prefill V loader) —
-  `paged_kv_desc.offset_i64`, the same per-lane i64 offset as fp8
-  sync-dequant.
+  default gfx942 bf16 D64 and fp16 D64/D128 prefill V loader) — each load
+  call's rows lie in one page, so V loads index that page's 64-bit base
+  pointer (loaded once per tile) with an i32 offset within the page. The
+  builder refuses a geometry where a call would span pages.
 
 The dispatcher enables it automatically (`_enable_i64_kv_addr`) only when
 `num_kv_blocks × block_stride > 0x7FFF0000` bytes (filled from `k.shape[0]`),

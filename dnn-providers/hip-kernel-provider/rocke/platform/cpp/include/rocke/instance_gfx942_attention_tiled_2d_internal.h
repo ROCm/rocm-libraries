@@ -476,6 +476,12 @@ rocke_value_t* rocke_gfx942_attn2d_read_k8_mfma_operand(rocke_gfx942_attn2d_buil
                                                         int k_iter,
                                                         int n_tile);
 
+/* _tile_page_ptrs: base pointers of the tile's pages (i64 K/V addressing); an
+ * arena-owned array of N_BLOCKS_PER_TILE values, or NULL on out of memory. */
+rocke_value_t** rocke_gfx942_attn2d_tile_page_ptrs(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                                   rocke_value_t* src,
+                                                   rocke_value_t* kv_tile_idx);
+
 /* ----- transposed-V store path (cfv / cfvst, lines 2621-2904) ----- */
 void rocke_gfx942_attn2d_issue_v_transposed(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                             rocke_value_t* kv_tile_idx);

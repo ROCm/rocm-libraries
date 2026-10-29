@@ -566,6 +566,42 @@ static int rocke__calls_per_page(const rocke_gfx942_attn2d_build_ctx_t* ctx)
     return (ctx->BS * ctx->HD) / rocke__kv_halves_per_call(ctx);
 }
 
+/* _tile_page_ptrs: base pointers of the tile's pages (arena-allocated, one per
+ * page), from one page-id load each. Builder calls follow Python's evaluation
+ * order. Returns NULL (builder error set) when out of memory. */
+rocke_value_t** rocke_gfx942_attn2d_tile_page_ptrs(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                                   rocke_value_t* src,
+                                                   rocke_value_t* kv_tile_idx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    int n_pages = ctx->N_BLOCKS_PER_TILE;
+    rocke_value_t** ptrs
+        = (rocke_value_t**)rocke_arena_calloc(&b->arena, (size_t)n_pages * sizeof(rocke_value_t*));
+    if(ptrs == NULL)
+    {
+        b->status = ROCKE_ERR_OOM;
+        snprintf(b->err, ROCKE_ERR_MSG_CAP, "out of memory for %d tile pages", n_pages);
+        return NULL;
+    }
+    int64_t kv_stride_blk_b = (int64_t)ctx->BS * ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
+    rocke_value_t* seq_base = rocke__seq_base(ctx);
+    rocke_value_t* max_idx = rocke__block_table_max_idx(ctx);
+    rocke_value_t* tile_page0 = rocke_b_mul(b, kv_tile_idx, rocke_b_const_i32(b, n_pages));
+    rocke_value_t* first = rocke_b_add(b, seq_base, tile_page0);
+    for(int page = 0; page < n_pages; ++page)
+    {
+        rocke_value_t* idx = rocke_b_add(b, first, rocke_b_const_i32(b, page));
+        rocke_value_t* mask = rocke_b_cmp_lt(b, idx, max_idx);
+        rocke_value_t* def = rocke_b_const_i32(b, 0);
+        rocke_value_t* physical
+            = rocke_b_masked_global_load(b, ctx->block_tables, idx, mask, def, rocke_i32(), 4);
+        rocke_value_t* page_i64 = rocke_b_zext(b, rocke_b_to_sgpr_u32(b, physical), rocke_i64());
+        rocke_value_t* base = rocke_b_mul(b, page_i64, rocke_b_const_i64(b, kv_stride_blk_b));
+        ptrs[page] = rocke_b_global_ptr_add(b, src, base);
+    }
+    return ptrs;
+}
+
 /* Base pointers and buffer resources of the tile's pages (arena-allocated, one per
  * page), and the kv head's byte offset within a page. Builder calls follow
  * Python's evaluation order. */
@@ -593,8 +629,7 @@ static bool rocke__tile_pages(rocke_gfx942_attn2d_build_ctx_t* ctx,
                  halves_per_call);
         return false;
     }
-    rocke_value_t** ptrs
-        = (rocke_value_t**)rocke_arena_calloc(&b->arena, (size_t)n_pages * sizeof(rocke_value_t*));
+    rocke_value_t** ptrs = rocke_gfx942_attn2d_tile_page_ptrs(ctx, src, kv_tile_idx);
     rocke_value_t** rsrcs
         = (rocke_value_t**)rocke_arena_calloc(&b->arena, (size_t)n_pages * sizeof(rocke_value_t*));
     if(ptrs == NULL || rsrcs == NULL)
@@ -602,22 +637,6 @@ static bool rocke__tile_pages(rocke_gfx942_attn2d_build_ctx_t* ctx,
         b->status = ROCKE_ERR_OOM;
         snprintf(b->err, ROCKE_ERR_MSG_CAP, "out of memory for %d tile pages", n_pages);
         return false;
-    }
-    int64_t kv_stride_blk_b = (int64_t)ctx->BS * ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
-    rocke_value_t* seq_base = rocke__seq_base(ctx);
-    rocke_value_t* max_idx = rocke__block_table_max_idx(ctx);
-    rocke_value_t* tile_page0 = rocke_b_mul(b, kv_tile_idx, rocke_b_const_i32(b, n_pages));
-    rocke_value_t* first = rocke_b_add(b, seq_base, tile_page0);
-    for(int page = 0; page < n_pages; ++page)
-    {
-        rocke_value_t* idx = rocke_b_add(b, first, rocke_b_const_i32(b, page));
-        rocke_value_t* mask = rocke_b_cmp_lt(b, idx, max_idx);
-        rocke_value_t* def = rocke_b_const_i32(b, 0);
-        rocke_value_t* physical
-            = rocke_b_masked_global_load(b, ctx->block_tables, idx, mask, def, rocke_i32(), 4);
-        rocke_value_t* page_i64 = rocke_b_zext(b, rocke_b_to_sgpr_u32(b, physical), rocke_i64());
-        rocke_value_t* base = rocke_b_mul(b, page_i64, rocke_b_const_i64(b, kv_stride_blk_b));
-        ptrs[page] = rocke_b_global_ptr_add(b, src, base);
     }
     rocke_value_t* kv_block_bytes_c = rocke__kv_block_bytes_c(ctx);
     for(int page = 0; page < n_pages; ++page)

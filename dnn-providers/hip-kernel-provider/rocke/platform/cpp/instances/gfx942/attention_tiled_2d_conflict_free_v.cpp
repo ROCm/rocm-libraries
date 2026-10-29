@@ -11,8 +11,9 @@
  *     (the proven-correct but ~5x-slower transposed-V fill). Lines 2658-2732.
  *   rocke__cfvst_load_token_row_pair (file-local)  -- vehicle (c) inner closure:
  *     bounded coalesced <2 x f16> dim-pair VMEM load (+ the _CFV_STORE_SEPOFF /
- *     _CFV_STORE_SCALAR_LOAD isolation variants), returned bitcast-to-i32. Takes
- *     the i64 offset_i64 path under I64_KV_ADDR.
+ *     _CFV_STORE_SCALAR_LOAD isolation variants), returned bitcast-to-i32. Under
+ *     I64_KV_ADDR it loads from the tile's page pointers with i32 offsets within
+ *     the page (CFVST_PAGE_I64).
  *   rocke__cfvst_block_coords (file-local)         -- vehicle (c) inner closure:
  *     block index -> (d0, d1, t0, t1) 2x2 f16 block coordinates.
  *   rocke_gfx942_attn2d_cfvst_load_v_regs          -- vehicle (c): issue the VMEM
@@ -38,6 +39,8 @@
  * (rocke_ir_builder_t.arena). Nothing is freed individually.
  */
 #include "rocke/instance_gfx942_attention_tiled_2d_internal.h"
+
+#include <cstdio>
 
 /* ==========================================================================
  * Local helpers shared by both vehicles.
@@ -204,91 +207,126 @@ typedef struct rocke__cfvst_payload
 } rocke__cfvst_payload_t;
 
 /* The per-tile values _cfvst_load_v_regs creates once and its inner closures
- * capture (Python zero_h, zero_off, tile_tok_base, _dp, max_seq_prefix_len). */
+ * capture (Python zero_h, zero_i32, tile_tok_base, _dp, max_seq_prefix_len, and
+ * under CFVST_PAGE_I64 v_page_ptrs and v_kv_head_b). */
 typedef struct rocke__cfvst_tile
 {
     rocke_value_t* kv_tile_idx;
     rocke_value_t* zero_h;
-    rocke_value_t* zero_off; /* i64 under I64_KV_ADDR, else i32 */
+    rocke_value_t* zero_i32;
     rocke_value_t* tile_tok_base;
     rocke_value_t* dp;
     rocke_value_t* max_seq_prefix_len;
+    bool page_i64; /* CFVST_PAGE_I64 */
+    rocke_value_t** page_ptrs; /* one per tile page, CFVST_PAGE_I64 only */
+    rocke_value_t* kv_head_b; /* kv head byte offset in a page, CFVST_PAGE_I64 only */
 } rocke__cfvst_tile_t;
 
-/* _off_const: V offsets are i64 under I64_KV_ADDR, so their constants are too. */
-static rocke_value_t* rocke__cfvst_off_const(rocke_gfx942_attn2d_build_ctx_t* ctx, int v)
+/* _cfvst_call_pages: the one page each cfvst call's token rows lie in. Writes
+ * out_pages[0..calls) and returns true, or returns false if a call spans pages.
+ * Rows grow with the block index, so a call's first and last block bound its
+ * tokens; guarded tail lanes read block 0. */
+static bool rocke__cfvst_call_pages(const rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                    int calls,
+                                    int total_blocks,
+                                    int dim_pairs,
+                                    int* out_pages)
 {
-    return ctx->I64_KV_ADDR ? rocke_b_const_i64(ctx->b, v) : rocke_b_const_i32(ctx->b, v);
+    for(int call = 0; call < calls; ++call)
+    {
+        int lo = call * ctx->THREADS;
+        int end = (call + 1) * ctx->THREADS;
+        int hi = (end < total_blocks ? end : total_blocks) - 1;
+        int first_page = (2 * (lo / dim_pairs)) / ctx->BS;
+        int last_page = (2 * (hi / dim_pairs) + 1) / ctx->BS;
+        bool guarded = hi < end - 1;
+        if(first_page != last_page || (guarded && first_page != 0))
+            return false;
+        out_pages[call] = first_page;
+    }
+    return true;
 }
 
-/* _v_offset(linear) -> byte offset of V[linear] from the cache base, and its
- * validity. Under I64_KV_ADDR the physical_block term is widened to i64
- * (offset_i64; the block varies per lane, so no scalar split). */
-static rocke_value_t* rocke__cfvst_v_offset(rocke_gfx942_attn2d_build_ctx_t* ctx,
-                                            const rocke__cfvst_tile_t* tile,
-                                            rocke_value_t* linear,
-                                            rocke_value_t** out_valid)
+/* _v_page_off(t_row, d): byte offset of V[t_row, d] within its page. Builder
+ * calls follow Python's evaluation order. */
+static rocke_value_t* rocke__cfvst_v_page_off(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                              const rocke__cfvst_tile_t* tile,
+                                              rocke_value_t* t_row,
+                                              rocke_value_t* d)
 {
-    static const char* names[3] = {"tile_idx", "linear_half", "kv_head"};
-    rocke_value_t* in_vals[3];
-    rocke_value_t* off = NULL;
-    rocke_value_t* vld = NULL;
-    if(!ctx->I64_KV_ADDR)
-        return rocke__paged_kv_offset(ctx, tile->kv_tile_idx, linear, ctx->kv_head_idx, out_valid);
-    in_vals[0] = tile->kv_tile_idx;
-    in_vals[1] = linear;
-    in_vals[2] = ctx->kv_head_idx;
-    (void)rocke_transforms_descriptor_offset_i64(
-        ctx->b, ctx->kv_desc, "physical_block", names, in_vals, 3, &off, &vld);
-    if(out_valid)
-        *out_valid = vld;
-    return off;
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* tok = (ctx->N_BLOCKS_PER_TILE > 1)
+                             ? rocke_b_mod(b, t_row, rocke_b_const_i32(b, ctx->BS))
+                             : t_row;
+    rocke_value_t* tok_b
+        = rocke_b_mul(b, tok, rocke_b_const_i32(b, ctx->NUM_KV * ctx->HD * ctx->KV_BYTES));
+    rocke_value_t* tok_head_b = rocke_b_add(b, tok_b, tile->kv_head_b);
+    rocke_value_t* dim_b = rocke_b_mul(b, d, rocke_b_const_i32(b, ctx->KV_BYTES));
+    return rocke_b_add(b, tok_head_b, dim_b);
 }
 
-/* _load_token_row_pair(t_row, d0) -> i32 = (V[t_row,d0], V[t_row,d0+1]), bounded.
- * Out-of-range tokens (past this CTA's valid KV length) read offset 0 and are
- * zeroed, like the bounded async DMA's hardware zero-fill. */
+/* _load_token_row_pair(t_row, d0, src) -> i32 = (V[t_row,d0], V[t_row,d0+1]),
+ * bounded. Out-of-range tokens (past this CTA's valid KV length) read offset 0
+ * and are zeroed, like the bounded async DMA's hardware zero-fill. src is the V
+ * cache, or the row's page pointer under CFVST_PAGE_I64. */
 static rocke_value_t* rocke__cfvst_load_token_row_pair(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                                        const rocke__cfvst_tile_t* tile,
                                                        rocke_value_t* t_row,
-                                                       rocke_value_t* d0)
+                                                       rocke_value_t* d0,
+                                                       rocke_value_t* src)
 {
     rocke_ir_builder_t* b = ctx->b;
     const rocke_type_t* dtype = ctx->dtype;
-
-    /* linear = t_row * HD + d0 */
-    rocke_value_t* linear
-        = rocke_b_add(b, rocke_b_mul(b, t_row, rocke_b_const_i32(b, ctx->HD)), d0);
     rocke_value_t* valid = NULL;
-    rocke_value_t* voff = rocke__cfvst_v_offset(ctx, tile, linear, &valid);
+    rocke_value_t* voff;
+
+    if(tile->page_i64)
+    {
+        voff = rocke__cfvst_v_page_off(ctx, tile, t_row, d0);
+    }
+    else
+    {
+        /* linear = t_row * HD + d0 */
+        rocke_value_t* linear
+            = rocke_b_add(b, rocke_b_mul(b, t_row, rocke_b_const_i32(b, ctx->HD)), d0);
+        voff = rocke__paged_kv_offset(ctx, tile->kv_tile_idx, linear, ctx->kv_head_idx, &valid);
+    }
     rocke_value_t* in_range
         = rocke_b_cmp_lt(b, rocke_b_add(b, tile->tile_tok_base, t_row), tile->max_seq_prefix_len);
     if(valid != NULL)
         in_range = rocke_b_land(b, in_range, valid);
-    rocke_value_t* safe_voff = rocke_b_select(b, in_range, voff, tile->zero_off);
-    rocke_value_t* safe_elem
-        = (ctx->KV_BYTES != 1)
-              ? rocke_b_div(b, safe_voff, rocke__cfvst_off_const(ctx, ctx->KV_BYTES))
-              : safe_voff;
+    rocke_value_t* safe_voff = rocke_b_select(b, in_range, voff, tile->zero_i32);
+    rocke_value_t* safe_elem = (ctx->KV_BYTES != 1)
+                                   ? rocke_b_div(b, safe_voff, rocke_b_const_i32(b, ctx->KV_BYTES))
+                                   : safe_voff;
     rocke_value_t* v2;
 
     if(ctx->CFV_STORE_SEPOFF)
     {
         /* Separate descriptor call for (t_row, d0+1) instead of voff+1. Python
          * builds the row mul before the d0+1 add. */
-        rocke_value_t* row1 = rocke_b_mul(b, t_row, rocke_b_const_i32(b, ctx->HD));
-        rocke_value_t* d0p1 = rocke_b_add(b, d0, rocke_b_const_i32(b, 1));
-        rocke_value_t* linear1 = rocke_b_add(b, row1, d0p1);
-        rocke_value_t* valid1 = NULL;
-        rocke_value_t* voff1 = rocke__cfvst_v_offset(ctx, tile, linear1, &valid1);
-        (void)valid1;
-        rocke_value_t* safe_voff1 = rocke_b_select(b, in_range, voff1, tile->zero_off);
+        rocke_value_t* voff1;
+        if(tile->page_i64)
+        {
+            rocke_value_t* d0p1 = rocke_b_add(b, d0, rocke_b_const_i32(b, 1));
+            voff1 = rocke__cfvst_v_page_off(ctx, tile, t_row, d0p1);
+        }
+        else
+        {
+            rocke_value_t* row1 = rocke_b_mul(b, t_row, rocke_b_const_i32(b, ctx->HD));
+            rocke_value_t* d0p1 = rocke_b_add(b, d0, rocke_b_const_i32(b, 1));
+            rocke_value_t* linear1 = rocke_b_add(b, row1, d0p1);
+            rocke_value_t* valid1 = NULL;
+            voff1 = rocke__paged_kv_offset(
+                ctx, tile->kv_tile_idx, linear1, ctx->kv_head_idx, &valid1);
+            (void)valid1;
+        }
+        rocke_value_t* safe_voff1 = rocke_b_select(b, in_range, voff1, tile->zero_i32);
         rocke_value_t* safe_elem1
-            = (ctx->KV_BYTES != 1)
-                  ? rocke_b_div(b, safe_voff1, rocke__cfvst_off_const(ctx, ctx->KV_BYTES))
-                  : safe_voff1;
-        rocke_value_t* e0 = rocke_b_global_load(b, ctx->value, safe_elem, dtype, 2);
-        rocke_value_t* e1 = rocke_b_global_load(b, ctx->value, safe_elem1, dtype, 2);
+            = (ctx->KV_BYTES != 1) ? rocke_b_div(b, safe_voff1, rocke_b_const_i32(b, ctx->KV_BYTES))
+                                   : safe_voff1;
+        rocke_value_t* e0 = rocke_b_global_load(b, src, safe_elem, dtype, 2);
+        rocke_value_t* e1 = rocke_b_global_load(b, src, safe_elem1, dtype, 2);
         e0 = rocke_b_select(b, in_range, e0, tile->zero_h);
         e1 = rocke_b_select(b, in_range, e1, tile->zero_h);
         rocke_value_t* pk[2] = {e0, e1};
@@ -297,9 +335,9 @@ static rocke_value_t* rocke__cfvst_load_token_row_pair(rocke_gfx942_attn2d_build
     else if(ctx->CFV_STORE_SCALAR_LOAD)
     {
         /* Two scalar n=1 loads + manual pack. */
-        rocke_value_t* e0 = rocke_b_global_load(b, ctx->value, safe_elem, dtype, 2);
-        rocke_value_t* elem1 = rocke_b_add(b, safe_elem, rocke__cfvst_off_const(ctx, 1));
-        rocke_value_t* e1 = rocke_b_global_load(b, ctx->value, elem1, dtype, 2);
+        rocke_value_t* e0 = rocke_b_global_load(b, src, safe_elem, dtype, 2);
+        rocke_value_t* elem1 = rocke_b_add(b, safe_elem, rocke_b_const_i32(b, 1));
+        rocke_value_t* e1 = rocke_b_global_load(b, src, elem1, dtype, 2);
         e0 = rocke_b_select(b, in_range, e0, tile->zero_h);
         e1 = rocke_b_select(b, in_range, e1, tile->zero_h);
         rocke_value_t* pk[2] = {e0, e1};
@@ -307,7 +345,7 @@ static rocke_value_t* rocke__cfvst_load_token_row_pair(rocke_gfx942_attn2d_build
     }
     else
     {
-        v2 = rocke_b_global_load_vN(b, ctx->value, safe_elem, dtype, 2, 4);
+        v2 = rocke_b_global_load_vN(b, src, safe_elem, dtype, 2, 4);
         /* Zero masked rows (whole pair belongs to one token). */
         rocke_value_t* zpk[2] = {tile->zero_h, tile->zero_h};
         rocke_value_t* zero_vec = rocke_b_vec_pack(b, zpk, 2, dtype);
@@ -349,13 +387,44 @@ void* rocke_gfx942_attn2d_cfvst_load_v_regs(rocke_gfx942_attn2d_build_ctx_t* ctx
     int total_blocks = tok_pairs * dim_pairs;
     int call;
     rocke__cfvst_tile_t tile;
+    int* call_pages = (int*)rocke_arena_alloc(
+        &b->arena, sizeof(int) * (size_t)(V_T_ITEMS_PER_THREAD > 0 ? V_T_ITEMS_PER_THREAD : 1));
+    if(call_pages == NULL)
+        return NULL;
 
+    /* CFVST_PAGE_I64 = TRANSPOSED_V_STORE and PAGE_RSRC_I64 (TRANSPOSED_V_STORE
+     * holds whenever this loader runs). Python raises the same error at build. */
+    tile.page_i64 = ctx->I64_KV_ADDR && !ctx->FAST_PAGED_KV_DESC;
+    if(tile.page_i64
+       && !rocke__cfvst_call_pages(ctx, V_T_ITEMS_PER_THREAD, total_blocks, dim_pairs, call_pages))
+    {
+        b->status = ROCKE_ERR_VALUE;
+        snprintf(b->err,
+                 ROCKE_ERR_MSG_CAP,
+                 "i64 K/V cfvst needs each V load call within one page (T=%d, BS=%d, "
+                 "HD=%d, threads=%d)",
+                 ctx->T,
+                 ctx->BS,
+                 ctx->HD,
+                 ctx->THREADS);
+        return NULL;
+    }
+    tile.page_ptrs = NULL;
+    tile.kv_head_b = NULL;
     tile.max_seq_prefix_len = rocke__max_seq_prefix_len(ctx);
     tile.kv_tile_idx = kv_tile_idx;
     tile.zero_h = rocke_b_cast_f32_to(b, rocke_b_const_f32(b, 0.0), ctx->dtype);
-    tile.zero_off = rocke__cfvst_off_const(ctx, 0);
+    tile.zero_i32 = rocke_b_const_i32(b, 0);
     tile.tile_tok_base = rocke_b_mul(b, kv_tile_idx, rocke_b_const_i32(b, ctx->T));
     tile.dp = rocke_b_const_i32(b, dim_pairs);
+    if(tile.page_i64)
+    {
+        tile.page_ptrs = rocke_gfx942_attn2d_tile_page_ptrs(ctx, ctx->value, kv_tile_idx);
+        if(tile.page_ptrs == NULL)
+            return NULL;
+        tile.kv_head_b
+            = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->HD * ctx->KV_BYTES));
+    }
 
     rocke__cfvst_payload_t* payload
         = (rocke__cfvst_payload_t*)rocke_arena_alloc(&b->arena, sizeof(rocke__cfvst_payload_t));
@@ -382,9 +451,10 @@ void* rocke_gfx942_attn2d_cfvst_load_v_regs(rocke_gfx942_attn2d_build_ctx_t* ctx
         }
         rocke__cfvst_blk_t* blkv = &payload->blocks[payload->count];
         rocke__cfvst_block_coords(ctx, &tile, blk, blkv);
+        rocke_value_t* src = tile.page_i64 ? tile.page_ptrs[call_pages[call]] : ctx->value;
         /* x0 = (V[t0,d0], V[t0,d1]) ; x1 = (V[t1,d0], V[t1,d1]) */
-        blkv->x0 = rocke__cfvst_load_token_row_pair(ctx, &tile, blkv->t0, blkv->d0);
-        blkv->x1 = rocke__cfvst_load_token_row_pair(ctx, &tile, blkv->t1, blkv->d0);
+        blkv->x0 = rocke__cfvst_load_token_row_pair(ctx, &tile, blkv->t0, blkv->d0, src);
+        blkv->x1 = rocke__cfvst_load_token_row_pair(ctx, &tile, blkv->t1, blkv->d0, src);
         payload->count += 1;
     }
     return payload;
