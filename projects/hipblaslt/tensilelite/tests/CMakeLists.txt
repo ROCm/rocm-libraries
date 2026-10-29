@@ -81,6 +81,29 @@ if(TENSILELITE_ENABLE_YAML)
     target_link_libraries(tensilelite-tests PRIVATE LLVMObjectYAML)
 endif()
 
+# OrigamiBoostLibrary.ShippedModelsAcceptBuiltLibrary: the shipped Origami Boost models against the
+# kernel library device-library/ writes (HIPBLASLT_TENSILE_LIBPATH, default <build>/Tensile), or the
+# installed one.
+if(HIPBLASLT_TENSILE_LIBPATH)
+    set(_tensilelite_test_libpath "${HIPBLASLT_TENSILE_LIBPATH}")
+elseif(DEFINED hipblaslt_BINARY_DIR)
+    set(_tensilelite_test_libpath "${hipblaslt_BINARY_DIR}/Tensile")
+else()
+    set(_tensilelite_test_libpath "${CMAKE_BINARY_DIR}/Tensile")
+endif()
+if(DEFINED ROCM_LIBRARIES_ROOT)
+    set(_origami_boost_models "${ROCM_LIBRARIES_ROOT}/shared/origami/data/nn/boost")
+else()
+    set(_origami_boost_models "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/origami/data/nn/boost")
+endif()
+get_filename_component(_origami_boost_models "${_origami_boost_models}" ABSOLUTE)
+target_compile_definitions(tensilelite-tests
+    PRIVATE
+        TENSILELITE_TEST_BUILT_LIBRARY_DIR="${_tensilelite_test_libpath}/library"
+        TENSILELITE_TEST_INSTALLED_LIBRARY_DIR="${CMAKE_INSTALL_LIBDIR}/hipblaslt/library"
+        ORIGAMI_BOOST_SHIPPED_MODELS="${_origami_boost_models}"
+)
+
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../clients/common/include")
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/include")

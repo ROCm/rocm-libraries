@@ -439,6 +439,31 @@ auto handle = origami::nn::load_boost_model(path, target, &status, &detail);
 // handle >= 0 on success; -1 with status / detail saying why the model was refused
 ```
 
+#### Shipped Origami Boost models
+
+`data/nn/boost/gfx950/` ships one model per dtype class (`origami_boost_gfx950_{bf16,tf32,fp8}.orr`). hipBLASLt colocates them next to the gfx950 kernel library and installs them with it; they are used only with `HIPBLASLT_ORIGAMI_BOOST=1`. A model is stamped with the Origami sources it was trained against (`origami_source_hash`: the configure-time `ORIGAMI_SOURCE_HASH` of `shared/origami/CMakeLists.txt`, over the `.hpp` files of `include/origami/` except `include/origami/nn/` and the `.cpp`/`.hpp` files of `src/origami/` and `src/simulator/`), so **any edit to those files makes every build refuse the shipped models** until they are re-stamped or retrained. Two tests fail loudly instead of letting that ship:
+
+* `origami-tests "[shipped]"` (`Origami Boost: shipped models load in this build`): every shipped model must be readable and match this build's arch, dtype, feature schema and Origami source hash. On a source-hash mismatch it computes the model features on the feature-parity samples (`tests/data/boost/parity_reference_v4*.csv`) and compares them bit for bit with `tests/data/boost/feature_digests.txt`, the features the models were validated with. Bit-identical: the models are still valid and the test prints the re-stamp command. Changed: the models must be retrained, and the test names the changed columns.
+* `tensilelite-tests` `OrigamiBoostLibrary.ShippedModelsAcceptBuiltLibrary`: every shipped model must be accepted against the kernel library the build made (the manifest diff hipBLASLt runs at load), so a library change the model was not trained for (`RETRAIN-REQUIRED`) fails too, and the library directory's copies must be the shipped files. It reads `<HIPBLASLT_TENSILE_LIBPATH>/library` (or the installed `lib/hipblaslt/library`, or `HIPBLASLT_ORIGAMI_BOOST_TEST_LIBRARY`) and skips without a built library or a HIP device.
+
+When `"[shipped]"` says the sources changed but the features are bit-identical, re-stamp and commit the models with the source change (from the repository root):
+
+```bash
+./build/tests/origami-tests "[boost]"                   # the parity tests pass
+python3 shared/origami/tools/origami_boost_restamp.py   # HEAD stamps only; trees, features, manifest byte-identical
+./build/tests/origami-tests "[shipped]"                 # passes now
+git add shared/origami/data/nn/boost
+```
+
+`origami_boost_restamp.py` needs only the Python standard library; it computes the source hash with the CMake rule (`--source-hash` prints it) and `--check` exits 1 while a model is stale.
+
+When the features changed, or the kernel library test reports `RETRAIN-REQUIRED`, the models must be retrained. Training and export live outside this repository (OrigamiML and its ORIBOOST exporter); contact the Origami Boost owners (@ROCm/origami-reviewers; models: @aliry95amd). A retrained model replaces the file here, and the digests are recorded at the same time:
+
+```bash
+ORIGAMI_BOOST_RECORD_FEATURE_DIGESTS=$PWD/shared/origami/tests/data/boost/feature_digests.txt \
+    ./build/tests/origami-tests "[shipped]"
+```
+
 
 ### Runtime Configuration
 
@@ -526,7 +551,7 @@ cmake --build build/ --parallel
 ./build/tests/origami-tests "[nn]"
 ```
 
-When `ORIGAMI_ENABLE_NN=OFF` (the default), `[nn]` filter tests are compiled out; the boost tests (`[nn][boost]`) run in both configurations. Their models and feature-parity samples (bf16, tf32, fp8) are the small fixtures in `tests/data/boost/`.
+When `ORIGAMI_ENABLE_NN=OFF` (the default), `[nn]` filter tests are compiled out; the boost tests (`[nn][boost]`) run in both configurations. Their models and feature-parity samples (bf16, tf32, fp8) are the small fixtures in `tests/data/boost/`; `[shipped]` checks the shipped models in `data/nn/boost/` (see "Shipped Origami Boost models").
 
 ## Debug Logging
 

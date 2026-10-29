@@ -33,3 +33,10 @@ Point `ORIGAMI_NN_WEIGHTS_DIR` at a directory containing fetched weight YAML, or
 
 Tests tagged `[nn][tilewright]` that require loaded weights skip automatically when manifests
 are absent.
+
+## Origami Boost models
+
+Each model is stamped with the Origami sources it was trained against, and a build whose sources
+differ refuses it. `origami-tests "[shipped]"` fails when that would happen and says whether to
+re-stamp (`shared/origami/tools/origami_boost_restamp.py`) or retrain; see "Shipped Origami Boost
+models" in `shared/origami/README.md`. Retraining happens outside this repository (OrigamiML).

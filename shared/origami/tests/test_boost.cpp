@@ -13,6 +13,7 @@
 #include <limits>
 #include <map>
 #include <numeric>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -1237,4 +1238,205 @@ TEST_CASE("Origami Boost: tile-latency terms rebuild compute_tile_latency", "[nn
     for (int e : ex_tf32) REQUIRE(e > 0);
     REQUIRE(ex[4] == 0);  // BF16 never takes the tile-weight discount
   }
+}
+
+namespace {
+
+const fs::path kShipped     = ORIGAMI_BOOST_SHIPPED_MODELS;
+const fs::path kOrigamiRoot = ORIGAMI_SOURCE_ROOT;
+const fs::path kDigests     = kData / "feature_digests.txt";
+
+constexpr const char* kParitySamples[] = {"parity_reference_v4.csv", "parity_reference_v4_tf32.csv",
+                                          "parity_reference_v4_fp8.csv"};
+
+// "<sample>\t<column>" -> sha256 of the column over the sample's rows, as the model reads it
+// (non-finite -> 0, -0 -> +0; binary64, little-endian, row order). Column pred_cycles is Origami's
+// latency, which the re-rank multiplies by exp(yhat).
+using digests_t = std::map<std::string, std::string>;
+
+digests_t feature_digests() {
+  digests_t   out;
+  const auto& columns = features::schema().columns;
+  for (const char* sample : kParitySamples) {
+    const auto t  = read_parity(kData / sample);
+    const auto hw = hardware_from_table(t);
+    std::vector<std::vector<std::uint8_t>> bytes(columns.size() + 1);
+    std::vector<double>                    row(features::slot_names().size());
+    auto put = [](std::vector<std::uint8_t>& b, double x) {
+      if (!std::isfinite(x) || x == 0.0) x = 0.0;
+      std::uint8_t raw[sizeof(double)];
+      std::memcpy(raw, &x, sizeof raw);
+      b.insert(b.end(), raw, raw + sizeof raw);
+    };
+    for (const auto& r : t.rows) {
+      const problem_t p = problem_from_row(t, r);
+      const auto      c = config_from_record(t, r);
+      candidate_t     cand;
+      cand.config          = &c;
+      cand.origami_latency = gemm::compute_total_latency(p, hw, c);
+      cand.fields          = fields_from_row(t, r);
+      REQUIRE(features::extract(p, hw, cand, row.data()));
+      put(bytes[0], cand.origami_latency);
+      for (std::size_t j = 0; j < columns.size(); ++j)
+        put(bytes[j + 1], row[static_cast<std::size_t>(features::slot_index(columns[j]))]);
+    }
+    for (std::size_t j = 0; j <= columns.size(); ++j)
+      out[std::string(sample) + "\t" + (j == 0 ? "pred_cycles" : columns[j - 1])] =
+          sha256_hex(bytes[j].data(), bytes[j].size());
+  }
+  return out;
+}
+
+void write_digests(const fs::path& path, const digests_t& d) {
+  std::ofstream f(path);
+  f << "# Origami Boost features the shipped models (data/nn/boost) were validated with:\n"
+       "# per parity sample and column, sha256 of the column as the model reads it\n"
+       "# (test_boost.cpp, feature_digests). Recorded by origami-tests \"[shipped]\" with\n"
+       "# ORIGAMI_BOOST_RECORD_FEATURE_DIGESTS=<this file> when the models are retrained;\n"
+       "# a re-stamp leaves it unchanged.\n"
+    << "feature_schema_hash\t" << features::schema().hash << "\n";
+  for (const auto& [key, hash] : d) f << key << "\t" << hash << "\n";
+  REQUIRE(f.good());
+}
+
+bool read_digests(const fs::path& path, std::string& schema_hash, digests_t& d) {
+  std::ifstream f(path);
+  if (!f) return false;
+  for (std::string line; std::getline(f, line);) {
+    if (line.empty() || line[0] == '#') continue;
+    const auto tab = line.rfind('\t');
+    if (tab == std::string::npos) return false;
+    if (line.rfind("feature_schema_hash\t", 0) == 0) schema_hash = line.substr(tab + 1);
+    else d[line.substr(0, tab)] = line.substr(tab + 1);
+  }
+  return true;
+}
+
+}  // namespace
+
+// Every shipped model (data/nn/boost/<arch>/*.orr) must pass the checks this build of Origami
+// makes on its own: readable file, arch, dtype, feature schema and Origami source hash (the kernel
+// library is checked by tensilelite-tests' OrigamiBoostLibrary.ShippedModelsAcceptBuiltLibrary).
+// On a source-hash mismatch the parity samples' features decide what the fix is: bit-identical,
+// re-stamp; changed, retrain.
+TEST_CASE("Origami Boost: shipped models load in this build", "[nn][boost][shipped]") {
+  if (!fs::is_directory(kShipped)) SKIP("no shipped Origami Boost models at " << kShipped);
+  require_data();
+  if (const char* record = std::getenv("ORIGAMI_BOOST_RECORD_FEATURE_DIGESTS")) {
+    write_digests(record, feature_digests());
+    WARN("recorded the feature digests in " << record);
+  }
+
+  const auto build = build_identity();
+  struct stale_t {
+    std::string model, stamp;
+  };
+  std::vector<stale_t> stale;
+  std::size_t          models = 0;
+  std::vector<fs::path> arch_dirs;
+  for (const auto& e : fs::directory_iterator(kShipped))
+    if (e.is_directory()) arch_dirs.push_back(e.path());
+  std::sort(arch_dirs.begin(), arch_dirs.end());
+  for (const auto& dir : arch_dirs) {
+    const std::string arch = dir.filename().string();
+    std::set<std::string> indexed;
+    std::ifstream         index(dir / "origami_nn_index");
+    for (std::string line; std::getline(index, line);) {
+      std::istringstream ls(line.substr(0, line.find('#')));
+      std::string        stem, backend, file;
+      if (ls >> stem >> backend >> file && backend == "boost") indexed.insert(file);
+    }
+    for (const auto& file : indexed) {
+      INFO(arch << "/origami_nn_index names " << file);
+      CHECK(fs::is_regular_file(dir / file));
+    }
+    std::vector<fs::path> files;
+    for (const auto& e : fs::directory_iterator(dir))
+      if (e.path().extension() == ".orr") files.push_back(e.path());
+    std::sort(files.begin(), files.end());
+    for (const auto& path : files) {
+      ++models;
+      const std::string name = path.filename().string();
+      INFO("shipped model " << path.string());
+      CHECK(indexed.count(name) == 1);
+      status_t    st;
+      std::string detail;
+      const auto  m = ensemble_t::load_file(path.string(), st, detail);
+      if (!m) FAIL("cannot be read (" << to_string(st) << "): " << detail);
+      const std::string dtype = m->head_string("dtype");
+      CHECK(m->head_string("arch") == arch);
+      CHECK((dtype == "bf16" || dtype == "tf32" || dtype == "fp8"));
+      CHECK(name == "origami_boost_" + arch + "_" + dtype + ".orr");
+      if (m->head_string("feature_schema_hash") != build.feature_schema_hash)
+        FAIL_CHECK("trained on feature schema " << m->head_string("feature_schema_hash")
+                   << ", this build computes " << build.feature_schema_hash
+                   << " (features/gemm_boost): the model must be retrained");
+      // Everything else booster_t::create checks, the source stamp aside.
+      auto id                = build;
+      id.origami_source_hash = m->head_string("origami_source_hash");
+      const deployment_t own{arch, dtype, &m->library_manifest()};
+      CHECK(booster_t::create(m, own, id, st, detail));
+      INFO(detail);
+      CHECK(st == status_t::ok);
+      if (m->head_string("origami_source_hash") != build.origami_source_hash)
+        stale.push_back({path.string(), m->head_string("origami_source_hash")});
+    }
+  }
+  REQUIRE(models > 0);
+
+  const auto  now = feature_digests();
+  std::string recorded_schema;
+  digests_t   recorded;
+  REQUIRE(read_digests(kDigests, recorded_schema, recorded));
+  std::vector<std::string> changed;
+  for (const auto& [key, hash] : now) {
+    const auto it = recorded.find(key);
+    if (it == recorded.end() || it->second != hash) changed.push_back(key);
+  }
+  if (recorded_schema != features::schema().hash || recorded.size() != now.size())
+    changed.insert(changed.begin(), "(feature schema or column set)");
+  std::ostringstream which;
+  for (std::size_t i = 0; i < changed.size() && i < 8; ++i) {
+    auto key = changed[i];
+    std::replace(key.begin(), key.end(), '\t', ' ');
+    which << "\n      " << key;
+  }
+  if (changed.size() > 8) which << "\n      ... " << changed.size() - 8 << " more";
+
+  if (stale.empty()) {
+    // The stamps match. Digests that differ here are a platform's libm or an extractor change the
+    // feature-parity test bounds; only where they match does the re-stamp decision below hold.
+    if (!changed.empty())
+      WARN("feature digests differ from " << kDigests.string() << " on " << changed.size()
+                                          << " columns:" << which.str());
+    return;
+  }
+
+  std::ostringstream msg;
+  msg << "Origami Boost: the Origami sources changed. This build's source hash is "
+      << build.origami_source_hash << "; " << stale.size() << " shipped model(s) are stamped for "
+      << "other sources and every build of this tree would refuse them (hipBLASLt falls back to "
+      << "stock Origami ranking):";
+  for (const auto& s : stale) msg << "\n      " << s.model << " (stamped " << s.stamp << ")";
+  if (changed.empty()) {
+    msg << "\n\nThe model features on the parity samples are BIT-IDENTICAL to the ones the models "
+           "were validated with (pred_cycles and all "
+        << features::schema().columns.size() << " columns of " << std::size(kParitySamples)
+        << " samples), so the models are still valid: only their stamp is out of date. Re-stamp "
+           "them, re-run this test and commit the models with your change:\n\n"
+        << "    python3 " << (kOrigamiRoot / "tools" / "origami_boost_restamp.py").string() << "\n"
+        << "    origami-tests \"[shipped]\"\n"
+        << "    git add " << kShipped.string() << "\n\n"
+        << "(shared/origami/README.md, \"Shipped Origami Boost models\")";
+  } else {
+    msg << "\n\nThe model features CHANGED on the parity samples (" << changed.size()
+        << " column(s) differ from " << kDigests.filename().string() << "):" << which.str()
+        << "\n\nThe shipped models were trained on the old features and must be RETRAINED for "
+           "this change (OrigamiML, the Origami Boost training pipeline, outside this "
+           "repository); a re-stamp would ship a model that no longer matches its inputs. "
+           "Contact the Origami Boost owners (@ROCm/origami-reviewers; models: Ali Yazdani, "
+           "@aliry95amd) before landing the change. Docs: shared/origami/README.md, \"Shipped "
+           "Origami Boost models\", and shared/origami/data/nn/README.md.";
+  }
+  FAIL(msg.str());
 }

@@ -43,8 +43,11 @@ target_compile_definitions(
 )
 
 target_include_directories(origami-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+get_filename_component(_origami_source_root "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 target_compile_definitions(
     origami-tests PRIVATE ORIGAMI_BOOST_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data/boost"
+                          ORIGAMI_BOOST_SHIPPED_MODELS="${_origami_source_root}/data/nn/boost"
+                          ORIGAMI_SOURCE_ROOT="${_origami_source_root}"
 )
 
 target_link_libraries(origami-tests PRIVATE roc::origami Catch2::Catch2WithMain)
