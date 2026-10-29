@@ -123,6 +123,23 @@ _WGRAD_SPLIT_POLICY: dict[str, WgradSplitPolicy] = {
     ),
 }
 
+# Per-dtype overrides of _WGRAD_SPLIT_POLICY, keyed by (arch, dW dtype).
+#
+# gfx1250 fp16 (fitted 2026-10-29 on the corpus_all wgrad shapes, every cached
+# split-K binary timed at every degree 2..128 with verification): a smaller
+# fill target and a deeper minimum slice than bf16, up to degree 128. Against
+# the per-shape best degree it loses ~1.4% (geomean); the cap of 1 it replaces
+# lost 2.2x. No fp16 degree failed the 5e-2 verification on that corpus, so
+# the packed fp16 atomic's rounding is not the binding limit there.
+_WGRAD_SPLIT_POLICY_BY_DTYPE: dict[tuple[str, str], WgradSplitPolicy] = {
+    ("gfx1250", "fp16"): WgradSplitPolicy(
+        target_ctas=512,
+        grouped_target_ctas=1024,
+        min_slice_k=4096,
+        max_degree=128,
+    ),
+}
+
 # Occupancy target for the *grouped* wgrad path, in WAVES per CU.
 #
 # ``WGRAD_ASSUMED_WAVES_PER_CU`` above is really a blocks-per-CU proxy pinned at
@@ -394,7 +411,11 @@ def select_split_k_wgrad(
     if base_grid <= 0:
         return SplitKDecision(1, base_grid, max_capacity, "empty grid")
 
-    policy = _WGRAD_SPLIT_POLICY.get(arch) if dtype_d is not None else None
+    policy = (
+        _WGRAD_SPLIT_POLICY_BY_DTYPE.get((arch, dtype_d), _WGRAD_SPLIT_POLICY.get(arch))
+        if dtype_d is not None
+        else None
+    )
     if policy is not None:
         if isinstance(groups, bool) or not isinstance(groups, int) or groups < 1:
             raise ValueError(f"groups must be a positive integer (got {groups!r})")
