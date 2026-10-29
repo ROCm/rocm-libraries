@@ -56,3 +56,34 @@ def test_faster_later_step_takes_the_size(tmp_path, monkeypatch):
 
     assert analyzer.exactWinners[_SIZE][0] == 1
     assert analyzer.exactWinners[_SIZE][1] == pytest.approx(1.5)
+
+
+def test_distinct_performances_that_round_alike_still_compare(tmp_path, monkeypatch):
+    """A faster later step wins even when both scores round to the same stored value.
+
+    The stored score is rounded to two decimals, which under UseEffLike quantises to
+    steps of 0.01 * max frequency. Two kernels inside one step round alike, so a
+    comparison on the rounded value would keep whichever arrived first.
+    """
+    monkeypatch.setitem(globalParameters, "UseEffLike", True)
+    monkeypatch.setattr(LibraryLogic, "read_max_freq", lambda: 2000.0)
+    analyzer = _analyzer()
+
+    # 1 and 9 GFlops both store as 0.0 at 2000 MHz, but 9 is nine times faster.
+    analyzer.addFromCSV(_writeStep(tmp_path / "step0.csv", 1.0), 1, {0: 0})
+    analyzer.addFromCSV(_writeStep(tmp_path / "step1.csv", 9.0), 1, {0: 1})
+
+    assert analyzer.exactWinners[_SIZE][0] == 1
+    assert analyzer.exactWinners[_SIZE][1] == pytest.approx(0.0)
+
+
+def test_rounded_tie_does_not_displace_a_faster_winner(tmp_path, monkeypatch):
+    """The reverse: a slower later step must not take the size when scores round alike."""
+    monkeypatch.setitem(globalParameters, "UseEffLike", True)
+    monkeypatch.setattr(LibraryLogic, "read_max_freq", lambda: 2000.0)
+    analyzer = _analyzer()
+
+    analyzer.addFromCSV(_writeStep(tmp_path / "step0.csv", 9.0), 1, {0: 0})
+    analyzer.addFromCSV(_writeStep(tmp_path / "step1.csv", 1.0), 1, {0: 1})
+
+    assert analyzer.exactWinners[_SIZE][0] == 0
