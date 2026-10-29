@@ -226,12 +226,16 @@ for text, message in (("", "empty IR input"), ("not serialized IR", "parse faile
     else:
         raise AssertionError("invalid serialized input was accepted")
 
-try:
-    rocke_engine.lower_serialized_ir("not serialized IR", arch="gfx950", flavor="invalid")
-except RuntimeError as exc:
-    assert "unknown LLVM flavor" in str(exc)
-else:
-    raise AssertionError("invalid explicit flavor was accepted")
+for invalid_flavor in ("llvm25", "LLVM24", " llvm24 "):
+    try:
+        rocke_engine.lower_serialized_ir(
+            "not serialized IR", arch="gfx950", flavor=invalid_flavor
+        )
+    except ValueError as exc:
+        assert invalid_flavor in str(exc)
+        assert "unknown LLVM flavor" in str(exc)
+    else:
+        raise AssertionError("invalid explicit flavor was accepted")
 
 ir = serialize(IRBuilder("cleanup_explicit_probe").kernel)
 for _ in range(2):
@@ -243,6 +247,7 @@ for _ in range(2):
         raise AssertionError("serialized-IR resolver failure did not propagate")
 
 assert rocke_engine.lower_serialized_ir(ir, arch="gfx950", flavor="llvm20")
+assert rocke_engine.lower_serialized_ir(ir, arch="gfx950", flavor="llvm24")
 """
 
 

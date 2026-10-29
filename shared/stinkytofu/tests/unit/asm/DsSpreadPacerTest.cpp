@@ -324,3 +324,31 @@ TEST(DsSpreadPacer, AStageOpeningOffABatchBoundaryCountsBatchesFromItsStart) {
     for (int w = 3; w < 11; ++w) per.push_back(issueBatch(p, w, pending));
     EXPECT_EQ(per, (std::vector<int>{3, 0, 0, 0, 3, 0, 0, 0}));
 }
+
+TEST(DsSpreadPacer, AStageTheLdsRateCanNotFinishByItsEndIsReported) {
+    // 60 loads from WMMA 0 to a barrier at 60 with 17 kept free: end 43. At 6 cycles per load and 8
+    // cycles per WMMA they need 45; at 5 they need 38; with no rate nothing is checked.
+    for (int cycles : {0, 5, 6}) {
+        Loads v;
+        add(v, 60, 0, 0, 60);
+        DsSpreadPacer p;
+        p.plan(v, 128, 4, 0, 17, 0, cycles, cycles > 0 ? 8 : 0);
+        if (cycles == 6) {
+            ASSERT_EQ(p.rateLimited().size(), 1u);
+            EXPECT_EQ(p.rateLimited()[0].start, 0);
+            EXPECT_EQ(p.rateLimited()[0].end, 43);
+            EXPECT_EQ(p.rateLimited()[0].total, 60);
+            EXPECT_EQ(p.rateLimited()[0].needed, 45);
+        } else {
+            EXPECT_TRUE(p.rateLimited().empty()) << "cycles=" << cycles;
+        }
+    }
+}
+
+TEST(DsSpreadPacer, TheRateLimitedWarningNamesTheStageTheRateAndTheShortfall) {
+    DsSpreadPacer::RateLimited r{0, 43, 60, 45};
+    EXPECT_EQ(DsSpreadPacer::rateLimitedMessage(r, 6),
+              "stage [0, 43) has 60 ds_loads that need 45 WMMAs at 6 cycles per load but has 43: "
+              "the pace is too sparse for the stage, its last ds_load will land late (lower "
+              "DsReadCyclesPerLoad)");
+}

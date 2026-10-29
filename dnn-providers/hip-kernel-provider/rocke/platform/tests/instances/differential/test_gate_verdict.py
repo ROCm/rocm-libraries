@@ -782,7 +782,11 @@ class TestMainReturnsTheGateVerdict(unittest.TestCase):
                     return_value=({"kept": {"0": "new"}}, []),
                 ):
                     with mock.patch.object(sys, "argv", argv):
-                        self.assertEqual(run_diff.main(), 0)
+                        with mock.patch.dict(
+                            os.environ, {"ROCKE_LLVM_FLAVOR": "llvm24"}
+                        ):
+                            self.assertEqual(run_diff.main(), 0)
+                            self.assertEqual(os.environ["ROCKE_LLVM_FLAVOR"], "llvm24")
             recorded = run_diff.GoldenStore.load(golden).section(run_diff.LL, "llvm20")
             self.assertEqual(recorded, {"kept": {"0": "new"}, "left_out": {"0": "x"}})
 
@@ -889,7 +893,7 @@ class TestConfigEnumeration(unittest.TestCase):
     def test_supported_catalog_census(self):
         # This is a coverage contract, not a traversal requirement: a deliberate
         # catalog change updates the census separately from the driver behavior.
-        self.assertEqual(self.config_count, 111)
+        self.assertEqual(self.config_count, 113)
 
     def test_both_drivers_visit_all_configs_and_stop_at_end(self):
         for driver, status in (("builders", "GREEN"), ("artifacts", "IDENTICAL")):
@@ -901,16 +905,18 @@ class TestConfigEnumeration(unittest.TestCase):
 
     def test_new_feature_probes_follow_the_existing_scale_configs(self):
         self.assertEqual(
-            [build.__name__ for build, arch in self.emitter.CONFIGS[-5:]],
+            [build.__name__ for build, arch in self.emitter.CONFIGS[-7:]],
             [
                 "build_data_prefetch",
                 "build_cluster",
                 "build_cluster_dims",
                 "build_multicast",
                 "build_tdm",
+                "build_buffer_store_cachepolicy",
+                "build_buffer_load_scalar",
             ],
         )
-        self.assertTrue(all(arch == "gfx1250" for _, arch in self.emitter.CONFIGS[-5:]))
+        self.assertTrue(all(arch == "gfx1250" for _, arch in self.emitter.CONFIGS[-7:]))
 
     def test_both_drivers_detect_drift_beyond_default_cap(self):
         late = run_diff.MAX_CFG

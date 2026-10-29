@@ -46,7 +46,6 @@ from .runtime_coexistence import (
     _mapped_lib_paths,
 )
 
-
 # Status codes.
 AMD_COMGR_STATUS_SUCCESS = 0
 
@@ -446,17 +445,20 @@ def _assert_ir_flavor_matches_lib(ir_text: str) -> None:
     not change the compiler that will consume it. Unknown compiler evidence
     is an error; with a known compiler, unrecognised IR layouts are left to COMGR.
     """
-    from ..core.lower_llvm import (
+    from ..core.llvm_profile import (
         _datalayout_kind_for_flavor,
         _datalayout_kind_from_ir,
         _flavor_for_llvm,
     )
 
     info = _require_compiler_info()
+    try:
+        lib_flavor = _flavor_for_llvm(info.llvm_version[0])
+    except ValueError as exc:
+        raise ComgrError(f"{exc}: {info.describe()}") from exc
     ir_kind = _datalayout_kind_from_ir(ir_text)
     if ir_kind is None:
         return
-    lib_flavor = _flavor_for_llvm(info.llvm_version[0])
     lib_kind = _datalayout_kind_for_flavor(lib_flavor)
     if lib_kind is None or lib_kind is ir_kind:
         return
