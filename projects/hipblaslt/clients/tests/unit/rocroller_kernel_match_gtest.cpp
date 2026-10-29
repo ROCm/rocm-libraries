@@ -1,32 +1,9 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Host-only unit tests for rocRollerKernelNameMatchesTile, the name-vs-tile half
-// of matchesRocRollerSelectedKernel (tensile_host.cpp). That function builds the
-// type/transpose prefix from a RocblasltContractionProblem and then calls
-// straight through to the predicate under test here, so these cases exercise the
-// shipping code rather than a copy of it. See README.md in this directory for
-// the dual-target build and the HostUnit/smoke_ naming.
-//
-// The predicate decides which checked-in rocRoller kernel an off-build may
-// substitute for a ranked tile, so a false positive silently runs the wrong
-// kernel. Three distinctions are easy to lose and each has its own cases below:
-//
-//   StreamK   "_WGT_16x16x128_UR_" is a substring of both the plain and the
-//             StreamK name of the same tile, so the tile token alone cannot tell
-//             them apart. "_SK" immediately precedes "_WGT_" on a StreamK name.
-//   Swizzle   The prefix match stops at "_Float_" and the tile match starts at
-//             "_WGT_", so the scale tokens between them are never inspected
-//             unless something looks for them. A pre-swizzled kernel carries
-//             PSTA_/PTA_/PSTB_/PTB_ there.
-//   WGM       A StreamK name never carries "_WGM_" even when the ranked tile has
-//             workgroupMapping set, because the generator forces
-//             workgroupMappingDim = -1 for every StreamK kernel.
-//
-// The header is included by relative path, following secure_env_gtest.cpp and
-// arch_revision_gtest.cpp: putting the library's internal src/include on this
-// target's include path shadows the clients' own utility.hpp (see the note in
-// ../src/CMakeLists.txt). The header is dependency-free for the same reason.
+// Host-only tests of captured kernel names against ranked tiles.
+// The relative include avoids shadowing the clients' utility.hpp with the
+// library's internal header of the same name.
 
 #include "../../../library/src/amd_detail/rocblaslt/src/include/rocroller_kernel_match.hpp"
 

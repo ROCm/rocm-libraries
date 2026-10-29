@@ -20,12 +20,7 @@ struct RocRollerSelectedTile
 };
 
 // Does a checked-in rocRoller kernel name describe exactly this ranked tile?
-//
-// `prefix` is the type/transpose prefix the caller already built, up to and
-// including the trailing "_Float_"; everything this function inspects lives
-// after it. Split out of matchesRocRollerSelectedKernel (tensile_host.cpp) so
-// it can be unit-tested without a RocblasltContractionProblem or a GPU; that
-// function builds the prefix and calls straight through to here.
+// `prefix` runs through the trailing "_Float_". The caller builds it.
 inline bool rocRollerKernelNameMatchesTile(const std::string&           kernel,
                                            const std::string&           prefix,
                                            const RocRollerSelectedTile& tile)
@@ -33,36 +28,24 @@ inline bool rocRollerKernelNameMatchesTile(const std::string&           kernel,
     if(kernel.find(prefix) == std::string::npos)
         return false;
 
-    // The prefix match stops at _Float_ and the tile match starts at WGT_, so the
-    // scale tokens in between are never inspected. A pre-swizzled kernel carries
-    // PSTA_/PTA_/PSTB_/PTB_ there and would otherwise match a non-pre-swizzled
-    // problem on tile shape alone. None are checked in, so reject them; if
-    // pre-swizzled rocRoller kernels are ever added this has to become a positive
-    // match on the problem's own scale format rather than a blanket reject.
-    // useRocRoller() is not the guard here: it turns a pre-swizzled scale layout
-    // away only for FP4 x FP4 and E4M3 x E4M3, so every other pre-swizzled pair
-    // still reaches this function.
+    // Captured kernels use natural scales. Preswizzled support would also need
+    // to match these tokens against the problem's scale format.
     if(kernel.find("_PSTA_") != std::string::npos || kernel.find("_PTA_") != std::string::npos
        || kernel.find("_PSTB_") != std::string::npos || kernel.find("_PTB_") != std::string::npos)
         return false;
 
-    // The leading '_' anchors the tile token: gemm.cpp always emits '_' before
-    // WGT_, from either _Float_ or the last scale token.
+    // Include delimiters so a tile extent cannot match part of a larger number.
     const std::string wgt = "_WGT_" + std::to_string(tile.m) + "x" + std::to_string(tile.n) + "x"
                             + std::to_string(tile.k) + "_UR_";
     if(kernel.find(wgt) == std::string::npos)
         return false;
 
-    // gemm.cpp:142-147 emits "SK_" immediately before "WGT_". Without this check
-    // "_WGT_16x16x128_UR_" is a substring of both the plain and the StreamK kernel
-    // of the same tile, and either would match either tile.
+    // genKernelName places SK immediately before the workgroup tile token.
     const bool hasSk = kernel.find("_SK" + wgt) != std::string::npos;
     if(hasSk != tile.streamK)
         return false;
 
-    // parameter_selection.cpp:249-254 forces workgroupMappingDim = -1 for every
-    // StreamK kernel, so an SK name never carries _WGM_ even when the ranked tile
-    // has workgroupMapping == true.
+    // StreamK disables workgroup mapping even when the ranked tile requests it.
     const bool hasWgm = kernel.find("_WGM_") != std::string::npos;
     return hasWgm == (tile.workgroupMapping && !tile.streamK);
 }
