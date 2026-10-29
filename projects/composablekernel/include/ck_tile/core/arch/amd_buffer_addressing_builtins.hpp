@@ -3098,15 +3098,9 @@ __device__ void amd_async_global_load_to_lds(CK_TILE_LDS_ADDR T* smem_ptr,
 #endif
 }
 
-// Issues 8 global_store_async_from_lds_b128 (16 bytes per lane each, LDS -> global without going
-// through VGPRs) and then waits on XCNT. The compiler does not track XCNT for these stores, so it
-// would reuse an address VGPR right after the store is issued, before the hardware has read it;
-// issuing the stores and the wait in one asm statement keeps all 16 address VGPRs intact until
-// they are consumed. Data completion is tracked by ASYNCcnt (s_wait_asynccnt); the caller must
-// wait on DScnt for its own LDS writes before calling. There is no bounds check: every active
-// lane must address valid global memory.
-//   global_offset: byte offset added to the wave-uniform global_base
-//   lds_addr:      LDS byte address
+// The compiler does not insert s_wait_xcnt for these stores, so the wait is in the same asm to
+// keep the address VGPRs live. No bounds check; the caller waits on DScnt before and on ASYNCcnt
+// after.
 CK_TILE_DEVICE void amd_async_global_store_from_lds_b128_x8(const void* global_base,
                                                             const uint32_t (&global_offset)[8],
                                                             const uint32_t (&lds_addr)[8])
@@ -3122,11 +3116,23 @@ CK_TILE_DEVICE void amd_async_global_store_from_lds_b128_x8(const void* global_b
                  "global_store_async_from_lds_b128 %7, %15, %16\n\t"
                  "s_wait_xcnt 0x0"
                  :
-                 : "v"(global_offset[0]), "v"(global_offset[1]), "v"(global_offset[2]),
-                   "v"(global_offset[3]), "v"(global_offset[4]), "v"(global_offset[5]),
-                   "v"(global_offset[6]), "v"(global_offset[7]), "v"(lds_addr[0]),
-                   "v"(lds_addr[1]), "v"(lds_addr[2]), "v"(lds_addr[3]), "v"(lds_addr[4]),
-                   "v"(lds_addr[5]), "v"(lds_addr[6]), "v"(lds_addr[7]), "s"(global_base)
+                 : "v"(global_offset[0]),
+                   "v"(global_offset[1]),
+                   "v"(global_offset[2]),
+                   "v"(global_offset[3]),
+                   "v"(global_offset[4]),
+                   "v"(global_offset[5]),
+                   "v"(global_offset[6]),
+                   "v"(global_offset[7]),
+                   "v"(lds_addr[0]),
+                   "v"(lds_addr[1]),
+                   "v"(lds_addr[2]),
+                   "v"(lds_addr[3]),
+                   "v"(lds_addr[4]),
+                   "v"(lds_addr[5]),
+                   "v"(lds_addr[6]),
+                   "v"(lds_addr[7]),
+                   "s"(global_base)
                  : "memory");
 #else
     ignore = global_base;

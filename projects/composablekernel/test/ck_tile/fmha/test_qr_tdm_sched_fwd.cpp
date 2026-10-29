@@ -678,8 +678,13 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
         batch, c.kv_heads, sequences.physical_k_rows, c.dimension, c.bhsd, sequences.group);
     const Layout v_layout(
         batch, c.kv_heads, sequences.physical_k_rows, value_dimension, c.bhsd, sequences.group);
-    const Layout o_layout(
-        batch, c.query_heads, sequences.physical_q_rows, value_dimension, c.bhsd, sequences.group);
+    // 128 spare O rows per head/batch catch stores past seqlen_q.
+    const Layout o_layout(batch,
+                          c.query_heads,
+                          sequences.physical_q_rows + 128,
+                          value_dimension,
+                          c.bhsd,
+                          sequences.group);
     const Layout lse_layout(
         batch, c.query_heads, sequences.physical_q_rows, 1, true, sequences.group);
     const auto q       = MakeInput(q_layout,
@@ -992,6 +997,26 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
     EXPECT_EQ(metrics.checked_lse_rows, lse ? logical_rows : 0);
     EXPECT_EQ(metrics.scanned_lse_rows, lse ? logical_rows : 0);
     EXPECT_TRUE(metrics.passed);
+
+    // O outside the logical rows must keep its NaN fill.
+    std::vector<bool> logical_o(o_float.size(), false);
+    for(int sequence = 0; sequence < batch; ++sequence)
+    {
+        const auto output_offset =
+            o_layout.SequenceOffset(sequence, sequences.q_starts[sequence], sequences.group);
+        for(int head = 0; head < c.query_heads; ++head)
+            for(int row = 0; row < sequences.q_lengths[sequence]; ++row)
+                for(int dim = 0; dim < value_dimension; ++dim)
+                    logical_o[output_offset + head * o_layout.head_stride +
+                              row * o_layout.row_stride + dim] = true;
+    }
+    std::size_t stray_o = 0;
+    for(std::size_t i = 0; i < o_float.size(); ++i)
+    {
+        if(!logical_o[i] && !std::isnan(o_float[i]))
+            ++stray_o;
+    }
+    EXPECT_EQ(stray_o, 0u);
 }
 
 INSTANTIATE_TEST_SUITE_P(

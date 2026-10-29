@@ -113,7 +113,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
     static constexpr bool kUsesTdmAffineDramPath       = true;
     static constexpr bool kUsesFixedSegmentedLdsArena  = true;
     static constexpr index_t kBlockPerCu               = Policy::kBlockPerCu;
-    // Q fits in the K1 slot: issue Q, K0 and V0 together; K1 overwrites Q afterwards.
+    // Q is staged in the K1 slot so Q, K0 and V0 load together.
     static constexpr bool kOverlapQKVPrologue =
         Geometry::kHeadDimQK == 128 && Geometry::kN == 128 &&
         Policy::template GetSmemSizeQ<Problem>() <= Policy::kKFootprintBytes;
@@ -422,7 +422,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
 
         static_assert(1 <= k1_loops);
 
-        // Q tile in LDS (K1 slot when overlapped with the K0/V0 loads)
+        // Q tile in LDS
         auto q_dram_window = make_tile_window(
             q_dram_block_window_tmp, Policy::template MakeQDramTileDistribution<Problem>());
 
@@ -452,8 +452,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
             static_assert(Policy::template GetSmemSizeQ<Problem>() <=
                               Policy::kLdsOffsetV0 - Policy::kLdsOffsetK1,
                           "Q in the K1 slot overlaps the V0 buffer");
-            // Q, K0 and V0 in flight together; wait for all three so no TDM completion
-            // order is assumed.
+            // No TDM completion order is assumed.
             load_tile_tdm(tdm_config_q, q_lds_store_window, q_dram_window);
             load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
             load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
@@ -810,7 +809,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                                                       std::is_same_v<
                                                           FmhaMask,
                                                           SimplifiedGenericAttentionMask<true>>)
-                                        return mask.IsOutOfBoundUnsignedNoFold(row, col);
+                                        return mask.IsOutOfBoundUnsigned(row, col);
                                     else
                                         return mask.IsOutOfBound(row, col);
                                 });

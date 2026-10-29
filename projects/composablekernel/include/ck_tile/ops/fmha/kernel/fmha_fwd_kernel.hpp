@@ -261,10 +261,11 @@ struct FmhaFwdKernel
     static constexpr bool kUseTrLoad    = detail::is_using_trload_v<FmhaPipeline>;
     static constexpr bool kIsTdmSchedD128 =
         kPipelineName == "qr_tdm_sched" && FmhaPipeline::BlockFmhaShape::kQKHeaddim == 128;
-    // Sched D128 stages O in padded LDS (the K0 slot) and writes it back with async LDS->global
-    // stores instead of the epilogue's per-lane buffer stores.
     static constexpr bool kUseAsyncLdsOStore =
         kIsTdmSchedD128 && kUsesFixedSegmentedLdsArena && sizeof(ODataType) == 2;
+    static constexpr index_t kAsyncOStoreBytes          = 16;
+    static constexpr index_t kAsyncOStoreVec            = kAsyncOStoreBytes / sizeof(ODataType);
+    static constexpr uint64_t kAsyncOTileSpanLimitBytes = uint64_t{1} << 32;
     // Match qr_tdm plus the validated sched D64/D128 variants. Sched D192 keeps
     // the existing head-major remap. GetTileIndex additionally requires batch
     // BHSD, square causal attention, one V tile, and no dropout for this order.
@@ -1541,25 +1542,27 @@ struct FmhaFwdKernel
                 if(kargs.sink_ptr != nullptr)
                     return false;
             }
-            // The async O store writes whole kN1-wide rows without a column bounds check, as 16-byte
-            // chunks at a 32-bit offset from the tile's first row.
+            // The codegen constraint repeats these checks so the dispatcher falls back to qr_tdm.
             if constexpr(kUseAsyncLdsOStore)
             {
                 if(kargs.hdim_v != FmhaPipeline::kN1)
                     return false;
-                constexpr index_t kVec = 16 / sizeof(ODataType);
-                if(reinterpret_cast<uintptr_t>(kargs.o_ptr) % 16 != 0 || kargs.stride_o < 0 ||
-                   kargs.stride_o % kVec != 0 || kargs.nhead_stride_o % kVec != 0)
+                if(reinterpret_cast<uintptr_t>(kargs.o_ptr) % kAsyncOStoreBytes != 0 ||
+                   kargs.stride_o < 0 || kargs.stride_o % kAsyncOStoreVec != 0 ||
+                   kargs.nhead_stride_o % kAsyncOStoreVec != 0)
+                {
                     return false;
+                }
                 if constexpr(!kIsGroupMode)
                 {
-                    if(kargs.batch_stride_o % kVec != 0)
+                    if(kargs.batch_stride_o % kAsyncOStoreVec != 0)
                         return false;
                 }
-                const uint64_t tile_span_bytes =
-                    (FmhaPipeline::kM0 - 1) * static_cast<uint64_t>(kargs.stride_o) * sizeof(ODataType) +
-                    FmhaPipeline::kN1 * sizeof(ODataType);
-                if(tile_span_bytes > (uint64_t{1} << 32))
+                const uint64_t tile_span_bytes = (FmhaPipeline::kM0 - 1) *
+                                                     static_cast<uint64_t>(kargs.stride_o) *
+                                                     sizeof(ODataType) +
+                                                 FmhaPipeline::kN1 * sizeof(ODataType);
+                if(tile_span_bytes > kAsyncOTileSpanLimitBytes)
                     return false;
             }
         }
@@ -1977,10 +1980,8 @@ struct FmhaFwdKernel
         }
     }
 
-    // Stages the O tile in padded LDS, then each wave copies the rows it staged to global memory
-    // with global_store_async_from_lds_b128, so the copy-out needs no cross-wave barrier. The async
-    // store has no bounds check: rows at or past num_valid_rows are redirected to the wave's last
-    // valid row, which rewrites bytes that row already receives.
+    // Each wave copies only the rows it staged, so no barrier follows the staging. The async store
+    // has no bounds check: rows past num_valid_rows are clamped to the wave's last valid row.
     template <typename OAccTile>
     CK_TILE_DEVICE static void StoreOTileAsyncFromLds(void* o_lds,
                                                       ODataType* o_tile_ptr,
@@ -1988,11 +1989,11 @@ struct FmhaFwdKernel
                                                       index_t num_valid_rows,
                                                       const OAccTile& o_acc_tile)
     {
-        constexpr index_t kM   = FmhaPipeline::kM0;
-        constexpr index_t kN   = FmhaPipeline::kN1;
-        constexpr index_t kVec = 16 / sizeof(ODataType);
-        // A 16-byte pad per row keeps the lanes of one ds_store_b128 on distinct banks.
-        constexpr index_t kLdsRowElems = kN + kVec;
+        constexpr index_t kM              = FmhaPipeline::kM0;
+        constexpr index_t kN              = FmhaPipeline::kN1;
+        constexpr index_t kVec            = kAsyncOStoreVec;
+        constexpr index_t kLdsRowElems    = kN + kVec;
+        constexpr index_t kStoresPerBurst = 8;
         static_assert(kM * kLdsRowElems * sizeof(ODataType) <=
                           FmhaPipeline::Policy::kKFootprintBytes,
                       "O staging must fit in the K0 slot");
@@ -2003,16 +2004,17 @@ struct FmhaFwdKernel
         constexpr index_t kMIter        = OEncoding::hs_lengthss_[number<0>{}][number<0>{}];
         constexpr index_t kMWarp        = OEncoding::hs_lengthss_[number<0>{}][number<1>{}];
         constexpr index_t kWarpM        = kM / (kMIter * kMWarp);
-        constexpr index_t kLanes        = kBlockSize / kMWarp;
+        constexpr index_t kLanes        = FmhaPipeline::Geometry::kWaveSize;
         constexpr index_t kChunks       = kN / kVec;
         constexpr index_t kRowsPerStore = kLanes / kChunks;
         static_assert(kMWarp == OBlockWarps::at(number<0>{}) && OBlockWarps::at(number<1>{}) == 1 &&
                           OEncoding::ps_to_rhss_major_[number<0>{}][number<0>{}] == 1 &&
                           OEncoding::ps_to_rhss_minor_[number<0>{}][number<0>{}] == 1,
                       "the wave index must select the M warp of the O tile");
+        static_assert(kMIter * kMWarp * kWarpM == kM && kMWarp * kLanes == kBlockSize);
         static_assert(kLanes % kChunks == 0 && kWarpM % kRowsPerStore == 0);
 
-        // K0 is reused: every wave's TDM writes and LDS reads of it must be done.
+        // K0 is reused: wait for every wave's TDM writes and LDS reads of it.
         s_wait_tensorcnt<0>();
         block_sync_lds<0>();
 
@@ -2040,24 +2042,27 @@ struct FmhaFwdKernel
         if(last_row >= 0)
         {
             constexpr index_t kStores = kMIter * kWarpM / kRowsPerStore;
-            static_assert(kStores % 8 == 0);
+            static_assert(kStores % kStoresPerBurst == 0);
             const index_t lane_row  = i_wave * kWarpM + i_lane / kChunks;
             const index_t col       = i_lane % kChunks * kVec;
             const uint32_t lds_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(o_lds));
-            static_for<0, kStores / 8, 1>{}([&](auto i_group) {
-                uint32_t global_offset[8];
-                uint32_t lds_addr[8];
-                static_for<0, 8, 1>{}([&](auto i_store) {
+            static_for<0, kStores / kStoresPerBurst, 1>{}([&](auto i_group) {
+                uint32_t global_offset[kStoresPerBurst];
+                uint32_t lds_addr[kStoresPerBurst];
+                static_for<0, kStoresPerBurst, 1>{}([&](auto i_store) {
                     constexpr index_t wave_row =
-                        (decltype(i_group)::value * 8 + decltype(i_store)::value) * kRowsPerStore;
+                        (decltype(i_group)::value * kStoresPerBurst + decltype(i_store)::value) *
+                        kRowsPerStore;
                     constexpr index_t tile_row =
                         wave_row / kWarpM * kMWarp * kWarpM + wave_row % kWarpM;
                     const index_t row = min(tile_row + lane_row, last_row);
                     global_offset[i_store] =
-                        static_cast<uint32_t>(row) * static_cast<uint32_t>(stride_o * sizeof(ODataType)) +
+                        static_cast<uint32_t>(row) *
+                            static_cast<uint32_t>(stride_o * sizeof(ODataType)) +
                         static_cast<uint32_t>(col * sizeof(ODataType));
                     lds_addr[i_store] =
-                        lds_base + static_cast<uint32_t>((row * kLdsRowElems + col) * sizeof(ODataType));
+                        lds_base +
+                        static_cast<uint32_t>((row * kLdsRowElems + col) * sizeof(ODataType));
                 });
                 amd_async_global_store_from_lds_b128_x8(o_tile_ptr, global_offset, lds_addr);
             });
@@ -3717,7 +3722,7 @@ struct FmhaFwdKernel
                     {
                         using Policy = typename FmhaPipeline::Policy;
                         static_assert(FmhaPipeline::GetSmemSize() == Policy::GetLdsArenaSize());
-                        __shared__ char smem_arena[Policy::GetLdsArenaSize()];
+                        alignas(16) __shared__ char smem_arena[Policy::GetLdsArenaSize()];
                         o_lds_staging = smem_arena + Policy::GetLdsOffsetK0();
                         return invoke_fmha_pipeline(q_dram_window,
                                                     k_dram_window,
@@ -3818,12 +3823,14 @@ struct FmhaFwdKernel
                 {i_m0, i_n1});
 
             if constexpr(kUseAsyncLdsOStore && PrefillCase)
+            {
                 StoreOTileAsyncFromLds(o_lds_staging,
                                        o_ptr + static_cast<long_index_t>(i_m0) * kargs.stride_o +
                                            i_n1,
                                        kargs.stride_o,
                                        kargs.seqlen_q - i_m0,
                                        o_acc_tile);
+            }
             else if constexpr(detail::epilogue_uses_smem_v<EpiloguePipeline>)
             {
                 // The pipeline is done with its LDS; pipelines that declare
