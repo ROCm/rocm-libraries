@@ -48,14 +48,16 @@ Generated `qr_tdm_sched` requires a null runtime `sink_ptr`; a finite virtual-si
 logit uses the existing `qr_tdm` fallback. This runtime pointer is independent
 of the compile-time sink-token flag.
 
-The generated API tries matching scheduled traits first. D64/V64 uses a
-128-by-64 Q/K sequence tile, matching the existing `qr_tdm` M128 geometry and
-compiler minimum-waves-per-EU hint of three. The launch API retains the
-historical `MinBlockPerCu` name; this hint does not establish achieved workgroup
-residency. Aligned batch K lengths use unpadded
+The generated API tries matching scheduled traits first. D64/V64 tries a
+128-by-128 Q/K sequence tile for BF16 batch attention with contiguous BSHD
+Q/K/V/O, square sequence lengths divisible by 256, no logical sequence-length
+pointers, and dense or full causal masks. This N128 variant uses WMMA-first
+placement. Other D64/V64 configurations retain the 128-by-64 tile and read-first
+placement. Both D64 variants use a compiler minimum-waves-per-EU hint of three.
+The launch API retains the historical `MinBlockPerCu` name; this hint does not
+establish achieved workgroup residency. Aligned batch K lengths use unpadded
 sequence traits; tails and group mode use padded traits. D64 uses compiler-scheduled
-softmax maximum chains and places each next-stage LDS read before the current
-WMMA, preserving read counts and stage-tail waits. Generated D64/D128/D192
+softmax maximum chains, preserving read counts and stage-tail waits. Generated D64/D128/D192
 scheduled sources enable expert scheduling mode. D128 uses a
 128-by-128 Q/K sequence tile. D192 tries a 128-by-128 tile when average K length
 is at least 512, the Q grid fits within the CU count, logical length pointers
@@ -65,7 +67,8 @@ count; its square-causal check compares packed Q/K totals. When
 `max_seqlen_q` is below 128, the existing fallback candidates are used.
 
 WG indexing follows the existing shared kernel rules. For batch BHSD square
-causal attention with one V tile and no dropout, sched D64/D128 visit the longest
+causal attention, including finite left windows with a causal mask, one V tile
+and no dropout, sched D64/D128 visit the longest
 Q tile across heads within each batch first. Sched D192 keeps the existing
 head-major remap; group mode does not enter this batch-local branch. The XCC
 mode 5/tm5r experiment remains disabled unless `CK_TILE_FMHA_PAIRED_XCC_ORDER`
@@ -95,9 +98,9 @@ from those values. A specific tuning can override them without duplicating the
 pipeline. The LDS arena packs K0, K1, V0, and V1 in order. Q uses the K arena
 during the prologue before the synchronization that permits K reuse.
 
-The default tile schedule is `FmhaTdmSchedSequentialTileSchedule`. D64 uses
+The default tile schedule is `FmhaTdmSchedSequentialTileSchedule`. D64 N64 uses
 `FmhaTdmSchedReadFirstPlacement`, which issues each row's reads and fences before
-its WMMA. D128/D192 use `FmhaTdmSchedWmmaFirstPlacement`, with a leading read on
+its WMMA. D64 N128 and D128/D192 use `FmhaTdmSchedWmmaFirstPlacement`, with a leading read on
 selected D128 stages. Each row divides its reads into two groups around a fence.
 BF16 D192/N128 uses `FmhaTdmSchedExplicitRowReadSchedule` with a concrete read
 placement and streams output rescale through the first PV stage. The other
