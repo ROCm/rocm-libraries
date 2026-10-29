@@ -25,6 +25,7 @@
 #pragma once
 
 #include "rocsparse_handle.hpp"
+#define deprecated_rocsparse_sddmm_alg_dense static_cast<rocsparse_sddmm_alg>(1)
 
 namespace rocsparse
 {
