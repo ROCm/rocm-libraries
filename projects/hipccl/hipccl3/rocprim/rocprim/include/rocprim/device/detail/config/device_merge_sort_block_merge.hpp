@@ -49,8 +49,8 @@ constexpr auto merge_sort_block_merge_config_picker()
 {
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -60,8 +60,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -71,8 +71,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -82,8 +82,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -93,8 +93,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -114,8 +114,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -125,8 +125,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -136,8 +136,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -147,8 +147,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -158,8 +158,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -179,7 +179,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -189,7 +190,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -199,7 +201,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -209,7 +212,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -219,7 +223,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -239,8 +244,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -250,8 +255,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -261,8 +266,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -272,8 +277,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -283,8 +288,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -304,8 +309,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -315,8 +320,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -326,8 +331,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -337,8 +342,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -348,8 +353,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -369,8 +374,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -380,8 +385,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -391,8 +396,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -402,8 +407,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -413,8 +418,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -434,8 +439,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -445,8 +450,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -456,8 +461,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -467,8 +472,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -478,8 +483,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -499,7 +504,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -509,7 +515,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -519,7 +526,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -529,7 +537,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -539,7 +548,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -571,8 +581,8 @@ constexpr auto merge_sort_block_merge_config_picker()
 {
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -582,8 +592,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -593,8 +603,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -604,8 +614,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -615,8 +625,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -636,8 +646,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -647,8 +657,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -658,8 +668,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -669,8 +679,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -680,8 +690,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -701,7 +711,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 1}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -711,7 +722,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -721,7 +733,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -731,7 +744,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -741,7 +755,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -761,8 +776,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -772,8 +787,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -783,8 +798,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -794,8 +809,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -805,8 +820,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -826,8 +841,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -837,8 +852,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -848,8 +863,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -859,8 +874,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -870,8 +885,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -891,8 +906,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -902,8 +917,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -913,8 +928,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -924,8 +939,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -935,8 +950,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -956,8 +971,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -967,8 +982,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -978,8 +993,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -989,8 +1004,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1000,8 +1015,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1021,7 +1036,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1031,7 +1047,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1041,7 +1058,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1051,7 +1069,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1061,7 +1080,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1092,8 +1112,8 @@ constexpr auto merge_sort_block_merge_config_picker()
 {
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1103,8 +1123,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1114,8 +1134,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1125,8 +1145,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1136,8 +1156,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1157,8 +1177,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1168,8 +1188,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1179,8 +1199,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1190,8 +1210,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1201,8 +1221,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1222,7 +1242,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1232,7 +1253,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1242,7 +1264,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1252,7 +1275,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1262,7 +1286,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1282,8 +1307,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1293,8 +1318,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1304,8 +1329,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1315,8 +1340,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1326,8 +1351,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1347,8 +1372,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1358,8 +1383,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1369,8 +1394,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1380,8 +1405,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1391,8 +1416,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1412,8 +1437,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1423,8 +1448,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1434,8 +1459,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1445,8 +1470,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1456,8 +1481,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1477,8 +1502,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1488,8 +1513,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1499,8 +1524,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1510,8 +1535,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1521,8 +1546,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1542,7 +1567,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1552,7 +1578,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1562,7 +1589,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1572,7 +1600,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1582,7 +1611,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1614,8 +1644,8 @@ constexpr auto merge_sort_block_merge_config_picker()
 {
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1625,8 +1655,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1636,8 +1666,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1647,8 +1677,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1658,8 +1688,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1679,8 +1709,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1690,8 +1720,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1701,8 +1731,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1712,8 +1742,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1723,8 +1753,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1744,7 +1774,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1754,7 +1785,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1764,7 +1796,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1774,7 +1807,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1784,7 +1818,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1804,8 +1839,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1815,8 +1850,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1826,8 +1861,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1837,8 +1872,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1848,8 +1883,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1869,8 +1904,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1880,8 +1915,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1891,8 +1926,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1902,8 +1937,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1913,8 +1948,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1934,8 +1969,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1945,8 +1980,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1956,8 +1991,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1967,8 +2002,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1978,8 +2013,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -1999,8 +2034,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2010,8 +2045,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2021,8 +2056,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2032,8 +2067,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2043,8 +2078,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2064,7 +2099,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2074,7 +2110,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2084,7 +2121,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2094,7 +2132,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2104,7 +2143,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2136,8 +2176,8 @@ constexpr auto merge_sort_block_merge_config_picker()
 {
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2147,8 +2187,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2158,8 +2198,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2169,8 +2209,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2180,8 +2220,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2201,8 +2241,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2212,8 +2252,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2223,8 +2263,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2234,8 +2274,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2245,8 +2285,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2266,7 +2306,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2276,7 +2317,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2286,7 +2328,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2296,7 +2339,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2306,7 +2350,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2326,8 +2371,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2337,8 +2382,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2348,8 +2393,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2359,8 +2404,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2370,8 +2415,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2391,8 +2436,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2402,8 +2447,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2413,8 +2458,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2424,8 +2469,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2435,8 +2480,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2456,8 +2501,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2467,8 +2512,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2478,8 +2523,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2489,8 +2534,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2500,8 +2545,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2521,8 +2566,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2532,8 +2577,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2543,8 +2588,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2554,8 +2599,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2565,8 +2610,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2586,7 +2631,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2596,7 +2642,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2606,7 +2653,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2616,7 +2664,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2626,7 +2675,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2658,8 +2708,8 @@ constexpr auto merge_sort_block_merge_config_picker()
 {
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2669,8 +2719,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2680,8 +2730,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2691,8 +2741,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2702,8 +2752,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2723,8 +2773,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2734,8 +2784,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2745,8 +2795,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2756,8 +2806,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2767,8 +2817,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2788,7 +2838,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2798,7 +2849,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2808,7 +2860,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2818,7 +2871,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2828,7 +2882,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2848,8 +2903,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2859,8 +2914,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2870,8 +2925,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2881,8 +2936,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2892,8 +2947,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2913,8 +2968,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2924,8 +2979,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2935,8 +2990,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2946,8 +3001,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2957,8 +3012,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2978,8 +3033,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -2989,8 +3044,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3000,8 +3055,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3011,8 +3066,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3022,8 +3077,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3043,8 +3098,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3054,8 +3109,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3065,8 +3120,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3076,8 +3131,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3087,8 +3142,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3108,7 +3163,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3118,7 +3174,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3128,7 +3185,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3138,7 +3196,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3148,7 +3207,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3180,8 +3240,8 @@ constexpr auto merge_sort_block_merge_config_picker()
 {
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3191,8 +3251,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3202,8 +3262,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3213,8 +3273,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3224,8 +3284,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3245,8 +3305,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3256,8 +3316,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3267,8 +3327,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3278,8 +3338,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3289,8 +3349,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3310,7 +3370,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3320,7 +3381,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3330,7 +3392,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3340,7 +3403,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3350,7 +3414,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3370,8 +3435,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3381,8 +3446,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3392,8 +3457,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3403,8 +3468,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3414,8 +3479,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3435,8 +3500,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 1024, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3446,8 +3511,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3457,8 +3522,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3468,8 +3533,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3479,8 +3544,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3500,8 +3565,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3511,8 +3576,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3522,8 +3587,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3533,8 +3598,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3544,8 +3609,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3565,8 +3630,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3576,8 +3641,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3587,8 +3652,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3598,8 +3663,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3609,8 +3674,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3630,7 +3695,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3640,7 +3706,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3650,7 +3717,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3660,7 +3728,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3670,7 +3739,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': '(1<<17)+70000', 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, (1 << 17) + 70000},
@@ -3702,8 +3772,8 @@ constexpr auto merge_sort_block_merge_config_picker()
 {
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3713,8 +3783,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3724,8 +3794,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3735,8 +3805,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3746,8 +3816,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3767,8 +3837,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3778,8 +3848,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3789,8 +3859,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3800,8 +3870,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3811,8 +3881,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3832,8 +3902,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3843,8 +3913,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3854,8 +3924,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3865,8 +3935,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3876,8 +3946,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3897,8 +3967,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3908,8 +3978,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3919,8 +3989,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3930,8 +4000,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3941,8 +4011,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3962,7 +4032,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3972,7 +4043,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3982,7 +4054,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -3992,7 +4065,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4002,7 +4076,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4022,8 +4097,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4033,8 +4108,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4044,8 +4119,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4055,8 +4130,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4066,8 +4141,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4087,8 +4162,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4098,8 +4173,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4109,8 +4184,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4120,8 +4195,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4131,8 +4206,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4152,7 +4227,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4162,7 +4238,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4172,7 +4249,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4182,7 +4260,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4192,7 +4271,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4224,8 +4304,8 @@ constexpr auto merge_sort_block_merge_config_picker()
 {
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4235,8 +4315,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4246,8 +4326,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4257,8 +4337,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4268,8 +4348,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4289,8 +4369,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4300,8 +4380,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4311,8 +4391,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4322,8 +4402,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4333,8 +4413,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4354,8 +4434,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 1}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4365,8 +4445,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4376,8 +4456,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4387,8 +4467,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4398,8 +4478,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4419,8 +4499,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4430,8 +4510,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4441,8 +4521,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4452,8 +4532,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4463,8 +4543,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4484,7 +4564,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4494,7 +4575,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4504,7 +4586,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4514,7 +4597,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4524,7 +4608,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4544,8 +4629,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4555,8 +4640,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4566,8 +4651,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4577,8 +4662,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4588,8 +4673,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 8}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4609,8 +4694,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4620,8 +4705,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4631,8 +4716,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4642,8 +4727,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4653,8 +4738,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 512, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4674,7 +4759,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4684,7 +4770,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 128, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4694,7 +4781,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4704,7 +4792,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},
@@ -4714,7 +4803,8 @@ constexpr auto merge_sort_block_merge_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'odd_even_block_size': 256, 'odd_even_ipt': 1, 'odd_even_size_limit': 201072, 'partition_block_size': 128, 'partition_ipt': 1, 'block_size_x': 256, 'ipt': 4}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return merge_sort_block_merge_config_params{
             {256, 1, 201072},

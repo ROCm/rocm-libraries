@@ -41,6 +41,8 @@
         {#- std::is_same_v<..., rocprim::empty_type> -#}
         ({{ mk_is_empty_type_check(config.value_type) }})
     {%- else -%}
+        {{ mk_is_fp_type_check(config.value_type) }}
+        {{- ' && '-}}
         {#- sizeof(value_type) < ... -#}
         {{ mk_type_sz_check(config.value_type) }}
         {%- if config.value_type.size_min == 0 -%}

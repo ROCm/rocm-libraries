@@ -49,8 +49,8 @@ constexpr auto scan_by_key_config_picker()
 {
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 4},
@@ -61,8 +61,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 11, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 11},
@@ -73,8 +73,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'block_size_x': 256, 'ipt': 3, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 3},
@@ -85,8 +85,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'block_size_x': 256, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 21},
@@ -97,8 +97,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -109,8 +109,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 2, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 2},
@@ -121,8 +121,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 9, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 9},
@@ -133,8 +133,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'block_size_x': 256, 'ipt': 3, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 3},
@@ -145,8 +145,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'block_size_x': 64, 'ipt': 7, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 7},
@@ -157,8 +157,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 19, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {64, 19},
@@ -169,7 +169,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 4},
@@ -180,7 +181,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 4, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 4},
@@ -191,7 +193,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -202,7 +205,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'block_size_x': 64, 'ipt': 10, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 10},
@@ -213,7 +217,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {64, 24},
@@ -224,8 +229,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 4},
@@ -236,8 +241,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -248,8 +253,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'block_size_x': 128, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {128, 20},
@@ -260,8 +265,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 10, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 10},
@@ -272,8 +277,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -284,8 +289,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 4},
@@ -296,8 +301,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 13, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 13},
@@ -308,8 +313,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 3, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 3},
@@ -320,8 +325,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 20},
@@ -332,8 +337,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -344,8 +349,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 5, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 5},
@@ -356,8 +361,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 3, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 3},
@@ -368,8 +373,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'block_size_x': 256, 'ipt': 3, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 3},
@@ -380,8 +385,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'block_size_x': 64, 'ipt': 7, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 7},
@@ -392,8 +397,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 19, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {64, 19},
@@ -404,8 +409,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 4},
@@ -416,8 +421,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 9, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 9},
@@ -428,8 +433,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'block_size_x': 64, 'ipt': 6, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {64, 6},
@@ -440,8 +445,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'block_size_x': 64, 'ipt': 10, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 10},
@@ -452,8 +457,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {64, 24},
@@ -464,7 +469,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 4},
@@ -475,7 +481,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'block_size_x': 128, 'ipt': 17, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {128, 17},
@@ -486,7 +493,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 5, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 5},
@@ -497,7 +505,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'block_size_x': 64, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 14},
@@ -508,7 +517,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'block_size_x': 128, 'ipt': 22, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {128, 22},
@@ -531,8 +541,8 @@ constexpr auto scan_by_key_config_picker()
 {
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -543,8 +553,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -555,8 +565,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -567,8 +577,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -579,8 +589,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {64, 24},
@@ -591,8 +601,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -603,8 +613,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -615,8 +625,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'block_size_x': 256, 'ipt': 4, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 4},
@@ -627,8 +637,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'block_size_x': 64, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 20},
@@ -639,8 +649,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 23, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 23},
@@ -651,7 +661,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -662,7 +673,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -673,7 +685,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -684,7 +697,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'block_size_x': 256, 'ipt': 17, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 17},
@@ -695,7 +709,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -706,8 +721,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 4},
@@ -718,8 +733,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -730,8 +745,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 11, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 11},
@@ -742,8 +757,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'block_size_x': 64, 'ipt': 17, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 17},
@@ -754,8 +769,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 15, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {64, 15},
@@ -766,8 +781,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -778,8 +793,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -790,8 +805,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -802,8 +817,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 20},
@@ -814,8 +829,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {64, 24},
@@ -826,8 +841,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -838,8 +853,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -850,8 +865,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'block_size_x': 256, 'ipt': 4, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 4},
@@ -862,8 +877,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'block_size_x': 64, 'ipt': 22, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 22},
@@ -874,8 +889,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 23, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 23},
@@ -886,8 +901,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 16},
@@ -898,8 +913,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -910,8 +925,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -922,8 +937,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'block_size_x': 256, 'ipt': 17, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 17},
@@ -934,8 +949,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -946,7 +961,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -957,7 +973,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -968,7 +985,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'block_size_x': 128, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {128, 8},
@@ -979,7 +997,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 20},
@@ -990,7 +1009,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -1013,8 +1033,8 @@ constexpr auto scan_by_key_config_picker()
 {
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 4, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 4},
@@ -1025,8 +1045,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'block_size_x': 256, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 20},
@@ -1037,8 +1057,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -1049,8 +1069,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'block_size_x': 128, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {128, 8},
@@ -1061,8 +1081,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 4, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 4},
@@ -1073,8 +1093,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'block_size_x': 256, 'ipt': 5, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 5},
@@ -1085,8 +1105,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -1097,8 +1117,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -1109,7 +1129,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 6, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 6},
@@ -1120,7 +1141,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -1131,7 +1153,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'block_size_x': 256, 'ipt': 10, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 10},
@@ -1142,7 +1165,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 20},
@@ -1153,8 +1177,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 4, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 4},
@@ -1165,8 +1189,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 20},
@@ -1177,8 +1201,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -1189,8 +1213,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'block_size_x': 128, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {128, 8},
@@ -1201,8 +1225,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 4, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 4},
@@ -1213,8 +1237,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'block_size_x': 256, 'ipt': 5, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 5},
@@ -1225,8 +1249,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -1237,8 +1261,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -1249,8 +1273,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 6, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 6},
@@ -1261,8 +1285,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -1273,8 +1297,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -1285,8 +1309,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 20},
@@ -1297,7 +1321,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 12, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 12},
@@ -1308,7 +1333,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -1319,7 +1345,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -1330,7 +1357,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -1352,8 +1380,8 @@ constexpr auto scan_by_key_config_picker()
 {
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 7, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 7},
@@ -1364,8 +1392,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -1376,8 +1404,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -1388,8 +1416,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'block_size_x': 64, 'ipt': 23, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 23},
@@ -1400,8 +1428,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {64, 14},
@@ -1412,8 +1440,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 7, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 7},
@@ -1424,8 +1452,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 15, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {64, 15},
@@ -1436,8 +1464,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'block_size_x': 256, 'ipt': 15, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 15},
@@ -1448,8 +1476,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -1460,8 +1488,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {64, 20},
@@ -1472,7 +1500,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 7, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 7},
@@ -1483,7 +1512,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 18, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {64, 18},
@@ -1494,7 +1524,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'block_size_x': 256, 'ipt': 15, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 15},
@@ -1505,7 +1536,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'block_size_x': 64, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 24},
@@ -1516,7 +1548,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {64, 24},
@@ -1527,8 +1560,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {64, 14},
@@ -1539,8 +1572,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 19, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {64, 19},
@@ -1551,8 +1584,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'block_size_x': 64, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {64, 14},
@@ -1563,8 +1596,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'block_size_x': 64, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 14},
@@ -1575,8 +1608,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {64, 14},
@@ -1587,8 +1620,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 7, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 7},
@@ -1599,8 +1632,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -1611,8 +1644,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -1623,8 +1656,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'block_size_x': 64, 'ipt': 23, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 23},
@@ -1635,8 +1668,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {64, 14},
@@ -1647,8 +1680,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 7, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 7},
@@ -1659,8 +1692,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 15, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {64, 15},
@@ -1671,8 +1704,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -1683,8 +1716,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'block_size_x': 64, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 20},
@@ -1695,8 +1728,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {64, 20},
@@ -1707,8 +1740,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 7, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 7},
@@ -1719,8 +1752,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 18, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {64, 18},
@@ -1731,8 +1764,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'block_size_x': 256, 'ipt': 18, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 18},
@@ -1743,8 +1776,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'block_size_x': 64, 'ipt': 22, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 22},
@@ -1755,8 +1788,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {64, 24},
@@ -1767,7 +1800,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 15, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {64, 15},
@@ -1778,7 +1812,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 18, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {64, 18},
@@ -1789,7 +1824,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 13, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 13},
@@ -1800,7 +1836,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'block_size_x': 64, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 24},
@@ -1811,7 +1848,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {64, 24},
@@ -1834,8 +1872,8 @@ constexpr auto scan_by_key_config_picker()
 {
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 6, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 6},
@@ -1846,8 +1884,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -1858,8 +1896,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -1870,8 +1908,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'block_size_x': 64, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 14},
@@ -1882,8 +1920,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {64, 14},
@@ -1894,8 +1932,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 10, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {64, 10},
@@ -1906,8 +1944,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'block_size_x': 128, 'ipt': 10, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {128, 10},
@@ -1918,8 +1956,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'block_size_x': 256, 'ipt': 12, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 12},
@@ -1930,8 +1968,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -1942,8 +1980,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'block_size_x': 128, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {128, 14},
@@ -1954,7 +1992,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 12, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {64, 12},
@@ -1965,7 +2004,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {64, 21},
@@ -1976,7 +2016,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'block_size_x': 128, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {128, 21},
@@ -1987,7 +2028,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -1998,7 +2040,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -2009,8 +2052,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 10, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {64, 10},
@@ -2021,8 +2064,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {64, 14},
@@ -2033,8 +2076,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'block_size_x': 64, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {64, 14},
@@ -2045,8 +2088,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'block_size_x': 64, 'ipt': 19, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 19},
@@ -2057,8 +2100,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {64, 14},
@@ -2069,8 +2112,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 9, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {64, 9},
@@ -2081,8 +2124,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -2093,8 +2136,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -2105,8 +2148,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'block_size_x': 64, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 14},
@@ -2117,8 +2160,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -2129,8 +2172,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 10, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {64, 10},
@@ -2141,8 +2184,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'block_size_x': 128, 'ipt': 10, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {128, 10},
@@ -2153,8 +2196,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'block_size_x': 256, 'ipt': 12, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 12},
@@ -2165,8 +2208,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -2177,8 +2220,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'block_size_x': 128, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {128, 14},
@@ -2189,8 +2232,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 12, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {64, 12},
@@ -2201,8 +2244,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 18, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {64, 18},
@@ -2213,8 +2256,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'block_size_x': 256, 'ipt': 18, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 18},
@@ -2225,8 +2268,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'block_size_x': 256, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 20},
@@ -2237,8 +2280,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -2249,7 +2292,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 15, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {64, 15},
@@ -2260,7 +2304,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 18, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {64, 18},
@@ -2271,7 +2316,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'block_size_x': 128, 'ipt': 18, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {128, 18},
@@ -2282,7 +2328,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 20},
@@ -2293,7 +2340,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -2316,8 +2364,8 @@ constexpr auto scan_by_key_config_picker()
 {
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 5, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 5},
@@ -2328,8 +2376,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 19, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {64, 19},
@@ -2340,8 +2388,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -2352,8 +2400,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'block_size_x': 64, 'ipt': 19, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 19},
@@ -2364,8 +2412,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -2376,8 +2424,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 15, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 15},
@@ -2388,8 +2436,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {64, 21},
@@ -2400,8 +2448,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'block_size_x': 128, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {128, 14},
@@ -2412,8 +2460,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'block_size_x': 64, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 24},
@@ -2424,8 +2472,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'block_size_x': 128, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {128, 14},
@@ -2436,7 +2484,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 3, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 3},
@@ -2447,7 +2496,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {64, 21},
@@ -2458,7 +2508,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'block_size_x': 256, 'ipt': 9, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 9},
@@ -2469,7 +2520,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'block_size_x': 256, 'ipt': 18, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 18},
@@ -2480,7 +2532,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 18, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 18},
@@ -2491,8 +2544,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 10, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {64, 10},
@@ -2503,8 +2556,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {64, 14},
@@ -2515,8 +2568,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'block_size_x': 128, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {128, 14},
@@ -2527,8 +2580,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'block_size_x': 128, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {128, 14},
@@ -2539,8 +2592,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {64, 14},
@@ -2551,8 +2604,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 5, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 5},
@@ -2563,8 +2616,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 19, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {64, 19},
@@ -2575,8 +2628,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -2587,8 +2640,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'block_size_x': 64, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 14},
@@ -2599,8 +2652,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -2611,8 +2664,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 5, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 5},
@@ -2623,8 +2676,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {64, 21},
@@ -2635,8 +2688,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -2647,8 +2700,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'block_size_x': 64, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {64, 24},
@@ -2659,8 +2712,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'block_size_x': 128, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {128, 14},
@@ -2671,8 +2724,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 6, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 6},
@@ -2683,8 +2736,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {64, 21},
@@ -2695,8 +2748,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'block_size_x': 256, 'ipt': 9, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 9},
@@ -2707,8 +2760,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'block_size_x': 256, 'ipt': 22, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 22},
@@ -2719,8 +2772,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 18, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 18},
@@ -2731,7 +2784,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 3, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 3},
@@ -2742,7 +2796,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {64, 21},
@@ -2753,7 +2808,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'block_size_x': 128, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {128, 21},
@@ -2764,7 +2820,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 18, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 18},
@@ -2775,7 +2832,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -2798,8 +2856,8 @@ constexpr auto scan_by_key_config_picker()
 {
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 21},
@@ -2810,8 +2868,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -2822,8 +2880,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -2834,8 +2892,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -2846,8 +2904,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -2858,8 +2916,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 23, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 23},
@@ -2870,8 +2928,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 21},
@@ -2882,8 +2940,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'block_size_x': 256, 'ipt': 23, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 23},
@@ -2894,8 +2952,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -2906,8 +2964,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -2918,7 +2976,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -2929,7 +2988,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -2940,7 +3000,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'block_size_x': 256, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 21},
@@ -2951,7 +3012,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -2962,7 +3024,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 23, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 23},
@@ -2973,8 +3036,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 14},
@@ -2985,8 +3048,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'block_size_x': 128, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {128, 21},
@@ -2997,8 +3060,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'block_size_x': 128, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {128, 14},
@@ -3009,8 +3072,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -3021,8 +3084,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -3033,8 +3096,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 21},
@@ -3045,8 +3108,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -3057,8 +3120,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -3069,8 +3132,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -3081,8 +3144,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -3093,8 +3156,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 23, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 23},
@@ -3105,8 +3168,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 21},
@@ -3117,8 +3180,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'block_size_x': 256, 'ipt': 23, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 23},
@@ -3129,8 +3192,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -3141,8 +3204,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 19, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 19},
@@ -3153,8 +3216,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -3165,8 +3228,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -3177,8 +3240,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'block_size_x': 256, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 21},
@@ -3189,8 +3252,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -3201,8 +3264,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 23, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 23},
@@ -3213,7 +3276,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -3224,7 +3288,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -3235,7 +3300,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 21},
@@ -3246,7 +3312,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -3257,7 +3324,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -3280,8 +3348,8 @@ constexpr auto scan_by_key_config_picker()
 {
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 16},
@@ -3292,8 +3360,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -3304,8 +3372,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'block_size_x': 256, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 20},
@@ -3316,8 +3384,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'block_size_x': 256, 'ipt': 12, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 12},
@@ -3328,8 +3396,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 7, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 7},
@@ -3340,8 +3408,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 11, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 11},
@@ -3352,8 +3420,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -3364,8 +3432,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'block_size_x': 256, 'ipt': 9, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 9},
@@ -3376,8 +3444,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -3388,8 +3456,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 20},
@@ -3400,7 +3468,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -3411,7 +3480,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -3422,7 +3492,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -3433,7 +3504,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'block_size_x': 128, 'ipt': 18, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {128, 18},
@@ -3444,7 +3516,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 20},
@@ -3455,8 +3528,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 16},
@@ -3467,8 +3540,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 9, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 9},
@@ -3479,8 +3552,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 6, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 6},
@@ -3491,8 +3564,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'block_size_x': 128, 'ipt': 10, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {128, 10},
@@ -3503,8 +3576,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'block_size_x': 128, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {128, 8},
@@ -3515,8 +3588,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 16},
@@ -3527,8 +3600,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -3539,8 +3612,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 20},
@@ -3551,8 +3624,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 12, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 12},
@@ -3563,8 +3636,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 7, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 7},
@@ -3575,8 +3648,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 11, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 11},
@@ -3587,8 +3660,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -3599,8 +3672,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'block_size_x': 256, 'ipt': 9, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 9},
@@ -3611,8 +3684,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'block_size_x': 256, 'ipt': 8, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 8},
@@ -3623,8 +3696,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 20},
@@ -3635,8 +3708,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -3647,8 +3720,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -3659,8 +3732,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -3671,8 +3744,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'block_size_x': 128, 'ipt': 18, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {128, 18},
@@ -3683,8 +3756,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 20},
@@ -3695,7 +3768,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 13, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 13},
@@ -3706,7 +3780,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -3717,7 +3792,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -3728,7 +3804,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 18, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 18},
@@ -3739,7 +3816,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'block_size_x': 128, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {128, 24},
@@ -3762,8 +3840,8 @@ constexpr auto scan_by_key_config_picker()
 {
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 16},
@@ -3774,8 +3852,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'block_size_x': 128, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {128, 21},
@@ -3786,8 +3864,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'block_size_x': 128, 'ipt': 23, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {128, 23},
@@ -3798,8 +3876,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -3810,8 +3888,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'block_size_x': 128, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {128, 24},
@@ -3822,8 +3900,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 20},
@@ -3834,8 +3912,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -3846,8 +3924,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 21},
@@ -3858,8 +3936,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -3870,8 +3948,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -3882,8 +3960,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 12, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 12},
@@ -3894,8 +3972,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 21},
@@ -3906,8 +3984,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -3918,8 +3996,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -3930,8 +4008,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -3942,8 +4020,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 13, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 13},
@@ -3954,8 +4032,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 22, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 22},
@@ -3966,8 +4044,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -3978,8 +4056,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -3990,8 +4068,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4002,7 +4080,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 15, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 15},
@@ -4013,7 +4092,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4024,7 +4104,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4035,7 +4116,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4046,7 +4128,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 22, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 22},
@@ -4057,8 +4140,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 21},
@@ -4069,8 +4152,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -4081,8 +4164,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'block_size_x': 256, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 21},
@@ -4093,8 +4176,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4105,8 +4188,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4117,8 +4200,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 12, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 12},
@@ -4129,8 +4212,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 21},
@@ -4141,8 +4224,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4153,8 +4236,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4165,8 +4248,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4177,7 +4260,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -4188,7 +4272,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 22, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 22},
@@ -4199,7 +4284,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4210,7 +4296,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4221,7 +4308,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4244,8 +4332,8 @@ constexpr auto scan_by_key_config_picker()
 {
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 16},
@@ -4256,8 +4344,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'block_size_x': 128, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {128, 21},
@@ -4268,8 +4356,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'block_size_x': 128, 'ipt': 23, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {128, 23},
@@ -4280,8 +4368,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -4292,8 +4380,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'block_size_x': 128, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {128, 24},
@@ -4304,8 +4392,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 20, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 20},
@@ -4316,8 +4404,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -4328,8 +4416,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 21},
@@ -4340,8 +4428,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4352,8 +4440,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4364,8 +4452,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 12, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 12},
@@ -4376,8 +4464,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 21},
@@ -4388,8 +4476,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4400,8 +4488,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4412,8 +4500,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4424,8 +4512,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 13, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 13},
@@ -4436,8 +4524,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 22, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 22},
@@ -4448,8 +4536,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4460,8 +4548,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4472,8 +4560,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4484,7 +4572,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 15, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 15},
@@ -4495,7 +4584,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4506,7 +4596,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4517,7 +4608,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4528,7 +4620,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 22, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 22},
@@ -4539,8 +4632,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {128, 21},
@@ -4551,8 +4644,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 16, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 16},
@@ -4563,8 +4656,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int', 'block_size_x': 256, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 21},
@@ -4575,8 +4668,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4587,8 +4680,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4599,8 +4692,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 12, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8)
-                 && (sizeof(value_type) <= 16))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 12},
@@ -4611,8 +4704,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 21, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4)
-                 && (sizeof(value_type) <= 8))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 21},
@@ -4623,8 +4716,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2)
-                 && (sizeof(value_type) <= 4))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4635,8 +4728,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1)
-                 && (sizeof(value_type) <= 2))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4647,8 +4740,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (!rocprim::is_floating_point<value_type>::value)
+                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4659,7 +4752,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
+                 && (sizeof(value_type) <= 16))
     {
         return scan_by_key_config_params{
             {256, 14},
@@ -4670,7 +4764,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 22, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
+                 && (sizeof(value_type) <= 8))
     {
         return scan_by_key_config_params{
             {256, 22},
@@ -4681,7 +4776,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
+                 && (sizeof(value_type) <= 4))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4692,7 +4788,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
+                 && (sizeof(value_type) <= 2))
     {
         return scan_by_key_config_params{
             {256, 24},
@@ -4703,7 +4800,8 @@ constexpr auto scan_by_key_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan'}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
+                 && (!std::is_same_v<value_type, rocprim::empty_type>))
     {
         return scan_by_key_config_params{
             {256, 24},
