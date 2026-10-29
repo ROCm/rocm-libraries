@@ -164,6 +164,13 @@ message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
 # hipSPARSELt's own create_device_library() reads it back.
 if(NOT TENSILELITE_GPU_TARGETS)
     set(TENSILELITE_GPU_TARGETS "${GPU_TARGETS}")
+else()
+    # A value from outside never passed the check above, and this is the list
+    # TensileLite builds from -- the one an xnack qualifier still reaches, since
+    # GPU_TARGETS has it stripped by then. Checking it here is what stops an
+    # enclosing project from handing us a target the direct path would refuse,
+    # device ASAN beside xnack- among them.
+    tensilelite_validate_gpu_targets("${TENSILELITE_GPU_TARGETS}")
 endif()
 
 # Strip xnack suffix from xnack_any platforms (e.g. gfx1250) for hip::device

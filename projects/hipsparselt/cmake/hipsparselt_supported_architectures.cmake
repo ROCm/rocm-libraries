@@ -127,13 +127,20 @@ function(hipsparselt_target_id_supported output_var arch)
     set(${output_var} "${_ok}" PARENT_SCOPE)
 endfunction()
 
-# An arch with every xnack qualifier removed, other qualifiers kept in order.
+# An arch with the xnack qualifier removed, other qualifiers kept in order.
+#
+# Matched exactly, not by prefix, and for the same reason as _withoutXnack in
+# hipblaslt/tensilelite/Common/Architectures.py: the xnack token is dropped only
+# to reach a target the compiler will take, and anything else is left for the
+# compiler to refuse. A prefix match would also eat "xnack-typo", so a
+# misspelling would come back as a bare arch the compiler accepts, and the build
+# would go on with the replay mode nobody asked for.
 function(hipsparselt_strip_xnack output_var arch)
     string(REPLACE ":" ";" _parts "${arch}")
     list(POP_FRONT _parts _base)
     set(_kept "")
     foreach(_qualifier IN LISTS _parts)
-        if(NOT _qualifier MATCHES "^xnack")
+        if(NOT _qualifier STREQUAL "xnack+" AND NOT _qualifier STREQUAL "xnack-")
             list(APPEND _kept "${_qualifier}")
         endif()
     endforeach()
