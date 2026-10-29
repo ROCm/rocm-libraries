@@ -232,6 +232,9 @@ option(HIPDNN_SKIP_TESTS "Skips building all tests" OFF)
 option(HIPDNN_ENABLE_TOOLING_TESTS
        "Register the DescriptorGenerator/IngestorGenerator pytest suites as ctest tests (needs pytest, PyYAML and Jinja2 importable by Python3_EXECUTABLE)"
        OFF)
+option(HIPDNN_ENABLE_SDPA_CONFORMANCE_TESTS
+       "Register the tools/sdpa_conformance pytest suites as ctest tests (needs pytest, pytest-xdist, numpy and torch importable by Python3_EXECUTABLE)"
+       OFF)
 
 option(HIPDNN_ENABLE_COVERAGE "Build with code coverage flags" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
