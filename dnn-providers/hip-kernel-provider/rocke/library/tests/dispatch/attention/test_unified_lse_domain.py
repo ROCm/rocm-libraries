@@ -3,18 +3,16 @@
 
 """CPU differential test of unified LSE dispatch over arch x path x feature.
 
-LSE off: every outcome and identity equals the golden captured on develop
-``5472e435cef``, before tiled 2D LSE existed. LSE on: a served request runs a
-variant that writes LSE, and every unified path that refuses it says why in
-its own words. Host only.
+Each key runs LSE off and on in the same process. A key served both ways keeps
+its candidate, path, tuning id and spec; only ``emit_lse`` and the ``lse``
+kernel-name token change, apart from the named reroutes in ``_REROUTES``. LSE
+on: a served request runs a variant that writes LSE, and every unified path
+that refuses it says why in its own words. Host only.
 """
 
 import ast
-import hashlib
+import dataclasses
 import itertools
-import json
-import os
-import pathlib
 import re
 
 import pytest
@@ -24,12 +22,10 @@ from dispatch.attention import (
     attention_candidates,
     dispatch_attention,
 )
+from dispatch.attention.common import _problem
+from kernels.common.attention_unified import select_auto_path
+from rocke.helpers.spec import kernel_name_join
 
-_GOLDEN = (
-    pathlib.Path(__file__).resolve().parents[2]
-    / "golden"
-    / "unified_lse_domain_lse_off.json"
-)
 _ARCHES = ("gfx942", "gfx950", "gfx90a", "gfx1250")
 _LSE_ARCHES = ("gfx942", "gfx950")
 _CUS = {"gfx942": 304, "gfx950": 256}
@@ -67,10 +63,12 @@ _NO_FEATURES = "capability: cannot serve features "
 _HANDOVER = frozenset(
     f"gfx942|prefill_bs32|d256|{dt}|sinks=0|paged|auto" for dt in ("bf16", "fp16")
 )
-
-
-def _sha(text):
-    return hashlib.sha256(text.encode()).hexdigest()[:16]
+# Candidates that do not declare the ``lse`` feature, by name.
+_NO_LSE = frozenset(
+    c.name
+    for c in attention_candidates()
+    if "lse" not in c.capability.supports_features
+)
 
 
 def _domain():
@@ -102,23 +100,16 @@ def _domain():
 
 
 def _run(request):
-    """(outcome row, result or None). The row is the request's identity: the
-    served candidate, path, kernel name, spec hash, tuning id and cache key, or
-    the refusal message."""
+    """(outcome row, result or None): the served candidate and path, or the
+    refusal message."""
     try:
         result = dispatch_attention(request)
     except ValueError as exc:
-        return {"ok": False, "msg": _sha(str(exc))}, None
-    spec = result.spec
-    cache_key = getattr(spec, "cache_key", None)
+        return {"ok": False, "why": str(exc)}, None
     return {
         "ok": True,
         "candidate": result.kernel_id.candidate,
-        "path": spec.path,
-        "name": spec.kernel_name(),
-        "spec_hash": result.kernel_id.spec_hash,
-        "tuning_id": result.kernel_id.tuning_id,
-        "cache_key": _sha(repr(cache_key())) if callable(cache_key) else None,
+        "path": result.spec.path,
     }, result
 
 
@@ -170,15 +161,115 @@ def table():
     return on, off
 
 
-def test_lse_off_outcomes_and_identities_are_unchanged(table):
-    _, off = table
-    actual = {key: row for key, (_, row, _, _) in off.items()}
-    if os.environ.get("ROCKE_REGEN_LSE_DOMAIN"):
-        _GOLDEN.write_text(json.dumps(actual, indent=1, sort_keys=True) + "\n")
-    golden = json.loads(_GOLDEN.read_text())
-    assert actual.keys() == golden.keys()
-    changed = {k: (golden[k], actual[k]) for k in golden if golden[k] != actual[k]}
-    assert not changed, changed
+# The only keys whose LSE-on dispatch may leave the LSE-off candidate.
+_REROUTES = ("tiled_2d_lse_handover", "no_lse_candidate")
+
+
+def _reroute(off, request):
+    """(name, candidate or None for any LSE writer, path) of the reroute LSE on
+    must take from the LSE-off result ``off``, or None when it must not move."""
+    if (
+        off.spec.path == "2d"
+        and select_auto_path(_problem(request), request.arch) == "3d"
+    ):
+        # The tiled 2D gate declines the LSE problem, so auto hands it to split-KV.
+        return "tiled_2d_lse_handover", "attention_unified_3d", "3d"
+    if off.kernel_id.candidate in _NO_LSE:
+        # Writes no LSE (route-only dense, d256/strided decode, gfx942 4-warp), so
+        # dispatch falls through to the next candidate on the same path that does.
+        return "no_lse_candidate", None, off.spec.path
+    return None
+
+
+def _field_diffs(off, on, prefix=""):
+    """Dotted names of spec fields that differ, recursing into nested specs and
+    skipping ``emit_lse``."""
+    if dataclasses.is_dataclass(off) and type(off) is type(on):
+        return [
+            name
+            for f in dataclasses.fields(off)
+            if f.name != "emit_lse"
+            for name in _field_diffs(
+                getattr(off, f.name), getattr(on, f.name), f"{prefix}{f.name}."
+            )
+        ]
+    return [] if off == on else [prefix.rstrip(".") or type(off).__name__]
+
+
+def _lse_flags(spec):
+    """Every ``emit_lse`` value in ``spec`` and its nested specs."""
+    if not dataclasses.is_dataclass(spec):
+        return []
+    return [
+        flag
+        for f in dataclasses.fields(spec)
+        for flag in (
+            [getattr(spec, f.name)]
+            if f.name == "emit_lse"
+            else _lse_flags(getattr(spec, f.name))
+        )
+    ]
+
+
+def _kernel_names(spec):
+    """{kernel: name} for the kernels ``spec`` launches, and which one writes
+    LSE: a pinned split-KV reduce, else the main kernel."""
+    names = {"kernel": spec.kernel_name()}
+    reduce = getattr(spec, "reduce_spec", None)
+    if spec.path == "3d" and reduce is not None:
+        names["reduce"] = reduce.kernel_name()
+    return names, "reduce" if "reduce" in names else "kernel"
+
+
+def _lse_on_identity_diff(off, on, request):
+    """Why the LSE-on dispatch is not the LSE-off one plus LSE, or None."""
+    reroute = _reroute(off, request)
+    if reroute:
+        name, want_candidate, want_path = reroute
+        got = (on.kernel_id.candidate, on.spec.path)
+        if got[1] != want_path or want_candidate not in (None, got[0]):
+            return f"{name}: wants {(want_candidate, want_path)}, got {got}"
+        return None if _writes_lse(on) else f"{name}: {got} writes no LSE"
+    off_id = (off.kernel_id.candidate, off.spec.path, off.kernel_id.tuning_id)
+    on_id = (on.kernel_id.candidate, on.spec.path, on.kernel_id.tuning_id)
+    if on_id != off_id:
+        return f"unlisted reroute {off_id} -> {on_id}"
+    names, writer = _kernel_names(off.spec)
+    want = {**names, writer: kernel_name_join(names[writer], "lse")}
+    if _kernel_names(on.spec)[0] != want:
+        return f"kernel names {_kernel_names(on.spec)[0]}, want {want}"
+    fields = _field_diffs(off.spec, on.spec)
+    if fields:
+        return f"spec fields differ: {fields}"
+    if any(_lse_flags(off.spec)) or not any(_lse_flags(on.spec)):
+        return f"emit_lse off={_lse_flags(off.spec)} on={_lse_flags(on.spec)}"
+    return None
+
+
+def test_lse_on_identity_is_lse_off_identity_plus_lse(table):
+    """Per key, in one run: LSE on serves the LSE-off identity plus LSE, or a
+    named ``_REROUTES`` entry. A key LSE off refuses stays refused; keys LSE on
+    refuses are the per-path wording test's."""
+    on, off = table
+    assert on.keys() == off.keys()
+    bad, fired = {}, set()
+    for key, (request, row, result, _) in on.items():
+        off_row, off_result = off[key][1], off[key][2]
+        if not off_row["ok"]:
+            if row["ok"]:
+                bad[key] = f"LSE on serves {row}, LSE off refuses"
+            continue
+        if not row["ok"]:
+            continue
+        reroute = _reroute(off_result, request)
+        if reroute:
+            fired.add(reroute[0])
+        why = _lse_on_identity_diff(off_result, result, request)
+        if why:
+            bad[key] = why
+    assert not bad, bad
+    # Each reroute must still describe a key in the domain, or it is dead.
+    assert fired == set(_REROUTES), fired
 
 
 def test_lse_on_routes_only_variants_that_write_lse(table):
