@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 // CPU-only unit tests for the per-solver perf-config picker. No GPU required.
-// Two kinds of checks:
+// Three kinds of checks:
 //   * a self-contained ranking invariant: ScorePickForTest returns a
 //     deterministic permutation of the bucket's real candidate descriptors
-//     (nothing invented or dropped), driven off the shipped catalog+metadata, and
+//     (nothing invented or dropped), driven off the shipped catalog+metadata,
 //   * a golden-vector parity gate: the LightGBM text-model walker (LgbmForest)
 //     reproduces LightGBM's own raw scores within a tight tolerance on committed
-//     (features -> score) vectors, for each per-solver model.
+//     (features -> score) vectors, for each per-solver model, and
+//   * the (solver, arch, direction) hold-outs in HeldOutOfPicker.
 
 #include <gtest/gtest.h>
 
@@ -19,6 +20,7 @@
 #include <miopen/conv/heuristics/lgbm_pcfg_pick.hpp>
 #include <miopen/conv/heuristics/lgbm_pcfg_metadata.hpp>
 #include <miopen/conv/heuristics/lgbm_forest.hpp>
+#include <miopen/conv_algo_name.hpp>
 
 #include <miopen/db_path.hpp>
 #include <miopen/filesystem.hpp>
@@ -35,6 +37,7 @@
 namespace {
 
 using miopen::ai::lgbm::LgbmForest;
+using miopen::ai::lgbm::pcfg::HeldOutOfPicker;
 using miopen::ai::lgbm::pcfg::kNumBaseProbFeatures;
 using miopen::ai::lgbm::pcfg::LgbmPcfgMetadata;
 using miopen::ai::lgbm::pcfg::ScorePickForTest;
@@ -217,6 +220,27 @@ TEST(CPU_LgbmPcfgForest_NONE, MatchesGoldenVectors)
     ASSERT_GT(solvers_checked, 0) << "no pcfg model asset was found to check";
     MIOPEN_LOG_I2("lgbm_pcfg golden parity: " << solvers_checked << " solvers, max abs err "
                                               << max_abs_err);
+}
+
+// Pins which (solver, arch, direction) combinations the picker holds out although
+// lgbm_pcfg.bin has buckets for them. ConvHipConv is held out on gfx1250 in every direction and
+// on gfx950 for backward weights only.
+TEST(CPU_LgbmPcfgHoldOut_NONE, HeldOutOfPicker)
+{
+    using miopen::conv::Direction;
+    const std::string hipconv = "ConvHipConv";
+
+    EXPECT_FALSE(HeldOutOfPicker(hipconv, "gfx950", Direction::Forward));
+    EXPECT_FALSE(HeldOutOfPicker(hipconv, "gfx950", Direction::BackwardData));
+    EXPECT_TRUE(HeldOutOfPicker(hipconv, "gfx950", Direction::BackwardWeights));
+
+    for(const auto dir : {Direction::Forward, Direction::BackwardData, Direction::BackwardWeights})
+    {
+        EXPECT_TRUE(HeldOutOfPicker(hipconv, "gfx1250", dir));
+        EXPECT_FALSE(HeldOutOfPicker(hipconv, "gfx942", dir));
+        EXPECT_FALSE(HeldOutOfPicker("ConvHipImplicitGemmV4R1Fwd", "gfx950", dir));
+        EXPECT_FALSE(HeldOutOfPicker("ConvHipImplicitGemmV4R1Fwd", "gfx1250", dir));
+    }
 }
 
 } // namespace

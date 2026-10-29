@@ -208,18 +208,28 @@ bool TwoTowerCoversSolver(const std::string& solver_name, const std::string& gfx
            kTwoTowerSolvers.end();
 }
 
-// Architectures a shipped model covers but the picker does not use yet.
-//
-// ConvHipConv on gfx1250: on held-out gfx1250 data the model retrained on hipconv v0.4 configs
-// gains 0.3% over the solver's default config (geomean, mean of 5 training seeds, 4 of them
-// within noise), and it has not been checked on gfx1250 hardware. Gated here, rather than by
-// dropping the gfx1250 buckets from lgbm_pcfg.bin, so enabling it is a one-line change.
-bool HeldOutOfPicker(const std::string& solver_name, const std::string& gfx_id)
-{
-    return solver_name == "ConvHipConv" && gfx_id.starts_with("gfx1250");
-}
-
 } // namespace
+
+// ConvHipConv on gfx1250, every direction: on held-out gfx1250 data the model retrained on
+// hipconv v0.4 configs gains 0.3% over the solver's default config (geomean, mean of 5 training
+// seeds, 4 of them within noise), and it has not been checked on gfx1250 hardware.
+//
+// ConvHipConv on gfx950, backward weights: on MI355X the 46 picks that differ from the default
+// config ran slower than the default (geomean 0.9749, worst 0.48x), and offline the model loses
+// to the default there (0.9927). Forward and backward data gain on both and stay enabled.
+//
+// Gated here, rather than by dropping buckets from lgbm_pcfg.bin, so enabling either is a
+// one-line change.
+bool HeldOutOfPicker(const std::string& solver_name,
+                     const std::string& gfx_id,
+                     conv::Direction direction)
+{
+    if(solver_name != "ConvHipConv")
+        return false;
+    if(gfx_id.starts_with("gfx1250"))
+        return true;
+    return gfx_id.starts_with("gfx950") && direction == conv::Direction::BackwardWeights;
+}
 
 std::vector<std::string> PickConfig(const std::string& solver_name,
                                     const conv::ProblemDescription& problem,
@@ -244,9 +254,10 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
         gfx_id = handle.GetDeviceName();
     }
 
-    if(HeldOutOfPicker(solver_name, gfx_id))
+    if(HeldOutOfPicker(solver_name, gfx_id, problem.GetDirection()))
     {
-        MIOPEN_LOG_I2("lgbm_pcfg: " << solver_name << " held out of the picker on " << gfx_id);
+        MIOPEN_LOG_I2("lgbm_pcfg: " << solver_name << " held out of the picker on " << gfx_id
+                                    << ", direction " << problem.GetDirectionStr());
         return {};
     }
 
