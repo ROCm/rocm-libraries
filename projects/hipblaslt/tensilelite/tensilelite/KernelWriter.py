@@ -5656,9 +5656,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # path. PGR==0 (no shadow) and non-fused-store-eligible kernels emit here unchanged
     # -- computePostLoopFusedStore returns an empty module for the latter, so the
     # non-subtile / non-eligible code path is byte-identical.
-    _plsinDeferFold = (self._plsinFusedFlagEligible(kernel)
+    _plsinDeferCoalesce = (self._plsinFusedFlagEligible(kernel)
                        and kernel["PrefetchGlobalRead"] >= 1)
-    if not _plsinDeferFold:
+    if not _plsinDeferCoalesce:
       module.add(self.computePostLoopFusedStore(kernel))
 
     module.add(mainLoop(self, kernel))
@@ -5781,6 +5781,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       # global write
       #module.addComment1("not-LocalSplitU: global write")
+      # DPP store-coalesce is always compiled into the store for eligible subtile kernels; the
+      # coalesce-vs-plain choice on the plain post-loop store is a RUNTIME size gate emitted INSIDE
+      # GlobalWriteBatch (subtileCoalesceSizeOkSgpr), not a second store build here.  (An earlier
+      # version called notLocalSplitUGlobalWrite twice to make two whole-store arms; that corrupts
+      # the register pool and drops higher-pressure epilogue kernels -- see the mxf4 bf16 subtile
+      # characterization suite.)  So this is a single, ordinary store call.
       storeModule, deferredGSU0 = self.notLocalSplitUGlobalWrite(kernel, tensorParametersA, tensorParametersB)
       module.add(storeModule)
       if postLoopStoreDedupLabel is not None:
