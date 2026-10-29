@@ -768,9 +768,15 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
                     )
                     for step, (hsaco, meta) in zip(plan.steps, entries)
                 ]
-            except (HipError, KeyError, struct.error) as e:
-                # struct.error: an extent or byte count past a 32-bit kernarg
-                # (a tensor over 2 GiB) -- the binary cannot address it.
+            except struct.error as e:
+                # A genuine over-2 GiB tensor is the only kernarg a struct.error
+                # should come from; anything else is a real packing bug and must
+                # not be swallowed as a silent skip.
+                if max(sizes.values()) <= 2**31 - 1:
+                    raise
+                print(f"  [skip] {spec.name}: tensor over 2 GiB ({e})", flush=True)
+                continue
+            except (HipError, KeyError) as e:
                 print(f"  [skip] {spec.name}: {e}", flush=True)
                 continue
 

@@ -615,8 +615,10 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
  *                                # a multiple of 8 up to ROCKE_DW_WIN_MAX_GROUP_CH
  *      out_stride: int = 1       # fwd: 2 keeps every 2nd row/col of the grid
  *
- *  AOT: takes the direct dgrad kernarg block (N, H, W, Ho, Wo, groups and the
- *  dY/dX strides are runtime); KH, KW and PAD are baked.
+ *  AOT: with fwd=False, takes the direct dgrad kernarg block (N, H, W, Ho, Wo,
+ *  groups and the dY/dX strides are runtime); with fwd=True, the rotated
+ *  filter runs the forward pass and the kernel takes the forward kernarg
+ *  block instead (A = input, D = output). KH, KW and PAD are baked either way.
  *  Grid (VALU):  (ceil(W / block_w), ceil(groups / block_ch), N * ceil(H / block_h))
  *  Grid (mfma):  (ceil(W / tile_w), ceil(groups / block_ch),
  *                 ceil(N / w_fold) * ceil(H / block_h))

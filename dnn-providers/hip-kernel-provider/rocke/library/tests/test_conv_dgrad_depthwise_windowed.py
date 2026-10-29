@@ -829,15 +829,21 @@ def _fwd_launch(knobs: dict, p: DirectConvProblem, arch: str):
 
 # (N, H, W, groups, cpg, K, stride, dtype, knobs): depthwise and grouped, odd
 # and ragged extents, partial channel blocks, N not a multiple of w_fold,
-# a 3-wave block holding one 24-channel group, stride 2 on odd images.
+# a 3-wave block holding one 24-channel group, stride 2 on odd images, a 9x9
+# depthwise filter, cpg 56 (not a power of two), cpg 24 at stride 1, and
+# cpg 64 at stride 2.
 _FWD_CASES = (
     (3, 15, 17, 64, 1, 3, 1, "fp16", dict(block_waves=8, block_h=8, w_fold=2)),
     (2, 13, 21, 40, 1, 7, 1, "bf16", dict(block_waves=4, block_h=14, w_fold=1)),
     (2, 15, 13, 72, 1, 5, 2, "fp16", dict(block_waves=8, block_h=8, w_fold=4)),
+    (2, 17, 19, 32, 1, 9, 1, "fp16", dict(block_waves=4, block_h=8, w_fold=1)),
     (2, 14, 19, 12, 8, 3, 1, "fp16", dict(block_waves=4, block_h=8, w_fold=2)),
     (3, 13, 11, 6, 16, 3, 2, "bf16", dict(block_waves=4, block_h=4, w_fold=1)),
     (1, 9, 18, 4, 32, 3, 1, "fp16", dict(block_waves=8, block_h=16, w_fold=1)),
     (2, 11, 10, 3, 24, 3, 2, "bf16", dict(block_waves=3, block_h=12, w_fold=2)),
+    (2, 12, 14, 3, 24, 3, 1, "fp16", dict(block_waves=3, block_h=12, w_fold=2)),
+    (2, 10, 13, 2, 56, 3, 1, "bf16", dict(block_waves=7, block_h=4, w_fold=1)),
+    (2, 11, 12, 2, 64, 3, 2, "fp16", dict(block_waves=8, block_h=8, w_fold=2)),
 )
 
 

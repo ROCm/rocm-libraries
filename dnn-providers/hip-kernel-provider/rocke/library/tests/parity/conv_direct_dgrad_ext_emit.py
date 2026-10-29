@@ -26,11 +26,13 @@
 # 40: xcd_tiles on gfx942, 44: waves_m = 2 with kpg = 16) and develop's forms
 # (41: persistent grid with the runtime K loop, 42: waves_q = waves_k = 2,
 # 43: runtime channels).
-# Indices 45..48: the MFMA form with fwd (the rotated filter; 48, fwd
-# without mfma, both reject).
-# Indices 49..54: its grouped forward form (cpg = kpg = 8 / 16 / 32; 51,
-# without fwd, and 54, a block narrower than a group, both reject); 55..57
-# the forward form at stride 2 (57, an odd block_h, both reject).
+# Indices 45..49: the MFMA form with fwd (the rotated filter; 48, fwd
+# without mfma, both reject; 49, a 9x9 depthwise filter).
+# Indices 50..58: its grouped forward form (cpg = kpg = 8 / 16 / 32; 52,
+# without fwd, and 55, a block narrower than a group, both reject); 56..58
+# the forward form at stride 2 (58, an odd block_h, both reject). Indices
+# 59..61: the non-power-of-two group sizes cpg 24 and cpg 56 (stride 1) and
+# cpg 64 (stride 2).
 from _emit_common import run_emit
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
@@ -342,11 +344,25 @@ _WIN_FWD_CFGS = (
         dict(mfma=True, block_waves=8, w_fold=4, prefetch_rows=3, block_h=4),
     ),
     (2, 14, 14, 64, 7, 7, 3, "bf16", "gfx950", dict(block_w=7, block_h=14)),
+    # 49: 9x9 depthwise (stride-1, "same" padding keeps the transposed
+    # problem identical to the forward one).
+    (
+        2,
+        17,
+        19,
+        32,
+        9,
+        9,
+        4,
+        "fp16",
+        "gfx950",
+        dict(mfma=True, block_waves=4, w_fold=1, prefetch_rows=2, block_h=8),
+    ),
 )
 
 
 # The grouped forward form (cpg = kpg, fwd, MFMA; ``_cpg`` defaults to 8):
-# 49 3x3 fp16 with a partial channel block, 50 7x7 bf16 under w_fold 2; 51
+# 50 3x3 fp16 with a partial channel block, 51 7x7 bf16 under w_fold 2; 52
 # cpg = 8 without fwd -- both engines reject. G counts groups.
 _WIN_G8_CFG_BASE = _WIN_FWD_CFG_BASE + len(_WIN_FWD_CFGS)
 _WIN_G8_CFGS = (
@@ -386,7 +402,7 @@ _WIN_G8_CFGS = (
         "gfx950",
         dict(mfma=True, block_waves=4, w_fold=1, prefetch_rows=1, block_h=8),
     ),
-    # 52: cpg 16 (two input chunks per wave); 53: cpg 32 bf16; 54: cpg 16 in
+    # 53: cpg 16 (two input chunks per wave); 54: cpg 32 bf16; 55: cpg 16 in
     # a block of 8 channels -- both reject.
     (
         2,
@@ -448,8 +464,8 @@ _WIN_G8_CFGS = (
             block_h=8,
         ),
     ),
-    # 55: depthwise stride 2 (the stride-1 grid of the output, every second
-    # row and column kept); 56: cpg 16 stride 2, bf16, w_fold 2; 57: stride 2
+    # 56: depthwise stride 2 (the stride-1 grid of the output, every second
+    # row and column kept); 57: cpg 16 stride 2, bf16, w_fold 2; 58: stride 2
     # with an odd block_h -- both reject.
     (
         2,
@@ -512,6 +528,69 @@ _WIN_G8_CFGS = (
             w_fold=1,
             prefetch_rows=2,
             block_h=7,
+        ),
+    ),
+    # 59: cpg 24 (not a power of two) at stride 1; 60: cpg 56 (not a power of
+    # two) at stride 1; 61: cpg 64 (the DW_WIN_MAX_GROUP_CH cap) at stride 2.
+    (
+        2,
+        12,
+        14,
+        3,
+        3,
+        3,
+        1,
+        "fp16",
+        "gfx950",
+        dict(
+            _cpg=24,
+            mfma=True,
+            fwd=True,
+            block_waves=3,
+            w_fold=2,
+            prefetch_rows=2,
+            block_h=12,
+        ),
+    ),
+    (
+        2,
+        10,
+        13,
+        2,
+        3,
+        3,
+        1,
+        "bf16",
+        "gfx950",
+        dict(
+            _cpg=56,
+            mfma=True,
+            fwd=True,
+            block_waves=7,
+            w_fold=1,
+            prefetch_rows=2,
+            block_h=4,
+        ),
+    ),
+    (
+        2,
+        12,
+        12,
+        2,
+        3,
+        3,
+        1,
+        "fp16",
+        "gfx950",
+        dict(
+            _cpg=64,
+            mfma=True,
+            fwd=True,
+            out_stride=2,
+            block_waves=8,
+            w_fold=2,
+            prefetch_rows=2,
+            block_h=8,
         ),
     ),
 )

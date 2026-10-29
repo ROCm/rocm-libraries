@@ -7595,7 +7595,7 @@ class DirectDepthwiseDgradWindowedSpec:
     def unrolled_mfmas(self) -> int:
         """Statically unrolled MFMAs per wave (MFMA form)."""
         p = self.problem
-        return self.block_h * p.KH * _dw_mfma_passes(p.KW)
+        return self.block_h * p.KH * _dw_mfma_passes(p.KW) * self.cin_chunks
 
     def _mfma_in_passes(self) -> int:
         """16-byte dY loads per thread and window row (MFMA form)."""
@@ -7772,6 +7772,9 @@ def _depthwise_dgrad_win_check(
         return False, f"prefetch_rows must be >= 1 (got {spec.prefetch_rows})"
     if spec.fwd and not spec.mfma:
         return False, "fwd requires mfma"
+    if spec.fwd and p.KH != p.KW:
+        # One PAD serves both axes; only a square filter keeps it one value.
+        return False, f"fwd requires a square filter (got {p.KH}x{p.KW})"
     if spec.out_stride not in (1, 2) or (spec.out_stride != 1 and not spec.fwd):
         return False, f"out_stride must be 1, or 2 with fwd (got {spec.out_stride})"
     if spec.block_h % spec.out_stride:

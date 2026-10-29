@@ -868,6 +868,7 @@ class DirectDepthwiseDgradWindowedSpec:
     prefetch_rows: int = 1  # mfma: dY rows in flight
     wave_size: int = 64
     fwd: bool = False       # mfma: rotated filter -- the forward pass
+    out_stride: int = 1     # fwd: 2 keeps every 2nd row/col of the grid
 ```
 
 The filter, the padding and the dtype are baked (the kernel name carries
