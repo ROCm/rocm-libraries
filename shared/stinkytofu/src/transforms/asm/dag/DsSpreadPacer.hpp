@@ -37,7 +37,7 @@ class DsSpreadPacer {
         int start;         // WMMA index of the barrier the load waits behind (0 = none)
         int end;           // WMMA index of the barrier it feeds (INT_MAX = the region end)
         int earliest = 0;  // WMMA count the graph lets it issue at the soonest
-        int drain = -1;    // WMMAs its barrier keeps for the last load to return (-1: default)
+        int drain = 0;     // WMMAs its barrier keeps for the last load to return
     };
 
     // A stage the LDS rate can not finish by its end: its loads need `needed` WMMAs from its start
@@ -70,14 +70,13 @@ class DsSpreadPacer {
         wmmaTotal_ = 0;
     }
 
-    // loads: the region's ds_loads. wmmaTotal: the region's WMMAs. drainWindows: the drain of a
-    // load whose barrier gives none (Load::drain < 0); the region end needs no drain.
+    // loads: the region's ds_loads. wmmaTotal: the region's WMMAs.
     // maxPerBatch: the most loads the hardware takes in one batch (0 = not bounded), which caps
     // what a batch that is behind its line may take.
     // cyclesPerLoad, windowCycles: the LDS return rate and the WMMA window (0 = no rate floor). A
     // stage's loads can not all be placed before start + total * cyclesPerLoad / windowCycles.
     void plan(const std::vector<Load>& loads, int wmmaTotal, int batch, int catchUp,
-              int drainWindows, int maxPerBatch = 0, int cyclesPerLoad = 0, int windowCycles = 0) {
+              int maxPerBatch = 0, int cyclesPerLoad = 0, int windowCycles = 0) {
         reset();
         if (loads.empty() || wmmaTotal <= 0) return;
         active_ = true;
@@ -90,8 +89,7 @@ class DsSpreadPacer {
             const int start = std::clamp(l.start, 0, wmmaTotal);
             // Only a barrier needs the drain: the region end loops back to the start, so the last
             // load of the region has nothing to be done before.
-            const int drain =
-                l.end == INT_MAX ? 0 : std::max(0, l.drain >= 0 ? l.drain : drainWindows);
+            const int drain = l.end == INT_MAX ? 0 : std::max(0, l.drain);
             const int end = std::clamp(std::min(l.end, wmmaTotal) - drain, start, wmmaTotal);
             auto [it, fresh] = index.try_emplace({start, end}, static_cast<int>(stages_.size()));
             if (fresh) {

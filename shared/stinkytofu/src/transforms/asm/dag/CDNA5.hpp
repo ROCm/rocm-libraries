@@ -690,6 +690,14 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Per-barrier drain B (WMMA windows) the after threshold was planned with: N = base + B. The
     // last ds feeding the barrier goes at N - B, so the pacer ends its stage there.
     std::unordered_map<const StinkyInstruction*, int> barrierDrainWmmas_;
+    // The drain the pacer keeps in front of `barrier`: its planned B, or the ds credit lifetime in
+    // WMMA windows for a barrier with no after threshold.
+    int barrierDrain(const StinkyInstruction& barrier) const {
+        auto it = barrierDrainWmmas_.find(&barrier);
+        if (it != barrierDrainWmmas_.end()) return it->second;
+        const int window = std::max(1, wmmaIssueConfig.latency);
+        return (dsReadCreditLifetime() + window - 1) / window;
+    }
     struct BarrierBeforeOutput {
         int beforeThreshold = 0;
         int baseBeforeThreshold = 0;
@@ -3610,7 +3618,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         for (unsigned id : dsOrder) {
             int start = 0;
             int end = INT_MAX;
-            int drain = -1;  // the drain of the barrier that sets `end`
+            int drain = 0;  // the drain of the barrier that sets `end`
             for (const auto* edges : {&deps.dag.graph, &predsRef}) {
                 const bool forward = edges == &deps.dag.graph;
                 std::vector<unsigned> frontier{id};
@@ -3620,14 +3628,12 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                         for (unsigned m : (*edges)[n]) {
                             const int w = cutWindow(m);
                             if (w >= 0) {
-                                if (forward && w < end) {
-                                    auto b = barrierDrainWmmas_.find(deps.dag.nodes[m].inst);
-                                    drain = b == barrierDrainWmmas_.end() ? -1 : b->second;
-                                }
-                                if (forward)
-                                    end = std::min(end, w);
-                                else
+                                if (!forward) {
                                     start = std::max(start, w);
+                                } else if (w < end) {
+                                    end = w;
+                                    drain = barrierDrain(*deps.dag.nodes[m].inst);
+                                }
                             } else if (!isMatrixInstruction(*deps.dag.nodes[m].inst) &&
                                        !isDSRead(*deps.dag.nodes[m].inst)) {
                                 next.push_back(m);
@@ -3639,8 +3645,6 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             }
             loads.push_back({id, start, end, earliestAt[id], drain});
         }
-        // A barrier with no planned drain (no after threshold) keeps the credit lifetime free.
-        const int drainWindows = (dsReadCreditLifetime() + windowCycles - 1) / windowCycles;
         const int batch = std::max(1, dagFeatures.dsBatchWmmas);
         // The most loads the LDS takes in one batch: its credits (readQueueDepth, each held
         // readCreditLifetime cycles) over the batch's cycles.
@@ -3648,8 +3652,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             (static_cast<long long>(batch) * windowCycles * std::max(1, dsReadQueueDepth()) +
              dsReadCreditLifetime() - 1) /
             std::max(1, dsReadCreditLifetime()));
-        dsSpread_.plan(loads, wmmaTotalThisRegion_, batch, dagFeatures.dsCatchUpPace, drainWindows,
-                       maxPerBatch, effectiveDsCyclesPerLoad(dsTotalThisRegion_), windowCycles);
+        dsSpread_.plan(loads, wmmaTotalThisRegion_, batch, dagFeatures.dsCatchUpPace, maxPerBatch,
+                       effectiveDsCyclesPerLoad(dsTotalThisRegion_), windowCycles);
         dsOverflow_ =
             !loads.empty() && static_cast<long long>(loads.size()) *
                                       dsIssueCost(*deps.dag.nodes[loads.front().nodeId].inst) >
@@ -3660,8 +3664,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                                         r, effectiveDsCyclesPerLoad(dsTotalThisRegion_))
                                  << "\n");
         PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] loads=" << loads.size()
-                             << " wmmas=" << wmmaTotalThisRegion_ << " batch=" << batch << " drain="
-                             << drainWindows << " catchUp=" << dagFeatures.dsCatchUpPace << "\n");
+                             << " wmmas=" << wmmaTotalThisRegion_ << " batch=" << batch
+                             << " catchUp=" << dagFeatures.dsCatchUpPace << "\n");
     }
     auto isFillerInst = [](const StinkyInstruction& i) {
         return isVectorALU(i) || isTranscendental(i) || isScalarALU(i);
