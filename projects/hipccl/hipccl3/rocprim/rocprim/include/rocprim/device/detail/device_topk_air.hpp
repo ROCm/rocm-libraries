@@ -77,7 +77,7 @@ static inline constexpr auto in_range(const SizeIn& size)
 {
     using common_t = std::common_type_t<SizeIn, SizeType>;
     return static_cast<common_t>(size)
-            < static_cast<common_t>(std::numeric_limits<SizeType>::max());
+           < static_cast<common_t>(std::numeric_limits<SizeType>::max());
 }
 } // namespace device_topk_air_helper
 
