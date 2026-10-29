@@ -40,6 +40,7 @@
 #include <map>
 #include <optional>
 #include <queue>
+#include <set>
 #include <tuple>
 #include <unordered_set>
 #include <utility>
@@ -765,10 +766,28 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return openSccChain_ != 0 && node->handshakeBarrier;
     }
 
+    // Split barriers (s_barrier_signal / s_barrier_wait): the hardware holds one signal per barrier
+    // id in flight, so after a signal the next barrier on that id must be a wait. sig1 sig2 wait1
+    // wait2 breaks. A wait is ready only after its own signal (they share LDS tokens), so the
+    // ready wait is that signal's. Other ids are free (-1 pairs nest inside an open -3). Per BB.
+    std::set<int> openBarrierIds_;
+    static int barrierId(const StinkyInstruction& inst) {
+        if (!isBarrierSignal(inst) && !isBarrierWait(inst)) return -1;  // s_barrier: workgroup
+        const auto& srcs = inst.getSrcRegs();
+        return !srcs.empty() && srcs[0].dataType == StinkyRegister::Type::LiteralInt
+                   ? static_cast<int>(srcs[0].getLiteralInt())
+                   : -1;
+    }
+    bool barrierPairBlocks(const DAGNode* node) const {
+        return !isBarrierWait(*node->inst) && openBarrierIds_.count(barrierId(*node->inst)) != 0;
+    }
+    void noteBarrierPairIssue(const DAGNode* node);
+
     // True when decidePromote() / pickOne() may consider issuing this barrier
     // now. No-op when clusterBarrier is off (see sccChainBlocks()).
     bool isBarrierEligibleNow(const DAGNode* node) const {
-        return !sccChainBlocks(node) && !(singleStageLoop() && stageBarrierAwaitsPrefetch(node));
+        return !barrierPairBlocks(node) && !sccChainBlocks(node) &&
+               !(singleStageLoop() && stageBarrierAwaitsPrefetch(node));
     }
     // Single-stage loop: the stage barrier waits for its released prefetch group, so the group
     // issues right before it (in the tensor_load's window).
@@ -1772,6 +1791,15 @@ void CDNA5ReadyQueue::noteSccChainIssue(DAGNode* node) {
     if (--sccReadersLeft_ == 0) openSccChain_ = 0;
 }
 
+// A signal opens its barrier id until a wait on that id issues.
+void CDNA5ReadyQueue::noteBarrierPairIssue(const DAGNode* node) {
+    const StinkyInstruction& inst = *node->inst;
+    if (isBarrierSignal(inst))
+        openBarrierIds_.insert(barrierId(inst));
+    else if (isBarrierWait(inst))
+        openBarrierIds_.erase(barrierId(inst));
+}
+
 // Pure promotion decision, run once at the top of each pickOne(): the first rule
 // in priority order that fires decides the pick.
 void CDNA5ReadyQueue::decidePromote() {
@@ -2342,6 +2370,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     auto rememberPick = [this](DAGNode* node) {
         lastPickedNode_ = node;
         noteSccChainIssue(node);
+        noteBarrierPairIssue(node);
         return node;
     };
 
@@ -2518,23 +2547,19 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // barrier was promoted (threshold met), the phases above gated off and we
     // arrive here to issue that exact node (formerly the forced-barrier phase
     // ahead of WMMA). Otherwise this is the drain case: issue the lowest-id
-    // barrier once all compute has been picked.
+    // eligible barrier once all compute has been picked. A barrier held back (an open
+    // SCC chain, an open barrier pair) waits for a later phase to clear it.
     if (isPromote(PromotePhase::Barrier) && !barrierQueue.empty()) {
         DAGNode* barrier = nullptr;
         if (promotedPhase_ == PromotePhase::Barrier) {
             barrier = extractForcedBarrier();  // removes the promoted (threshold-met) node
-        } else if (clusterBarrierEnabled()) {
-            // Skip barriers held back by an open SCC chain; a later phase issues them
-            // once the chain's last reader has gone out.
+        } else {
             for (DAGNode* cand : barrierQueue) {
                 if (!isBarrierEligibleNow(cand)) continue;
                 barrier = cand;
                 break;
             }
             if (barrier) barrierQueue.erase(barrier);
-        } else {
-            barrier = barrierQueue.top();
-            barrierQueue.pop();
         }
         if (barrier) {
             updateWMMAStatus(barrier);
@@ -2572,6 +2597,11 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // broke.
     if (clusterBarrierEnabled() && openSccChain_ != 0 && !barrierQueue.empty()) {
         STINKY_UNREACHABLE("CDNA5ReadyQueue::pickOne: open SCC chain but only barriers are ready");
+    }
+    // Only barriers are left and an open signal holds them all: its wait is not ready, yet a wait
+    // depends only on its own signal and its own token's memory ops.
+    if (!openBarrierIds_.empty() && !barrierQueue.empty()) {
+        STINKY_UNREACHABLE("CDNA5ReadyQueue::pickOne: open barrier signal but no wait is ready");
     }
 
     assert(false && "CDNA5ReadyQueue::pickOne: all buckets empty");
@@ -2650,6 +2680,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
 
     resetActiveWindow();
     carriedWar_.clear();
+    openBarrierIds_.clear();
     nonWmmaFillsSinceActiveWmma_ = 0;
     fillsThisWindow_ = 0;
     dsSchedulingBudgetUsed_ = 0;
