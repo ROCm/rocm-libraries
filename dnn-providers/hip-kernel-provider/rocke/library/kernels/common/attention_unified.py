@@ -797,18 +797,19 @@ def _cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     ``arch`` sits at index 1 like every other key family in this module, so
     ``_assert_cache_key_arch`` can check key-vs-compile agreement uniformly and
     two arches can never alias to one cached kernel.
+
+    Like the tiled keys, it holds only fields the scalar 2D build reads. The
+    dynamic shape (``total_q``, ``num_seqs``, ``max_seqlen_q``, ``max_seqlen_k``)
+    reaches the kernel as kernargs or the launch grid, never as IR, so one binary
+    serves every batch. ``test_attention_scalar_cache_key.py`` enforces this.
     """
     return (
         "scalar",
         arch,
-        problem.total_q,
-        problem.num_seqs,
         problem.num_query_heads,
         problem.num_kv_heads,
         problem.head_size,
         problem.block_size,
-        problem.max_seqlen_q,
-        problem.max_seqlen_k,
         problem.dtype,
         problem.q_dtype,
         problem.sliding_window,
@@ -1297,16 +1298,16 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
     # combo and a much heavier prelude.
     if _enable_combo_2d(problem, arch) and problem.sliding_window > 0:
         return problem.block_size
-    # fp16 D128 single-batch sliding-window: force T=64. The generic
+    # fp16 & bf16 D128 single-batch sliding-window: force T=64. The generic
     # 2*block_size tile would give T=32 at block_size=16, whose 256 outer
     # iterations at S=8192 under-amortise the per-iter cost. T=64 halves the
-    # iteration count; measured ~1.65x on gfx950 (numerically identical --
-    # both paths max_abs 1.95e-3).
+    # iteration count; faster on gfx950 for both dtypes, within tolerance of
+    # the narrow path's output on each (fp16 max_abs 1.95e-3, bf16 max_abs
+    # 1.5625e-02 -- larger due to bf16's lower precision, not a routing bug).
     if (
         _enable_single_batch_combo(problem, arch)
         and problem.sliding_window > 0
         and problem.head_size == 128
-        and problem.dtype == "fp16"
     ):
         return 64
     # Single-batch (num_seqs == 1) d128/d64 prefill full-combo cohort.
@@ -2015,10 +2016,12 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
         them per-score, so biased single-batch prefill takes the combo path
         instead of the fallback. Only softcap/sinks are excluded (above)
         because the mask-limit shortcut can't fold them.
-      * sliding window: fp16 D128 only -- the transposed-32x32 path is ~1.65x
-        faster here than the narrow 16x16 path (both numerically equal); other
-        SW shapes keep their existing routing, and the no-SW VALU sub-flags
-        auto-disable via _enable_transposed_subflags.
+      * sliding window: fp16 & bf16 D128 only (measured both on gfx950) -- the
+        transposed-32x32 path is faster here than the narrow 16x16 path on
+        both dtypes, within tolerance of it numerically (fp16 max_abs
+        1.95e-3, bf16 max_abs 1.5625e-02); other SW shapes keep their
+        existing routing, and the no-SW VALU sub-flags auto-disable via
+        _enable_transposed_subflags.
       * head_size in {64, 128}.
       * max_seqlen_q > 256 (long prefill; decode-class shapes route to the 3D
         split-KV path via ``select_path``, and the autotuner's win starts at
@@ -2034,20 +2037,19 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
         return False
     if problem.softcap > 0 or problem.use_sinks:
         return False
-    # fp16 D128 sliding-window (block_size==16 only) routes to the transposed-
-    # 32x32 fp32 online-softmax path (~1.65x faster here than the narrow 16x16
-    # path; both numerically equal). Scoped to block_size==16 because that is the
-    # cohort we measured. bs in {32,64} would now also build safely under the
-    # combo -- the _enable_k_single_buffer geometry guard derives block_m <=
-    # tile_size, so the former block_m=128 > tile_size=64 collision no longer
-    # raises -- but their combo speedup is unmeasured, so they keep their
-    # existing routing. bf16 D128 SW and all other SW shapes also stay on their
-    # existing paths; the no-SW VALU sub-flags auto-disable for SW via
-    # _enable_transposed_subflags.
+    # fp16 & bf16 D128 sliding-window (block_size==16 only) route to the
+    # transposed-32x32 fp32 online-softmax path (faster here than the narrow
+    # 16x16 path on both dtypes, measured on gfx950; within tolerance of it
+    # numerically -- fp16 max_abs 1.95e-3, bf16 max_abs 1.5625e-02).
+    # Scoped to block_size==16 because that is the cohort we measured. bs in
+    # {32,64} would now also build safely under the combo -- the
+    # _enable_k_single_buffer geometry guard derives block_m <= tile_size, so
+    # the former block_m=128 > tile_size=64 collision no longer raises -- but
+    # their combo speedup is unmeasured, so they keep their existing routing.
+    # All other SW shapes also stay on their existing paths; the no-SW VALU
+    # sub-flags auto-disable for SW via _enable_transposed_subflags.
     if problem.sliding_window > 0 and not (
-        problem.head_size == 128
-        and problem.dtype == "fp16"
-        and problem.block_size == 16
+        problem.head_size == 128 and problem.block_size == 16
     ):
         return False
     if problem.head_size not in (64, 128):
@@ -5745,7 +5747,7 @@ def _get_scalar_launcher(
         kernel_name=kname,
         signature=_attn_signature(
             problem.dtype,
-            include_bt_stride=False,
+            include_bt_stride=True,
             kv_dtype=_kv_storage_dtype(problem),
         ),
         cache_key=("scalar",) + cache_key,
@@ -6364,7 +6366,7 @@ def run_unified_attention_torch(
         softcap=softcap,
         sinks=sinks,
         bt_stride=bt_stride,
-        include_bt_stride=False,
+        include_bt_stride=True,
         k_scale=k_scale,
         v_scale=v_scale,
         out_scale=out_scale,
@@ -6406,7 +6408,6 @@ class UnifiedAttention2DSpec:
         p = self.problem
         return kernel_name_join(
             self.name,
-            f"q{p.total_q}",
             f"h{p.num_query_heads}",
             f"kv{p.num_kv_heads}",
             f"d{p.head_size}",
@@ -6511,6 +6512,7 @@ def build_unified_attention_2d(
     _out_scale = b.param("out_scale", F32)
     softcap = b.param("softcap", F32)
     num_seqs = b.param("num_seqs", I32)
+    bt_stride = b.param("block_table_stride", I32)
 
     q_tok = b.block_id_x()
     q_head = b.block_id_y()
@@ -6567,16 +6569,8 @@ def build_unified_attention_2d(
         iv_name="kpos",
     )
     with loop as (kpos, (m_val, l_val, acc_val)):
-        block_idx, token_in_block = _magic_div_mod(b, kpos, p.block_size)
-        physical = b.global_load_i32(
-            block_tables,
-            b.add(
-                b.mul(
-                    seq_idx,
-                    b.const_i32((p.max_seqlen_k + p.block_size - 1) // p.block_size),
-                ),
-                block_idx,
-            ),
+        physical, token_in_block = _physical_block_and_token(
+            b, p, block_tables, bt_stride, seq_idx, kpos
         )
 
         # Vectorised QK dot product. Both Q[q_tok, q_head, :] and
@@ -6692,7 +6686,6 @@ class UnifiedAttention3DSpec(UnifiedAttention2DSpec):
         p = self.problem
         return kernel_name_join(
             self.name,
-            f"q{p.total_q}",
             f"h{p.num_query_heads}",
             f"kv{p.num_kv_heads}",
             f"d{p.head_size}",
@@ -6750,6 +6743,7 @@ def build_unified_attention_3d(
     scale = abi["scale"]
     _softcap = b.param("softcap", F32)
     num_seqs = b.param("num_seqs", I32)
+    bt_stride = b.param("block_table_stride", I32)
 
     q_tok = b.block_id_x()
     q_head = b.block_id_y()
@@ -6800,6 +6794,7 @@ def build_unified_attention_3d(
             query,
             key,
             block_tables,
+            bt_stride,
             seq_idx,
             q_tok,
             q_head,
@@ -6827,7 +6822,9 @@ def build_unified_attention_3d(
         alpha = b.exp2(b.fsub(m_val, new_m))
         prob = b.exp2(b.fsub(score, new_m))
         new_l = b.fadd(b.fmul(l_val, alpha), prob)
-        vv = _emit_v_load(b, p, dtype, value, block_tables, seq_idx, kv_head, kpos, dim)
+        vv = _emit_v_load(
+            b, p, dtype, value, block_tables, bt_stride, seq_idx, kv_head, kpos, dim
+        )
         new_acc = b.fadd(b.fmul(acc_val, alpha), b.fmul(prob, vv))
         b.scf_yield(new_m_raw, new_l, new_acc)
 
@@ -6864,7 +6861,6 @@ class UnifiedAttentionReduceSpec:
         p = self.problem
         return kernel_name_join(
             self.name,
-            f"q{p.total_q}",
             f"h{p.num_query_heads}",
             f"d{p.head_size}",
             f"seg{self.num_segments}",
@@ -7110,6 +7106,7 @@ def _emit_qk_score(
     query: Value,
     key: Value,
     block_tables: Value,
+    bt_stride: Value,
     seq_idx: Value,
     q_tok: Value,
     q_head: Value,
@@ -7138,7 +7135,7 @@ def _emit_qk_score(
     """
     score = b.const_f32(0.0)
     physical, token_in_block = _physical_block_and_token(
-        b, p, block_tables, seq_idx, kpos
+        b, p, block_tables, bt_stride, seq_idx, kpos
     )
     q_desc = _q_descriptor(p)
     kv_desc = _paged_kv_descriptor(p)
@@ -7189,13 +7186,14 @@ def _emit_v_load(
     dtype: Type,
     value: Value,
     block_tables: Value,
+    bt_stride: Value,
     seq_idx: Value,
     kv_head: Value,
     kpos: Value,
     dim: Value,
 ) -> Value:
     physical, token_in_block = _physical_block_and_token(
-        b, p, block_tables, seq_idx, kpos
+        b, p, block_tables, bt_stride, seq_idx, kpos
     )
     v_off = _paged_kv_descriptor(p).offset(
         b,
@@ -7211,12 +7209,17 @@ def _physical_block_and_token(
     b: IRBuilder,
     p: UnifiedAttentionProblem,
     block_tables: Value,
+    bt_stride: Value,
     seq_idx: Value,
     kpos: Value,
 ) -> Tuple[Value, Value]:
+    """Look up ``kpos``'s physical KV block in row ``seq_idx`` of the block table.
+
+    ``bt_stride`` is the table's row stride kernarg, not a value derived from
+    ``max_seqlen_k``: callers may allocate rows wider than the longest sequence.
+    """
     block_idx, token_in_block = _magic_div_mod(b, kpos, p.block_size)
-    max_blocks = (p.max_seqlen_k + p.block_size - 1) // p.block_size
     physical = b.global_load_i32(
-        block_tables, b.add(b.mul(seq_idx, b.const_i32(max_blocks)), block_idx)
+        block_tables, b.add(b.mul(seq_idx, bt_stride), block_idx)
     )
     return physical, token_in_block
