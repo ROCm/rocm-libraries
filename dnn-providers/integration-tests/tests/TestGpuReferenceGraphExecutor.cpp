@@ -427,6 +427,8 @@ void runConvBwdExecutorVsCpu(const std::vector<int64_t>& dyDims,
 
     for(size_t i = 0; i < dyCount; ++i)
     {
+        // Convert size_t -> float -> T since the custom half/bfloat16 types provide explicit
+        // conversions from float
         static_cast<T*>(cpuDy.rawHostData())[i] = T(static_cast<float>(i + 1));
     }
     for(size_t i = 0; i < wCount; ++i)
@@ -524,6 +526,8 @@ void runConvWrwExecutorVsCpu(const std::vector<int64_t>& xDims,
 
     for(size_t i = 0; i < xCount; ++i)
     {
+        // Convert size_t -> float -> T since custom half/bfloat16 types provide explicit
+        // conversions from float
         static_cast<T*>(cpuX.rawHostData())[i] = T(static_cast<float>(i + 1));
     }
     for(size_t i = 0; i < dyCount; ++i)
