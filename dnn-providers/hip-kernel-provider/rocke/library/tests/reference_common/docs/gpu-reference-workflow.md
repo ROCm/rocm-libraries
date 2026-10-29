@@ -625,7 +625,7 @@ do not overlap. These still do:
 | Two on different variants | Disjoint files, except where both add to a shared file: a replay ABI in the operation's `worker.py`, checks in its contract tests, or text in its guide | Merge in either order and keep both additions |
 | Two on the same variant | Its lock and DVC pointer conflict, as intended | Rebase onto the one merged first, keep the union of both cohorts, and requalify. Configuration and host tests reject a lock, pointer, or `CASES` taken from different qualifications; review must check that neither pull request's cases were dropped |
 | One editing the shared WMMA cohort | Every published WMMA variant's lock, whose cohort digest no longer matches | Requalify each, or first [give a processor its own tuple](quickstart.md#i-want-to-change-a-shared-cohort-on-one-processor) to decouple it |
-| One adding an architecture | That operation's `architectures/registry.json` and its `set(ROCKE_PUBLISHED_<OPERATION>_ARCHITECTURES ...)` line | Rebase and keep both entries |
+| One adding an architecture | That operation's `architectures/registry.json`, its `set(ROCKE_PUBLISHED_<OPERATION>_ARCHITECTURES ...)` line, and the processor lists in its own contract tests | Rebase and keep both entries |
 | One changing an operation's `contract.py` or `reference_common` | Every variant of the operation, or of every operation, without a textual conflict | Run the host checks after merging; a change to case fields, inputs, or tolerances needs each affected variant requalified |
 
 ## Triage

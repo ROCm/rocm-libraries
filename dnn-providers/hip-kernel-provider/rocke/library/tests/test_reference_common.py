@@ -1090,10 +1090,36 @@ def test_reference_family_label_does_not_hide_a_missing_gpu(monkeypatch):
             pytest.fail("a selected reference must not skip a missing GPU")
 
 
-@pytest.mark.parametrize(
-    "operation,architecture",
-    [("sdpa", "gfx1100"), ("conv", "gfx1151")],
-)
+def _enrolled_slots():
+    """Every enrolled (operation, processor), read from the registries."""
+    from importlib import import_module
+
+    return [
+        (operation, architecture)
+        for operation in OPERATIONS
+        for architecture in import_module(
+            f"{operation}_reference.architectures"
+        ).ARCHITECTURES
+    ]
+
+
+def _unenrolled_processors():
+    """For each operation, a real processor that its registry does not enroll."""
+    candidates = ("gfx1100", "gfx1151", "gfx1101", "gfx1102")
+    enrolled = _enrolled_slots()
+    unenrolled = []
+    for operation in OPERATIONS:
+        spare = [name for name in candidates if (operation, name) not in enrolled]
+        if not spare:
+            raise AssertionError(
+                f"{operation} enrolls every processor in {candidates}; "
+                "add an unenrolled real processor to this list"
+            )
+        unenrolled.append((operation, spare[0]))
+    return unenrolled
+
+
+@pytest.mark.parametrize("operation,architecture", _unenrolled_processors())
 def test_reference_fixture_skips_supported_gpu_without_cohort(
     operation, architecture, monkeypatch
 ):
@@ -1147,16 +1173,7 @@ def test_reference_fixture_skip_says_no_gpu_was_detected(operation, monkeypatch)
     assert "None" not in reason and "cohort" not in reason
 
 
-@pytest.mark.parametrize(
-    "operation,architecture",
-    [
-        ("sdpa", "gfx942"),
-        ("sdpa", "gfx1200"),
-        ("sdpa", "gfx1201"),
-        ("conv", "gfx942"),
-        ("conv", "gfx950"),
-    ],
-)
+@pytest.mark.parametrize("operation,architecture", _enrolled_slots())
 @pytest.mark.parametrize("candidate", [False, True])
 def test_reference_fixture_selects_explicit_paths(
     operation, architecture, candidate, tmp_path, monkeypatch
@@ -1653,7 +1670,13 @@ def test_reference_fixture_explains_an_archive_passed_as_the_bundle(
 
     gpu_tests = import_module(f"test_{operation}_pinned_reference")
     registry = import_module(f"{operation}_reference.architectures")
-    architecture = registry.ARCHITECTURES[index]
+    # An enrolled architecture may not be published yet; this needs a lock.
+    published = [
+        name
+        for name in registry.ARCHITECTURES
+        if registry.baseline_lock(name, _variant(registry, name)).is_file()
+    ]
+    architecture = published[index]
     archive = tmp_path / f"{architecture}.tar.gz"
     archive.write_bytes(b"archive fixture")
     monkeypatch.setattr(
@@ -1956,7 +1979,8 @@ def test_enrollment_rejects_unlisted_names_before_importing(operation, monkeypat
                 ):
                     lookup(architecture, name)
     # common is the adapters' shared helper module, not an adapter.
-    for name in ("gfx1100", "../gfx942", "common"):
+    unenrolled = dict(_unenrolled_processors())[operation]
+    for name in (unenrolled, "../gfx942", "common"):
         monkeypatch.setitem(sys.modules, f"{registry.__name__}.{name}", None)
         for lookup in (
             registry.get_architecture,
