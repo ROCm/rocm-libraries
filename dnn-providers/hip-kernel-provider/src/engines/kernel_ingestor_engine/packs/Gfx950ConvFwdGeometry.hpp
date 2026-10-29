@@ -634,6 +634,7 @@ enum class DirectVariant
     GROUPED, ///< "grouped": DirectConvSpec.
     NONGROUPED, ///< "nongrouped": DirectNongroupedConvSpec.
     GROUPED_HALO, ///< "grouped_halo": DirectNongroupedConvSpec with grouped=True.
+    WIN, ///< "win": DirectDepthwiseDgradWindowedSpec(fwd=True), depthwise or grouped (cpg = kpg).
 };
 
 /// A closed value set: any other integer, including a future family this build does not
@@ -684,6 +685,10 @@ inline std::optional<DirectVariant> parseDirectVariant(std::string_view value)
     if(value == "grouped_halo")
     {
         return DirectVariant::GROUPED_HALO;
+    }
+    if(value == "win")
+    {
+        return DirectVariant::WIN;
     }
     return std::nullopt;
 }
@@ -873,6 +878,11 @@ struct DirectInstance
     /// partial sums that direct_split_reduce folds; see splitReduceLaunch).
     int64_t groupMerge = 1;
     int64_t splitC = 1;
+    /// win: images per block sharing one 16x16 MFMA tile (tile_w = 32 / wFold columns),
+    /// and dY window rows in flight ahead of the one being multiplied (register budget
+    /// only; no effect on the grid).
+    int64_t wFold = 0;
+    int64_t prefetchRows = 0;
 };
 
 /// The channels per lane fragment of DirectNongroupedConvSpec's MFMA atom (_ATOMS in
@@ -1141,6 +1151,53 @@ inline std::optional<LaunchGeometry> nongroupedDirectLaunch(const Problem& probl
                           static_cast<unsigned int>(threads)};
 }
 
+/// The MFMA channels one wave of the windowed kernel owns (DW_DGRAD_MFMA_CH in
+/// conv_direct_grouped.py).
+constexpr int64_t DIRECT_WINDOWED_MFMA_CH = 8;
+
+/// The windowed depthwise/grouped forward kernel (DirectDepthwiseDgradWindowedSpec with
+/// ``fwd=True``, the Toeplitz MFMA form run on the rotated filter):
+/// is_valid_depthwise_dgrad_win_spec and dw_win_fwd_problem in conv_direct_grouped.py on
+/// the runtime problem (square filter, stride 1 or 2, no dilation, cpg = kpg = 1 or a
+/// multiple of 8 up to 64, block_h a multiple of the stride), then
+/// direct_launch_geometry's grid over the transposed stride-1 problem:
+///   (ceil(stride * Wo / (32 / w_fold)), ceil(C / (8 * block_waves)),
+///    ceil(N / w_fold) * ceil(stride * Ho / block_h))
+/// of block_waves * 64 threads. w_fold and prefetch_rows only shape the register budget
+/// the binary was compiled with, not the grid.
+inline std::optional<LaunchGeometry> windowedDirectLaunch(const Problem& problem,
+                                                          const Geometry& geometry,
+                                                          const DirectInstance& instance)
+{
+    const auto& compiled = instance.compiled;
+    const bool grouped = instance.cpg > 1;
+    if(problem.y != problem.x || !directCompiledMatches(compiled, problem)
+       || compiled.dilationH != 1 || compiled.dilationW != 1
+       || (compiled.strideH != 1 && compiled.strideH != 2) || problem.groups <= 0
+       || problem.c % problem.groups != 0 || problem.k % problem.groups != 0
+       || problem.c / problem.groups != instance.cpg || problem.k / problem.groups != instance.kpg
+       || (grouped ? instance.cpg != instance.kpg || instance.cpg % DIRECT_WINDOWED_MFMA_CH != 0
+                         || instance.cpg > 64
+                   : instance.cpg != 1 || instance.kpg != 1)
+       || instance.blockH < 1 || instance.blockWaves < 1
+       || instance.blockWaves > DIRECT_MAX_BLOCK_WAVES
+       || (instance.wFold != 1 && instance.wFold != 2 && instance.wFold != 4)
+       || instance.blockH % compiled.strideH != 0 || instance.prefetchRows < 1 || geometry.ho < 1
+       || geometry.wo < 1 || problem.n > DIRECT_MAX_GRID_DIM)
+    {
+        return std::nullopt;
+    }
+    const auto tileW = 32 / instance.wFold;
+    const auto blockCh = instance.blockWaves * DIRECT_WINDOWED_MFMA_CH;
+    const auto stride1H = compiled.strideH * geometry.ho;
+    const auto stride1W = compiled.strideH * geometry.wo;
+    return boundedDirectGrid(ceilDiv(stride1W, tileW),
+                             ceilDiv(problem.c, blockCh),
+                             ceilDiv(problem.n, instance.wFold)
+                                 * ceilDiv(stride1H, instance.blockH),
+                             instance.blockWaves * DIRECT_WAVE_SIZE);
+}
+
 /// Images per launch of a non-grouped or grouped-halo kernel on @p problem, or an empty
 /// list when one launch serves it (rocKE's direct_kernel_sweep._batch_chunks). Those
 /// kernels redirect masked accesses to NONGROUPED_OOB_BASE through one 32-bit buffer
@@ -1257,6 +1314,8 @@ inline std::optional<LaunchGeometry> directInstanceLaunch(const Problem& problem
     case DirectVariant::NONGROUPED:
     case DirectVariant::GROUPED_HALO:
         return nongroupedDirectLaunch(problem, geometry, instance);
+    case DirectVariant::WIN:
+        return windowedDirectLaunch(problem, geometry, instance);
     case DirectVariant::NONE:
     default:
         return std::nullopt;

@@ -43,6 +43,8 @@ engine:
   - waves_per_eu
   - group_merge
   - split_c
+  - prefetch_rows
+  - w_fold
   heuristic: native
   native_symbols_from: hipkernel:Gfx950ConvFwdAot
 kmd_fields:
@@ -214,6 +216,14 @@ kmd_fields:
   type: int
   default_value: 1
   builder_default: true
+- name: prefetch_rows
+  type: int
+  default_value: 0
+  builder_default: true
+- name: w_fold
+  type: int
+  default_value: 0
+  builder_default: true
 kernel_source_kind: rocke
 workspace_policy: derived
 graph_match:
@@ -274,6 +284,8 @@ specialization:
   - waves_per_eu
   - group_merge
   - split_c
+  - prefetch_rows
+  - w_fold
   matcher_only_fields: []
   bindings:
     dtype:
@@ -382,6 +394,10 @@ specialization:
       field: group_merge
     split_c:
       field: split_c
+    prefetch_rows:
+      field: prefetch_rows
+    w_fold:
+      field: w_fold
 packs:
 - name: bf16
   arch:

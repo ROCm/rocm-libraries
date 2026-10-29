@@ -54,7 +54,7 @@ holds the adapter to that, and to the sweep's served-problem predicate.
 
 ## Direct instances
 
-The direct sweep has seven forward algorithms. Each is a `direct_variant` of the AOT
+The direct sweep has eight forward algorithms. Each is a `direct_variant` of the AOT
 engine; all share `kernel_family` 1 and the same forward ABI:
 
 | Algorithm | `direct_variant` | Kernel spec | Identities per dtype |
@@ -66,8 +66,9 @@ engine; all share `kernel_family` 1 and the same forward ABI:
 | `direct_grouped` | `grouped` | `DirectConvSpec` | 80 |
 | `direct_nongrouped` | `nongrouped` | `DirectNongroupedConvSpec` | 4,874 (1,816 split-C) |
 | `direct_grouped_halo` | `grouped_halo` | `DirectNongroupedConvSpec` with `grouped=True` | 2,850 |
+| `direct_depthwise_win` | `win` | `DirectDepthwiseDgradWindowedSpec` with `fwd=True` (the windowed dgrad kernel's Toeplitz MFMA form run on the rotated filter; depthwise `cpg=1` or grouped `cpg=kpg` a multiple of 8 up to 64, stride 1 or 2) | 759 |
 
-That is 10,027 identities per dtype. `make_conv_aot_config.py` accepts every one of them
+That is 10,786 identities per dtype. `make_conv_aot_config.py` accepts every one of them
 (`PACKAGED_DIRECT_ALGORITHMS`, checked by the direct sweep's own round trip
 `direct_job_for_identity`). The one forward kernel of the direct sweep that is not an
 instance is `direct_split_reduce`: it ships as the second launch of each split-C
@@ -322,21 +323,30 @@ together:
 
 | Family | fp16 | bf16 |
 |---|---:|---:|
-| Implicit GEMM | 217 | 217 |
-| Implicit GEMM, group-merged (`group_merge` 4, 8, 16) | 10 | 10 |
-| Direct `nongrouped`, split-C (`split_c` 2, 4, 8, 16) | 91 | 91 |
-| Direct `nongrouped` | 84 | 84 |
-| Direct depthwise `tiled` | 79 | 79 |
-| Direct `grouped_halo` (`group_merge` 1, 2, 4, 8) | 45 | 45 |
-| Direct depthwise `std` | 5 | 5 |
-| Direct `grouped` | 3 | 3 |
-| Direct depthwise `spatial` | 3 | 3 |
-| **Total** | **537** | **537** |
+| Implicit GEMM | 73 | 73 |
+| Implicit GEMM, group-merged | 6 | 6 |
+| Direct `nongrouped`, split-C | 29 | 29 |
+| Direct `nongrouped` | 44 | 44 |
+| Direct depthwise/grouped `win` (`cpg` 1 or 8..64, stride 1 or 2) | 38 | 38 |
+| Direct `grouped_halo` | 9 | 9 |
+| Direct depthwise `tiled` | 4 | 4 |
+| Direct depthwise `col` | 3 | 3 |
+| Direct depthwise `spatial` | 1 | 1 |
+| **Total** | **207** | **207** |
 
-1,074 instances in all. Every entry must be an identity of rocKE's gfx950 forward
+414 instances in all. Every entry must be an identity of rocKE's gfx950 forward
 sweeps (`aot_jobs.py` for implicit GEMM, `direct_aot_jobs.py` for direct) and
 must convert, that is, the packaged launch runs it. The tool fails on any entry that
 is not, rather than dropping it.
+
+This catalog (measured top-1 per shape over a newer sweep round) drops the
+`std`/`grouped` depthwise families and most of `tiled` entirely, and adds the
+windowed MFMA `win` kernel (`direct_depthwise_win`, see [Direct
+instances](#direct-instances)) — both a pure-depthwise arm (`cpg` 1) and a grouped
+one (`cpg = kpg`, a multiple of 8 up to 64, stride 1 or 2). `win` packages a
+kernel built on the windowed dgrad kernel's Toeplitz MFMA form
+(`DirectDepthwiseDgradWindowedSpec` with `fwd=True`); see the "Direct instances"
+table for its kernel spec.
 
 The list is the union of the fastest kernel (top-1) per measured shape over rocKE's
 forward sweeps on 2-D fp16 and bf16 forward convolutions. Unlike the previous catalog it
@@ -348,8 +358,8 @@ and B load widths are always equal):
 
 | Epilogue | Load/store widths, fp16 instances |
 |---|---|
-| `cshuffle` | 8/8/8 (140), 1/1/8 (38), 4/4/8 (15), 8/8/4 (7), 8/8/1 (2), 1/1/1 (1) |
-| `default` | 8/8/1 (14) |
+| `cshuffle` | 8/8/8 (53), 1/1/8 (4), 8/8/4 (3), 4/4/8 (2), 8/8/1 (1), 1/1/1 (1) |
+| `default` | 8/8/1 (8), 1/1/1 (1) |
 
 So a problem whose widest combination is not one of these has no instance at it, and
 runs every instance that serves it ([Serves and selected](#serves-and-selected)). Every
@@ -358,10 +368,13 @@ problem class still has an implicit-GEMM instance
 have few (one where only 1/1/1 serves). No instance uses the async DMA K loop.
 
 Which instances serve a given problem, and which of those run, is decided at runtime,
-not by the catalog. For the GPU suite's graphs the engine selects, per dtype, 140
-implicit-GEMM candidates for a dense graph with C and K divisible by 8, 1 to 38 where
-the widest combination is narrower, and 6 to 11 for depthwise
-(`aotGraphs()` in `IntegrationGpuGfx950ConvFwd.cpp`).
+not by the catalog. For the GPU suite's graphs the engine selects, per dtype, some
+number of implicit-GEMM candidates for a dense graph with C and K divisible by 8, fewer
+where the widest combination is narrower, and a handful for depthwise
+(`aotGraphs()` in `IntegrationGpuGfx950ConvFwd.cpp`) — **the exact counts above (140, 1
+to 38, 6 to 11) are stale for this catalog** (computed for the previous 537/dtype one)
+and need re-measuring on GPU once this catalog's C++ side is built (tracked in the
+catalog-swap plan's Step 3.5).
 
 The lists are compact: one identity per line, holding only the fields that have no
 plain default or that differ from it. `KernelIdentity.from_dict` restores the rest, and
@@ -378,14 +391,14 @@ of their own (`make_conv_aot_config.py --sharding k-loop`, the default):
 
 | KDP shard, per dtype | Instances |
 |---|---:|
-| `gfx950_conv_fwd_aot_<dtype>_mem_plain` | 76 |
-| `gfx950_conv_fwd_aot_<dtype>_mem_unroll` | 18 |
-| `gfx950_conv_fwd_aot_<dtype>_compv3_plain` | 60 |
-| `gfx950_conv_fwd_aot_<dtype>_compv3_unroll` | 9 |
-| `gfx950_conv_fwd_aot_<dtype>_compv4_plain` | 54 |
-| `gfx950_conv_fwd_aot_<dtype>_compv4_unroll` | 10 |
-| `gfx950_conv_fwd_aot_<dtype>_direct` | 219 |
-| `gfx950_conv_fwd_aot_<dtype>_direct_split` | 91 |
+| `gfx950_conv_fwd_aot_<dtype>_mem_plain` | 19 |
+| `gfx950_conv_fwd_aot_<dtype>_mem_unroll` | 13 |
+| `gfx950_conv_fwd_aot_<dtype>_compv3_plain` | 22 |
+| `gfx950_conv_fwd_aot_<dtype>_compv3_unroll` | 1 |
+| `gfx950_conv_fwd_aot_<dtype>_compv4_plain` | 18 |
+| `gfx950_conv_fwd_aot_<dtype>_compv4_unroll` | 6 |
+| `gfx950_conv_fwd_aot_<dtype>_direct` | 99 |
+| `gfx950_conv_fwd_aot_<dtype>_direct_split` | 29 |
 
 The KDPs are in DVC, not git: they live in the bundle's `artifacts/` folder, tracked by
 `artifacts.dvc`, and the trained model under `heuristics/` by `heuristics.dvc`. Fetch
@@ -448,7 +461,7 @@ regenerates it from the lists on every run. The tests hold the pieces together:
 
 - `tests/test_enumerate_conv_aot_instances.py` fails when the lists are not what the
   tool builds from the committed labels and the rocKE tree beside them, when a label is
-  not a sweep identity or does not convert, or when the catalog is not 537 kernels per
+  not a sweep identity or does not convert, or when the catalog is not 207 kernels per
   dtype, the same in both.
 - `tests/test_make_conv_aot_config.py` fails when a shipped shard is not exactly the
   lists' instances of its shard, with instance-derived ids, or when a committed file is
@@ -464,8 +477,8 @@ current sources.
 
 ### Build and package cost
 
-The product pack compiles every instance, 1,074 variants for this engine (and a second
-launch for each of the 182 split-C ones).
+The product pack compiles every instance, 414 variants for this engine (and a second
+launch for each of the 58 split-C ones).
 
 The build figures below were measured for an earlier catalog, rocKE's whole forward
 sweep with only the std and spatial direct kernels (about 159,000 variants with the
@@ -515,9 +528,12 @@ the same limit walks. Unset, or any value that is not a positive integer, means 
 limit.
 
 In the GPU suite's synthetic graphs, a dense 3x3 graph selects 3,260 of its 78,940
-serving implicit-GEMM instances, plus up to a few hundred direct ones (146 for the
-default `Smoke` graph); a depthwise graph selects 7,440 implicit-GEMM instances (only
-width 1 serves one channel per group) and about 110 direct ones.
+serving implicit-GEMM instances (a sweep-wide figure, unaffected by the catalog swap),
+plus up to a few hundred direct ones (146 for the default `Smoke` graph); a depthwise
+graph selects 7,440 implicit-GEMM instances (only width 1 serves one channel per group)
+and about 110 direct ones. **The direct-instance counts (146, 110) are stale for this
+catalog** — the shipped direct-instance count dropped from the previous catalog's;
+re-measure once Step 3.5 (GPU build) runs the integration suite.
 
 ### Plan-build cost
 
@@ -631,13 +647,13 @@ integration root packs it for gfx950, the product's where the product root offer
 ## Current limits
 
 - Forward only. The launch runs every forward kernel of rocKE's sweeps, but the shipped
-  catalog packages only the 537 per dtype its label list names; the seed exercises
+  catalog packages only the 207 per dtype its label list names; the seed exercises
   knob values the catalog does not ship.
-- The trained `sort_kernel_catalog` model predates the group-merged, grouped-halo and
-  split-C instances. It ignores the `group_merge` and `split_c` knobs, and the
-  `grouped_halo` value of `direct_variant` is unseen by it; benchmarking measures every
-  selected instance regardless. Retrain it on this catalog before relying on the
-  unbenchmarked ranking.
+- The trained `sort_kernel_catalog` model predates the group-merged, grouped-halo,
+  split-C and `win` instances. It ignores the `group_merge`, `split_c`, `prefetch_rows`
+  and `w_fold` knobs, and the `grouped_halo`/`win` values of `direct_variant` are unseen
+  by it; benchmarking measures every selected instance regardless. Retrain it on this
+  catalog before relying on the unbenchmarked ranking.
 - One score heuristic, as described above. It is a placeholder until rocKE's
   dispatcher ranks instances. Benchmarking every selected instance grows with the
   number of configurations in the catalog; `HIPDNN_INGESTOR_CANDIDATE_LIMIT` bounds it

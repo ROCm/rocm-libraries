@@ -102,8 +102,8 @@ def catalog():
     return tool.read_labels(tool.CATALOG_LABELS)
 
 
-def test_the_catalog_lists_537_kernels_per_dtype_the_same_in_both(catalog):
-    """227 implicit-GEMM and 310 direct kernels per dtype, and the two dtypes list the
+def test_the_catalog_lists_207_kernels_per_dtype_the_same_in_both(catalog):
+    """79 implicit-GEMM and 128 direct kernels per dtype, and the two dtypes list the
     same kernels."""
     by_dtype = collections.defaultdict(list)
     for identity in catalog:
@@ -113,7 +113,7 @@ def test_the_catalog_lists_537_kernels_per_dtype_the_same_in_both(catalog):
         families = collections.Counter(
             i["algorithm"] == "implicit_gemm" for i in identities
         )
-        assert families == {True: 227, False: 310}
+        assert families == {True: 79, False: 128}
 
     def without_dtype(identity):
         return tuple(
@@ -243,7 +243,13 @@ def test_main_writes_one_list_per_dtype_ordered_by_family_then_hash(
     tmp_path, monkeypatch, synthetic_grid, catalog
 ):
     implicit = synthetic_grid[:12]
-    direct = [i for i in catalog if i["algorithm"] != "implicit_gemm"][:5]
+    # One dtype only: _both_dtypes reassigns dtype_a/b/d below, so two entries that
+    # differ only by their original dtype would collide into the same label.
+    direct = [
+        i
+        for i in catalog
+        if i["algorithm"] != "implicit_gemm" and i["dtype_a"] == "bf16"
+    ][:5]
     status, written = _fake_main(tmp_path, monkeypatch, _both_dtypes(implicit + direct))
     assert status == 0
     assert sorted(written) == sorted(tool.DTYPES)

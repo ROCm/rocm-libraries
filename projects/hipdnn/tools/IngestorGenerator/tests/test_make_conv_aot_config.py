@@ -416,6 +416,7 @@ _DIRECT_GRID = {
     # 3058 unsplit and 1816 split-C kernels.
     "direct_nongrouped": 4874,
     "direct_grouped_halo": 2850,
+    "direct_depthwise_win": 759,
 }
 #: Forward identities per dtype and algorithm of the direct sweep the packaged launch
 #: does not run, and the start of the reason the adapter refuses them with: the
@@ -612,6 +613,7 @@ def test_direct_instances_are_variants_stating_their_own_fields(
             ("grouped",): "gfx950_conv_fwd_aot_grouped_{dtype}_{instance_id}",
             ("nongrouped",): "gfx950_conv_fwd_aot_nongrouped_{dtype}_{instance_id}",
             ("grouped_halo",): "gfx950_conv_fwd_aot_groupedhalo_{dtype}_{instance_id}",
+            ("win",): "gfx950_conv_fwd_aot_dwwin_{dtype}_{instance_id}",
         }
     # Every direct field is builder_default, so implicit-GEMM descriptors (and std and
     # spatial ones, for the block knobs) leave them to the KMD.

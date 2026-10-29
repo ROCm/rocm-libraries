@@ -139,6 +139,8 @@ DIRECT_KNOB_FIELDS = {
     "waves_per_eu": 0,
     "group_merge": 1,
     "split_c": 1,
+    "prefetch_rows": 0,
+    "w_fold": 0,
 }
 #: Spec field order of a std or spatial direct instance.
 DIRECT_SPEC_ORDER = SPEC_ORDER + tuple(DIRECT_FIELDS)
@@ -174,6 +176,7 @@ DIRECT_VARIANT_FIELDS = {
         "waves_per_eu",
         "group_merge",
     ),
+    "win": ("block_h", "prefetch_rows", "w_fold", "cpg", "kpg"),
 }
 #: Spec field order of a group-merged implicit-GEMM instance: the merge degree
 #: after the implicit-GEMM fields, every direct field at its builder_default.
@@ -234,6 +237,8 @@ ENGINE_KNOBS = (
     "waves_per_eu",
     "group_merge",
     "split_c",
+    "prefetch_rows",
+    "w_fold",
 )
 #: Direct-sweep algorithm -> the instance's direct_variant, for the algorithms the
 #: exact-shape engine's direct launch runs.
@@ -248,6 +253,7 @@ PACKAGED_DIRECT_ALGORITHMS = {
     "direct_grouped": "grouped",
     "direct_nongrouped": "nongrouped",
     "direct_grouped_halo": "grouped_halo",
+    "direct_depthwise_win": "win",
 }
 #: The generator variant (kernel name) of each direct variant. std and spatial keep
 #: the name they had when they were the only direct instances.
@@ -259,6 +265,7 @@ _DIRECT_VARIANT_NAMES = {
     "grouped": "gfx950_conv_fwd_aot_grouped_{dtype}_{instance_id}",
     "nongrouped": "gfx950_conv_fwd_aot_nongrouped_{dtype}_{instance_id}",
     "grouped_halo": "gfx950_conv_fwd_aot_groupedhalo_{dtype}_{instance_id}",
+    "win": "gfx950_conv_fwd_aot_dwwin_{dtype}_{instance_id}",
 }
 #: The generator variant of a group-merged implicit-GEMM instance and of a
 #: split-C non-grouped one.
@@ -433,6 +440,7 @@ def build_config(
             ("grouped",),
             ("nongrouped",),
             ("grouped_halo",),
+            ("win",),
         ):
             members = [
                 s

@@ -680,7 +680,7 @@ constexpr std::array<const char*, 8> AOT_DIRECT_FIELDS{
 /// The block knobs after block_w and block_waves, with the KMD default each holds where
 /// its variant does not use it (_AOT_DIRECT_KNOB_DEFAULTS in convolution_forward.py, less
 /// the string "atom"). iglp -1 and waves_per_eu 0 stand for rocKE's None.
-constexpr std::array<std::pair<const char*, int64_t>, 18> AOT_DIRECT_KNOB_DEFAULTS{{
+constexpr std::array<std::pair<const char*, int64_t>, 20> AOT_DIRECT_KNOB_DEFAULTS{{
     {"block_h", 0},
     {"unroll_rows", 0},
     {"block_q", 0},
@@ -699,6 +699,8 @@ constexpr std::array<std::pair<const char*, int64_t>, 18> AOT_DIRECT_KNOB_DEFAUL
     {"waves_per_eu", 0},
     {"group_merge", 1},
     {"split_c", 1},
+    {"prefetch_rows", 0},
+    {"w_fold", 0},
 }};
 
 /// The fields of block_w, block_waves, AOT_DIRECT_KNOB_DEFAULTS and "atom" that
@@ -745,6 +747,8 @@ bool aotDirectVariantUses(conv::DirectVariant variant, std::string_view field)
                       "iglp",
                       "waves_per_eu",
                       "group_merge"});
+    case conv::DirectVariant::WIN:
+        return among({"block_waves", "block_h", "cpg", "kpg", "prefetch_rows", "w_fold"});
     case conv::DirectVariant::NONE:
     default:
         return false;
@@ -929,6 +933,8 @@ std::optional<conv::DirectInstance> aotDirectInstance(const KernelDefinition& ke
     instance.atomFragment = atomFragment;
     instance.groupMerge = knob("group_merge");
     instance.splitC = knob("split_c");
+    instance.prefetchRows = knob("prefetch_rows");
+    instance.wFold = knob("w_fold");
     return instance;
 }
 
@@ -1156,7 +1162,13 @@ double
     }
     if(const auto* direct = std::get_if<conv::DirectInstance>(&*instance))
     {
-        if(!conv::isDepthwiseDirectVariant(direct->variant))
+        // win packages both a pure-depthwise arm (cpg == 1, which competes with
+        // std/spatial/tiled/col) and a grouped one (cpg a multiple of 8): only the
+        // former is pure depthwise.
+        const bool pureDepthwise = direct->variant == conv::DirectVariant::WIN
+                                       ? direct->cpg <= 1
+                                       : conv::isDepthwiseDirectVariant(direct->variant);
+        if(!pureDepthwise)
         {
             return -0.5;
         }

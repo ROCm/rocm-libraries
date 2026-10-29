@@ -51,6 +51,8 @@
     "iglp",
     "waves_per_eu",
     "group_merge",
-    "split_c"
+    "split_c",
+    "prefetch_rows",
+    "w_fold"
   ]
 }

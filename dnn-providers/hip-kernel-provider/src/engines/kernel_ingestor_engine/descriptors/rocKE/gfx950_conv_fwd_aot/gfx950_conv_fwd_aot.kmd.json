@@ -245,6 +245,16 @@
       "name": "split_c",
       "type": "int",
       "default_value": 1
+    },
+    {
+      "name": "prefetch_rows",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "w_fold",
+      "type": "int",
+      "default_value": 0
     }
   ]
 }

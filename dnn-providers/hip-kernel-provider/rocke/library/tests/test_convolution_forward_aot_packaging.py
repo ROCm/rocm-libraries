@@ -31,6 +31,7 @@ from builders.common.convolution_forward import (
     DIRECT_VARIANT_GROUPED,
     DIRECT_VARIANT_GROUPED_HALO,
     DIRECT_VARIANT_NONGROUPED,
+    DIRECT_VARIANT_WIN,
     KERNEL_FAMILY_DIRECT_DEPTHWISE,
     Gfx950ConvFwdAotSpec,
     Gfx950ConvFwdSpec,
@@ -630,6 +631,7 @@ _DIRECT_COUNTS = {
     # 3058 unsplit and 1816 split-C kernels.
     "direct_nongrouped": 4874,
     "direct_grouped_halo": 2850,
+    "direct_depthwise_win": 759,
 }
 #: Forward direct identities per dtype the packaged launch refuses as an instance: the
 #: split-C fold, the second launch of each split-C instance.
@@ -818,6 +820,17 @@ def _instance_problems(spec: Gfx950ConvFwdAotSpec, count: int = 24):
             groups = rng.choice([1] + [2, 4, 8, 12, 16, 32] * 2)
             cpg = rng.choice([4, 8, 16, 24, 32, 64])
             kpg = rng.choice([cpg, cpg, 16, 32, 64])
+            c, k = groups * cpg, groups * kpg
+            hi = rng.choice([3, 8, 13, 17, 28])
+            wi = rng.choice([14, 16, 28, 30, 32, 48, 56, 64, 96, 128])
+        elif variant == DIRECT_VARIANT_WIN and spec.cpg > 1:
+            # Grouped windowed: cpg = kpg, a multiple of 8 (DW_WIN_FWD_GROUP_CH); one
+            # group in a share, which the kernel declines (cpg must match exactly).
+            cpg, kpg = rng.choice(
+                [(spec.cpg, spec.kpg)] * 6
+                + [(spec.cpg, 2 * spec.kpg), (spec.cpg + 8, spec.kpg + 8)]
+            )
+            groups = rng.choice([1, 2, 3, 4, 6, 8])
             c, k = groups * cpg, groups * kpg
             hi = rng.choice([3, 8, 13, 17, 28])
             wi = rng.choice([14, 16, 28, 30, 32, 48, 56, 64, 96, 128])
@@ -1151,6 +1164,32 @@ def test_tiled_serves_large_filters_the_row_stream_cannot(direct_jobs):
     )
 
 
+def test_win_serves_depthwise_and_grouped_stride_1_and_2(direct_jobs):
+    dw = _first(direct_jobs, "direct_depthwise_win", cpg=1, filter_h=3, stride_h=1)
+    problem = Gfx950ConvFwdSpec(
+        N=2, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, pH=1, pW=1, groups=32
+    )
+    assert gfx950_conv_fwd_aot_serves(dw, problem) == (True, "ok")
+    # Wrong group count (not cpg=kpg=1) is declined.
+    ok, why = gfx950_conv_fwd_aot_serves(dw, replace(problem, groups=16))
+    assert not ok and "cpg, kpg" in why, why
+
+    grouped = _first(direct_jobs, "direct_depthwise_win", cpg=8, filter_h=3, stride_h=1)
+    gproblem = Gfx950ConvFwdSpec(
+        N=2, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, pH=1, pW=1, groups=4
+    )
+    assert gfx950_conv_fwd_aot_serves(grouped, gproblem) == (True, "ok")
+    # A depthwise (cpg=1) instance never serves a grouped (cpg=8) problem and vice versa.
+    assert not gfx950_conv_fwd_aot_serves(dw, gproblem)[0]
+    assert not gfx950_conv_fwd_aot_serves(grouped, problem)[0]
+
+    stride2 = _first(direct_jobs, "direct_depthwise_win", cpg=1, filter_h=3, stride_h=2)
+    s2problem = Gfx950ConvFwdSpec(
+        N=2, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, sH=2, sW=2, pH=1, pW=1, groups=32
+    )
+    assert gfx950_conv_fwd_aot_serves(stride2, s2problem) == (True, "ok")
+
+
 @pytest.mark.parametrize("cpg", [4, 8, 16, 32])
 def test_grouped_serves_its_compiled_channel_counts_only(direct_jobs, cpg):
     spec = _first(direct_jobs, "direct_grouped", cpg=cpg)
@@ -1273,6 +1312,10 @@ def test_out_of_contract_direct_instances_are_declined(direct_jobs, change, reas
         ("direct_nongrouped", {"block_waves": 1}, "does not use block_waves"),
         ("direct_nongrouped", {"cpg": 16}, "does not use cpg"),
         ("direct_nongrouped", {"stride_h": 3, "stride_w": 3}, "stride 3"),
+        ("direct_depthwise_win", {"block_h": 0}, "block_h"),
+        ("direct_depthwise_win", {"w_fold": 3}, "w_fold"),
+        ("direct_depthwise_win", {"prefetch_rows": 0}, "prefetch_rows"),
+        ("direct_depthwise_win", {"block_q": 16}, "does not use block_q"),
     ],
 )
 def test_out_of_contract_variant_knobs_are_declined(

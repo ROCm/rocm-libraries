@@ -237,8 +237,10 @@ TEST(TestGfx950ConvFwdGeometry, FamilyAndVariantValueSetsAreClosed)
     EXPECT_EQ(parseDirectVariant("col"), DirectVariant::COL);
     EXPECT_EQ(parseDirectVariant("grouped"), DirectVariant::GROUPED);
     EXPECT_EQ(parseDirectVariant("nongrouped"), DirectVariant::NONGROUPED);
+    EXPECT_EQ(parseDirectVariant("grouped_halo"), DirectVariant::GROUPED_HALO);
+    EXPECT_EQ(parseDirectVariant("win"), DirectVariant::WIN);
     for(const auto* value :
-        {"", "Std", "SPATIAL", "direct_depthwise", "std ", "direct_depthwise_tiled", "Col"})
+        {"", "Std", "SPATIAL", "direct_depthwise", "std ", "direct_depthwise_tiled", "Col", "Win"})
     {
         SCOPED_TRACE(value);
         EXPECT_FALSE(parseDirectVariant(value));

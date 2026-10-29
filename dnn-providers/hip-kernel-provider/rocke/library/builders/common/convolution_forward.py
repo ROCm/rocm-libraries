@@ -958,6 +958,10 @@ DIRECT_VARIANT_NONGROUPED = "nongrouped"
 #: DirectNongroupedConvSpec with ``grouped=True``: groups > 1, the per-group
 #: channel counts runtime, ``group_merge`` groups per workgroup.
 DIRECT_VARIANT_GROUPED_HALO = "grouped_halo"
+#: DirectDepthwiseDgradWindowedSpec(fwd=True): the windowed dgrad kernel's
+#: Toeplitz MFMA form run forward on the rotated filter -- depthwise or
+#: grouped (cpg = kpg, 8..64 channels), stride 1 or 2.
+DIRECT_VARIANT_WIN = "win"
 #: Each forward algorithm of ``direct_aot_jobs.DIRECT_CAPABILITIES`` the packaged
 #: launch runs, and the ``direct_variant`` an instance of it carries.
 AOT_DIRECT_ALGORITHMS = {
@@ -968,6 +972,7 @@ AOT_DIRECT_ALGORITHMS = {
     "direct_grouped": DIRECT_VARIANT_GROUPED,
     "direct_nongrouped": DIRECT_VARIANT_NONGROUPED,
     DIRECT_GROUPED_HALO: DIRECT_VARIANT_GROUPED_HALO,
+    "direct_depthwise_win": DIRECT_VARIANT_WIN,
 }
 #: The variants built from DirectNongroupedConvSpec: C and K (per group) are
 #: runtime, so they bake no channel counts and compute dilated problems.
@@ -1003,6 +1008,8 @@ _AOT_DIRECT_KNOB_DEFAULTS = {
     "waves_per_eu": 0,
     "group_merge": 1,
     "split_c": 1,
+    "prefetch_rows": 0,
+    "w_fold": 0,
 }
 #: Per variant, the direct identity's knob keys (``KernelIdentity.knobs``) and
 #: the instance field each one is carried in.
@@ -1050,6 +1057,12 @@ AOT_DIRECT_KNOBS = {
         "waves_per_eu": "waves_per_eu",
         "group_merge": "group_merge",
     },
+    DIRECT_VARIANT_WIN: {
+        "block_h": "block_h",
+        "block_waves": "block_waves",
+        "prefetch_rows": "prefetch_rows",
+        "w_fold": "w_fold",
+    },
 }
 #: Knobs a variant's identity always spells with one value, which no field
 #: carries: the grouped LDS-halo kernel is DirectNongroupedConvSpec(grouped=True).
@@ -1065,6 +1078,7 @@ _AOT_DIRECT_OPTIONAL_KNOBS = {DIRECT_VARIANT_NONGROUPED: {"split_c": ("split_c",
 _AOT_DIRECT_EXTRA_FIELDS = {
     DIRECT_VARIANT_GROUPED: ("cpg", "kpg", "block_h"),
     DIRECT_VARIANT_NONGROUPED: ("split_c",),
+    DIRECT_VARIANT_WIN: ("cpg", "kpg"),
 }
 #: Knobs rocKE spells as a bool, and as None: the descriptor holds an int.
 _AOT_DIRECT_BOOL_KNOBS = ("unroll_rows", "double_buffer")
@@ -1216,6 +1230,8 @@ def aot_direct_instance_fields(identity: KernelIdentity) -> dict:
         fields_.update(
             cpg=identity.cpg, kpg=identity.kpg, block_h=aot_direct_grouped_block_h()
         )
+    elif variant == DIRECT_VARIANT_WIN:
+        fields_.update(cpg=identity.cpg, kpg=identity.kpg)
     return fields_
 
 
@@ -1296,6 +1312,8 @@ class Gfx950ConvFwdAotSpec:
     waves_per_eu: int = 0
     group_merge: int = 1
     split_c: int = 1
+    prefetch_rows: int = 0
+    w_fold: int = 0
 
     @property
     def is_direct(self) -> bool:
@@ -1336,7 +1354,7 @@ class Gfx950ConvFwdAotSpec:
         grouped-halo."""
         if self.direct_variant in _AOT_HALO_VARIANTS:
             return 0, 0
-        if self.direct_variant == DIRECT_VARIANT_GROUPED:
+        if self.direct_variant in (DIRECT_VARIANT_GROUPED, DIRECT_VARIANT_WIN):
             return self.cpg, self.kpg
         return 1, 1
 
