@@ -302,8 +302,9 @@ jobs:
       - name: Add ROCm bin to PATH
         run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
 
+      # Parallel: see the Linux lane. Serial this step was 14-20 min on Windows.
       - name: Run tests
-        run: ctest --test-dir build --output-on-failure --no-tests=error
+        run: ctest --test-dir build --output-on-failure --no-tests=error --parallel 16
 
       - name: Patch ROCm SDK with superbuild outputs
         shell: pwsh
@@ -572,11 +573,14 @@ jobs:
           test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
           printf '%s\n' "${kpacks[@]}"
 
+      # Parallel: the suites are independent processes, and the ones that share state are
+      # marked RUN_SERIAL / FIXTURES_* in CMake, which ctest honors. Serial this step was
+      # 7.7-11.3 min, dominated by a few long Python suites running back to back.
       - name: Run tests
         env:
           # Native rocKE AUTO detection must see the wheel COMGR used by packaging.
           ROCKE_COMGR_LIB: ${{ env.HKP_ROCKE_COMGR_LIB }}
-        run: ctest --test-dir build --output-on-failure --no-tests=error
+        run: ctest --test-dir build --output-on-failure --no-tests=error --parallel 16
 
       # The full support matrix is too large to commit (only its overview is,
       # in dnn-providers/integration-tests/), so publish it from every run.
