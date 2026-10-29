@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <initializer_list>
 #include <limits>
 #include <memory>
@@ -230,6 +231,14 @@ struct TensorLabels
     std::string_view isVirtual;
 };
 
+// The C++ type setConstValue stored the constant's bytes from.
+enum class ConstantSource
+{
+    OTHER,
+    SIGNED_INTEGER,
+    UNSIGNED_INTEGER,
+};
+
 struct TensorInputs
 {
     std::optional<cudnnDataType_t> dataType;
@@ -241,11 +250,74 @@ struct TensorInputs
     cudnnBackendTensorReordering_t reorderingMode = CUDNN_TENSOR_REORDERING_NONE;
     bool isVirtual = false;
     bool isByValue = false;
-    // The constant's bytes as stored by the caller: exactly one element of the
-    // data type.
+    // The constant's bytes as stored by the caller: one element of the data
+    // type, or a wider integer (see constantSource) holding a value of it.
     std::optional<std::vector<std::byte>> constantValue;
+    ConstantSource constantSource = ConstantSource::OTHER;
     TensorPtr raggedOffset;
 };
+
+// cuDNN reads one element from the start of the stored bytes. For a wider integer whose value the
+// integer element type holds, that is the value (little-endian), so it is narrowed to one element.
+inline std::optional<std::vector<std::byte>>
+    narrowIntegerConstant(DataType_t dataType, const std::vector<std::byte>& bytes, bool isSigned)
+{
+    const auto read = [&bytes](auto value) {
+        std::memcpy(&value, bytes.data(), sizeof(value));
+        return value;
+    };
+    std::int64_t signedValue = 0;
+    std::uint64_t unsignedValue = 0;
+    switch(bytes.size())
+    {
+    case sizeof(std::int16_t):
+        signedValue = read(std::int16_t{});
+        unsignedValue = read(std::uint16_t{});
+        break;
+    case sizeof(std::int32_t):
+        signedValue = read(std::int32_t{});
+        unsignedValue = read(std::uint32_t{});
+        break;
+    case sizeof(std::int64_t):
+        signedValue = read(std::int64_t{});
+        unsignedValue = read(std::uint64_t{});
+        break;
+    default:
+        return std::nullopt;
+    }
+    const bool negative = isSigned && signedValue < 0;
+
+    const auto narrow = [&](auto element) -> std::optional<std::vector<std::byte>> {
+        using Element = decltype(element);
+        const bool fits
+            = negative
+                  ? signedValue >= static_cast<std::int64_t>(std::numeric_limits<Element>::min())
+                  : unsignedValue
+                        <= static_cast<std::uint64_t>(std::numeric_limits<Element>::max());
+        if(!fits)
+        {
+            return std::nullopt;
+        }
+        element
+            = negative ? static_cast<Element>(signedValue) : static_cast<Element>(unsignedValue);
+        std::vector<std::byte> narrowed(sizeof(Element));
+        std::memcpy(narrowed.data(), &element, sizeof(Element));
+        return narrowed;
+    };
+    switch(dataType)
+    {
+    case DataType_t::INT8:
+        return narrow(std::int8_t{});
+    case DataType_t::UINT8:
+        return narrow(std::uint8_t{});
+    case DataType_t::INT32:
+        return narrow(std::int32_t{});
+    case DataType_t::BOOLEAN:
+        return narrow(bool{});
+    default:
+        return std::nullopt;
+    }
+}
 
 inline std::shared_ptr<const TensorRecord> makeTensorRecord(TensorInputs inputs,
                                                             const TensorLabels& labels)
@@ -311,20 +383,29 @@ inline std::shared_ptr<const TensorRecord> makeTensorRecord(TensorInputs inputs,
         // The element size is rounded up to whole bytes: upstream stores a
         // bool constant as one byte.
         const std::size_t size = (get_element_size_in_bits(dataType) + 7) / 8;
-        if(size == 0)
-        {
-            throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                            std::string(labels.constantValue)
-                                + ": the tensor data type has no size");
-        }
-        // Upstream's backend reads one element from the start of whatever was
-        // stored; any other size is a caller type mismatch.
         if(inputs.constantValue->size() != size)
         {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                            std::string(labels.constantValue) + " has "
-                                + std::to_string(inputs.constantValue->size())
-                                + " bytes; the tensor data type needs " + std::to_string(size));
+            const bool widerInteger = inputs.constantSource != ConstantSource::OTHER
+                                      && inputs.constantValue->size() > size;
+            std::optional<std::vector<std::byte>> narrowed;
+            if(widerInteger)
+            {
+                narrowed = narrowIntegerConstant(dataType,
+                                                 *inputs.constantValue,
+                                                 inputs.constantSource
+                                                     == ConstantSource::SIGNED_INTEGER);
+            }
+            if(!narrowed)
+            {
+                throw ShimError(CUDNN_STATUS_BAD_PARAM,
+                                std::string(labels.constantValue) + " has "
+                                    + std::to_string(inputs.constantValue->size())
+                                    + " bytes; the tensor data type needs " + std::to_string(size)
+                                    + (widerInteger ? "; a wider integer must hold a value of an "
+                                                      "integer data type"
+                                                    : ""));
+            }
+            inputs.constantValue = std::move(narrowed);
         }
     }
 
@@ -689,8 +770,7 @@ inline std::int64_t layernormNormalizedDimCount(const TensorRecord& x, const Ten
 }
 
 // The three convolution operations differ only in their labels and which
-// tensor is the output; `tensors` is in the record's slot order (X, W, Y /
-// DY, W, DX / DY, X, DW).
+// tensor is the output; `tensors` is in the record's Slots order.
 struct ConvolutionOperationLabels
 {
     std::string_view convolution;
@@ -1013,6 +1093,9 @@ inline std::shared_ptr<const ResampleBackwardOperationRecord>
         throw ShimError(CUDNN_STATUS_BAD_PARAM,
                         std::string(labels.index) + " is required for CUDNN_RESAMPLE_MAXPOOL");
     }
+    rejectUnlowerable(inputs.index && inputs.resample->mode() != ResampleMode_t::MAXPOOL,
+                      labels.index,
+                      " except for CUDNN_RESAMPLE_MAXPOOL");
     requireScaling(inputs.alpha, 1.0, labels.alpha);
     requireScaling(inputs.beta, 0.0, labels.beta);
     rejectUnlowerable(inputs.hasX, labels.x, " for resample backward");

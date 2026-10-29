@@ -224,6 +224,32 @@ TEST_F(TestCudnnShimV8Errata, ShapeRuleReadsMissingDimensionAsZero)
     EXPECT_TRUE(fe::check_errata(rules({filterWidth}), "ConvFwd_eng0", _handle, graph, always));
 }
 
+// Fully specified rules make every entry decide, so each forward slot must read its own tensor:
+// X {2,4,8,8}, W {8,4,3,3} and Y {2,8,8,8} read as {4,8,8,0}, {4,3,3,0} and {8,8,8,0}.
+TEST_F(TestCudnnShimV8Errata, ShapeRuleReadsForwardSlots)
+{
+    const fe::OperationGraph_v8 graph = convGraph();
+    const auto blocks
+        = [&](const char* format, const char* key, const std::vector<std::int64_t>& shape) {
+              json shaped = rule("ConvFwd", 0);
+              shaped["shape_format"] = format;
+              shaped[key] = shape;
+              return fe::check_errata(rules({shaped}), "ConvFwd_eng0", _handle, graph, always);
+          };
+
+    for(const char* format : {"NCHW", "NHWC"})
+    {
+        SCOPED_TRACE(format);
+        EXPECT_TRUE(blocks(format, "input_shape", {4, 8, 8, 0}));
+        EXPECT_FALSE(blocks(format, "input_shape", {4, 3, 3, 0}));
+        EXPECT_FALSE(blocks(format, "input_shape", {8, 8, 8, 0}));
+    }
+    // A filter shape is always read as NCHW.
+    EXPECT_TRUE(blocks("NHWC", "filter_shape", {4, 3, 3, 0}));
+    EXPECT_FALSE(blocks("NCHW", "filter_shape", {4, 8, 8, 0}));
+    EXPECT_FALSE(blocks("NCHW", "filter_shape", {8, 8, 8, 0}));
+}
+
 // ConvBwdFilter reads input X and filter DW; ConvBwdData reads input DX and filter W. With a
 // wildcard only the last compared entry decides (see above), and DY's width 6 would unblock a
 // rule written for 8. blocked_shape[i] meets dims[i + 1], so X/DX {1,4,5,6,8} reads as
@@ -265,6 +291,18 @@ TEST_F(TestCudnnShimV8Errata, ShapeRuleReadsBackwardSlots)
         EXPECT_FALSE(blocksShape("NCHW", "input_shape", {4, 9, 6, 8}));
         EXPECT_FALSE(blocksShape("NCHW", "input_shape", {4, 5, 9, 8}));
         EXPECT_FALSE(blocksShape("NCHW", "input_shape", {4, 5, 6, 9}));
+
+        // NHWC reads N, H, W, C from blocked_shape and dims[1], [2], [3], [4] in turn.
+        EXPECT_TRUE(blocksShape("NHWC", "input_shape", {4, 5, 6, 8}));
+        EXPECT_FALSE(blocksShape("NHWC", "input_shape", {9, 5, 6, 8}));
+        EXPECT_FALSE(blocksShape("NHWC", "input_shape", {4, 9, 6, 8}));
+        EXPECT_FALSE(blocksShape("NHWC", "input_shape", {4, 5, 9, 8}));
+        EXPECT_FALSE(blocksShape("NHWC", "input_shape", {4, 5, 6, 9}));
+
+        // NHWC checks C (blocked_shape[3]) before H and W, so their wildcards reset a C
+        // mismatch; NCHW checks it last.
+        EXPECT_TRUE(blocksShape("NHWC", "input_shape", {-1, -1, -1, 9}));
+        EXPECT_FALSE(blocksShape("NCHW", "input_shape", {-1, -1, -1, 9}));
     }
 }
 

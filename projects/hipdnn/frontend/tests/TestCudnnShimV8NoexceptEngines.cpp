@@ -21,10 +21,7 @@ namespace
 
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 
-bool keepAll(cudnnBackendDescriptor_t /*config*/)
-{
-    return false;
-}
+using fe::AllowAll;
 
 class TestCudnnShimV8NoexceptEngines : public hipdnn_shim_test::ShimV8PlanFixture
 {
@@ -60,20 +57,20 @@ TEST_F(TestCudnnShimV8NoexceptEngines, HeuristicsListReportsStatuses)
 
     fe::EngineConfigList all;
     EXPECT_EQ(
-        fe::get_heuristics_list(modes, graph, keepAll, all, /*evaluate_all=*/true, /*sm_count=*/8),
+        fe::get_heuristics_list(modes, graph, AllowAll, all, /*evaluate_all=*/true, /*sm_count=*/8),
         (std::vector<cudnnStatus_t>{CUDNN_STATUS_NOT_SUPPORTED, CUDNN_STATUS_NOT_SUPPORTED}));
     EXPECT_TRUE(all.empty());
 
     fe::EngineConfigList first;
     EXPECT_EQ(fe::get_heuristics_list(
-                  modes, graph, keepAll, first, /*evaluate_all=*/false, /*sm_count=*/8),
+                  modes, graph, AllowAll, first, /*evaluate_all=*/false, /*sm_count=*/8),
               std::vector<cudnnStatus_t>{CUDNN_STATUS_NOT_SUPPORTED});
     EXPECT_TRUE(first.empty());
 
     fe::EngineConfigList unknown;
     EXPECT_EQ(
         fe::get_heuristics_list(
-            std::vector<fe::HeurMode_t>{static_cast<fe::HeurMode_t>(99)}, graph, keepAll, unknown),
+            std::vector<fe::HeurMode_t>{static_cast<fe::HeurMode_t>(99)}, graph, AllowAll, unknown),
         std::vector<cudnnStatus_t>{CUDNN_STATUS_BAD_PARAM});
     EXPECT_TRUE(unknown.empty());
 }

@@ -441,7 +441,6 @@ TEST_F(TestCudnnShimV8CoreLowering, LowersInStableTopologicalOrder)
 
     EXPECT_EQ(outputUidsInGraphOrder(), (std::vector<std::int64_t>{11, 2, 3}));
     EXPECT_EQ(core->kind(), CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR);
-    EXPECT_EQ(core->handle(), _handle);
     EXPECT_EQ(core->tag(), "tag");
     EXPECT_EQ(core->hipdnnGraph(), created(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR).front());
     EXPECT_EQ(finalized().back(), core->hipdnnGraph());

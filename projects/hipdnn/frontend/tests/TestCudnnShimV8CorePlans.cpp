@@ -18,14 +18,12 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -63,7 +61,6 @@ protected:
     std::shared_ptr<const v8::GraphCore> graph()
     {
         return std::make_shared<const v8::GraphCore>(
-            _handle,
             hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor(
                 newMockDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR)),
             "");
@@ -554,7 +551,7 @@ TEST_F(TestCudnnShimV8CorePlans, RawConfigNotesReadTheEngine)
 
     // Each lookup GETs a fresh ENGINE wrapper and destroys it.
     const std::vector<hipdnnBackendDescriptor_t> all = created(HIPDNN_BACKEND_ENGINE_DESCRIPTOR);
-    ASSERT_EQ(all.size(), engines + 3);
+    ASSERT_EQ(all.size(), engines + 4);
     for(std::size_t i = engines; i < all.size(); ++i)
     {
         EXPECT_NE(std::find(destroyed.begin(), destroyed.end(), all[i]), destroyed.end()) << i;

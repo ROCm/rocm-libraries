@@ -94,13 +94,11 @@ inline std::int64_t engineGlobalIndex(hipdnnBackendDescriptor_t engine)
 inline bool engineConfigHasNumericalNote(hipdnnBackendDescriptor_t engineConfig,
                                          cudnnBackendNumericalNote_t note) noexcept
 {
-    if(note != CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC)
-    {
-        return false;
-    }
     bool found = false;
     return guarded([&] {
-               found = !isDeterminismClaimed(engineGlobalIndex(engineOfConfig(engineConfig).get()));
+               const std::vector<cudnnBackendNumericalNote_t> notes
+                   = numericalNotes(engineGlobalIndex(engineOfConfig(engineConfig).get()));
+               found = std::find(notes.begin(), notes.end(), note) != notes.end();
            })
            && found;
 }

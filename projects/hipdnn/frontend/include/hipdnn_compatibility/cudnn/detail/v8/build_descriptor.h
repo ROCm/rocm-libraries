@@ -14,8 +14,9 @@ namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8
 {
 
 // The build() of the convolution, matmul, pointwise, reduction, resample, RNG and tensor
-// descriptor builders. The pointer is created before makeRecord validates, so a failed descriptor
-// still has a (null) raw descriptor. Descriptors befriend this to install the built pointer.
+// descriptor builders. The pointer is created before makeRecord validates, so a failed
+// descriptor still has a (null) raw descriptor. BackendDescriptor befriends this to install the
+// built pointer.
 template <typename Descriptor, typename MakeRecord>
 Descriptor&& buildDescriptor(Descriptor& descriptor,
                              cudnnBackendDescriptorType_t type,

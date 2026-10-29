@@ -104,8 +104,8 @@ inline void addPort(std::vector<TensorPtr>& ports, const TensorPtr& tensor)
     }
 }
 
-template <cudnnBackendDescriptorType_t K, OperationTarget T>
-OperationPorts operationPorts(const ConvolutionOperationRecordOf<K, T>& op)
+template <cudnnBackendDescriptorType_t K, OperationTarget T, typename S>
+OperationPorts operationPorts(const ConvolutionOperationRecordOf<K, T, S>& op)
 {
     const std::array<TensorPtr, 3>& tensors = op.tensors();
     return {{tensors[0], tensors[1]}, {tensors[2]}};
@@ -182,43 +182,36 @@ inline OperationPorts operationPorts(const NormBackwardOperationRecord& op)
     return ports;
 }
 
+template <typename Visitor, typename First, typename... Rest>
+decltype(auto) visitOperationAs(const OperationRecord& op,
+                                Visitor& visitor,
+                                OperationRecordList<First, Rest...> /*records*/)
+{
+    if constexpr(sizeof...(Rest) == 0)
+    {
+        return visitor(recordAs<First>(op));
+    }
+    else
+    {
+        if(op.kind() == First::KIND)
+        {
+            return visitor(recordAs<First>(op));
+        }
+        return visitOperationAs(op, visitor, OperationRecordList<Rest...>{});
+    }
+}
+
 // Calls `visitor` with the concrete record behind an operation.
 template <typename Visitor>
 decltype(auto)
     visitOperation(const OperationRecord& op, const LoweringLabels& labels, Visitor&& visitor)
 {
-    switch(op.target())
+    if(op.target() == OperationTarget::NOT_SET)
     {
-    case OperationTarget::CONVOLUTION_FPROP:
-        return visitor(recordAs<ConvolutionForwardOperationRecord>(op));
-    case OperationTarget::CONVOLUTION_DGRAD:
-        return visitor(recordAs<ConvolutionBackwardDataOperationRecord>(op));
-    case OperationTarget::CONVOLUTION_WGRAD:
-        return visitor(recordAs<ConvolutionBackwardFilterOperationRecord>(op));
-    case OperationTarget::POINTWISE:
-        return visitor(recordAs<PointwiseOperationRecord>(op));
-    case OperationTarget::MATMUL:
-        return visitor(recordAs<MatmulOperationRecord>(op));
-    case OperationTarget::REDUCTION:
-        return visitor(recordAs<ReductionOperationRecord>(op));
-    case OperationTarget::RESAMPLE_FWD:
-        return visitor(recordAs<ResampleForwardOperationRecord>(op));
-    case OperationTarget::RESAMPLE_BWD:
-        return visitor(recordAs<ResampleBackwardOperationRecord>(op));
-    case OperationTarget::BATCHNORM:
-    case OperationTarget::BATCHNORM_INFERENCE:
-    case OperationTarget::LAYERNORM:
-    case OperationTarget::RMSNORM:
-        return visitor(recordAs<NormForwardOperationRecord>(op));
-    case OperationTarget::BATCHNORM_BACKWARD:
-    case OperationTarget::LAYERNORM_BACKWARD:
-    case OperationTarget::RMSNORM_BACKWARD:
-        return visitor(recordAs<NormBackwardOperationRecord>(op));
-    case OperationTarget::NOT_SET:
-    default:
         throw ShimError(CUDNN_STATUS_INTERNAL_ERROR,
-                        std::string(operationLabel(labels, op.kind())) + " has no lowering target");
+                        operationLabel(labels, op.kind()) + " has no lowering target");
     }
+    return visitOperationAs(op, visitor, OperationRecords{});
 }
 
 // One hipdnn_frontend tensor per UID. The hipDNN packers keep the first tensor
@@ -511,27 +504,36 @@ void lowerConvolution(Attributes attributes, const Record& op, LoweringContext& 
 
 inline void lowerOperation(const ConvolutionForwardOperationRecord& op, LoweringContext& context)
 {
-    const auto& [x, w, y] = op.tensors();
+    using Slots = ConvolutionForwardOperationRecord::Slots;
+    const std::array<TensorPtr, 3>& tensors = op.tensors();
     fe_graph::ConvFpropAttributes attributes;
-    attributes.set_x(context.tensor(x)).set_w(context.tensor(w)).set_y(context.tensor(y));
+    attributes.set_x(context.tensor(tensors[Slots::X]))
+        .set_w(context.tensor(tensors[Slots::W]))
+        .set_y(context.tensor(tensors[Slots::Y]));
     lowerConvolution<fe_graph::ConvolutionFpropNode>(std::move(attributes), op, context);
 }
 
 inline void lowerOperation(const ConvolutionBackwardDataOperationRecord& op,
                            LoweringContext& context)
 {
-    const auto& [dy, w, dx] = op.tensors();
+    using Slots = ConvolutionBackwardDataOperationRecord::Slots;
+    const std::array<TensorPtr, 3>& tensors = op.tensors();
     fe_graph::ConvDgradAttributes attributes;
-    attributes.set_dy(context.tensor(dy)).set_w(context.tensor(w)).set_dx(context.tensor(dx));
+    attributes.set_dy(context.tensor(tensors[Slots::DY]))
+        .set_w(context.tensor(tensors[Slots::W]))
+        .set_dx(context.tensor(tensors[Slots::DX]));
     lowerConvolution<fe_graph::ConvolutionDgradNode>(std::move(attributes), op, context);
 }
 
 inline void lowerOperation(const ConvolutionBackwardFilterOperationRecord& op,
                            LoweringContext& context)
 {
-    const auto& [dy, x, dw] = op.tensors();
+    using Slots = ConvolutionBackwardFilterOperationRecord::Slots;
+    const std::array<TensorPtr, 3>& tensors = op.tensors();
     fe_graph::ConvWgradAttributes attributes;
-    attributes.set_x(context.tensor(x)).set_dy(context.tensor(dy)).set_dw(context.tensor(dw));
+    attributes.set_x(context.tensor(tensors[Slots::X]))
+        .set_dy(context.tensor(tensors[Slots::DY]))
+        .set_dw(context.tensor(tensors[Slots::DW]));
     lowerConvolution<fe_graph::ConvolutionWgradNode>(std::move(attributes), op, context);
 }
 
@@ -917,7 +919,7 @@ inline std::shared_ptr<const GraphCore>
                                                                    "",
                                                                    graph),
                   "assembling the hipDNN operation graph");
-    return std::make_shared<const GraphCore>(handle, std::move(*graph), std::move(tag));
+    return std::make_shared<const GraphCore>(std::move(*graph), std::move(tag));
 }
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8

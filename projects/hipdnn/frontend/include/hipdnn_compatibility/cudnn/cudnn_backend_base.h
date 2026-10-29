@@ -35,6 +35,10 @@ static_assert(CUDNN_FRONTEND_VERSION == 12400,
 namespace detail::v8
 {
 struct RecordAccess;
+template <typename Descriptor, typename MakeRecord>
+Descriptor&& buildDescriptor(Descriptor& descriptor,
+                             cudnnBackendDescriptorType_t type,
+                             MakeRecord&& makeRecord);
 } // namespace detail::v8
 
 // Upstream wraps one cuDNN descriptor. Here it pairs the shim record behind a builder object with a
@@ -45,10 +49,12 @@ class OpaqueBackendPointer
 {
     friend struct detail::v8::RecordAccess;
 
-    // Only RecordAccess can name or create a key, so only the shim can call the record constructor,
-    // which stays public for std::make_shared.
-    struct RecordKey
+    // Only RecordAccess can create a key, so only the shim can call the record constructor, which
+    // stays public for std::make_shared. The explicit default constructor also keeps the key from
+    // being an aggregate that `{}` could build.
+    class RecordKey
     {
+        friend struct detail::v8::RecordAccess;
         explicit RecordKey() = default;
     };
 
@@ -145,6 +151,12 @@ std::shared_ptr<const T> recordOf(const ManagedOpaqueDescriptor& pointer)
 
 class BackendDescriptor
 {
+    // The descriptor builders' shared build() installs the built pointer.
+    template <typename Descriptor, typename MakeRecord>
+    friend Descriptor&& detail::v8::buildDescriptor(Descriptor& descriptor,
+                                                    cudnnBackendDescriptorType_t type,
+                                                    MakeRecord&& makeRecord);
+
 public:
     virtual std::string describe() const = 0;
 

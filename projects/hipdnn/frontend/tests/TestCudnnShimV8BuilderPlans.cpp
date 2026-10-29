@@ -19,7 +19,6 @@
 #include <cstring>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>

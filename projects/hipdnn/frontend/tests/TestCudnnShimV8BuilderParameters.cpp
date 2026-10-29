@@ -491,7 +491,7 @@ TEST_F(TestCudnnShimV8BuilderParameters, PointwiseDefaultParametersElideAtLoweri
         std::vector<hipdnnBackendAttributeName_t> absent;
     };
     const std::vector<Case> cases = {
-        // DBL_MAX upper clip is sent unclamped for non-FLOAT math.
+        // An upper clip at or above FLT_MAX, the DBL_MAX default included, is not sent.
         {"relu double",
          PointwiseMode_t::RELU_FWD,
          DataType_t::DOUBLE,
@@ -509,6 +509,13 @@ TEST_F(TestCudnnShimV8BuilderParameters, PointwiseDefaultParametersElideAtLoweri
          DataType_t::FLOAT,
          [](fe::PointWiseDescBuilder& b) {
              b.setReluUpperClip(static_cast<double>(std::numeric_limits<float>::max()));
+         },
+         {HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP}},
+        {"relu upper clip infinite",
+         PointwiseMode_t::RELU_FWD,
+         DataType_t::FLOAT,
+         [](fe::PointWiseDescBuilder& b) {
+             b.setReluUpperClip(std::numeric_limits<double>::infinity());
          },
          {HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP}},
         {"elu",

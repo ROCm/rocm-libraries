@@ -89,17 +89,23 @@ inline v8::TensorPtr errataTensor(const ManagedOpaqueDescriptor& op, ErrataTenso
     switch(slot)
     {
     case ErrataTensorSlot::CONVOLUTION_FORWARD_X:
-        return convolutionTensor<v8::ConvolutionForwardOperationRecord>(op, 0);
+        return convolutionTensor<v8::ConvolutionForwardOperationRecord>(
+            op, v8::ConvolutionForwardOperationRecord::Slots::X);
     case ErrataTensorSlot::CONVOLUTION_FORWARD_W:
-        return convolutionTensor<v8::ConvolutionForwardOperationRecord>(op, 1);
+        return convolutionTensor<v8::ConvolutionForwardOperationRecord>(
+            op, v8::ConvolutionForwardOperationRecord::Slots::W);
     case ErrataTensorSlot::CONVOLUTION_BWD_FILTER_X:
-        return convolutionTensor<v8::ConvolutionBackwardFilterOperationRecord>(op, 1);
+        return convolutionTensor<v8::ConvolutionBackwardFilterOperationRecord>(
+            op, v8::ConvolutionBackwardFilterOperationRecord::Slots::X);
     case ErrataTensorSlot::CONVOLUTION_BWD_FILTER_DW:
-        return convolutionTensor<v8::ConvolutionBackwardFilterOperationRecord>(op, 2);
+        return convolutionTensor<v8::ConvolutionBackwardFilterOperationRecord>(
+            op, v8::ConvolutionBackwardFilterOperationRecord::Slots::DW);
     case ErrataTensorSlot::CONVOLUTION_BWD_DATA_DX:
-        return convolutionTensor<v8::ConvolutionBackwardDataOperationRecord>(op, 2);
+        return convolutionTensor<v8::ConvolutionBackwardDataOperationRecord>(
+            op, v8::ConvolutionBackwardDataOperationRecord::Slots::DX);
     case ErrataTensorSlot::CONVOLUTION_BWD_DATA_W:
-        return convolutionTensor<v8::ConvolutionBackwardDataOperationRecord>(op, 1);
+        return convolutionTensor<v8::ConvolutionBackwardDataOperationRecord>(
+            op, v8::ConvolutionBackwardDataOperationRecord::Slots::W);
     default:
         return nullptr;
     }
@@ -108,9 +114,10 @@ inline v8::TensorPtr errataTensor(const ManagedOpaqueDescriptor& op, ErrataTenso
 } // namespace detail
 
 // Returns true when the tensor_slot tensor of op matches blocked_shape, given in shape_format
-// ("NCHW" or "NHWC") order. Ported as upstream, quirks included: blocked_shape[i] is compared
-// with the tensor's dims[i + 1] (a 4-D tensor's missing fifth dim reads as 0), and a -1 entry
-// resets the result to true, so only the entries after the last -1 decide.
+// ("NCHW" or "NHWC") order. Ported as upstream, quirks included: the tensor's dims are read from
+// index 1 (dims[1..4]; a 4-D tensor's missing fifth dim reads as 0). The entries are checked in
+// N, C, H, W order (blocked_shape index 0, 1, 2, 3 for NCHW; 0, 3, 1, 2 for NHWC), and a -1
+// resets the result to true, so only the checks after the last -1 in that order decide.
 inline bool check_shape(const ManagedOpaqueDescriptor& op,
                         const std::string& shape_format,
                         detail::ErrataTensorSlot tensor_slot,

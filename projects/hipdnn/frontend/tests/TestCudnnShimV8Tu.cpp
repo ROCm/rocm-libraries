@@ -106,6 +106,11 @@ static_assert(!std::is_constructible_v<cudnn_frontend::OpaqueBackendPointer,
                                        cudnnBackendDescriptorType_t,
                                        std::shared_ptr<const cudnn_frontend::detail::v8::Record>,
                                        cudnnBackendDescriptor_t>);
+// Consumer code cannot make the key the record constructor takes, not even through a deduced
+// conversion.
+static_assert(
+    !std::is_default_constructible_v<decltype(cudnn_frontend::detail::v8::RecordAccess::key())>);
+static_assert(!std::is_aggregate_v<decltype(cudnn_frontend::detail::v8::RecordAccess::key())>);
 static_assert(
     std::is_constructible_v<cudnn_frontend::OpaqueBackendPointer, cudnnBackendDescriptorType_t>);
 static_assert(

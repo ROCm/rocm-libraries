@@ -16,7 +16,11 @@
 
 #include <array>
 #include <cstdint>
+#include <cstring>
+#include <functional>
+#include <memory>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -53,17 +57,74 @@ TEST_F(TestCudnnShimV8NoExcept, FailedPrecheckReturnsStatus)
 
 TEST_F(TestCudnnShimV8NoExcept, RetryAfterFailedPrecheckSucceeds)
 {
-    // The failed tensor's placeholder pointer stays in the builder; it must not count as built.
     fe::TensorBuilder builder;
     describeTensor(builder);
     {
         const fe::Tensor first = builder.build();
         ASSERT_EQ(first.get_status(), CUDNN_STATUS_BAD_PARAM);
+        // An empty placeholder, so an operation slot reads it as set but not built.
+        EXPECT_NE(first.get_desc(), nullptr);
+        EXPECT_EQ(fe::detail::v8::recordOf<fe::detail::v8::TensorRecord>(first.get_desc()),
+                  nullptr);
     }
 
     const fe::Tensor retry = builder.setAlignment(16).build();
     EXPECT_EQ(retry.get_status(), CUDNN_STATUS_SUCCESS) << retry.get_error();
     EXPECT_NE(fe::detail::v8::recordOf<fe::detail::v8::TensorRecord>(retry.get_desc()), nullptr);
+}
+
+TEST_F(TestCudnnShimV8NoExcept, RetryKeepsRaggedOffsetAndConstant)
+{
+    constexpr std::array<int64_t, 1> ONE{1};
+    fe::TensorBuilder raggedBuilder;
+    raggedBuilder.setDataType(fe::DataType_t::INT32)
+        .setDim(1, ONE.data())
+        .setStride(1, ONE.data())
+        .setId(9)
+        .setAlignment(16);
+    auto ragged = std::make_shared<fe::Tensor>(raggedBuilder.build());
+    ASSERT_EQ(ragged->get_status(), CUDNN_STATUS_SUCCESS) << ragged->get_error();
+
+    struct Case
+    {
+        const char* label;
+        std::function<void(fe::TensorBuilder&)> breakIt;
+        std::function<void(fe::TensorBuilder&)> fix;
+    };
+    const std::vector<Case> cases = {
+        {"failed precheck",
+         [](fe::TensorBuilder&) {},
+         [](fe::TensorBuilder& b) { b.setAlignment(16); }},
+        {"failed core check",
+         [](fe::TensorBuilder& b) { b.setAlignment(16).setVectorCountAndDimension(4, 1); },
+         [](fe::TensorBuilder& b) { b.setVectorCountAndDimension(1, -1); }},
+    };
+    for(const Case& c : cases)
+    {
+        SCOPED_TRACE(c.label);
+        fe::TensorBuilder builder;
+        describeTensor(builder).setRaggedOffset(ragged).setConstValue(2.5F);
+        c.breakIt(builder);
+        {
+            // Binding by value moves the failed tensor's members out of the builder.
+            const fe::Tensor first = builder.build();
+            ASSERT_NE(first.get_status(), CUDNN_STATUS_SUCCESS);
+        }
+        c.fix(builder);
+
+        const fe::Tensor retry = builder.build();
+        ASSERT_EQ(retry.get_status(), CUDNN_STATUS_SUCCESS) << retry.get_error();
+        const auto record
+            = fe::detail::v8::recordOf<fe::detail::v8::TensorRecord>(retry.get_desc());
+        ASSERT_NE(record, nullptr);
+        EXPECT_EQ(record->raggedOffset(),
+                  fe::detail::v8::recordOf<fe::detail::v8::TensorRecord>(ragged->get_desc()));
+        ASSERT_TRUE(record->constantValue().has_value());
+        ASSERT_EQ(record->constantValue()->size(), sizeof(float));
+        float constant = 0.0F;
+        std::memcpy(&constant, record->constantValue()->data(), sizeof(constant));
+        EXPECT_EQ(constant, 2.5F);
+    }
 }
 
 TEST_F(TestCudnnShimV8NoExcept, FailedFinalizeCarriesShimMessage)

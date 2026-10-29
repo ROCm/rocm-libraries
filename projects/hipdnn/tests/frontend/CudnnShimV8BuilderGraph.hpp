@@ -15,6 +15,8 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipdnn_backend.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
@@ -56,12 +58,7 @@ inline std::string lastError()
 
 inline Dims packedStrides(const Dims& dims)
 {
-    Dims strides(dims.size(), 1);
-    for(std::size_t i = dims.size(); i > 1; --i)
-    {
-        strides[i - 2] = strides[i - 1] * dims[i - 1];
-    }
-    return strides;
+    return hipdnn_data_sdk::utilities::generateStrides(dims);
 }
 
 // Bytes of a dense FLOAT tensor of `dims`.
@@ -94,34 +91,8 @@ inline std::string jsonEngineId(const std::string& json)
     return json.substr(open + 1, close - open - 1);
 }
 
-class DeviceBuffer
-{
-public:
-    explicit DeviceBuffer(std::size_t bytes)
-    {
-        EXPECT_EQ(hipMalloc(&_ptr, std::max<std::size_t>(bytes, 1)), hipSuccess);
-    }
-    DeviceBuffer(const DeviceBuffer&) = delete;
-    DeviceBuffer& operator=(const DeviceBuffer&) = delete;
-    DeviceBuffer(DeviceBuffer&&) = delete;
-    DeviceBuffer& operator=(DeviceBuffer&&) = delete;
-
-    ~DeviceBuffer()
-    {
-        if(_ptr != nullptr)
-        {
-            static_cast<void>(hipFree(_ptr));
-        }
-    }
-
-    void* get() const
-    {
-        return _ptr;
-    }
-
-private:
-    void* _ptr = nullptr;
-};
+// Zero bytes allocate nothing: get() is null, as for a plan without workspace.
+using DeviceBuffer = hipdnn_data_sdk::utilities::Workspace<>;
 
 // The status a builder call threw, or SUCCESS when it did not throw.
 template <typename Action>

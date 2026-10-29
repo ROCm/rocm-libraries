@@ -20,8 +20,10 @@
 // cuDNN C enum <-> shim FE enum, matched by enumerator name as upstream's
 // convert_to_cudnn_type / convert_from_cudnn_type do. std::nullopt means the
 // value is valid on one side but has no counterpart on the other; callers
-// report NOT_SUPPORTED. Raw C values outside the declared range never reach
-// these functions: the builders and the v8 factories reject them with BAD_PARAM.
+// report NOT_SUPPORTED. The builder setters pass raw C values through upstream's
+// convert_from_cudnn_type, so a value outside the declared range gets upstream's
+// fallback (NOT_SET, or NONE for reordering); only values the builders keep raw
+// are range-checked, as BAD_PARAM (requireEnumerator).
 // FE -> hipDNN C lowering reuses the Types.hpp converters (toHipdnnDataType,
 // toBackendPointwiseMode, toBackendConvMode, ...).
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail

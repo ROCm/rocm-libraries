@@ -12,6 +12,8 @@
  * @brief Umbrella header for the hipDNN cuDNN frontend compatibility shim (v9 graph API and
  * v0.x builders).
  *
+ * The v0.x builders were introduced in hipdnn_frontend 0.5.0.
+ *
  * @code{.cpp}
  * #include <hipdnn_compatibility/cudnn/cudnn_frontend.h>
  * namespace cudnn_frontend = hipdnn_frontend::compatibility::cudnn_frontend;

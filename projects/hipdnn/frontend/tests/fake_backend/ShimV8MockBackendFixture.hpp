@@ -297,6 +297,10 @@ protected:
                                   std::size_t size) {
                 const std::lock_guard<std::mutex> lock(_mutex);
                 _deserializations.push_back({handle, {serialized, serialized + size}});
+                if(_deserializeStatus != HIPDNN_STATUS_SUCCESS)
+                {
+                    return _deserializeStatus;
+                }
                 *descriptor = allocate(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
                 if(*descriptor == nullptr)
                 {
@@ -341,6 +345,13 @@ protected:
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         _deserializedEngineId = engineId;
+    }
+
+    // Deserializing a hipDNN plan returns `status` and no descriptor (SUCCESS restores it).
+    void setDeserializeStatus(hipdnnStatus_t status)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _deserializeStatus = status;
     }
 
     std::vector<CapturedDeserialize> deserializations() const
@@ -1038,6 +1049,7 @@ private:
     std::vector<std::uint8_t> _serializedPlan;
     std::int64_t _lastSerializedEngineId = -1;
     hipdnnStatus_t _serializeStatus = HIPDNN_STATUS_SUCCESS;
+    hipdnnStatus_t _deserializeStatus = HIPDNN_STATUS_SUCCESS;
     std::optional<std::int64_t> _deserializedEngineId;
     std::vector<CapturedDeserialize> _deserializations;
     std::vector<float> _profilingTimes;

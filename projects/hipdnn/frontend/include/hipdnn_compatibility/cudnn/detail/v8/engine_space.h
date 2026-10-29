@@ -31,11 +31,8 @@ namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8
 class GraphCore final : public RecordOf<CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR>
 {
 public:
-    GraphCore(hipdnnHandle_t handle,
-              hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor graph,
-              std::string tag)
-        : _handle(handle)
-        , _graph(std::move(graph))
+    GraphCore(hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor graph, std::string tag)
+        : _graph(std::move(graph))
         , _tag(std::move(tag))
     {
     }
@@ -45,12 +42,6 @@ public:
     GraphCore(GraphCore&&) = delete;
     GraphCore& operator=(GraphCore&&) = delete;
     ~GraphCore() = default;
-
-    // hipDNN has no getter for a graph's handle, so this is the only record of it.
-    hipdnnHandle_t handle() const noexcept
-    {
-        return _handle;
-    }
 
     hipdnnBackendDescriptor_t hipdnnGraph() const noexcept
     {
@@ -230,7 +221,6 @@ private:
         return space;
     }
 
-    hipdnnHandle_t _handle;
     hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor _graph;
     std::string _tag;
     // Declared after _graph so the cached configs and engines are released

@@ -258,15 +258,23 @@ TEST_F(TestCudnnShimV8BuilderContracts, PlanLayerBuildersMapAnyCoreException)
     const fe::EngineConfigList configs = engineConfigs(graph);
     ASSERT_EQ(configs.size(), 3U);
     const fe::ExecutionPlan_v8 plan = planFor(configs[0], graph.getTag());
+    // A separate plan: the JSON is written once per plan, and `plan` must still serialize below.
+    const std::string planJson = planFor(configs[2], graph.getTag()).getJsonRepresentation();
+
+    // Rejected by the JSON parser before any hipDNN call.
+    EXPECT_EQ(
+        thrownStatus([&] { fe::ExecutionPlanBuilder_v8().setHandle(_handle).loadFromJson("{"); }),
+        CUDNN_STATUS_BAD_PARAM);
+    setDeserializeStatus(HIPDNN_STATUS_ALLOC_FAILED);
+    EXPECT_EQ(thrownStatus(
+                  [&] { fe::ExecutionPlanBuilder_v8().setHandle(_handle).loadFromJson(planJson); }),
+              CUDNN_STATUS_ALLOC_FAILED);
+    setDeserializeStatus(HIPDNN_STATUS_SUCCESS);
 
     ON_CALL(*_mockBackend, backendGetSerializedExecutionPlanExt(_, _, _, _))
         .WillByDefault([](hipdnnBackendDescriptor_t, std::size_t, std::size_t*, std::uint8_t*)
                            -> hipdnnStatus_t { throw std::runtime_error("unexpected"); });
     EXPECT_EQ(thrownStatus([&] { plan.getJsonRepresentation(); }), CUDNN_STATUS_INTERNAL_ERROR);
-
-    EXPECT_EQ(
-        thrownStatus([&] { fe::ExecutionPlanBuilder_v8().setHandle(_handle).loadFromJson("{"); }),
-        CUDNN_STATUS_BAD_PARAM);
 
     createThrows(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR,
                  [] { throw std::runtime_error("unexpected"); });

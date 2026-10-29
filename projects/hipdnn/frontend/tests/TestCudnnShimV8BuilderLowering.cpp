@@ -931,7 +931,8 @@ TEST_F(TestCudnnShimV8BuilderLowering, LayerNormNormalizedDimCountFromScale)
     // A full-rank scale normalizes from its first non-1 dim on, else the scale's rank. [1, C, 1, 1]
     // is cuDNN's layer-norm layout ([B*S, H, 1, 1] activations); hipDNN's backward node rejects
     // any count under 3 for it.
-    for(const DimCase& item : {DimCase{{1, 1, 4, 4}, {2, 3, 1, 1}, 2},
+    for(const DimCase& item : {DimCase{{1, 1, 1, 4}, {2, 3, 4, 1}, 1},
+                               DimCase{{1, 1, 4, 4}, {2, 3, 1, 1}, 2},
                                DimCase{{1, 3, 4, 4}, {2, 1, 1, 1}, 3},
                                DimCase{{1, 3, 1, 1}, {2, 1, 1, 1}, 3},
                                DimCase{{3, 4, 4}, {2}, 3}})
@@ -1166,16 +1167,26 @@ TEST_F(TestCudnnShimV8BuilderLowering, ResampleParametersAndIndexPresence)
         const v8fe::ResampleDesc_v8 average
             = resample({mode, v8fe::PaddingMode_t::ZERO_PAD, {2, 2}, {0, 0}, {0, 0}, {2, 2}});
         const v8fe::Tensor averageIndex = indexTensor(13);
-        const hipdnn_shim_test::BuildFailure failure = hipdnn_shim_test::failureOf([&] {
-            [[maybe_unused]] const v8fe::Operation op
-                = resampleForward(average, tensor(11, IMAGE), tensor(12, POOLED), &averageIndex);
-        });
-        ASSERT_TRUE(failure.thrown);
-        EXPECT_EQ(failure.status, CUDNN_STATUS_NOT_SUPPORTED);
-        EXPECT_NE(failure.what.find("index tensor is not supported by the hipDNN cuDNN shim except "
-                                    "for CUDNN_RESAMPLE_MAXPOOL"),
-                  std::string::npos)
-            << failure.what;
+        const std::vector<std::function<void()>> builds = {
+            [&] {
+                [[maybe_unused]] const v8fe::Operation op = resampleForward(
+                    average, tensor(11, IMAGE), tensor(12, POOLED), &averageIndex);
+            },
+            [&] {
+                [[maybe_unused]] const v8fe::Operation op = resampleBackward(
+                    average, tensor(12, POOLED), tensor(11, IMAGE), &averageIndex);
+            },
+        };
+        for(const std::function<void()>& build : builds)
+        {
+            const hipdnn_shim_test::BuildFailure failure = hipdnn_shim_test::failureOf(build);
+            ASSERT_TRUE(failure.thrown);
+            EXPECT_EQ(failure.status, CUDNN_STATUS_NOT_SUPPORTED);
+            EXPECT_NE(failure.what.find("index tensor is not supported by the hipDNN cuDNN shim "
+                                        "except for CUDNN_RESAMPLE_MAXPOOL"),
+                      std::string::npos)
+                << failure.what;
+        }
     }
 
     // The backward op keeps the asymmetric forward geometry.

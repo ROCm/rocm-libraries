@@ -785,7 +785,7 @@ TEST_F(TestCudnnShimV8BuilderOperations, UnloweredKindsCheckSlotsFirst)
 }
 
 // A descriptor without a tensor record in a slot the builder sends is a caller
-// error, even where a built tensor would be dropped (index) or NOT_SUPPORTED.
+// error, even in a slot where a built tensor is NOT_SUPPORTED (resample backward X).
 TEST_F(TestCudnnShimV8BuilderOperations, NonTensorInSentSlotIsBadParam)
 {
     const v8fe::ManagedOpaqueDescriptor notTensor = convDesc().get_desc();

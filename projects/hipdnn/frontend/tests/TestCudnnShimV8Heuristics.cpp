@@ -24,13 +24,9 @@ namespace
 
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 
+using fe::AllowAll;
 using hipdnn_shim_test::BuildFailure;
 using hipdnn_shim_test::failureOf;
-
-bool keepAll(cudnnBackendDescriptor_t /*config*/)
-{
-    return false;
-}
 
 class TestCudnnShimV8Heuristics : public hipdnn_shim_test::ShimV8PlanFixture
 {
@@ -44,7 +40,7 @@ TEST_F(TestCudnnShimV8Heuristics, ModeStringsRunEachMode)
     const std::vector<cudnnStatus_t> statuses = fe::get_heuristics_list(
         std::vector<std::string>{"heuristics_instant", "heuristics_fallback"},
         graph,
-        keepAll,
+        AllowAll,
         configs);
 
     // Both modes run the shim's single FALLBACK ranking, so the list repeats.
@@ -53,13 +49,13 @@ TEST_F(TestCudnnShimV8Heuristics, ModeStringsRunEachMode)
 
     fe::EngineConfigList modeB;
     EXPECT_EQ(fe::get_heuristics_list(
-                  std::vector<std::string>{"heuristics_mode_b"}, graph, keepAll, modeB),
+                  std::vector<std::string>{"heuristics_mode_b"}, graph, AllowAll, modeB),
               std::vector<cudnnStatus_t>{CUDNN_STATUS_SUCCESS});
     EXPECT_EQ(modeB.size(), 3U);
 
     fe::EngineConfigList unknown;
     EXPECT_TRUE(fe::get_heuristics_list(
-                    std::vector<std::string>{"heuristics_unknown"}, graph, keepAll, unknown)
+                    std::vector<std::string>{"heuristics_unknown"}, graph, AllowAll, unknown)
                     .empty());
     EXPECT_TRUE(unknown.empty());
 }
@@ -73,7 +69,7 @@ TEST_F(TestCudnnShimV8Heuristics, ArrayModeOverloadsRunEachMode)
     const std::vector<cudnnStatus_t> statuses = fe::get_heuristics_list<2>(
         std::array<std::string, 2>{"heuristics_instant", "heuristics_fallback"},
         graph,
-        keepAll,
+        AllowAll,
         configs);
     EXPECT_EQ(statuses, (std::vector<cudnnStatus_t>{CUDNN_STATUS_SUCCESS, CUDNN_STATUS_SUCCESS}));
     EXPECT_EQ(indicesOf(configs), (std::vector<std::int64_t>{0, 1, 2, 0, 1, 2}));
@@ -82,7 +78,7 @@ TEST_F(TestCudnnShimV8Heuristics, ArrayModeOverloadsRunEachMode)
     const fe::EngineConfigList byMode = fe::get_heuristics_list<2>(
         std::array<cudnnBackendHeurMode_t, 2>{CUDNN_HEUR_MODE_INSTANT, CUDNN_HEUR_MODES_COUNT},
         graph,
-        keepAll);
+        AllowAll);
     EXPECT_EQ(indicesOf(byMode), (std::vector<std::int64_t>{0, 1, 2}));
 }
 
@@ -128,7 +124,7 @@ TEST_F(TestCudnnShimV8Heuristics, SmCountTargetNotSupported)
     fe::EngineConfigList configs;
     EXPECT_EQ(fe::get_heuristics_list(std::vector<std::string>{"heuristics_fallback"},
                                       graph,
-                                      keepAll,
+                                      AllowAll,
                                       configs,
                                       /*evaluate_all=*/false,
                                       /*sm_count=*/0),
@@ -144,13 +140,13 @@ TEST_F(TestCudnnShimV8Heuristics, FailedModeStopsUnlessEvaluateAll)
 
     fe::EngineConfigList all;
     EXPECT_EQ(
-        fe::get_heuristics_list(modes, graph, keepAll, all, /*evaluate_all=*/true, /*sm_count=*/8),
+        fe::get_heuristics_list(modes, graph, AllowAll, all, /*evaluate_all=*/true, /*sm_count=*/8),
         (std::vector<cudnnStatus_t>{CUDNN_STATUS_NOT_SUPPORTED, CUDNN_STATUS_NOT_SUPPORTED}));
     EXPECT_TRUE(all.empty());
 
     fe::EngineConfigList first;
     EXPECT_EQ(fe::get_heuristics_list(
-                  modes, graph, keepAll, first, /*evaluate_all=*/false, /*sm_count=*/8),
+                  modes, graph, AllowAll, first, /*evaluate_all=*/false, /*sm_count=*/8),
               std::vector<cudnnStatus_t>{CUDNN_STATUS_NOT_SUPPORTED});
     EXPECT_TRUE(first.empty());
 }
@@ -180,9 +176,10 @@ TEST_F(TestCudnnShimV8Heuristics, OpensourceModeRunsFallback)
     fe::detail::warnedHeuristicModes().store(0);
 
     fe::EngineConfigList configs;
-    EXPECT_EQ(fe::get_heuristics_list(
-                  std::vector<fe::HeurMode_t>{fe::HeurMode_t::OPENSOURCE}, graph, keepAll, configs),
-              std::vector<cudnnStatus_t>{CUDNN_STATUS_SUCCESS});
+    EXPECT_EQ(
+        fe::get_heuristics_list(
+            std::vector<fe::HeurMode_t>{fe::HeurMode_t::OPENSOURCE}, graph, AllowAll, configs),
+        std::vector<cudnnStatus_t>{CUDNN_STATUS_SUCCESS});
     EXPECT_EQ(indicesOf(configs), (std::vector<std::int64_t>{0, 1, 2}));
     const auto logs = recorder.getRecordedLogs();
     EXPECT_EQ(std::count_if(logs.begin(),
@@ -196,7 +193,7 @@ TEST_F(TestCudnnShimV8Heuristics, OpensourceModeRunsFallback)
 
     fe::EngineConfigList fallback;
     EXPECT_EQ(fe::get_heuristics_list(
-                  std::vector<fe::HeurMode_t>{fe::HeurMode_t::FALLBACK}, graph, keepAll, fallback),
+                  std::vector<fe::HeurMode_t>{fe::HeurMode_t::FALLBACK}, graph, AllowAll, fallback),
               std::vector<cudnnStatus_t>{CUDNN_STATUS_SUCCESS});
     EXPECT_EQ(fallback.size(), 3U);
 }
@@ -209,7 +206,7 @@ TEST_F(TestCudnnShimV8Heuristics, UnknownHeurModeRejected)
         [[maybe_unused]] const std::vector<cudnnStatus_t> statuses = fe::get_heuristics_list(
             std::vector<fe::HeurMode_t>{fe::HeurMode_t::FALLBACK, static_cast<fe::HeurMode_t>(99)},
             graph,
-            keepAll,
+            AllowAll,
             configs);
     });
     ASSERT_TRUE(failure.thrown);
@@ -231,6 +228,24 @@ TEST_F(TestCudnnShimV8Heuristics, FallbackListMatchesHeuristics)
     ASSERT_EQ(fallback.get_status(), CUDNN_STATUS_SUCCESS) << fallback.get_error();
     EXPECT_EQ(indicesOf(fallback.getFallbackList()), indicesOf(engineConfigs(graph)));
     EXPECT_EQ(indicesOf(fallback.getFallbackList()), (std::vector<std::int64_t>{1, 2, 0}));
+}
+
+// Binding a build() result by value must leave the builder able to build again.
+TEST_F(TestCudnnShimV8Heuristics, FallbackListBuilderBuildsTwice)
+{
+    installHeuristicResults({1, 2, 0});
+    fe::OperationGraph_v8 graph = convGraph();
+    fe::EngineFallbackListBuilder_v8 builder;
+    builder.setOperationGraph(graph).setOperation(
+        CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR);
+
+    fe::EngineFallbackList_v8 first = builder.build();
+    ASSERT_EQ(first.get_status(), CUDNN_STATUS_SUCCESS) << first.get_error();
+
+    fe::EngineFallbackList_v8 second = builder.build();
+    ASSERT_EQ(second.get_status(), CUDNN_STATUS_SUCCESS) << second.get_error();
+    EXPECT_EQ(indicesOf(second.getFallbackList()), (std::vector<std::int64_t>{1, 2, 0}));
+    EXPECT_EQ(indicesOf(first.getFallbackList()), (std::vector<std::int64_t>{1, 2, 0}));
 }
 
 // Pinned against the NVIDIA table at CUDNN_VERSION 92200 (the minor <= 2

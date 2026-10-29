@@ -276,6 +276,64 @@ TEST_F(TestCudnnShimV8FindPlan, RejectedTimerCallSortsLast)
     EXPECT_EQ(timesOf(sorted), (std::vector<float>{1.0F, 2.0F, std::numeric_limits<float>::max()}));
 }
 
+TEST_F(TestCudnnShimV8FindPlan, RejectedStartSortsLast)
+{
+    using ::testing::_;
+
+    installProfilingTimes({1.0F, 2.0F});
+    int starts = 0;
+    ON_CALL(*_mockBackend, backendSetAttribute(_, HIPDNN_ATTR_PROFILING_START_EXT, _, _, _))
+        .WillByDefault([&starts](hipdnnBackendDescriptor_t,
+                                 hipdnnBackendAttributeName_t,
+                                 hipdnnBackendAttributeType_t,
+                                 std::int64_t,
+                                 const void*) {
+            return ++starts == 1 ? HIPDNN_STATUS_INTERNAL_ERROR : HIPDNN_STATUS_SUCCESS;
+        });
+
+    const fe::executionPlans_t sorted
+        = timeSorted<CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(plans(2));
+
+    // Engine 0's span is never read, so engine 1 reads the first time.
+    EXPECT_EQ(tagsOf(sorted), (std::vector<std::string>{"ConvFwd_eng1", "ConvFwd_eng0"}));
+    EXPECT_EQ(timesOf(sorted), (std::vector<float>{1.0F, std::numeric_limits<float>::max()}));
+    EXPECT_EQ(timelineCount("elapsed"), 1U);
+}
+
+// The warm-up ran, but a timed run failed: its span measures nothing.
+TEST_F(TestCudnnShimV8FindPlan, FailedTimedRunSortsLast)
+{
+    installProfilingTimes({0.5F, 1.0F});
+    failExecuteFor(0, 2);
+
+    const fe::executionPlans_t sorted
+        = timeSorted<CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(plans(2));
+
+    EXPECT_EQ(tagsOf(sorted), (std::vector<std::string>{"ConvFwd_eng1", "ConvFwd_eng0"}));
+    EXPECT_EQ(timesOf(sorted), (std::vector<float>{0.5F, std::numeric_limits<float>::max()}));
+    // The timer is still stopped after the failed run.
+    EXPECT_EQ(timelineCount("stop"), 2U);
+    EXPECT_EQ(timelineCount("elapsed"), 1U);
+}
+
+TEST_F(TestCudnnShimV8FindPlan, FindPlanAndCacheSkipsFailedTimedRun)
+{
+    installProfilingTimes({0.01F, 1.0F, 2.0F});
+    failExecuteFor(0, 2);
+    fe::EngineConfigGenerator generator = heuristicGenerator();
+    fe::ExecutionPlanCache cache("find");
+
+    const fe::ExecutionPlan front
+        = generator.cudnnFindPlanAndCache<CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(
+            _handle, *_graph, *_pack, cache);
+
+    EXPECT_EQ(front.getTag(), "ConvFwd_eng1");
+    EXPECT_EQ(front.getExecutionTime(), 0.01F);
+    const fe::ExecutionPlan* cached = nullptr;
+    ASSERT_TRUE(cache.get_plan_from_cache(*_graph, cached));
+    EXPECT_EQ(cached->getTag(), "ConvFwd_eng1");
+}
+
 // hipDNN keeps a failed call's message until it is read; a failed timer call
 // must not leave it for the next shim error on the thread.
 TEST_F(TestCudnnShimV8FindPlan, TimerFailureDrainsHipdnnMessage)

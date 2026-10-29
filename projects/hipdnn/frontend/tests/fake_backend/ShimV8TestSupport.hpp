@@ -7,6 +7,7 @@
 #include <hipdnn_compatibility/cudnn/detail/v8/error.h>
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -21,12 +22,7 @@ using Dims = std::vector<std::int64_t>;
 
 inline Dims packedStrides(const Dims& dims)
 {
-    Dims strides(dims.size(), 1);
-    for(std::size_t i = dims.size(); i > 1; --i)
-    {
-        strides[i - 2] = strides[i - 1] * dims[i - 1];
-    }
-    return strides;
+    return hipdnn_data_sdk::utilities::generateStrides(dims);
 }
 
 // The ShimError `body` throws; a body that throws nothing fails the test.

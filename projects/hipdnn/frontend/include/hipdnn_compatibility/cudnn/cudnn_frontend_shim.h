@@ -145,6 +145,14 @@ inline cudnnStatus_t profilingStatus(hipdnnStatus_t status)
     return toCudnnStatus(status);
 }
 
+inline cudnnStatus_t setProfilingTrigger(hipdnnBackendDescriptor_t profiling,
+                                         hipdnnBackendAttributeName_t attribute)
+{
+    const bool trigger = true;
+    return profilingStatus(hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
+        profiling, attribute, HIPDNN_TYPE_BOOLEAN, 1, &trigger));
+}
+
 // Replaces upstream's CUDA event wrappers: device time between start() and stop() on the
 // handle's stream, measured by one hipDNN profiling descriptor reused across measurements.
 class PlanTimer
@@ -162,7 +170,8 @@ public:
         {
             return CUDNN_STATUS_NOT_INITIALIZED;
         }
-        cudnnStatus_t status = setTrigger(HIPDNN_ATTR_PROFILING_RESET_EXT);
+        cudnnStatus_t status
+            = setProfilingTrigger(_profiling.get(), HIPDNN_ATTR_PROFILING_RESET_EXT);
         if(status != CUDNN_STATUS_SUCCESS)
         {
             return status;
@@ -177,7 +186,7 @@ public:
         {
             return status;
         }
-        return setTrigger(HIPDNN_ATTR_PROFILING_START_EXT);
+        return setProfilingTrigger(_profiling.get(), HIPDNN_ATTR_PROFILING_START_EXT);
     }
 
     cudnnStatus_t stop()
@@ -186,7 +195,8 @@ public:
         {
             return CUDNN_STATUS_NOT_INITIALIZED;
         }
-        const cudnnStatus_t status = setTrigger(HIPDNN_ATTR_PROFILING_STOP_EXT);
+        const cudnnStatus_t status
+            = setProfilingTrigger(_profiling.get(), HIPDNN_ATTR_PROFILING_STOP_EXT);
         if(status != CUDNN_STATUS_SUCCESS)
         {
             return status;
@@ -228,13 +238,6 @@ public:
     }
 
 private:
-    cudnnStatus_t setTrigger(hipdnnBackendAttributeName_t attribute)
-    {
-        const bool trigger = true;
-        return profilingStatus(hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
-            _profiling.get(), attribute, HIPDNN_TYPE_BOOLEAN, 1, &trigger));
-    }
-
     cudnnHandle_t _handle;
     hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor _profiling;
 };
@@ -248,9 +251,7 @@ inline cudnnStatus_t deviceSynchronize()
     {
         return CUDNN_STATUS_NOT_INITIALIZED;
     }
-    const bool trigger = true;
-    return profilingStatus(hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
-        sync.get(), HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT, HIPDNN_TYPE_BOOLEAN, 1, &trigger));
+    return setProfilingTrigger(sync.get(), HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT);
 }
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::detail

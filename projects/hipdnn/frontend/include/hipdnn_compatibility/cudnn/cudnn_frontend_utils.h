@@ -48,8 +48,9 @@ static_assert(CUDNN_FRONTEND_VERSION == 12400,
               "include/cudnn_frontend_utils.h at the new tag, then update this assert.");
 
 #if !defined(CUDNN_FRONTEND_SKIP_JSON_LIB) && !defined(HIPDNN_FRONTEND_SKIP_JSON_LIB)
-// Upstream declares this alias at global scope; here it stays in the shim namespace so it cannot
-// collide with a consumer's own global `json`.
+// Upstream declares this alias at global scope; here it stays in the shim namespace so it does not
+// collide with a consumer's own global `json`, unless `using namespace cudnn_frontend;` brings it
+// into scope and the consumer's alias names a different type (the name is then ambiguous).
 using json = nlohmann::json;
 #endif
 
@@ -111,6 +112,20 @@ static inline void set_error_and_throw_exception(const BackendDescriptor* desc,
                          status);
 #endif
 }
+
+namespace detail
+{
+// Upstream lets a negative count reach reserve() or resize(), which throws std::length_error.
+inline bool rejectNegativeCount(const BackendDescriptor* desc, int64_t count, const char* message)
+{
+    if(count >= 0)
+    {
+        return false;
+    }
+    set_error_and_throw_exception(desc, CUDNN_STATUS_BAD_PARAM, message);
+    return true;
+}
+} // namespace detail
 
 inline std::string to_string(cudnnBackendBehaviorNote_t note)
 {

@@ -23,6 +23,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -44,10 +45,6 @@ class Tensor_v8 : public BackendDescriptor
 {
 public:
     friend class TensorBuilder_v8;
-    template <typename Descriptor, typename MakeRecord>
-    friend Descriptor&& detail::v8::buildDescriptor(Descriptor& descriptor,
-                                                    cudnnBackendDescriptorType_t type,
-                                                    MakeRecord&& makeRecord);
     std::string describe() const override
     {
         std::stringstream ss;
@@ -179,9 +176,6 @@ private:
     bool isVirtual = false;
     bool isByValue = false;
 
-    bool hasConstValue = false;
-    std::vector<uint8_t> constValueBytes;
-
     cudnn_frontend::TensorReordering_t reorder_type = cudnn_frontend::TensorReordering_t::NONE;
     std::shared_ptr<Tensor_v8> raggedOffset;
 };
@@ -234,9 +228,17 @@ public:
     template <typename T>
     auto setConstValue(const T& value) -> TensorBuilder_v8&
     {
-        m_tensor.hasConstValue = true;
-        m_tensor.constValueBytes.resize(sizeof(T));
-        std::memcpy(m_tensor.constValueBytes.data(), &value, sizeof(T));
+        m_constValueBytes.resize(sizeof(T));
+        std::memcpy(m_constValueBytes.data(), &value, sizeof(T));
+        if constexpr(std::is_integral_v<T>)
+        {
+            m_constantSource = std::is_signed_v<T> ? detail::v8::ConstantSource::SIGNED_INTEGER
+                                                   : detail::v8::ConstantSource::UNSIGNED_INTEGER;
+        }
+        else
+        {
+            m_constantSource = detail::v8::ConstantSource::OTHER;
+        }
         m_tensor.isByValue = true;
         return *this;
     }
@@ -268,7 +270,7 @@ public:
 
     auto setRaggedOffset(std::shared_ptr<Tensor_v8>& raggedOffset) -> TensorBuilder_v8&
     {
-        m_tensor.raggedOffset = raggedOffset;
+        m_raggedOffset = raggedOffset;
         return *this;
     }
 
@@ -291,6 +293,9 @@ public:
 
     Tensor_v8&& build()
     {
+        // The builder owns the ragged offset and the constant: binding a failed build() by value
+        // moves m_tensor's copies out, and the fixed builder may build again.
+        m_tensor.raggedOffset = m_raggedOffset;
         if(m_tensor.alignment <= 0)
         {
             return failPrecheck("TensorBuilder: byte alignment must be positive");
@@ -379,12 +384,13 @@ public:
             inputs.reorderingMode = cudnn_reordering_type;
             inputs.isVirtual = m_tensor.isVirtual;
             inputs.isByValue = m_tensor.isByValue;
-            if(m_tensor.hasConstValue)
+            if(!m_constValueBytes.empty())
             {
-                inputs.constantValue.emplace(m_tensor.constValueBytes.size());
+                inputs.constantValue.emplace(m_constValueBytes.size());
                 std::memcpy(inputs.constantValue->data(),
-                            m_tensor.constValueBytes.data(),
-                            m_tensor.constValueBytes.size());
+                            m_constValueBytes.data(),
+                            m_constValueBytes.size());
+                inputs.constantSource = m_constantSource;
             }
             return detail::v8::makeTensorRecord(std::move(inputs), s_labels);
         });
@@ -398,8 +404,9 @@ public:
 
 private:
     // Upstream's prechecks run before the descriptor exists. Without exceptions the failed tensor
-    // is handed back, so it gets an empty pointer to keep get_raw_desc() safe; build() treats that
-    // placeholder as unbuilt, so a fixed builder can still build.
+    // is handed back with an empty pointer: an operation's optional slot then reads it as set but
+    // not built (BAD_PARAM) rather than as absent. buildDescriptor() replaces the placeholder, so a
+    // fixed builder can still build.
     Tensor_v8&& failPrecheck(const char* message)
     {
 #ifdef NV_CUDNN_DISABLE_EXCEPTION
@@ -415,6 +422,9 @@ private:
     }
 
     Tensor_v8 m_tensor;
+    std::shared_ptr<Tensor_v8> m_raggedOffset;
+    std::vector<uint8_t> m_constValueBytes;
+    detail::v8::ConstantSource m_constantSource = detail::v8::ConstantSource::OTHER;
 };
 
 using Tensor = Tensor_v8;

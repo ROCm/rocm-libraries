@@ -290,7 +290,7 @@ TEST(TestCudnnShimV8CoreFactories, TensorChecksRunInOrderWithCallerLabels)
     expectTensorError(
         inputs, CUDNN_STATUS_BAD_PARAM, "constant has 4 bytes; the tensor data type needs 8");
 
-    // A wider constant is a type mismatch too: its leading bytes are not the value.
+    // A wider constant that is not an integer is a type mismatch: cuDNN reads its leading bytes.
     inputs = tensorInputs({1});
     inputs.constantValue = std::vector<std::byte>(sizeof(double));
     expectTensorError(
@@ -338,6 +338,76 @@ TEST(TestCudnnShimV8CoreFactories, TensorConstantCopiedAndWinsOverByValue)
     v8::TensorInputs runtime = tensorInputs({1});
     runtime.isByValue = true;
     EXPECT_TRUE(v8::makeTensorRecord(std::move(runtime), TENSOR_LABELS)->isRuntimePassByValue());
+}
+
+TEST(TestCudnnShimV8CoreFactories, WiderIntegerConstantNarrowsWhenItFits)
+{
+    const auto narrowed
+        = [](cudnnDataType_t dataType, std::vector<std::byte> bytes, v8::ConstantSource source) {
+              v8::TensorInputs inputs = tensorInputs({1});
+              inputs.dataType = dataType;
+              inputs.constantValue = std::move(bytes);
+              inputs.constantSource = source;
+              return *v8::makeTensorRecord(std::move(inputs), TENSOR_LABELS)->constantValue();
+          };
+    constexpr auto SIGNED = v8::ConstantSource::SIGNED_INTEGER;
+    constexpr auto UNSIGNED = v8::ConstantSource::UNSIGNED_INTEGER;
+    EXPECT_EQ(narrowed(CUDNN_DATA_UINT8, bytesOf(std::int32_t{3}), SIGNED),
+              bytesOf(std::uint8_t{3}));
+    EXPECT_EQ(narrowed(CUDNN_DATA_UINT8, bytesOf(std::uint64_t{255}), UNSIGNED),
+              bytesOf(std::uint8_t{255}));
+    EXPECT_EQ(narrowed(CUDNN_DATA_INT8, bytesOf(std::int16_t{-128}), SIGNED),
+              bytesOf(std::int8_t{-128}));
+    EXPECT_EQ(narrowed(CUDNN_DATA_BOOLEAN, bytesOf(std::int32_t{1}), SIGNED), bytesOf(true));
+    EXPECT_EQ(narrowed(CUDNN_DATA_INT32, bytesOf(std::int64_t{-5}), SIGNED),
+              bytesOf(std::int32_t{-5}));
+
+    const auto expectRejected = [](cudnnDataType_t dataType,
+                                   std::vector<std::byte> bytes,
+                                   v8::ConstantSource source,
+                                   const std::string& message) {
+        v8::TensorInputs inputs = tensorInputs({1});
+        inputs.dataType = dataType;
+        inputs.constantValue = std::move(bytes);
+        inputs.constantSource = source;
+        expectShimError([&] { v8::makeTensorRecord(std::move(inputs), TENSOR_LABELS); },
+                        CUDNN_STATUS_BAD_PARAM,
+                        message);
+    };
+    const std::string doesNotFit = "; a wider integer must hold a value of an integer data type";
+    expectRejected(CUDNN_DATA_UINT8,
+                   bytesOf(std::int32_t{256}),
+                   SIGNED,
+                   "constant has 4 bytes; the tensor data type needs 1" + doesNotFit);
+    expectRejected(CUDNN_DATA_UINT8,
+                   bytesOf(std::int32_t{-1}),
+                   SIGNED,
+                   "constant has 4 bytes; the tensor data type needs 1" + doesNotFit);
+    expectRejected(CUDNN_DATA_INT8,
+                   bytesOf(std::uint32_t{128}),
+                   UNSIGNED,
+                   "constant has 4 bytes; the tensor data type needs 1" + doesNotFit);
+    expectRejected(CUDNN_DATA_BOOLEAN,
+                   bytesOf(std::int32_t{2}),
+                   SIGNED,
+                   "constant has 4 bytes; the tensor data type needs 1" + doesNotFit);
+    expectRejected(CUDNN_DATA_INT32,
+                   bytesOf(std::int64_t{std::numeric_limits<std::int32_t>::max()} + 1),
+                   SIGNED,
+                   "constant has 8 bytes; the tensor data type needs 4" + doesNotFit);
+    expectRejected(CUDNN_DATA_FLOAT,
+                   bytesOf(std::int64_t{5}),
+                   SIGNED,
+                   "constant has 8 bytes; the tensor data type needs 4" + doesNotFit);
+    // cuDNN would read a narrower integer past its end.
+    expectRejected(CUDNN_DATA_INT32,
+                   bytesOf(std::int16_t{5}),
+                   SIGNED,
+                   "constant has 2 bytes; the tensor data type needs 4");
+    expectRejected(CUDNN_DATA_UINT8,
+                   bytesOf(std::int32_t{3}),
+                   v8::ConstantSource::OTHER,
+                   "constant has 4 bytes; the tensor data type needs 1");
 }
 
 TEST(TestCudnnShimV8CoreFactories, TensorRaggedOffsetKept)
@@ -887,6 +957,18 @@ TEST(TestCudnnShimV8CoreFactories, MatmulAndResampleOperationRules)
         resampleInputs(CUDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING), RESAMPLE_LABELS);
     average.index = nullptr;
     EXPECT_EQ(v8::makeOperationRecord(average, RESAMPLE_BWD_LABELS)->index(), nullptr);
+
+    for(const cudnnResampleMode_t mode :
+        {CUDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING, CUDNN_RESAMPLE_AVGPOOL_EXCLUDE_PADDING})
+    {
+        SCOPED_TRACE(mode);
+        v8::ResampleBackwardOperationInputs indexed = maxpool;
+        indexed.resample = v8::makeResampleRecord(resampleInputs(mode), RESAMPLE_LABELS);
+        expectShimError(
+            [&] { v8::makeOperationRecord(indexed, RESAMPLE_BWD_LABELS); },
+            CUDNN_STATUS_NOT_SUPPORTED,
+            "index is not supported by the hipDNN cuDNN shim except for CUDNN_RESAMPLE_MAXPOOL");
+    }
 }
 
 TEST(TestCudnnShimV8CoreFactories, NormForwardTargetsAndKeptSlots)

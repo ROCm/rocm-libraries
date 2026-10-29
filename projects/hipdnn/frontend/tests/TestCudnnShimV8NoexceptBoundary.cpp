@@ -21,6 +21,7 @@
 #include <limits>
 #include <new>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -179,6 +180,8 @@ TEST_F(TestCudnnShimV8NoexceptBoundary, PlanLayerReturnsStatus)
     fe::OperationGraph graph = convGraph();
     const fe::EngineConfigList configs = engineConfigs(graph);
     ASSERT_EQ(configs.size(), 3U);
+    const std::string planJson = planFor(configs[0], graph.getTag()).getJsonRepresentation();
+    ASSERT_FALSE(planJson.empty());
 
     createThrows(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, [] { throw std::bad_alloc(); });
     const fe::ExecutionPlan failed = planFor(configs[0], graph.getTag());
@@ -187,10 +190,20 @@ TEST_F(TestCudnnShimV8NoexceptBoundary, PlanLayerReturnsStatus)
     EXPECT_TRUE(failed.getJsonRepresentation().empty());
     EXPECT_EQ(failed.get_status(), CUDNN_STATUS_NOT_INITIALIZED);
 
-    const fe::ExecutionPlan loaded
+    // Rejected by the JSON parser before any hipDNN call.
+    const fe::ExecutionPlan unparsed
         = fe::ExecutionPlanBuilder().setHandle(_handle).loadFromJson("{");
-    EXPECT_EQ(loaded.get_status(), CUDNN_STATUS_BAD_PARAM);
-    EXPECT_EQ(loaded.get_raw_desc(), nullptr);
+    EXPECT_EQ(unparsed.get_status(), CUDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(unparsed.get_raw_desc(), nullptr);
+
+    setDeserializeStatus(HIPDNN_STATUS_ALLOC_FAILED);
+    const fe::ExecutionPlan undeserialized
+        = fe::ExecutionPlanBuilder().setHandle(_handle).loadFromJson(planJson);
+    EXPECT_EQ(undeserialized.get_status(), CUDNN_STATUS_ALLOC_FAILED);
+    EXPECT_NE(std::string(undeserialized.get_error()).find("deserializing"), std::string::npos)
+        << undeserialized.get_error();
+    EXPECT_EQ(undeserialized.get_raw_desc(), nullptr);
+    setDeserializeStatus(HIPDNN_STATUS_SUCCESS);
 
     // Upstream's own prechecks (no config, no handle) also leave a null raw descriptor.
     const fe::ExecutionPlan noConfig = fe::ExecutionPlanBuilder().build();

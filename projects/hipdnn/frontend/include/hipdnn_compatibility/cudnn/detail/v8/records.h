@@ -548,13 +548,43 @@ protected:
     }
 };
 
-// One record for the three convolution operations. `tensors` holds inputs 0
-// and 1, then the output: X, W -> Y (forward); DY, W -> DX (backward data);
-// DY, X -> DW (backward filter).
-template <cudnnBackendDescriptorType_t K, OperationTarget T>
+// Positions in ConvolutionOperationRecordOf::tensors(): the two inputs, then the output. Readers
+// name a slot through the record's Slots, so a slot of another kind does not compile.
+struct ConvolutionForwardSlots
+{
+    enum : std::size_t
+    {
+        X,
+        W,
+        Y,
+    };
+};
+struct ConvolutionBackwardDataSlots
+{
+    enum : std::size_t
+    {
+        DY,
+        W,
+        DX,
+    };
+};
+struct ConvolutionBackwardFilterSlots
+{
+    enum : std::size_t
+    {
+        DY,
+        X,
+        DW,
+    };
+};
+
+// One record for the three convolution operations.
+template <cudnnBackendDescriptorType_t K, OperationTarget T, typename SlotsT>
 class ConvolutionOperationRecordOf final : public OperationRecordOf<K>
 {
 public:
+    using Slots = SlotsT;
+
     struct Fields
     {
         std::shared_ptr<const ConvolutionRecord> convolution;
@@ -583,13 +613,16 @@ private:
 
 using ConvolutionForwardOperationRecord
     = ConvolutionOperationRecordOf<CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
-                                   OperationTarget::CONVOLUTION_FPROP>;
+                                   OperationTarget::CONVOLUTION_FPROP,
+                                   ConvolutionForwardSlots>;
 using ConvolutionBackwardDataOperationRecord
     = ConvolutionOperationRecordOf<CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR,
-                                   OperationTarget::CONVOLUTION_DGRAD>;
+                                   OperationTarget::CONVOLUTION_DGRAD,
+                                   ConvolutionBackwardDataSlots>;
 using ConvolutionBackwardFilterOperationRecord
     = ConvolutionOperationRecordOf<CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
-                                   OperationTarget::CONVOLUTION_WGRAD>;
+                                   OperationTarget::CONVOLUTION_WGRAD,
+                                   ConvolutionBackwardFilterSlots>;
 
 // Slot map: forward classes X -> IN_0, B -> IN_1, T -> IN_2, Y -> OUT_0;
 // activation-backward DY -> IN_0, X -> IN_1, DX -> OUT_0.
@@ -1033,23 +1066,32 @@ private:
 };
 
 template <typename... Records>
-constexpr bool isAnyKind(cudnnBackendDescriptorType_t kind) noexcept
+struct OperationRecordList
+{
+};
+
+// Every concrete operation record; OperationRecord::isKind and lowering's visitOperation read it.
+using OperationRecords = OperationRecordList<ConvolutionForwardOperationRecord,
+                                             ConvolutionBackwardDataOperationRecord,
+                                             ConvolutionBackwardFilterOperationRecord,
+                                             PointwiseOperationRecord,
+                                             MatmulOperationRecord,
+                                             ReductionOperationRecord,
+                                             ResampleForwardOperationRecord,
+                                             ResampleBackwardOperationRecord,
+                                             NormForwardOperationRecord,
+                                             NormBackwardOperationRecord>;
+
+template <typename... Records>
+constexpr bool isAnyKind(cudnnBackendDescriptorType_t kind,
+                         OperationRecordList<Records...> /*records*/) noexcept
 {
     return ((kind == Records::KIND) || ...);
 }
 
 constexpr bool OperationRecord::isKind(cudnnBackendDescriptorType_t kind) noexcept
 {
-    return isAnyKind<ConvolutionForwardOperationRecord,
-                     ConvolutionBackwardDataOperationRecord,
-                     ConvolutionBackwardFilterOperationRecord,
-                     PointwiseOperationRecord,
-                     MatmulOperationRecord,
-                     ReductionOperationRecord,
-                     ResampleForwardOperationRecord,
-                     ResampleBackwardOperationRecord,
-                     NormForwardOperationRecord,
-                     NormBackwardOperationRecord>(kind);
+    return isAnyKind(kind, OperationRecords{});
 }
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8

@@ -43,10 +43,6 @@ class ResampleDesc_v8 : public BackendDescriptor
 {
 public:
     friend class ResampleDescBuilder_v8;
-    template <typename Descriptor, typename MakeRecord>
-    friend Descriptor&& detail::v8::buildDescriptor(Descriptor& descriptor,
-                                                    cudnnBackendDescriptorType_t type,
-                                                    MakeRecord&& makeRecord);
     std::string describe() const override
     {
         std::stringstream ss;

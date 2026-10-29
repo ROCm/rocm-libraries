@@ -468,29 +468,27 @@ inline void readKnob(Reader& reader, KnobChoices& knobs)
 {
     std::optional<std::int64_t> type;
     std::optional<std::int64_t> value;
+    bool haveType = false;
+    bool haveValue = false;
     reader.expect('{');
     do
     {
         const std::string key = reader.string();
         reader.expect(':');
-        std::optional<std::int64_t>* slot = nullptr;
         if(key == "type")
         {
-            slot = &type;
+            reader.markSeen(haveType, key);
+            type = reader.integer();
         }
         else if(key == "value")
         {
-            slot = &value;
+            reader.markSeen(haveValue, key);
+            value = reader.integer();
         }
         else
         {
             reader.fail("unknown knob key \"" + key + "\"");
         }
-        if(slot->has_value())
-        {
-            reader.fail("duplicate key \"" + key + "\"");
-        }
-        *slot = reader.integer();
     } while(reader.consume(','));
     reader.expect('}');
     if(!type || !value)

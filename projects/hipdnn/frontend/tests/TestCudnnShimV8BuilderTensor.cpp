@@ -452,10 +452,23 @@ TEST_F(TestCudnnShimV8BuilderTensor, BooleanConstantLowersAsOneByte)
               HIPDNN_DATA_BOOLEAN);
 }
 
+TEST_F(TestCudnnShimV8BuilderTensor, WiderIntegerConstantLowersNarrowed)
+{
+    lowerAdd(constant(2, DataType_t::UINT8, 3));
+    const auto byteValue = loweredField(2, HIPDNN_ATTR_TENSOR_VALUE_EXT);
+    ASSERT_TRUE(byteValue);
+    EXPECT_EQ(byteValue->values<std::uint8_t>(), (std::vector<std::uint8_t>{3}));
+
+    lowerAdd(constant(4, DataType_t::INT32, std::int64_t{-5}));
+    const auto intValue = loweredField(4, HIPDNN_ATTR_TENSOR_VALUE_EXT);
+    ASSERT_TRUE(intValue);
+    EXPECT_EQ(intValue->value<std::int32_t>(), -5);
+}
+
 TEST_F(TestCudnnShimV8BuilderTensor, ConstantSizeMismatchRejected)
 {
     // A narrower constant would be read past its end; a wider one would be read as its leading
-    // bytes. Both are BAD_PARAM.
+    // bytes, which are its value only for an integer that an integer data type holds.
     const auto build = [](DataType_t dataType, const auto& value) {
         v8fe::TensorBuilder builder;
         describe(builder, TensorSpec{2, {1, 1, 1, 1}});
@@ -476,6 +489,13 @@ TEST_F(TestCudnnShimV8BuilderTensor, ConstantSizeMismatchRejected)
          build(DataType_t::BOOLEAN, std::array<std::uint8_t, 4>{0, 0x7F, 0x7F, 0x7F}),
          CUDNN_STATUS_BAD_PARAM},
         {"INT64 from int64", build(DataType_t::INT64, std::int64_t{5}), CUDNN_STATUS_SUCCESS},
+        {"UINT8 from int", build(DataType_t::UINT8, 3), CUDNN_STATUS_SUCCESS},
+        {"BOOLEAN from int", build(DataType_t::BOOLEAN, 1), CUDNN_STATUS_SUCCESS},
+        {"INT32 from int64", build(DataType_t::INT32, std::int64_t{5}), CUDNN_STATUS_SUCCESS},
+        {"UINT8 from out-of-range int", build(DataType_t::UINT8, 256), CUDNN_STATUS_BAD_PARAM},
+        {"UINT8 from negative int", build(DataType_t::UINT8, -1), CUDNN_STATUS_BAD_PARAM},
+        {"BOOLEAN from int 2", build(DataType_t::BOOLEAN, 2), CUDNN_STATUS_BAD_PARAM},
+        {"FLOAT from int64", build(DataType_t::FLOAT, std::int64_t{5}), CUDNN_STATUS_BAD_PARAM},
     };
     for(const Case& item : cases)
     {

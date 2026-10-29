@@ -92,12 +92,12 @@ TEST_F(TestCudnnShimV8Utils, ConvertersFailClosedLikeUpstream)
     EXPECT_EQ(note, CUDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION);
 
     EXPECT_EQ(fe::detail::convert_from_cudnn_type(CUDNN_DATA_INT8x4), DataType_t::INT8x4);
-    // 20 is inside cudnnDataType_t's range but names no enumerator.
+    // 20 names no cudnnDataType_t enumerator; upstream's fallback applies, not BAD_PARAM.
     EXPECT_EQ(fe::detail::convert_from_cudnn_type(static_cast<cudnnDataType_t>(20)),
               DataType_t::NOT_SET);
 
-    // In-range values the C enums do not name: the out-param forms overwrite the
-    // output with upstream's fallback.
+    // Values the C enums do not name: the out-param forms overwrite the output with
+    // upstream's fallback.
     PaddingMode_t padding = PaddingMode_t::ZERO_PAD;
     fe::detail::convert_from_cudnn_type(static_cast<cudnnPaddingMode_t>(3), padding);
     EXPECT_EQ(padding, PaddingMode_t::NOT_SET);

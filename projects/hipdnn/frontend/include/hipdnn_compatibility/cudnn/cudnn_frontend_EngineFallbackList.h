@@ -158,8 +158,8 @@ class EngineFallbackListBuilder_v8
 public:
     auto setOperationGraph(OperationGraph_v8& opGraph_) -> EngineFallbackListBuilder_v8&
     {
-        m_fallback_list.opGraph = opGraph_.get_desc();
-        m_fallback_list.opGraphTag = opGraph_.getTag();
+        m_opGraph = opGraph_.get_desc();
+        m_opGraphTag = opGraph_.getTag();
         m_fallback_list.num_ops = opGraph_.getOpCount();
         return *this;
     }
@@ -178,6 +178,10 @@ public:
 
     EngineFallbackList_v8&& build()
     {
+        // The list's noexcept move empties its graph, so the builder keeps its own copy for a
+        // second build(), as upstream's copying move did.
+        m_fallback_list.opGraph = m_opGraph;
+        m_fallback_list.opGraphTag = m_opGraphTag;
         if(m_fallback_list.opGraph == nullptr)
         {
             set_error_and_throw_exception(
@@ -207,6 +211,8 @@ public:
 
 private:
     EngineFallbackList_v8 m_fallback_list;
+    ManagedOpaqueDescriptor m_opGraph = nullptr;
+    std::string m_opGraphTag;
 };
 
 // NOLINTEND(readability-identifier-naming,modernize-use-equals-delete,modernize-use-override,performance-move-constructor-init,readability-else-after-return)
