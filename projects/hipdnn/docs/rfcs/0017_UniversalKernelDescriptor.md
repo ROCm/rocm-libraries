@@ -3,7 +3,7 @@
 - Contributors: Brian Harrison, Daryl Hawkins, Jason Campbell, Brad Pepers
 - **Status**: In progress
 - **Status notes**: The generic kernel ingestor ships behind the default-OFF `HIPDNN_ENABLE_KERNEL_INGESTOR` CMake option (#10606), in `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/`, with build-time kpack packaging in `dnn-providers/hip-kernel-provider/descriptor-packaging` (#10820, #11165) and runtime kpack loading (#11144). UDD and `NATIVE` UHD logic resolve to C++ symbols through `NativeRegistry`, and the UED `graph_match.native` arm through `GraphMatchRegistry`. A UMD either names a native symbol or carries declarative `criteria`, compiled with the SDK expression library (`CompiledCriteria.hpp`). The UED `graph_match.nodes` pattern is built (compiled against the generated op-schema registry). UDD formulas, `MODEL` UHDs, runtime drop-in, multi-launch, and composition are not built.
-- **Last verified**: 2026-10-26 against `users/dahawkin/kernel-ingestor-ued-criteria` (0b6c859e7ef)
+- **Last verified**: 2026-10-29 against `develop` (4a3fc208880) with #13177 and #PRNUM applied
 
 ## Table of Contents
 

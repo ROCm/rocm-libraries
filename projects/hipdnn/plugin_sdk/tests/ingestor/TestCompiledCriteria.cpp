@@ -310,24 +310,45 @@ INSTANTIATE_TEST_SUITE_P(
             "PresenceOfARequiredOperand", R"({"present": ["$input_a"]})", "$input_a"},
         UnresolvedReferenceCase{"PresenceOfARequiredAttribute",
                                 R"({"not_present": ["$pointwise.operation"]})",
-                                "$pointwise.operation"}),
+                                "$pointwise.operation"},
+        // A presence test nested under another operator is found as well.
+        UnresolvedReferenceCase{"NestedPresenceOfARequiredOperand",
+                                R"({"and": [{"==": ["$input_a.rank", 4]},
+                                            {"not_present": ["$input_a"]}]})",
+                                "$input_a"},
+        // The unary form, a bare operand instead of an array.
+        UnresolvedReferenceCase{
+            "BarePresenceOfARequiredOperand", R"({"present": "$input_a"})", "$input_a"}),
     [](const ::testing::TestParamInfo<UnresolvedReferenceCase>& info) { return info.param.name; });
 
-TEST(TestCompiledCriteria, ANativeGraphMatchChecksOnlyKernelReferences)
+TEST(TestCompiledCriteria, ANativeGraphMatchChecksKernelAndDeviceReferences)
 {
-    // A native match publishes whatever it returns at runtime, so nothing else is known at
-    // load; the KMD is.
+    // A native match publishes whatever it returns at runtime, so its tokens are unknown at
+    // load. The KMD and the device vocabulary are known, and the device is read before the
+    // binding, so both are checked.
     const GraphMatch native{NativeGraphMatch{"test.native"}};
-    const auto schema = schemaWith({{"dtype", MetadataType::STRING, std::nullopt}});
+    const auto schema = schemaWith(
+        {{"dtype", MetadataType::STRING, std::nullopt}, {"lds", MetadataType::INT, std::nullopt}});
 
     EXPECT_EQ(criteriaReferenceError(
                   *criteria(R"({"==": ["$q.anything", "$kernel.dtype"]})", MatchScope::KERNEL),
                   native,
                   schema),
               "");
+    EXPECT_EQ(criteriaReferenceError(
+                  *criteria(R"({"<=": ["$kernel.lds", "$device.lds_size"]})", MatchScope::KERNEL),
+                  native,
+                  schema),
+              "");
     EXPECT_NE(criteriaReferenceError(
                   *criteria(R"({"==": ["$kernel.tile", 1]})", MatchScope::KERNEL), native, schema),
               "");
+    EXPECT_NE(criteriaReferenceError(
+                  *criteria(R"({"<=": ["$kernel.lds", "$device.lds_sz"]})", MatchScope::KERNEL),
+                  native,
+                  schema)
+                  .find("$device.lds_sz"),
+              std::string::npos);
 }
 
 TEST(TestCompiledCriteria, AnEngineWithoutGraphMatchPublishesOnlyKernelAndDevice)

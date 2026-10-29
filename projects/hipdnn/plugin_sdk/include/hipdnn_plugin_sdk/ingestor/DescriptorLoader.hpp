@@ -1065,8 +1065,9 @@ inline MatchDescriptor parseMatchDescriptor(const nlohmann::json& root, const st
     }
     else
     {
+        matcher.criteriaJson = root.at("criteria");
         matcher.criteria
-            = compileCriteria(root.at("criteria"), matcher.scope, "key 'criteria' in " + where);
+            = compileCriteria(matcher.criteriaJson, matcher.scope, "key 'criteria' in " + where);
     }
     matcher.revision = declaredRevisionOf(root, where);
     return matcher;

@@ -58,6 +58,9 @@ inline constexpr std::array<std::string_view, 2> PUBLISHED_INDEXED_TENSOR_FIELDS
 inline constexpr std::array<std::string_view, 2> PUBLISHED_GRAPH_FIELDS
     = {"node_count", "is_override_shape_enabled"};
 
+namespace detail
+{
+
 /// Splits `name[i]` into its name and index. The index must be written the way
 /// tensorElement() writes one: decimal digits, no sign, and no leading zero, so a token
 /// that can never be published is refused rather than read as null forever.
@@ -101,6 +104,8 @@ inline bool isPublishedTensorField(std::string_view field)
     const auto indexed = splitIndexedField(field);
     return indexed.has_value() && contains(PUBLISHED_INDEXED_TENSOR_FIELDS, indexed->first);
 }
+
+} // namespace detail
 
 /// Validates @p tensor and publishes its fields under @p root. Publish each root
 /// once. If this returns false, discard the whole binding.

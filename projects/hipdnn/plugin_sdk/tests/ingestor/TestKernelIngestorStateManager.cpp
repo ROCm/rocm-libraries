@@ -817,6 +817,49 @@ TEST(TestKernelIngestorStateManager, DeclarativeCriteriaNarrowTheCatalogOverTheP
     EXPECT_TRUE(declined.entries.empty());
 }
 
+TEST(TestKernelIngestorStateManager, DeclarativeKernelCriteriaReadTheQueriedDevicesProperties)
+{
+    // A kernel-scoped criterion relating each candidate's metadata to a `$device.*` value:
+    // the catalog follows the properties of the device the query names.
+    const ScopedBlockSizeScore score;
+    const DescriptorId ldsMatcherId = testId(0xC3);
+
+    auto pack = makePack({ldsMatcherId});
+    pack.kernels = {makeKernel(testId(0x64), "kernel_64_float", 64, "FLOAT"),
+                    makeKernel(testId(0x65), "kernel_256_float", 256, "FLOAT")};
+
+    const StateManager manager(
+        makeSchema(),
+        {{ldsMatcherId,
+          "kernel fits the device's lds",
+          MatchScope::KERNEL,
+          "",
+          {},
+          compileCriteria(
+              nlohmann::json::parse(R"({"<=": ["$kernel.block_size", "$device.lds_size"]})"),
+              MatchScope::KERNEL,
+              "criteria")}},
+        makeTestDispatches(),
+        {std::move(pack)},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        GraphMatch{});
+    const TestGraph graph(makeGraphId(0x25));
+
+    // `$device.lds_size` is the device's sharedMemPerBlock.
+    auto smallDevice = testDeviceProperties();
+    smallDevice.sharedMemPerBlock = 128;
+    const auto small = manager.unsortedCatalog(MatchContext{graph, 0, smallDevice});
+
+    ASSERT_EQ(small.entries.size(), 1U);
+    EXPECT_EQ(small.entries.front()->kernelId, testId(0x64));
+
+    auto largeDevice = testDeviceProperties();
+    largeDevice.sharedMemPerBlock = 256;
+    const auto large = manager.unsortedCatalog(MatchContext{graph, 1, largeDevice});
+
+    EXPECT_EQ(large.entries.size(), 2U);
+}
+
 TEST(TestKernelIngestorStateManager, RefusesToConstructAgainstAnUnregisteredGraphMatchSymbol)
 {
     // Same eager-resolution contract the matcher and dispatch symbols get: a misspelled

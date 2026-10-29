@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_plugin_sdk/ingestor/CompiledCriteria.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
@@ -253,7 +254,7 @@ TEST(TestIngestorDescriptors, HeuristicDescriptorDefaultsToStaticOrder)
             = EngineDescriptor{};
     }
     {
-        [[maybe_unused]] const auto& [f0, f1, f2, f3, f4] = MatchDescriptor{};
+        [[maybe_unused]] const auto& [f0, f1, f2, f3, f4, f5, f6] = MatchDescriptor{};
     }
     {
         [[maybe_unused]] const auto& [f0, f1, f2] = DispatchDescriptor{};
@@ -591,6 +592,24 @@ std::vector<EqualityCase> allEqualityCases()
              fieldRow(type, "MatchSymbol", true, baseline, [](auto& v) { v.matchSymbol += "!"; }),
              fieldRow(
                  type, "Revision", true, baseline, [](auto& v) { v.revision = OTHER_VERSION; })});
+
+        // A declarative copy: two files with the same `criteria` compile to distinct
+        // CompiledCriteria instances, which must still compare equal.
+        auto declarative = baseline;
+        declarative.matchSymbol.clear();
+        declarative.criteriaJson = nlohmann::json::parse(R"({"==": ["$kernel.dtype", "FP32"]})");
+        declarative.criteria
+            = compileCriteria(declarative.criteriaJson, declarative.scope, "baseline criteria");
+        append({fieldRow(type,
+                         "CriteriaRecompiled",
+                         false,
+                         declarative,
+                         [](auto& v) {
+                             v.criteria = compileCriteria(v.criteriaJson, v.scope, "copy criteria");
+                         }),
+                fieldRow(type, "CriteriaJson", true, declarative, [](auto& v) {
+                    v.criteriaJson = nlohmann::json::parse(R"({"==": ["$kernel.dtype", "FP16"]})");
+                })});
     }
     {
         const DispatchDescriptor baseline{testId(0x71), "dispatch", "dispatch.symbol"};

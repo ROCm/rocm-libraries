@@ -527,6 +527,10 @@ class CompiledCriteria;
 
 /// UMD: one applicability check, shared by id across packs. Exactly one arm is set:
 /// @ref matchSymbol names a native criterion, or @ref criteria holds a declarative one.
+///
+/// `operator==` is authored-content equality: it compares @ref criteriaJson and ignores the
+/// compiled @ref criteria pointer, so the copies of one UMD shipped in per-arch shards, each
+/// compiled from its own file, compare equal.
 struct MatchDescriptor
 {
     DescriptorId id;
@@ -536,14 +540,19 @@ struct MatchDescriptor
     hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
     /// The declarative `criteria` arm, compiled when the UMD is read (see
     /// CompiledCriteria.hpp). Null for a native criterion. Immutable and shared by every
-    /// copy of the descriptor.
+    /// copy of the descriptor. Each file compiles its own, so two equal descriptors read
+    /// from different files hold different pointers. Not part of operator==.
     std::shared_ptr<const CompiledCriteria> criteria = nullptr;
+    /// The authored `criteria` value, kept verbatim. Null for a native criterion. Compared
+    /// by operator== in place of @ref criteria.
+    nlohmann::json criteriaJson = nullptr;
 };
 
 inline bool operator==(const MatchDescriptor& lhs, const MatchDescriptor& rhs)
 {
-    return std::tie(lhs.id, lhs.name, lhs.scope, lhs.matchSymbol, lhs.revision)
-           == std::tie(rhs.id, rhs.name, rhs.scope, rhs.matchSymbol, rhs.revision);
+    return std::tie(lhs.id, lhs.name, lhs.scope, lhs.matchSymbol, lhs.revision, lhs.criteriaJson)
+           == std::tie(
+               rhs.id, rhs.name, rhs.scope, rhs.matchSymbol, rhs.revision, rhs.criteriaJson);
 }
 
 inline bool operator!=(const MatchDescriptor& lhs, const MatchDescriptor& rhs)

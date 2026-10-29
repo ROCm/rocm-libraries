@@ -3,7 +3,7 @@
 - Contributors: Brian Harrison
 - **Status**: In progress
 - **Status notes**: The UMD ships both arms, the native `match_symbol` and the declarative `criteria`, parsed in `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp` (#10606, #10850). `criteria` compiles with the SDK expression library (`JsonExpression.hpp`, #11632) in `CompiledCriteria.hpp`, and each pack checks its references against its engine. `kernel_fields`, `allow_override_shape`, and `$kernel.*` memoization are not built.
-- **Last verified**: 2026-10-26 against `users/dahawkin/kernel-ingestor-ued-criteria` (0b6c859e7ef)
+- **Last verified**: 2026-10-29 against `develop` (4a3fc208880) with #13177 and #PRNUM applied
 
 > Follow-up to [RFC 0017 (Universal Kernel Descriptors)](0017_UniversalKernelDescriptor.md),
 > covering the "UMD + applicability" row of its follow-up series
@@ -1324,8 +1324,9 @@ formulas and the UHD `features_signature`. Checks 1, 2, 4, 5, and 6 run, and che
 an unknown or rank-mismatched layout alias, and a `scope` that disagrees with the `$kernel.*` reads.
 It has no static type check. It refuses a literal root, and a criterion whose result is not boolean
 `true` declines at match time. `criteriaReferenceError()` runs checks 5 and 6, and also refuses
-`present` or `not_present` on a pattern variable or attribute the pattern binds as required. Under a
-native `graph_match` it checks only `$kernel.*` references. A failing pair drops that pack. An
+`present` or `not_present` on a pattern variable or attribute the pattern binds as required. It
+checks `$kernel.*` and `$device.*` references on every `graph_match` arm, and under a native
+`graph_match` it checks no other reference. A failing pair drops that pack. An
 unregistered `match_symbol` drops the whole descriptor set of that engine, not only the UMD
 (`loadValidatedDescriptorSets()` in `DescriptorLoader.hpp`).
 

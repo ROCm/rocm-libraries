@@ -233,7 +233,7 @@ private:
         {
             return detail::toExpressionValue(it->second);
         }
-        const auto indexed = splitIndexedField(field);
+        const auto indexed = detail::splitIndexedField(field);
         if(!indexed.has_value())
         {
             return {};
@@ -385,13 +385,13 @@ inline std::shared_ptr<const CompiledCriteria>
 /// KMD is @p schema, or "" when it can (RFC 0018 A.5 checks 5 and 6). The message reads as
 /// a continuation of "its criteria ...".
 ///
-///  - `$kernel.*` must name a field @p schema declares, or `name[i]` of an INT_LIST field.
-///    This runs on every arm.
+///  - `$kernel.*` must name a field @p schema declares, or `name[i]` of an INT_LIST field,
+///    and `$device.*` must name a device property. These run on every arm.
 ///  - Every other reference must be something the engine publishes: a pattern variable or
-///    one of its fields, a node attribute, `$graph.*`, or `$device.*`. A `nodes` pattern
-///    is the only arm whose published set is known before a graph arrives, so a native
-///    `graph_match` skips this (RFC 0020 §4.5), and an engine without `graph_match`
-///    publishes nothing (RFC 0020 §6).
+///    one of its fields, a node attribute, or `$graph.*`. A `nodes` pattern is the only
+///    arm whose published set is known before a graph arrives, so a native `graph_match`
+///    skips this (RFC 0020 §4.5), and an engine without `graph_match` publishes nothing
+///    (RFC 0020 §6).
 ///  - `present` / `not_present` may not ask about a pattern variable or attribute the
 ///    pattern binds as required: the answer is fixed by the pattern (RFC 0020 §6.1).
 inline std::string criteriaReferenceError(const CompiledCriteria& criteria,
@@ -448,7 +448,7 @@ inline std::string criteriaReferenceError(const CompiledCriteria& criteria,
             bool declared = field.has_value() && kmdField(*field) != nullptr;
             if(!declared && field.has_value())
             {
-                const auto indexed = splitIndexedField(*field);
+                const auto indexed = detail::splitIndexedField(*field);
                 const auto* list = indexed.has_value() ? kmdField(indexed->first) : nullptr;
                 declared = list != nullptr && list->type == MetadataType::INT_LIST;
             }
@@ -459,10 +459,6 @@ inline std::string criteriaReferenceError(const CompiledCriteria& criteria,
             }
             continue;
         }
-        if(native)
-        {
-            continue;
-        }
         if(root == DEVICE_SYMBOL_ROOT)
         {
             const auto field = detail::symbolField(path, DEVICE_SYMBOL_ROOT);
@@ -470,6 +466,10 @@ inline std::string criteriaReferenceError(const CompiledCriteria& criteria,
             {
                 return "read $" + path + ", which is not a device property";
             }
+            continue;
+        }
+        if(native)
+        {
             continue;
         }
         if(pattern == nullptr)
@@ -492,7 +492,8 @@ inline std::string criteriaReferenceError(const CompiledCriteria& criteria,
         if(findVariable(root) != nullptr)
         {
             const auto rest = std::string_view(path).substr(root.size());
-            if(!rest.empty() && (rest.front() != '.' || !isPublishedTensorField(rest.substr(1))))
+            if(!rest.empty()
+               && (rest.front() != '.' || !detail::isPublishedTensorField(rest.substr(1))))
             {
                 return "read $" + path + ", but tensor '" + std::string(root)
                        + "' publishes no such field";

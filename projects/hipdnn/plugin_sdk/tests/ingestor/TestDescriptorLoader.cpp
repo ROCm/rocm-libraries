@@ -2021,6 +2021,111 @@ TEST(TestDescriptorLoader, CollapsesCopiesDifferingOnlyInExtensionKeysAndProvena
     EXPECT_EQ(sets.front().engine.name, "test:extension_keys");
 }
 
+namespace
+{
+
+/// A graph-scope `criteria` expression that admits pointwise operation @p op.
+nlohmann::json pointwiseOperationIs(const char* op)
+{
+    return {{"==", nlohmann::json::array({"$pointwise.operation", op})}};
+}
+
+/// A complete set over a declarative pointwise pattern whose graph UMD admits operation @p op.
+Documents pointwiseCriteriaSet(const std::string& engineName, const char* op)
+{
+    auto documents = makeSetDocuments('1', engineName);
+    documentOfType(documents, ".ued.json")["graph_match"] = {{"nodes", pointwisePatternNodes()}};
+    declareCriteria(matcherOfScope(documents, "graph"), pointwiseOperationIs(op));
+    return documents;
+}
+
+/// @p documents' graph UMD admitting operation @p op instead: the same id, name, scope and
+/// revision, so the copies differ in `criteria` alone.
+TestDocument graphUmdAdmitting(Documents& documents, const char* op)
+{
+    auto body = matcherOfScope(documents, "graph");
+    body["criteria"] = pointwiseOperationIs(op);
+    return {".umd.json", std::move(body)};
+}
+
+DescriptorId graphUmdId(Documents& documents)
+{
+    return hipdnn_flatbuffers_sdk::utilities::parseUuid(
+        matcherOfScope(documents, "graph").at("id").get<std::string>());
+}
+
+} // namespace
+
+/// `criteria` is part of a UMD's content: copies of one id in one root that differ only
+/// there poison the id, whichever file the walk meets first (RFC 0020 §13.2.1).
+TEST(TestDescriptorLoader, DropsTheIdWhenTwoUmdsInOneRootDifferOnlyInCriteria)
+{
+    for(const auto& [first, second] :
+        std::vector<std::pair<const char*, const char*>>{{"ADD", "SUB"}, {"SUB", "ADD"}})
+    {
+        SCOPED_TRACE(std::string("a/ admits ") + first + ", b/ admits " + second);
+        const ScopedSymbols symbols;
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+            uniqueDirectory(std::string("criteria_same_root_") + first));
+        auto documents = pointwiseCriteriaSet("test:criteria_same_root", first);
+        writeDocuments(dir.path() / "a", documents);
+        writeDocument(dir.path() / "b", graphUmdAdmitting(documents, second));
+
+        const auto catalog = loadDescriptorCatalog(dir.path());
+
+        EXPECT_EQ(tallyOf(catalog.matchers, graphUmdId(documents)).conflicted, 1u);
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "with different contents"))
+            << recorder.getRecordedLogsAsString();
+        EXPECT_TRUE(resolveDescriptorSets(catalog).empty());
+    }
+}
+
+/// Each file compiles its own criteria, so two copies hold different compiled instances;
+/// identical authored criteria are still one definition.
+TEST(TestDescriptorLoader, CollapsesUmdCopiesWithIdenticalCriteria)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("criteria_identical"));
+    auto documents = pointwiseCriteriaSet("test:criteria_identical", "ADD");
+    writeDocuments(dir.path() / "a", documents);
+    writeDocument(dir.path() / "b", graphUmdAdmitting(documents, "ADD"));
+
+    const auto catalog = loadDescriptorCatalog(dir.path());
+
+    EXPECT_EQ(tallyOf(catalog.matchers, graphUmdId(documents)).conflicted, 0u);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0u)
+        << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(resolveDescriptorSets(catalog).size(), 1u);
+}
+
+/// A later root's UMD that differs from the earlier root's only in `criteria` is a
+/// redefinition: it is refused at ERROR and the earlier root's criteria stay in force.
+TEST(TestDescriptorLoader, RefusesALaterRootsUmdDifferingOnlyInCriteria)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("criteria_roots"));
+    auto documents = pointwiseCriteriaSet("test:criteria_roots", "ADD");
+    writeDocuments(dir.path() / "a", documents);
+    writeDocument(dir.path() / "b", graphUmdAdmitting(documents, "SUB"));
+
+    const auto catalog = loadDescriptorCatalog(
+        std::vector<std::filesystem::path>{dir.path() / "a", dir.path() / "b"});
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "under an earlier root"))
+        << recorder.getRecordedLogsAsString();
+    const auto id = graphUmdId(documents);
+    EXPECT_EQ(tallyOf(catalog.matchers, id).conflicted, 0u);
+    const auto* matcher = detail::findDescriptor(catalog.matchers, id);
+    ASSERT_NE(matcher, nullptr);
+    EXPECT_EQ(matcher->criteriaJson, pointwiseOperationIs("ADD"));
+}
+
 TEST(TestDescriptorLoader, LoadsNothingFromAnEmptyDirectory)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("empty"));
@@ -6007,6 +6112,21 @@ TEST(TestDescriptorLoader, ChangingALaunchCodeObjectChangesTheEngineSelectorRevi
     EXPECT_EQ(revisionWith("rocke_merge", "revision_a"), revisionWith("rocke_merge", "revision_a"));
     EXPECT_NE(revisionWith("rocke_merge", "revision_a"),
               revisionWith("rocke_merge_v2", "revision_a"));
+}
+
+/// The selector revision digests each declarative matcher's criteria, so editing a UMD's
+/// criteria without bumping its revision does not keep a revision a ranker was trained against.
+TEST(TestDescriptorLoader, ChangingAMatchersCriteriaChangesTheEngineSelectorRevision)
+{
+    const ScopedSymbols symbols;
+    const auto revisionWith = [](const char* op, const std::string& label) {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(label));
+        writeDocuments(dir.path(), pointwiseCriteriaSet("test:" + label, op));
+        return engineSelectorRevision(loadFrom(dir.path()).at(0));
+    };
+
+    EXPECT_EQ(revisionWith("ADD", "criteria_revision"), revisionWith("ADD", "criteria_revision"));
+    EXPECT_NE(revisionWith("ADD", "criteria_revision"), revisionWith("SUB", "criteria_revision"));
 }
 
 /// A launch name is `^[a-z][a-z0-9_]*$`: underscores and digits after the first letter are
