@@ -52,13 +52,12 @@ struct QrTdmKVSharedLdsArenaLayout
 // qr_tdm_kvshared: the qr_tdm_pingpong policy for K and V read from one tensor. Both
 // gemms read the same LDS tile, so K and V share one descriptor and one row padding,
 // K's 16 B per row (V's 32 B costs d128 one workgroup per WGP, 5-7% slower at short
-// seqlen_k, and d256 1%). kNumKVBuffers_ K/V tiles in LDS keep kNumKVBuffers_ - 1 of them
-// in flight under the gemms; two measured fastest on gfx1250 (a third costs more in
-// resident workgroups than it adds in loads in flight).
-template <index_t kNumKVBuffers_ = 2>
+// seqlen_k, and d256 1%). Two K/V buffers keep one tile in flight under the gemms; a third
+// costs more in resident workgroups than it adds in loads in flight (d256 [1024, 200]:
+// 28% slower).
 struct BlockFmhaPipelineQRKSVSTdmKVSharedPolicy : BlockFmhaPipelineQRKSVSTdmPingPongPolicy
 {
-    static constexpr index_t kNumKVBuffers = kNumKVBuffers_;
+    static constexpr index_t kNumKVBuffers = 2;
 
     template <typename Problem>
     using LdsPaddingConfigQ = typename detail::QrTdmPingPongPadding<Problem>::Q;

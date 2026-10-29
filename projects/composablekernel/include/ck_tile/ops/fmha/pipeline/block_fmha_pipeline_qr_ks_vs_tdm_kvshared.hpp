@@ -10,9 +10,9 @@
 namespace ck_tile {
 
 // qr_tdm_pingpong's TDM staging for K and V that are one tensor (the caller passes the same
-// K and V views): each K/V tile is staged once, by one TDM transfer into one of
-// kNumKVBuffers LDS buffers, and serves both gemms. Trip i reads buffer i % kNumKVBuffers
-// while the TDM fills the others.
+// K and V views): each K/V tile is staged once, by one TDM transfer into one of two LDS
+// buffers, and serves both gemms. Trip i reads buffer i & 1 while the TDM fills the other
+// with tile i + 1.
 //
 // Each warp (one or two) takes 32 keys of every tile and runs an online softmax of its own
 // over them: S^T = K Q^T, then O^T += V^T P^T with V^T read transposed. The WMMA C layout
@@ -20,7 +20,7 @@ namespace ck_tile {
 // goes from the exponent straight into it, with no S round trip through LDS and each score
 // exponentiated once. Two warps meet only at the K/V buffer barrier, and at the end, where
 // their (m, l, O) are merged through LDS. The V view is not read.
-template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSTdmKVSharedPolicy<>>
+template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSTdmKVSharedPolicy>
 struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<Problem_, Policy_>
 {
     using PingPong = BlockFmhaPipelineQRKSVSTdmPingPong<Problem_, Policy_>;
@@ -291,8 +291,8 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
                              {bias_origin.at(number<0>{}), kv_load_start},
                              MakeSDistribution());
 
-        // K/V tiles, whole, in kNumKVBuffers buffers: tile t goes to buffer t % kNumKVBuffers
-        constexpr index_t kNumKVBuffers = Policy::kNumKVBuffers;
+        // K/V tiles, whole: tile t goes to buffer t & 1
+        static_assert(Policy::kNumKVBuffers == 2);
         auto kv_dram_window =
             make_tile_window(k_dram_block_window_tmp,
                              {kv_load_start, 0},
@@ -314,26 +314,22 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
             integer_divide_ceil(physical_seqlen_k_end - physical_seqlen_k_start, kN0) +
             num_sink_loop;
 
-        // Tile t into buffer i_buf: the window moves from tile t - 1 (the sink->normal jump
-        // at the boundary between the sink tiles and the others). Tiles past the last are not
-        // loaded, so the merge can use buffer num_total_loop % kNumKVBuffers.
-        const auto load_next_kv_tile = [&](index_t t, index_t i_buf) {
+        // Tile t: the window moves from tile t - 1 (the sink->normal jump at the boundary
+        // between the sink tiles and the others). Tiles past the last are not loaded, so the
+        // merge can use buffer num_total_loop & 1.
+        const auto load_next_kv_tile = [&](index_t t) {
             if constexpr(kHasSink)
             {
                 if(t == num_sink_loop)
                     move_tile_window(kv_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
             }
             move_tile_window(kv_dram_window, {kN0, 0});
-            kv_lds_write_window.set_bottom_tensor_view_data_ptr(kv_smem_buf(i_buf));
+            kv_lds_write_window.set_bottom_tensor_view_data_ptr(kv_smem_buf(t & 1));
             load_tile_tdm(tdm_config_kv, kv_lds_write_window, kv_dram_window);
         };
 
-        // tiles 0 .. kNumKVBuffers - 2, issued while Q is still in flight
+        // tile 0, issued while Q is still in flight
         load_tile_tdm(tdm_config_kv, kv_lds_write_window, kv_dram_window);
-        static_for<1, kNumKVBuffers - 1, 1>{}([&](auto t) {
-            if(t < num_total_loop)
-                load_next_kv_tile(t, t);
-        });
 
         constexpr index_t kKVRowBytes =
             Policy::template MakeKVLdsBlockDescriptor<Problem>().calculate_offset(
@@ -350,8 +346,8 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
         const index_t i_q    = lane % 16; // the lane's query
         const index_t i_half = lane / 16;
 
-        // retire Q only; the K/V tiles, issued after it, stay in flight
-        s_wait_tensorcnt_barrier<kNumKVBuffers - 1>();
+        // retire Q only; tile 0, issued after it, stays in flight
+        s_wait_tensorcnt_barrier<1>();
 
         // Q^T, the QK B operand, for the whole loop
         RawX16 q_operand[kQKSteps];
@@ -375,24 +371,18 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
 
         auto s_acc = make_static_distributed_tensor<SaccDataType>(MakeSDistribution());
 
-        // buffer of tile i_total_loops, and of tile i_total_loops + kNumKVBuffers - 1
         index_t i_total_loops = 0;
-        index_t i_read_buf    = 0;
-        index_t i_write_buf   = kNumKVBuffers - 1;
         do
         {
-            const LdsChar* const kv = arena + i_read_buf * Layout::kKVStride;
+            const LdsChar* const kv = arena + (i_total_loops & 1) * Layout::kKVStride;
 
-            // One barrier for two hazards: tile i has landed (tiles i + 1 .. stay in
-            // flight), and every read of the buffer tile i + kNumKVBuffers - 1 goes to
-            // (the last trip's gemms, or on the first trip Q's) is done.
-            s_wait_tensorcnt_barrier<kNumKVBuffers - 2, 0>();
+            // One barrier for two hazards: tile i has landed, and every read of the buffer
+            // tile i + 1 goes to (the last trip's gemms, or on the first trip Q's) is done.
+            s_wait_tensorcnt_barrier<0, 0>();
 
             // the next tile, if any
-            if(i_total_loops + kNumKVBuffers - 1 < num_total_loop)
-                load_next_kv_tile(i_total_loops + kNumKVBuffers - 1, i_write_buf);
-            i_read_buf  = i_read_buf + 1 == kNumKVBuffers ? 0 : i_read_buf + 1;
-            i_write_buf = i_write_buf + 1 == kNumKVBuffers ? 0 : i_write_buf + 1;
+            if(i_total_loops + 1 < num_total_loop)
+                load_next_kv_tile(i_total_loops + 1);
 
             const index_t kv_tile_start =
                 (num_sink_loop > i_total_loops)
@@ -501,8 +491,7 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
             static_assert(kNWarp * kXWarpFloats * sizeof(float) <= Layout::kKVStride);
             const auto x_lds = [&](index_t i_w) {
                 return reinterpret_cast<float*>(static_cast<char*>(smem_arena) +
-                                                (num_total_loop % kNumKVBuffers) *
-                                                    Layout::kKVStride) +
+                                                (num_total_loop & 1) * Layout::kKVStride) +
                        i_w * kXWarpFloats;
             };
             const index_t i_other = kNWarp - 1 - i_warp;
