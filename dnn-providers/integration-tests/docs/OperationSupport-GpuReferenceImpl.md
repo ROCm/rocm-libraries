@@ -62,7 +62,7 @@ The following table lists the operations currently executable through the GPU gr
 | RMSNorm Backward | FP16, BFP16, FP32 | Stride-based | GPU Reference |  |
 | Reduction | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 or FP64 compute; see [Reduction Modes](#reduction-modes) |
 | SDPA Forward (dense) | FP16, BFP16, FP32, FP8 (E4M3, E5M2 and their FNUZ forms) | Op-defined | GPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
-| SDPA Forward (ragged) | BFP16, FP8 E4M3 | Op-defined | GPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset` |
+| SDPA Forward (ragged) | Native: BFP16, FP8 E4M3; other dtypes through the dense rewrite | Op-defined | GPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset` |
 | SDPA Backward | FP16, BFP16, FP32 | Op-defined | GPU Reference | dQ/dK/dV and dBias; LSE (rank 3 or 4); bias, band, padding, GQA, Dqk != Dv, explicit-mask dropout, ALiBi; ragged through the dense rewrite. No Philox dropout (the backward node has no `rng_dump`) or sinks (no `dsink` output) |
 | Pointwise Unary | FP16, BFP16, FP32 | All | GPU Reference | See [Pointwise Modes](#pointwise-modes) |
 | Pointwise Binary | FP16, BFP16, FP32 | All | GPU Reference | See [Pointwise Modes](#pointwise-modes) |
@@ -213,7 +213,7 @@ host validator.
 | Reduction | Yes | Yes |
 | Resample Forward | Yes | No (library only) |
 | Resample Backward | Yes | No |
-| SDPA Forward | Yes (FP8 E4M3, E5M2 and their FNUZ forms; variable seq. len.; ragged BFP16 and FP8 E4M3) | Yes (dense incl. FP8 E4M3, E5M2 and their FNUZ forms and variable seq. len.; ragged incl. FP8 E4M3) |
+| SDPA Forward | Yes (FP8 E4M3, E5M2 and their FNUZ forms; variable seq. len.; ragged BFP16 and FP8 E4M3 native, other dtypes through the dense rewrite) | Yes (dense incl. FP8 E4M3, E5M2 and their FNUZ forms and variable seq. len.; ragged incl. FP8 E4M3) |
 | SDPA Backward | Yes | Yes (dense; ragged through the dense rewrite) |
 | BlockScale Quantize / Dequantize | Yes | No |
 | Pointwise Unary | Yes (no IDENTITY) | Yes (incl. IDENTITY) |

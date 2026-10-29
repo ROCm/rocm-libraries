@@ -669,7 +669,16 @@ struct RawPagedGraphSpec
     std::vector<int64_t> containerDims = {5, 2, 2, 8};
     // A packed K page table: it carries a ragged offset (INT32 [3, 1, 1, 1], uid 11).
     bool packedPageTableK = false;
+    // An explicit dropout mask FLOAT [2, 2, 3, dropoutMaskSkv] (uid 12) with its scale (uid 13).
+    std::optional<int64_t> dropoutMaskSkv = std::nullopt;
 };
+
+RawPagedGraphSpec pagedWithDropoutMask(int64_t maskSkv)
+{
+    RawPagedGraphSpec spec;
+    spec.dropoutMaskSkv = maskSkv;
+    return spec;
+}
 
 flatbuffers::FlatBufferBuilder makeRawPagedSdpaFwdGraph(const RawPagedGraphSpec& spec)
 {
@@ -759,6 +768,23 @@ flatbuffers::FlatBufferBuilder makeRawPagedSdpaFwdGraph(const RawPagedGraphSpec&
             DataType::FLOAT,
             hipdnn_data_sdk::utilities::generateStrides(biasDims),
             biasDims);
+    }
+    if(spec.dropoutMaskSkv.has_value())
+    {
+        const std::vector<int64_t> maskDims = {2, 2, 3, spec.dropoutMaskSkv.value()};
+        const std::vector<int64_t> scaleDims = {1, 1, 1, 1};
+        attrs.dropout_mask_tensor_uid = 12;
+        attrs.dropout_scale_tensor_uid = 13;
+        add(12,
+            "DropoutMask",
+            DataType::FLOAT,
+            hipdnn_data_sdk::utilities::generateStrides(maskDims),
+            maskDims);
+        add(13,
+            "DropoutScale",
+            DataType::FLOAT,
+            hipdnn_data_sdk::utilities::generateStrides(scaleDims),
+            scaleDims);
     }
 
     auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
@@ -895,7 +921,11 @@ INSTANTIATE_TEST_SUITE_P(
         PagedApplicabilityCase{
             "ZeroBlockSize",
             {true, true, true, DataType::INT32, 5, std::nullopt, {2, 1, 3, 1}, {5, 2, 0, 8}},
-            false}),
+            false},
+        // An explicit dropout mask spans the paged key extent (3 blocks of 2 = 6), not the
+        // container's block size (2), which the references would reject at execute.
+        PagedApplicabilityCase{"DropoutMaskSpansPagedExtent", pagedWithDropoutMask(6), true},
+        PagedApplicabilityCase{"DropoutMaskSizedToBlock", pagedWithDropoutMask(2), false}),
     [](const TestParamInfo<PagedApplicabilityCase>& info) { return std::string(info.param.name); });
 
 // A paged graph runs through the executor and equals gathering the cache and running the dense
@@ -947,6 +977,81 @@ TEST(TestSdpaFwdPlanPaged, ExecuteMatchesGatherThenDense)
         vDense,
         oRef,
         SdpaFwdOptions<float>{}.setMask(noMask).setSeqLens(&seqLenQ, &seqLenKv));
+
+    const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
+    EXPECT_TRUE(exactValidation.allClose(o, oRef));
+}
+
+// An explicit dropout mask over paged K/V spans the paged key extent (6): the graph is accepted,
+// runs, and equals the gathered dense reference with the same mask.
+TEST(TestSdpaFwdPlanPaged, DropoutMaskOverPagedKvMatchesGatherThenDense)
+{
+    auto graphBuilder = makeRawPagedSdpaFwdGraph(pagedWithDropoutMask(6));
+
+    hipdnn_data_sdk::utilities::Tensor<float> q({2, 2, 3, 8});
+    hipdnn_data_sdk::utilities::Tensor<float> kCache({5, 2, 2, 8});
+    hipdnn_data_sdk::utilities::Tensor<float> vCache({5, 2, 2, 8});
+    hipdnn_data_sdk::utilities::Tensor<float> o({2, 2, 3, 8});
+    hipdnn_data_sdk::utilities::Tensor<int32_t> seqLenQ({2, 1, 1, 1});
+    hipdnn_data_sdk::utilities::Tensor<int32_t> seqLenKv({2, 1, 1, 1});
+    hipdnn_data_sdk::utilities::Tensor<int32_t> pageTable({2, 1, 3, 1});
+    hipdnn_data_sdk::utilities::Tensor<float> mask({2, 2, 3, 6});
+    hipdnn_data_sdk::utilities::Tensor<float> scale({1, 1, 1, 1});
+    q.fillWithRandomValues(-1.0F, 1.0F, 51);
+    kCache.fillWithRandomValues(-1.0F, 1.0F, 52);
+    vCache.fillWithRandomValues(-1.0F, 1.0F, 53);
+    seqLenQ.setHostValue(3, 0, 0, 0, 0);
+    seqLenQ.setHostValue(2, 1, 0, 0, 0);
+    seqLenKv.setHostValue(5, 0, 0, 0, 0);
+    seqLenKv.setHostValue(2, 1, 0, 0, 0);
+    const std::vector<int32_t> blocks = {4, 1, 3, 2, 0, 0};
+    for(int64_t i = 0; i < 6; ++i)
+    {
+        pageTable.setHostValue(blocks[static_cast<size_t>(i)], i / 3, 0, i % 3, 0);
+    }
+    // Drop every third key of the gathered row, with the 1 / keep-probability scale.
+    for(int64_t b = 0; b < 2; ++b)
+    {
+        for(int64_t h = 0; h < 2; ++h)
+        {
+            for(int64_t sq = 0; sq < 3; ++sq)
+            {
+                for(int64_t skv = 0; skv < 6; ++skv)
+                {
+                    mask.setHostValue((skv + sq + h + b) % 3 == 0 ? 0.0F : 1.0F, b, h, sq, skv);
+                }
+            }
+        }
+    }
+    scale.fillWithValue(1.5F);
+    o.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+
+    const std::unordered_map<int64_t, void*> variantPack = {{1, q.memory().hostData()},
+                                                            {2, kCache.memory().hostData()},
+                                                            {3, vCache.memory().hostData()},
+                                                            {4, o.memory().hostData()},
+                                                            {6, seqLenQ.memory().hostData()},
+                                                            {7, seqLenKv.memory().hostData()},
+                                                            {8, pageTable.memory().hostData()},
+                                                            {9, pageTable.memory().hostData()},
+                                                            {12, mask.memory().hostData()},
+                                                            {13, scale.memory().hostData()}};
+    CpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
+    executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), variantPack);
+
+    auto kDense = CpuFpReferenceSdpa::gatherPagedKv(kCache, pageTable, seqLenKv, 6);
+    auto vDense = CpuFpReferenceSdpa::gatherPagedKv(vCache, pageTable, seqLenKv, 6);
+    hipdnn_data_sdk::utilities::Tensor<float> oRef({2, 2, 3, 8});
+    const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                kDense,
+                                vDense,
+                                oRef,
+                                SdpaFwdOptions<float>{}
+                                    .setMask(noMask)
+                                    .setSeqLens(&seqLenQ, &seqLenKv)
+                                    .setDropout(&mask, 1.5F));
 
     const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
     EXPECT_TRUE(exactValidation.allClose(o, oRef));
@@ -2343,6 +2448,24 @@ TEST(TestSdpaFwdPlanScale, ScaleTensorMustBeOneFloatElement)
                                          {RawExtraTensor{20, "Scale", dataType, dims}});
         EXPECT_FALSE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()))
             << "scale " << EnumNameDataType(dataType) << " with " << dims.back() << " elements";
+    }
+}
+
+// A non-finite baked attn_scale_value turns every output into NaN, so it is declined.
+TEST(TestSdpaFwdPlanScale, NonFiniteBakedScaleIsDeclined)
+{
+    CpuReferenceGraphExecutor executor;
+    for(const float value : {0.5F,
+                             std::numeric_limits<float>::quiet_NaN(),
+                             std::numeric_limits<float>::infinity(),
+                             -std::numeric_limits<float>::infinity()})
+    {
+        SdpaAttributesT attrs;
+        attrs.attn_scale_value = value;
+        auto graph = makeRawSdpaFwdGraph(attrs);
+        EXPECT_EQ(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()),
+                  std::isfinite(value))
+            << "attn_scale_value " << value;
     }
 }
 
