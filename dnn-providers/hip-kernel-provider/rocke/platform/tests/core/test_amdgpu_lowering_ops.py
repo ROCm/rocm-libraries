@@ -14,9 +14,9 @@ These are engine-level (not kernel-family) contracts, so they live in
   map silently reinterpreted them as f16), and reject anything unmapped.
 * ``lower_hip`` arch seam -- an explicitly passed arch must resolve in the arch
   catalog; only an omitted arch falls back to the gfx950 baseline.
-* f64 ops without an f64 lowering (transcendental math, ``fabs``, ``fma``,
-  ``fmax3``, ``fmin3``, ``vector_fma``) -- raise in both ``lower_hip`` and
-  ``lower_llvm`` instead of computing through f32.
+* f64 ops without an f64 lowering (transcendental math, ``fma``, ``fmax3``,
+  ``fmin3``, ``vector_fma``) -- raise in both ``lower_hip`` and ``lower_llvm``
+  instead of computing through f32. f64 ``fabs`` has one and stays in double.
 * ``lower_llvm`` f64 ``vector_add`` / ``vector_sub`` / ``vector_mul`` -- emit
   ``fadd`` / ``fsub`` / ``fmul`` on ``<N x double>``, not the integer ops.
 * ``lower_llvm._op_memref_global_atomic_add_pk_bf16`` -- lowers to a generic
@@ -34,7 +34,9 @@ Run:  PYTHONPATH=python python3 tests/core/test_amdgpu_lowering_ops.py
 
 from __future__ import annotations
 
+import re
 import unittest
+from typing import ClassVar
 
 from rocke.core.ir import BF16, F64, I32, IRBuilder, PtrType
 from rocke.core.lower_hip import lower_kernel_to_hip
@@ -182,26 +184,59 @@ class TestHipF64Rejection(unittest.TestCase):
         b.ret()
         return b.kernel
 
+    # Each op's exact rejection message: (HIP lowerer, LLVM lowerer).
+    _REJECTIONS: ClassVar[dict[str, tuple[str, str]]] = {
+        "exp2": ("math.exp2 does not support f64", "math.exp2 currently supports f32"),
+        "log2": ("math.log2 does not support f64", "math.log2 currently supports f32"),
+        "sqrt": ("math.sqrt does not support f64", "math.sqrt currently supports f32"),
+        "rsqrt": (
+            "math.rsqrt does not support f64",
+            "math.rsqrt currently supports f32",
+        ),
+        "rcp_fast": (
+            "math.rcp_fast does not support f64",
+            "math.rcp_fast currently supports f32",
+        ),
+        "fma": ("arith.fma does not support f64", "fma: unsupported FP type 'f64'"),
+        "fmax3": (
+            "arith.fmax3 does not support f64",
+            "fmax3: unsupported FP type 'f64'",
+        ),
+        "fmin3": (
+            "arith.fmin3 does not support f64",
+            "fmin3: unsupported FP type 'f64'",
+        ),
+        "vector_fma": (
+            "vector.fma does not support f64",
+            "vector_fma: unsupported element type 'f64'",
+        ),
+    }
+
     def test_unsupported_ops_raise(self):
-        for op_name in (
-            "exp2",
-            "log2",
-            "sqrt",
-            "rsqrt",
-            "rcp_fast",
-            "fabs",
-            "fma",
-            "fmax3",
-            "fmin3",
-            "vector_fma",
-        ):
+        # The whole message is pinned, not just the exception type, so a
+        # rejection raised for an unrelated reason cannot pass.
+        for op_name, (hip_msg, llvm_msg) in self._REJECTIONS.items():
             with self.subTest(op=op_name):
                 kernel = self._kernel(op_name)
-                with self.assertRaises(NotImplementedError) as cm:
+                with self.assertRaisesRegex(
+                    NotImplementedError, rf"^{re.escape(hip_msg)}$"
+                ):
                     lower_kernel_to_hip(kernel, arch="gfx942")
-                self.assertIn("does not support f64", str(cm.exception))
-                with self.assertRaises(NotImplementedError):
+                with self.assertRaisesRegex(
+                    NotImplementedError, rf"^{re.escape(llvm_msg)}$"
+                ):
                     lower_kernel_to_llvm(kernel, arch="gfx942")
+
+    def test_fabs_stays_in_double(self):
+        # The f32 helper would round the value to f32; both lowerings keep it
+        # in double: LLVM through llvm.fabs.f64, HIP through the double fabs.
+        kernel = self._kernel("fabs")
+        ll = lower_kernel_to_llvm(kernel, arch="gfx942")
+        self.assertIn("declare double @llvm.fabs.f64(double)", ll)
+        self.assertRegex(ll, r"= call double @llvm\.fabs\.f64\(double %")
+        hip = lower_kernel_to_hip(kernel, arch="gfx942")
+        self.assertRegex(hip, r"double \S+ = fabs\(")
+        self.assertNotIn("fabsf", hip)
 
     def test_rcp_divides_in_double(self):
         hip = lower_kernel_to_hip(self._kernel("rcp"), arch="gfx942")

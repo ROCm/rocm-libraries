@@ -80,12 +80,12 @@ attribute.
 **Decision:** Characterize the pure helpers + single-threaded + `n_jobs=1` in-process paths (→ ~81% line); accept the real fork/spawn `multiprocessing.Pool` / `ProcessPoolExecutor` / Windows-only paths as out of reach for a flake-free unit test.
 
 ## D5 — recurring submodule-shadowing gotcha
-**Observation (not a fork, but recorded):** several `Tensile` packages re-export
+**Observation (not a fork, but recorded):** several `tensilelite` packages re-export
 a class that shadows a same-named submodule attribute, so
-`import Tensile.X.Foo as F` binds the *class*, not the module. Hit for
+`import tensilelite.X.Foo as F` binds the *class*, not the module. Hit for
 `SolutionStructs.Solution`, `Component` (LocalRead), and `Common.Parallel`
 (joblib `Parallel`). **Standard fix applied everywhere:**
-`F = importlib.import_module("Tensile.X.Foo")`.
+`F = importlib.import_module("tensilelite.X.Foo")`.
 
 ## D6 — `KernelHelperNaming.py`: cover the naming half, accept <95%
 
@@ -169,26 +169,26 @@ characterization assertion can distinguish mutant from original:
 
 **M2 — accepted `# pragma: no mutate` (expanded mutation run).** These
 equivalent source forms are fenced so mutmut does not keep reporting them:
-- `Tensile.Common.ValidParameters.checkSpaceFillAlgoIsValid` — the
+- `tensilelite.Common.ValidParameters.checkSpaceFillAlgoIsValid` — the
   `range(0, maxOrderID + 1)` membership check carries `# pragma: no mutate`
   because `range(0, n)` and `range(n)` produce the same values; the explicit
   lower bound documents the valid OrderID interval.
-- `Tensile.Common.ValidParameters.checkSpaceFillAlgoWGMIsValid` — the
+- `tensilelite.Common.ValidParameters.checkSpaceFillAlgoWGMIsValid` — the
   `range(0, 256)` membership check carries `# pragma: no mutate` because
   `range(0, n)` and `range(n)` produce the same values; the explicit lower bound
   documents the half-open GridDim interval `[0, 256)`.
 
 **M3 — accepted equivalent mutants (expanded mutation run).** These survivors
 are behaviorally equivalent on the specific public surface under test:
-- `Tensile.TensileLogic.ValidWorkGroupMappingXCC.x__cu_count_from_path__mutmut_9` —
+- `tensilelite.TensileLogic.ValidWorkGroupMappingXCC.x__cu_count_from_path__mutmut_9` —
   changing `cu` to `CU` inside the regex literal is equivalent because the search
   uses `re.IGNORECASE`.
 
 Two former survivors are intentionally no longer accepted equivalents:
-`Tensile.TensileLogic.ValidWorkGroupMappingXCC.x__validateWorkGroupMappingXCC__mutmut_14`
+`tensilelite.TensileLogic.ValidWorkGroupMappingXCC.x__validateWorkGroupMappingXCC__mutmut_14`
 is avoided by making the missing-key / `-1` sentinel branch explicit before
 reading the fixed `WorkGroupMappingXCC` value, and
-`Tensile.Common.Utilities.xǁSpinnyThingǁincrement__mutmut_1` is killable because
+`tensilelite.Common.Utilities.xǁSpinnyThingǁincrement__mutmut_1` is killable because
 `SpinnyThing.increment` now uses its `value` parameter to advance by caller
 selected steps.
 
@@ -197,10 +197,10 @@ extended past the original five files to add `Common/DataType.py`,
 `Common/Types.py`, `Common/ValidParameters.py`, `SolutionStructs/Naming.py`, and
 `SolutionStructs/Utilities.py`, with matching characterization directories added
 to `pytest_add_cli_args_test_selection`. Source-path mapping for the widened slice:
-DataType → `Tensile/Common/DataType.py`; CommonTypes → `Tensile/Common/Types.py`;
-ValidParameters → `Tensile/Common/ValidParameters.py`; Naming →
-`Tensile/SolutionStructs/Naming.py`; SolutionStructsUtils →
-`Tensile/SolutionStructs/Utilities.py`.
+DataType → `tensilelite/Common/DataType.py`; CommonTypes → `tensilelite/Common/Types.py`;
+ValidParameters → `tensilelite/Common/ValidParameters.py`; Naming →
+`tensilelite/SolutionStructs/Naming.py`; SolutionStructsUtils →
+`tensilelite/SolutionStructs/Utilities.py`.
 
 **M5 — SolutionStructs Naming/Utilities mutation outcome.** `Naming.py`: 455
 generated, 453 killed, 2 accepted equivalents, 0 no-test mutants → 100% covered
@@ -212,11 +212,18 @@ explicit no-test entries and accepted equivalents.
 
 **Pinned equivalent (Naming).**
 **ADR:** [`adr/0003-pin-split-gsu-naming-crash.md`](adr/0003-pin-split-gsu-naming-crash.md).
-`Tensile.SolutionStructs.Naming.x__getName__mutmut_{70,71}` changes the masked
+`tensilelite.SolutionStructs.Naming.x__getName__mutmut_{70,71}` changes the masked
 `state["GlobalSplitU"] = "M"` expression at `Naming.py:172`; every string form
 reaches the same pinned string-versus-integer `TypeError` before it can affect a
 name. [`AIHPBLAS-4297`](https://amd-hub.atlassian.net/browse/AIHPBLAS-4297)
 tracks this pinned defect.
+
+**Superseded split-GSU disposition (Naming).**
+**ADR:** [`adr/0035-fix-split-gsu-naming.md`](adr/0035-fix-split-gsu-naming.md).
+The two mutants above are no longer accepted equivalents: the naming path now
+emits `GSUM` for split and automatic GSU, so changes to the masked value are
+observable. Reevaluate their mutation results against the new regression test;
+the M5 counts above describe the historical run.
 
 The former WGMXCC and unreachable-abbreviation equivalents were removed as
 redundant/dead source instead of being fenced, unlike M2's documented pragmas.
@@ -304,10 +311,9 @@ available where this change was authored.
 
 ## D22 — `test_bigfile_capped_emit` basename churn from upstream StreamK/GSU codegen changes
 
-**Context:** After rebasing D21's fixtures onto current `develop`, 3 of the 10 `test_bigfile_capped_emit` cases (`equality_gfx950_HSS_big`, `gfx950_origami_MX`, `gfx1201_I8II`) failed on basename only — `err` stayed `0` and each fixture's solution count matched its `cap` exactly (6 solutions in, 6 emitted), so the affected kernels are unchanged in identity, just renamed. Root cause: `Tensile/Components/GSU.py`, `GlobalWriteBatch.py`, `StreamK.py`, and `KernelWriterAssembly.py` changed on `develop` (notably #9401 "enable PrefetchAcrossPersistent for SK4 and SK5" and #11245 "CompactLoopStore for D-store, MBSK, and StreamK") between when these fixtures were baselined and now, shifting the content-derived `MinNaming` hash for a subset of solutions that happen to hit those codegen paths. Same category as D16/D17.
+**Context:** After rebasing D21's fixtures onto current `develop`, 3 of the 10 `test_bigfile_capped_emit` cases (`equality_gfx950_HSS_big`, `gfx950_origami_MX`, `gfx1201_I8II`) failed on basename only — `err` stayed `0` and each fixture's solution count matched its `cap` exactly (6 solutions in, 6 emitted), so the affected kernels are unchanged in identity, just renamed. Root cause: `tensilelite/Components/GSU.py`, `GlobalWriteBatch.py`, `StreamK.py`, and `KernelWriterAssembly.py` changed on `develop` (notably #9401 "enable PrefetchAcrossPersistent for SK4 and SK5" and #11245 "CompactLoopStore for D-store, MBSK, and StreamK") between when these fixtures were baselined and now, shifting the content-derived `MinNaming` hash for a subset of solutions that happen to hit those codegen paths. Same category as D16/D17.
 
 **Decision:** Re-recorded only the 3 affected snapshot nodes via `--snapshot-update`; verified locally beforehand that both old and new basenames refer to the same 6 vendored solutions per fixture (no solution added/dropped/reordered-in-or-out of the capped set), and that assembly still emits cleanly (`err == 0`) for all of them.
-
 ## D23 — Canonical code-object linker input order
 
 **ADR:** [`adr/0013-canonical-code-object-link-order.md`](adr/0013-canonical-code-object-link-order.md)

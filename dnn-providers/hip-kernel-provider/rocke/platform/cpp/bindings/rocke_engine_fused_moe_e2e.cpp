@@ -38,6 +38,8 @@
 #include <string>
 #include <vector>
 
+#include "family_glue.hpp"
+
 extern "C" {
 #include "rocke/instance_batched_gemm.h"
 #include "rocke/instance_fused_moe_e2e.h"
@@ -82,14 +84,21 @@ struct Store
     }
 };
 
-std::string take_ll(rocke_status_t st, char* ll, const char* err, const char* fn)
+/* `err` is taken by reference, not as a pointer, so that no call site can pass
+ * nullptr: an arch-domain refusal lowered through the err-less
+ * rocke_lower_kernel_to_llvm used to reach Python as an ArchDomainError with an
+ * empty message, losing the intrinsic, target and flavor that explain it. Lower
+ * through the _ex entry. */
+std::string
+    take_ll(rocke_status_t st, char* ll, const char (&err)[ROCKE_ERR_MSG_CAP], const char* fn)
 {
     if(st != ROCKE_OK || !ll)
     {
         if(ll)
             free(ll);
+        throw_if_arch_domain(st, err);
         std::string msg = std::string(fn) + " failed (status=" + std::to_string((int)st)
-                          + "): " + (err && err[0] ? err : "unknown error");
+                          + "): " + (err[0] ? err : "unknown error");
         throw std::runtime_error(msg);
     }
     std::string out(ll);
@@ -136,10 +145,10 @@ std::vector<std::string> ver_kernel(rocke_kernel_def_t* k)
  * at the dataclass default (rocke_fmoe_forward_spec_default), so the tile-swap
  * policy and the static gate see exactly the Python defaults; only the
  * enumerated shape + dtype differ -- exactly as the standalone emitter. */
-rocke_fmoe_forward_spec_t fmoe_build(const py::dict& d, Store& st)
+rocke_fmoe_forward_spec_t fmoe_build(const py::dict& d, Store& st, const char* arch)
 {
     rocke_fmoe_forward_spec_t s = rocke_fmoe_forward_spec_default();
-    s.arch = st.keep("gfx950");
+    s.arch = st.keep(arch);
     s.tokens = x_int(d, "tokens", s.tokens);
     s.experts = x_int(d, "experts", s.experts);
     s.topk = x_int(d, "topk", s.topk);
@@ -166,8 +175,8 @@ constexpr size_t FMOE_NSTAGES = sizeof(FMOE_STAGES) / sizeof(FMOE_STAGES[0]);
 std::string fmoe_lower(const py::dict& d, const std::string& arch)
 {
     Store st;
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
-    rocke_fmoe_forward_spec_t s = fmoe_build(d, st);
+    const char* a = require_arch(arch);
+    rocke_fmoe_forward_spec_t s = fmoe_build(d, st, a);
     std::string out;
     for(size_t i = 0; i < FMOE_NSTAGES; ++i)
     {
@@ -198,7 +207,7 @@ rocke_kernel_def_t* fmoe_build_stage_kernel(rocke_ir_builder_t* b,
     rocke_fmoe_build_ctx_t* ctx = (rocke_fmoe_build_ctx_t*)calloc(1, sizeof(*ctx));
     if(!ctx)
         return nullptr;
-    if(rocke_fmoe_build_ctx_init(ctx, spec, spec->arch ? spec->arch : "gfx950") != ROCKE_OK)
+    if(rocke_fmoe_build_ctx_init(ctx, spec, spec->arch) != ROCKE_OK)
     {
         rocke_fmoe_build_ctx_destroy(ctx);
         free(ctx);
@@ -227,9 +236,9 @@ rocke_kernel_def_t* fmoe_build_stage_kernel(rocke_ir_builder_t* b,
 
 std::string fmoe_serialize(const py::dict& d, const std::string& arch)
 {
-    (void)arch;
+    const char* a = require_arch(arch);
     Store st;
-    rocke_fmoe_forward_spec_t s = fmoe_build(d, st);
+    rocke_fmoe_forward_spec_t s = fmoe_build(d, st, a);
     std::string out;
     for(size_t i = 0; i < FMOE_NSTAGES; ++i)
     {
@@ -265,9 +274,9 @@ std::string fmoe_serialize(const py::dict& d, const std::string& arch)
 
 std::vector<std::string> fmoe_verify(const py::dict& d, const std::string& arch)
 {
-    (void)arch;
+    const char* a = require_arch(arch);
     Store st;
-    rocke_fmoe_forward_spec_t s = fmoe_build(d, st);
+    rocke_fmoe_forward_spec_t s = fmoe_build(d, st, a);
     std::vector<std::string> out;
     for(size_t i = 0; i < FMOE_NSTAGES; ++i)
     {
@@ -294,8 +303,7 @@ std::vector<std::string> fmoe_verify(const py::dict& d, const std::string& arch)
 
 void register_fused_moe_e2e(py::module_& m)
 {
-    m.def("fused_moe_e2e_lower_llvm", &fmoe_lower, py::arg("spec"), py::arg("arch") = "gfx950");
-    m.def(
-        "fused_moe_e2e_serialize_ir", &fmoe_serialize, py::arg("spec"), py::arg("arch") = "gfx950");
-    m.def("fused_moe_e2e_verify", &fmoe_verify, py::arg("spec"), py::arg("arch") = "gfx950");
+    m.def("fused_moe_e2e_lower_llvm", &fmoe_lower, py::arg("spec"), py::arg("arch"));
+    m.def("fused_moe_e2e_serialize_ir", &fmoe_serialize, py::arg("spec"), py::arg("arch"));
+    m.def("fused_moe_e2e_verify", &fmoe_verify, py::arg("spec"), py::arg("arch"));
 }

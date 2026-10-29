@@ -56,7 +56,6 @@ extern "C" {
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="axpby_uniform">Uniform Precisions</caption>
 *  <tr><th>X / Y / compute_type
 *  <tr><td>HIP_R_32F
 *  <tr><td>HIP_R_64F
@@ -66,7 +65,6 @@ extern "C" {
 *
 *  \par Mixed Precisions:
 *  <table>
-*  <caption id="axpby_mixed">Mixed Precisions</caption>
 *  <tr><th>X / Y      <th>compute_type
 *  <tr><td>HIP_R_16F  <td>HIP_R_32F
 *  <tr><td>HIP_R_16BF <td>HIP_R_32F

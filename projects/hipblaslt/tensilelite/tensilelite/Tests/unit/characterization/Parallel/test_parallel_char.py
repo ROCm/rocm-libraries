@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Common.Parallel``: thread-count logic,
+"""Characterization tests for ``tensilelite.Common.Parallel``: thread-count logic,
 global-parameter overwrite, the pcall wrappers, ``apply_print_exception``, and
 the single-threaded / n_jobs=1 (in-process) paths of ``ParallelMap`` /
 ``ParallelMap2``. The real fork/spawn process-pool paths are not unit-driven
@@ -14,22 +14,18 @@ import importlib
 
 import pytest
 
-from Tensile.Common.GlobalParameters import globalParameters
+from tensilelite.Common.GlobalParameters import globalParameters
 
-# `import Tensile.Common.Parallel as P` resolves to the joblib `Parallel` class
+# `import tensilelite.Common.Parallel as P` resolves to the joblib `Parallel` class
 # (re-exported into the Common package namespace, shadowing the submodule). Load
 # the real module via import_module.
-P = importlib.import_module("Tensile.Common.Parallel")
+P = importlib.import_module("tensilelite.Common.Parallel")
 
 pytestmark = pytest.mark.unit
 
 
 @contextlib.contextmanager
 def _gp(**over):
-    # Snapshot+restore the ENTIRE dict: ParallelMap2's joblib n_jobs=1 in-process
-    # path calls OverwriteGlobalParameters(globalParameters), which does
-    # clear()+update(self) and empties the live dict. Full restore keeps the
-    # shared session intact regardless of such side effects.
     saved = dict(globalParameters)
     globalParameters.update(over)
     try:
@@ -68,7 +64,7 @@ def test_cpu_thread_count_capped():
 
 
 def test_overwrite_global_parameters():
-    from Tensile.Common import GlobalParameters as GPmod
+    from tensilelite.Common import GlobalParameters as GPmod
     saved = dict(GPmod.globalParameters)
     try:
         P.OverwriteGlobalParameters({"OnlyKey": 1})
@@ -79,7 +75,7 @@ def test_overwrite_global_parameters():
 
 
 def test_pcall_multi_and_single_arg():
-    from Tensile.Common import GlobalParameters as GPmod
+    from tensilelite.Common import GlobalParameters as GPmod
     saved = dict(GPmod.globalParameters)
     try:
         assert P.pcallWithGlobalParamsMultiArg(_add, (2, 3), dict(saved)) == 5
@@ -135,3 +131,38 @@ def test_parallel_map2_joblib_njobs1_in_process():
     with _gp(CpuThreads=1, ShowProgressBar=False):
         rv = P.ParallelMap2(_add, [(1, 2), (10, 20)], multiArg=True)
     assert list(rv) == [3, 30]
+
+
+def test_parallel_map2_n_jobs1_keeps_global_parameters():
+    with _gp(CpuThreads=1, ShowProgressBar=False):
+        expected = dict(globalParameters)
+        P.ParallelMap2(_add, [(1, 2)], multiArg=True)
+        assert dict(globalParameters) == expected
+
+
+@pytest.fixture
+def njobs(monkeypatch):
+    calls = []
+
+    class _RecordingParallel:
+        def __init__(self, n_jobs, **_):
+            calls.append(n_jobs)
+
+        def __call__(self, tasks):
+            return list(tasks)
+
+    monkeypatch.setattr(P, "Parallel", _RecordingParallel)
+    monkeypatch.setattr(P, "CPUThreadCount", lambda enable=True: 8)
+    return calls
+
+
+def test_parallel_map2_caps_workers_at_task_count(njobs):
+    with _gp(ShowProgressBar=False):
+        P.ParallelMap2(_add, zip([1, 3], [2, 4]))
+    assert njobs == [2]
+
+
+def test_parallel_map2_spawn_worker_keeps_a_subprocess_for_one_task(njobs):
+    with _gp(ShowProgressBar=True):
+        P.ParallelMap2(_double, [1], multiArg=False, spawn_worker=True)
+    assert njobs == [2]

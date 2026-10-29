@@ -673,6 +673,10 @@ FEATURE_ENGINES = {
         "feature_engine_vec",
         "GemmUniversalVecFeatureEngine",
     ),
+    "BatchedGemmFeatureEngine": (
+        "feature_engine_batched",
+        "BatchedGemmFeatureEngine",
+    ),
     "GroupedConvFeatureEngine": (
         "feature_engine_grouped_conv",
         "GroupedConvFeatureEngine",
@@ -683,6 +687,7 @@ FEATURE_ENGINES = {
 OPERATION_ENGINES = {
     "gemm_universal": "GemmUniversalFeatureEngine",
     "gemm_universal_vec": "GemmUniversalVecFeatureEngine",
+    "batched_gemm": "BatchedGemmFeatureEngine",
     "grouped_conv": "GroupedConvFeatureEngine",
 }
 

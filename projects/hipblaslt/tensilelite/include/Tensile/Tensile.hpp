@@ -134,6 +134,9 @@ namespace TensileLite
         size_t sharedMemBytes = 0;
 
         KernelArguments args;
+
+        // Carries a non-null occupancy-probe address.
+        bool occupancyProbe = false;
     };
 
     /**
