@@ -1378,10 +1378,6 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
 
         // clang-format off
         str << "DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3";
-
-        if(get_warp_size() != 64) {
-            str << "_WmmaPorted";
-        }
         
         if constexpr(DirectLoad)
         {
@@ -1395,7 +1391,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
         {
             str << "_PingPong";
         }
-        str << "<" << TileLoadThreadGroupSize << "l," << TileMathThreadGroupSize << "m, "
+        str << "<" << TileLoadThreadGroupSize << "l+" << TileMathThreadGroupSize << "m, "
             << MPerBlock << ", "
             << NPerBlock << ", "
             << K0PerBlock << ", "
