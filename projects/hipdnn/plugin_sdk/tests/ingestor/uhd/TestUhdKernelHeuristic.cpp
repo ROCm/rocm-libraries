@@ -2339,6 +2339,54 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, ADegradedRankingReportsNoGroup)
     }
 }
 
+/// rankWith binds per candidate only the `$kernel.*` names its signature reads; each must get
+/// exactly what binding the kernel's whole metadata gives it, including where that binds
+/// nothing (a stale value would then be read in place of failing closed).
+TEST(TestIngestorUhdKernelHeuristic, PerSlotKernelBindingMatchesWholeMetadataBinding)
+{
+    KernelDefinition plain;
+    plain.priority = 7;
+    plain.metadata["tile"] = std::vector<int64_t>{16, 32};
+    plain.metadata["tile[0]"] = int64_t{99}; // a scalar of an element's name wins
+    plain.metadata["a[1]"] = std::vector<int64_t>{5};
+    plain.metadata["flag"] = true;
+    plain.metadata["ratio"] = 0.5;
+    plain.metadata["name"] = std::string("xdl");
+    plain.metadata[""] = std::vector<int64_t>{3};
+    KernelDefinition scalarPriority = plain;
+    scalarPriority.metadata["priority"] = int64_t{42};
+    KernelDefinition arrayPriority = plain;
+    arrayPriority.metadata["priority"] = std::vector<int64_t>{1, 2};
+
+    const std::vector<std::string> names
+        = {"tile",        "tile[0]", "tile[1]", "tile[2]",  "tile[01]",
+           "tile[-1]",    "tile[]",  "tile[0",  "tile[1]]", "tile[99999999999999999999]",
+           "a[1]",        "a[1][0]", "a[1][1]", "flag",     "ratio",
+           "name",        "[0]",     "[1]",     "priority", "priority[0]",
+           "priority[1]", "unknown", "id"};
+
+    for(const auto* kernel : {&plain, &scalarPriority, &arrayPriority})
+    {
+        const auto whole = detail::kernelVarsFrom(*kernel);
+        for(const auto& name : names)
+        {
+            const auto slot = detail::kernelVarSlot("kernel." + name);
+            EXPECT_EQ(slot.boundName, "kernel." + name);
+            const auto bound = detail::kernelVarOf(*kernel, slot);
+            const auto expected = whole.find(name);
+            if(expected == whole.end())
+            {
+                EXPECT_FALSE(bound.has_value()) << name;
+            }
+            else
+            {
+                ASSERT_TRUE(bound.has_value()) << name;
+                EXPECT_EQ(*bound, expected->second) << name;
+            }
+        }
+    }
+}
+
 } // namespace hipdnn_plugin_sdk::ingestor
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

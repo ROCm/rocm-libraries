@@ -38,6 +38,20 @@ public:
     {
         _ctx.clearNamespace("kernel");
     }
+    /// Rebinds one kernel variable, named without the sigil (`kernel.tile[0]`), or unbinds
+    /// it when @p value is empty. Rebinding only the names a signature reads is cheaper per
+    /// candidate than clearKernelVars() followed by bindKernelVars().
+    void setKernelVar(const std::string& boundName, std::optional<VariableContext::ValueType> value)
+    {
+        if(value)
+        {
+            _ctx.bindBare(boundName, std::move(*value));
+        }
+        else
+        {
+            _ctx.unbindBare(boundName);
+        }
+    }
     void bindQueryVars(const ValueMap& props)
     {
         for(const auto& [name, value] : props)
