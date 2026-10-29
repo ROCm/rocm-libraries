@@ -1747,7 +1747,9 @@ def write_spec(cases, path):
         window_semantics=P.WINDOW_SEMANTICS,
         cases=[c["record"] for c in cases],
     )
-    Path(path).write_text(json.dumps(spec, indent=1) + "\n", encoding="utf-8", newline="\n")
+    Path(path).write_text(
+        json.dumps(spec, indent=1) + "\n", encoding="utf-8", newline="\n"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -1832,7 +1834,9 @@ def report(cases):
         f"{r['claim_required']}, covered by claim-only cases {r['claim_covered']}; forbidden {len(r['forbidden'])}"
     )
 
-    print("\nLegality under develop before SEM-001, after #14483 (SEM-001, R13), after #14358")
+    print(
+        "\nLegality under develop before SEM-001, after #14483 (SEM-001, R13), after #14358"
+    )
     for sem in P.SEMANTICS:
         print(f"  {sem:<12} {dict(Counter(c['legality'][sem] for c in cases))}")
     viol = [

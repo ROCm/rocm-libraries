@@ -1177,7 +1177,9 @@ def save_calibration(entries, path=CALIBRATION_FILE):
         ),
         "estimates": OrderedDict(sorted(entries.items())),
     }
-    Path(path).write_text(json.dumps(doc, indent=1) + "\n", encoding="utf-8", newline="\n")
+    Path(path).write_text(
+        json.dumps(doc, indent=1) + "\n", encoding="utf-8", newline="\n"
+    )
 
 
 def estimate(params, seed=1234):
