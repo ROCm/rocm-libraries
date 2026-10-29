@@ -495,6 +495,36 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         EXPECT_EQ(waits, 5) << blockListing(*bb);
     }
 
+    // SpecifiedClusterLoop N: of the three copies only the N-th handshakes. The
+    // other loop has one trigger, fewer than N >= 2, and keeps it either way.
+    // ReduceClusterBarrierPerLoop is not read once N is set.
+    void expectOnlySpecifiedUnrollCopyHandshakes(int n, bool reduceClusterBarrierPerLoop = false) {
+        const LaterUnrollCopies copies = buildLaterUnrollCopies();
+        runPass(/*rule3SignalLeadCycles=*/100, /*splitWaveLoop=*/false,
+                /*streamKMulticast=*/false, /*pgrValue=*/1, reduceClusterBarrierPerLoop,
+                /*signalAheadOfDsCnt=*/false, /*specifiedClusterLoop=*/n);
+        StinkyInstruction* copy[] = {copies.first, copies.second, copies.third};
+        for (int i = 0; i < 3; ++i) {
+            EXPECT_EQ(isImmediatelyPrecededByClusterBarrierWait(copy[i]), i + 1 == n)
+                << "copy " << i + 1 << " with SpecifiedClusterLoop " << n << ":"
+                << blockListing(*bb);
+        }
+        EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(copies.otherPath))
+            << "a loop with fewer triggers than N keeps its handshake:" << blockListing(*bb);
+
+        // Rule 1 at GSU_1, Rule 3 on copy N and on the other loop.
+        // Rule 2 adds the matching wait in front of the preheader load.
+        const auto [signals, waits] = clusterBarrierCounts();
+        EXPECT_EQ(signals, 3) << blockListing(*bb);
+        EXPECT_EQ(waits, 3) << blockListing(*bb);
+
+        const std::string once = blockListing(*bb);
+        runPass(/*rule3SignalLeadCycles=*/100, /*splitWaveLoop=*/false,
+                /*streamKMulticast=*/false, /*pgrValue=*/1, reduceClusterBarrierPerLoop,
+                /*signalAheadOfDsCnt=*/false, /*specifiedClusterLoop=*/n);
+        EXPECT_EQ(blockListing(*bb), once) << "a second pass must not add another copy";
+    }
+
     // A compare feeding the branch that consumes it, so the SCC live range stays
     // confined to the pair and does not push the pass's anchors around.
     StinkyInstruction* createGuardedBranch(GFX opcode, int sgpr, const char* target) {
@@ -613,14 +643,16 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
     // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
     void runPass(int rule3SignalLeadCycles = 100, bool splitWaveLoop = false,
                  bool streamKMulticast = false, int pgrValue = 1,
-                 bool reduceClusterBarrierPerLoop = false, bool signalAheadOfDsCnt = false) {
+                 bool reduceClusterBarrierPerLoop = false, bool signalAheadOfDsCnt = false,
+                 int specifiedClusterLoop = 0) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         auto pass = createInsertClusterBarrierPass(
             streamKMulticast, pgrValue, rule3SignalLeadCycles,
             /*splitWaveLoop=*/splitWaveLoop,
             /*reduceClusterBarrierPerLoop=*/reduceClusterBarrierPerLoop,
-            /*signalAheadOfDsCnt=*/signalAheadOfDsCnt);
+            /*signalAheadOfDsCnt=*/signalAheadOfDsCnt,
+            /*specifiedClusterLoop=*/specifiedClusterLoop);
         if (testDumpEnabled()) {
             std::cerr << "\n=== INPUT (before InsertClusterBarrierPass):" << blockListing(*bb)
                       << "\n";
@@ -3287,4 +3319,20 @@ TEST_F(InsertClusterBarrierPassTest, LaterUnrollLoopCopiesEachGetClusterHandshak
     const LaterUnrollCopies copies = buildLaterUnrollCopies();
     runPass();
     expectEveryLaterUnrollCopyHandshake(copies);
+}
+
+TEST_F(InsertClusterBarrierPassTest, SpecifiedClusterLoop1KeepsOnlyTheFirstUnrollCopy) {
+    expectOnlySpecifiedUnrollCopyHandshakes(1);
+}
+
+TEST_F(InsertClusterBarrierPassTest, SpecifiedClusterLoop2KeepsOnlyTheSecondUnrollCopy) {
+    expectOnlySpecifiedUnrollCopyHandshakes(2);
+}
+
+TEST_F(InsertClusterBarrierPassTest, SpecifiedClusterLoop3KeepsOnlyTheThirdUnrollCopy) {
+    expectOnlySpecifiedUnrollCopyHandshakes(3);
+}
+
+TEST_F(InsertClusterBarrierPassTest, SpecifiedClusterLoopOverridesTheReducedCadence) {
+    expectOnlySpecifiedUnrollCopyHandshakes(2, /*reduceClusterBarrierPerLoop=*/true);
 }

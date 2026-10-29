@@ -139,6 +139,14 @@ than 2500 and that sum covers at least 5 cycles per ds_load (integer division,
 `sumWmmaLatencyCycles / dsLoadCount >= 5`). A main loop missing WMMAs or
 ds_loads stays off, so every trigger still handshakes.
 
+`SpecifiedClusterLoop` (module option, default `0` = off) and
+`ReduceClusterBarrierPerLoop` are exclusive: with `N > 0` the pass ignores the
+reduced cadence, whatever it resolved to. The triggers of each enclosing loop are numbered in
+program order, and a loop with at least `N` of them handshakes on the `N`-th
+only. A loop with fewer triggers handshakes on every one, so no loop is left
+without a handshake. Under `ClusterBarrierSplitWaveLoop` the wave-0 body and
+its copy have their own heads and are numbered separately.
+
 ### Anchor resolution
 
 1. The **wait anchor** (Rule 3(b)) is the workgroup `s_barrier_signal -1`.

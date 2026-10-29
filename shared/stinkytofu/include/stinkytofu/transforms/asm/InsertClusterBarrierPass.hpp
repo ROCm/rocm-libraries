@@ -72,9 +72,14 @@ class Pass;
 /// \p signalAheadOfDsCnt puts a Rule 3 or pre-loop cluster signal that lands
 /// right behind an `s_wait_dscnt` run in front of that run instead, so the drain
 /// stays next to the instruction it was inserted for. Off by default.
+/// \p specifiedClusterLoop N > 0 keeps the Rule 3 handshake on the N-th trigger
+/// of each loop that has at least N triggers, e.g. one of the three unroll
+/// copies, and drops the others. A loop with fewer triggers handshakes on every
+/// one. It replaces \p reduceClusterBarrierPerLoop, which is then ignored. 0 is
+/// off.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
     bool streamKMulticast = false, int pgrValue = 1, int rule3SignalLeadCycles = 100,
     bool splitWaveLoop = false, bool reduceClusterBarrierPerLoop = false,
-    bool signalAheadOfDsCnt = false);
+    bool signalAheadOfDsCnt = false, int specifiedClusterLoop = 0);
 
 }  // namespace stinkytofu

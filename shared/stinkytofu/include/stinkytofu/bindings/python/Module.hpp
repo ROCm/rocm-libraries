@@ -124,6 +124,8 @@
 // SchedulingKnobHeuristics.hpp.
 // ReduceClusterBarrierPerLoop: <0 unset, 0 = a Rule 3 handshake on every loop
 // trigger, >0 = one handshake per enclosing loop. propose() currently leaves it off.
+// SpecifiedClusterLoop: N > 0 keeps the handshake on the N-th trigger (e.g. unroll copy) of
+// each loop with at least N, and ReduceClusterBarrierPerLoop is ignored; 0 = off.
 #define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                                                       \
     X(LockDsReadOrder, bool, true)                                                                 \
     X(EvenSpreadFillers, bool, true)                                                               \
@@ -151,6 +153,7 @@
     X(MergeDscnt, bool, true) /* forced burst: one wait before the run; false = one per WMMA */    \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
     X(ReduceClusterBarrierPerLoop, int, -1)                                                        \
+    X(SpecifiedClusterLoop, int, 0)                                                                \
     X(ClusterBarrierSignalAheadOfDsCnt, bool,                                                      \
       false) /* signal ahead of the dscnt it lands behind */                                       \
     X(TensorLoadDsLoadGapCycles, int, 64)

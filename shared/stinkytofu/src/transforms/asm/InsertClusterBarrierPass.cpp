@@ -1743,13 +1743,14 @@ class InsertClusterBarrierPassImpl : public Pass {
 
     InsertClusterBarrierPassImpl(bool streamKMulticast, int pgrValue, int rule3SignalLeadCycles,
                                  bool splitWaveLoop, bool reduceClusterBarrierPerLoop,
-                                 bool signalAheadOfDsCnt)
+                                 bool signalAheadOfDsCnt, int specifiedClusterLoop)
         : streamKMulticast_(streamKMulticast),
           pgrValue_(pgrValue),
           rule3SignalLeadCycles_(std::max(0, rule3SignalLeadCycles)),
           splitWaveLoop_(splitWaveLoop),
-          reduceClusterBarrierPerLoop_(reduceClusterBarrierPerLoop),
-          signalAheadOfDsCnt_(signalAheadOfDsCnt) {}
+          reduceClusterBarrierPerLoop_(specifiedClusterLoop <= 0 && reduceClusterBarrierPerLoop),
+          signalAheadOfDsCnt_(signalAheadOfDsCnt),
+          specifiedClusterLoop_(specifiedClusterLoop) {}
 
     const char* getName() const override {
         return "Insert Cluster Barrier";
@@ -1857,6 +1858,17 @@ class InsertClusterBarrierPassImpl : public Pass {
             // insertProducerTensorDrainBefore.
             std::vector<IRBase*> producerDrainAnchors;
 
+            // Every loop trigger is collected before any is decided on, so
+            // specifiedClusterLoop_ knows how many its loop has.
+            struct LoopTrigger {
+                BasicBlock::iterator loadIt;
+                BasicBlock::iterator segBegin;
+                StinkyInstruction* trigger = nullptr;
+                StinkyInstruction* head = nullptr;
+                int ordinal = 0;  // 1-based, in program order within its loop
+            };
+            std::vector<LoopTrigger> loopTriggers;
+            std::unordered_map<StinkyInstruction*, int> loopTriggerCount;
             {
                 auto segBegin = bb.begin();
                 for (auto it = bb.begin(); it != bb.end(); ++it) {
@@ -1878,6 +1890,15 @@ class InsertClusterBarrierPassImpl : public Pass {
                     // at, and the run-up's own load is Rule 2's business.
                     StinkyInstruction* head = findEnclosingLoopHead(trigger);
                     if (head == nullptr) continue;
+                    loopTriggers.push_back({it, segBegin, trigger, head, ++loopTriggerCount[head]});
+                }
+            }
+            {
+                for (const LoopTrigger& site : loopTriggers) {
+                    const BasicBlock::iterator it = site.loadIt;
+                    const BasicBlock::iterator segBegin = site.segBegin;
+                    StinkyInstruction* trigger = site.trigger;
+                    StinkyInstruction* head = site.head;
 
                     bool emitHandshake = false;
                     if (reduceClusterBarrierPerLoop_) {
@@ -1919,6 +1940,16 @@ class InsertClusterBarrierPassImpl : public Pass {
                         // A re-run skips a trigger that already has its wait, and
                         // skips the drain recording below with it.
                         continue;
+                    } else if (specifiedClusterLoop_ > 0 &&
+                               loopTriggerCount[head] >= specifiedClusterLoop_) {
+                        // Only the N-th trigger of a loop that has N handshakes.
+                        // A loop with fewer keeps all of them.
+                        emitHandshake = site.ordinal == specifiedClusterLoop_;
+                        PASS_DEBUG(std::cerr
+                                   << "[InsertClusterBarrier] specified trigger=" << trigger
+                                   << " head=" << head << " ordinal=" << site.ordinal << "/"
+                                   << loopTriggerCount[head] << " emitHandshake=" << emitHandshake
+                                   << "\n");
                     } else {
                         emitHandshake = true;
                     }
@@ -2144,6 +2175,7 @@ class InsertClusterBarrierPassImpl : public Pass {
     const bool splitWaveLoop_ = false;
     const bool reduceClusterBarrierPerLoop_ = false;
     const bool signalAheadOfDsCnt_ = false;
+    const int specifiedClusterLoop_ = 0;
 };
 
 char InsertClusterBarrierPassImpl::ID = 0;
@@ -2153,10 +2185,11 @@ char InsertClusterBarrierPassImpl::ID = 0;
 std::unique_ptr<Pass> createInsertClusterBarrierPass(bool streamKMulticast, int pgrValue,
                                                      int rule3SignalLeadCycles, bool splitWaveLoop,
                                                      bool reduceClusterBarrierPerLoop,
-                                                     bool signalAheadOfDsCnt) {
+                                                     bool signalAheadOfDsCnt,
+                                                     int specifiedClusterLoop) {
     return std::make_unique<InsertClusterBarrierPassImpl>(
         streamKMulticast, pgrValue, rule3SignalLeadCycles, splitWaveLoop,
-        reduceClusterBarrierPerLoop, signalAheadOfDsCnt);
+        reduceClusterBarrierPerLoop, signalAheadOfDsCnt, specifiedClusterLoop);
 }
 
 namespace cluster_barrier {

@@ -289,7 +289,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 resolvedKnobs.clusterBarrierRule3SignalLeadCycles,
                 /*splitWaveLoop=*/moduleOptions.ClusterBarrierSplitWaveLoop,
                 /*reduceClusterBarrierPerLoop=*/resolvedKnobs.reduceClusterBarrierPerLoop,
-                /*signalAheadOfDsCnt=*/moduleOptions.ClusterBarrierSignalAheadOfDsCnt));
+                /*signalAheadOfDsCnt=*/moduleOptions.ClusterBarrierSignalAheadOfDsCnt,
+                /*specifiedClusterLoop=*/moduleOptions.SpecifiedClusterLoop));
         }
 
         // Build the CFG after the flat region splice-backs so RegionClonePass can
