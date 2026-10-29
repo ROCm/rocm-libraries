@@ -52,6 +52,8 @@ struct H
     __device__ void operator()() const {}
 };
 
+// A separate __host__ function: a host hip::wthread created directly in the __host__ __device__ main fails at
+// runtime with "Cannot find Symbol".
 __host__ void test_host()
 {
     hip::wthread t0 = support::make_test_thread(H());
@@ -64,9 +66,8 @@ __host__ void test_host()
     t1.join();
 }
 
-int main(int, char**)
+__device__ void test_device()
 {
-#ifdef __HIP_DEVICE_COMPILE__
     assert(G::n_alive == 0);
     assert(!G::op_run);
     {
@@ -87,6 +88,12 @@ int main(int, char**)
     }
     assert(G::n_alive == 0);
     assert(G::op_run);
+}
+
+int main(int, char**)
+{
+#ifdef __HIP_DEVICE_COMPILE__
+    test_device();
 #else
     test_host();
 #endif
