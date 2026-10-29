@@ -105,8 +105,9 @@ jobs:
       ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
       ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
       RACE_REPORT_DIR: ${{ github.workspace }}/race-reports
-      # Per-command limits leave time for reports after a workload timeout.
-      RACE_TIMEOUT_SECONDS: "210"
+      # Leave emulated GEMMs effectively unlimited. The step timeout bounds the
+      # workload and still leaves time to upload reports.
+      RACE_TIMEOUT_SECONDS: "10000"
       TENSILELITE_TIMEOUT_SECONDS: "420"
     steps:
       # The job needs three inputs in one workspace:
