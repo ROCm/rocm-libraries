@@ -132,7 +132,16 @@ TEST(TestRaggedSdpaDensify, ZeroBiasThroughTheRewriteEqualsTheNativeRaggedPlan)
     }
     for(size_t i = 0; i < native.second.size(); ++i)
     {
-        EXPECT_NEAR(native.second[i], rewritten.second[i], 1e-5F) << "LSE element " << i;
+        // A dead row's LSE is -inf on both sides (SEM-010); EXPECT_NEAR(-inf, -inf) fails on
+        // googletest versions that compute |a - b| = NaN, so infinities compare exactly.
+        if(std::isinf(native.second[i]))
+        {
+            EXPECT_EQ(native.second[i], rewritten.second[i]) << "LSE element " << i;
+        }
+        else
+        {
+            EXPECT_NEAR(native.second[i], rewritten.second[i], 1e-5F) << "LSE element " << i;
+        }
     }
 }
 
