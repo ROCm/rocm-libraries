@@ -383,8 +383,7 @@ namespace
             // An event never recorded has no timestamp to read.
             float milliseconds = 0.0f;
             EXPECT_NE(hipEventElapsedTime(&milliseconds, stop, stop), hipSuccess)
-                << "with " << count
-                << " kernels the stop was recorded although the start was not";
+                << "with " << count << " kernels the stop was recorded although the start was not";
             static_cast<void>(hipGetLastError());
 
             static_cast<void>(hipEventDestroy(stop));

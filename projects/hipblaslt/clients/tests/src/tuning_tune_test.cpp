@@ -3425,9 +3425,11 @@ namespace
 
             return hipblasLtMatrixLayoutCreate(&m_layoutA, HIP_R_32F, kOnlineM, kOnlineK, kOnlineM)
                        == HIPBLAS_STATUS_SUCCESS
-                   && hipblasLtMatrixLayoutCreate(&m_layoutB, HIP_R_32F, kOnlineK, kOnlineN, kOnlineK)
+                   && hipblasLtMatrixLayoutCreate(
+                          &m_layoutB, HIP_R_32F, kOnlineK, kOnlineN, kOnlineK)
                           == HIPBLAS_STATUS_SUCCESS
-                   && hipblasLtMatrixLayoutCreate(&m_layoutC, HIP_R_32F, kOnlineM, kOnlineN, kOnlineM)
+                   && hipblasLtMatrixLayoutCreate(
+                          &m_layoutC, HIP_R_32F, kOnlineM, kOnlineN, kOnlineM)
                           == HIPBLAS_STATUS_SUCCESS
                    && hipblasLtMatmulDescCreate(&m_desc, m_computeType, HIP_R_32F)
                           == HIPBLAS_STATUS_SUCCESS
@@ -3527,7 +3529,8 @@ namespace
             ASSERT_TRUE(xf32.dispatch(&launched)) << "dispatch " << i << " failed";
 
             if(launched != fp32Kernel)
-                GTEST_SKIP() << "this device has an xf32 kernel for GELU_AUX, so nothing falls back";
+                GTEST_SKIP()
+                    << "this device has an xf32 kernel for GELU_AUX, so nothing falls back";
         }
 
         EXPECT_EQ(counters().onlineMisses, 0u)

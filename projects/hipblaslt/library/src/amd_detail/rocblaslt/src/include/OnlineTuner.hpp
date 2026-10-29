@@ -34,13 +34,13 @@ struct OnlineTunerTestAccess;
 namespace rocblaslt
 {
     /**
- * @brief The tuner's knobs, as whoever links it supplies them.
- *
- * The tuner reads no environment of its own. Inside hipBLASLt these come from
- * HIPBLASLT_TUNING_MODE and the HIPBLASLT_TUNING_* search settings, read
- * through the same secure accessor the rest of the tuning stack uses, which is
- * only reachable from the library and not from here.
- */
+     * @brief The tuner's knobs, as whoever links it supplies them.
+     *
+     * The tuner reads no environment of its own. Inside hipBLASLt these come from
+     * HIPBLASLT_TUNING_MODE and the HIPBLASLT_TUNING_* search settings, read
+     * through the same secure accessor the rest of the tuning stack uses, which is
+     * only reachable from the library and not from here.
+     */
     struct OnlineTunerConfig
     {
         // Off unless the link says otherwise, so the feature stays off by
@@ -64,117 +64,117 @@ namespace rocblaslt
     };
 
     /**
- * @brief The configuration the tuner is built with.
- *
- * Defined by whoever links the tuner rather than read here, because the
- * mapping needs the tuning mode and TuningPolicy, which live where the secure
- * environment accessor does. Called once, from the singleton's constructor,
- * which is the first use of the tuner and so is after everything it reads can
- * be constructed.
- */
+     * @brief The configuration the tuner is built with.
+     *
+     * Defined by whoever links the tuner rather than read here, because the
+     * mapping needs the tuning mode and TuningPolicy, which live where the secure
+     * environment accessor does. Called once, from the singleton's constructor,
+     * which is the first use of the tuner and so is after everything it reads can
+     * be constructed.
+     */
     OnlineTunerConfig onlineTunerConfig();
 
     /**
- * @brief Explore-then-cache kernel selection on top of the Origami ranking.
- *
- * The first topK() * repeats() times a problem is seen, each of the top-K
- * ranked candidates is dispatched in turn and timed on the GPU; once every
- * candidate has been sampled the measured winner is pinned for every later
- * call with that problem. A candidate's repeats are reduced to one score by
- * taking the smallest of them.
- *
- * Timing is deferred-read. beginMeasurement() hands back an event pair for the
- * caller to wrap the launch with, and the elapsed time is only read on a later
- * visit to the same problem, once hipEventQuery() reports the stop event
- * complete. A whole exploration may be outstanding at once, so a caller that
- * enqueues the same problem back to back without synchronising still explores
- * at dispatch rate rather than at queue-drain rate. No entry point here ever
- * waits on the GPU.
- *
- * Every entry point is a branch on a member flag when the configuration does
- * not switch the tuner on, so the feature costs nothing when it is off.
- */
+     * @brief Explore-then-cache kernel selection on top of the Origami ranking.
+     *
+     * The first topK() * repeats() times a problem is seen, each of the top-K
+     * ranked candidates is dispatched in turn and timed on the GPU; once every
+     * candidate has been sampled the measured winner is pinned for every later
+     * call with that problem. A candidate's repeats are reduced to one score by
+     * taking the smallest of them.
+     *
+     * Timing is deferred-read. beginMeasurement() hands back an event pair for the
+     * caller to wrap the launch with, and the elapsed time is only read on a later
+     * visit to the same problem, once hipEventQuery() reports the stop event
+     * complete. A whole exploration may be outstanding at once, so a caller that
+     * enqueues the same problem back to back without synchronising still explores
+     * at dispatch rate rather than at queue-drain rate. No entry point here ever
+     * waits on the GPU.
+     *
+     * Every entry point is a branch on a member flag when the configuration does
+     * not switch the tuner on, so the feature costs nothing when it is off.
+     */
     class OnlineTuner
     {
     public:
         /**
-     * @brief The winner itself, for a caller that would otherwise have to ask
-     * the library for a ranked list only to pick one entry out of it.
-     *
-     * m_problem identifies the problem the winner was offered for, at the
-     * granularity the solution library caches its rankings at rather than the
-     * granularity resolution() is keyed on. A caller whose problem matches it
-     * would be handed the very ranking the winner was recorded in, so it can
-     * use the winner without fetching that ranking to look for it; one whose
-     * problem does not match has to go and ask, because a key deliberately
-     * covers problems that rank differently.
-     *
-     * m_requiredWorkspace is that same ranking's workspace answer for the
-     * winner, which depends only on the solution and the problem and so is
-     * fixed alongside them. Only the caller's own allocation still varies, and
-     * comparing against it is all that remains of the filter.
-     *
-     * m_tuningKey is the same problem again, in the key the tuning file is
-     * written and replayed under. It is here and not on the Resolution for the
-     * reason the two keys differ at all: resolution() is keyed on the fields
-     * the prediction model ranks on, which deliberately merges problems that
-     * differ in epilogue, bias, strides or scaling, while a file row
-     * deliberately separates exactly those. One resolution key can therefore
-     * cover several distinct file keys, and this is the one that belongs to the
-     * problem this record describes -- the problem whose ranking held the
-     * winner where it was recorded, whose hash m_problem is, and whose
-     * workspace answer m_requiredWorkspace is. A record is written once and
-     * never overwritten, so a merged sibling is served the winner at run time
-     * wherever its own ranking confirms it, but is never the key a row is
-     * written under, because nothing measured it.
-     *
-     * pinWinner() holds that last sentence up rather than leaving it to the
-     * order callers happen to arrive in. A record is installed only for the
-     * problem that registered the exploration, which is also the only problem
-     * whose launches were sampled, so m_problem here is ProblemState::m_problem
-     * and m_tuningKey is that problem's file key and no other's.
-     *
-     * Built at pin time and nowhere else: it costs a pass over forty-odd fields
-     * and a cached device query, which is affordable once per resolved problem
-     * and would not be affordable per call.
-     */
+         * @brief The winner itself, for a caller that would otherwise have to ask
+         * the library for a ranked list only to pick one entry out of it.
+         *
+         * problem identifies the problem the winner was offered for, at the
+         * granularity the solution library caches its rankings at rather than the
+         * granularity resolution() is keyed on. A caller whose problem matches it
+         * would be handed the very ranking the winner was recorded in, so it can
+         * use the winner without fetching that ranking to look for it; one whose
+         * problem does not match has to go and ask, because a key deliberately
+         * covers problems that rank differently.
+         *
+         * requiredWorkspace is that same ranking's workspace answer for the
+         * winner, which depends only on the solution and the problem and so is
+         * fixed alongside them. Only the caller's own allocation still varies, and
+         * comparing against it is all that remains of the filter.
+         *
+         * tuningKey is the same problem again, in the key the tuning file is
+         * written and replayed under. It is here and not on the Resolution for the
+         * reason the two keys differ at all: resolution() is keyed on the fields
+         * the prediction model ranks on, which deliberately merges problems that
+         * differ in epilogue, bias, strides or scaling, while a file row
+         * deliberately separates exactly those. One resolution key can therefore
+         * cover several distinct file keys, and this is the one that belongs to the
+         * problem this record describes -- the problem whose ranking held the
+         * winner where it was recorded, whose hash problem is, and whose
+         * workspace answer requiredWorkspace is. A record is written once and
+         * never overwritten, so a merged sibling is served the winner at run time
+         * wherever its own ranking confirms it, but is never the key a row is
+         * written under, because nothing measured it.
+         *
+         * pinWinner() holds that last sentence up rather than leaving it to the
+         * order callers happen to arrive in. A record is installed only for the
+         * problem that registered the exploration, which is also the only problem
+         * whose launches were sampled, so problem here is ProblemState::m_problem
+         * and tuningKey is that problem's file key and no other's.
+         *
+         * Built at pin time and nowhere else: it costs a pass over forty-odd fields
+         * and a cached device query, which is affordable once per resolved problem
+         * and would not be affordable per call.
+         */
         struct PinnedWinner
         {
-            std::shared_ptr<TensileLite::ContractionSolution> m_solution;
-            size_t                                            m_problem           = 0;
-            size_t                                            m_requiredWorkspace = 0;
+            std::shared_ptr<TensileLite::ContractionSolution> solution;
+            size_t                                            problem           = 0;
+            size_t                                            requiredWorkspace = 0;
 
             // The workspace the candidate list was filtered by, which is the
             // limit of the caller whose ranking the winner was recorded in.
             // Recorded for the same reason a tune row records one: a winner
             // chosen from candidates a small allocation could cover says
             // nothing about the kernels it ruled out.
-            size_t m_searchWorkspace = 0;
+            size_t searchWorkspace = 0;
 
-            TensileLite::ProblemOverride m_tuningKey;
+            TensileLite::ProblemOverride tuningKey;
         };
 
         /**
-     * @brief Everything a problem still needs once its winner is pinned.
-     *
-     * Published once, while the write lock is held, and read from then on
-     * without taking anything: the key and the winner never change afterwards,
-     * so the release store that publishes the pointer and the acquire load that
-     * finds it are the whole synchronisation.
-     *
-     * pinned() is filled in later, by the first caller to offer the winner
-     * object, and is published the same way for the same reason -- a release
-     * store under the write lock against an acquire load taking none. It is
-     * written at most once, so a reader either sees nothing or sees a record
-     * that is complete and will never change, and copying the shared_ptr out of
-     * it is a read of an object nothing mutates.
-     *
-     * position() is the exception and is only a hint -- where the caller found
-     * the winner in the list it was offered last time. Callers check it against
-     * the list in hand before acting on it, so a wrong value costs one trip down
-     * the full path and can never change which kernel is chosen. Nothing is
-     * ordered against it, hence relaxed.
-     */
+         * @brief Everything a problem still needs once its winner is pinned.
+         *
+         * Published once, while the write lock is held, and read from then on
+         * without taking anything: the key and the winner never change afterwards,
+         * so the release store that publishes the pointer and the acquire load that
+         * finds it are the whole synchronisation.
+         *
+         * pinned() is filled in later, by the first caller to offer the winner
+         * object, and is published the same way for the same reason -- a release
+         * store under the write lock against an acquire load taking none. It is
+         * written at most once, so a reader either sees nothing or sees a record
+         * that is complete and will never change, and copying the shared_ptr out of
+         * it is a read of an object nothing mutates.
+         *
+         * position() is the exception and is only a hint -- where the caller found
+         * the winner in the list it was offered last time. Callers check it against
+         * the list in hand before acting on it, so a wrong value costs one trip down
+         * the full path and can never change which kernel is chosen. Nothing is
+         * ordered against it, hence relaxed.
+         */
         class Resolution
         {
             friend class OnlineTuner;
@@ -240,29 +240,71 @@ namespace rocblaslt
             return m_enabled;
         }
 
+        // Slack over the candidates * repeats launches exploration needs. A
+        // caller is free to ignore the rotation selectCandidate() asks for, so
+        // without a ceiling a problem could stay in the exploring state, and on
+        // the write lock, for the life of the process.
+        static constexpr int c_visitBudgetFactor = 8;
+
+        // Slack over the visit budget before a problem NOBODY is exploring is
+        // given up on. Deliberately much larger, because what it bounds is a
+        // different thing: see ProblemState::m_dispatchesSinceSelection. The
+        // counter it caps is advanced by every dispatch under the key,
+        // including a merged sibling's, and only the registrant's own visits
+        // reset it -- so this has to leave room for however much sibling
+        // traffic separates two of the registrant's visits, or heavy sibling
+        // traffic would end a healthy exploration early. Overshooting costs an
+        // abandoned problem a bounded run of cheap locked dispatches before it
+        // short-circuits for the life of the process; undershooting costs a
+        // live exploration its samples.
+        static constexpr int c_abandonBudgetFactor = 16;
+
+        // The resolved table is deliberately not the problem map: it is fixed
+        // in size and never rehashes, which is what lets resolution() follow a
+        // published entry with no lock at all. The entries themselves outlive
+        // the process, so a reader can never be handed a dangling one.
+        //
+        // A power of two so the index is a mask, and far larger than the number
+        // of distinct problems a process is expected to see; overshooting only
+        // costs the table's own footprint, 32KiB.
+        //
+        // KNOWN BOUNDARY. This is the one limit the fast path has. Past roughly
+        // this many live resolved keys, keys start landing in occupied slots
+        // and the later one evicts the earlier, which costs the evicted problem
+        // the fast path for good -- publishing happens once, at the moment a
+        // problem resolves, and nothing republishes it. The degradation is
+        // gradual and proportional, each evicted problem falling back to the
+        // locked path it took while it was still being explored, and nothing it
+        // is told is wrong; resolution() answers on the key, so a slot holding
+        // someone else's entry reads as absent. The resolution and winner
+        // pools are deliberately NOT capped at this number: capping them turned the same
+        // boundary into a cliff, where the 4097th problem to resolve and every
+        // one after it was refused a published entry outright.
+        static constexpr size_t c_resolutionSlots = 4096;
+
         /**
-     * @brief Re-read the configuration and forget everything learned under
-     * the old one. Tests only, like TuningModeSingleton::reloadForTest.
-     *
-     * The configuration is read once, in the constructor of a
-     * process-lifetime singleton, and that constructor runs on the process's
-     * first dispatch -- long before a test that sets the tuning variables in
-     * its own setup can have set them. Without this a single-process test
-     * suite can only ever observe online tuning as whatever the first
-     * dispatch of the binary happened to configure, which is off.
-     *
-     * Drops the published resolutions along with the problems. They are
-     * normally kept for the life of the process precisely so that a reader
-     * following a published pointer without a lock can never be handed a
-     * dangling one, so this must only be called with no other thread inside
-     * the library.
-     *
-     * The event pool is deliberately left alone. A pooled pair belongs to a
-     * device and to the HIP runtime, not to a configuration, and destroying
-     * events is what the destructor already declines to do. The pairs the
-     * dropped problems still had outstanding are retired, since nothing could
-     * reach them again and they would go on counting against livePairCap().
-     */
+         * @brief Re-read the configuration and forget everything learned under
+         * the old one. Tests only, like TuningModeSingleton::reloadForTest.
+         *
+         * The configuration is read once, in the constructor of a
+         * process-lifetime singleton, and that constructor runs on the process's
+         * first dispatch -- long before a test that sets the tuning variables in
+         * its own setup can have set them. Without this a single-process test
+         * suite can only ever observe online tuning as whatever the first
+         * dispatch of the binary happened to configure, which is off.
+         *
+         * Drops the published resolutions along with the problems. They are
+         * normally kept for the life of the process precisely so that a reader
+         * following a published pointer without a lock can never be handed a
+         * dangling one, so this must only be called with no other thread inside
+         * the library.
+         *
+         * The event pool is deliberately left alone. A pooled pair belongs to a
+         * device and to the HIP runtime, not to a configuration, and destroying
+         * events is what the destructor already declines to do. The pairs the
+         * dropped problems still had outstanding are retired, since nothing could
+         * reach them again and they would go on counting against livePairCap().
+         */
         void reloadForTest();
 
         int topK() const
@@ -320,19 +362,19 @@ namespace rocblaslt
         }
 
         /**
-     * @brief The pinned winner for a problem, or nullptr while it is still
-     * being explored.
-     *
-     * One acquire load and one compare, taking no lock and doing no work that
-     * grows with topK(). A caller holding a Resolution already has its answer,
-     * so it can skip the candidate filtering and the search that dominate the
-     * per-call cost of a problem there is nothing left to learn about.
-     *
-     * The table is direct-mapped over the key and a colliding key evicts, so
-     * nullptr is not an answer -- it only means the caller must go through
-     * selectCandidate() and take the lock, which is what every call did before.
-     * Nothing here can be wrong, only absent.
-     */
+         * @brief The pinned winner for a problem, or nullptr while it is still
+         * being explored.
+         *
+         * One acquire load and one compare, taking no lock and doing no work that
+         * grows with topK(). A caller holding a Resolution already has its answer,
+         * so it can skip the candidate filtering and the search that dominate the
+         * per-call cost of a problem there is nothing left to learn about.
+         *
+         * The table is direct-mapped over the key and a colliding key evicts, so
+         * nullptr is not an answer -- it only means the caller must go through
+         * selectCandidate() and take the lock, which is what every call did before.
+         * Nothing here can be wrong, only absent.
+         */
         const Resolution* resolution(size_t problemKey) const
         {
             const Resolution* entry = m_resolutions[problemKey & (c_resolutionSlots - 1)].load(
@@ -342,37 +384,37 @@ namespace rocblaslt
         }
 
         /**
-     * @brief Offer a resolved problem the winner object itself, so later calls
-     * need not ask the library for a ranking to find it in.
-     *
-     * Taken from the first caller to offer one and ignored afterwards. A key can
-     * cover problems that rank differently, and the one recorded here is the one
-     * the winner was measured on; letting a later problem overwrite it would
-     * only make the two take turns invalidating each other's record.
-     *
-     * problem is the caller's own identifier for the problem the winner was
-     * offered for, in the same terms selectCandidate() takes it, and is checked
-     * against the problem that registered the exploration rather than merely
-     * carried. A caller the resolution key merges with that problem measured
-     * none of it, so it has no key worth writing a row under; it is handed the
-     * winner through its own ranking and leaves no record behind. What comes
-     * back is handed on through pinned(), where a later caller compares its own
-     * identifier against it. Calling this cannot change which kernel is chosen
-     * for any problem: a caller that does not recognise what comes back has
-     * lost nothing but the shortcut.
-     *
-     * tuningKey is that same problem in the tuning file's key, carried for
-     * whoever records the winner; see PinnedWinner::m_tuningKey.
-     *
-     * Returns the record this call installed, or null when it installed
-     * nothing -- because this caller is not the problem that was measured,
-     * because another caller got there first, or because there was nothing to
-     * offer. Whoever records the winner outside
-     * this process has to know which caller's key was taken, and this is the
-     * only answer that is not a race: the check above is a hint taken without
-     * the lock, so two callers can both reach here and only one of them leaves
-     * a record behind.
-     */
+         * @brief Offer a resolved problem the winner object itself, so later calls
+         * need not ask the library for a ranking to find it in.
+         *
+         * Taken from the first caller to offer one and ignored afterwards. A key can
+         * cover problems that rank differently, and the one recorded here is the one
+         * the winner was measured on; letting a later problem overwrite it would
+         * only make the two take turns invalidating each other's record.
+         *
+         * problem is the caller's own identifier for the problem the winner was
+         * offered for, in the same terms selectCandidate() takes it, and is checked
+         * against the problem that registered the exploration rather than merely
+         * carried. A caller the resolution key merges with that problem measured
+         * none of it, so it has no key worth writing a row under; it is handed the
+         * winner through its own ranking and leaves no record behind. What comes
+         * back is handed on through pinned(), where a later caller compares its own
+         * identifier against it. Calling this cannot change which kernel is chosen
+         * for any problem: a caller that does not recognise what comes back has
+         * lost nothing but the shortcut.
+         *
+         * tuningKey is that same problem in the tuning file's key, carried for
+         * whoever records the winner; see PinnedWinner::tuningKey.
+         *
+         * Returns the record this call installed, or null when it installed
+         * nothing -- because this caller is not the problem that was measured,
+         * because another caller got there first, or because there was nothing to
+         * offer. Whoever records the winner outside
+         * this process has to know which caller's key was taken, and this is the
+         * only answer that is not a race: the check above is a hint taken without
+         * the lock, so two callers can both reach here and only one of them leaves
+         * a record behind.
+         */
         const PinnedWinner*
             pinWinner(const Resolution&                                        resolved,
                       const std::shared_ptr<TensileLite::ContractionSolution>& solution,
@@ -382,32 +424,32 @@ namespace rocblaslt
                       const TensileLite::ProblemOverride&                      tuningKey);
 
         /**
-     * @brief Pick which of the ranked candidates should run next.
-     *
-     * Registers the problem's candidate list on first sight. Returns the
-     * position within rankedSolutionIndices to promote to the front, or -1 to
-     * leave the caller's ordering alone.
-     *
-     * problem identifies the caller at the granularity the solution library
-     * caches its rankings at, and is what decides whose exploration this is.
-     * One resolution key covers several such problems by design; the first to
-     * register owns the exploration and every other is left its own ordering
-     * until there is a measured winner to serve it. See
-     * ProblemState::m_problem.
-     *
-     * capturing says the caller's dispatch is being recorded into a HIP graph
-     * rather than executed. Such a caller is never offered a probe candidate;
-     * it is served a measured winner if there is one, and otherwise left its
-     * own ordering. See selectCandidateImpl() for why.
-     *
-     * retained says the caller keeps this answer and dispatches it itself,
-     * rather than being asked again on its next dispatch -- a heuristic query.
-     * It is treated as a capture is: served a measured winner if there is
-     * one, and otherwise left its own ordering, with nothing registered,
-     * counted or offered. The algo it is handed is launched as a caller-supplied
-     * one, which is never measured, so a probe promoted into it could only be
-     * kept unmeasured. See selectCandidateImpl().
-     */
+         * @brief Pick which of the ranked candidates should run next.
+         *
+         * Registers the problem's candidate list on first sight. Returns the
+         * position within rankedSolutionIndices to promote to the front, or -1 to
+         * leave the caller's ordering alone.
+         *
+         * problem identifies the caller at the granularity the solution library
+         * caches its rankings at, and is what decides whose exploration this is.
+         * One resolution key covers several such problems by design; the first to
+         * register owns the exploration and every other is left its own ordering
+         * until there is a measured winner to serve it. See
+         * ProblemState::m_problem.
+         *
+         * capturing says the caller's dispatch is being recorded into a HIP graph
+         * rather than executed. Such a caller is never offered a probe candidate;
+         * it is served a measured winner if there is one, and otherwise left its
+         * own ordering. See selectCandidateImpl() for why.
+         *
+         * retained says the caller keeps this answer and dispatches it itself,
+         * rather than being asked again on its next dispatch -- a heuristic query.
+         * It is treated as a capture is: served a measured winner if there is
+         * one, and otherwise left its own ordering, with nothing registered,
+         * counted or offered. The algo it is handed is launched as a caller-supplied
+         * one, which is never measured, so a probe promoted into it could only be
+         * kept unmeasured. See selectCandidateImpl().
+         */
         int selectCandidate(size_t                  problemKey,
                             size_t                  problem,
                             const std::vector<int>& rankedSolutionIndices,
@@ -422,9 +464,9 @@ namespace rocblaslt
         }
 
         /**
-     * @brief Read back every outstanding measurement the GPU has finished.
-     * Leaves the unfinished ones outstanding.
-     */
+         * @brief Read back every outstanding measurement the GPU has finished.
+         * Leaves the unfinished ones outstanding.
+         */
         void harvestPending(size_t problemKey)
         {
             if(!m_enabled)
@@ -441,24 +483,24 @@ namespace rocblaslt
         }
 
         /**
-     * @brief Claim an event pair for the imminent launch of solutionIndex.
-     *
-     * On true, start and stop must both be recorded around that launch,
-     * otherwise the sample is dropped on the next harvest and the pair is
-     * retired rather than pooled again. On false neither argument is touched
-     * and nothing is owed. Problems that selectCandidate() has not registered
-     * are never measured.
-     *
-     * Nor is any dispatch other than the one selectCandidate() last asked THIS
-     * THREAD for. The solution index alone does not identify it: a problem the
-     * resolution key merges with the one being explored is left its own
-     * ordering, and its own pick is very often a candidate of that exploration
-     * that still owes samples, so timing it would credit one problem with a
-     * launch of another. The offer is held on the thread selection answered
-     * rather than on the problem, because one problem can have as many offers
-     * outstanding as there are threads in the library; see the offer paragraph
-     * on ProblemState for what that does and does not close.
-     */
+         * @brief Claim an event pair for the imminent launch of solutionIndex.
+         *
+         * On true, start and stop must both be recorded around that launch,
+         * otherwise the sample is dropped on the next harvest and the pair is
+         * retired rather than pooled again. On false neither argument is touched
+         * and nothing is owed. Problems that selectCandidate() has not registered
+         * are never measured.
+         *
+         * Nor is any dispatch other than the one selectCandidate() last asked THIS
+         * THREAD for. The solution index alone does not identify it: a problem the
+         * resolution key merges with the one being explored is left its own
+         * ordering, and its own pick is very often a candidate of that exploration
+         * that still owes samples, so timing it would credit one problem with a
+         * launch of another. The offer is held on the thread selection answered
+         * rather than on the problem, because one problem can have as many offers
+         * outstanding as there are threads in the library; see the offer paragraph
+         * on ProblemState for what that does and does not close.
+         */
         bool beginMeasurement(size_t      problemKey,
                               int         solutionIndex,
                               hipEvent_t& start,
@@ -526,7 +568,7 @@ namespace rocblaslt
         //
         // m_problem is the problem that registered the candidate list, at the
         // granularity the solution library caches its rankings at -- the same
-        // quantity PinnedWinner::m_problem carries, and equal to it by
+        // quantity PinnedWinner::problem carries, and equal to it by
         // construction. Exploration belongs to whoever registered: a merged
         // sibling is offered no candidate, spends none of the visit budget and
         // installs no record, and is served the measured winner through its own
@@ -661,17 +703,17 @@ namespace rocblaslt
 
         // The remainder require m_mutex, held shared where they only read and
         // exclusively where they mutate state or the event pool.
-        void registerProblem(size_t                  problemKey,
-                             size_t                  problem,
-                             ProblemState&           state,
-                             const std::vector<int>& rankedSolutionIndices);
-        int  nextCandidate(const ProblemState& state) const;
-        int  measurableCandidate(const ProblemState& state,
-                                 size_t              problemKey,
-                                 int                 solutionIndex) const;
-        int  inFlightCap(const ProblemState& state) const;
-        int  visitBudget(const ProblemState& state) const;
-        int  abandonBudget(const ProblemState& state) const;
+        void  registerProblem(size_t                  problemKey,
+                              size_t                  problem,
+                              ProblemState&           state,
+                              const std::vector<int>& rankedSolutionIndices);
+        int   nextCandidate(const ProblemState& state) const;
+        int   measurableCandidate(const ProblemState& state,
+                                  size_t              problemKey,
+                                  int                 solutionIndex) const;
+        int   inFlightCap(const ProblemState& state) const;
+        int   visitBudget(const ProblemState& state) const;
+        int   abandonBudget(const ProblemState& state) const;
         float score(const std::vector<float>& samples) const;
         void  resolve(size_t problemKey, ProblemState& state);
         void  releaseExploration(ProblemState& state);
@@ -711,28 +753,7 @@ namespace rocblaslt
         // outstanding; what livePairCap() bounds. Same lock as m_pairs.
         std::unordered_map<int, int> m_livePairs;
 
-        // The resolved table is deliberately not the problem map: it is fixed
-        // in size and never rehashes, which is what lets resolution() follow a
-        // published entry with no lock at all. The entries themselves outlive
-        // the process, so a reader can never be handed a dangling one.
-        //
-        // A power of two so the index is a mask, and far larger than the number
-        // of distinct problems a process is expected to see; overshooting only
-        // costs the table's own footprint, 32KiB.
-        //
-        // KNOWN BOUNDARY. This is the one limit the fast path has. Past roughly
-        // this many live resolved keys, keys start landing in occupied slots
-        // and the later one evicts the earlier, which costs the evicted problem
-        // the fast path for good -- publishing happens once, at the moment a
-        // problem resolves, and nothing republishes it. The degradation is
-        // gradual and proportional, each evicted problem falling back to the
-        // locked path it took while it was still being explored, and nothing it
-        // is told is wrong; resolution() answers on the key, so a slot holding
-        // someone else's entry reads as absent. The pools below are
-        // deliberately NOT capped at this number: capping them turned the same
-        // boundary into a cliff, where the 4097th problem to resolve and every
-        // one after it was refused a published entry outright.
-        static constexpr size_t c_resolutionSlots = 4096;
+        // The resolved table, sized by c_resolutionSlots above.
 
         // See livePairCap().
         static constexpr int c_livePairExplorations = 16;

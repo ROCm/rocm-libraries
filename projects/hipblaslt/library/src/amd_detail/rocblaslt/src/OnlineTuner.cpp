@@ -14,25 +14,6 @@ namespace rocblaslt
 {
     namespace
     {
-        // Slack over the candidates * repeats launches exploration needs. A
-        // caller is free to ignore the rotation selectCandidate() asks for, so
-        // without a ceiling a problem could stay in the exploring state, and on
-        // the write lock, for the life of the process.
-        constexpr int c_visitBudgetFactor = 8;
-
-        // Slack over the visit budget before a problem NOBODY is exploring is
-        // given up on. Deliberately much larger, because what it bounds is a
-        // different thing: see ProblemState::m_dispatchesSinceSelection. The
-        // counter it caps is advanced by every dispatch under the key,
-        // including a merged sibling's, and only the registrant's own visits
-        // reset it -- so this has to leave room for however much sibling
-        // traffic separates two of the registrant's visits, or heavy sibling
-        // traffic would end a healthy exploration early. Overshooting costs an
-        // abandoned problem a bounded run of cheap locked dispatches before it
-        // short-circuits for the life of the process; undershooting costs a
-        // live exploration its samples.
-        constexpr int c_abandonBudgetFactor = 16;
-
         constexpr const char* c_tracePrefix = "[hipblaslt-online-tune]";
 
         /**
@@ -151,7 +132,7 @@ namespace rocblaslt
     // static, so its destructor competes with the HIP runtime's own teardown, and
     // hipEventDestroy() after that teardown faults. The process is exiting, so
     // leaking the handles costs nothing.
-    OnlineTuner::~OnlineTuner() {}
+    OnlineTuner::~OnlineTuner() { }
 
     /**
      * @brief The rule this function keeps, stated once.
@@ -264,7 +245,7 @@ namespace rocblaslt
         // state and must stay a load and a compare.
         t_offer.m_candidate = -1;
 
-        std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
+        std::unique_lock<std::shared_timed_mutex> lock(m_mutex);
 
         ProblemState& state = m_problems[problemKey];
 
@@ -381,7 +362,7 @@ namespace rocblaslt
                 return;
         }
 
-        std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
+        std::unique_lock<std::shared_timed_mutex> lock(m_mutex);
 
         auto iter = m_problems.find(problemKey);
         if(iter == m_problems.end() || iter->second.m_resolved)
@@ -491,7 +472,7 @@ namespace rocblaslt
                 return false;
         }
 
-        std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
+        std::unique_lock<std::shared_timed_mutex> lock(m_mutex);
 
         auto iter = m_problems.find(problemKey);
         if(iter == m_problems.end())
@@ -541,8 +522,7 @@ namespace rocblaslt
                                       ProblemState&           state,
                                       const std::vector<int>& rankedSolutionIndices)
     {
-        const size_t count
-            = std::min(rankedSolutionIndices.size(), static_cast<size_t>(m_topK));
+        const size_t count = std::min(rankedSolutionIndices.size(), static_cast<size_t>(m_topK));
 
         // Whoever registers owns the exploration, for the same reason the first
         // caller to offer a winner object owns that record: a key covers
@@ -794,7 +774,7 @@ namespace rocblaslt
         if(!solution)
             return nullptr;
 
-        std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
+        std::unique_lock<std::shared_timed_mutex> lock(m_mutex);
 
         // Unbounded for the same reason as the resolution pool, and it has to
         // move with it: a problem refused a winner object here keeps a null
@@ -812,7 +792,7 @@ namespace rocblaslt
         // caller is matched against the registration instead. Refusing one
         // costs it the shortcut and its own ranking still answers; what it
         // buys is that the key a row is written under belongs to the problem
-        // the time was taken on. See PinnedWinner::m_tuningKey.
+        // the time was taken on. See PinnedWinner::tuningKey.
         //
         // The state is in m_problems, which never erases, and the resolution
         // was published from it, so the lookup finds it whenever the key is
@@ -821,12 +801,12 @@ namespace rocblaslt
         if(registered == m_problems.end() || registered->second.m_problem != problem)
             return nullptr;
 
-        auto entry                 = std::make_unique<PinnedWinner>();
-        entry->m_solution          = solution;
-        entry->m_problem           = problem;
-        entry->m_requiredWorkspace = requiredWorkspace;
-        entry->m_searchWorkspace   = searchWorkspace;
-        entry->m_tuningKey         = tuningKey;
+        auto entry               = std::make_unique<PinnedWinner>();
+        entry->solution          = solution;
+        entry->problem           = problem;
+        entry->requiredWorkspace = requiredWorkspace;
+        entry->searchWorkspace   = searchWorkspace;
+        entry->tuningKey         = tuningKey;
 
         const PinnedWinner* published = entry.get();
         m_winnerPool.push_back(std::move(entry));

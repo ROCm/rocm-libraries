@@ -59,7 +59,7 @@ struct OnlineTunerTestAccess
 
     // Pairs waiting in a device's pool, newest last.
     static std::vector<std::pair<hipEvent_t, hipEvent_t>> pooledPairs(const OnlineTuner& tuner,
-                                                                       int               device)
+                                                                      int                device)
     {
         std::vector<std::pair<hipEvent_t, hipEvent_t>> pairs;
 
@@ -100,31 +100,26 @@ namespace
     constexpr int kTopK    = 3;
     constexpr int kRepeats = 2;
 
-    // Nothing here records an event, so no candidate ever collects a sample and
-    // exploration can only end by running out its visit budget. Bounded well
-    // above that budget, so a tuner that never gives up fails an assertion
-    // instead of hanging the suite.
+    // The host-only cases below record no event, so no candidate collects a
+    // sample and exploration can only end by running out its visit budget.
+    // Bounded well above that budget, so a tuner that never gives up fails an
+    // assertion instead of hanging the suite.
     constexpr int kCallCeiling = 4096;
 
-    // The tuner's two ceilings, restated. visitBudget() bounds the visits the
-    // REGISTRANT may spend and abandonBudget() bounds how long a problem
-    // nobody is exploring stays unresolved; neither is reachable from here, so
-    // both are written out in the terms OnlineTuner.cpp computes them in
-    // (c_visitBudgetFactor and c_abandonBudgetFactor). Getting one wrong costs
-    // the merged-sibling case its point, not its result -- it asserts the
-    // ordering of all three numbers before using them.
-    constexpr int kVisitBudget   = kTopK * kRepeats * 8;
-    constexpr int kAbandonBudget = kVisitBudget * 16;
+    // The tuner's two ceilings, in the terms it computes them in.
+    // visitBudget() bounds the visits the REGISTRANT may spend and
+    // abandonBudget() bounds how long a problem nobody is exploring stays
+    // unresolved.
+    constexpr int kVisitBudget   = kTopK * kRepeats * OnlineTuner::c_visitBudgetFactor;
+    constexpr int kAbandonBudget = kVisitBudget * OnlineTuner::c_abandonBudgetFactor;
 
     // A run of sibling dispatches long enough to be well past the registrant's
     // budget and well short of the abandonment ceiling.
     constexpr int kEarlyEnough = 512;
 
-    // The resolution table is direct-mapped over the key and its size is the
-    // tuner's own business, so this only has to be a multiple of whatever that
-    // size is for the colliding-key test to mean anything. Getting it wrong
-    // costs the test its point, not its result.
-    constexpr size_t kResolutionSlots = 4096;
+    // The resolution table is direct-mapped over the key, so two keys this far
+    // apart share a slot.
+    constexpr size_t kResolutionSlots = OnlineTuner::c_resolutionSlots;
 
     OnlineTuner& tuner()
     {
@@ -317,14 +312,14 @@ namespace
             = tuner().pinWinner(*resolved, solution, identityOf(key), 256, 1024, measured);
         ASSERT_NE(installed, nullptr);
         EXPECT_EQ(installed, resolved->pinned());
-        EXPECT_EQ(installed->m_requiredWorkspace, 256u);
-        EXPECT_EQ(installed->m_searchWorkspace, 1024u);
-        EXPECT_EQ(installed->m_tuningKey.m, 4096u);
+        EXPECT_EQ(installed->requiredWorkspace, 256u);
+        EXPECT_EQ(installed->searchWorkspace, 1024u);
+        EXPECT_EQ(installed->tuningKey.m, 4096u);
 
         EXPECT_EQ(tuner().pinWinner(*resolved, solution, identityOf(key), 0, 0, sibling), nullptr)
             << "a second caller was told it had installed the record";
         EXPECT_EQ(resolved->pinned(), installed);
-        EXPECT_EQ(resolved->pinned()->m_tuningKey.m, 4096u)
+        EXPECT_EQ(resolved->pinned()->tuningKey.m, 4096u)
             << "a later caller restated the key the row is written under";
     }
 
@@ -481,8 +476,8 @@ namespace
             = tuner().pinWinner(*resolved, solution, measured, 256, 1024, measuredKey);
         ASSERT_NE(installed, nullptr) << "the measured problem was refused its own record";
         EXPECT_EQ(installed, resolved->pinned());
-        EXPECT_EQ(installed->m_problem, measured);
-        EXPECT_EQ(installed->m_tuningKey.colStrideA, 4096u)
+        EXPECT_EQ(installed->problem, measured);
+        EXPECT_EQ(installed->tuningKey.colStrideA, 4096u)
             << "the row would be written under a merged sibling's key";
     }
 
@@ -688,7 +683,7 @@ namespace
     // first place.
     //
     // It must not do the opposite either, and the version of this case that
-    // asserted only the first half is what pinned the give-up defect in place: a
+    // asserted only the first half is what kept an earlier defect in place: a
     // sibling's selection visit reset the give-up counter, so a registrant
     // that had stopped visiting could never be noticed, the problem stayed
     // unresolved, and every one of those sibling dispatches took the tuner's
@@ -1156,7 +1151,8 @@ namespace
     // problems that differ in epilogue, bias, strides or scaling, whose own
     // rank 0 is very often a candidate of this exploration's. The sample taken
     // was then a measurement of a different problem's kernel filed under this
-    // problem's candidate, which is the pooled-samples defect reached under concurrency.
+    // problem's candidate: the pooled-samples defect, reached under
+    // concurrency.
     //
     // Both halves are asserted, because the old slot got both wrong at once:
     // the thief must be refused, AND the launch the offer was made to must
@@ -1218,7 +1214,7 @@ namespace
             << "the registrant's sample was not credited";
     }
 
-    // The offer defect's other two halves, which are the same defect read
+    // The same defect's other two halves, read
     // forwards instead of backwards: the slot was dropped at the top of every
     // selection visit, above the merged-sibling guard, so a sibling CANCELLED
     // an offer the registrant had not consumed yet. The registrant's launch
@@ -1363,9 +1359,10 @@ namespace
             return pooledBefore > 0;
         };
 
-        auto recordNothing = [](hipEvent_t, hipEvent_t) {};
-        auto recordStartOnly
-            = [&](hipEvent_t start, hipEvent_t) { EXPECT_EQ(hipEventRecord(start, device.stream()), hipSuccess); };
+        auto recordNothing   = [](hipEvent_t, hipEvent_t) { };
+        auto recordStartOnly = [&](hipEvent_t start, hipEvent_t) {
+            EXPECT_EQ(hipEventRecord(start, device.stream()), hipSuccess);
+        };
 
         // A pooled pair first, so put one there with a real sample.
         {
@@ -1407,7 +1404,8 @@ namespace
             device.bracket(start, stop);
             tuner().harvestPending(warm);
         }
-        EXPECT_TRUE(measure(0x1026, recordStartOnly)) << "the pooled case did not get a pooled pair";
+        EXPECT_TRUE(measure(0x1026, recordStartOnly))
+            << "the pooled case did not get a pooled pair";
 
         // The pool is empty now, so the next pairs are fresh: one never
         // recorded at all, and one with only its start recorded. Neither has

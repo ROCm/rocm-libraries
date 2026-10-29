@@ -3741,7 +3741,7 @@ inline bool tuningCacheKeyable(const RocblasltContractionProblem& prob)
 // all of them rewritten from the caller's problem description by every
 // updateTensileProblem(), so they survive that window. The cost is that
 // problems differing only in epilogue, bias or strides share a key; what that
-// costs and why it is safe is PinnedWinner::m_tuningKey.
+// costs and why it is safe is PinnedWinner::tuningKey.
 inline size_t onlineTuningProblemKey(const TensileLite::ContractionProblemGemm& problem)
 {
     const rocisa::DataType computeType = problem.f32XdlMathOp() == rocisa::DataType::XFloat32
@@ -7392,7 +7392,7 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&         
                                      double                                      winnerTimeUs)
 {
     const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
-    if(!tuning.writes() || !winner.m_solution)
+    if(!tuning.writes() || !winner.solution)
         return;
 
     const auto& tuner = rocblaslt::OnlineTuner::getInstance();
@@ -7407,14 +7407,14 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&         
             throw std::runtime_error("injected online-record failure");
 
         TensileLite::TunedEntry entry;
-        entry.solutionIndex = winner.m_solution->index;
+        entry.solutionIndex = winner.solution->index;
 
         // From the measured object, like tune's, so the name written here is
         // the name replay compares against via getKernelNameFromAlgoIndex.
-        entry.kernelName             = winner.m_solution->kernelName;
+        entry.kernelName             = winner.solution->kernelName;
         entry.schemaVersion          = TensileLite::kCurrentTuningSchemaVersion;
         entry.buildStamp             = TensileLite::currentBuildStamp();
-        entry.requiredWorkspaceBytes = winner.m_requiredWorkspace;
+        entry.requiredWorkspaceBytes = winner.requiredWorkspace;
         entry.winnerTimeUs           = winnerTimeUs;
 
         // Complete, under no ceiling. Online's search is the ranked prefix and
@@ -7429,7 +7429,7 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&         
         search.mode           = TensileLite::TuningMode::Online;
         search.allKernels     = false;
         search.maxCandidates  = tuner.topK();
-        search.workspaceBytes = winner.m_searchWorkspace;
+        search.workspaceBytes = winner.searchWorkspace;
         search.coldIters      = tuner.coldCalls();
         search.hotIters       = tuner.repeats();
 
@@ -7447,14 +7447,14 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&         
         // confirms it, but a row written under its key would record timings
         // nobody took.
         const bool persisted
-            = TensileLite::appendTunedEntry(tuning.cachePath(), prob, winner.m_tuningKey, entry);
+            = TensileLite::appendTunedEntry(tuning.cachePath(), prob, winner.tuningKey, entry);
 
         // Beside whatever the file already held rather than instead of it. The
         // file is shared with tune and is append-only, and online has no
         // standing to drop another mode's winner; find() puts the newest
         // complete row first, which is this one.
         static_cast<void>(
-            TensileLite::OverrideMap::getMap().addIfAbsent(winner.m_tuningKey, entry));
+            TensileLite::OverrideMap::getMap().addIfAbsent(winner.tuningKey, entry));
 
         // The shape is served by a measured kernel from here on, whether or not
         // the append reached the file, so the summary counts it as matched
@@ -7463,8 +7463,8 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&         
         auto& counters = TensileLite::TuningCounters::instance();
         if(persisted)
             counters.tuned++;
-        TensileLite::recordTuningLookup(winner.m_tuningKey, true);
-        TensileLite::recordTuningWinner(winner.m_tuningKey);
+        TensileLite::recordTuningLookup(winner.tuningKey, true);
+        TensileLite::recordTuningWinner(winner.tuningKey);
 
         // Through the gate the tune path's terminal line goes through, not
         // around it. This is online's equivalent of tuning-done: the one line
@@ -7475,7 +7475,7 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&         
         // Routing it through shouldLogTuningTerminal puts both modes under one
         // policy -- per key, and unconditional once info logging is on -- so a
         // later change to what the stack reports moves online with it.
-        if(TensileLite::shouldLogTuningTerminal(winner.m_tuningKey,
+        if(TensileLite::shouldLogTuningTerminal(winner.tuningKey,
                                                 TensileLite::TuningAttempt::Tuned))
         {
             std::ostringstream msg;
@@ -7657,17 +7657,17 @@ inline std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
     const rocblaslt::OnlineTuner::PinnedWinner* pinned = resolved.pinned();
 
     if(!pinned
-       || pinned->m_problem != std::hash<TensileLite::ContractionProblemGemm>{}(tensile_prob))
+       || pinned->problem != std::hash<TensileLite::ContractionProblemGemm>{}(tensile_prob))
         return {};
 
     // All that is left of the per-candidate workspace filter: the requirement is
     // fixed once the problem and the solution are, and only the caller's own
     // allocation still varies. A caller that cannot cover the winner is one the
     // winner is withheld from, which is its ranking untouched.
-    if(pinned->m_requiredWorkspace > tensile_prob.workspaceSize())
+    if(pinned->requiredWorkspace > tensile_prob.workspaceSize())
         return {};
 
-    return {pinned->m_solution};
+    return {pinned->solution};
 }
 
 // Front the pinned winner of an already-resolved problem, doing nothing that

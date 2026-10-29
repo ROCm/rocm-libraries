@@ -101,9 +101,14 @@ information, see :doc:`Use hipBLASLt offline tuning <../how-to/how-to-use-hipbla
 for the first ``HIPBLASLT_TUNING_COLD_ITERS`` visits of a problem it launches the ranked first
 choice untouched, then dispatches each of the top ``HIPBLASLT_TUNING_MAX_CANDIDATES`` in turn
 ``HIPBLASLT_TUNING_HOT_ITERS`` times, timing each with a HIP event pair that is read back on a
-later visit to the same problem, and pins the fastest for every call after that. It only does so
-where the library chooses the kernel, so an explicitly supplied algorithm is never overridden, and
-it leaves a shape the cache file already serves to the cache.
+later visit to the same problem, and pins the fastest for every call after that. It explores only
+``hipblasLtMatmul`` calls that pass no algorithm, where the library chooses the kernel and launches
+it in the same call. An algorithm the caller supplies, including one returned by
+``hipblasLtMatmulAlgoGetHeuristic``, is launched as given and never timed, and
+``hipblasLtMatmulAlgoGetHeuristic`` is answered with a winner ``online`` has already measured
+for the problem, or otherwise with its usual ranking. The ``hipblaslt_ext`` GEMM and grouped GEMM
+interfaces are not tuned online. A shape the cache file already serves is replayed from the
+cache, not explored.
 
 A pinned winner is appended to ``HIPBLASLT_TUNING_CACHE_PATH`` as it is pinned, in the same row
 format ``tune`` writes and ``cache`` replays, so a file filled online is replayed by ``cache`` mode
