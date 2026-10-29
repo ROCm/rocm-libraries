@@ -34,6 +34,7 @@ from config_harness import (
     assert_real_gfx1250_kernels,
     emit_kernels_from_config,
     golden_digest,
+    with_symbol_names,
 )
 
 pytestmark = pytest.mark.unit
@@ -74,7 +75,8 @@ def _emit(cluster_dim):
                                     cluster_dim=cluster_dim)
 
 
-@pytest.mark.parametrize("cluster_dim, a_has_peers", _SHAPES, ids=_SHAPE_IDS)
+@pytest.mark.parametrize("cluster_dim, a_has_peers", _SHAPES + [((1, 4), True)],
+                         ids=_SHAPE_IDS + ["cs1_ck4"])
 def test_streamk_pap_cluster_multicast_gfx1250_mask_liveness(cluster_dim, a_has_peers):
     """PAP keeps every mask that carries real peers live across the persistent
     refresh, and only frees the A mask when Ck == 1 makes it self-only."""
@@ -82,6 +84,7 @@ def test_streamk_pap_cluster_multicast_gfx1250_mask_liveness(cluster_dim, a_has_
     assert_real_gfx1250_kernels(results)
     for base, src, _err in results:
         assert_assembles(src, base)
+        src = with_symbol_names(src)
         # B broadcasts along Cs in both shapes, so it is always re-applied.
         assert _B_ATTACH in src, (
             f"Kernel {base!r} dropped the B-multicast mask (MulticastMaskB)"

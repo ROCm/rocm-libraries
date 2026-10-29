@@ -446,7 +446,11 @@ def _direct_launch_spec(
         return None, why
     try:
         return direct_spec_for_problem(
-            identity.algorithm, problem, _instance_knobs(identity), identity.arch
+            identity.algorithm,
+            problem,
+            _instance_knobs(identity),
+            identity.arch,
+            identity.wave_size,
         )
     except (ValueError, ZeroDivisionError) as e:
         # A spec constructor that refuses the shape outright is a refusal too,
@@ -493,7 +497,9 @@ def _instance_block(identity: KernelIdentity) -> tuple[int, int, int]:
         dil_h=identity.dilation_h,
         dil_w=identity.dilation_w,
     )
-    spec = make_direct_spec(identity.algorithm, probe, _instance_knobs(identity))
+    spec = make_direct_spec(
+        identity.algorithm, probe, _instance_knobs(identity), identity.wave_size
+    )
     return (spec.threads_per_block, 1, 1)
 
 

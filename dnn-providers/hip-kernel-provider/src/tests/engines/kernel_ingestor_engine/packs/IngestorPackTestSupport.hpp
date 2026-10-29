@@ -26,6 +26,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GraphPatternMatcher.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
@@ -371,6 +372,35 @@ inline void applyOperandState(hipdnn_flatbuffers_sdk::data_objects::TensorAttrib
     }
 }
 
+// A dispatch handler with none of the save or restore overrides. It needs no workspace,
+// prepares an empty launch and launches nothing.
+class StubDispatchHandler : public hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>
+{
+public:
+    size_t workspaceBytes(
+        const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/,
+        const hipdnn_plugin_sdk::ingestor::BoundTokens& /*bound*/,
+        const hipdnn_plugin_sdk::ingestor::KernelDefinition& /*kernel*/) const override
+    {
+        return 0;
+    }
+
+    std::unique_ptr<hipdnn_plugin_sdk::ingestor::PreparedDispatch>
+        prepare(const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/,
+                const hipdnn_plugin_sdk::ingestor::BoundTokens& /*bound*/,
+                const hipdnn_plugin_sdk::ingestor::KernelDefinition& /*kernel*/) const override
+    {
+        return std::make_unique<hipdnn_plugin_sdk::ingestor::PreparedDispatch>();
+    }
+
+    void launch(const Handle& /*handle*/,
+                const hipdnn_plugin_sdk::ingestor::PreparedDispatch& /*prepared*/,
+                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                uint32_t /*numDeviceBuffers*/,
+                void* /*workspace*/) const override
+    {
+    }
+};
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

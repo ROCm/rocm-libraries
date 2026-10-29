@@ -29,6 +29,8 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_dnvec.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -54,8 +56,7 @@ void testing_spsv_coo_bad_arg(const Arguments& argus)
     hipDataType          dataType  = HIP_R_32F;
     hipsparseSpSVAlg_t   alg       = HIPSPARSE_SPSV_ALG_DEFAULT;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto drow_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
     auto dcol_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
@@ -73,7 +74,6 @@ void testing_spsv_coo_bad_arg(const Arguments& argus)
 
     // SpSV structures
     hipsparseSpMatDescr_t A;
-    hipsparseDnVecDescr_t x, y;
 
     hipsparseSpSVDescr_t descr;
 
@@ -84,8 +84,8 @@ void testing_spsv_coo_bad_arg(const Arguments& argus)
     // Create SpSV structures
     verify_hipsparse_status_success(
         hipsparseCreateCoo(&A, m, n, nnz, drow, dcol, dval, idxType, idxBase, dataType), "success");
-    verify_hipsparse_status_success(hipsparseCreateDnVec(&x, m, dx, dataType), "success");
-    verify_hipsparse_status_success(hipsparseCreateDnVec(&y, m, dy, dataType), "success");
+    hipsparseLocalDnVec x(m, dx, dataType);
+    hipsparseLocalDnVec y(m, dy, dataType);
 
     // SpSV buffer
     verify_hipsparse_status_invalid_handle(
@@ -154,8 +154,6 @@ void testing_spsv_coo_bad_arg(const Arguments& argus)
     // Destruct
     verify_hipsparse_status_success(hipsparseSpSV_destroyDescr(descr), "success");
     verify_hipsparse_status_success(hipsparseDestroySpMat(A), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnVec(x), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnVec(y), "success");
 #endif
 }
 
@@ -178,8 +176,7 @@ void testing_spsv_coo(Arguments argus)
     hipDataType          typeT = getDataType<T>();
 
     // hipSPARSE handle
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures
     std::vector<I> hrow_ptr;
@@ -251,10 +248,9 @@ void testing_spsv_coo(Arguments argus)
         hipsparseCreateCoo(&A, m, n, nnz, drow, dcol, dval, typeI, idx_base, typeT));
 
     // Create dense vectors
-    hipsparseDnVecDescr_t x, y1, y2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, m, dx, typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y1, m, dy_1, typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y2, m, dy_2, typeT));
+    hipsparseLocalDnVec x(m, dx, typeT);
+    hipsparseLocalDnVec y1(m, dy_1, typeT);
+    hipsparseLocalDnVec y2(m, dy_2, typeT);
 
     CHECK_HIPSPARSE_ERROR(
         hipsparseSpMatSetAttribute(A, HIPSPARSE_SPMAT_FILL_MODE, &uplo, sizeof(uplo)));
@@ -373,9 +369,6 @@ void testing_spsv_coo(Arguments argus)
 
     CHECK_HIPSPARSE_ERROR(hipsparseSpSV_destroyDescr(descr));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
 }
 
