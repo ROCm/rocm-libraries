@@ -307,16 +307,16 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWritesLseThroughGraph)
 // causal_mask=true plus left_bound=2 is a causal sliding window. The deprecated
 // flag fixes the diagonal but must keep the left bound, the same rule as the CPU
 // reference, so the plan equals a direct fprop() with (leftBound=2, rightBound=0,
-// top-left). hipDNN's left_bound=2 keeps 3 keys per row with the diagonal
-// (cuDNN's set_sliding_window_length(2) would keep 2; see #12982). With
-// Sq = Skv = 8 that hipDNN window makes rows 3..7 lose keys, so plain causal
-// attention would not match.
+// top-left). left_bound=2 keeps 2 keys per row, the diagonal included, as cuDNN's
+// set_sliding_window_length(2) does. With Sq = Skv = 8 that window makes rows 2..7
+// lose keys, so plain causal attention would not match.
 TEST(TestGpuSdpaFwdPlanBuilder, DeprecatedCausalMaskWithLeftBoundIsSlidingWindow)
 {
     SKIP_IF_NO_DEVICES();
 
     using hipdnn_data_sdk::utilities::Tensor;
     using hipdnn_gpu_ref::GpuFpReferenceSdpa;
+    using hipdnn_gpu_ref::GpuSdpaFwdOptions;
 
     SdpaAttributesT attrs;
     attrs.causal_mask = true;
@@ -347,15 +347,12 @@ TEST(TestGpuSdpaFwdPlanBuilder, DeprecatedCausalMaskWithLeftBoundIsSlidingWindow
 
     auto direct = [&](int64_t leftBound) {
         Tensor<float> out(DIMS);
-        GpuFpReferenceSdpa::fprop<float, float, float, float, float>(q,
-                                                                     k,
-                                                                     v,
-                                                                     out,
-                                                                     std::nullopt,
-                                                                     /*attnMask=*/nullptr,
-                                                                     leftBound,
-                                                                     /*rightBound=*/0,
-                                                                     /*topLeftAlignment=*/true);
+        GpuFpReferenceSdpa::fprop<float, float, float, float, float>(
+            q,
+            k,
+            v,
+            out,
+            GpuSdpaFwdOptions<float>{}.setBand(leftBound, /*right=*/0, /*topLeft=*/true));
         return out;
     };
     auto oWindow = direct(/*leftBound=*/2);
