@@ -71,7 +71,10 @@ def test_named_toml_nothing_places_fails_configuration(cmake, tmp_path, quoted):
 
 
 def test_unrecognised_reservation_argument_fails(cmake, tmp_path):
-    result, _ = _finalize(cmake, tmp_path, _entry(f'"{_TOML}"'), "FILE x.txt")
+    # The entry names no TOML, so the shard guard cannot be what fails the run.
+    result, _ = _finalize(
+        cmake, tmp_path, 'add_test(suite "../../bin/run")', "FILE x.txt"
+    )
 
     assert result.returncode != 0
     assert "hkp_reserve_census_shard: unrecognised argument(s): FILE;x.txt" in (
