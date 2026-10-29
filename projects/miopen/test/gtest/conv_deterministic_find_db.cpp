@@ -54,12 +54,13 @@ std::set<std::string> FindDbSolvers(const miopen::fs::path& find_db,
     return solvers;
 }
 
-void FindWrw(miopen::Handle& handle,
-             const miopen::ConvolutionDescriptor& conv,
-             const tensor<float>& x,
-             const tensor<float>& w,
-             const tensor<float>& y,
-             const ProblemDescription& problem)
+// Runs a wrw Find and returns the number of solutions it found.
+int FindWrw(miopen::Handle& handle,
+            const miopen::ConvolutionDescriptor& conv,
+            const tensor<float>& x,
+            const tensor<float>& w,
+            const tensor<float>& y,
+            const ProblemDescription& problem)
 {
     auto x_dev = handle.Write(x.data);
     auto w_dev = handle.Write(w.data);
@@ -83,11 +84,15 @@ void FindWrw(miopen::Handle& handle,
                                      wspace.ptr(),
                                      wspace.size(),
                                      false);
-    ASSERT_GT(ret_algo_count, 0);
+    return ret_algo_count;
 }
 
 void RunTest()
 {
+    // The variable overrides the attribute of both descriptors. Then the test has one mode only.
+    if(MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC)
+        GTEST_SKIP() << "MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC is set";
+
     // One handle for both modes, so the invoker cache is shared as in an application.
     miopen::Handle handle{};
 
@@ -113,7 +118,8 @@ void RunTest()
     const miopen::TestRordbEmbedFsOverrideLock rordb_embed_fs_override;
     ASSERT_TRUE(miopen::debug::testing_find_db_enabled);
 
-    FindWrw(handle, conv_default, x, w, y, problem_default);
+    ASSERT_GT(FindWrw(handle, conv_default, x, w, y, problem_default), 0)
+        << "The default-mode Find returned no solution";
     const auto solvers_default = FindDbSolvers(find_db, problem_default);
     ASSERT_FALSE(solvers_default.empty());
 
@@ -126,7 +132,8 @@ void RunTest()
             << solver;
     }
 
-    FindWrw(handle, conv_det, x, w, y, problem_det);
+    ASSERT_GT(FindWrw(handle, conv_det, x, w, y, problem_det), 0)
+        << "The deterministic Find returned no solution";
     EXPECT_FALSE(FindDbSolvers(find_db, problem_det).empty());
     // The deterministic Find must not change the default-mode record.
     EXPECT_EQ(FindDbSolvers(find_db, problem_default), solvers_default);
@@ -134,6 +141,8 @@ void RunTest()
 
 } // namespace
 
+// The parameter is not read. It exists only for the GPU_<Name>_FP32 naming convention and the
+// "Smoke/" prefix that the CI test categories select.
 class GPU_ConvDeterministicFindDb_FP32 : public testing::TestWithParam<miopenDataType_t>
 {
 };
