@@ -332,7 +332,7 @@ template<unsigned int Iteration, unsigned int HistogramSize, unsigned int Actual
 choose_pivot_bin(
     SharedStorageType& storage,
     histogram_t<bins_per_thread> const& thread_bins,
-    histogram_t<ActualSize> const& block_local_histogram,   // was histogram_t<HistogramSize>
+    histogram_t<ActualSize> const& block_local_histogram, 
     SizeIn N,
     SizeOut K,
     unsigned int thread_id)
