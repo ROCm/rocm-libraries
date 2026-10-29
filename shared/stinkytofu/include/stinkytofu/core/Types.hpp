@@ -125,6 +125,10 @@ struct PassFeatureConfig {
         /// the burst is max(that length, queueStartMinWmmaBurst) WMMAs (cut at the next
         /// barrier), and the stage's ds_loads catch up after it (DsCatchUpPace).
         bool queueStartForceWmmaBurst = false;
+        /// With queueStartForceWmmaBurst, open every WMMA region with a burst. Off, only the
+        /// loop header's first WMMA region and a region after a barrier wait do. The loop-head
+        /// deferral still wins.
+        bool queueStartBurstEveryRegion = false;
         /// Minimum WMMAs in a forced burst: 1..wmmaQueueDepth (clamped), -1 = wmmaQueueDepth.
         /// Only the burst length changes; the queue model keeps wmmaQueueDepth.
         int queueStartMinWmmaBurst = -1;

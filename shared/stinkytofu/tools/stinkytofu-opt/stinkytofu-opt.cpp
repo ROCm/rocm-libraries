@@ -206,6 +206,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--barrier-half-slack=") ||
                 arg.starts_with("--wmma-barrier-cover-cycles=") ||
                 arg.starts_with("--loop-tail-wmma-run=") || arg == "--wmma-refill-on-queue-drain" ||
+                arg == "--queue-start-burst-every-region" ||
                 arg == "--barrier-tail-back-to-back" || arg == "--wait-alu-hold-first-wait-only" ||
                 arg.starts_with("--ds-catch-up-pace=") || arg.starts_with("--ds-batch-wmmas=") ||
                 arg.starts_with("--ds-read-cycles-per-load=") ||
@@ -600,6 +601,8 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.wmmaRefillOnQueueDrain = true;
         } else if (a == "--queue-start-force-wmma-burst") {
             passFeatureConfig.dagFeatures.queueStartForceWmmaBurst = true;
+        } else if (a == "--queue-start-burst-every-region") {
+            passFeatureConfig.dagFeatures.queueStartBurstEveryRegion = true;
         } else if (a.starts_with("--queue-start-min-wmma-burst=")) {
             passFeatureConfig.dagFeatures.queueStartMinWmmaBurst =
                 std::stoi(a.substr(std::string("--queue-start-min-wmma-burst=").size()));

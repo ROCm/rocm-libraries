@@ -190,6 +190,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.wmmaRefillToCycles = moduleOptions.WmmaRefillToCycles;
                 passFeatureConfig.dagFeatures.queueStartForceWmmaBurst =
                     moduleOptions.QueueStartForceWmmaBurst;
+                passFeatureConfig.dagFeatures.queueStartBurstEveryRegion =
+                    moduleOptions.QueueStartBurstEveryRegion;
                 passFeatureConfig.dagFeatures.queueStartMinWmmaBurst =
                     moduleOptions.QueueStartMinWmmaBurst;
                 passFeatureConfig.dagFeatures.queueStartCalibratedIssueCycles =

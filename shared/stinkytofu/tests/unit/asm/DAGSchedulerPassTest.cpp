@@ -3070,14 +3070,15 @@ TEST_F(DAGSchedulerPassTest, QueueStartWmmaBurst_LoopHeadDeferralWins) {
     }
 }
 
-// The queue is reset at every block and region start. Without queueStartForceWmmaBurst only
-// the loop header's first WMMA region opens with a burst; with it, a block that is not a loop
-// header does too: its first WMMAs go ahead of the ready ds_loads and the compare, and they are
-// marked so MergeDscnt decides whether their waits merge.
+// The queue is reset at every block and region start. queueStartForceWmmaBurst alone still
+// bursts only a loop header's first WMMA region and a region after a barrier wait, so a block
+// that is not a loop header does not. queueStartBurstEveryRegion, with the force flag, does:
+// its first WMMAs go ahead of the ready ds_loads and the compare, and they are marked so
+// MergeDscnt decides whether their waits merge.
 TEST_F(DAGSchedulerPassTest, QueueStartForceWmmaBurst_NonHeaderBlockFillsTheQueueFirst) {
-    std::string shapes[2];
-    std::string marks[2];
-    for (int v = 0; v < 2; ++v) {
+    std::string shapes[3];
+    std::string marks[3];
+    for (int v = 0; v < 3; ++v) {
         SetUp();
         for (int i = 0; i < 8; i++) createMovableDsLoad(600 + i * 4, 80, i + 1);
         for (int i = 0; i < 16; i++) createWmmaF32_16x16x16_bf16(8 * i, 300 + 8 * i);
@@ -3092,7 +3093,8 @@ TEST_F(DAGSchedulerPassTest, QueueStartForceWmmaBurst_NonHeaderBlockFillsTheQueu
         pfc.dagFeatures.dsReadQueueDepth = 16;
         pfc.dagFeatures.wmmaQueueDepth = 8;
         pfc.dagFeatures.wmmaQueueCoverCycles = 16;
-        pfc.dagFeatures.queueStartForceWmmaBurst = v == 1;
+        pfc.dagFeatures.queueStartForceWmmaBurst = v >= 1;
+        pfc.dagFeatures.queueStartBurstEveryRegion = v == 2;
         ctx.setPassFeatureConfig(pfc);
         pass->run(*func, ctx, am);
         ASSERT_EQ(countStinkyInstructions(*bb), beforeCount);
@@ -3105,10 +3107,12 @@ TEST_F(DAGSchedulerPassTest, QueueStartForceWmmaBurst_NonHeaderBlockFillsTheQueu
     }
     EXPECT_NE(shapes[0].substr(0, 8), "WWWWWWWW") << shapes[0];
     EXPECT_EQ(marks[0], std::string(16, 'W'));
-    EXPECT_EQ(shapes[1].substr(0, 9), "WWWWWWWWd") << shapes[1];
-    EXPECT_EQ(std::count(shapes[1].begin(), shapes[1].end(), 'W'), 16) << shapes[1];
-    EXPECT_EQ(std::count(shapes[1].begin(), shapes[1].end(), 'd'), 8) << shapes[1];
-    EXPECT_EQ(marks[1], std::string(8, 'B') + std::string(8, 'W'));
+    EXPECT_NE(shapes[1].substr(0, 8), "WWWWWWWW") << shapes[1];
+    EXPECT_EQ(marks[1], std::string(16, 'W'));
+    EXPECT_EQ(shapes[2].substr(0, 9), "WWWWWWWWd") << shapes[2];
+    EXPECT_EQ(std::count(shapes[2].begin(), shapes[2].end(), 'W'), 16) << shapes[2];
+    EXPECT_EQ(std::count(shapes[2].begin(), shapes[2].end(), 'd'), 8) << shapes[2];
+    EXPECT_EQ(marks[2], std::string(8, 'B') + std::string(8, 'W'));
 }
 
 // After a barrier wait the queue starts empty: the WMMAs behind it fill the queue before the
