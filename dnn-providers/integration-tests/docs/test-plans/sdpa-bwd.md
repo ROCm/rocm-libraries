@@ -45,12 +45,13 @@ The features come from `flatbuffers_sdk/schemas/sdpa_backward_attributes.fbs` (`
 `scaled_dot_product_flash_attention.h` (`sdpa_node.h`) at `7d24006e6d7`, and the hipDNN SDPA
 semantics register (`SdpaSemanticsRegister.md`, entries SEM-nnn, added by #14358).
 
-**Baseline.** develop `61c26758398` (checked 2026-10-26 22:40 UTC) plus #14312, which derives O and
-Stats from the forward in the fill path; every file and line cited here is unchanged since the first
-audit at `b4fb42b18d4`. The CPU reference is the oracle on this baseline. Later PRs open gates
-(§4.1): #14358 (CPU and GPU references for the whole API, the SdpaBackward golden lane), #14287 or
-#14358 (SEM-001, the `left_bound` meaning), #14346 (`expected_rejection`), and the companion engine
-PRs that turn open defects into typed declines (§4.2). **Levels:** quick (`quick/`), PR
+**Baseline.** develop `e9c9997f239` (2026-10-29). It includes #14312, which derives O and Stats from
+the forward in the fill path, and #14483, which gives `left_bound` the cuDNN meaning (SEM-001). File
+and line citations come from the audit at `b4fb42b18d4` and `61c26758398`; #14483 changed the
+`left_bound` handling that §1.2 cites. The CPU reference is the oracle on this baseline. Later PRs
+open gates (§4.1): #14358 (CPU and GPU references for the whole API, the SdpaBackward golden lane),
+#14346 (`expected_rejection`), and the companion engine PRs that turn open defects into typed
+declines (§4.2). **Levels:** quick (`quick/`), PR
 (`standard/`), nightly (`comprehensive/`), full (`full/`); they cascade. PR CI runs `standard` on
 gfx94X in TheRock's `hipkernelprovider` job and nightly runs `comprehensive`; full runs only in
 TheRock prerelease builds, and no weekly lane exists (`projects/hipdnn/docs/TESTING.md:105-110`).
@@ -155,11 +156,11 @@ A position (b, h, i, j) is **live** when every active rule keeps it. The diagona
 
 **Window convention.** The plan states a window as W, the keys kept including the diagonal key (the
 model convention: Hugging Face, FlashAttention `window_size_left + 1`, gpt-oss, vLLM). The generator
-writes `left_bound = W − 1` on develop, which keeps `left_bound + 1` keys
-(`CpuFpReferenceSdpa.hpp:883-898`), and `left_bound = W` after SEM-001 lands (#14287 or #14358),
-which keeps `left_bound` keys as cuDNN does (`Attention.md:380`) and makes 0 illegal (R13); W = 1
-writes 0 on develop and 1 after. GL-10 pins the meaning. The PR that lands SEM-001 regenerates the 123 plan items (128 cases) that set W;
-case ids do not change.
+writes `left_bound = W`, which keeps `left_bound` keys as cuDNN does (`Attention.md:380`); 0 is
+illegal (R13). That is develop's meaning since #14483 (SEM-001, 2026-10-28). Before it, develop kept
+`left_bound + 1` keys and the generator wrote `left_bound = W − 1` (`WINDOW_SEMANTICS = "develop"`
+in `sdpa_bwd_plan.py`). GL-10 pins the meaning. Case ids name W, so they do not change with the
+switch.
 
 **Deprecated flags (SEM-002).** `causal_mask` sets R_eff = R if R ≥ 0, else 0, and keeps the
 alignment; `causal_mask_bottom_right` also sets BOTTOM_RIGHT; a left bound still applies. Both flags
@@ -182,9 +183,9 @@ defined only with TOP_LEFT causal (R_eff = 0).
 hipDNN's contract is cuDNN's semantics. In order of authority: `Attention.md:360-470, 540-705` and
 `sdpa_node.h:1183-1641`; the SEM register; the schema and the frontend node; the references.
 
-| Entry | Contract | develop | after #14287 / #14358 |
+| Entry | Contract | develop | after #14358 |
 |---|---|---|---|
-| SEM-001 `left_bound` | L keys including the diagonal | L + 1 keys (diverges) | aligned (both PRs) |
+| SEM-001 `left_bound` | L keys including the diagonal | aligned (#14483) | aligned |
 | SEM-002–004, 006, 012, 013 | deprecated flags compose (#13065); explicit alignment, window on the same diagonal; bias, then band (extension); FP32 P; unset scale 1.0 (#12926) | aligned | aligned |
 | SEM-008 padding flag | extension: seq_len without the flag is padding | CPU reference declines seq_len | modelled |
 | SEM-010 dead rows | O = 0, Stats = −inf, no contribution | band dead rows correct; a row dead by −inf bias gives NaN | aligned |
@@ -301,7 +302,7 @@ Legal graphs with a hazard. Undefined graphs (layer U, §2.8) are rejection prob
 | AW5 | Bias with a BR band or a window | extension (SEM-006): bias, then band; cuDNN rejects | ready; dropout + band #14358 + I6 | PR |
 | AW8 | Sq = Skv = 1 | P = 1: dQ = dK = 0 within rounding, dV = dO; cuDNN rejects (EXT) | ready | Q |
 | AW9 | Skv ≤ 2 with long Sq | dV sums dO over Sq ≥ 512; fp16 error grows with Sq (DEF-03); bf16 is bit-exact | ready | Q (bf16) |
-| AW10 | Window or bound covering the sequence | W = Skv − 1, Skv, Skv + 1 (the #14287 covering-window boundary); R ≥ Skv − 1 | ready | Q |
+| AW10 | Window or bound covering the sequence | W = Skv − 1, Skv, Skv + 1 (the #14483 covering-window boundary); R ≥ Skv − 1 | ready | Q |
 | AW11 | GQA with a window, causal mask, D 64 or D 256 | Mistral-7B 32/8 W 4096; gpt-oss 64/8 D 64 W 128; Gemma-3 16/8 D 256 W 1024 | ready | N |
 | AW12 | Independent layouts | dO layout ≠ O; dO batch stride with gaps; dQ, dK, dV layouts ≠ inputs; dO row pitch D + 1 (DEF-05) | ready | Q |
 | AW14 | K and V on one buffer | shared K = V (DeepSeek-V4); a bundle has one buffer per uid | HG17 | — |
@@ -329,7 +330,7 @@ The bundle harness loads a graph with `Graph::from_binary` and never runs `Graph
 so the generator enforces legality and classifies every case into one layer:
 
 **F** is frontend-legal on develop (R0–R12, tensor validate, post-validate); **F_R13** adds R13
-(`left_bound` ∈ {−1} or ≥ 1; #14287 or #14358) and **F_R13R14** adds R14 (`right_bound` ≥ −1; #14358);
+(`left_bound` ∈ {−1} or ≥ 1; #14483) and **F_R13R14** adds R14 (`right_bound` ≥ −1; #14358);
 **F_active** is the frontend of the baseline. **WF** is F_R13R14 plus the cuDNN tensor tables and
 support rules (`Attention.md:444-486, 693-705`; `sdpa_node.h:1284-1530`). **EXT** is outside WF with
 semantics hipDNN defines (SEM register, stride and broadcast rules). **U** is in F_active, outside WF
@@ -365,7 +366,7 @@ Each validation rule has one frontend unit test; these are not sweep cases. IV0�
 tensor validate, post-validate, backend finalize and the packer enum. Unit tests missing on develop:
 R1 (O, dK, dV unset), R2 (V rank), R7 (dO rank ≠ 4; O rank < 4, a possible out-of-bounds read that
 needs IVP1), R8 (all three bias checks), R10 (seq_len_kv rank, batch and non-one dims), R12 (node
-wiring) and post-validate (dBias without dims). R13 arrives with #14287 and #14358, R14 with #14358
+wiring) and post-validate (dBias without dims). R13 arrived with #14483, R14 arrives with #14358
 only; the merge must keep #14358's R14 test.
 
 **Proposed rules.** Each closes a U class. Until it lands, its class is a rejection probe (§4.2);
@@ -764,7 +765,7 @@ depend on the shape; a regression whose reference is shared with the engines als
 | REG-05a–c | MQA, GQA and Hk ≠ Hv overran dK/dV (memory fault) | #11543 `1f55a293e9b` | B1 4/1/1, 4/2/2, 4/2/1 64² causal TL; H50 32/8/8 16² | quick |
 | REG-07a–c | the reference read the bias as FLOAT whatever its dtype | #13474 `8a4428ed822` | B1 2 64×96: BF16 bias; HALF bias with BF16 IO; HALF bias with FP16 IO | quick |
 | REG-08 | the CPU reference threw on rank-3 Stats instead of declining | #12933 `73e2396380e` | B1 1 128² D128, Stats rank 3 | gated (#14358) |
-| REG-13a, c, d, e | `left_bound` kept W + 1 keys (SEM-001); W 1; covering-window boundary W = Skv − 1 and Skv | #14287, #14358 (ALMIOPEN-3024) | B1 1: 64×128 W 2; 64² W 1; 65² W 64, W 65; H65 W 1 BR | quick |
+| REG-13a, c, d, e | `left_bound` kept W + 1 keys (SEM-001); W 1; covering-window boundary W = Skv − 1 and Skv | #14483 (ALMIOPEN-3024) | B1 1: 64×128 W 2; 64² W 1; 65² W 64, W 65; H65 W 1 BR | quick |
 | REG-14 | the CPU reference gave NaN for a row that a −inf bias masks | #14358 `6be2472f007` | B1 2 64×96, bias row 7 and column 5 all −inf | gated (#14358 + I4) |
 
 Not sweep cases: #8469 (bf16 accumulation in the CPU reference) is pinned by GL-01; #12912, #13418
@@ -893,7 +894,7 @@ IO dtype, seed 42 (640 KiB). Every case uses FP64 compute rounded once (DV-2) an
 | GL-05 | HALF bias [1,Hq,Sq,Skv], fp16 | G-A; G-E (#13474) | PR | — |
 | GL-06, GL-07 | TL causal (90 unattended keys per head); BR causal | G-C (SEM-003) | PR | — |
 | GL-08 | BR with `right_bound` 90 at 203 × 113 (offset −90, no dead row) | G-C | PR | — |
-| GL-10 | window W 2, BR (`left_bound` 1 on develop, 2 after SEM-001) | G-C (SEM-001, SEM-004); G-E | PR | — |
+| GL-10 | window W 2, BR (`left_bound` 2) | G-C (SEM-001, SEM-004); G-E | PR | — |
 | GL-11 | `attn_scale_value` unset | G-C (SEM-013); G-E (#12926) | PR | — |
 | GL-12 | GQA B2 4/2/2 64 × 96 D64, BR causal | G-C (head grouping ⌊h/g⌋) | PR | — |
 | GL-13 | `causal_mask` with BR (tensors shared with GL-07) | G-E (#13065); G-C (SEM-002) | PR | — |
@@ -961,8 +962,7 @@ so a SdpaBackward golden pointer fails as `<bundle>_Unvalidated` until #14358 (A
 coverage gate). GT3: the objects reach the `golden-data` remote before the pointer merges; a human
 runs `dvc push` (tracking: to file). GL-14, GL-15 and GL-16a wait for their live counterparts, so
 golden data is never a level's only coverage of a feature. Forward halves stay `_fwd_pair` bundles,
-outside SdpaBackward counts and claims (HG13). Regenerate when SEM-001 lands (GL-10 and GL-21 rewrite
-`left_bound`; tensors unchanged), at generator v2.0.0, when the SEM-010 amendment lands (add GL-09,
+outside SdpaBackward counts and claims (HG13). Regenerate at generator v2.0.0, when the SEM-010 amendment lands (add GL-09,
 GL-16b), when HG7 lands, and when torch, the generator major version or the strategy changes.
 
 ---
@@ -1050,7 +1050,7 @@ The generator emits these features' cases as gated or listed items; they run whe
 | no GPU backward reference; no SdpaBackward golden lane | CPU reference only; M and X gated; no golden data | #14358 | ALMIOPEN-2103, 2694; 2863, 2588 |
 | the #14312 derivation declines ALiBi, padding, dropout and ragged (I6); its CPU forward is too slow for M and X | those cases stay gated after #14358 | extend it; derive with the GPU forward | ALMIOPEN-2855 (GPU forward); extension to file |
 | #14312 calls the forward overload that #14358 deletes | the second PR to land does not build | move to `SdpaFwdOptions` | PR review |
-| `left_bound` keeps L + 1 keys (SEM-001) | window cases pass while wrong against cuDNN | #14287 or #14358 | ALMIOPEN-3024 |
+| `left_bound` keeps L + 1 keys (SEM-001) | window cases pass while wrong against cuDNN | fixed by #14483 | ALMIOPEN-3024 |
 | rank-3 Stats throw; non-FLOAT Stats read as float; #14358 throws for a device-memory scale and declines p = 0 | false FAIL; silent mis-model; PRB-R01 loses its oracle | references decline; rule IVP2; a SEM entry for p = 0 | to file; PR review |
 | CPU reference cost: single-threaded, dP for every key | 90 % of lane time | parallelise over (b, KV head); skip masked keys | to file |
 | E5: bundles load without `Graph::validate()` | frontend rules never apply to a bundle | the generator enforces legality; validate after load | to file |
