@@ -4,17 +4,20 @@
 
 By default it is opt-in: admitted only when the request names both its
 ``algorithm`` and ``spec_id``. A family whose ``auto`` is itself one
-configuration of a registered variant passes ``route_auto`` and gets a
-candidate that also answers ``auto``. Its configuration comes from the
-request's ``tuning_knobs`` (rebuilt directly), else its ``tuning_id``
-(``auto``: the space's default; otherwise a search of the space). ``support``
-and ``select_spec`` share one resolution per request.
+configuration of a registered variant passes ``route_auto`` (and optionally
+``auto_knobs``) and gets a candidate that also answers ``auto``. Its
+configuration comes from the request's ``tuning_knobs`` (rebuilt directly),
+else its ``tuning_id`` (``auto``: on an ``auto`` ``spec_id`` with no tuning
+pin, the ``auto_knobs`` stack if given, else the space's default; otherwise a
+search of the space). ``support`` and
+``select_spec`` share one resolution per request.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from functools import lru_cache
-from typing import Any, Callable, Optional, Sequence, Tuple
+from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
 
 from ..core import (
     Capability,
@@ -37,6 +40,12 @@ def explicitly_pinned(req, algorithm: str, spec_id: str) -> bool:
     ) and normalize_selector(req.algorithm) == normalize_selector(algorithm)
 
 
+def carries_tuning_pin(req) -> bool:
+    """Whether ``req`` pins a configuration itself: a ``tuning_id`` other
+    than ``auto`` (blank counts as ``auto``) or any ``tuning_knobs``."""
+    return (req.tuning_id.strip() or "auto") != "auto" or bool(dict(req.tuning_knobs))
+
+
 def resolve_pinned(
     req,
     *,
@@ -54,10 +63,10 @@ def resolve_pinned(
     A pin that does not resolve is refused with the reason; the candidate never
     substitutes another configuration.
     """
+    if not carries_tuning_pin(req):
+        return default()
     wanted = req.tuning_id.strip() or "auto"
     knobs = dict(req.tuning_knobs)
-    if wanted == "auto" and not knobs:
-        return default()
     spec, why = canonicalize(knobs)
     if wanted == "auto":
         return spec, why
@@ -110,6 +119,7 @@ def make_tuned_candidate(
     block: Callable[[Any], Tuple[int, int, int]] = lambda spec: spec.launch_block(),
     precheck: Optional[Callable[[Any], Tuple[bool, str]]] = None,
     route_auto: Optional[Callable[[Any], Tuple[bool, str]]] = None,
+    auto_knobs: Optional[Callable[[Any], Mapping[str, Any]]] = None,
 ) -> KernelCandidate:
     """A candidate over ``space``, opt-in unless ``route_auto`` is given.
 
@@ -127,8 +137,18 @@ def make_tuned_candidate(
     or name this candidate is resolved as if it pinned both, and for one whose
     ``spec_id`` is ``auto``, ``route_auto`` says whether this candidate takes it
     (``(False, why)`` leaves it to another candidate). Without it the candidate
-    is opt-in.
+    is opt-in. ``auto_knobs(req)`` (with ``route_auto`` only) gives the knobs an
+    ``auto`` request with no tuning pin (``tuning_id`` ``auto``, no
+    ``tuning_knobs``) runs on this candidate, resolved as ``tuning_knobs`` are
+    (a knob the request cannot read drops); an empty mapping runs the space's
+    default. A request that carries its own tuning pin resolves it as given.
+    Knobs that do not resolve on a request whose space default does are a
+    family data error and raise ``RuntimeError`` with the reason; ``auto``
+    never quietly runs another configuration. Without ``auto_knobs``, ``auto``
+    runs the space's default.
     """
+    if auto_knobs is not None and route_auto is None:
+        raise ValueError(f"{name}: auto_knobs needs route_auto")
 
     def routed(req) -> Tuple[Optional[Any], str]:
         """``req`` pinned to this candidate, or ``(None, why)`` if it does not
@@ -146,6 +166,22 @@ def make_tuned_candidate(
             ok, why = route_auto(req)
             if not ok:
                 return None, why
+            probe = opt_in_probe(req, candidate)
+            pinned = carries_tuning_pin(req)
+            knobs = auto_knobs(req) if auto_knobs is not None and not pinned else None
+            if knobs:
+                stacked = replace(probe, tuning_knobs=dict(knobs))
+                found, why = resolve(stacked)
+                if found is not None:
+                    return stacked, "ok"
+                # A request the space cannot build at all is refused below with
+                # the base's reason; one it can build must take the stack.
+                if resolve(probe)[0] is not None:
+                    raise RuntimeError(
+                        f"{name}: auto knobs {dict(knobs)!r} do not resolve on "
+                        f"a request whose default configuration does: {why}"
+                    )
+            return probe, "ok"
         return opt_in_probe(req, candidate), "ok"
 
     @lru_cache(maxsize=32)
