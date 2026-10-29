@@ -62,7 +62,7 @@ from .Toolchain.Source import SourceToolchain
 from .Common import HR, print1, print2, IsaInfo, IsaVersion, \
         printExit, printWarning, ensurePath, tqdm, state, \
         BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR, ParallelMap2
-from .Common.Architectures import archNamesByIsa, isaToGfx, gfxToVariants
+from .Common.Architectures import archNamesByIsa, isaToGfx, gfxToVariants, withoutPredicate
 from .Common.GlobalParameters import globalParameters, startTime
 from .Common.TimingInstrumentation import timing_context
 
@@ -146,7 +146,7 @@ def cmdLineArchsFor(archNames, isaInfoMap) -> List[str]:
     ]
 
 
-def _computeCacheKey(benchmarkStep, cmdLineArchs):
+def _computeCacheKey(benchmarkStep, cmdLineArchs, archNames=None):
     """Compute a deterministic hash from the cache-relevant parameter fields.
 
     The compiler targets belong in the key because they decide what the cached
@@ -154,10 +154,30 @@ def _computeCacheKey(benchmarkStep, cmdLineArchs):
     architectures sharing an ISA are tuned by two runs that agree on every field
     here, and without the targets the second would load the first's objects and
     hand the wrong machine code to silicon that cannot run it.
+
+    A qualified request is in the key for the same reason one step further on.
+    ``cmdLineArchs`` has been through ``archNamesByIsa``, which drops the xnack
+    qualifier, so gfx1250 and gfx1250:xnack- arrive here spelled alike -- yet
+    their objects differ, because the qualifier selects ARCH_CAP_OVERRIDES and
+    an xnack- build omits the replay drains. Without this the two runs share one
+    entry, and whichever ran first decides what the other executes: an
+    unqualified run reusing an xnack- run's objects gets kernels missing drains
+    it needs.
+
+    The field is added only when something was actually qualified, so an
+    unqualified build hashes exactly as it did before this field existed and
+    keeps its caches. Adding it unconditionally would move every key once --
+    including those of builds that never mention xnack -- for no gain, since an
+    empty value distinguishes nothing. Predicates are dropped from what does go
+    in; they select hardware and say nothing about what is in a code object, so
+    keeping them would only split entries that should be shared.
     """
     cacheFields = {f: getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items()}
     cacheFields["KernelNamingVersion"] = _KERNEL_NAMING_VERSION
     cacheFields["_Architectures"] = ",".join(sorted(cmdLineArchs))
+    qualified = sorted(withoutPredicate(a) for a in (archNames or []) if ":" in a)
+    if qualified:
+        cacheFields["_RequestedArchitectures"] = ",".join(qualified)
     canonical = json.dumps(cacheFields, sort_keys=True, default=str)
     return hashlib.sha256(canonical.encode()).hexdigest()[:_CACHE_KEY_LEN]
 
@@ -707,7 +727,9 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
         backend_name = str(backendConfig.get("Name", "tensile")).lower()
 
         # check if a solution cache exists and if it matches our solution parameters
-        cacheKey = _computeCacheKey(benchmarkStep, cmdLineArchsFor(archNames, isaInfoMap))
+        cacheKey = _computeCacheKey(
+            benchmarkStep, cmdLineArchsFor(archNames, isaInfoMap), archNames
+        )
         cacheDir = os.path.join(stepBaseDir, "caches", cacheKey)
         sourcePath = Path(cacheDir) / "source"
         
