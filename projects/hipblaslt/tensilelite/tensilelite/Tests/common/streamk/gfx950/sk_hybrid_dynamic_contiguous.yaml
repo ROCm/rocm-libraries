@@ -1,0 +1,149 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# StreamK, WorkAssignment Hybrid, dynamic sub-mode: the contiguous per-queue
+# item order (formula and gate: StreamKHybrid._contiguousQueueItem).
+# WorkGroupMapping 1 skips origami, so the runtime WGMXCC is the XCD count and
+# chunk is 0. The dynamic grid is at most 3 workgroups per CU: 768 on gfx950.
+#
+# - 768 whole tiles on the 768 grid, batch 1 and 2: renumbered;
+# - 1024 whole tiles on 768 workgroups: interleaved;
+# - fixed WorkGroupMappingXCC 8 with PersistentXCCMapping 8: interleaved;
+# - WorkQueueStealing: the renumbering follows the item's queue, not the
+#   popping workgroup's;
+# - PAP (whole tiles only), the OptNLL call site: one round (64 and 120
+#   tiles) renumbered, several rounds (1024 tiles) interleaved.
+#
+# Validation after repeated launches: see sk_hybrid.yaml; the Synchronizer
+# check catches queue counters left nonzero (an item popped twice or never).
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict]
+
+GlobalParameters:
+  Architecture: gfx950
+  HybridAssignmentPolicy: [DynamicWorkQueue]
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: False
+  CpuThreads: 16
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  MaxWorkspaceSize: 134217728
+  # Several launches of each kernel: 2 warmups and one group of 3
+  # back-to-back launches per run, 2 runs per problem.
+  SyncsPerBenchmark: 1
+  EnqueuesPerSync: 3
+  ValidateAfterEnqueues: True
+  RotatingBufferSize: 512
+  NumWarmups: 2
+  NumBenchmarks: 2
+  SleepPercent: 0
+
+.SkDynamicContiguousCommon: &sk_dynamic_contiguous_common
+  - KernelLanguage: [Assembly]
+  - TileProcessingStrategy: [StreamK]
+  - WorkAssignment: [Hybrid]
+  - GlobalSplitU: [0]
+  - DepthU: [16]
+  # MT 64x64.
+  - MatrixInstruction: [[16, 16, 4, 1, 1, 2, 2, 2, 2]]
+  - GlobalReadVectorWidthA: [1]
+  - GlobalReadVectorWidthB: [1]
+  - LocalReadVectorWidth: [1]
+  - VectorWidthA: [1]
+  - VectorWidthB: [1]
+  - MIArchVgpr: [False]
+  - PrefetchGlobalRead: [2]
+  - PrefetchLocalRead: [1]
+  - 1LDSBuffer: [1]
+  - ExpandPointerSwap: [False]
+  - ScheduleIterAlg: [3]
+  - SourceSwap: [True]
+  - StoreRemapVectorWidth: [0]
+  - TransposeLDS: [0]
+  - WorkGroupMapping: [1]
+  - StaggerU: [0]
+
+BenchmarkProblems:
+  - - OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - BenchmarkCommonParameters: *sk_dynamic_contiguous_common
+      ForkParameters:
+        - Groups:
+          - # Auto WGMXCC (the XCD count at launch).
+            - WorkGroupMappingXCC: -1
+              PersistentXCCMapping: 0
+              WorkQueueStealing: 0
+            # Fixed WGMXCC: interleaved.
+            - WorkGroupMappingXCC: 8
+              PersistentXCCMapping: 8
+              WorkQueueStealing: 0
+            # Single-hop work stealing.
+            - WorkGroupMappingXCC: -1
+              PersistentXCCMapping: 0
+              WorkQueueStealing: 1
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # 768 whole tiles on the 768 grid: renumbered.
+          - Exact: [2048, 1536, 1, 256]
+          - Exact: [1024, 1536, 2, 256]
+          # 1024 whole tiles on 768 workgroups: interleaved.
+          - Exact: [2048, 2048, 1, 256]
+
+  - - OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [Hybrid]
+        - GlobalSplitU: [0]
+        - WavefrontSize: [64]
+        - DepthU: [16]
+        - 1LDSBuffer: [0]
+        - DirectToLds: [0]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        # MT 128x128.
+        - MatrixInstruction: [[16, 16, 4, 1, 1, 4, 4, 2, 2]]
+        - MIArchVgpr: [false]
+        - PrefetchAcrossPersistent: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StoreRemapVectorWidth: [0]
+        - StoreVectorWidth: [4]
+        - TransposeLDS: [0]
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
+        - WorkGroupMapping: [1]
+        - WorkGroupMappingXCC: [-1]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - UseSgprForGRO: [0]
+        - StaggerU: [0]
+        - Use64bShadowLimit: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # Whole tiles (PAP never splits), one round: 64 and 3 x 40 (edge) tiles.
+          - Exact: [1024, 1024, 1, 512]
+          - Exact: [1000, 520, 3, 512]
+          # 1024 whole tiles on at most 768 workgroups: interleaved.
+          - Exact: [4096, 4096, 1, 256]
