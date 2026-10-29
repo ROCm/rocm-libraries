@@ -1032,12 +1032,18 @@ def test_an_authored_recipe_reading_kernel_priority_is_admitted():
         )
 
 
-def test_the_bench_is_run_for_real_and_a_failing_exit_is_refused(tmp_path):
+def test_the_bench_is_run_for_real_and_a_failing_exit_is_refused(tmp_path, monkeypatch):
     """Every other test replaces `_run_json`; this one runs a stand-in executable, so the
-    exit status and the one-JSON-object rule are what is checked."""
+    exit status and the one-JSON-object rule are what is checked. The child gets this
+    process's environment, as `bench_environment` gives it: an interpreter that finds its
+    libpython through LD_LIBRARY_PATH cannot start without it."""
+    import os
     import sys
 
     from uhd_gen.generate import _run_json
+
+    monkeypatch.delenv("HIPDNN_CACHE_DIR", raising=False)
+    environment = dict(os.environ)
 
     def bench(body: str) -> list:
         script = tmp_path / f"bench{len(list(tmp_path.glob('bench*')))}.py"
@@ -1046,26 +1052,35 @@ def test_the_bench_is_run_for_real_and_a_failing_exit_is_refused(tmp_path):
 
     commands: list = []
     answered = _run_json(
-        bench("print('{\"avg_time_ms\": 1.5}')"), {}, tmp_path / "logs", 0, commands
+        bench("print('{\"avg_time_ms\": 1.5}')"),
+        environment,
+        tmp_path / "logs",
+        0,
+        commands,
     )
     assert answered == {"avg_time_ms": 1.5} and commands[0]["returncode"] == 0
 
     with pytest.raises(ValueError, match=r"hipdnn_bench failed \(3\)"):
         _run_json(
             bench("import sys\nprint('{}')\nsys.exit(3)"),
-            {},
+            environment,
             tmp_path / "logs",
             1,
             commands,
         )
     with pytest.raises(ValueError, match="one JSON response"):
-        _run_json(bench("print('not json')"), {}, tmp_path / "logs", 2, commands)
+        _run_json(
+            bench("print('not json')"), environment, tmp_path / "logs", 2, commands
+        )
 
 
-def test_a_bench_that_outlasts_its_timeout_is_killed_and_refused(tmp_path):
+def test_a_bench_that_outlasts_its_timeout_is_killed_and_refused(tmp_path, monkeypatch):
+    import os
     import sys
 
     from uhd_gen.generate import _run_json
+
+    monkeypatch.delenv("HIPDNN_CACHE_DIR", raising=False)
 
     script = tmp_path / "hang.py"
     script.write_text("import time\ntime.sleep(60)\n", encoding="utf-8")
@@ -1073,7 +1088,7 @@ def test_a_bench_that_outlasts_its_timeout_is_killed_and_refused(tmp_path):
     with pytest.raises(ValueError, match="timed out after 0.5 s"):
         _run_json(
             [sys.executable, str(script)],
-            {},
+            dict(os.environ),
             tmp_path / "logs",
             0,
             commands,
