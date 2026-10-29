@@ -156,14 +156,20 @@ class GL2PrefetchLoad(GL2Prefetch):
         du: int = kernel["_DepthU%s" % subTc]
         if tc.startswith("MX"):
             mxTile = mxFreeTile(kernel, tc)
-            mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), sgpr("Size%s"%INDEX_CHARS[tIdx]), \
-                round(kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"] * bpe), comment="addr increment"))
+            kBytes = round(kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"] * bpe)
             if mxTile > 1:
                 # 1D inc = Size * (DepthU/MXBlock) * bpe. 2D K-row pitch is
-                # Size/MXBlockFree; without this shift CD4_2 PGL1 walks SizeJ
-                # (65536) through a 6144-byte MXSB buffer.
+                # ceil(Size/MXBlockFree), as in calculateStartAddr; without it
+                # CD4_2 PGL1 walks SizeJ (65536) through a 6144-byte MXSB buffer.
+                mod.add(SAddU32(sgpr(f"GL2PrefetchInc{tc}"), sgpr("Size%s"%INDEX_CHARS[tIdx]), mxTile - 1,
+                    comment=f"ceil(Size/MXBlockFree({mxTile}))"))
                 mod.add(SLShiftRightB32(sgpr(f"GL2PrefetchInc{tc}"), hex(int(log2(mxTile))),
-                    sgpr(f"GL2PrefetchInc{tc}"), f"MXS 2D: Size/MXBlockFree({mxTile})"))
+                    sgpr(f"GL2PrefetchInc{tc}"), "MXS 2D: scale rows"))
+                mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), sgpr(f"GL2PrefetchInc{tc}"), kBytes,
+                    comment="addr increment"))
+            else:
+                mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), sgpr("Size%s"%INDEX_CHARS[tIdx]), kBytes,
+                    comment="addr increment"))
         elif tp["tlu"]:
             perpStride: str | RegisterContainer = writer.strideRef(subTc, 3)
             mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), perpStride, round(du * bpe), comment="addr increment"))

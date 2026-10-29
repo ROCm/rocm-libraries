@@ -14,6 +14,9 @@ A yaml list ``MXBlockA: [free, k]`` is split into this pair by ProblemType.
 from math import log2
 from typing import Mapping
 
+from rocisa.code import Module
+from rocisa.instruction import SAddU32, SLShiftRightB32, SMulI32
+
 # 2D MXS buffers are a few e8s. MacDataType F8's ldsAlign is 256 B
 # (64 / 0.25 regs), which would round a 2-byte buffer back to the 1D size.
 MXS_LDS_ALIGN_2D = 64
@@ -241,3 +244,24 @@ def mxTileSpanPartnerDelta(kernel: Mapping, tc: str, tile01: int) -> int:
         blocks = int(kernel.get(blockKey, 1) or 1)
         return int(matrixInstT) * blocks * numWaves * vw
     return int(matrixInstT) * vw
+
+
+def mulScaleRows(dst, factor, size, mxTile: int, rowsSgpr=None, comment: str = "") -> Module:
+    """dst = factor * K-row pitch of an MX scale tensor.
+
+    The pitch is Size for 1D scales and ceil(Size / MXBlockFree) for 2D, the
+    row count the host allocates (CeilDivide). factor is an int or a
+    register; rowsSgpr holds the 2D row count and defaults to dst, so
+    it is required when factor is dst.
+    """
+    mod = Module()
+    rows = size
+    if mxTile > 1:
+        rows = rowsSgpr if rowsSgpr is not None else dst
+        mod.add(SAddU32(rows, size, mxTile - 1, f"ceil(Size/MXBlockFree({mxTile}))"))
+        mod.add(SLShiftRightB32(rows, hex(int(log2(mxTile))), rows, "MXS 2D: scale rows"))
+    if isinstance(factor, int):
+        mod.add(SMulI32(dst, rows, factor, comment))
+    else:
+        mod.add(SMulI32(dst, factor, rows, comment))
+    return mod

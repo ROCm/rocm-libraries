@@ -2448,23 +2448,28 @@ namespace TensileLite
                       }
                       size_t const gpuScaleBytes = swizzledScaleElems * eltSize;
                       std::vector<uint8_t> gpuScaleBuf(gpuScaleBytes, 0);
-                      size_t const elemsPerBatch
-                          = (batchCount > 0) ? (swizzledScaleElems / batchCount)
-                                             : swizzledScaleElems;
                       if(mxBlockFree > 1)
                       {
                           // generateMXInput has no 2D seam. Canonical cpuInput is
                           // already downsampled; swizzle that tensor for the GPU.
+                          // Each batch keeps its descriptor offset (as the 1D path
+                          // does) and only its own footprint is copied and swizzled,
+                          // so a padded batch stride neither shifts nor overreads.
+                          size_t const batchFootprintBytes = slowDim * fastDim * eltSize;
+                          if((batchCount - 1) * scaleBatchStrideBytes + batchFootprintBytes
+                             > gpuScaleBytes)
+                              throw std::runtime_error(
+                                  "2D MX scale: batch footprint exceeds the scale buffer");
                           for(size_t b = 0; b < batchCount; b++)
                           {
-                              auto* dst = gpuScaleBuf.data() + b * elemsPerBatch * eltSize;
+                              auto* dst = gpuScaleBuf.data() + b * scaleBatchStrideBytes;
                               auto* src
                                   = static_cast<uint8_t*>(pristineScale.cpuInput.valid.get())
                                     + b * scaleBatchStrideBytes;
                               size_t const srcBytes = (batchCount > 1)
                                   ? scaleBatchStrideBytes
                                   : scaleDesc.totalAllocatedBytes();
-                              std::memcpy(dst, src, std::min(srcBytes, elemsPerBatch * eltSize));
+                              std::memcpy(dst, src, std::min(srcBytes, batchFootprintBytes));
                               applyMXScaleLayoutInPlace(dst,
                                                         slowDim * fastDim,
                                                         swizzleLayout,

@@ -592,6 +592,11 @@ CONFIGS = [
     GL2Config("gsu2_mx1x128_cluster", [_A(True, 128), _B(True, 64), _MXSA(128), _MXSB(64)],
               depth_u=512, mx_block=128, mx_block_free=1, cluster=(4, 4),
               gsu=2, gsuc=True, k_iters=14),
+    # MX128x128 with free sizes that are not a multiple of MXBlockFree: the scale
+    # tensor has ceil(Size/128) rows, so the K step must use that pitch, not a floor.
+    GL2Config("mx128x128_unaligned_free", [_A(True, 128), _B(True, 128), _MXSA(128), _MXSB(128)],
+              depth_u=256, mx_block=128, mx_block_free=128, cluster=(2, 2),
+              size_i=264, size_j=200, k_iters=6),
     # MX128x128 with asymmetric MT and cluster shapes for MXSA and MXSB.
     GL2Config("gsu2_mx128x128_cluster", [_A(True, 64), _B(True, 192), _MXSA(64), _MXSB(192)],
               depth_u=512, mx_block=128, mx_block_free=128, cluster=(4, 2),
@@ -1101,7 +1106,7 @@ def inc_bytes(spec, cfg):
     """Per-iteration K (summation) address increment in bytes, matching
     GL2Prefetch.setIncrement. Advancing the prefetch by one iteration moves a
     full DepthU along the summation axis; in bytes this is:
-      - MX:       SizeFree * (DepthU // MXBlock) / MXBlockFree (* bpe == 1)
+      - MX:       ceil(SizeFree / MXBlockFree) * (DepthU // MXBlock) (* bpe == 1)
       - Metadata: StrideMetadataL(=coal_m) * DepthUMetadata if TLUMetadata,
                   else DepthUMetadata                          (bpe == 1)
       - TLU:      StrideUnroll(=coal) * (_DepthU{A,B} * bpe)
@@ -1109,8 +1114,8 @@ def inc_bytes(spec, cfg):
     """
     bpe = spec.bpe
     if spec.is_mx:
-        return (free_dim_size(cfg, spec.subtc)
-                * round(cfg.depth_u // cfg.mx_block * bpe)) // cfg.mx_block_free
+        scale_rows = (free_dim_size(cfg, spec.subtc) + cfg.mx_block_free - 1) // cfg.mx_block_free
+        return scale_rows * round(cfg.depth_u // cfg.mx_block * bpe)
     if spec.is_m:
         coal, _, _, _ = tensor_dims(spec, cfg)
         return round(coal * cfg.depth_u_metadata) if spec.tlu else round(cfg.depth_u_metadata)

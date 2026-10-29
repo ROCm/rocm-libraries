@@ -10,8 +10,9 @@ from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32
 from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, MemTokenData, TENSORModifiers
 from rocisa.functions import scalarMultiply64Bpe
 from math import log2, ceil, prod
-from ..Common.MxScaleLayout import mxFreeTile, mxTdmMSplitStride, mxTdmTileM
+from ..Common.MxScaleLayout import mxFreeTile, mulScaleRows, mxTdmMSplitStride, mxTdmTileM
 # from ..KernelWriterAssembly import KernelWriterAssembly
+
 
 
 class TensorDataMoverLoad(TensorDataMover):
@@ -28,6 +29,16 @@ class TensorDataMoverLoad(TensorDataMover):
 
     def __call__(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping):
         pass
+
+    def mulScaleKRowPitch(self, writer: "KernelWriterAssembly", kernel: Mapping, tc: str, tIdx: int,
+                          dstSgpr: int | str, comment: str) -> Module:
+        """dst *= K-row pitch of an MX scale tensor (see mulScaleRows)."""
+        mxTile = mxFreeTile(kernel, tc)
+        size = sgpr(f"Size{INDEX_CHARS[tIdx]}")
+        if mxTile == 1:
+            return mulScaleRows(sgpr(dstSgpr), sgpr(dstSgpr), size, mxTile, comment=comment)
+        with writer.allocTmpSgpr(1, tag="TDM_mxsKRowPitch") as rows:
+            return mulScaleRows(sgpr(dstSgpr), sgpr(dstSgpr), size, mxTile, sgpr(rows.idx), comment)
 
     def gsuIterOffset(self, writer: "KernelWriterAssembly", kernel: Mapping, tc: str, dstSgpr: int | str) -> Module:
         """Index of the first unroll iteration owned by this GSU group.
@@ -141,10 +152,8 @@ class TensorDataMoverLoad(TensorDataMover):
                 mod.add(self.gsuIterOffset(writer, kernel, tc, gsuOffsetSgprIdx))
                 mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), gsuOffsetBytes, f"gsuOffset = gsuIterOffset * DepthU({depthU}) * bpe({bpe})"))
                 if "MXS" in tc:
-                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), sgpr(f"Size{INDEX_CHARS[tIdx]}"), f"MXS: scale GSU offset by tile size Size{INDEX_CHARS[tIdx]}"))
-                    mxTile = mxFreeTile(kernel, tc)
-                    if mxTile > 1:
-                        mod.add(SLShiftRightB32(sgpr(gsuOffsetSgprIdx), hex(int(log2(mxTile))), sgpr(gsuOffsetSgprIdx), f"MXS 2D: Size / MXBlockFree({mxTile})"))
+                    mod.add(self.mulScaleKRowPitch(writer, kernel, tc, tIdx, gsuOffsetSgprIdx,
+                                                   "MXS: scale GSU offset by the K-row pitch"))
                 elif tlu:
                     unrollStride = writer.strideRef(tc, unrollSummation[-1])
                     mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), unrollStride, "tlu=1, scale GSU offset by unroll stride"))
@@ -245,9 +254,8 @@ class TensorDataMoverLoad(TensorDataMover):
                     # K-splitting: offset by stride to next k_group
                     scale = numMxKGroups // numComp
                     mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), (mxUnit * numMxKGroups // numComp), f"woffset = wCompId * mxUnit({mxUnit}) * numMxKGroups({numMxKGroups}) // numComp({numComp})"))
-                    mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(f"Size{INDEX_CHARS[tIdx]}"), f"woffset *= Size{INDEX_CHARS[tIdx]}"))
-                    if mxTile > 1:
-                        mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), hex(int(log2(mxTile))), sgpr(waveOffsetSgprIdx), f"MXS 2D: Size / MXBlockFree({mxTile})"))
+                    mod.add(self.mulScaleKRowPitch(writer, kernel, tc, tIdx, waveOffsetSgprIdx,
+                                                   "woffset *= K-row pitch"))
                 else:
                     # M/N-splitting: offset within same k_group along tile dimension.
                     # 0 when scale-rows < numComp: all comps share the WG start
@@ -265,10 +273,8 @@ class TensorDataMoverLoad(TensorDataMover):
                 mod.add(self.gsuIterOffset(writer, kernel, tc, gsuOffsetSgprIdx))
                 mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), gsuOffsetBytes, f"gsuOffset = gsuIterOffset * DepthU({depthU}) * bpe({bpe})"))
                 if "MXS" in tc:
-                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), sgpr(f"Size{INDEX_CHARS[tIdx]}"), f"MXS: scale GSU offset by tile size Size{INDEX_CHARS[tIdx]}"))
-                    mxTile = mxFreeTile(kernel, tc)
-                    if mxTile > 1:
-                        mod.add(SLShiftRightB32(sgpr(gsuOffsetSgprIdx), hex(int(log2(mxTile))), sgpr(gsuOffsetSgprIdx), f"MXS 2D: Size / MXBlockFree({mxTile})"))
+                    mod.add(self.mulScaleKRowPitch(writer, kernel, tc, tIdx, gsuOffsetSgprIdx,
+                                                   "MXS: scale GSU offset by the K-row pitch"))
                 elif tlu:
                     unrollStride = writer.strideRef(tc, unrollSummation[-1])
                     mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), unrollStride, "tlu=1, scale GSU offset by unroll stride"))
