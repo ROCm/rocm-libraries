@@ -150,6 +150,10 @@ namespace FixedPointEmulation
             {0x75b0u, {11.22, 22.04, 521.7, 3.0e7, 6.1e7, 1.2e7, 3.0e8, 6.1e8}}, // gfx950-mi350x
             {0x75a3u, {11.33, 22.58, 484.0, 3.4e7, 6.8e7, 1.4e7, 3.4e8, 6.8e8}}, // gfx950-mi355x
             {0x75b3u, {11.33, 22.58, 484.0, 3.4e7, 6.8e7, 1.4e7, 3.4e8, 6.8e8}}, // gfx950-mi355x
+            /* PROVISIONAL: values copied from gfx950-mi355x, not measured on this
+             * device.  Only HIPBLAS_EMULATION_STRATEGY=eager results are meaningful
+             * until the row is measured (README steps 2-3).                       */
+            {0x745eu, {11.33, 22.58, 484.0, 3.4e7, 6.8e7, 1.4e7, 3.4e8, 6.8e8}}, // gfx1100-w7800
         };
         static std::optional<std::optional<PerfModelDeviceParams>> device_params_cache[64];
 
