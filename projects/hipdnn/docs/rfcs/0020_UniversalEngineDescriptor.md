@@ -3,7 +3,7 @@
 - Contributors: TBD
 - **Status**: In progress
 - **Status notes**: The UED loads and registers a generic engine (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp`; #10606, #10679, #10850, #11033). `graph_match` has both arms: the declarative `nodes` pattern, compiled against the generated op-schema registry when the UED is read, and the `native` escape hatch. The loader reads the three role-scoped heuristic maps and the runtime resolves them by arch (#13028). The JSON Schema file is `plugin_sdk/schemas/universal_engine_descriptor.schema.json`. Each UMD `criteria` is validated against the published symbol set of every engine a pack pairs it with (`CompiledCriteria.hpp`). The cross-engine root-opcode index and the same validation for UDD formulas and the UHD `features_signature` are not built.
-- **Last verified**: 2026-10-29 against `develop` (4a3fc208880) with #13177 and #PRNUM applied
+- **Last verified**: 2026-10-29 against `develop` (4a3fc208880) with #13177 and #14705 applied
 - **Follows**: [RFC 0017](0017_UniversalKernelDescriptor.md) (Universal Kernel Descriptors). This is the "UED + graph matching" follow-up named in RFC 0017 § 14.2: the engine format together with the graph-matching specification: the `nodes` structural pattern, the symbols matching publishes, and the op-schema registry behind them.
 
 ## Table of Contents
