@@ -609,9 +609,9 @@ constexpr std::array<ForwardCase, 12> kPartialQueryCases{{
 }};
 
 // Exercise every output row and component of the wider D64 key tile with the independent FP32
-// reference. BF16 selects N128 inside this contract; FP16 must retain its N64 fallback. Append
+// reference. Both FP16 and BF16 select N128 inside this contract. Append
 // these inputs so every earlier case index remains stable.
-constexpr int kD64WideTileN = std::is_same_v<DataTypeConfig, FmhaFwdBf16> ? 128 : 64;
+constexpr int kD64WideTileN = 128;
 constexpr std::array<ForwardCase, 4> kD64WideTileCases{{
     {"D64BatchWideTileDense256",
      64,
