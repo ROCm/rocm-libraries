@@ -187,30 +187,30 @@
   dict({
     64: dict({
       'pad': 16,
-      'perBlock': 256,
+      'perBlock': 1024,
     }),
     96: dict({
-      'pad': 0,
-      'perBlock': 0,
+      'pad': 6,
+      'perBlock': 512,
     }),
     128: dict({
-      'pad': 16,
-      'perBlock': 512,
+      'pad': 8,
+      'perBlock': 1024,
     }),
     192: dict({
       'pad': 6,
-      'perBlock': 256,
+      'perBlock': 1024,
     }),
     256: dict({
-      'pad': 16,
+      'pad': 4,
       'perBlock': 1024,
     }),
     384: dict({
-      'pad': 6,
-      'perBlock': 512,
+      'pad': 4,
+      'perBlock': 1024,
     }),
     512: dict({
-      'pad': 8,
+      'pad': 2,
       'perBlock': 1024,
     }),
   })

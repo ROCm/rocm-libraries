@@ -114,7 +114,7 @@ _FP32_PARAMS = [
 def test_get_fp32_mt_config(params, snapshot):
     vw, lrvw, wg, ipt, wt, emu = params
     result = {
-        mt: {k: L.get_fp32_mt_config(mt, k, vw, lrvw, wg, ipt, wt, _K_B32, _TDM, emu) for k in _B128_KEYS}
+        mt: {k: L.get_fp32_mt_config(mt, k, vw, lrvw, wg, ipt, wt, _K_B32, _TDM, emu, lrvwTile=vw if emu else 1) for k in _B128_KEYS}
         for mt in _MTS
     }
     assert result == snapshot
