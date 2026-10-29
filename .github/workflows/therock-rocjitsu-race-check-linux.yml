@@ -27,10 +27,6 @@ on:
         description: "Concurrent GEMMs"
         type: number
         default: 8
-      rocjitsu_ref:
-        description: "rocm-systems revision containing rocjitsu"
-        type: string
-        default: "29656a8dcc052615e1ca49cafde98d684b6b81f2"
   workflow_call:
     inputs:
       therock_ref:
@@ -54,9 +50,6 @@ on:
       random_gemm_threads:
         type: number
         default: 8
-      rocjitsu_ref:
-        type: string
-        default: "6f5d9658a4b13656e0c1a3719d86a320c9206dbe"
 
 permissions:
   contents: read
@@ -145,8 +138,10 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: ROCm/rocm-systems
-          # Callers pin the emulator independently of the library under test.
-          ref: ${{ inputs.rocjitsu_ref }}
+          # Keep the validated tool revision stable instead of following
+          # rocm-systems develop, where rocjitsu interfaces can change independently.
+          # Pinned 2026-10-21.
+          ref: 6f5d9658a4b13656e0c1a3719d86a320c9206dbe
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
