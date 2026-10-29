@@ -6200,6 +6200,8 @@ class _Lowerer:
         rsrc, voffset, soffset = op.operands
         elem_type = op.attrs["elem_type"]
         _LLVM_ELEM = {"f16": "half", "bf16": "bfloat", "f32": "float", "i32": "i32"}
+        if elem_type not in _LLVM_ELEM:
+            raise ValueError(f"tile.buffer_load: unsupported elem_type {elem_type!r}")
         llvm_elem = _LLVM_ELEM[elem_type]
         if elem_type in ("f16", "bf16"):
             self._need("raw.ptr.buffer.load.i16")
@@ -6247,7 +6249,7 @@ class _Lowerer:
                 f"ptr addrspace(8) {self._operand(rsrc)}, "
                 f"i32 {self._operand(voffset)}, "
                 f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
+                f"i32 {int(op.attrs.get('cachepolicy', 0))})"
             )
         else:
             intr = f"raw.ptr.buffer.store.v{dwords}i32"
@@ -6262,7 +6264,7 @@ class _Lowerer:
                 f"ptr addrspace(8) {self._operand(rsrc)}, "
                 f"i32 {self._operand(voffset)}, "
                 f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
+                f"i32 {int(op.attrs.get('cachepolicy', 0))})"
             )
 
     def _op_tile_buffer_store_f16(self, op: Op) -> None:
@@ -6277,7 +6279,7 @@ class _Lowerer:
             f"ptr addrspace(8) {self._operand(rsrc)}, "
             f"i32 {self._operand(voffset)}, "
             f"i32 {self._operand(soffset)}, "
-            f"i32 0)"
+            f"i32 {int(op.attrs.get('cachepolicy', 0))})"
         )
 
     def _op_tile_buffer_load_bf16(self, op: Op) -> None:
@@ -6341,7 +6343,7 @@ class _Lowerer:
             f"ptr addrspace(8) {self._operand(rsrc)}, "
             f"i32 {self._operand(voffset)}, "
             f"i32 {self._operand(soffset)}, "
-            f"i32 0)"
+            f"i32 {int(op.attrs.get('cachepolicy', 0))})"
         )
 
     def _op_tile_buffer_store_vN_bf16(self, op: Op) -> None:
@@ -6363,7 +6365,7 @@ class _Lowerer:
                 f"ptr addrspace(8) {self._operand(rsrc)}, "
                 f"i32 {self._operand(voffset)}, "
                 f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
+                f"i32 {int(op.attrs.get('cachepolicy', 0))})"
             )
         else:
             intr = f"raw.ptr.buffer.store.v{dwords}i32"
@@ -6378,7 +6380,7 @@ class _Lowerer:
                 f"ptr addrspace(8) {self._operand(rsrc)}, "
                 f"i32 {self._operand(voffset)}, "
                 f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
+                f"i32 {int(op.attrs.get('cachepolicy', 0))})"
             )
 
     def _op_tile_buffer_store_f32(self, op: Op) -> None:

@@ -1,8 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Unit tests for the hipdnn-deep-review partition.py helper (areas, plan, packets, gate)."""
+"""Unit tests for the hipdnn-deep-review partition.py helper (areas, plan, packets, gate,
+orient-gate)."""
 
 import importlib.util
+import os
+import subprocess
 from pathlib import Path
 from types import ModuleType
 
@@ -471,3 +474,36 @@ def test_packets_drift_lane_follows_the_trigger(part, tmp_path):
     (rd / "drift.txt").write_text("Target tip: abc\nTrigger: yes\n")
     run(part, "packets", rd, "--lanes", "DRIFT")
     assert "drift.txt" in (rd / "packets" / "DRIFT.md").read_text()
+
+
+def test_orient_gate_accepts_added_files_and_flags_paths_absent_at_base(
+    part, tmp_path, capsys
+):
+    clone = tmp_path / "clone"
+    (clone / "src").mkdir(parents=True)
+    (clone / "src" / "old.cpp").write_text("x\n")
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t"}
+    env.update(GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t", HOME=str(tmp_path))
+    for args in (["init", "-q"], ["add", "."], ["commit", "-qm", "base"]):
+        subprocess.run(["git", "-C", str(clone), *args], check=True, env=env)
+    base = subprocess.run(
+        ["git", "-C", str(clone), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (tmp_path / "r1").mkdir()
+    rd = make_round(tmp_path / "r1", [(1, 0, "src/new.hpp")])
+    (rd / "PIN.md").write_text(f"CLONE: {clone}\nBASE: {base}\n")
+    (rd / "orient").mkdir()
+    (rd / "orient" / "a.md").write_text(
+        "Adds `src/new.hpp:3`; reads `./src/old.cpp`.\n"
+    )
+    (rd / "CONTEXT.md").write_text("Area `src/old.cpp:1` and dir `src/x`.\n")
+    with pytest.raises(SystemExit) as exc:
+        run(part, "orient-gate", rd)
+    assert exc.value.code == 1
+    assert capsys.readouterr().out == "not at base: src/x\n"
+    (rd / "CONTEXT.md").write_text("Area `src/old.cpp:1` and dir `src`.\n")
+    run(part, "orient-gate", rd)
+    assert capsys.readouterr().out == ""

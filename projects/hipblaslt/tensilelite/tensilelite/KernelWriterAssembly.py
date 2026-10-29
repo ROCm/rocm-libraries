@@ -60,11 +60,11 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   SOrSaveExecB64, SSExtI16toI32, SSetPCB64, SSetRegIMM32B32, SSetPrior, SSubBU32, SSubI32, SSubU32, SSubU64, SSetVgprMsb,\
   SWaitCnt, SWaitAlu, SXorB32, VAShiftRightI32, VAccvgprReadB32, VAccvgprWrite, VAccvgprWriteB32, \
   VAdd3U32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, VAddLShiftLeftU32, VAddU32, VAndB32, \
-  VBfeU32, VSwapB32, VCmpEQI32, VCmpEQU32, VCmpGEI32, VCmpGEU32, VCmpGtU32, VCmpGTI32, VCmpLeI32, VCmpLtI32, \
-  VCmpLtU32, VCmpNeU64, VCmpUF32, VCmpXGeU32, VCmpXLtU32, VCmpXLtU64, VCndMaskB32, VCvtF16toF32, VCvtI32toF32, \
+  VBfeU32, VBfiB32, VSwapB32, VCmpEQI32, VCmpEQU32, VCmpGEI32, VCmpGEU32, VCmpGtU32, VCmpGTI32, VCmpLeI32, VCmpLtI32, \
+  VCmpLtU32, VCmpNeU64, VCmpUF32, VCmpXEqU32, VCmpXGeU32, VCmpXGtU32, VCmpXLtU32, VCmpXLtU64, VCndMaskB32, VCvtF16toF32, VCvtI32toF32, \
   VCvtF32toF16, VCvtFP8toF32, VCvtInstruction, VCvtPkF32toBF16, VCvtPkF32toBF8, \
   VCvtPkF32toFP8, VCvtPkFP8toF32, VCvtSRF32toBF8, VCvtSRF32toFP8, VCvtScaleFP8toF16, \
-  VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, \
+  VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, VLShiftLeftOrB32, \
   VLShiftLeftB64, VLShiftRightB32, VLShiftRightB64, VMadU32U24, VMaxF32, VMinI32, VMovB32, VMovB64, VMulF32, \
   VMulHIU32, VMulLOU32, VMulPKF32S, VMulU32U24, VNotB32, VOrB32, VPackF16toB32, \
   VPrngB32, VReadfirstlaneB32, VReadlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128, \
@@ -93,7 +93,7 @@ from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCus
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, persistentSpatialCluster, plsinBlockSchedTile
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
-from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinBlockSchedTile, isMxf4SubtilePath
+from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinBlockSchedTile, isMxf4SubtilePath, isSubtileSwizzledTensor
 from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
 from .Common.DataType import DataType
 from .Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
@@ -2901,6 +2901,64 @@ class KernelWriterAssembly(KernelWriter):
 
     return module
 
+  def occupancyProbe(self, kernel):
+    # CU-occupancy probe: when ProbeAddr != 0, thread 0 of the WG stores
+    # ProbeEpoch to ProbeAddr[XCC << 6 | SE << 4 | CU] (XCC from XCC_ID[3:0],
+    # SE from HW_ID[14:13], CU from HW_ID[11:8]); a CU with SH != 0, SE >= 4
+    # or XCC >= 8 does not store. Then WGs whose raw launch id is >= ProbeGrid
+    # (probe-only WGs padding the dispatch) end. Plain store, no wait.
+    # Requires KernArgAddress shifted past the common args (ArgType 0/3 path),
+    # the raw id snapshot in StreamKTileIdx and full waves (exec all ones on entry).
+    module = Module("OccupancyProbe")
+    if self.states.probeKernArgOffset < 0:
+      return module
+    module.addComment1("CU-occupancy probe")
+    skipLabel = Label(self.labels.getNameInc("OccupancyProbe_Skip"), "")
+    # tmp+0..1 ProbeAddr; tmp+2 ProbeEpoch; tmp+3 ProbeGrid; tmp+4 HW_ID then XCC_ID.
+    # The slot math runs while the args load.
+    with self.allocTmpSgpr(5, alignment=2, tag="occupancyProbe_tmpSgpr") as tmpSgprInfo:
+      sAddr  = tmpSgprInfo.idx
+      sEpoch = sAddr + 2
+      sGrid  = sAddr + 3
+      sId    = sAddr + 4
+      module.add(SLoadB64(dst=sgpr(sAddr, 2), base=sgpr("KernArgAddress", 2),
+                          soffset=hex(self.states.probeKernArgOffset), comment="load ProbeAddr"))
+      module.add(SLoadB64(dst=sgpr(sEpoch, 2), base=sgpr("KernArgAddress", 2),
+                          soffset=hex(self.states.probeKernArgOffset + 8), comment="load ProbeEpoch, ProbeGrid"))
+      vOffset = self.vgprPool.checkOut(1, "occupancyProbe_vOffset")
+      vEpoch  = self.vgprPool.checkOut(1, "occupancyProbe_vEpoch")
+      module.add(SGetRegB32(dst=sgpr(sId), src=HWRegContainer(reg="HW_REG_HW_ID", value=[8, 8]),
+                            comment="HW_ID[15:8]: SE << 5 | SH << 4 | CU"))
+      module.add(VLShiftLeftB32(dst=vgpr(vOffset), shiftHex=2, src=sgpr(sId), comment="CU << 2 in [5:2]"))
+      module.add(SLShiftLeftB32(dst=sgpr(sId), shiftHex=1, src=sgpr(sId), comment="SE << 6 | SH << 5 | CU << 1"))
+      module.add(VBfiB32(dst=vgpr(vOffset), src0=63, src1=vgpr(vOffset), src2=sgpr(sId),
+                         comment="SE << 6 | CU << 2"))
+      module.add(SAndB32(dst=sgpr(sId), src0=sgpr(sId), src1=hex(0x120), comment="SCC = SH != 0 || SE >= 4, live to s_cselect"))
+      module.add(SGetRegB32(dst=sgpr(sId), src=HWRegContainer(reg="HW_REG_XCC_ID", value=[0, 4]),
+                            comment="XCC id"))
+      module.add(SCSelectB32(dst=sgpr(sId), src0=8, src1=sgpr(sId), comment="unmapped CU: XCC = 8"))
+      module.add(VLShiftLeftOrB32(dst=vgpr(vOffset), shiftHex=8, src0=sgpr(sId), src1=vgpr(vOffset),
+                                  comment="probe slot byte offset"))
+      module.add(SWaitCnt(kmcnt=0, comment="wait for probe args"))
+      module.add(SCmpEQU64(src0=sgpr(sAddr, 2), src1=0, comment="ProbeAddr == 0 ?"))
+      module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment="no probe"))
+      module.add(VMovB32(dst=vgpr(vEpoch), src=sgpr(sEpoch), comment="ProbeEpoch"))
+      execMovInst = SMovB32 if kernel["WavefrontSize"] == 32 else SMovB64
+      module.add(VCmpXEqU32(dst=EXEC(), src0=vgpr("Serial"), src1=0, comment="thread 0 stores"))
+      module.add(VCmpXGtU32(dst=EXEC(), src0=8, src1=sgpr(sId), comment="mapped CU (XCC < 8)"))
+      module.add(SNop(waitState=4, comment="VALU write exec -> VMEM"))
+      module.add(GlobalStoreB32(vaddr=vgpr(vOffset), src=vgpr(vEpoch), saddr=sgpr(sAddr, 2),
+                                comment="ProbeAddr[slot] = ProbeEpoch"))
+      module.add(execMovInst(dst=EXEC(), src=-1, comment="reset exec"))
+      module.add(SCmpGeU32(src0=sgpr("StreamKTileIdx"), src1=sgpr(sGrid),
+                           comment="probe-only WG: raw WG id >= ProbeGrid"))
+      module.add(SCBranchSCC0(labelName=skipLabel.getLabelName(), comment="real WG"))
+      module.add(SEndpgm(comment="probe-only WG: exit before any other side effect"))
+      self.vgprPool.checkIn(vEpoch)
+      self.vgprPool.checkIn(vOffset)
+    module.add(skipLabel)
+    return module
+
   def clusterPadEarlyExit(self, kernel):
     # Exit padded work-groups from a grid rounded up to a ClusterDim multiple
     # (see ContractionSolution::generateSingleCall), before any TDM load,
@@ -3487,7 +3545,8 @@ class KernelWriterAssembly(KernelWriter):
       # SGPR, which overflows the SGPR file on tuned high-register SKXCC kernels).
       # The queue index reads it, masked % numQueues, in StreamK.graWorkGroup.
       # Once-per-workgroup setup only -- no steady-state instructions added.
-      if Component.WorkAssignment.usesRawQueueRank(self, kernel):
+      # The occupancy probe's ProbeGrid test reads the same snapshot.
+      if Component.WorkAssignment.usesRawQueueRank(self, kernel) or self.states.probeKernArgOffset >= 0:
         module.add(SMovB32(dst=sgpr("StreamKTileIdx"), src=sgpr("WorkGroup0"),
                            comment="StreamK: snapshot raw pre-remap launch WG id -> dead-in-window StreamKTileIdx carrier (queue = rawWG %% numQueues)"))
 
@@ -3506,6 +3565,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SCBranchSCC0(labelName=labelMultiGemm.getLabelName()))
       module.add(ArgType3_Routed_To_ArgType0)
       module.add(deepcopy(moduleWg))
+      module.add(self.occupancyProbe(kernel))
       module.add(self.clusterPadEarlyExit(kernel))
       if not isPersistent(kernel):
         if clusterEnabled(kernel["ClusterDim"]):
@@ -5271,12 +5331,25 @@ class KernelWriterAssembly(KernelWriter):
                           strideF, comment="numLine * stride"))
                 if isMxSwizzledScaleLayout:
                   module.add(SAddU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr(stmp+0), src1=extra_bytes, comment="buffer_load limit for %s"%tc))
+                elif isPreShuffledAB:
+                  # numLine is measured in 16-row blocks.  Convert the logical
+                  # row stride to the physical block stride before adding the
+                  # final DepthU-wide block covered by this SRD.
+                  module.add(SMulI32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=swizzleSize0,
+                                     comment="numLine * stride * %u (row-block stride)"%swizzleSize0))
+                  module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=extra_bytes,
+                                     comment="+ swizzleBlock*DepthU/swizzleSize1"))
+                  module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]),
+                                               comment="buffer_load limit for %s (pre-shuffled, tile-boundary)"%tc))
                 else:
                   # (numLine * stride + DepthU) * bpe  -- mirrors scale path structure
                   module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=extra_bytes, comment="+ DepthU (one K step)"))
                   module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]), comment="buffer_load limit for %s (tile-boundary, avoids 32-bit overflow)"%tc))
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
                     strideF, comment="tlu=0, scaled tile-offset by stride"))
+          if isPreShuffledAB:
+            module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
+                      swizzleSize0, comment="pre-shuffled: scale by %u rows per block"%swizzleSize0))
         elif useFixedSrd2:
           # Unit-stride tile dim (TLU=1): the strided formula above cannot fire,
           # and without this Srd+2 stays 0 and every load returns 0.  Bound the
@@ -5971,8 +6044,14 @@ class KernelWriterAssembly(KernelWriter):
     if tP["isSwizzled"]:
       # "StrideA0I" or "StrideB1J"
       strideName = "Stride%s%s"%(tc,self.states.indexChars[tP["idx"]])
+      # On the subtile path the stride is the pre-shuffled 16-row block stride, so
+      # it has to follow the padding the host applied when it laid the tensor out,
+      # not the per-wave swizzleK block.  They differ whenever swizzleK > one
+      # operand -- 32 against 8 for gfx942 f16 -- so the classic path keeps
+      # swizzleK, which is the granularity its own host layout pads to.
+      alignK = tP["swizzleLayoutK"] if isSubtileSwizzledTensor(kernel) else tP["swizzleK"]
       module.addModuleAsFlatItems(self.setTo(strideName, "SizeL"))
-      module.addModuleAsFlatItems(self.alignTo(strideName, strideName, tP["swizzleK"]))
+      module.addModuleAsFlatItems(self.alignTo(strideName, strideName, alignK))
 
     if kernel["BufferLoad"]:
       # maxAddrSgpr = size[n] * stride[n-1]
