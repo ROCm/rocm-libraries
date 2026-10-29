@@ -749,6 +749,19 @@ def _supports_heads_per_wg(spec: MlaPrefillSpec, *, arch: str) -> tuple[bool, st
                 "agpr_acc needs the llvm22 or llvm23 flavor (llvm20 does not "
                 f"keep the backend out of the AGPR file), got {flavor}"
             )
+        # The key-tile DMA moves 256 B per wave instruction: a latent row must
+        # be a whole number of them, and a RoPE row exactly half of one (two
+        # rows per instruction, swizzled over 16 8 B units).
+        if (spec.r_kv * 2) % 256 != 0:
+            return False, (
+                f"agpr_acc DMAs latent rows in 256 B chunks: r_kv={spec.r_kv}, "
+                "expected a multiple of 128"
+            )
+        if spec.d_rope * 2 != 128:
+            return False, (
+                f"agpr_acc DMAs two 128 B RoPE rows per chunk: d_rope={spec.d_rope}, "
+                "expected 64"
+            )
     # The PV gathers four latent tiles per read and the epilogue stages W_UV
     # in 64-row latent blocks and EPI_VQ-wide v windows.
     if spec.r_kv % 64 != 0:
@@ -942,6 +955,21 @@ def build_mla_prefill_score_probe(
             f"d_nope/{MFMA_N} = {spec.d_nope // MFMA_N} n-tiles must divide "
             f"evenly across num_warps={spec.num_warps}"
         )
+    # Its staging loops hand each thread whole chunks with no remainder, so a
+    # tile that does not divide would leave part of the operand unstaged.
+    for name, count, width in (
+        ("Q tile", spec.block_q * spec.head_dim_qk, 4),
+        ("c_kv tile", spec.block_k * spec.r_kv, 8),
+        ("k_rope tile", spec.block_k * spec.d_rope, 4),
+        ("W_UK slice", spec.r_kv_tile * spec.d_nope, 8),
+    ):
+        if count % (spec.threads * width) != 0:
+            raise NotImplementedError(
+                f"the MLA score probe stages its {name} ({count} elements) in "
+                f"{width}-wide chunks, which must divide across "
+                f"num_warps={spec.num_warps} x 64 threads"
+            )
+
     dtype = BF16
     BQ = spec.block_q
     BK = spec.block_k
