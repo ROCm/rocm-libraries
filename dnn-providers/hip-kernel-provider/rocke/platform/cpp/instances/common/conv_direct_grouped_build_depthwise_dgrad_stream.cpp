@@ -88,20 +88,7 @@ bool dgs_stream_padding_reason(const rocke_direct_conv_problem_t* p,
                                char* reason,
                                size_t reason_cap)
 {
-    if(dgs_pad_w_reason(p, prefix, reason, reason_cap))
-        return true;
-    if(rocke_direct_conv_problem_pad_w(p) != p->PAD)
-    {
-        if(reason != NULL && reason_cap > 0)
-            snprintf(reason,
-                     reason_cap,
-                     "%sone padding for both axes (got PAD=%dx%d)",
-                     prefix,
-                     p->PAD,
-                     rocke_direct_conv_problem_pad_w(p));
-        return true;
-    }
-    return false;
+    return rocke_direct_conv_one_padding_reason(p, prefix, reason, reason_cap);
 }
 
 bool dgs_is_bf16(const rocke_direct_conv_problem_t* p)
@@ -1023,6 +1010,27 @@ rocke_status_t rocke_direct_depthwise_dgrad_stream_lower_to_llvm(
 int rocke_direct_conv_problem_pad_w(const rocke_direct_conv_problem_t* p)
 {
     return p->pad_w < 0 ? p->PAD : p->pad_w;
+}
+
+bool rocke_direct_conv_one_padding_reason(const rocke_direct_conv_problem_t* p,
+                                          const char* prefix,
+                                          char* reason,
+                                          size_t reason_cap)
+{
+    if(dgs_pad_w_reason(p, prefix, reason, reason_cap))
+        return true;
+    if(rocke_direct_conv_problem_pad_w(p) != p->PAD)
+    {
+        if(reason != NULL && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "%sone padding for both axes (got PAD=%dx%d)",
+                     prefix,
+                     p->PAD,
+                     rocke_direct_conv_problem_pad_w(p));
+        return true;
+    }
+    return false;
 }
 
 void rocke_direct_depthwise_tiled_out_hw(const rocke_direct_depthwise_tiled_spec_t* spec,

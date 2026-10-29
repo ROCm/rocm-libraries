@@ -157,6 +157,42 @@ class TestDepthwiseDgradSpecs(unittest.TestCase):
             dc.is_valid_depthwise_dgrad_stream_spec(_stream(p), "gfx1250")[0]
         )
 
+    def test_wmma_kernels_refuse_per_axis_padding(self):
+        # The WMMA convolutions offset columns by PAD.
+        from kernels.common.conv_direct_dgrad_wmma import (
+            DirectDgradWmmaSpec,
+            dgrad_wmma_reason,
+        )
+        from kernels.common.conv_direct_fwd_wmma import (
+            DirectFwdWmmaSpec,
+            fwd_wmma_reason,
+        )
+        from kernels.common.conv_fwd_small_wmma import (
+            FwdSmallcWmmaSpec,
+            FwdSmallkWmmaSpec,
+            fwd_smallc_reason,
+            fwd_smallk_reason,
+        )
+
+        def dense(pad_w, H=13, W=21, C=64, K=96):
+            return dc.DirectConvProblem(
+                N=2, H=H, W=W, groups=1, cpg=C, kpg=K, dtype="bf16", pad_w=pad_w
+            )
+
+        cases = (
+            (DirectFwdWmmaSpec, fwd_wmma_reason, {}),
+            (DirectDgradWmmaSpec, dgrad_wmma_reason, {}),
+            (FwdSmallcWmmaSpec, fwd_smallc_reason, dict(H=32, W=48, C=3, K=64)),
+            (FwdSmallkWmmaSpec, fwd_smallk_reason, dict(H=32, W=48, C=64, K=4)),
+        )
+        for cls, reason, shape in cases:
+            with self.subTest(kernel=cls.__name__):
+                self.assertIsNone(reason(cls(problem=dense(-1, **shape))))
+                self.assertIsNone(reason(cls(problem=dense(1, **shape))))
+                why = reason(cls(problem=dense(0, **shape)))
+                self.assertEqual(why, "one padding for both axes (got PAD=1x0)")
+                self.assertIn("pad_w", reason(cls(problem=dense(-2, **shape))))
+
     def test_benchmark_sweep_refuses_per_axis_padding(self):
         # Only --run-from-cache serves a per-axis padding (on the rotated-filter
         # kernel); the uncached sweep would build the row-streaming kernel.

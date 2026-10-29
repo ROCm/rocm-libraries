@@ -16,14 +16,19 @@
  *     its row padding, which must differ from the same spec at another column
  *     padding (and stay unchanged when both paddings are equal);
  *   - a tiled dgrad spec with more than one channel per lane, which the
- *     rotated-filter mode does not implement and must refuse.
+ *     rotated-filter mode does not implement and must refuse;
+ *   - a per-axis padding given to the WMMA convolutions, which offset
+ *     columns by PAD and must refuse it.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/instance_conv_direct_dgrad_wmma.h"
+#include "rocke/instance_conv_direct_fwd_wmma.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_dw_dgrad.h"
+#include "rocke/instance_conv_fwd_small_wmma.h"
 #include "rocke/lower_llvm.h"
 
 #define ERR_CAP 1024
@@ -183,6 +188,60 @@ static void test_tiled_dgrad_refuses_cpl(void)
           reason);
 }
 
+static rocke_direct_conv_problem_t dense_problem(int H, int W, int C, int K)
+{
+    rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
+    p.N = 2;
+    p.H = H;
+    p.W = W;
+    p.groups = 1;
+    p.cpg = C;
+    p.kpg = K;
+    p.dtype = "bf16";
+    return p;
+}
+
+template <typename Spec, typename Valid>
+static void check_wmma_padding(const char* kernel, Spec spec, Valid is_valid)
+{
+    char reason[ERR_CAP];
+    spec.problem.pad_w = -1;
+    CHECK(is_valid(&spec, "gfx1250", reason, sizeof(reason)),
+          "%s refused pad_w=-1: %s",
+          kernel,
+          reason);
+    spec.problem.pad_w = 1;
+    CHECK(is_valid(&spec, "gfx1250", reason, sizeof(reason)),
+          "%s refused pad_w=PAD: %s",
+          kernel,
+          reason);
+    spec.problem.pad_w = 0;
+    CHECK(!is_valid(&spec, "gfx1250", reason, sizeof(reason)), "%s accepted pad_w=0", kernel);
+    CHECK(strcmp(reason, "one padding for both axes (got PAD=1x0)") == 0,
+          "%s reason: %s",
+          kernel,
+          reason);
+    spec.problem.pad_w = -2;
+    CHECK(!is_valid(&spec, "gfx1250", reason, sizeof(reason)), "%s accepted pad_w=-2", kernel);
+    CHECK(strstr(reason, "pad_w") != NULL, "%s reason names pad_w: %s", kernel, reason);
+}
+
+static void test_wmma_kernels_refuse_per_axis_padding(void)
+{
+    rocke_direct_fwd_wmma_spec_t fwd = rocke_direct_fwd_wmma_spec_default();
+    fwd.problem = dense_problem(13, 21, 64, 96);
+    check_wmma_padding("direct_fwd_wmma", fwd, rocke_direct_fwd_wmma_is_valid_spec);
+    rocke_direct_dgrad_wmma_spec_t dgrad = rocke_direct_dgrad_wmma_spec_default();
+    dgrad.problem = dense_problem(13, 21, 64, 96);
+    check_wmma_padding("direct_dgrad_wmma", dgrad, rocke_direct_dgrad_wmma_is_valid_spec);
+    rocke_fwd_smallc_wmma_spec_t smallc = rocke_fwd_smallc_wmma_spec_default();
+    smallc.problem = dense_problem(32, 48, 3, 64);
+    check_wmma_padding("fwd_smallc_wmma", smallc, rocke_fwd_smallc_wmma_is_valid_spec);
+    rocke_fwd_smallk_wmma_spec_t smallk = rocke_fwd_smallk_wmma_spec_default();
+    smallk.problem = dense_problem(32, 48, 64, 4);
+    check_wmma_padding("fwd_smallk_wmma", smallk, rocke_fwd_smallk_wmma_is_valid_spec);
+}
+
 int main(void)
 {
     test_stream_lower_name_overflow();
@@ -190,6 +249,7 @@ int main(void)
     test_stream_refuses_per_axis_padding();
     test_tiled_dgrad_name_carries_per_axis_padding();
     test_tiled_dgrad_refuses_cpl();
+    test_wmma_kernels_refuse_per_axis_padding();
     if(g_failures != 0)
     {
         fprintf(stderr, "%d check(s) failed\n", g_failures);

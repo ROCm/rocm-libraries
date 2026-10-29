@@ -469,6 +469,15 @@ def pad_w_reason(p: "DirectConvProblem") -> Optional[str]:
     return None
 
 
+def one_padding_reason(p: "DirectConvProblem") -> Optional[str]:
+    """Why ``p`` is not one padding for both axes: the kernels that offset
+    columns by ``PAD`` compute no per-axis padding."""
+    why = pad_w_reason(p)
+    if why is None and p.PAD_W != p.PAD:
+        why = f"one padding for both axes (got PAD={p.PAD}x{p.PAD_W})"
+    return why
+
+
 def forward_padding_reason(p: "DirectConvProblem") -> Optional[str]:
     """Why a forward direct-conv kernel cannot compute ``p``, or ``None``.
 
@@ -7115,10 +7124,7 @@ class DirectDepthwiseDgradStreamSpec:
 def _dw_dgrad_stream_padding_reason(p: "DirectConvProblem") -> Optional[str]:
     """The row-streaming dgrad kernel offsets columns by ``PAD``: it computes
     no per-axis padding."""
-    why = pad_w_reason(p)
-    if why is None and p.PAD_W != p.PAD:
-        why = f"one padding for both axes (got PAD={p.PAD}x{p.PAD_W})"
-    return why
+    return one_padding_reason(p)
 
 
 def is_valid_depthwise_dgrad_stream_spec(
