@@ -238,6 +238,7 @@ add_executable(${INTEGRATION_TESTS_EXE}
     src/harness/bundle/SupportVerdict.cpp
     src/harness/bundle/SweepManifestCache.cpp
     src/harness/bundle/VariantPackBuilder.cpp
+    src/harness/gpu-graph-executor/GpuReferenceGraphExecutor.cpp
     src/harness/input-init/FillInputs.cpp
     src/harness/input-init/SdpaBackwardInputs.cpp
 )
@@ -266,6 +267,7 @@ add_executable(${GOLDEN_DATA_TESTS_EXE}
     src/harness/bundle/SupportVerdict.cpp
     src/harness/bundle/SweepManifestCache.cpp
     src/harness/bundle/VariantPackBuilder.cpp
+    src/harness/gpu-graph-executor/GpuReferenceGraphExecutor.cpp
     src/harness/input-init/FillInputs.cpp
     src/harness/input-init/SdpaBackwardInputs.cpp
     src/harness/reference-validation/BundleReferenceValidationHarness.cpp

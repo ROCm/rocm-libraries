@@ -4,8 +4,9 @@
 # NOTE: FrontendGraphEngineRunner.cpp, ReferenceExecutorPool.cpp and
 # HarnessDependencies.cpp are deliberately absent. They are the only places that
 # touch the frontend Graph or a hipdnnHandle_t, or hand the harness a pooled reference
-# executor. CpuReferenceGraphExecutorAdapter.cpp and ReferenceGraphExecutorFactory.cpp
-# ARE linked: the direct executor tests construct reference executors themselves.
+# executor. CpuReferenceGraphExecutorAdapter.cpp, GpuReferenceGraphExecutor.cpp and
+# ReferenceGraphExecutorFactory.cpp ARE linked: the direct executor tests construct
+# reference executors themselves.
 # Leaving the pool, HarnessDependencies.cpp and GoldenDataRegistration.cpp out keeps
 # "harness code paths cannot get a pooled executor" a link-time guarantee rather than
 # a convention. GoldenDataRegistration.cpp is absent for the same reason: it registers
@@ -25,6 +26,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     ../src/harness/bundle/SupportVerdict.cpp
     ../src/harness/bundle/SweepManifestCache.cpp
     ../src/harness/bundle/VariantPackBuilder.cpp
+    ../src/harness/gpu-graph-executor/GpuReferenceGraphExecutor.cpp
     ../src/harness/input-init/FillInputs.cpp
     ../src/harness/input-init/SdpaBackwardInputs.cpp
     ../src/harness/reference-validation/BundleReferenceValidationHarness.cpp
