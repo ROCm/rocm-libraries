@@ -6852,6 +6852,14 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             if(post_iters > 0 && relaunch)
                 verifyRelaunches(sol, first_launch_failed);
+            else if(post_iters > 0)
+            {
+                // A launch path without a relaunch hook must not look verified.
+                hipblaslt_bench_options::verification_failures()++;
+                hipblaslt_cerr << "post_bench_verify_iters is not supported for this launch path, "
+                                  "so the relaunches of solution "
+                               << sol << " were not checked" << std::endl;
+            }
 
 #define argument_param                                                                            \
     e_transA, e_transB, e_grouped_gemm, e_batch_count, e_M, e_N, e_K, e_alpha, e_lda, e_stride_a, \
@@ -7119,6 +7127,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       stream),
                         HIPBLAS_STATUS_SUCCESS);
                 };
+                relaunch = [&](size_t sol) { runBlock(sol, 0); };
                 search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
                     searchCfg,
