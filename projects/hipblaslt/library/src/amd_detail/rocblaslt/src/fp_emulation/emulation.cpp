@@ -49,28 +49,46 @@ namespace FixedPointEmulation
      * require workspace, which is necessary for very large k values where no
      * zero-workspace INT8 GEMM algorithm is available.
      * 128 MiB matches the default value of HIPBLASLT_TUNING_USER_MAX_WORKSPACE. */
-    /* TODO some INT8 GEMMs return wrong results for larger K when given a
-     * larger workspace, but are correct without workspace.
-     * This is why this workspace is set to size 0.
-     * For larger K this might fail to find a solution,
-     * and then we fall back to native DGEMM */
-    static constexpr size_t OZ2_INT8_GEMM_WS_BYTES = 0; //128ull << 20; /* 128 MiB */
+    static constexpr size_t OZ2_INT8_GEMM_WS_BYTES = 128ull << 20; /* 128 MiB */
+    /* The INT8 GEMM workspace follows small scratch buffers in the emulation
+     * workspace and is rounded up to OZ2_INT8_WS_ALIGN; reserve the slack.   */
+    static constexpr size_t OZ2_INT8_WS_ALIGN   = 256u;
+    static constexpr size_t OZ2_INT8_WS_RESERVE
+        = OZ2_INT8_GEMM_WS_BYTES + (OZ2_INT8_GEMM_WS_BYTES > 0 ? OZ2_INT8_WS_ALIGN : 0u);
 
     /* Number of moduli processed per pass: the largest value ≤ s such that
      * the simultaneous allocation of A8i + B8i + C32i fits in the total budget.
      * Scale and GEMM share the same chunk — one scale launch followed by one
      * batched GEMM per pass.  The final pass handles the remainder naturally
      * via min(chunk, effective_s - chunk_start).                             */
-    static unsigned compute_chunk_size(int64_t m, int64_t n, int64_t k, unsigned s, size_t budget)
+    /* Workspace bytes needed per modulus in one pass: A8i slice (pad(k) x pad(m)),
+     * B8i slice (pad(k) x n) and one INT32 output slot (pad(m) x n), matching the
+     * layout in emulated_gemm_impl.                                           */
+    static size_t bytes_per_modulus(int64_t m, int64_t n, int64_t k)
     {
-        const size_t mn4    = static_cast<size_t>(m) * static_cast<size_t>(n) * 4u;
         const size_t lda8i  = pad(static_cast<size_t>(k));
         const size_t cola8i = pad(static_cast<size_t>(m));
-        const size_t slc    = lda8i * cola8i + lda8i * static_cast<size_t>(n);
+        const size_t nn     = static_cast<size_t>(n);
+        return lda8i * cola8i + lda8i * nn + cola8i * nn * sizeof(int32_t);
+    }
+
+    /* True when at least one modulus fits in the budget.  When false, the
+     * monolithic path cannot run without overflowing the workspace and the
+     * problem must be split.                                                  */
+    static bool chunk_fits(int64_t m, int64_t n, int64_t k, size_t budget)
+    {
+        return budget >= bytes_per_modulus(m, n, k);
+    }
+
+    static unsigned compute_chunk_size(int64_t m, int64_t n, int64_t k, unsigned s, size_t budget)
+    {
+        const size_t per = bytes_per_modulus(m, n, k);
 
         size_t chunk = s;
-        if(mn4 > 0u || slc > 0u)
-            chunk = std::min(chunk, budget / (mn4 + slc));
+        if(per > 0u)
+            chunk = std::min(chunk, budget / per);
+        /* Clamped to 1 for the chunk-count arithmetic; callers must check
+         * chunk_fits() before running the monolithic path.                  */
         return static_cast<unsigned>(std::max(size_t(1u), chunk));
     }
 
@@ -86,7 +104,7 @@ namespace FixedPointEmulation
         const size_t pn  = pad(static_cast<size_t>(n));
         const size_t boh = co * sizeof(int16_t) + pn * sizeof(int16_t) + sizeof(uint32_t)
                            + co * sizeof(int32_t) + pn * sizeof(int32_t) + 2 * sizeof(float)
-                           + OZ2_INT8_GEMM_WS_BYTES;
+                           + OZ2_INT8_WS_RESERVE;
         const size_t   W1  = (workspace_bytes > boh) ? workspace_bytes - boh : 0u;
         const unsigned cs1 = compute_chunk_size(m, n, k, s, W1);
         if(cs1 < s)
@@ -220,17 +238,22 @@ namespace FixedPointEmulation
         const double n_chunks       = std::ceil(s / chunk_sz);
         const double n_scale_chunks = n_chunks; /* scale and GEMM share the same chunk */
 
-        const double t_int8_bw = (mk + kn + 4.0 * mn) / c0;
+        /* One INT8 GEMM (k x m)^T (k x n) -> INT32 (m x n).  The INT8 operand
+         * reads overlap with the MFMA work, but the INT32 output write (4 B per
+         * element) does not: it is charged additively at HBM bandwidth.  With
+         * max(compute, reads + writes) the model underestimated INT8 GEMMs by
+         * up to ~2x for large m, n and small k (where the output write
+         * dominates), letting the gate pick emulation where it is slower.     */
+        const double t_int8_one = std::max(2.0 * mnk / c2, (mk + kn) / c0) + 4.0 * mn / c0;
         const double t_prelim_kern
             = ((mk + kn) * 17.0 / c0 + 2.0 * hw.ovh_kernel) / K::eff_prelim[tA][tB];
-        const double t_prelim_gemm = std::max(2.0 * mnk / c2, t_int8_bw) + hw.ovh_matmul;
+        const double t_prelim_gemm = t_int8_one + hw.ovh_matmul;
         const double t_refine_kern
             = (mn * 8.0 / c0 + 3.0 * hw.ovh_kernel + hw.ovh_memset) / K::eff_refine;
         const double t_scale_kern = ((mk + kn) * (8.0 * n_scale_chunks + s) / c0
                                      + 2.0 * n_scale_chunks * hw.ovh_kernel)
                                     / K::eff_scale[tA][tB];
-        const double t_int8_gemms
-            = s * std::max(2.0 * mnk / c2, t_int8_bw) + n_chunks * hw.ovh_matmul;
+        const double t_int8_gemms = s * t_int8_one + n_chunks * hw.ovh_matmul;
         const double t_accum_kern
             = (mn * (4.0 * s + 32.0 * n_chunks - 16.0) / c0 + n_chunks * hw.ovh_kernel)
               / K::eff_accum;
@@ -291,12 +314,11 @@ namespace FixedPointEmulation
             return t_nat * (1.0 + 1e-6);
         }
         const size_t budget = compute_budget_from_ws(m, n, k, s, workspace_bytes);
-        const double t_mono
-            = perf_model_times(tA, tB, m, n, k, s, device, budget, type_a).t_total;
+        const bool   fits   = chunk_fits(m, n, k, budget);
 
         const unsigned chunk_sz = compute_chunk_size(m, n, k, s, budget);
         const unsigned n_chunks = (s + chunk_sz - 1u) / chunk_sz;
-        if(n_chunks > 1u)
+        if(n_chunks > 1u || !fits)
         {
             const bool    split_m = (m >= n);
             const int64_t half_m  = split_m ? m / 2 : m;
@@ -306,10 +328,16 @@ namespace FixedPointEmulation
                 = 2.
                   * effective_time(
                       tA, tB, half_m, half_n, k, s, device, workspace_bytes, type_a);
+            /* If not even one modulus fits, the split is mandatory. */
+            if(!fits)
+                return t_split;
+            const double t_mono
+                = perf_model_times(tA, tB, m, n, k, s, device, budget, type_a).t_total;
             if(t_split < t_mono)
                 return t_split;
+            return t_mono;
         }
-        return t_mono;
+        return perf_model_times(tA, tB, m, n, k, s, device, budget, type_a).t_total;
     }
 
     /* Returns per-component predicted costs summed across ALL leaf sub-GEMMs,
@@ -328,10 +356,12 @@ namespace FixedPointEmulation
     {
         const size_t   budget = compute_budget_from_ws(m, n, k, s, workspace_bytes);
         PerfModelTimes mono   = perf_model_times(tA, tB, m, n, k, s, device, budget, type_a);
+        const bool     fits   = chunk_fits(m, n, k, budget);
 
         const unsigned chunk_sz = compute_chunk_size(m, n, k, s, budget);
         const unsigned n_chunks = (s + chunk_sz - 1u) / chunk_sz;
-        if(n_chunks > 1u)
+        if((n_chunks > 1u || !fits) && m >= FIXED_POINT_EMUL_MIN_MN
+           && n >= FIXED_POINT_EMUL_MIN_MN)
         {
             const bool    split_m = (m >= n);
             const int64_t half_m  = split_m ? m / 2 : m;
@@ -341,7 +371,7 @@ namespace FixedPointEmulation
                 = 2.
                   * effective_time(
                       tA, tB, half_m, half_n, k, s, device, workspace_bytes, type_a);
-            if(t_split < mono.t_total)
+            if(!fits || t_split < mono.t_total)
             {
                 PerfModelTimes half = effective_perf_model_times(
                     tA, tB, half_m, half_n, k, s, device, workspace_bytes, type_a);
@@ -1035,13 +1065,14 @@ namespace FixedPointEmulation
             const unsigned chunk_sz = compute_chunk_size(m, n, k, num_moduli, ws_budget);
             const unsigned n_chunks = (num_moduli + chunk_sz - 1u) / chunk_sz;
 
-            /* ws_budget == 0 means the Zhi/Zlo double-accumulator arrays (each m×n
-             * doubles) cannot fit alongside the INT8 arrays in the workspace.
-             * The monolithic path would write beyond the workspace buffer → unsafe.
-             * Force a binary spatial split on the larger of m or n to reduce m×n
-             * (and hence the Zhi/Zlo requirement) until ws_budget > 0.
-             * This case is also entered when n_chunks > 1 (multiple chunk passes). */
-            if(n_chunks > 1u || ws_budget == 0u)
+            /* If not even one modulus (A8i + B8i slices + one INT32 slot) fits in
+             * the budget left after the fixed buffers and the Zhi/Zlo accumulators,
+             * the monolithic path would write beyond the workspace buffer.  Force
+             * a binary spatial split on the larger of m or n until it fits.
+             * This branch is also entered when n_chunks > 1 (multiple passes),
+             * where the split is optional and decided by the performance model. */
+            const bool fits = chunk_fits(m, n, k, ws_budget);
+            if(n_chunks > 1u || !fits)
             {
                 const bool    split_m = (m >= n);
                 const int64_t half_m  = split_m ? m / 2 : m;
@@ -1057,10 +1088,9 @@ namespace FixedPointEmulation
                 constexpr hipDataType type_a_perf
                     = std::is_same_v<T, double> ? HIP_R_64F : HIP_R_32F;
 
-                /* When ws_budget == 0, the performance model would return degenerate
-                 * predictions (chunk_size=1, always-split to tiny sub-GEMMs that look
-                 * fast but are not).  Skip the model and force the split immediately. */
-                const bool force_split = (ws_budget == 0u);
+                /* When one modulus does not fit, the monolithic path is not an
+                 * option: skip the performance model and split immediately.      */
+                const bool force_split = !fits;
                 /* ADP-aware performance model s: use the minimum s that satisfies the
                  * precision target instead of S_MAX, to avoid overestimating emulation
                  * cost in dynamic mode.                                               */
@@ -1237,7 +1267,12 @@ namespace FixedPointEmulation
         int32_t* const   row_max    = reinterpret_cast<int32_t*>(nan_flag + szNanFlag);
         int32_t* const   col_max    = row_max + szRowMax;
         float* const     adp_buf    = reinterpret_cast<float*>(col_max + szColMax);
-        void* const      int8_ws    = static_cast<void*>(adp_buf + 2);
+        /* Round up to OZ2_INT8_WS_ALIGN: GEMM kernels that use workspace
+         * (e.g. split-K / Stream-K partials) expect an aligned buffer.  The
+         * slack is included in OZ2_INT8_WS_RESERVE.                       */
+        void* const int8_ws = reinterpret_cast<void*>(
+            (reinterpret_cast<uintptr_t>(adp_buf + 2) + OZ2_INT8_WS_ALIGN - 1u)
+            & ~static_cast<uintptr_t>(OZ2_INT8_WS_ALIGN - 1u));
         constexpr size_t int8_ws_size = OZ2_INT8_GEMM_WS_BYTES;
         int32_t* const   C32i         = C32i_batch;
 
@@ -1615,6 +1650,18 @@ namespace FixedPointEmulation
         const int64_t stride_A_b = static_cast<int64_t>(lda8i * cola8i);
         const int64_t stride_B_b = static_cast<int64_t>(ldb8i * static_cast<size_t>(n));
         const int64_t stride_C_b = static_cast<int64_t>(szC32i);
+        /* TensileLite passes every tensor stride, including the batch stride,
+         * to its kernels as a 32-bit argument, so hipBLASLt reports no
+         * solution for a strided-batched GEMM whose A, B or C/D batch stride
+         * reaches 2^32 elements (a batch_count=1 GEMM of that size is fine).
+         * In that case run the moduli of each chunk as separate
+         * batch_count=1 GEMMs.  The C/D stride (pad(m) * n INT32 elements)
+         * reaches the limit at about m = n = 65536.                        */
+        constexpr int64_t OZ2_INT8_MAX_BATCH_STRIDE = int64_t(1) << 32;
+        const bool        use_batched = stride_A_b < OZ2_INT8_MAX_BATCH_STRIDE
+                                 && stride_B_b < OZ2_INT8_MAX_BATCH_STRIDE
+                                 && stride_C_b < OZ2_INT8_MAX_BATCH_STRIDE;
+        if(use_batched)
         {
             auto _wt0 = WallClock::now();
             hipblasLtMatrixLayoutSetAttribute(context.layoutA,
@@ -1648,7 +1695,7 @@ namespace FixedPointEmulation
 
             /* Update batch_count when it changes (normally constant; may differ on
              * the final pass when effective_s is not a multiple of chunk_size).    */
-            if(static_cast<int32_t>(actual) != batch_cur)
+            if(use_batched && static_cast<int32_t>(actual) != batch_cur)
             {
                 batch_cur = static_cast<int32_t>(actual);
                 auto _wt0 = WallClock::now();
@@ -1672,22 +1719,28 @@ namespace FixedPointEmulation
             {
                 /* A8i and B8i both start at position 0: the scale pass wrote actual
                  * moduli into A8i[0..actual-1] / B8i[0..actual-1].                */
-                const hipblasStatus_t batch_st = hipblasLtMatmul(context.int8_handle,
-                                                                 context.matmulDesc,
-                                                                 &one_i,
-                                                                 A8i,
-                                                                 context.layoutA,
-                                                                 B8i,
-                                                                 context.layoutB,
-                                                                 &zero_i,
-                                                                 C32i_batch,
-                                                                 context.layoutCD,
-                                                                 C32i_batch,
-                                                                 context.layoutCD,
-                                                                 nullptr,
-                                                                 int8_ws,
-                                                                 int8_ws_size,
-                                                                 stream);
+                hipblasStatus_t batch_st = HIPBLAS_STATUS_SUCCESS;
+                const unsigned  n_calls  = use_batched ? 1u : actual;
+                for(unsigned t = 0; t < n_calls && batch_st == HIPBLAS_STATUS_SUCCESS; ++t)
+                {
+                    int32_t* const c_t = C32i_batch + t * stride_C_b;
+                    batch_st           = hipblasLtMatmul(context.int8_handle,
+                                               context.matmulDesc,
+                                               &one_i,
+                                               A8i + t * stride_A_b,
+                                               context.layoutA,
+                                               B8i + t * stride_B_b,
+                                               context.layoutB,
+                                               &zero_i,
+                                               c_t,
+                                               context.layoutCD,
+                                               c_t,
+                                               context.layoutCD,
+                                               nullptr,
+                                               int8_ws,
+                                               int8_ws_size,
+                                               stream);
+                }
                 _pstop(_t_int8);
                 if(batch_st != HIPBLAS_STATUS_SUCCESS)
                 {
@@ -1964,7 +2017,7 @@ size_t fixedPointEmulationWorkspaceSize(const _rocblaslt_handle*           h,
           + cola8i * sizeof(int32_t) /* row_max[m] */
           + padn * sizeof(int32_t) /* col_max[n] — precomputed by partial kernel */
           + 2 * sizeof(float) /* ADP float buffer: adp_buf[0..1] (bias ±200) */
-          + OZ2_INT8_GEMM_WS_BYTES; /* INT8 GEMM workspace (preliminary + batch)  */
+          + OZ2_INT8_WS_RESERVE; /* INT8 GEMM workspace (preliminary + batch)  */
     return std::min(optimal, decision.workspace_bytes);
 }
 
@@ -2045,7 +2098,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
                                + cola8i_g * sizeof(int32_t) /* row_max    */
                                + padn_g * sizeof(int32_t) /* col_max    */
                                + 2 * sizeof(float) /* adp_buf    */
-                               + OZ2_INT8_GEMM_WS_BYTES; /* = 0        */
+                               + OZ2_INT8_WS_RESERVE;
 
         const size_t   W_var1 = (W > base_oh) ? W - base_oh : 0u;
         const unsigned cs1    = compute_chunk_size(m, n, k, num_moduli, W_var1);
@@ -2415,7 +2468,7 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
         const size_t base_oh  = cola8i_g * sizeof(int16_t) + padn_g * sizeof(int16_t)
                                + sizeof(uint32_t) + cola8i_g * sizeof(int32_t)
                                + padn_g * sizeof(int32_t) + 2 * sizeof(float)
-                               + OZ2_INT8_GEMM_WS_BYTES;
+                               + OZ2_INT8_WS_RESERVE;
 
         const size_t   W_var1 = (W > base_oh) ? W - base_oh : 0u;
         const unsigned cs1    = compute_chunk_size(m, n, k, num_moduli, W_var1);
