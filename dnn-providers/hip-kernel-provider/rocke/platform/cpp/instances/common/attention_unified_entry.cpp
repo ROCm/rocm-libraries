@@ -17,7 +17,7 @@
  *   - the three launch grid fns
  *       rocke_unified_attention_{2d,3d,reduce}_scalar_grid
  *   - the 2D signature
- *       rocke_unified_attention_2d_scalar_signature  (_attn_signature, no bt_stride)
+ *       rocke_unified_attention_2d_scalar_signature  (_attn_signature, with bt_stride)
  *   - the three build drivers, each ctx_init -> phase functions in Python
  *     execution order (see instance_attention_unified_internal.h)
  *       rocke_build_unified_attention_{2d,3d,reduce}_scalar
@@ -188,25 +188,24 @@ bool rocke_unified_attention_supports_scalar(const rocke_unified_attention_probl
 rocke_status_t rocke_unified_attention_2d_scalar_kernel_name(
     const rocke_unified_attention_problem_t* p, const char* name, char* out, size_t out_cap)
 {
-    char qbuf[32], hbuf[32], kvbuf[32], dbuf[32], bbuf[32];
+    char hbuf[32], kvbuf[32], dbuf[32], bbuf[32];
     const char* prefix;
     if(p == NULL || out == NULL)
         return ROCKE_ERR_VALUE;
     prefix = name ? name : "rocke_unified_attention_2d_scalar";
 
-    snprintf(qbuf, sizeof(qbuf), "q%d", p->total_q);
     snprintf(hbuf, sizeof(hbuf), "h%d", p->num_query_heads);
     snprintf(kvbuf, sizeof(kvbuf), "kv%d", p->num_kv_heads);
     snprintf(dbuf, sizeof(dbuf), "d%d", p->head_size);
     snprintf(bbuf, sizeof(bbuf), "b%d", p->block_size);
 
     {
-        const char* parts[6] = {qbuf, hbuf, kvbuf, dbuf, bbuf, p->dtype ? p->dtype : ""};
+        const char* parts[5] = {hbuf, kvbuf, dbuf, bbuf, p->dtype ? p->dtype : ""};
         /* flags={"sink":use_sinks,"sw":sliding_window>0,"softcap":softcap>0} */
         const char* flag_names[3] = {"sink", "sw", "softcap"};
         int flag_on[3]
             = {p->use_sinks ? 1 : 0, p->sliding_window > 0 ? 1 : 0, p->softcap > 0.0 ? 1 : 0};
-        return rocke_kernel_name_join(prefix, parts, 6, flag_names, flag_on, 3, out, out_cap, NULL);
+        return rocke_kernel_name_join(prefix, parts, 5, flag_names, flag_on, 3, out, out_cap, NULL);
     }
 }
 
@@ -217,13 +216,12 @@ rocke_status_t
                                                   char* out,
                                                   size_t out_cap)
 {
-    char qbuf[32], hbuf[32], kvbuf[32], dbuf[32], bbuf[32], segbuf[32];
+    char hbuf[32], kvbuf[32], dbuf[32], bbuf[32], segbuf[32];
     const char* prefix;
     if(p == NULL || out == NULL)
         return ROCKE_ERR_VALUE;
     prefix = name ? name : "rocke_unified_attention_3d_scalar";
 
-    snprintf(qbuf, sizeof(qbuf), "q%d", p->total_q);
     snprintf(hbuf, sizeof(hbuf), "h%d", p->num_query_heads);
     snprintf(kvbuf, sizeof(kvbuf), "kv%d", p->num_kv_heads);
     snprintf(dbuf, sizeof(dbuf), "d%d", p->head_size);
@@ -231,8 +229,8 @@ rocke_status_t
     snprintf(segbuf, sizeof(segbuf), "seg%d", num_segments);
 
     {
-        const char* parts[7] = {qbuf, hbuf, kvbuf, dbuf, bbuf, segbuf, p->dtype ? p->dtype : ""};
-        return rocke_kernel_name_join(prefix, parts, 7, NULL, NULL, 0, out, out_cap, NULL);
+        const char* parts[6] = {hbuf, kvbuf, dbuf, bbuf, segbuf, p->dtype ? p->dtype : ""};
+        return rocke_kernel_name_join(prefix, parts, 6, NULL, NULL, 0, out, out_cap, NULL);
     }
 }
 
@@ -243,20 +241,19 @@ rocke_status_t
                                                       char* out,
                                                       size_t out_cap)
 {
-    char qbuf[32], hbuf[32], dbuf[32], segbuf[32];
+    char hbuf[32], dbuf[32], segbuf[32];
     const char* prefix;
     if(p == NULL || out == NULL)
         return ROCKE_ERR_VALUE;
     prefix = name ? name : "rocke_unified_attention_reduce_scalar";
 
-    snprintf(qbuf, sizeof(qbuf), "q%d", p->total_q);
     snprintf(hbuf, sizeof(hbuf), "h%d", p->num_query_heads);
     snprintf(dbuf, sizeof(dbuf), "d%d", p->head_size);
     snprintf(segbuf, sizeof(segbuf), "seg%d", num_segments);
 
     {
-        const char* parts[5] = {qbuf, hbuf, dbuf, segbuf, p->dtype ? p->dtype : ""};
-        return rocke_kernel_name_join(prefix, parts, 5, NULL, NULL, 0, out, out_cap, NULL);
+        const char* parts[4] = {hbuf, dbuf, segbuf, p->dtype ? p->dtype : ""};
+        return rocke_kernel_name_join(prefix, parts, 4, NULL, NULL, 0, out, out_cap, NULL);
     }
 }
 
@@ -295,7 +292,7 @@ void rocke_unified_attention_reduce_scalar_grid(const rocke_unified_attention_pr
 }
 
 /* ===================================================================== *
- *  2D signature -- _attn_signature(dtype, include_bt_stride=False)
+ *  2D signature -- _attn_signature(dtype, include_bt_stride=True)
  * ===================================================================== */
 
 rocke_status_t
@@ -331,7 +328,8 @@ rocke_status_t
     rocke_signature_builder_scalar(&sb, "out_scale", "f32");
     rocke_signature_builder_scalar(&sb, "softcap", "f32");
     rocke_signature_builder_scalar(&sb, "num_seqs", "i32");
-    /* include_bt_stride=False, include_qq_bias_stride=False => no tail scalars */
+    rocke_signature_builder_scalar(&sb, "block_table_stride", "i32");
+    /* include_qq_bias_stride=False => no qq_bias_stride_0 tail scalar */
 
     return rocke_signature_builder_build(&sb, out_items, out_count);
 }
@@ -341,9 +339,9 @@ rocke_status_t
  *
  *  ctx_init -> declare_scalar_params (+ 2D tail params) -> emit_find_seq_idx ->
  *  emit_prologue -> emit_2d_softmax_loop -> emit_2d_epilogue -> ctx.kernel.
- *  The 2D tail params (out_scale, softcap, num_seqs) follow the shared ABI
- *  prefix; declare_scalar_params declares only the prefix, so the tail is
- *  appended here -- matching the Python build body's param order.
+ *  The 2D tail params (out_scale, softcap, num_seqs, block_table_stride) follow
+ *  the shared ABI prefix; declare_scalar_params declares only the prefix, so
+ *  the tail is appended here, matching the Python build body's param order.
  * ===================================================================== */
 rocke_kernel_def_t* rocke_build_unified_attention_2d_scalar(
     rocke_ir_builder_t* b, const rocke_unified_attention_problem_t* p, const char* name)
@@ -382,10 +380,11 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_scalar(
         /* abi = _declare_scalar_attn_params(b, dtype) */
         rocke_attn_unified_declare_scalar_params(&ctx);
 
-        /* 2D tail params: out_scale, softcap, num_seqs. */
+        /* 2D tail params: out_scale, softcap, num_seqs, block_table_stride. */
         ctx.out_scale = rocke_b_param(b, "out_scale", rocke_f32(), NULL);
         ctx.softcap = rocke_b_param(b, "softcap", rocke_f32(), NULL);
         ctx.num_seqs = rocke_b_param(b, "num_seqs", rocke_i32(), NULL);
+        ctx.block_table_stride = rocke_b_param(b, "block_table_stride", rocke_i32(), NULL);
 
         /* prologue: grid ids + seq-idx scan + per-seq geometry + SSA constants.
          * The seq-idx scan reads q_tok, which emit_prologue computes first; the
@@ -450,9 +449,10 @@ rocke_kernel_def_t*
     /* abi = _declare_scalar_attn_params(b, dtype) */
     rocke_attn_unified_declare_scalar_params(&ctx);
 
-    /* 3D tail params: softcap (unused by body) + num_seqs. */
+    /* 3D tail params: softcap (unused by body), num_seqs, block_table_stride. */
     ctx.softcap = rocke_b_param(b, "softcap", rocke_f32(), NULL);
     ctx.num_seqs = rocke_b_param(b, "num_seqs", rocke_i32(), NULL);
+    ctx.block_table_stride = rocke_b_param(b, "block_table_stride", rocke_i32(), NULL);
 
     /* emit_prologue runs the seq-idx scan internally after computing q_tok;
      * do not call emit_find_seq_idx here (q_tok would still be NULL). */
