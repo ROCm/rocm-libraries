@@ -1096,6 +1096,71 @@ stride-1 unpacked tiles only, and the ring and the staged dX tile within the
 covers every knob; the byte-identity gate is
 `library/tests/parity/conv_direct_dgrad_wmma_emit.{c,py}` (llvm23 lane).
 
+## Winograd Forward (gfx1250)
+
+`library/kernels/common/conv_winograd_*.py` (C++ twins
+`instance_conv_winograd_{fwd,gemm_wmma,gen,fused_1d_wmma}.h`). A stride-1, 2-D
+forward convolution computed as Winograd `F(m, r)` per axis, with fp16 / bf16
+I/O and fp16 GEMM operands (bf16 operands only for `F(2x2, 3x3)` with bf16
+I/O). Three implementations:
+
+- **Unfused 3x3** (`conv_winograd_fwd` + `conv_winograd_gemm_wmma`), output
+  tile `mh x mw` with `mh, mw` in {2, 4, 6}:
+  - K1 filter transform `w KYXC -> U [bin][K][C/g]`;
+  - K2 input transform `x NHWC -> V [tile][bin][C]` (register path, or an
+    LDS region of `bh x bw` tiles per workgroup); dilation runs as
+    `dH * dW` independent sub-grids. On the register path a run of
+    `tiles_per_thread` tiles keeps its whole input patch in VGPRs, so
+    explicit specs with long runs of large tiles spill to scratch on gfx1250
+    (F4: from 2 tiles at `vec` 8, from 4 at `vec` 4; F(6x4), F(4x6), F6:
+    from 2 or 3). They stay legal (slower, not wrong); the dispatcher's
+    knobs (`tuned_transform_options`) use one tile per thread on the
+    register path and longer runs only on the LDS path, which does not spill;
+  - K3 batched GEMM over the `bins * groups` independent GEMMs
+    (`WinogradGemmWmmaSpec`: TDM operand ring in LDS, WMMA 16x16x32, TDM or
+    direct epilogue, optional split-K with `build_winograd_gemm_reduce`);
+  - K4 output transform `M -> y`.
+  bf16 I/O with tiles of 4 or more runs a per-tile power-of-two prescale
+  (`e[tile]`, fused into K2 or as a separate max pass K2a; K4 undoes it).
+  K1 and the first input-transform stage can run as one merged launch
+  (`WinogradMergedSpec`). Problems past the 32-bit buffer offsets run as
+  batch chunks sharing U.
+- **Generalized** (`conv_winograd_gen` + K3 with `taps`): any `F(m, r)` per
+  axis (1-D `1 x r` / `r x 1`, 5x5), and segmented long filters: `S`
+  segments of `F(m, m)` share one input transform and K3 sums
+  `V[t + s] U[s]` over the segments.
+- **Fused 1-D** (`conv_winograd_fused_1d_wmma`, `1 x r`, `H = 1`, fp16):
+  the generalized K1 writes U, then one persistent kernel keeps a block of
+  transformed weights in registers and runs input transform, per-bin WMMA
+  GEMMs and output transform per tile block through LDS (optional async
+  prefetch of the next raw block and merged phases).
+
+The transforms use exact Toom-Cook matrices (`toom_cook_gen`, default
+interpolation points per `F(m, r)`), applied in fp32. Every transform load
+and store goes through a buffer resource; padding, dilation holes and tails
+read zero / drop the store, so the kernels have no bounds branches. The
+transform kernels bake the problem extents in; K3 takes them as kernargs.
+
+**Plan selection.** `conv_winograd_select.select_winograd(problem, dtype,
+model=WinogradCostModel(num_cus=...))` returns the safe plan of lowest model
+cost: the kind, tile or variant, a K3 configuration and the batch split.
+Eligibility: stride 1, 2-D, not 1x1, `C/g` and `K/g` >= 32, dilation up to
+35. Plans over the fp16 error budget (F(6x6, 3x3), several single-segment
+long-filter transforms) are never offered. The cost model is analytic
+(roofline terms in byte equivalents with nominal ratios); it ranks plans and
+predicts no time.
+
+**Dispatch.** The grouped-convolution dispatcher registers one opt-in forward
+candidate, `conv_winograd_fwd` (`algorithm="winograd"`, gfx1250): pinning the
+algorithm selects the selector's plan, and the sweep entry points list every
+safe plan. `algorithm="auto"` never picks it. Plans are admitted only at an
+LLVM flavor all their kernels lower at (`ConvGroupedRequest.llvm_flavor`): the
+K3 GEMM lowers at `llvm23` only, so at `llvm20` / `llvm22` the unfused plans
+are refused and only the fused 1-D plans remain. `launch_plan_for` returns the
+plan's `ConvLaunchPlan`: one step per kernel (each built for the problem,
+kernargs named per step) over the buffers `x`, `w`, `y` and the workspaces
+`U`, `V`, `M` (and `e`).
+
 ## Direct Wgrad Kernels
 
 Sources: `library/kernels/common/conv_direct_wgrad_tiled.py`,

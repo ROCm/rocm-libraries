@@ -162,7 +162,7 @@ class ToySpace(KnobSpace):
 
 
 # ------------------------------------------------------------ the candidates
-def _candidate(tile: int, space_type=ToySpace, base_fn=None):
+def _candidate(tile: int, space_type=ToySpace, base_fn=None, **hooks):
     variant_id = f"tile{tile}"
     name = f"toy_gfx950_{variant_id}"
 
@@ -192,6 +192,7 @@ def _candidate(tile: int, space_type=ToySpace, base_fn=None):
         build=lambda spec, arch: spec.kernel,
         bind_torch=lambda request, spec, tensors, **kw: None,
         grid=lambda spec, req: spec.launch_grid(),
+        **hooks,
     )
 
 
@@ -446,6 +447,88 @@ class TestTheKitCatchesBrokenSpaces(unittest.TestCase):
         candidate = _registry(_IgnoresKnobs).get("toy_gfx950_tile64")
         with self.assertRaises(TuningContractError):
             assert_tuning_contract(candidate, [ToyRequest(m=1024)])
+
+
+def _routed_registry(seen=None) -> CandidateRegistry:
+    """Two non-opt-in tiles: ``auto`` goes to tile128 from m=512, else tile64."""
+
+    def route(tile):
+        def route_auto(req):
+            if (tile == 128) == (req.m >= 512):
+                return True, "ok"
+            return False, f"auto takes the other tile at m={req.m}"
+
+        return route_auto
+
+    def precheck(req):
+        if seen is not None:
+            seen.append(req)
+        return True, "ok"
+
+    registry = CandidateRegistry("toy")
+    for tile in (64, 128):
+        registry.register(_candidate(tile, route_auto=route(tile), precheck=precheck))
+    return registry
+
+
+class TestRouteAuto(unittest.TestCase):
+    def test_a_routed_candidate_answers_auto_with_its_default(self):
+        registry = _routed_registry()
+        for m, chosen in ((100, "toy_gfx950_tile64"), (1024, "toy_gfx950_tile128")):
+            with self.subTest(m=m):
+                req = ToyRequest(m=m)
+                candidate = registry.select(req)
+                self.assertEqual(candidate.name, chosen)
+                self.assertFalse(candidate.opt_in)
+                pinned = replace(req, algorithm="toy_tuned", spec_id=candidate.spec_id)
+                self.assertEqual(
+                    candidate.select_spec(req), candidate.select_spec(pinned)
+                )
+                other = next(c for c in registry.candidates() if c is not candidate)
+                ok, why = other.admits(req)
+                self.assertFalse(ok)
+                self.assertIn("auto takes the other tile", why)
+
+    def test_a_pin_bypasses_the_route_and_a_mismatched_selector_is_refused(self):
+        registry = _routed_registry()
+        tile64 = registry.get("toy_gfx950_tile64")
+        pinned = ToyRequest(m=1024, spec_id="gfx950_tile64")
+        self.assertTrue(tile64.admits(pinned)[0])
+        knobbed = replace(pinned, tuning_knobs={"unroll": 2})
+        self.assertEqual(dict(tile64.select_spec(knobbed).knobs), {"unroll": 2})
+        ok, why = tile64.admits(ToyRequest(m=100, algorithm="other"))
+        self.assertFalse(ok)
+        self.assertIn("algorithm", why)
+        with self.assertRaises(PinRefused):
+            registry.select(replace(knobbed, tuning_knobs={"unroll": 3}))
+
+    def test_sweeps_and_the_precheck_see_the_pinned_request(self):
+        seen = []
+        registry = _routed_registry(seen)
+        tile128 = registry.get("toy_gfx950_tile128")
+        req = ToyRequest(m=1024)
+        self.assertTrue(tile128.admits(req)[0])
+        self.assertEqual(
+            (seen[-1].algorithm, seen[-1].spec_id), ("toy_tuned", "gfx950_tile128")
+        )
+        swept = list(tile128.sweep_space(req))
+        self.assertEqual(swept[0], tile128.select_spec(req))
+        self.assertTrue(list(tile128.sample_space(req, 2, 0)))
+        # A sweep pins each candidate, so the route does not hide the other.
+        results = registry.dispatch_all(req, kernel_id=_kid)
+        self.assertEqual(
+            {r.candidate.name for r in results},
+            {"toy_gfx950_tile64", "toy_gfx950_tile128"},
+        )
+        for result in results:
+            self.assertEqual(result.candidate.select_spec(result.request), result.spec)
+
+    def test_without_route_auto_the_candidate_stays_opt_in(self):
+        candidate = _candidate(64)
+        self.assertTrue(candidate.opt_in)
+        ok, why = candidate.admits(ToyRequest(m=100))
+        self.assertFalse(ok)
+        self.assertIn("opt-in", why)
 
 
 if __name__ == "__main__":

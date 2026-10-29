@@ -4781,6 +4781,183 @@ def cases():
             build_direct_dgrad_wmma_case(_dtype, **_over),
         )
 
+    # --- conv_winograd_fwd: Winograd F(m x m_w, 3x3) forward transforms ---
+    # K2 input transform (register path, fused bf16 prescale), K4 output
+    # transform and the merged K2+K1 launch. The full matrix (and the C++
+    # twin) lives in library/tests/parity/conv_winograd_fwd_emit.*.
+    def build_winograd_fwd_case(stage, **spec_kw):
+        def _build():
+            from kernels.common._conv_implicit_gemm_common import ConvProblem
+            from kernels.common import conv_winograd_fwd as wf
+
+            p = ConvProblem(N=2, Hi=20, Wi=24, C=64, K=96, Y=3, X=3, pH=1, pW=1)
+            spec = wf.WinogradFwdSpec(problem=p, **spec_kw)
+            if isinstance(stage, tuple):
+                return wf.build_winograd_merged(
+                    wf.WinogradMergedSpec(spec, stage), arch="gfx1250"
+                )
+            build = {
+                "K2": wf.build_winograd_input_transform,
+                "K4": wf.build_winograd_output_transform,
+            }[stage]
+            return build(spec, arch="gfx1250")
+
+        return _build
+
+    for _case_id, _stage, _over in (
+        ("f4_k2", "K2", {}),
+        ("f4_bf16_prescale_k2", "K2", dict(io_dtype="bf16", prescale=True)),
+        ("f6x4_k4", "K4", dict(m=6, m_w=4)),
+        ("f4_merged_k2_k1", ("K2", "K1"), {}),
+    ):
+        add(
+            "conv_winograd_fwd",
+            f"conv_winograd_fwd/gfx1250/{_case_id}",
+            "gfx1250",
+            build_winograd_fwd_case(_stage, **_over),
+        )
+
+    # --- conv_winograd_gemm_wmma: the Winograd batched GEMM (K3, gfx1250) ---
+    # TDM operand ring + WMMA, TDM or per-lane epilogue, split-K slabs and
+    # their reduce. The full matrix (and the C++ twin) lives in
+    # library/tests/parity/conv_winograd_gemm_wmma_emit.*.
+    def build_winograd_gemm_case(**spec_kw):
+        def _build():
+            from kernels.common.conv_winograd_gemm_wmma import (
+                WinogradGemmWmmaSpec,
+                build_winograd_gemm_wmma,
+            )
+
+            return build_winograd_gemm_wmma(
+                WinogradGemmWmmaSpec(**spec_kw), arch="gfx1250"
+            )
+
+        return _build
+
+    def build_winograd_gemm_reduce_case(dtype):
+        def _build():
+            from kernels.common.conv_winograd_gemm_wmma import (
+                WinogradGemmReduceSpec,
+                build_winograd_gemm_reduce,
+            )
+
+            return build_winograd_gemm_reduce(
+                WinogradGemmReduceSpec(dtype), arch="gfx1250"
+            )
+
+        return _build
+
+    for _case_id, _build_fn in (
+        ("fp16_default", build_winograd_gemm_case()),
+        (
+            "bf16_sk_direct_taps2",
+            build_winograd_gemm_case(
+                dtype="bf16", split_k=True, epilogue="direct", taps=2, tile_k=64
+            ),
+        ),
+        ("reduce_fp16", build_winograd_gemm_reduce_case("fp16")),
+    ):
+        add(
+            "conv_winograd_gemm_wmma",
+            f"conv_winograd_gemm_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            _build_fn,
+        )
+
+    # --- conv_winograd_gen: generalized Winograd forward transforms ---
+    # K1 filter / K2 input / K4 output transforms of a segmented 1-D filter,
+    # a grouped 5x5 one and the 1x5 / 5x1 F(4,5). The full matrix (and the
+    # C++ twin) lives in library/tests/parity/conv_winograd_gen_emit.*.
+    def build_winograd_gen_case(stage, prob, ay, ax, **spec_kw):
+        def _build():
+            from kernels.common import conv_winograd_gen as G
+            from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+            spec = G.WinogradGenSpec(
+                problem=ConvProblem(**prob),
+                ax_y=G.WinoAxis(*ay),
+                ax_x=G.WinoAxis(*ax),
+                **spec_kw,
+            )
+            build = {
+                "K1": G.build_filter_transform,
+                "K2": G.build_input_transform,
+                "K4": G.build_output_transform,
+            }[stage]
+            return build(spec, arch="gfx1250")
+
+        return _build
+
+    _wg_1x11 = dict(N=2, Hi=1, Wi=200, C=64, K=64, Y=1, X=11, pW=5)
+    _wg_5x5 = dict(N=1, Hi=20, Wi=20, C=64, K=64, Y=5, X=5, pH=2, pW=2, groups=2)
+    # F(4,5): the selector's only 1x5 / 5x1 variant. K1 / K2 / K4 pin its
+    # G / B^T / A^T respectively.
+    _wg_1x5 = dict(N=2, Hi=1, Wi=130, C=64, K=64, Y=1, X=5, pW=2)
+    _wg_5x1 = dict(N=1, Hi=60, Wi=3, C=32, K=64, Y=5, X=1, pH=4, dH=2)
+    for _case_id, _stage, _prob, _ay, _ax, _kw in (
+        ("1x11_6s2_k1", "K1", _wg_1x11, (1, 1), (6, 11, 2), {}),
+        ("1x11_6s2_k2", "K2", _wg_1x11, (1, 1), (6, 11, 2), {}),
+        ("5x5_f2_g2_bf16_k4", "K4", _wg_5x5, (2, 5), (2, 5), dict(io_dtype="bf16")),
+        ("1x5_f4_k1", "K1", _wg_1x5, (1, 1), (4, 5), {}),
+        ("1x5_f4_k2", "K2", _wg_1x5, (1, 1), (4, 5), {}),
+        ("1x5_f4_k4", "K4", _wg_1x5, (1, 1), (4, 5), {}),
+        ("5x1_f4_d2_bf16_k2", "K2", _wg_5x1, (4, 5), (1, 1), dict(io_dtype="bf16")),
+    ):
+        add(
+            "conv_winograd_gen",
+            f"conv_winograd_gen/gfx1250/{_case_id}",
+            "gfx1250",
+            build_winograd_gen_case(_stage, _prob, _ay, _ax, **_kw),
+        )
+
+    # --- conv_winograd_fused_1d_wmma: fused 1-D Winograd forward (gfx1250) ---
+    # Weight-stationary 1 x r Winograd with the WMMA input transform, async
+    # prefetch and merged phases (the selector's config), and the VALU
+    # transform without prefetch. The C++ twin is gated by
+    # library/tests/parity/conv_winograd_fused_1d_wmma_emit.*.
+    def build_winograd_fused_1d_case(C, K, ax, **spec_kw):
+        def _build():
+            from kernels.common._conv_implicit_gemm_common import ConvProblem
+            from kernels.common.conv_winograd_fused_1d_wmma import (
+                FusedWino1DSpec,
+                build_fused_wino_1d,
+            )
+            from kernels.common.conv_winograd_gen import WinoAxis
+
+            p = ConvProblem(N=1, Hi=1, Wi=600, C=C, K=K, Y=1, X=ax[1], pW=ax[1] // 2)
+            return build_fused_wino_1d(
+                FusedWino1DSpec(problem=p, ax=WinoAxis(*ax), **spec_kw),
+                arch="gfx1250",
+            )
+
+        return _build
+
+    for _case_id, _c, _k, _ax, _kw in (
+        (
+            "1x11_4s3_c128_sel",
+            128,
+            128,
+            (4, 11, 3),
+            dict(
+                q=2,
+                fk=4,
+                waves=4,
+                xf="wmma",
+                xf_batch=16,
+                prefetch=True,
+                m_f16=True,
+                merge=True,
+            ),
+        ),
+        ("1x7_4s2_c64_valu", 64, 64, (4, 7, 2), dict(q=2, fk=2)),
+    ):
+        add(
+            "conv_winograd_fused_1d_wmma",
+            f"conv_winograd_fused_1d_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_winograd_fused_1d_case(_c, _k, _ax, **_kw),
+        )
+
     # Stride 2 (3x3 phases and the 2x2 patch merge), dilation, packed small
     # groups, the split barrier with and without the per-wave epilogue, and
     # tile widths that are not a power of two. Also llvm23-only.
