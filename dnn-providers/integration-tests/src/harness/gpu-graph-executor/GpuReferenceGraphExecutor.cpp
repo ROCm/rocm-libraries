@@ -140,7 +140,7 @@ struct GpuReferenceGraphExecutor::Impl
         try
         {
             auto key = buildSignatureKey(node, tensorMap);
-            const auto& builder = _planRegistry.getPlanBuilder(key);
+            const auto& builder = planRegistry.getPlanBuilder(key);
             return builder.isApplicable(node, tensorMap);
         }
         catch(...)
@@ -155,7 +155,7 @@ struct GpuReferenceGraphExecutor::Impl
     {
         auto key = buildSignatureKey(node, graph.getTensorMap());
 
-        const auto& planBuilder = _planRegistry.getPlanBuilder(key);
+        const auto& planBuilder = planRegistry.getPlanBuilder(key);
         if(!planBuilder.isApplicable(node, graph.getTensorMap()))
         {
             const std::string nodeName
@@ -167,7 +167,7 @@ struct GpuReferenceGraphExecutor::Impl
         return planBuilder.buildNodePlan(graph, node);
     }
 
-    detail::GpuPlanBuilderRegistry _planRegistry;
+    detail::GpuPlanBuilderRegistry planRegistry;
 };
 
 GpuReferenceGraphExecutor::GpuReferenceGraphExecutor()
