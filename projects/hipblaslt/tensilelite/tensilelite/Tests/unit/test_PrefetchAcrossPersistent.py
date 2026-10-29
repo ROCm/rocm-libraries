@@ -2114,18 +2114,23 @@ def test_rap_without_scales_silences_a_on_every_wave(_gp_gfx1250, gfx1250_iim, a
 
 @pytest.mark.parametrize("pap", [0, 1], ids=["rap", "paprap"])
 @pytest.mark.parametrize("fuse", [2, 3])
-def test_rap_shared_scale_set_emits_each_label_once(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, pap):
-    """TDMFuse 2/3 with both scales on two waves gate the shared set's stagger to its members' waves;
-    the reuse copy re-emits that gate, so its label goes through rapLabel like the shadow-init ones."""
+def test_rap_rejects_a_shared_scale_set(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, pap):
+    """RAP silences A by wave parity, which the shared-scale rows do not give it.
+
+    TDMFuse 2/3 with both scales seat A on part of the waves, so Solution rejects
+    ReuseAcrossPersistent there rather than letting the parity null reach the writer."""
     extra = dict(PrefetchAcrossPersistent=1) if pap else {}
-    with _stinkyTofuInputs() as inputs:
-        _, asm = _emit_asm(gfx1250_iim, assembler, TDMFuse=fuse, mi=_MI_W2, ReuseAcrossPersistent=1,
-                           AssertSummationElementMultiple=256, **extra)
-    out = capsys.readouterr().out
-    assert [_labelsDefinedTwice(text) for text in inputs] == [[]]
-    if pap:
-        # PAP+RAP overflows the SGPR budget on these rows, which codegen rejects as it does StreamK's.
-        assert not asm and "Generating kernel source resulted in error 2" in out, out[-2000:]
-        return
-    assert asm, "rejected or not emitted: %r" % out
-    assert _labelsDefinedTwice(asm) == []
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, mi=_MI_W2,
+                       ReuseAcrossPersistent=1, AssertSummationElementMultiple=256, **extra)
+    assert sol.get("Valid") is not True, "TDMFuse=%d + RAP was accepted" % fuse
+    assert "ReuseAcrossPersistent is not implemented with TDMFuse=%d" % fuse in out, out[-2000:]
+
+
+@pytest.mark.parametrize("fuse", [1, 2, 3])
+def test_rap_accepts_the_every_wave_pair(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
+    """Without MX scales TDMFuse 1-3 give A and B a set each on every wave, which RAP can silence."""
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, mi=_MI_W2,
+                       ReuseAcrossPersistent=1, AssertSummationElementMultiple=256,
+                       ProblemType={"MacDataTypeB": "F8", "MXBlockA": 0, "MXBlockB": 0})
+    assert sol.get("Valid") is True, "TDMFuse=%d + RAP without scales was rejected: %r" % (fuse, out)
+    assert sol.get("ReuseAcrossPersistent") == 1

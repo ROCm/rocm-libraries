@@ -11,7 +11,7 @@
 A set splits its waves over the members the problem carries (tdmWaveShares), so
 the waves of a missing MX scale go to the rest of its set. Without MX scales
 TDMFuse 1-3 all reduce to {A} + {B}: A and B each ride every wave and the three
-rows issue the same loads (tdmWaveMask). TDMFuse=0 keeps A and B on one set,
+rows issue the same loads (tdmWavePartition). TDMFuse=0 keeps A and B on one set,
 split by wave parity. With one scale, that scale takes every wave of the
 TDMFuse=0 scale set, shares its data tensor's set with it on TDMFuse 1-3, and
 the other data tensor of TDMFuse 1-3 rides every wave of a set of its own.
@@ -113,11 +113,6 @@ def tdmGroupingName(ks):
         raise ValueError("TDMFuse=%r maps to the %r row, which has no _GROUPING_ACCEPTED entry"
                          % (fuse, name))
     return name
-
-
-def tdmGroupingAccepted(ks):
-    """True when the requested grouping can be produced."""
-    return bool(_GROUPING_ACCEPTED[tdmGroupingName(ks)](ks))
 
 
 def tdmGrouping(ks):
@@ -357,16 +352,6 @@ def tdmWavePartition(ks, tc):
     return numComp, tuple(w for w in range(numWaves) if (w % 2 == 0) == isAArm)
 
 
-def tdmWaveMask(ks, tc):
-    """The waves that issue tensor `tc`'s TDM load: bit w is set for wave w, 0 for none."""
-    return sum(1 << w for w in tdmWavePartition(ks, tc)[1])
-
-
-def tdmWaveMasks(ks):
-    """{tensor: tdmWaveMask} for every live member of the resolved grouping."""
-    return {tc: tdmWaveMask(ks, tc) for group in liveGroups(ks) for tc in group}
-
-
 def tdmStashedMembers(ks):
     """Live members that share a wave with an earlier member of their set, in set order.
 
@@ -486,16 +471,6 @@ def tdmHalfPlrMaskedIncs(ks):
         return ("A", "B")
     live = tdmLiveScales(ks)
     return tuple(live) if len(live) == 1 else ()
-
-
-def tdmSoleWave(ks, tc):
-    """Return the sole wave carrying `tc`."""
-    _, waves = tdmWavePartition(ks, tc)
-    if len(waves) != 1:
-        raise TdmArrangementNotEmittable(
-            "the shared-set increment selects one wave per member; %s rides waves %s"
-            % (tc, waves))
-    return waves[0]
 
 
 def tdmWaveGuard(ks, tc):

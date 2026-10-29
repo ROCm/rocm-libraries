@@ -55,7 +55,7 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        pgrAutoPairRequested, \
                                        resolvePrefetchGlobalReadSpecialValues
 from ..Components.TDMFuse import TDM_FUSE_GROUPING, TDM_SCALE_TENSORS, tdmBothTensors, \
-                                       tdmGroupingAccepted, tdmGroupingName, tdmLiveScales, \
+                                       tdmGroupingName, tdmLiveScales, tdmPairOnEveryWave, \
                                        tdmPapRejectReason, tdmWavePartition, tdmWaveSeparated
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
@@ -7842,6 +7842,24 @@ class Solution(collections.abc.Mapping):
       # descriptor set, which is what lets RAP silence A's transfers per parity.
       if not (state["enableTDMA"] and state["enableTDMB"] and state["NumWaves"] > 1):
         reject(state, printRejectionReason, "ReuseAcrossPersistent requires wave-separated TDM (TDMInst = 3 and NumWaves > 1)")
+        return
+      # The RAP null writes that parity assumption into the kernel: it silences A
+      # on even waves (KernelWriterAssembly.rapNullTdmDescriptorForEvenWaves).
+      # That is right for TDMFuse=0's aliased set, and for the every-wave pair
+      # TDMFuse 1-3 give A and B when the problem carries no MX scales. With MX
+      # scales the grouping moves A off the even waves -- TDMFuse=2 seats it on
+      # waves 0..NumWaves/2-1 of a block set, TDMFuse=3 on every wave while B
+      # takes only part of them -- and the parity null silences the wrong waves.
+      if state.get("TDMFuse", 0) and not tdmPairOnEveryWave(state, "A", "B"):
+        reject(state, printRejectionReason,
+               "ReuseAcrossPersistent is not implemented with TDMFuse=%d and MX scales on %s: it "
+               "silences A by wave parity, which holds for TDMFuse=0 and for TDMFuse 1-3 without "
+               "MX scales, where A and B each ride every wave of a set of their own. The %s "
+               "grouping seats A on part of the waves instead. Use TDMFuse=0, put the MX scales on "
+               "neither tensor, or use ReuseAcrossPersistent=0"
+               % (state["TDMFuse"],
+                  " and ".join(tdmLiveScales(state)) or "neither tensor",
+                  tdmGroupingName(state)))
         return
       if state["InnerUnroll"] != 1:
         reject(state, printRejectionReason, "ReuseAcrossPersistent requires InnerUnroll = 1")
