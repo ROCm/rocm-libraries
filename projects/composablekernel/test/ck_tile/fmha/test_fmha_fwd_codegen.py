@@ -1213,38 +1213,53 @@ class TestCompiledGfx125D64N128Dispatch(unittest.TestCase):
         }
 
     def test_n128_inside_contract(self):
+        self.check_n128_inside_contract("bf16")
+
+    def check_n128_inside_contract(self, dtype):
         dispatch, _ = self.compile()
         for lse in (0, 1):
             lse_flag = "t" if lse else "f"
             self.assertEqual(
-                dispatch.run(lse=lse, **self.case()),
-                [self.sched_id(dispatch, lse=lse_flag, bn0=128)],
+                dispatch.run(dtype=dtype, lse=lse, **self.case()),
+                [self.sched_id(dispatch, dtype=dtype, lse=lse_flag, bn0=128)],
             )
             for mask in (1, 2):
                 self.assertEqual(
                     dispatch.run(
+                        dtype=dtype,
                         lse=lse,
                         mask=mask,
                         window_size_left=-1,
                         window_size_right=0,
                         **self.case(),
                     ),
-                    [self.sched_id(dispatch, mask="s_mask", lse=lse_flag, bn0=128)],
+                    [
+                        self.sched_id(
+                            dispatch, dtype=dtype, mask="s_mask", lse=lse_flag, bn0=128
+                        )
+                    ],
                 )
         for length in (256, 512, 2048):
             self.assertEqual(
-                dispatch.run(**self.case() | dict(seqlen_q=length, seqlen_k=length)),
-                [self.sched_id(dispatch, bn0=128)],
+                dispatch.run(
+                    dtype=dtype, **self.case() | dict(seqlen_q=length, seqlen_k=length)
+                ),
+                [self.sched_id(dispatch, dtype=dtype, bn0=128)],
             )
         for cus in (64, 256, 1024):
             self.assertEqual(
-                dispatch.run(num_cus=cus, **self.case()),
-                [self.sched_id(dispatch, bn0=128)],
+                dispatch.run(dtype=dtype, num_cus=cus, **self.case()),
+                [self.sched_id(dispatch, dtype=dtype, bn0=128)],
             )
 
     def test_everything_else_keeps_n64(self):
+        for dtype in ("bf16", "fp16"):
+            with self.subTest(dtype=dtype):
+                self.check_everything_else_keeps_n64(dtype)
+
+    def check_everything_else_keeps_n64(self, dtype):
         dispatch, _ = self.compile()
-        n128 = self.sched_id(dispatch, bn0=128)
+        n128 = self.sched_id(dispatch, dtype=dtype, bn0=128)
         causal = dict(mask=1, window_size_left=-1, window_size_right=0)
         cases = {
             "short": (dict(seqlen_q=128, seqlen_k=128), {}),
@@ -1281,20 +1296,22 @@ class TestCompiledGfx125D64N128Dispatch(unittest.TestCase):
         }
         for name, (changes, kernel_fields) in cases.items():
             with self.subTest(case=name):
-                result = dispatch.run(**self.case() | changes)
+                result = dispatch.run(dtype=dtype, **self.case() | changes)
                 self.assertEqual(len(result), 1)
                 self.assertNotEqual(result[0], n128)
-                self.assertIn(result[0], self.n64_ids(dispatch, **kernel_fields))
+                self.assertIn(
+                    result[0], self.n64_ids(dispatch, dtype=dtype, **kernel_fields)
+                )
         self.assertEqual(
-            dispatch.run(group=1, **self.case()),
-            [self.sched_id(dispatch, spad="t", mode="group")],
+            dispatch.run(dtype=dtype, group=1, **self.case()),
+            [self.sched_id(dispatch, dtype=dtype, spad="t", mode="group")],
         )
-        self.assertNotEqual(dispatch.run(has_sink_ptr=1, **self.case()), [n128])
+        self.assertNotEqual(
+            dispatch.run(dtype=dtype, has_sink_ptr=1, **self.case()), [n128]
+        )
 
-    def test_fp16_never_selects_n128(self):
-        dispatch, _ = self.compile()
-        result = dispatch.run(dtype="fp16", **self.case())
-        self.assertIn(result[0], self.n64_ids(dispatch, dtype="fp16"))
+    def test_fp16_n128_inside_contract(self):
+        self.check_n128_inside_contract("fp16")
 
     def test_custom_n128_tile_cannot_bypass_the_contract(self):
         pool, kernels = get_fwd_blobs(
@@ -1429,8 +1446,8 @@ class TestGfx125V128Codegen(unittest.TestCase):
             sum(
                 (
                     {0: 12, 100: 8, 200: 4, 600: 12}[receipt]
-                    # D64 N128 is BF16 only and absent from receipt 200.
-                    + (4 if dtype == "bf16" and receipt in (0, 100, 600) else 0)
+                    # D64 N128 is absent from receipt 200 for both dtypes.
+                    + (4 if receipt in (0, 100, 600) else 0)
                     if dim == 64
                     else count * (2 if dim == 192 else 1)
                 )
@@ -1479,8 +1496,8 @@ class TestGfx125V128Codegen(unittest.TestCase):
             n64 = [k for k in kernels if k.F_tile.F_bn0 == 64]
             n128 = [k for k in kernels if k.F_tile.F_bn0 == 128]
             self.assertEqual(len(n64), 12)
-            # N128 is emitted for BF16 only, as batch npad, simplified masks.
-            self.assertEqual(len(n128), 4 if dtype == "bf16" else 0)
+            # N128 is emitted for both dtypes, as batch npad, simplified masks.
+            self.assertEqual(len(n128), 4)
             for kernel in kernels:
                 self.assertEqual(kernel.F_tile.F_bm0, 128)
                 self.assertEqual(kernel.F_tile.F_bn1, 64)
@@ -1688,13 +1705,13 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 candidates.setdefault(key, kernel)
             else:
                 self.assertNotIn(diagnostic, kernel.render())
-        # D64 N128 is BF16 only and not part of receipt 200; check it separately.
+        # D64 N128 is not part of receipt 200; check both dtypes separately.
         _, d64_n128 = get_fwd_blobs(
-            ["gfx1250"], "*d64_bf16*_qr_tdm_sched_*", 600, [64], "simplified"
+            ["gfx1250"], "*d64_*16*_qr_tdm_sched_*", 600, [64], "simplified"
         )
         for kernel in d64_n128:
             if kernel.F_tile.F_bn0 == 128:
-                candidates.setdefault(("bf16", 64, 128, 64), kernel)
+                candidates.setdefault((kernel.F_dtype, 64, 128, 64), kernel)
         self.assertEqual(
             set(candidates),
             {
@@ -1707,7 +1724,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     (192, 128, 128),
                 )
             }
-            | {("bf16", 64, 128, 64)},
+            | {(dtype, 64, 128, 64) for dtype in ("bf16", "fp16")},
         )
         with tempfile.TemporaryDirectory(
             prefix="fmha-occupancy-contract-"
