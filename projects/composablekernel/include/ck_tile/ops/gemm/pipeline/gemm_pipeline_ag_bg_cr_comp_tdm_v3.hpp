@@ -53,6 +53,10 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                       std::is_same_v<typename Base::CLayout, tensor_layout::gemm::RowMajor>,
                   "comp_tdm_v3 supports A row-major, B column-major, C row-major only");
 
+    // Only tested in the plain GEMM kernel; the multi-D, grouped and batched-contraction kernels
+    // reject a pipeline that sets this (UniversalGemmKernel::kIsPlainGemmOnlyPipeline).
+    static constexpr bool kPlainGemmOnly = true;
+
 #if defined(__gfx125__)
     // Accumulators plus one k-atom of A and B must fit the per-wave VGPR budget (1024 / waves
     // per SIMD); a tile that does not fit would spill in the main loop. Checked in the gfx1250

@@ -3,28 +3,32 @@
 
 #pragma once
 
-// Shared setup of the comp_tdm_v3 gtests: GemmPipelineAgBgCrCompTDMV3 on gfx1250, fp8 x fp8 ->
-// bf16, A row-major, B column-major, C row-major, warp tile 32x32x128.
+// Shared setup of the comp_tdm_v3 gtests: GemmPipelineAgBgCrCompTDMV3 on gfx1250, fp8/bf8 A and B
+// -> bf16, A row-major, B column-major, C row-major, warp tile 32x32x128.
 //
 // Instances: 16 waves (256x256x256, warps 4x4x1) and 4 waves (128x128x256, warps 2x2x1), each with
 // the default policy (one split barrier per K tile) and with the two joint barriers per K tile
 // (kUseSplitBarrier = false); plus, at 16 waves, the split barrier with fixed TDM issuers
 // (kAlternateIssuers = false), with the TENSORcnt wait on the issuing waves only
 // (kTensorWaitAllWaves = false) and with the refill issued right after the arrive
-// (kRefillPoint = AfterArrive).
+// (kRefillPoint = AfterArrive). All of these are fp8 x fp8; bf8 x bf8 runs at 16 and 4 waves and
+// fp8 x bf8 and bf8 x fp8 at 16 waves, with the default policy.
 //
 // Split-K (k_batch != 1) must be rejected by IsSupportedArgument.
 //
 // Shapes: K = 256, 512 and 768 (one, two and three K tiles: both tail paths, with and without the
 // hot loop) and 512x512x1024 in test_gemm_pipeline_comp_tdm_v3_wmma.cpp (SMOKE_TEST); K = 65536 (a
-// long K loop with the real K stride) in test_gemm_pipeline_comp_tdm_v3_longk_wmma.cpp
-// (REGRESSION_TEST: each long-K case runs for 7-40 s under the gfx1250 emulator).
+// long K loop with the real K stride) in test_gemm_pipeline_comp_tdm_v3_longk_wmma.cpp for the fp8
+// instances and 16-wave bf8 x bf8 (REGRESSION_TEST: each long-K case runs for 7-40 s under the
+// gfx1250 emulator).
 //
 // Inputs:
-// - Int: integers in [-5, 5], exact in fp8. Every product and every partial sum is an integer
+// - Int: integers in [-5, 5], exact in fp8 and bf8. Every product and every partial sum is an
+// integer
 //   below 2^24, so the fp32 accumulation is exact whatever the order, and the result must equal
 //   the exact sum rounded to bf16, bit for bit.
-// - Random: uniform reals in [-2, 2] rounded to fp8. Checked against a double reference with a
+// - Random: uniform reals in [-2, 2] rounded to the operand's type. Checked against a double
+// reference with a
 //   tolerance for bf16 rounding and fp32 accumulation.
 
 #include <cmath>
@@ -75,8 +79,6 @@ struct RefillAfterArrivePolicy : SplitBarrierPolicy
 
 namespace {
 
-using ADataType   = ck_tile::fp8_t;
-using BDataType   = ck_tile::fp8_t;
 using AccDataType = float;
 using CDataType   = ck_tile::bf16_t;
 using ALayout     = ck_tile::tensor_layout::gemm::RowMajor;
@@ -87,9 +89,13 @@ template <ck_tile::index_t TileM_,
           ck_tile::index_t TileN_,
           ck_tile::index_t WarpsM_,
           ck_tile::index_t WarpsN_,
-          typename Policy_>
+          typename Policy_,
+          typename ADataType_ = ck_tile::fp8_t,
+          typename BDataType_ = ck_tile::fp8_t>
 struct V3Config
 {
+    using ADataType                          = ADataType_;
+    using BDataType                          = BDataType_;
     static constexpr ck_tile::index_t TileM  = TileM_;
     static constexpr ck_tile::index_t TileN  = TileN_;
     static constexpr ck_tile::index_t TileK  = 256;
@@ -101,6 +107,8 @@ struct V3Config
 template <typename Config>
 struct V3KernelOf
 {
+    using ADataType = typename Config::ADataType;
+    using BDataType = typename Config::BDataType;
     using TileShape =
         ck_tile::TileGemmShape<ck_tile::sequence<Config::TileM, Config::TileN, Config::TileK>,
                                ck_tile::sequence<Config::WarpsM, Config::WarpsN, 1>,
@@ -179,19 +187,21 @@ class TestCkTileGemmPipelineCompTDMV3 : public ::testing::Test
     protected:
     void Run(ck_tile::index_t M, ck_tile::index_t N, ck_tile::index_t K, Init init)
     {
+        using ADataType = typename Config::ADataType;
+        using BDataType = typename Config::BDataType;
         // A is M x K row-major, B is N x K (K x N column-major), both packed.
         std::mt19937 gen(0xC0FFEE + M + N + K + static_cast<int>(init));
         std::vector<ADataType> a(static_cast<size_t>(M) * K);
         std::vector<BDataType> b(static_cast<size_t>(N) * K);
-        std::vector<float> af(a.size()), bf(b.size()); // the fp8 values, decoded
+        std::vector<float> af(a.size()), bf(b.size()); // the fp8/bf8 values, decoded
         auto fill = [&](auto& v, std::vector<float>& vf) {
             std::uniform_int_distribution<int> di(-5, 5);
             std::uniform_real_distribution<float> dr(-2.f, 2.f);
             for(size_t i = 0; i < v.size(); ++i)
             {
                 const float x = init == Init::Int ? static_cast<float>(di(gen)) : dr(gen);
-                v[i]          = ck_tile::type_convert<ADataType>(x);
-                vf[i]         = ck_tile::type_convert<float>(v[i]);
+                v[i]  = ck_tile::type_convert<typename std::decay_t<decltype(v)>::value_type>(x);
+                vf[i] = ck_tile::type_convert<float>(v[i]);
             }
         };
         fill(a, af);
@@ -272,6 +282,8 @@ class TestCkTileGemmPipelineCompTDMV3 : public ::testing::Test
     }
 };
 
+using DefaultPolicy = ck_tile::GemmPipelineAgBgCrCompTDMV3Policy;
+
 using V3Configs =
     ::testing::Types<V3Config<256, 256, 4, 4, ck_tile::GemmPipelineAgBgCrCompTDMV3Policy>,
                      V3Config<128, 128, 2, 2, ck_tile::GemmPipelineAgBgCrCompTDMV3Policy>,
@@ -279,6 +291,21 @@ using V3Configs =
                      V3Config<128, 128, 2, 2, comp_tdm_v3_test::JointBarrierPolicy>,
                      V3Config<256, 256, 4, 4, comp_tdm_v3_test::SplitFixedIssuerPolicy>,
                      V3Config<256, 256, 4, 4, comp_tdm_v3_test::TensorWaitIssuersOnlyPolicy>,
-                     V3Config<256, 256, 4, 4, comp_tdm_v3_test::RefillAfterArrivePolicy>>;
+                     V3Config<256, 256, 4, 4, comp_tdm_v3_test::RefillAfterArrivePolicy>,
+                     V3Config<256, 256, 4, 4, DefaultPolicy, ck_tile::bf8_t, ck_tile::bf8_t>,
+                     V3Config<128, 128, 2, 2, DefaultPolicy, ck_tile::bf8_t, ck_tile::bf8_t>,
+                     V3Config<256, 256, 4, 4, DefaultPolicy, ck_tile::fp8_t, ck_tile::bf8_t>,
+                     V3Config<256, 256, 4, 4, DefaultPolicy, ck_tile::bf8_t, ck_tile::fp8_t>>;
+
+// The long-K set: the fp8 instances and 16-wave bf8 x bf8.
+using V3LongKConfigs =
+    ::testing::Types<V3Config<256, 256, 4, 4, DefaultPolicy>,
+                     V3Config<128, 128, 2, 2, DefaultPolicy>,
+                     V3Config<256, 256, 4, 4, comp_tdm_v3_test::JointBarrierPolicy>,
+                     V3Config<128, 128, 2, 2, comp_tdm_v3_test::JointBarrierPolicy>,
+                     V3Config<256, 256, 4, 4, comp_tdm_v3_test::SplitFixedIssuerPolicy>,
+                     V3Config<256, 256, 4, 4, comp_tdm_v3_test::TensorWaitIssuersOnlyPolicy>,
+                     V3Config<256, 256, 4, 4, comp_tdm_v3_test::RefillAfterArrivePolicy>,
+                     V3Config<256, 256, 4, 4, DefaultPolicy, ck_tile::bf8_t, ck_tile::bf8_t>>;
 
 } // namespace

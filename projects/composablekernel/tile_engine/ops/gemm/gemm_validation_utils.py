@@ -47,8 +47,8 @@ GEMM_PIPELINES_BY_ARCH = {
 #   (TDM_PIPELINE_EPILOGUE; every other TDM pipeline keeps "tdm");
 # - it is the only pipeline allowed the [4, 4, 1] wave map
 #   (PIPELINE_EXTRA_WARP_COMBINATIONS; the shared table is unchanged);
-# - its wave maps are the two it is tested with, 2x2x1 and 4x4x1, and its A/B
-#   are fp8/bf8 only (GFX1250_TDM_V3_*);
+# - its wave maps are the two it is tested with, 2x2x1 and 4x4x1, its A/B are
+#   fp8/bf8 only and its layout is rcr only (GFX1250_TDM_V3_*);
 # - it is registered for gemm_universal only.
 # No default or CI config lists it; gemm_universal/configs/
 # gfx1250_fp8_comp_tdm_v3.json holds its one instance.

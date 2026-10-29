@@ -8,7 +8,7 @@
 
 namespace {
 
-TYPED_TEST_SUITE(TestCkTileGemmPipelineCompTDMV3, V3Configs);
+TYPED_TEST_SUITE(TestCkTileGemmPipelineCompTDMV3, V3LongKConfigs);
 
 TYPED_TEST(TestCkTileGemmPipelineCompTDMV3, IntLongK) { this->Run(256, 256, 65536, Init::Int); }
 TYPED_TEST(TestCkTileGemmPipelineCompTDMV3, RandomLongK)
