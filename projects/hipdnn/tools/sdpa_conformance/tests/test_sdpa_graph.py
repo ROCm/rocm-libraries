@@ -43,7 +43,10 @@ class Serialized:
         self.tensors = {t["uid"]: t for t in doc["tensors"]}
         self.inputs = self.node["inputs"]
         self.outputs = self.node["outputs"]
-        self.attrs = self.node["attributes"]
+        # forward nodes serialize scalars under "attributes", backward nodes under "parameters"
+        self.attrs = self.node[
+            "attributes" if "attributes" in self.node else "parameters"
+        ]
 
     def tensor(self, role):
         return self.tensors[self.uids[role]]
