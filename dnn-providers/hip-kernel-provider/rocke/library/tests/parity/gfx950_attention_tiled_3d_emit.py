@@ -319,6 +319,7 @@ def _emit(idx: int) -> str:
         num_kv_heads=cfg["num_kv_heads"],
         dtype=cfg["dtype"],
         num_segments=cfg["num_segments"],
+        waves_per_eu=cfg.get("waves_per_eu"),
         emit_lse=idx in _REDUCE_LSE,
     )
     red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx950")

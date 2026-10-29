@@ -332,6 +332,21 @@ _CONFIGS = {
         has_softcap=False,
         kv_storage_dtype=None,
     ),
+    20: dict(
+        # Decode GQA with waves_per_eu, which the reduce inherits.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_decode_grid=True,
+        waves_per_eu=2,
+    ),
 }
 
 # Configs whose REDUCE kernel is built with emit_lse=True (segment unchanged).
@@ -351,6 +366,7 @@ def _kernels(idx: int):
         num_kv_heads=cfg["num_kv_heads"],
         dtype=cfg["dtype"],
         num_segments=cfg["num_segments"],
+        waves_per_eu=cfg.get("waves_per_eu"),
         emit_lse=idx in _REDUCE_LSE,
     )
     red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx942")
