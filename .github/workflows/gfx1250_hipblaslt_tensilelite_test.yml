@@ -530,7 +530,9 @@ jobs:
             pip install -r requirements.txt -r requirements-dev.txt invoke "cmake==3.31.10" nanobind scikit-build-core
             invoke rocisa --stinkytofu on --no-rebuild-on-import
             invoke build-client --no-rebuild-rocisa --build-dir "$RUNNER_TEMP/split-bench-client" --rocm-path "$ROCM_PATH" --gpu-targets gfx1250-strict
-          } 2>&1 | awk -F, -v OFS=, "$HW_SCRUB"
+          } 2>&1 \
+            | sed -E 's/[Cc]lang( version)? [0-9.]+/clang <ver>/g; s/ROCm[ -]?[0-9.]+/ROCm <ver>/g' \
+            | awk -F, -v OFS=, "$HW_SCRUB"
           cd "$GITHUB_WORKSPACE"
           export ROCISA_BACKEND=stinkytofu
           export PYTHONPATH="$GITHUB_WORKSPACE/projects/hipblaslt/tensilelite"
