@@ -418,26 +418,30 @@ class MlaPrefillSpec:
         return WAVE_SIZE * self.num_warps
 
     def kernel_name(self) -> str:
-        return self._name("mla_prefill_score_probe_gfx942")
+        # The probe uses neither the forward layout fields nor absorbed_query.
+        return (
+            f"mla_prefill_score_probe_gfx942{self._geometry()}"
+            f"_rt{self.r_kv_tile}_w{self.num_warps}_{self.dtype}"
+        )
 
     def fwd_kernel_name(self) -> str:
-        return self._name("mla_prefill_fwd_gfx942")
+        # r_kv_tile only shapes the probe, so it is not part of this name.
+        return f"mla_prefill_fwd_gfx942{self._geometry()}" f"_w{self.num_warps}" + (
+            f"_hpw{self.heads_per_wg}" if self.heads_per_wg != 1 else ""
+        ) + (f"_qpw{self.q_tiles_per_wg}" if self.q_tiles_per_wg != 1 else "") + (
+            f"_x{self.num_xcds}" if self.num_xcds else ""
+        ) + (
+            "_aa" if self.agpr_acc else ""
+        ) + f"_{self.dtype}" + (
+            "_aq" if self.absorbed_query else ""
+        )
 
-    def _name(self, stem: str) -> str:
+    def _geometry(self) -> str:
         return (
-            f"{stem}"
             f"_h{self.num_heads}"
             f"_n{self.d_nope}r{self.d_rope}v{self.d_v}"
             f"_rkv{self.r_kv}"
             f"_q{self.block_q}k{self.block_k}"
-            f"_rt{self.r_kv_tile}"
-            f"_w{self.num_warps}"
-            + (f"_hpw{self.heads_per_wg}" if self.heads_per_wg != 1 else "")
-            + (f"_qpw{self.q_tiles_per_wg}" if self.q_tiles_per_wg != 1 else "")
-            + (f"_x{self.num_xcds}" if self.num_xcds else "")
-            + ("_aa" if self.agpr_acc else "")
-            + f"_{self.dtype}"
-            + ("_aq" if self.absorbed_query else "")
         )
 
 

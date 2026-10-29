@@ -65,10 +65,11 @@ if sys.path and sys.path[0] != _LIB_ROOT:
 def _cases():
     """``cid -> zero-arg builder``.
 
-    Only ``num_heads`` varies. The codegen levers (``block_q``, ``block_k``,
-    ``r_kv_tile``, ``num_warps``) are deliberately left at their defaults: this
-    fixture pins the *shipped* IR, and sweeping levers here would bless
-    configurations nothing has measured or run on device.
+    The forward cases take the spec dispatch ships (``dispatched``) or, for
+    the agpr_acc layout, build it directly; the probe uses the spec defaults
+    at ``block_q=16``. Codegen levers are deliberately not swept: this fixture
+    pins the *shipped* IR, and sweeping levers here would bless configurations
+    nothing has measured or run on device.
     """
     from kernels.mla.mla_prefill_gfx942 import (
         MlaPrefillSpec,
