@@ -55,7 +55,9 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        pgrAutoPairRequested, \
                                        resolvePrefetchGlobalReadSpecialValues
 from ..Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
-                                       tdmGroupingName, tdmPapRejectReason
+                                       tdmGroupingName, tdmPapRejectReason, \
+                                       tdmWavePartition, tdmWaveSeparated
+from ..Common.MxScaleLayout import mxTdmTileM
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -214,6 +216,23 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
   return True
 
 
+def _validateMXBlock128Arch(state, asmCaps, printRejectionReason):
+  """Reject MXBlock 128 and 2D MX scales off gfx1250.
+
+  Only the WMMA_V3 path splats one scale byte per WMMA and indexes 2D scale
+  rows; elsewhere (e.g. gfx950) these solutions fail kernel generation.
+  """
+  if asmCaps.get("HasWMMA_V3", False):
+    return True
+  for tc in ("A", "B"):
+    mxBlock = state["ProblemType"][f"MXBlock{tc}"]
+    if mxBlock == 128 or (mxBlock and state["ProblemType"][f"MXBlockFree{tc}"] > 1):
+      reject(state, printRejectionReason,
+             f"MXBlock{tc} 128 and 2D MX scales require WMMA_V3 (gfx1250)")
+      return False
+  return True
+
+
 def _validateMXLocalReadWidth(state, asmCaps, printRejectionReason):
   """Reject invalid MX scale units and undersized M-major local reads.
 
@@ -252,6 +271,73 @@ def _validateMXLocalReadWidth(state, asmCaps, printRejectionReason):
           f"M-major MX-scale local read for {tc} requires "
           f"VectorWidth{tc} >= MatrixInstK // MXBlock{tc} ({mxUnit}), "
           f"got {vectorWidth}")
+      return False
+
+  return True
+
+
+def _validateMX2DFreeTile(state, printRejectionReason):
+  """Reject 2D MX tiles whose scale rows the TDM / LRA codegen misplaces.
+
+  The 2D scale path loads ``ceil(MT/MXBlockFree)`` scale rows from
+  ``(wg*MT)/MXBlockFree`` and picks a row with ``localM >> log2(MXBlockFree)``.
+
+  2D also requires ``MXBlock == MatrixInstK`` (one scale byte per row along K);
+  the TDM, LRA and local-read 2D paths do not handle ``mxUnit > 1``.
+
+  2D supports ``MXBlockFree == 128`` only (``[128, 128]``). The 2D local read
+  address has no lane term, so one scale row must cover a wave's whole free
+  extent; smaller free blocks read row 0's scale for every row (e.g. ``[32, 128]``
+  with VW 8 gets 75% of A rows wrong).
+  """
+  for tc, tile01 in (("A", 0), ("B", 1)):
+    mxTile = state["ProblemType"][f"MXBlockFree{tc}"]
+    # 1 is the 1D layout; 2D is validated for [128, 128] only.
+    if state["ProblemType"][f"MXBlock{tc}"] and mxTile not in (1, 128):
+      reject(state, printRejectionReason,
+             f"2D MX scale for {tc} supports MXBlockFree{tc} 128 only, got {mxTile}")
+      return False
+    if mxTile <= 1:
+      continue
+    # 2D addressing (TDM wg offset, LRA wave offset, the one-VGPR local read)
+    # assumes one scale byte per scale row along K, i.e. MXBlock == MatrixInstK.
+    mxBlock = state["ProblemType"][f"MXBlock{tc}"]
+    mxUnit = state["MatrixInstK"] // mxBlock if mxBlock else 1
+    if mxUnit != 1:
+      reject(state, printRejectionReason,
+             f"2D MX scale for {tc} requires MXBlock{tc} == MatrixInstK ({state['MatrixInstK']}), "
+             f"got mxUnit {mxUnit}")
+      return False
+  return True
+
+
+def _validateMX2DTdmMSplit(state, printRejectionReason):
+  """Reject a 2D MX wave-separated TDM M-split that drops scale rows.
+
+  The M-split gives each of ``numComp`` components ``scaleRows // numComp`` rows;
+  a remainder is never loaded. Fewer rows than components is fine (every component
+  loads the full tile). Whether the TDM splits M or K depends on DepthU, so this
+  runs once DepthU is resolved.
+  """
+  waveSeparated = tdmWaveSeparated(state) and not state.get("UseSubtileImpl") \
+      and state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]
+  if not waveSeparated:
+    return True
+  for tc, tile01 in (("A", 0), ("B", 1)):
+    mxTile = state["ProblemType"][f"MXBlockFree{tc}"]
+    if mxTile <= 1:
+      continue
+    mxBlock = state["ProblemType"][f"MXBlock{tc}"]
+    mxUnit = state["MatrixInstK"] // mxBlock
+    if mxUnit <= 0:
+      continue  # _validateMXLocalReadWidth rejects it
+    numMxKGroups = (state["DepthU"] // mxBlock) // mxUnit
+    numComp, _ = tdmWavePartition(state, f"MXS{tc}")
+    scaleRows = mxTdmTileM(state[f"MacroTile{tile01}"], mxTile)
+    if numMxKGroups < numComp and scaleRows >= numComp and scaleRows % numComp != 0:
+      reject(state, printRejectionReason,
+             f"2D MX TDM M-split for {tc} requires scale rows ({scaleRows}) to be a multiple "
+             f"of TDM components ({numComp}); the remainder rows are never loaded")
       return False
 
   return True
@@ -3596,6 +3682,8 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason,
                "TDMFuse=%d grouping %s was declined" % (tdmFuse, tdmGroupingName(state)))
         return
+    if not _validateMX2DFreeTile(state, printRejectionReason):
+      return
 
     # Check PAP after TDMFuse-specific errors.
     if state.get("PrefetchAcrossPersistent", 0) and state["enableTDMA"] and state["enableTDMB"]:
@@ -4084,6 +4172,17 @@ class Solution(collections.abc.Mapping):
 
       state["_DepthU"] = depthU
       state["DepthU"] = depthU
+
+      # One K-group of scales per MXBlock: a DepthU below it has no scale to load
+      # (DepthU // MXBlock is 0 and later divides by zero).
+      for tc in ("A", "B"):
+        mxBlock = state["ProblemType"][f"MXBlock{tc}"]
+        if mxBlock and depthU < mxBlock:
+          reject(state, printRejectionReason,
+                 f"MX scale for {tc} requires DepthU >= MXBlock{tc} ({depthU} < {mxBlock})")
+          return
+      if not _validateMX2DTdmMSplit(state, printRejectionReason):
+        return
 
       state["_DepthUA"] = depthUA# internal — data SRD advance
       if state["ProblemType"]["MXBlockA"]:
@@ -4913,6 +5012,9 @@ class Solution(collections.abc.Mapping):
         calLRVWFor950MX()
       else:
         calLRVW()
+
+      if not _validateMXBlock128Arch(state, isaInfoMap[isa].asmCaps, printRejectionReason):
+        return
 
       if not _validateMXLocalReadWidth(
           state, isaInfoMap[isa].asmCaps, printRejectionReason):
