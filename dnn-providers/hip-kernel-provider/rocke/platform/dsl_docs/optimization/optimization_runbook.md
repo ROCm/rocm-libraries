@@ -1836,7 +1836,7 @@ they exist, live under `instances/<arch>/<kernel>.py`) and read the
 | `w_fold` / `prefetch_rows` | `DirectDepthwiseDgradWindowedSpec` (`mfma`) | 1 / 1 | Images per 16x16 MFMA tile (`tile_w = 32 / w_fold` columns each); dY window rows in flight | Fold to fill the 32-column tile on narrow images (minimise padded tile columns plus window columns read); `prefetch_rows = 2` is what the cache builds; each row costs registers (`mfma_frag_vgprs`). Both must stay 1 without `mfma` |
 | `waves_q` (`stage_rows`) | `DirectConv4cSpec` dgrad | 1 | Waves splitting `block_q` in the row-staged 4c kernel (`block_q == 4 * waves_q`) | Set by `make_dgrad_4c_spec(stage_rows=True)`; workgroup = `block_groups / 16 * waves_q` waves |
 | `groups` | conv_implicit_gemm | 1 | Grouped conv via descriptor `unmerge("group")` | `> 1` for ResNeXt / depthwise-style |
-| `group_merge` | conv_implicit_gemm (fwd), conv_implicit_gemm_wgrad | 1 | Folds `Gm` conv groups into one GEMM so the per-group channel count the vector-width picker sees becomes `Gm` instead of 1, restoring a wide load where the depthwise one was scalar. Fwd puts the group on GemmN and GemmK and masks off-diagonal **weights** on the B load, so the redundant work lands in idle MFMA N-lanes and costs no memory traffic; wgrad puts it on M and N instead | Depthwise only (`cpg == kpg == 1`), `wave_size == 64`. Must divide `groups` and fit `tile_n`. Fwd also excludes `async_dma`, pointwise (`Y == X == 1`) and 3-D; wgrad also excludes `split_k > 1` without `two_stage`. Larger `Gm` widens the load but adds masked compute, so the best degree is shape-dependent and **turns over** — sweep it rather than maxing it. Inert at `1`; see [`examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md`](../../python/rocke/examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md) |
+| `group_merge` | conv_implicit_gemm (fwd), conv_implicit_gemm_wgrad | 1 | Folds `Gm` conv groups into one GEMM so the per-group channel count the vector-width picker sees becomes `Gm` instead of 1, restoring a wide load where the depthwise one was scalar. Fwd puts the group on GemmN and GemmK and masks off-diagonal **weights** on the B load, so the redundant work lands in idle MFMA N-lanes and costs no memory traffic; wgrad puts it on M and N instead | Depthwise only (`cpg == kpg == 1`); wgrad also `wave_size == 64` (fwd runs on WMMA too). Must divide `groups` and fit `tile_n`. Fwd also excludes `async_dma`, pointwise (`Y == X == 1`) and 3-D; wgrad also excludes `split_k > 1` without `two_stage`. Larger `Gm` widens the load but adds masked compute, so the best degree is shape-dependent and **turns over** — sweep it rather than maxing it. Inert at `1`; see [`examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md`](../../python/rocke/examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md) |
 | `k0_k1_split` | conv_implicit_gemm | False | K0/K1 inner-dim split for `CoalescedTileLoader` | When C is the natural contiguous dim |
 | `n_acc_slots` (derived) | DirectConv | KH | Circular accumulators for row streaming | Conv 3×3 → 3 slots |
 
@@ -2108,7 +2108,7 @@ them by hand only through an explicit tuning spec.
 |---|---|---|---|
 | `chiplet_swizzle` | GEMM / conv | False | Remap WGIDs so contiguous stripes land on the same XCD (L2 reuse). Rejected by `is_valid_dgrad_spec`: the dgrad builder does not implement it (dgrad has `xcd_tile_order`) |
 | `chiplet_wgm` | GEMM / conv | 8 | Super-tile WGM grouping |
-| `chiplet_num_xcds` | GEMM / conv | 8 | MI300X / MI325X / MI350X have 8 XCDs |
+| `chiplet_num_xcds` | GEMM / conv / dense attention | 8 | MI300X / MI325X / MI350X have 8 XCDs; dense attention's XCD-aware block orders read it |
 | `chiplet_chunk_size` | GEMM / conv | 64 | XCD round-robin chunk size |
 | `helpers/grid.py::chiplet_transform_chunked` | helper | — | Pure helper if you author your own kernel |
 | Constants `NUM_XCDS_MI300X / MI325X / MI350X` | `helpers/grid.py` | — | All 8 today |
@@ -2388,6 +2388,24 @@ sweep CSVs.
   display kernel symbol is the same across two compile-time-constant
   variants, the cache can serve the wrong HSACO. Salt the kernel
   symbol with a shape hash before compile (see §12.2).
+- **16-bit split-K degree outgrows the atomic's rounding.** A packed
+  bf16/fp16 atomic (`global_atomic_add_pk_*`) rounds the running sum in
+  dW on every add, so with same-sign partials the relative error grows
+  roughly linearly in the split degree, up to about
+  `degree * 2**-(fraction bits + 1)` (`2**-8` per add for bf16, which
+  has 7 fraction bits). A degree picked for CTA fill alone on a
+  small-channel, deep-reduction wgrad can pass on signed random
+  inputs and still miss the tolerance on all-positive ones. Cap the
+  16-bit degree from that bound, not from throughput, and test the cap
+  with all-positive inputs (`WgradSplitPolicy.max_degree_by_dtype` on
+  gfx1250 caps bf16 at 12).
+- **Validator rule scoped to the wrong epilogue.** A store-width rule
+  written for the MFMA cshuffle epilogue also gated the WMMA split-K
+  epilogue, which never reads that width. Hand-built specs left the width
+  unset and passed, while every AOT cache job pins it, so the cache built
+  no split-K binary at all. Scope each validator rule to the code path
+  that consumes it, and test reachability through the AOT grid, not a
+  hand-built spec.
 
 ### 14.2 Performance Failures
 
@@ -2523,6 +2541,19 @@ An optimization is done when:
 - If the HIP-debug backend disagrees with LLVM-direct on a kernel,
   one of the two is missing an op lowering — file the issue,
   don't ignore it.
+- If a higher 16-bit split-K degree is faster, check it against the
+  atomic-rounding bound before raising the cap (§14.1): the speed comes
+  from accepting more rounding error. Only a wider dW dtype raises the
+  bound itself.
+- Sweep every 16-bit split-K degree per dtype, and compare it with the best
+  `split_k=1` kernel, before you set a cap. Do not assume two packed atomics
+  with the same instruction pattern behave alike. In a gfx1250 wgrad sweep
+  (`benchmark_implicit_gemm_conv.py --direction wgrad --verify`, once per
+  `--split-k` degree), bf16 timings kept improving up to the accuracy cap,
+  while no fp16 degree beat the unsplit kernel on a mid-size dW. That is a
+  timing observation only; the cause was not classified with hardware
+  counters. When no cap avoids such a loss, turn the automatic split off for
+  that dtype and leave the explicit degree as an opt-in.
 
 ### 16.2 Anti-patterns (what to avoid)
 

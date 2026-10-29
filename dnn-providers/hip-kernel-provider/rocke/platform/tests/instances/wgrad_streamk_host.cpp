@@ -386,6 +386,71 @@ void check_validator()
     CHECK(rejects(s, "gfx950", "tile_m not divisible by warp_m * warp_tile_m"));
 }
 
+/* WMMA split-K gates (Python is_valid_wgrad_spec / WgradConvSpec.validate):
+ * admitted where ArchTarget memory.has_global_float_atomic_add is set, and the
+ * packed-atomic store-width rule is MFMA-only -- the AOT cache grid pins
+ * vector_size_c=1 for the default epilogue, which must not block WMMA split-K.
+ * The dW row parity still applies. */
+void check_wmma_split_k_validator()
+{
+    char why[512];
+    auto valid = [&](const rocke_implicit_gemm_conv_wgrad_spec_t& s, const char* arch) {
+        why[0] = '\0';
+        return rocke_implicit_gemm_conv_wgrad_is_valid_spec(&s, arch, why, sizeof(why));
+    };
+    auto wmma = [](const rocke_conv_problem_t& p, int warp_tile_k) {
+        rocke_implicit_gemm_conv_wgrad_spec_t s = rocke_implicit_gemm_conv_wgrad_spec_default();
+        s.problem = p;
+        s.dtype_a = "bf16";
+        s.dtype_b = "bf16";
+        s.dtype_d = "bf16";
+        s.tile_m = 32;
+        s.tile_n = 32;
+        s.tile_k = 32;
+        s.warp_m = 1;
+        s.warp_n = 1;
+        s.warp_tile_m = 16;
+        s.warp_tile_n = 16;
+        s.warp_tile_k = warp_tile_k;
+        s.wave_size = 32;
+        s.split_k = 4;
+        s.has_vector_size_c = true;
+        s.vector_size_c = 1;
+        return s;
+    };
+
+    rocke_implicit_gemm_conv_wgrad_spec_t s = wmma(dense(), 32);
+    CHECK(valid(s, "gfx1250"));
+
+    s = wmma(dense(), 16);
+    CHECK(!valid(s, "gfx1151"));
+    CHECK(strcmp(why,
+                 "WMMA split_k atomic is enabled only on arches with validated float global "
+                 "atomics (has_global_float_atomic_add; got gfx1151)")
+          == 0);
+
+    /* C=3, 3x3: wg_N = 27, an odd dW row. */
+    rocke_conv_problem_t odd = rocke_conv_problem_default(2, 12, 12, 3, 96, 3, 3);
+    odd.pH = 1;
+    odd.pW = 1;
+    s = wmma(odd, 32);
+    CHECK(!valid(s, "gfx1250"));
+    CHECK(strstr(why, "wg_N=27") != NULL);
+
+    /* MFMA keeps the store-width rule: cshuffle at vector_size_c=1 has no pair. */
+    s = spec(dense());
+    s.streamk = "off";
+    s.dtype_a = "bf16";
+    s.dtype_b = "bf16";
+    s.dtype_d = "bf16";
+    s.epilogue = "cshuffle";
+    s.split_k = 4;
+    s.has_vector_size_c = true;
+    s.vector_size_c = 1;
+    CHECK(!valid(s, "gfx950"));
+    CHECK(strstr(why, "store_vec=1") != NULL);
+}
+
 } // namespace
 
 int main()
@@ -395,6 +460,7 @@ int main()
     check_plans();
     check_invalid_inputs();
     check_validator();
+    check_wmma_split_k_validator();
     if(g_failures)
     {
         fprintf(stderr, "rocke_wgrad_streamk_host: %d failure(s)\n", g_failures);

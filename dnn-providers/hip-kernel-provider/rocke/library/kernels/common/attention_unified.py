@@ -61,6 +61,7 @@ from rocke.helpers.transforms import (
 )
 
 from ._attention_additive_bias import append_additive_bias_signature
+from ._lse_store import validate_unified_lse
 
 # Alias the promoted log2-domain softcap helper under the local name used by
 # the scalar reference kernels (matches the gfx950 tiled modules' convention).
@@ -146,8 +147,16 @@ class UnifiedAttentionProblem:
     # (tiled 2D/3D) and in the scalar kernels; other arches reject it.
     causal_top_left: bool = False
     right_bound: int = 0
+    # Optional FP32 natural-log softmax normalizer, [total_q, num_query_heads, 1].
+    # Implemented by the gfx942/gfx950 split-KV (3D) reduce only; every other
+    # path declines it (see _reject_lse).
+    emit_lse: bool = False
 
     def __post_init__(self):
+        if type(self.emit_lse) is not bool:
+            raise ValueError(
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+            )
         if self.right_bound < -1:
             raise ValueError(
                 f"right_bound must be >= -1 (-1 = unbounded), got {self.right_bound}"
@@ -546,6 +555,29 @@ def _reject_mask_on_arch(
     return None
 
 
+_LSE_SPLIT_KV_ARCHES = ("gfx942", "gfx950")
+
+
+def _reject_lse(
+    problem: UnifiedAttentionProblem, arch: str, path: str
+) -> Optional[Tuple[bool, str]]:
+    """The LSE output exists only in the gfx942/gfx950 split-KV reduce.
+
+    ``path`` is ``"3d"`` for split-KV, else a label for the refused path."""
+    if not problem.emit_lse:
+        return None
+    if path != "3d":
+        return False, f"LSE output is not implemented on the {path} attention path"
+    if arch not in _LSE_SPLIT_KV_ARCHES:
+        return False, f"LSE output is not implemented on {arch} split-KV attention"
+    if problem.use_sinks:
+        return False, (
+            "LSE output with attention sinks is not implemented on split-KV "
+            "attention (keyless rows would drop the sink)"
+        )
+    return None
+
+
 def supports_native_unified_attention(
     problem: UnifiedAttentionProblem,
     arch: str,
@@ -606,7 +638,11 @@ def supports_native_unified_attention_tiled(
     canonicalized internally before routing.
     """
     arch = _canonical_arch_for_selection(arch)
-    rejected = _reject_mask_semantics(problem) or _reject_mask_on_arch(problem, arch)
+    rejected = (
+        _reject_lse(problem, arch, "tiled 2D")
+        or _reject_mask_semantics(problem)
+        or _reject_mask_on_arch(problem, arch)
+    )
     if rejected is not None:
         return rejected
     if arch == "gfx1250" and problem.softcap > 0:
@@ -709,7 +745,11 @@ def supports_native_unified_attention_3d_tiled(
     ``arch`` may be a decorated target ID — canonicalized internally.
     """
     arch = _canonical_arch_for_selection(arch)
-    rejected = _reject_mask_semantics(problem) or _reject_mask_on_arch(problem, arch)
+    rejected = (
+        _reject_lse(problem, arch, "3d")
+        or _reject_mask_semantics(problem)
+        or _reject_mask_on_arch(problem, arch)
+    )
     if rejected is not None:
         return rejected
     rejected = _reject_fp8_format_arch_mismatch(problem, arch)
@@ -1257,16 +1297,16 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
     # combo and a much heavier prelude.
     if _enable_combo_2d(problem, arch) and problem.sliding_window > 0:
         return problem.block_size
-    # fp16 D128 single-batch sliding-window: force T=64. The generic
+    # fp16 & bf16 D128 single-batch sliding-window: force T=64. The generic
     # 2*block_size tile would give T=32 at block_size=16, whose 256 outer
     # iterations at S=8192 under-amortise the per-iter cost. T=64 halves the
-    # iteration count; measured ~1.65x on gfx950 (numerically identical --
-    # both paths max_abs 1.95e-3).
+    # iteration count; faster on gfx950 for both dtypes, within tolerance of
+    # the narrow path's output on each (fp16 max_abs 1.95e-3, bf16 max_abs
+    # 1.5625e-02 -- larger due to bf16's lower precision, not a routing bug).
     if (
         _enable_single_batch_combo(problem, arch)
         and problem.sliding_window > 0
         and problem.head_size == 128
-        and problem.dtype == "fp16"
     ):
         return 64
     # Single-batch (num_seqs == 1) d128/d64 prefill full-combo cohort.
@@ -1975,10 +2015,12 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
         them per-score, so biased single-batch prefill takes the combo path
         instead of the fallback. Only softcap/sinks are excluded (above)
         because the mask-limit shortcut can't fold them.
-      * sliding window: fp16 D128 only -- the transposed-32x32 path is ~1.65x
-        faster here than the narrow 16x16 path (both numerically equal); other
-        SW shapes keep their existing routing, and the no-SW VALU sub-flags
-        auto-disable via _enable_transposed_subflags.
+      * sliding window: fp16 & bf16 D128 only (measured both on gfx950) -- the
+        transposed-32x32 path is faster here than the narrow 16x16 path on
+        both dtypes, within tolerance of it numerically (fp16 max_abs
+        1.95e-3, bf16 max_abs 1.5625e-02); other SW shapes keep their
+        existing routing, and the no-SW VALU sub-flags auto-disable via
+        _enable_transposed_subflags.
       * head_size in {64, 128}.
       * max_seqlen_q > 256 (long prefill; decode-class shapes route to the 3D
         split-KV path via ``select_path``, and the autotuner's win starts at
@@ -1994,20 +2036,19 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
         return False
     if problem.softcap > 0 or problem.use_sinks:
         return False
-    # fp16 D128 sliding-window (block_size==16 only) routes to the transposed-
-    # 32x32 fp32 online-softmax path (~1.65x faster here than the narrow 16x16
-    # path; both numerically equal). Scoped to block_size==16 because that is the
-    # cohort we measured. bs in {32,64} would now also build safely under the
-    # combo -- the _enable_k_single_buffer geometry guard derives block_m <=
-    # tile_size, so the former block_m=128 > tile_size=64 collision no longer
-    # raises -- but their combo speedup is unmeasured, so they keep their
-    # existing routing. bf16 D128 SW and all other SW shapes also stay on their
-    # existing paths; the no-SW VALU sub-flags auto-disable for SW via
-    # _enable_transposed_subflags.
+    # fp16 & bf16 D128 sliding-window (block_size==16 only) route to the
+    # transposed-32x32 fp32 online-softmax path (faster here than the narrow
+    # 16x16 path on both dtypes, measured on gfx950; within tolerance of it
+    # numerically -- fp16 max_abs 1.95e-3, bf16 max_abs 1.5625e-02).
+    # Scoped to block_size==16 because that is the cohort we measured. bs in
+    # {32,64} would now also build safely under the combo -- the
+    # _enable_k_single_buffer geometry guard derives block_m <= tile_size, so
+    # the former block_m=128 > tile_size=64 collision no longer raises -- but
+    # their combo speedup is unmeasured, so they keep their existing routing.
+    # All other SW shapes also stay on their existing paths; the no-SW VALU
+    # sub-flags auto-disable for SW via _enable_transposed_subflags.
     if problem.sliding_window > 0 and not (
-        problem.head_size == 128
-        and problem.dtype == "fp16"
-        and problem.block_size == 16
+        problem.head_size == 128 and problem.block_size == 16
     ):
         return False
     if problem.head_size not in (64, 128):
@@ -2906,6 +2947,48 @@ def kv_addr_width_for_builder(
     return False
 
 
+def gfx942_3d_kv_needs_i64_addr(
+    num_kv_blocks: int,
+    block_bytes: int,
+    *,
+    kv_fp8: bool,
+    use_wide_kv_load: bool,
+    tile_size: int,
+    head_size: int,
+) -> bool:
+    """``use_i64_kv_addr`` for the gfx942 tiled 3D kernel on this paged cache.
+
+    The kernel has no i64 path, so its spec refuses the flag: True means the
+    cache is past what the selected K/V loader reads. The single rule for the
+    spec builder, the cache key and the dispatcher's tuning specs.
+    """
+    from ..gfx942.attention_tiled_3d import i32_kv_cache_bytes
+
+    limit = i32_kv_cache_bytes(
+        kv_fp8=kv_fp8,
+        use_wide_kv_load=use_wide_kv_load,
+        tile_size=tile_size,
+        head_size=head_size,
+    )
+    return num_kv_blocks > 0 and num_kv_blocks * block_bytes > limit
+
+
+def _enable_i64_kv_addr_3d(problem: UnifiedAttentionProblem, arch: str) -> bool:
+    """3D ``use_i64_kv_addr``: ``_enable_i64_kv_addr``, except on gfx942, whose
+    limit depends on the K/V loader (``gfx942_3d_kv_needs_i64_addr``)."""
+    # Below the buffer range every loader is i32, so skip the selector walk.
+    if arch != "gfx942" or not _enable_i64_kv_addr(problem):
+        return _enable_i64_kv_addr(problem)
+    return gfx942_3d_kv_needs_i64_addr(
+        problem.num_kv_blocks,
+        _kv_block_bytes(problem),
+        kv_fp8=_kv_storage_dtype(problem) is not None,
+        use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem, arch),
+        tile_size=_gfx942_3d_tile_size_override(problem, arch) or problem.block_size,
+        head_size=problem.head_size,
+    )
+
+
 def _kv_block_bytes(problem: UnifiedAttentionProblem) -> int:
     """Byte size of one paged K (or V) block for ``problem``."""
     elem_bytes = 1 if problem.use_fp8 else 2
@@ -2918,11 +3001,11 @@ def _enable_i64_kv_addr(problem: UnifiedAttentionProblem) -> bool:
     The default load path puts the full byte offset (incl.
     ``physical_block * block_stride``) in a 32-bit buffer voffset, bounded at
     ``_I32_KV_BUFFER_BYTES``; past that, loads silently return zeros. When the
-    cache is that large we fold the per-block offset into a
-    64-bit buffer base (a tiny, wave-uniform ``make_buffer_rsrc`` per
-    block; measured within ~1-2% of the i32 path). Below the cap we keep
-    the fast i32 path. ``num_kv_blocks == 0`` means the cache size is
-    unknown (caller did not supply it) -> assume small / fast path.
+    cache is that large we fold the per-block offset into a 64-bit buffer
+    base (a wave-uniform ``make_buffer_rsrc`` per block; the gfx942 tiled 2D
+    K/V copies build one per page of a tile, not one per copy). Below the cap
+    we keep the i32 path. ``num_kv_blocks == 0`` means the cache size is
+    unknown (caller did not supply it) -> assume small / i32 path.
     """
     return kv_cache_needs_i64_addr(problem.num_kv_blocks, _kv_block_bytes(problem))
 
@@ -3004,15 +3087,35 @@ def _spec_kv_addr_limit(
     return min(limits, key=lambda limit: limit.nbytes, default=None)
 
 
+def _3d_spec_kv_addr_limit(
+    problem: UnifiedAttentionProblem, spec, arch: str
+) -> _KvAddrLimit | None:
+    """Largest paged K cache, in bytes, the 3D segment kernel built from ``spec``
+    reads. gfx942 has no i64 path, so its K/V loader sets the limit."""
+    if arch == "gfx942":
+        from ..gfx942.attention_tiled_3d import i32_kv_cache_bytes
+
+        return _KvAddrLimit(
+            i32_kv_cache_bytes(
+                kv_fp8=spec.kv_storage_dtype is not None,
+                use_wide_kv_load=spec.use_wide_kv_load,
+                tile_size=spec.tile_size,
+                head_size=spec.head_size,
+            ),
+            _KV_LIMIT_NO_I64_PATH,
+        )
+    return _spec_kv_addr_limit(problem, spec)
+
+
 def _kv_addr_fix(
     problem: UnifiedAttentionProblem, num_kv_blocks: int, kv_addr_limit: _KvAddrLimit
 ) -> str:
     """What a caller can do about a cache past ``kv_addr_limit``."""
     if kv_addr_limit.cause == _KV_LIMIT_NO_I64_PATH:
         return (
-            "This kernel has no i64 KV path (the scalar, gfx942 4-warp GQA and "
-            "gfx1250 kernels index at most 2^31 elements), so fixing "
-            "num_kv_blocks will not help. Use a smaller cache."
+            "This kernel has no i64 KV path (the scalar, gfx942 4-warp GQA, "
+            "gfx942 tiled 3D and gfx1250 kernels), so fixing num_kv_blocks "
+            "will not help. Use a smaller cache."
         )
     if kv_addr_limit.cause != _KV_LIMIT_I32_BUFFER:
         return (
@@ -3942,6 +4045,11 @@ def _validate_strided_3d_spec(problem: UnifiedAttentionProblem, tuning_spec) -> 
     ):
         if getattr(reduce, name) != getattr(segment, name):
             raise ValueError(f"strided reduce_spec.{name} disagrees with segment")
+    # Strided decode writes no LSE (the runner refuses problem.emit_lse first),
+    # and this branch returns before the paged LSE agreement check: a reduce
+    # built with lse_ptr would not match the LSE-off launch signature.
+    if getattr(reduce, "emit_lse", False):
+        raise ValueError("strided reduce_spec cannot emit LSE")
     _validate_strided_3d_lds(segment, reduce, arch=tuning_spec.arch)
 
 
@@ -3985,13 +4093,16 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         _select_3d_waves_per_eu(problem, arch),
         _enable_gfx942_3d_wide_kv_load(problem, arch),
         _kv_storage_dtype(problem),
-        _enable_i64_kv_addr(problem),
+        _enable_i64_kv_addr_3d(problem, arch),
         decode_grid,
         _kv_cache_policy_3d(problem, arch),
         _gfx950_3d_tile_size_override(problem, arch),
         _kv_lds_swizzle_3d(problem, arch),
         _wave_page_id_load_3d(problem, arch),
     ) + _mask_key(problem)
+    if problem.emit_lse:
+        # Suffix only when on, so every LSE-off key is unchanged.
+        base = base + ("lse",)
     if arch == "gfx1250":
         sp = _tiled_3d_spec_from_problem(problem, arch)
         return base + (
@@ -4054,19 +4165,21 @@ def _3d_signature(
     return sb.build()
 
 
-def _reduce_signature(dtype: str):
+def _reduce_signature(dtype: str, *, emit_lse: bool = False):
     from rocke.helpers.spec import SignatureBuilder
 
     io_dtype = "f16" if dtype == "fp16" else "bf16"
-    return (
+    sig = (
         SignatureBuilder()
         .ptr("output_ptr", io_dtype)
         .ptr("segm_output_ptr", "f32")
         .ptr("segm_max_ptr", "f32")
         .ptr("segm_expsum_ptr", "f32")
         .ptr("seq_lens_ptr", "i32")
-        .build()
     )
+    if emit_lse:
+        sig = sig.ptr("lse_ptr", "f32")
+    return sig.build()
 
 
 def _attn_signature(
@@ -4145,9 +4258,9 @@ def _attn_values(
     _require_additive_bias(problem, additive_bias)
     # Production 2D and scalar launches and the torch direct-launch harnesses
     # pack kernargs here, so check the real K cache against what the compiled
-    # kernel addresses (``kv_addr_limit``, from ``_spec_kv_addr_limit``). Not
-    # covered: the 3D path and the gfx1250 tiled_2d_verify harness, which pack
-    # their own.
+    # kernel addresses (``kv_addr_limit``, from ``_spec_kv_addr_limit``). The 3D
+    # path checks in ``_run_3d_tiled_on_stream``; the gfx1250 tiled_2d_verify
+    # harness packs its own and is not covered.
     _check_kv_addr_width(problem, k, kv_addr_limit)
     vals = {
         "output_ptr": out,
@@ -4349,6 +4462,7 @@ def _run_3d_tiled_on_stream(
     kv_cache_layout=None,
     execution=None,
     capture_refs=None,
+    lse=None,
 ):
     """Launch the tiled 3D segment + reduce kernels.
 
@@ -4370,6 +4484,19 @@ def _run_3d_tiled_on_stream(
     else:
         num_segments = _num_segments(problem, _launch_arch)
         cache_key = _tiled_3d_cache_key(problem, _launch_arch)
+    # The spec saw problem.num_kv_blocks, which a caller can leave stale, so
+    # check the real paged cache. gfx1250's 3D spec makes no i64 decision.
+    if kv_cache_layout is None and _launch_arch in ("gfx942", "gfx950"):
+        if cache_key not in _3D_KV_ADDR_LIMITS:
+            segment_spec = (
+                tuning_spec.kernel_spec
+                if tuning_spec is not None
+                else _tiled_3d_spec_from_problem(problem, _launch_arch)
+            )
+            _3D_KV_ADDR_LIMITS[cache_key] = _3d_spec_kv_addr_limit(
+                problem, segment_spec, _launch_arch
+            )
+        _check_kv_addr_width(problem, k, _3D_KV_ADDR_LIMITS[cache_key])
     if kv_cache_layout is not None:
         cache_key = cache_key + ("strided_kv",)
     capturing = _torch_stream_capturing()
@@ -4395,6 +4522,7 @@ def _run_3d_tiled_on_stream(
                     alibi_slopes,
                     qq_bias,
                     additive_bias,
+                    lse,
                 )
             ),
             int(additive_bias_batch_stride),
@@ -4441,6 +4569,7 @@ def _run_3d_tiled_on_stream(
                 kv_cache_layout=kv_cache_layout,
                 execution=execution,
                 cache_key=cache_key,
+                lse=lse,
             )
 
     prepared = _get_3d_pipeline(
@@ -4507,6 +4636,8 @@ def _run_3d_tiled_on_stream(
         "segm_expsum_ptr": segm_expsum,
         "seq_lens_ptr": seqused_k,
     }
+    if problem.emit_lse:
+        red_vals["lse_ptr"] = lse
     # hipStreamSynchronize is illegal while a stream is capturing, and the
     # default LaunchConfig.fence=True path does exactly that. Frameworks
     # that wrap the whole forward in torch.cuda.graph (vLLM, an outer
@@ -4560,6 +4691,7 @@ def _run_3d_graph(
     kv_cache_layout,
     execution,
     cache_key,
+    lse=None,
 ):
     """Paired, bounded graph ownership; called under the graph submission lock."""
     graph_key = (
@@ -4585,6 +4717,7 @@ def _run_3d_graph(
                 alibi_slopes,
                 qq_bias,
                 additive_bias,
+                lse,
             )
         ),
         id(q),
@@ -4598,6 +4731,7 @@ def _run_3d_graph(
         id(alibi_slopes) if alibi_slopes is not None else 0,
         id(qq_bias) if qq_bias is not None else 0,
         id(additive_bias) if additive_bias is not None else 0,
+        id(lse) if lse is not None else 0,
         float(softmax_scale),
         float(k_scale),
         float(v_scale),
@@ -4654,6 +4788,7 @@ def _run_3d_graph(
             execution=execution,
             tuning_spec=tuning_spec,
             kv_cache_layout=kv_cache_layout,
+            lse=lse,
         )
         wait_stream_and_release(int(stream))
         refs = []
@@ -4692,6 +4827,7 @@ def _run_3d_graph(
                     capture_refs=refs,
                     tuning_spec=tuning_spec,
                     kv_cache_layout=kv_cache_layout,
+                    lse=lse,
                 )
         # Capture has ended. Drain its raw-launch argument bucket; graph entry
         # refs own scratch and all captured tensors from here through eviction.
@@ -4711,7 +4847,10 @@ def _run_3d_graph(
                 alibi_slopes,
                 qq_bias,
                 additive_bias,
-            ),
+            )
+            # Keep the LSE output alive with the graph only when it is written,
+            # so the LSE-off entry keeps exactly its previous reference set.
+            + ((lse,) if lse is not None else ()),
             q.device,
             int(stream),
         )
@@ -4751,6 +4890,8 @@ _2D_LAUNCH_META: Dict[Tuple, _Attention2DLaunchMeta] = {}
 # Per-cache-key ``_spec_kv_addr_limit`` of the default-route spec. The spec is a
 # function of the cache key, so it is built once per kernel, not per total_q.
 _2D_KV_ADDR_LIMITS: dict[tuple, _KvAddrLimit | None] = {}
+# The same for the 3D segment kernel, from ``_3d_spec_kv_addr_limit``.
+_3D_KV_ADDR_LIMITS: dict[tuple, _KvAddrLimit | None] = {}
 _2D_GRAPHS: Dict[Tuple, Any] = {}
 _2D_GRAPH_REFS: Dict[Tuple, Tuple[Any, ...]] = {}
 _SCALAR_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
@@ -4815,6 +4956,16 @@ def _explicit_path_supported(
     A tuning spec is a knob combination, not proof the problem is runnable.
     ``AttentionTuningSpec.allow_unsupported`` is the only bypass.
     """
+    # LSE eligibility is an output contract, not a coverage gate: the
+    # allow_unsupported escape hatch must not skip it (a keyless row would
+    # silently drop an attention sink, or a 2D path would write no LSE at all).
+    rejected = _reject_lse(
+        problem,
+        _canonical_arch_for_selection(arch),
+        "3d" if kind == "3d" else "tiled 2D",
+    )
+    if rejected is not None:
+        return rejected
     if tuning_spec is not None and tuning_spec.allow_unsupported:
         return True, f"explicit {kind} tuning spec (unsupported override)"
     if kind == "3d":
@@ -5203,6 +5354,8 @@ def _get_3d_pipeline(
                     dtype=problem.dtype,
                     num_segments=num_segments,
                     waves_per_eu=_select_3d_waves_per_eu(problem, arch),
+                    # Only when on: gfx1250's reduce spec has no such field.
+                    **({"emit_lse": True} if problem.emit_lse else {}),
                 )
             seg_kernel = build_unified_attention_3d_tiled(segment_spec, arch=arch)
             red_kernel = build_unified_attention_reduce_tiled(reduce_spec, arch=arch)
@@ -5233,7 +5386,10 @@ def _get_3d_pipeline(
     red_launcher = KernelLauncher(
         hsaco=red_hsaco,
         kernel_name=red_kname,
-        signature=_reduce_signature(problem.dtype),
+        # problem.emit_lse matches the built reduce: an explicit tuning spec
+        # must agree with it (paged: run_unified_attention_torch; strided:
+        # _validate_strided_3d_spec refuses an LSE reduce).
+        signature=_reduce_signature(problem.dtype, emit_lse=problem.emit_lse),
         cache_key=("3d_red",) + cache_key,
     )
     pipeline = PipelineLauncher([seg_launcher, red_launcher])
@@ -5731,6 +5887,7 @@ def run_unified_attention_torch(
     kv_layout: str = "paged",
     execution: Attention3DExecution | None = None,
     use_graph: bool = True,
+    lse=None,
 ):
     """Launch a CK DSL attention kernel on torch tensors.
 
@@ -5768,7 +5925,30 @@ def run_unified_attention_torch(
     scratch unless an execution owner is supplied. Captures use graph-private
     scratch; ``use_graph=False`` disables internal 3D replay.
     Warm up compilation before enclosing calls in ``torch.cuda.graph``.
+
+    ``lse`` is the optional caller-owned natural-log softmax normalizer, a
+    contiguous FP32 ``[total_q, num_query_heads, 1]`` tensor, written only when
+    ``problem.emit_lse`` is set. Only the gfx942/gfx950 split-KV (3D) path
+    writes it; every other path raises ``NotImplementedError`` rather than
+    returning without it. Rows with no visible key get ``-inf`` (and O = 0).
     """
+    # Caller-owned LSE output ([total_q, Hq, 1] FP32, ``problem.emit_lse``):
+    # validated before any compile so a bad buffer never reaches a launch.
+    validate_unified_lse(
+        problem,
+        lse,
+        q=q,
+        k=k,
+        v=v,
+        out=out,
+        cu_seqlens_q=cu_seqlens_q,
+        seqused_k=seqused_k,
+        block_table=block_table,
+        sinks=sinks,
+        alibi_slopes=alibi_slopes,
+        qq_bias=qq_bias,
+        additive_bias=additive_bias,
+    )
     if execution is not None:
         if not isinstance(execution, Attention3DExecution):
             raise TypeError("execution must be an Attention3DExecution")
@@ -5819,6 +5999,10 @@ def run_unified_attention_torch(
     if kv_layout not in ("paged", "strided"):
         raise ValueError("kv_layout must be 'paged' or 'strided'")
     if kv_layout == "strided":
+        if problem.emit_lse:
+            raise NotImplementedError(
+                "LSE output is not implemented for strided-KV decode"
+            )
         from .attention_kv_cache import StridedKvCacheLayout
 
         if _launch_arch not in ("gfx942", "gfx950"):
@@ -5946,6 +6130,26 @@ def run_unified_attention_torch(
         # Explicit specs are initially selected before framework tensors exist.
         # Refresh address-width state and tuning identity from the real cache.
         tuning_spec = tuning_spec.with_num_kv_blocks(int(k.shape[0]))
+        # A path that cannot write LSE (a 2D spec, or a split-KV reduce without
+        # the output, e.g. gfx1250) is refused as NotImplementedError, the same
+        # error as the backend refusals below.
+        if problem.emit_lse:
+            rejected = _reject_lse(
+                problem,
+                _launch_arch,
+                "3d" if tuning_spec.path == "3d" else "tiled 2D",
+            )
+            if rejected is not None:
+                raise NotImplementedError(rejected[1])
+        # Otherwise the explicit spec owns the reduce kernel, so it must agree
+        # with the problem on the LSE output: a mismatch would either drop the
+        # output or launch a kernel whose argument list differs from the
+        # signature. A reduce spec without the field cannot emit LSE.
+        reduce_lse = tuning_spec.path == "3d" and bool(
+            getattr(tuning_spec.reduce_spec, "emit_lse", False)
+        )
+        if reduce_lse != problem.emit_lse:
+            raise ValueError("tuning_spec LSE output disagrees with problem.emit_lse")
 
     # Auto path selection. Historically we *always* preferred 3D when
     # supported because split-KV produces a huge grid that beats Triton
@@ -6004,9 +6208,41 @@ def run_unified_attention_torch(
                 k_scale=k_scale,
                 v_scale=v_scale,
                 tuning_spec=tuning_spec,
+                lse=lse,
             )
         if backend == "3d":
             raise NotImplementedError(reason_3d)
+
+    if problem.emit_lse:
+        # Every remaining path (2D graph replay, tiled 2D, scalar) writes no LSE.
+        # Refuse here, BEFORE the 2D graph fast path: _run_2d_graphed replays a
+        # cache hit before any support gate, and _cheap_2d_sig does not encode
+        # emit_lse, so an LSE-off graph captured on the same buffers would
+        # otherwise serve this request and leave lse unwritten. In order: a
+        # split-KV LSE reason (sinks, arch); for ``auto``, the split-KV gate's
+        # verdict (name the backend='3d' way out only when that gate admits the
+        # problem); otherwise the explicitly requested 2D path.
+        rejected = _reject_lse(problem, _launch_arch, "3d")
+        if rejected is not None:
+            raise NotImplementedError(rejected[1])
+        if backend == "auto":
+            if prefer_2d:
+                ok_3d, reason_3d = _explicit_path_supported(
+                    problem, tuning_spec, "3d", _launch_arch
+                )
+                if ok_3d:
+                    raise NotImplementedError(
+                        "LSE output is not implemented on the tiled 2D attention "
+                        "path, which backend='auto' chose for this shape; the "
+                        "split-KV path can serve it: pass backend='3d' or pin a "
+                        "'*_u3d_*' tuning spec (it can be slower for this shape)"
+                    )
+            raise NotImplementedError(
+                "LSE output needs the split-KV attention path, which declined "
+                f"this problem: {reason_3d}"
+            )
+        _, why = _reject_lse(problem, _launch_arch, "tiled 2D")
+        raise NotImplementedError(why)
 
     if backend in ("tiled", "auto"):
         # Graphed fast path FIRST: for the short-context regime the launch is

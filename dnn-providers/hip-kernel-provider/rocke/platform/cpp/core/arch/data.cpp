@@ -305,13 +305,13 @@ static void _mfma_b_32x32x16(rocke_ir_builder_t* b,
         *out1 = n_in_atom;
 }
 
-/* MFMA 16x16x4 fp32 A operand (#8348): scalar float per lane.
+/* MFMA 16x16x4 fp32 / f64 A operand (#8348): one scalar per lane.
  * (lane % 16, lane // 16); slot is always 0 (a_frag_len == 1). */
-static void _mfma_a_16x16x4_f32(rocke_ir_builder_t* b,
-                                rocke_value_t* lane,
-                                int slot,
-                                rocke_value_t** out0,
-                                rocke_value_t** out1)
+static void _mfma_a_16x16x4(rocke_ir_builder_t* b,
+                            rocke_value_t* lane,
+                            int slot,
+                            rocke_value_t** out0,
+                            rocke_value_t** out1)
 {
     rocke_value_t *c16, *m_in_atom, *k;
     (void)slot;
@@ -325,13 +325,13 @@ static void _mfma_a_16x16x4_f32(rocke_ir_builder_t* b,
         *out1 = k;
 }
 
-/* MFMA 16x16x4 fp32 B operand (#8348): scalar float per lane.
+/* MFMA 16x16x4 fp32 / f64 B operand (#8348): one scalar per lane.
  * (lane // 16, lane % 16); slot is always 0 (b_frag_len == 1). */
-static void _mfma_b_16x16x4_f32(rocke_ir_builder_t* b,
-                                rocke_value_t* lane,
-                                int slot,
-                                rocke_value_t** out0,
-                                rocke_value_t** out1)
+static void _mfma_b_16x16x4(rocke_ir_builder_t* b,
+                            rocke_value_t* lane,
+                            int slot,
+                            rocke_value_t** out0,
+                            rocke_value_t** out1)
 {
     rocke_value_t *c16, *n_in_atom, *k;
     (void)slot;
@@ -383,6 +383,69 @@ static void _mfma_b_32x32x2_f32(rocke_ir_builder_t* b,
         *out0 = k;
     if(out1)
         *out1 = n_in_atom;
+}
+
+/* MFMA 16x16x4 f64 accumulator: slot i -> (i*4 + lane // 16, lane % 16). */
+static void _mfma_acc_16x16x4_f64(rocke_ir_builder_t* b,
+                                  rocke_value_t* lane,
+                                  int slot,
+                                  rocke_value_t** out0,
+                                  rocke_value_t** out1)
+{
+    rocke_value_t *c16, *n_in_atom, *m_blk, *row;
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    c16 = rocke_b_const_i32(b, 16);
+    n_in_atom = rocke_b_mod(b, lane, c16);
+    m_blk = rocke_b_div(b, lane, c16);
+    row = rocke_b_add(b, rocke_b_const_i32(b, slot * 4), m_blk);
+    if(out0)
+        *out0 = row;
+    if(out1)
+        *out1 = n_in_atom;
+}
+
+/* MFMA 4x4x4 f64 B operand (4 blocks stacked along rows, one scalar per lane):
+ * lane 16*k + 4*blk + n -> (blk*4 + k, n). */
+static void _mfma_b_4x4x4_f64(rocke_ir_builder_t* b,
+                              rocke_value_t* lane,
+                              int slot,
+                              rocke_value_t** out0,
+                              rocke_value_t** out1)
+{
+    rocke_value_t *c4, *n_in_blk, *blk, *k, *row;
+    (void)slot;
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    c4 = rocke_b_const_i32(b, 4);
+    n_in_blk = rocke_b_mod(b, lane, c4);
+    blk = rocke_b_mod(b, rocke_b_div(b, lane, c4), c4);
+    k = rocke_b_div(b, lane, rocke_b_const_i32(b, 16));
+    row = rocke_b_add(b, rocke_b_mul(b, blk, c4), k);
+    if(out0)
+        *out0 = row;
+    if(out1)
+        *out1 = n_in_blk;
+}
+
+/* MFMA 4x4x4 f64 accumulator (4 blocks stacked along rows, one scalar per lane):
+ * lane 16*m + 4*blk + n -> (blk*4 + m, n). */
+static void _mfma_acc_4x4x4_f64(rocke_ir_builder_t* b,
+                                rocke_value_t* lane,
+                                int slot,
+                                rocke_value_t** out0,
+                                rocke_value_t** out1)
+{
+    rocke_value_t *c4, *n_in_blk, *blk, *m, *row;
+    (void)slot;
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    c4 = rocke_b_const_i32(b, 4);
+    n_in_blk = rocke_b_mod(b, lane, c4);
+    blk = rocke_b_mod(b, rocke_b_div(b, lane, c4), c4);
+    m = rocke_b_div(b, lane, rocke_b_const_i32(b, 16));
+    row = rocke_b_add(b, rocke_b_mul(b, blk, c4), m);
+    if(out0)
+        *out0 = row;
+    if(out1)
+        *out1 = n_in_blk;
 }
 
 /* WMMA 16x16x16 accumulator (wave32): (2*slot + lane//16, lane % 16). */
@@ -771,10 +834,8 @@ static const rocke_layout_map_t lm_xf32_32_a = {ROCKE_MMA_ROLE_A, 2, 64, _mfma_a
 static const rocke_layout_map_t lm_xf32_32_b = {ROCKE_MMA_ROLE_B, 2, 64, _mfma_b_32x32x4_xf32};
 
 /* --- mfma_f32_16x16x4_f32: a/b/c present (frag 1/1/4, wave64) (#8348) --- */
-static const rocke_layout_map_t lm_mfma_16x16x4_f32_a
-    = {ROCKE_MMA_ROLE_A, 1, 64, _mfma_a_16x16x4_f32};
-static const rocke_layout_map_t lm_mfma_16x16x4_f32_b
-    = {ROCKE_MMA_ROLE_B, 1, 64, _mfma_b_16x16x4_f32};
+static const rocke_layout_map_t lm_mfma_16x16x4_a = {ROCKE_MMA_ROLE_A, 1, 64, _mfma_a_16x16x4};
+static const rocke_layout_map_t lm_mfma_16x16x4_b = {ROCKE_MMA_ROLE_B, 1, 64, _mfma_b_16x16x4};
 static const rocke_layout_map_t lm_mfma_16x16x4_f32_c
     = {ROCKE_MMA_ROLE_ACC, 4, 64, _mfma_acc_16x16};
 
@@ -785,6 +846,15 @@ static const rocke_layout_map_t lm_mfma_32x32x2_f32_b
     = {ROCKE_MMA_ROLE_B, 1, 64, _mfma_b_32x32x2_f32};
 static const rocke_layout_map_t lm_mfma_32x32x2_f32_c
     = {ROCKE_MMA_ROLE_ACC, 16, 64, _mfma_acc_32x32};
+
+/* --- mfma_f64_16x16x4_f64: a/b shared with fp32 16x16x4, own c (frag 1/1/4, wave64) --- */
+static const rocke_layout_map_t lm_mfma_16x16x4_f64_c
+    = {ROCKE_MMA_ROLE_ACC, 4, 64, _mfma_acc_16x16x4_f64};
+
+/* --- mfma_f64_4x4x4_f64: a shared with 16x16x4 (frag 1/1/1, wave64) --- */
+static const rocke_layout_map_t lm_mfma_4x4x4_f64_b = {ROCKE_MMA_ROLE_B, 1, 64, _mfma_b_4x4x4_f64};
+static const rocke_layout_map_t lm_mfma_4x4x4_f64_c
+    = {ROCKE_MMA_ROLE_ACC, 1, 64, _mfma_acc_4x4x4_f64};
 
 /* --- wmma_f32_16x16x16_{f16,bf16}: a/b/c present (frag 16/16/8, wave32) --- */
 static const rocke_layout_map_t lm_wmma_16x16x16_a = {ROCKE_MMA_ROLE_A, 16, 32, _wmma_a_16x16};
@@ -959,6 +1029,9 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     /* --- MFMA fp32 (wave64) --- */
     {"mfma_f32_16x16x4_f32", 4},
     {"mfma_f32_32x32x2_f32", 16},
+    /* --- MFMA fp64 (wave64) --- */
+    {"mfma_f64_16x16x4_f64", 4},
+    {"mfma_f64_4x4x4_f64", 1},
     /* --- MFMA f16 (wave64) --- */
     {"mfma_f32_16x16x16_f16", 4},
     {"mfma_f32_16x16x32_f16", 4},
@@ -977,9 +1050,8 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     {"mfma_f32_32x32x16_fp8", 16},
     {"mfma_f32_32x32x16_bf8", 16},
     /* --- MFMA MX (wave64), frag lengths only --- */
-    {"mfma_f32_16x16x128_fp4", 4},
-    {"mfma_f32_16x16x96_fp6", 4},
     {"mfma_f32_16x16x128_fp8", 4},
+    {"mfma_f32_16x16x128_fp4fp6fp8", 4},
     {"mfma_scale_f32_16x16x128_f8f6f4", 4},
     /* --- WMMA f16 / bf16 (wave32, RDNA) --- */
     {"wmma_f32_16x16x16_f16", 8},
@@ -1149,8 +1221,8 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      1,
      4,
      64,
-     &lm_mfma_16x16x4_f32_a,
-     &lm_mfma_16x16x4_f32_b,
+     &lm_mfma_16x16x4_a,
+     &lm_mfma_16x16x4_b,
      &lm_mfma_16x16x4_f32_c},
     {"mma",
      "fp32",
@@ -1167,6 +1239,36 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      &lm_mfma_32x32x2_f32_a,
      &lm_mfma_32x32x2_f32_b,
      &lm_mfma_32x32x2_f32_c},
+    {"mma",
+     "fp64",
+     "fp64",
+     "fp64",
+     16,
+     16,
+     4,
+     "mfma_f64_16x16x4_f64",
+     1,
+     1,
+     4,
+     64,
+     &lm_mfma_16x16x4_a,
+     &lm_mfma_16x16x4_b,
+     &lm_mfma_16x16x4_f64_c},
+    {"mma",
+     "fp64",
+     "fp64",
+     "fp64",
+     4,
+     4,
+     4,
+     "mfma_f64_4x4x4_f64",
+     1,
+     1,
+     1,
+     64,
+     &lm_mfma_16x16x4_a,
+     &lm_mfma_4x4x4_f64_b,
+     &lm_mfma_4x4x4_f64_c},
     {"mma",
      "fp16",
      "fp16",
@@ -1903,8 +2005,8 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      1,
      4,
      64,
-     &lm_mfma_16x16x4_f32_a,
-     &lm_mfma_16x16x4_f32_b,
+     &lm_mfma_16x16x4_a,
+     &lm_mfma_16x16x4_b,
      &lm_mfma_16x16x4_f32_c},
     {"mma",
      "fp32",
@@ -2101,38 +2203,6 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      &lm_mfma_32x32x16_a,
      &lm_mfma_32x32x16_b,
      &lm_mfma_32x32x16_c},
-    /* Low-bit catalog keys use exponent/mantissa names; op_ids carry frag lengths
-     * only (no verified maps), per _MMA_FRAGMENT_INFO. */
-    {"mma",
-     "fp4e2m1",
-     "fp4e2m1",
-     "fp32",
-     16,
-     16,
-     128,
-     "mfma_f32_16x16x128_fp4",
-     16,
-     16,
-     4,
-     64,
-     NULL,
-     NULL,
-     NULL},
-    {"mma",
-     "fp6e2m3",
-     "fp6e2m3",
-     "fp32",
-     16,
-     16,
-     96,
-     "mfma_f32_16x16x96_fp6",
-     12,
-     12,
-     4,
-     64,
-     NULL,
-     NULL,
-     NULL},
     /* TF32 via BF16x3 emulation. No native encoding: each row issues three
      * mfma_*_bf16 over a Dekker-style split of the fp32 payload of its TF32
      * operands. Frag lengths, wave size and layout maps are inherited verbatim
@@ -2361,7 +2431,7 @@ static const rocke_mma_op_t k_mma_gfx11_generic[] = {
 /* ----------------------------- gfx1250 (CDNA/GFX12) ---------------------- */
 /* gfx1250: wave32, WMMA only (no MFMA). fp32 K=4 atom: A/B are scalar float
  * per lane (same lane layout as mfma_f32_16x16x4_f32 on CDNA — reuses
- * lm_mfma_16x16x4_f32_{a,b}); accumulator is <8 x float> in the gfx12
+ * lm_mfma_16x16x4_{a,b}); accumulator is <8 x float> in the gfx12
  * column-distributed layout (lm_wmma_gfx12_c, c_frag_len=8).
  * Primary fp16/bf16 atom is 16x16x32 (K=32, not the gfx12 RDNA 16x16x16).
  * A/B frag_len=16 (16 fp16/bf16 elements per lane); A/B layout maps are NULL
@@ -2655,113 +2725,215 @@ int rocke_arch_mma_c_frag_len(const char* op_id)
  * Per-arch rocke_arch_target_t singletons (the embedded arches[gfx] entries).
  * =========================================================================
  *
- * Field order of rocke_arch_target_t:
- *   gfx, family, target_family, wave_size, lds_capacity_bytes, vmcnt_bits,
- *   mma{ops,num_ops}, memory{has_async_lds,has_async_global_lds,has_ds_read_tr,has_tdm,
- *   buffer_load_max_dwords,async_lds_max_dwords,has_scalar_data_prefetch,
- *   has_global_prefetch,has_cluster_launch,has_multicast_load},
- *   limits{max_threads_per_block,vgprs,agprs,sgprs}
+ * Every field is spelled with a designated initializer, in declaration order,
+ * so a field added to rocke_memory_caps_t (or any member struct) cannot shift
+ * the values below into the wrong slot; an out-of-order or misspelled name is a
+ * compile error, and so is an entry that leaves a field out (see the pragma
+ * below). A new field must be named in every entry, with its value
+ * mirroring arch_specs.json.
  */
 
 #define K_NUM(arr) ((int)(sizeof(arr) / sizeof((arr)[0])))
 
+/* The build passes -Wno-missing-field-initializers; turn it back on here so an
+ * entry that omits a field fails to compile instead of zero-filling it. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic error "-Wmissing-field-initializers"
+
 static const rocke_arch_target_t k_target_gfx90a = {
-    "gfx90a",
-    "cdna",
-    "gfx9_mfma",
-    64,
-    65536,
-    6,
-    {k_mma_gfx90a, K_NUM(k_mma_gfx90a)},
-    {false, false, false, false, 4, 0, false, false, false, false},
-    {1024, 512, 256, 102},
+    .gfx = "gfx90a",
+    .family = "cdna",
+    .target_family = "gfx9_mfma",
+    .wave_size = 64,
+    .lds_capacity_bytes = 65536,
+    .vmcnt_bits = 6,
+    .mma = {.ops = k_mma_gfx90a, .num_ops = K_NUM(k_mma_gfx90a)},
+    .memory = {
+        .has_async_lds = false,
+        .has_async_global_lds = false,
+        .has_ds_read_tr = false,
+        .has_tdm = false,
+        .buffer_load_max_dwords = 4,
+        .async_lds_max_dwords = 0,
+        .has_scalar_data_prefetch = false,
+        .has_global_prefetch = false,
+        .has_cluster_launch = false,
+        .has_multicast_load = false,
+        .has_global_float_atomic_add = false,
+    },
+    .limits = {.max_threads_per_block = 1024, .vgprs = 512, .agprs = 256, .sgprs = 102},
 };
 
 static const rocke_arch_target_t k_target_gfx942 = {
-    "gfx942",
-    "cdna",
-    "gfx9_mfma",
-    64,
-    65536,
-    6,
-    {k_mma_gfx942, K_NUM(k_mma_gfx942)},
-    {true, true, false, false, 4, 1, false, false, false, false},
-    {1024, 512, 256, 102},
+    .gfx = "gfx942",
+    .family = "cdna",
+    .target_family = "gfx9_mfma",
+    .wave_size = 64,
+    .lds_capacity_bytes = 65536,
+    .vmcnt_bits = 6,
+    .mma = {.ops = k_mma_gfx942, .num_ops = K_NUM(k_mma_gfx942)},
+    .memory = {
+        .has_async_lds = true,
+        .has_async_global_lds = true,
+        .has_ds_read_tr = false,
+        .has_tdm = false,
+        .buffer_load_max_dwords = 4,
+        .async_lds_max_dwords = 1,
+        .has_scalar_data_prefetch = false,
+        .has_global_prefetch = false,
+        .has_cluster_launch = false,
+        .has_multicast_load = false,
+        .has_global_float_atomic_add = false,
+    },
+    .limits = {.max_threads_per_block = 1024, .vgprs = 512, .agprs = 256, .sgprs = 102},
 };
 
 static const rocke_arch_target_t k_target_gfx950 = {
-    "gfx950",
-    "cdna",
-    "gfx950",
-    64,
-    163840,
-    6,
-    {k_mma_gfx950, K_NUM(k_mma_gfx950)},
-    {true, true, true, false, 4, 4, false, false, false, false},
-    {1024, 512, 256, 102},
+    .gfx = "gfx950",
+    .family = "cdna",
+    .target_family = "gfx950",
+    .wave_size = 64,
+    .lds_capacity_bytes = 163840,
+    .vmcnt_bits = 6,
+    .mma = {.ops = k_mma_gfx950, .num_ops = K_NUM(k_mma_gfx950)},
+    .memory = {
+        .has_async_lds = true,
+        .has_async_global_lds = true,
+        .has_ds_read_tr = true,
+        .has_tdm = false,
+        .buffer_load_max_dwords = 4,
+        .async_lds_max_dwords = 4,
+        .has_scalar_data_prefetch = false,
+        .has_global_prefetch = false,
+        .has_cluster_launch = false,
+        .has_multicast_load = false,
+        .has_global_float_atomic_add = false,
+    },
+    .limits = {.max_threads_per_block = 1024, .vgprs = 512, .agprs = 256, .sgprs = 102},
 };
 
 static const rocke_arch_target_t k_target_gfx1151 = {
-    "gfx1151",
-    "rdna",
-    "gfx11_rdna",
-    32,
-    65536,
-    6,
-    {k_mma_gfx1151, K_NUM(k_mma_gfx1151)},
-    {false, false, false, false, 4, 0, false, false, false, false},
-    {1024, 256, 0, 106},
+    .gfx = "gfx1151",
+    .family = "rdna",
+    .target_family = "gfx11_rdna",
+    .wave_size = 32,
+    .lds_capacity_bytes = 65536,
+    .vmcnt_bits = 6,
+    .mma = {.ops = k_mma_gfx1151, .num_ops = K_NUM(k_mma_gfx1151)},
+    .memory = {
+        .has_async_lds = false,
+        .has_async_global_lds = false,
+        .has_ds_read_tr = false,
+        .has_tdm = false,
+        .buffer_load_max_dwords = 4,
+        .async_lds_max_dwords = 0,
+        .has_scalar_data_prefetch = false,
+        .has_global_prefetch = false,
+        .has_cluster_launch = false,
+        .has_multicast_load = false,
+        .has_global_float_atomic_add = false,
+    },
+    .limits = {.max_threads_per_block = 1024, .vgprs = 256, .agprs = 0, .sgprs = 106},
 };
 
 static const rocke_arch_target_t k_target_gfx1201 = {
-    "gfx1201",
-    "rdna",
-    "gfx12_rdna",
-    32,
-    65536,
-    6,
-    {k_mma_gfx1201, K_NUM(k_mma_gfx1201)},
-    {false, false, false, false, 4, 0, false, false, false, false},
-    {1024, 256, 0, 106},
+    .gfx = "gfx1201",
+    .family = "rdna",
+    .target_family = "gfx12_rdna",
+    .wave_size = 32,
+    .lds_capacity_bytes = 65536,
+    .vmcnt_bits = 6,
+    .mma = {.ops = k_mma_gfx1201, .num_ops = K_NUM(k_mma_gfx1201)},
+    .memory = {
+        .has_async_lds = false,
+        .has_async_global_lds = false,
+        .has_ds_read_tr = false,
+        .has_tdm = false,
+        .buffer_load_max_dwords = 4,
+        .async_lds_max_dwords = 0,
+        .has_scalar_data_prefetch = false,
+        .has_global_prefetch = false,
+        .has_cluster_launch = false,
+        .has_multicast_load = false,
+        .has_global_float_atomic_add = false,
+    },
+    .limits = {.max_threads_per_block = 1024, .vgprs = 256, .agprs = 0, .sgprs = 106},
 };
 
 static const rocke_arch_target_t k_target_gfx1250 = {
-    "gfx1250",
-    "cdna",
-    "gfx12_cdna",
-    32,
-    163840,
-    6,
-    {k_mma_gfx1250.ops, K_NUM(k_mma_gfx1250.ops)},
-    {false, true, false, true, 4, 0, true, true, true, true},
-    {1024, 256, 0, 106},
+    .gfx = "gfx1250",
+    .family = "cdna",
+    .target_family = "gfx12_cdna",
+    .wave_size = 32,
+    .lds_capacity_bytes = 327680,
+    .vmcnt_bits = 6,
+    .mma = {.ops = k_mma_gfx1250.ops, .num_ops = K_NUM(k_mma_gfx1250.ops)},
+    .memory = {
+        .has_async_lds = false,
+        .has_async_global_lds = true,
+        .has_ds_read_tr = false,
+        .has_tdm = true,
+        .buffer_load_max_dwords = 4,
+        .async_lds_max_dwords = 0,
+        .has_scalar_data_prefetch = true,
+        .has_global_prefetch = true,
+        .has_cluster_launch = true,
+        .has_multicast_load = true,
+        .has_global_float_atomic_add = true,
+    },
+    .limits = {.max_threads_per_block = 1024, .vgprs = 256, .agprs = 0, .sgprs = 106},
 };
 
 static const rocke_arch_target_t k_target_gfx11_generic = {
-    "gfx11-generic",
-    "rdna",
-    "gfx11_rdna",
-    32,
-    65536,
-    6,
-    {k_mma_gfx11_generic, K_NUM(k_mma_gfx11_generic)},
-    {false, false, false, false, 4, 0, false, false, false, false},
-    {1024, 256, 0, 106},
+    .gfx = "gfx11-generic",
+    .family = "rdna",
+    .target_family = "gfx11_rdna",
+    .wave_size = 32,
+    .lds_capacity_bytes = 65536,
+    .vmcnt_bits = 6,
+    .mma = {.ops = k_mma_gfx11_generic, .num_ops = K_NUM(k_mma_gfx11_generic)},
+    .memory = {
+        .has_async_lds = false,
+        .has_async_global_lds = false,
+        .has_ds_read_tr = false,
+        .has_tdm = false,
+        .buffer_load_max_dwords = 4,
+        .async_lds_max_dwords = 0,
+        .has_scalar_data_prefetch = false,
+        .has_global_prefetch = false,
+        .has_cluster_launch = false,
+        .has_multicast_load = false,
+        .has_global_float_atomic_add = false,
+    },
+    .limits = {.max_threads_per_block = 1024, .vgprs = 256, .agprs = 0, .sgprs = 106},
 };
 
 /* gfx12-generic (RDNA4): the same WMMA atoms as gfx1201, so it shares that
  * catalog. */
 static const rocke_arch_target_t k_target_gfx12_generic = {
-    "gfx12-generic",
-    "rdna",
-    "gfx12_rdna",
-    32,
-    65536,
-    6,
-    {k_mma_gfx1201, K_NUM(k_mma_gfx1201)},
-    {false, false, false, false, 4, 0, false, false, false, false},
-    {1024, 256, 0, 106},
+    .gfx = "gfx12-generic",
+    .family = "rdna",
+    .target_family = "gfx12_rdna",
+    .wave_size = 32,
+    .lds_capacity_bytes = 65536,
+    .vmcnt_bits = 6,
+    .mma = {.ops = k_mma_gfx1201, .num_ops = K_NUM(k_mma_gfx1201)},
+    .memory = {
+        .has_async_lds = false,
+        .has_async_global_lds = false,
+        .has_ds_read_tr = false,
+        .has_tdm = false,
+        .buffer_load_max_dwords = 4,
+        .async_lds_max_dwords = 0,
+        .has_scalar_data_prefetch = false,
+        .has_global_prefetch = false,
+        .has_cluster_launch = false,
+        .has_multicast_load = false,
+        .has_global_float_atomic_add = false,
+    },
+    .limits = {.max_threads_per_block = 1024, .vgprs = 256, .agprs = 0, .sgprs = 106},
 };
+#pragma GCC diagnostic pop
 
 /* =========================================================================
  * Shared registry + known-arches (sorted by gfx token).

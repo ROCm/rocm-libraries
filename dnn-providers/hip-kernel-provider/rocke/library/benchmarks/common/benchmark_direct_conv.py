@@ -32,6 +32,7 @@ grouped dgrad forms:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import itertools
 import os
 import sys
@@ -223,9 +224,12 @@ def parse_miopen_cmd_direct(cmd: str):
     kpg = K // groups
     # For fprop the grouped direct kernels require cpg == kpg.
     # For dgrad and wgrad cpg and kpg may differ; the spec validators enforce the
-    # kernel-specific constraints, so we skip the symmetric check here.
+    # kernel-specific constraints, so we skip the symmetric check here. So do
+    # ungrouped forward problems (stems with C = 3 included): the non-grouped
+    # and small-channel kernels take any channel counts their validators accept.
     if (
         miopen_args.forw not in (2, 4)
+        and groups != 1
         and cpg != 1
         and cpg != kpg
         and (cpg % 4 != 0 or cpg < 4)
@@ -555,10 +559,14 @@ def _run_depthwise_sweep(
     from rocke.runtime.hip_module import HipError
 
     p = problem
-    # Use spatial kernel when groups fit in one wave (better thread utilisation).
-    # Derive wave_size from the spec default so this stays correct on wave32 targets
-    # (groups == wave_size would leave zero W-positions per wave — not valid).
-    _wave_size = DirectDepthwiseSpatialSpec(problem=p).wave_size
+    from rocke.core.arch import ArchTarget
+
+    # Every depthwise variant is built at the target's wave size (64 on CDNA,
+    # 32 on gfx1250), as the AOT cache does; the tiled and column-streamed
+    # validators reject any other.
+    _wave_size = ArchTarget.from_gfx(arch).wave_size
+    # Use spatial kernel when groups fit in one wave (better thread utilisation;
+    # groups == wave_size would leave zero W-positions per wave — not valid).
     _use_spatial = p.groups < _wave_size
 
     # All three variants take fp16 and bf16 -- preload and spatial off
@@ -628,6 +636,7 @@ def _run_depthwise_sweep(
             spec = DirectDepthwiseTiledSpec(
                 problem=p,
                 name="rocke_bench_direct_depthwise_tiled",
+                wave_size=_wave_size,
                 block_w=block_w,
                 block_h=block_h,
                 block_waves=block_waves,
@@ -639,6 +648,7 @@ def _run_depthwise_sweep(
             spec = DirectDepthwiseSpatialSpec(
                 problem=p,
                 name="rocke_bench_direct_depthwise_spatial",
+                wave_size=_wave_size,
                 block_waves=block_waves,
             )
             ok, _ = is_valid_depthwise_spatial_spec(spec, arch=arch)
@@ -647,6 +657,7 @@ def _run_depthwise_sweep(
             spec = DirectDepthwiseColSpec(
                 problem=p,
                 name="rocke_bench_direct_depthwise_col",
+                wave_size=_wave_size,
                 block_h=block_h,
                 block_w=block_w,
                 block_waves=block_waves,
@@ -658,6 +669,7 @@ def _run_depthwise_sweep(
             spec = DirectDepthwiseSpec(
                 problem=p,
                 name="rocke_bench_direct_depthwise",
+                wave_size=_wave_size,
                 block_w=block_w,
                 block_waves=block_waves,
             )
@@ -2225,6 +2237,70 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
     return _run_from_cache(args, arch, cases, cache, directions)
 
 
+_TENSOR_LIMIT = 1 << 31
+
+
+def _batch_chunks(p, direction: str) -> List[int]:
+    """Images per launch: the fewest balanced batch chunks that keep every
+    activation under 2 GiB (``[N]`` when one launch fits, and for wgrad).
+
+    The chunks need not divide N; they differ by at most one image (N=31 that
+    fits 15 images per launch runs as 11 + 10 + 10).
+    """
+    if direction == "wgrad":
+        return [p.N]
+    elem = 2
+    per_image = max(p.H * p.W * p.total_c, p.Ho * p.Wo * p.total_k) * elem
+    per_launch = (_TENSOR_LIMIT - 1) // per_image
+    if p.N <= per_launch or per_launch < 1:
+        return [p.N]
+    n_steps = -(-p.N // per_launch)
+    base, extra = divmod(p.N, n_steps)
+    return [base + (i < extra) for i in range(n_steps)]
+
+
+def _chunk_buffers(ptrs, sizes, inputs, out_name, chunks, i):
+    """``(ptrs, sizes)`` with the activations narrowed to batch chunk ``i``
+    of ``chunks`` (images per chunk, in batch order)."""
+    if len(chunks) == 1:
+        return ptrs, sizes
+    ptrs, sizes = dict(ptrs), dict(sizes)
+    n_total, n0 = sum(chunks), sum(chunks[:i])
+    for name in [n for n in inputs if n != "w"] + [out_name]:
+        per_image = sizes[name] // n_total
+        ptrs[name] = ptrs[name] + n0 * per_image
+        sizes[name] = chunks[i] * per_image
+    return ptrs, sizes
+
+
+def _chunk_plans(plan_fn, p, chunks):
+    """Plans for a problem run as ``chunks`` (see :func:`_batch_chunks`).
+
+    ``plan_fn(problem)`` returns ``(plans, rejected)`` for one launch's
+    problem; each distinct chunk size is planned on its own batch, so a
+    kernel's grid and re-validation see the images it really runs. Returns
+    ``(plans, rejected, per_chunk)``: the kernels that serve every chunk size
+    (as planned for the first chunk), the rejections, and per plan label the
+    plan of each chunk in order.
+    """
+    by_size = {}
+    for n in dict.fromkeys(chunks):
+        by_size[n] = plan_fn(p if n == p.N else dataclasses.replace(p, N=n))
+    plans, rejected = by_size[chunks[0]]
+    rejected = list(rejected)
+    labels = {n: {pl.label: pl for pl in sized[0]} for n, sized in by_size.items()}
+    for n, sized in by_size.items():
+        rejected += [r for r in sized[1] if r not in rejected]
+        missing = [pl for pl in plans if pl.label not in labels[n]]
+        rejected += [
+            (pl.identity, f"does not serve a batch chunk of {n} images")
+            for pl in missing
+        ]
+        plans = [pl for pl in plans if pl.label in labels[n]]
+    per_chunk = {pl.label: [labels[n][pl.label] for n in chunks] for pl in plans}
+    return plans, rejected, per_chunk
+
+
 def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
     """Benchmark every cached kernel that can run each case. Nothing is compiled.
 
@@ -2256,8 +2332,15 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
             continue
         torch_dt = torch.bfloat16 if dtype == "bf16" else torch.float16
         for direction in directions or (case_direction,):
-            plans, rejected = _filter_variants(
-                *direct_plans(cache, p, direction, arch), variants
+            # A problem whose tensors pass the kernels' 2 GiB (i32 offset)
+            # limit runs as balanced batch chunks, each launch on its slice.
+            chunks = _batch_chunks(p, direction)
+            plans, rejected, per_chunk = _chunk_plans(
+                lambda q: _filter_variants(
+                    *direct_plans(cache, q, direction, arch), variants
+                ),
+                p,
+                chunks,
             )
             if not plans:
                 why = _no_plan_reason(rejected, dtype, variants)
@@ -2320,8 +2403,9 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 rt.memset(ptrs[out_name], 0, Out_t.nbytes)
             # Scratch buffers are sized for the largest plan and shared.
             for plan in plans:
-                for name, nbytes in plan.workspaces.items():
-                    sizes[name] = max(sizes.get(name, 0), nbytes)
+                for chunk_plan in per_chunk[plan.label]:
+                    for name, nbytes in chunk_plan.workspaces.items():
+                        sizes[name] = max(sizes.get(name, 0), nbytes)
             for name in set(sizes) - set(ptrs):
                 ptrs[name] = rt.alloc(sizes[name])
 
@@ -2338,10 +2422,16 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                                 kernel_name=st.kernel_name,
                                 signature=st.signature,
                             ),
-                            launch_values(st, ptrs, sizes),
+                            launch_values(
+                                st,
+                                *_chunk_buffers(
+                                    ptrs, sizes, inputs, out_name, chunks, i
+                                ),
+                            ),
                             LaunchConfig(grid=st.grid, block=st.block, stream=0),
                         )
-                        for st in plan.steps
+                        for i, chunk_plan in enumerate(per_chunk[plan.label])
+                        for st in chunk_plan.steps
                     ]
                 except HipError as e:
                     print(f"  [skip] {plan.label}: {e}", flush=True)
