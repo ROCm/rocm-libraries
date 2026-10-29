@@ -46,6 +46,7 @@ implementation.
 | `conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec` (incl. 4c dgrad), `DirectConvSpec` (incl. fused-weight dgrad), `DirectDepthwiseDgradWindowedSpec` | `instances/convolution.md`, [`README_conv_direct_grouped.md`](../../../library/kernels/common/README_conv_direct_grouped.md) |
 | `conv_direct_nongrouped.py` | `DirectNongroupedConvSpec` (`groups == 1`) | `instances/convolution.md` |
 | `conv_direct_dgrad_wmma.py` | `DirectDgradWmmaSpec` (gfx1250 dgrad) | `instances/convolution.md` |
+| `conv_winograd_fwd.py`, `conv_winograd_gemm_wmma.py`, `conv_winograd_gen.py`, `conv_winograd_fused_1d_wmma.py`, `conv_winograd_select.py` | `WinogradFwdSpec`, `WinogradMergedSpec`, `WinogradGemmWmmaSpec`, `WinogradGemmReduceSpec`, `WinogradGenSpec`, `FusedWino1DSpec`; plan selector `select_winograd` (gfx1250 Winograd forward) | `instances/convolution.md` |
 | `conv_direct_wgrad_tiled.py` | `DirectWgradTiledSpec` (direct wgrad, atomics) | `instances/convolution.md` |
 | `conv_direct_dw_wgrad.py` | `DwWgradLdsSpec`, `DwWgradColsSpec`, `DwWgradFoldSpec` (depthwise wgrad) | `instances/convolution.md` |
 | `conv_direct_wgrad_gather.py` | `WgradGatherSpec` (dense small-C wgrad) | `instances/convolution.md` |
@@ -234,6 +235,7 @@ From `helpers/README.md`:
 | conv_direct_grouped | - | input/output/weight + H/W pad | - | - | - | yes | - | `MfmaAtom` (4x4x4 / 16x16x{16,32}), `chiplet_transform_chunked_runtime` (`helpers.grid`, `xcd_tiles`) |
 | conv_direct_nongrouped | - | - | - | - | - | yes | - | `chiplet_aware_super_tile_dynamic` (`helpers.grid`), `emit_direct_params` (AOT kernargs) |
 | conv_direct_dgrad_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `ds_read_tr16_b128` |
+| conv_winograd (fwd / gemm_wmma / gen / fused_1d_wmma) | yes (buffer) | - | - | - | - | yes | - | TDM `tensor_load_to_lds` / `tensor_store_from_lds` (K3), `chiplet_transform_chunked_runtime` (`helpers.grid`), `global_load_async_to_lds`, `ds_read_tr16_b128` (fused 1-D) |
 | conv_direct_wgrad (tiled / dw / gather) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), kernel attr `lds_alias_scopes` |
 | img2col | - | reuses A descriptor | - | yes | - | yes | - | - |
 | pooling | - | full (input + pad) | - | yes | - | yes | - | - |
