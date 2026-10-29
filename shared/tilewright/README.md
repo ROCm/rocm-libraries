@@ -524,7 +524,9 @@ if (!tilewright::supports(*model, context, hw)) { /* use another ranking */ }
 - `allocate_huge_pages(bytes)` and `free_huge_pages(p, bytes)` hand out and
   take back zeroed memory for data rankings read on every call (TensileLite
   keeps its launch records there): on Linux whole 2 MiB pages at a 2 MiB
-  boundary, on transparent huge pages unless the system has them off.
+  boundary, on transparent huge pages unless the system has them off, and
+  heap memory where the system refuses such a mapping or is not Linux.
+  `allocate_huge_pages` throws `std::bad_alloc` only when the heap fails too.
 
 `DataType` values are part of the model format (MI-table keys). They follow
 Origami's enumeration, which has an `Int4` entry that Tensile's does not, so

@@ -185,9 +185,10 @@ std::size_t cache_usage() noexcept;
 // Zeroed memory for data that a ranking reads on every call, such as what a
 // LaunchModel's plan() reads of each config: at least `bytes`, 64-byte
 // aligned. On Linux it is whole 2 MiB pages at a 2 MiB boundary, backed by
-// transparent huge pages unless the system has them off. Throws
-// std::bad_alloc when the memory cannot be had. free_huge_pages takes it back
-// given the same `bytes`.
+// transparent huge pages unless the system has them off; where the system
+// refuses that mapping, and on other systems, it comes from the heap. Throws
+// std::bad_alloc only when the heap cannot supply it either. free_huge_pages
+// takes it back given the same `bytes`.
 void* allocate_huge_pages(std::size_t bytes);
 void free_huge_pages(void* p, std::size_t bytes) noexcept;
 

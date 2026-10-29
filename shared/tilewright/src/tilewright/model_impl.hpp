@@ -281,6 +281,16 @@ std::vector<CellBounds> cell_bounds(const Model& model);
 // reach its wrap-around.
 void set_rank_epoch(std::uint32_t epoch) noexcept;
 
+// What allocate_huge_pages returns where no huge pages can be mapped, and on
+// systems other than Linux: zeroed heap memory for `bytes`, 64-byte aligned
+// and never at a 2 MiB boundary, which tells free_huge_pages that it is not a
+// mapping. Declared here so that tests can reach that path.
+void* heap_pages(std::size_t bytes);
+
+// While `refuse` is true, allocate_huge_pages takes every mapping it asks the
+// system for as refused, so that tests reach what follows a refusal.
+void refuse_huge_page_mappings(bool refuse) noexcept;
+
 // The selection-time options (README.md, Building and testing): TW_LEVER_PREFETCH
 // and TW_LEVER_MEMO are on unless defined to 0, as the CMake options define them
 // when off, and the memo's plan check TW_LEVER_MEMO_CHECK is on wherever

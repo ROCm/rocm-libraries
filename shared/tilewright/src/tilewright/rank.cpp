@@ -1960,40 +1960,83 @@ bool huge_pages_off() {
 }  // namespace
 #endif
 
+namespace detail {
+
+// Heap memory starts kHeapOffset bytes past a kHeapAlign boundary: 64-byte
+// aligned, and never at a 2 MiB boundary, where every mapping starts.
+constexpr std::size_t kHeapOffset = 64;
+constexpr std::align_val_t kHeapAlign{128};
+// free_huge_pages tells heap memory from a mapping by its address alone.
+static_assert(kHeapOffset % 64 == 0 && kHeapOffset > 0 &&
+                  kHeapOffset < static_cast<std::size_t>(kHeapAlign) &&
+                  (std::size_t{1} << 21) % static_cast<std::size_t>(kHeapAlign) == 0,
+              "heap memory must start 64-byte aligned and never at a 2 MiB boundary");
+
+namespace {
+std::atomic<bool> refused_mappings{false};
+}  // namespace
+
+void refuse_huge_page_mappings(bool refuse) noexcept {
+  refused_mappings.store(refuse, std::memory_order_relaxed);
+}
+
+void* heap_pages(std::size_t bytes) {
+  const std::size_t length = bytes == 0 ? 1 : bytes;
+  if (length > std::numeric_limits<std::size_t>::max() - kHeapOffset) throw std::bad_alloc();
+  char* const p =
+      static_cast<char*>(::operator new(length + kHeapOffset, kHeapAlign)) + kHeapOffset;
+  std::memset(p, 0, length);
+  return p;
+}
+
+}  // namespace detail
+
 void* allocate_huge_pages(std::size_t bytes) {
 #if defined(__linux__)
-  if (bytes > std::numeric_limits<std::size_t>::max() - 2 * kHugePage) throw std::bad_alloc();
-  const std::size_t length = huge_length(bytes);
-  void* const raw =
-      mmap(nullptr, length + kHugePage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (raw == MAP_FAILED) throw std::bad_alloc();
-  // Its huge-page-aligned part.
-  const std::uintptr_t start = reinterpret_cast<std::uintptr_t>(raw);
-  const std::uintptr_t at    = (start + kHugePage - 1) & ~std::uintptr_t{kHugePage - 1};
-  if (at != start) munmap(raw, at - start);
-  munmap(reinterpret_cast<void*>(at + length), start + kHugePage - at);
-  char* const p = reinterpret_cast<char*>(at);
-  if (!huge_pages_off()) {
-    // A huge page at the first touch of each, else a collapse of the small
-    // pages that touch made (MADV_COLLAPSE fails harmlessly before Linux 6.1).
-    madvise(p, length, MADV_HUGEPAGE);
-    for (std::size_t o = 0; o < length; o += kHugePage) static_cast<volatile char*>(p)[o] = 0;
-    madvise(p, length, kMadvCollapse);
+  if (bytes <= std::numeric_limits<std::size_t>::max() - 2 * kHugePage) {
+    const std::size_t length = huge_length(bytes);
+    // A refusal the tests ask for (refuse_huge_page_mappings) takes the path of
+    // a refusal by the system.
+    void* const raw = detail::refused_mappings.load(std::memory_order_relaxed)
+                          ? MAP_FAILED
+                          : mmap(nullptr,
+                                 length + kHugePage,
+                                 PROT_READ | PROT_WRITE,
+                                 MAP_PRIVATE | MAP_ANONYMOUS,
+                                 -1,
+                                 0);
+    if (raw != MAP_FAILED) {
+      // Its huge-page-aligned part.
+      const std::uintptr_t start = reinterpret_cast<std::uintptr_t>(raw);
+      const std::uintptr_t at    = (start + kHugePage - 1) & ~std::uintptr_t{kHugePage - 1};
+      if (at != start) munmap(raw, at - start);
+      munmap(reinterpret_cast<void*>(at + length), start + kHugePage - at);
+      char* const p = reinterpret_cast<char*>(at);
+      if (!huge_pages_off()) {
+        // A huge page at the first touch of each, else a collapse of the small
+        // pages that touch made (MADV_COLLAPSE fails harmlessly before Linux 6.1).
+        madvise(p, length, MADV_HUGEPAGE);
+        for (std::size_t o = 0; o < length; o += kHugePage) static_cast<volatile char*>(p)[o] = 0;
+        madvise(p, length, kMadvCollapse);
+      }
+      return p;
+    }
   }
-  return p;
-#else
-  return ::operator new(bytes == 0 ? 1 : bytes, std::align_val_t{64});
 #endif
+  return detail::heap_pages(bytes);
 }
 
 void free_huge_pages(void* p, std::size_t bytes) noexcept {
   if (p == nullptr) return;
 #if defined(__linux__)
-  munmap(p, huge_length(bytes));
-#else
-  (void)bytes;
-  ::operator delete(p, std::align_val_t{64});
+  // A mapping starts at a 2 MiB boundary; heap memory never does.
+  if (reinterpret_cast<std::uintptr_t>(p) % kHugePage == 0) {
+    munmap(p, huge_length(bytes));
+    return;
+  }
 #endif
+  (void)bytes;
+  ::operator delete(static_cast<char*>(p) - detail::kHeapOffset, detail::kHeapAlign);
 }
 
 struct CandidateSet::Impl final : detail::CellCacheSource {

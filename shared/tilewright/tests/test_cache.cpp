@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // The cache limit: what it counts, what it releases, and that rankings never
-// depend on it.
+// depend on it; and the memory of allocate_huge_pages, outside the limit.
 
 #include "model_impl.hpp"
 #include "model_writer.hpp"
@@ -10,10 +10,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
+#include <new>
 #include <random>
+#include <thread>
+#include <utility>
 #include <vector>
 
 namespace tw = tilewright;
@@ -228,6 +232,124 @@ TEST_CASE("CandidateSet::prepare builds what rankings would build on first use",
     CHECK(tw::cache_usage() == before);
     set.prepare();
     CHECK(tw::cache_usage() > before);
+  }
+}
+
+TEST_CASE("memory of allocate_huge_pages is zeroed, aligned and taken back, mapped or not",
+          "[memory]") {
+  constexpr std::size_t kHuge = std::size_t{1} << 21;
+  const std::size_t sizes[]   = {0, 1, 64, 4096, kHuge - 1, kHuge, kHuge + 1, std::size_t{5} << 20};
+  constexpr std::size_t kNever = std::numeric_limits<std::size_t>::max();
+
+  // allocate_huge_pages maps where the system lets it; heap_pages is what it
+  // returns where the system refuses.
+  for (const bool heap : {false, true}) {
+    std::vector<std::pair<unsigned char*, std::size_t>> blocks;
+    for (const std::size_t bytes : sizes) {
+      void* const p = heap ? tw::detail::heap_pages(bytes) : tw::allocate_huge_pages(bytes);
+      REQUIRE(p != nullptr);
+      const auto at = reinterpret_cast<std::uintptr_t>(p);
+      CHECK(at % 64 == 0);
+      // How free_huge_pages tells a mapping from heap memory.
+      if (heap) {
+        CHECK(at % 128 == 64);
+      } else {
+        CHECK((at % kHuge == 0 || at % 128 == 64));
+      }
+      auto* const b = static_cast<unsigned char*>(p);
+      CHECK(std::all_of(b, b + bytes, [](unsigned char c) { return c == 0; }));
+      blocks.emplace_back(b, bytes);
+    }
+    // Every byte holds what was written to it once all blocks are written.
+    for (std::size_t i = 0; i < blocks.size(); ++i)
+      for (std::size_t j = 0; j < blocks[i].second; ++j)
+        blocks[i].first[j] = static_cast<unsigned char>(j * 31 + i);
+    for (std::size_t i = 0; i < blocks.size(); ++i) {
+      std::size_t wrong = 0;
+      for (std::size_t j = 0; j < blocks[i].second; ++j)
+        wrong += blocks[i].first[j] != static_cast<unsigned char>(j * 31 + i) ? 1 : 0;
+      CHECK(wrong == 0);
+    }
+    // No two blocks overlap.
+    std::vector<std::pair<std::uintptr_t, std::size_t>> spans;
+    for (const auto& [b, bytes] : blocks)
+      spans.emplace_back(reinterpret_cast<std::uintptr_t>(b), bytes);
+    std::sort(spans.begin(), spans.end());
+    for (std::size_t i = 1; i < spans.size(); ++i)
+      CHECK(spans[i - 1].first + spans[i - 1].second <= spans[i].first);
+    // Taken back: heap memory that free_huge_pages would not give back to the
+    // heap is reported by LeakSanitizer (AGENTS.md's sanitizer run).
+    for (const auto& [b, bytes] : blocks) tw::free_huge_pages(b, bytes);
+  }
+  tw::free_huge_pages(nullptr, 0);
+  tw::free_huge_pages(nullptr, kHuge);
+  CHECK_THROWS_AS(tw::allocate_huge_pages(kNever), std::bad_alloc);
+  CHECK_THROWS_AS(tw::detail::heap_pages(kNever), std::bad_alloc);
+}
+
+TEST_CASE("allocate_huge_pages takes heap memory where a mapping is refused", "[memory]") {
+  // Every mapping allocate_huge_pages asks for is refused while one lives.
+  struct Refused {
+    Refused() { tw::detail::refuse_huge_page_mappings(true); }
+    ~Refused() { tw::detail::refuse_huge_page_mappings(false); }
+    Refused(const Refused&)            = delete;
+    Refused& operator=(const Refused&) = delete;
+  };
+  constexpr std::size_t kHuge = std::size_t{1} << 21;
+  {
+    const Refused refused;
+    for (const std::size_t bytes :
+         {std::size_t{0}, std::size_t{1}, std::size_t{4096}, kHuge, std::size_t{5} << 20}) {
+      void* p = nullptr;
+      REQUIRE_NOTHROW(p = tw::allocate_huge_pages(bytes));
+      REQUIRE(p != nullptr);
+      // Heap memory, as free_huge_pages tells it from a mapping.
+      CHECK(reinterpret_cast<std::uintptr_t>(p) % 128 == 64);
+      auto* const b = static_cast<unsigned char*>(p);
+      CHECK(std::all_of(b, b + bytes, [](unsigned char c) { return c == 0; }));
+      std::fill(b, b + bytes, static_cast<unsigned char>(0xA5));
+      tw::free_huge_pages(p, bytes);
+    }
+  }
+
+  // The copy of a candidate set prepared under refusal, and the scratch block
+  // of a thread whose first ranking is under refusal, are heap memory; the
+  // rankings are those without refusal.
+  const LimitGuard guard;
+  tw::set_cache_limit(kUnlimited);
+  std::mt19937_64 rng(31);
+  const std::vector<tw::Config> pool = random_pool(rng, 40);
+  const tw::ModelPtr model           = load_spec(listed_grid(tw::WeightType::Int4, pool, 7));
+  std::vector<tw::Problem> problems;
+  std::vector<std::size_t> depth;
+  for (int i = 0; i < 24; ++i) {
+    problems.push_back(random_problem(rng));
+    depth.push_back(i % 3 == 0 ? kAll : 1);
+  }
+  std::vector<std::vector<tw::Result>> expect;
+  for (std::size_t i = 0; i < problems.size(); ++i)
+    expect.push_back(tw::rank_configs(*model, problems[i], test_hardware(), pool, depth[i]));
+
+  std::vector<std::vector<tw::Result>> ranked, top;
+  {
+    const Refused refused;
+    const tw::CandidateSet set(model, pool);
+    set.prepare();
+    std::thread ranking([&] {
+      std::vector<tw::Result> r;
+      for (std::size_t i = 0; i < problems.size(); ++i) {
+        ranked.push_back(set.rank(problems[i], test_hardware(), depth[i]));
+        set.rank_top(problems[i], test_hardware(), {}, depth[i], r);
+        top.push_back(r);
+      }
+    });
+    ranking.join();
+  }
+  REQUIRE(ranked.size() == problems.size());
+  for (std::size_t i = 0; i < problems.size(); ++i) {
+    INFO("problem " << i);
+    CHECK(same_results(ranked[i], expect[i]));
+    CHECK(same_results(top[i], scored_prefix(expect[i], depth[i])));
   }
 }
 
