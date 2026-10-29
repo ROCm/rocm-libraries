@@ -13,6 +13,10 @@
  *
  * The expected strings must stay byte-identical to the Python engine's -- that
  * equality is the parity contract this gate exists to defend.
+ *
+ * Each case lowers for a target that has its intrinsic, as the Python cases do:
+ * the arch-domain lane refuses a kernel lowered for a target that cannot lower
+ * what it demands, so lower_one's gfx950 default only suits gfx950 intrinsics.
  */
 #include <cstdio>
 #include <cstdlib>
@@ -140,36 +144,37 @@ rocke_value_t* global_ptr_param(rocke_ir_builder_t* b, const char* name, const r
 
 void case_gfx1250_standalone_bridge()
 {
-    const std::string ir = lower_one(
-        "gfx1250_bridge",
-        [](rocke_ir_builder_t* b) {
-            const int shape[] = {1};
-            rocke_value_t* dst = global_ptr_param(b, "dst", rocke_i16());
-            rocke_value_t* smem = rocke_b_smem_alloc(b, rocke_i64(), shape, 1, "barrier");
-            rocke_value_t* local = rocke_b_smem_addr_of(b, smem);
-            rocke_value_t* members = rocke_b_const_i32(b, 2);
-            rocke_value_t* d4 = rocke_b_zero_vec(b, rocke_i32(), 4);
-            rocke_value_t* d8 = rocke_b_zero_vec(b, rocke_i32(), 8);
+    const auto build = [](rocke_ir_builder_t* b) {
+        const int shape[] = {1};
+        rocke_value_t* dst = global_ptr_param(b, "dst", rocke_i16());
+        rocke_value_t* smem = rocke_b_smem_alloc(b, rocke_i64(), shape, 1, "barrier");
+        rocke_value_t* local = rocke_b_smem_addr_of(b, smem);
+        rocke_value_t* members = rocke_b_const_i32(b, 2);
+        rocke_value_t* d4 = rocke_b_zero_vec(b, rocke_i32(), 4);
+        rocke_value_t* d8 = rocke_b_zero_vec(b, rocke_i32(), 8);
 
-            rocke_b_s_wait_tensorcnt(b, 3);
-            rocke_b_s_barrier_signal(b, 1);
-            rocke_b_s_barrier_wait(b, 2);
-            rocke_b_s_barrier_init(b, local, members);
-            rocke_b_s_barrier_signal_var(b, local, members);
-            rocke_b_s_barrier_join(b, local);
-            rocke_b_s_wakeup_barrier(b, local);
-            rocke_b_s_barrier_leave(b, 4);
-            rocke_b_s_delay_alu(b, 0x1234);
-            rocke_b_s_wait_alu(b, 0x2345);
-            rocke_b_s_clause(b, 0x3456);
-            rocke_b_s_wait_xcnt(b, 0x4567);
-            rocke_b_global_store_async_from_lds(b, dst, local, 16, -4, 31);
-            rocke_b_global_load_tr16_b128(b, dst, rocke_i16());
-            rocke_b_tensor_load_to_lds(b, d4, d8, d4, d4, d8, 5);
-            rocke_b_tensor_store_from_lds(b, d4, d8, d4, d4, d8, 6);
-        },
-        "gfx1250",
-        ROCKE_LLVM_FLAVOR_LLVM23);
+        rocke_b_s_wait_tensorcnt(b, 3);
+        rocke_b_s_barrier_signal(b, 1);
+        rocke_b_s_barrier_wait(b, 2);
+        rocke_b_s_barrier_init(b, local, members);
+        rocke_b_s_barrier_signal_var(b, local, members);
+        rocke_b_s_barrier_join(b, local);
+        rocke_b_s_wakeup_barrier(b, local);
+        rocke_b_s_barrier_leave(b, 4);
+        rocke_b_s_delay_alu(b, 0x1234);
+        rocke_b_s_wait_alu(b, 0x2345);
+        rocke_b_s_clause(b, 0x3456);
+        rocke_b_s_wait_xcnt(b, 0x4567);
+        rocke_b_global_store_async_from_lds(b, dst, local, 16, -4, 31);
+        rocke_b_global_load_tr16_b128(b, dst, rocke_i16());
+        rocke_b_tensor_load_to_lds(b, d4, d8, d4, d4, d8, 5);
+        rocke_b_tensor_store_from_lds(b, d4, d8, d4, d4, d8, 6);
+    };
+    const std::string ir = lower_one("gfx1250_bridge", build, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23);
+    const std::string ir24
+        = lower_one("gfx1250_bridge", build, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM24);
+    if(ir24 != ir)
+        fail("LLVM24 bridge output differs from its shared LLVM23 profile", __LINE__);
 
     EXPECT_IR(ir, "call void @llvm.amdgcn.s.wait.tensorcnt(i16 3)");
     EXPECT_IR(ir, "call void @llvm.amdgcn.s.barrier.signal(i32 1)");
@@ -182,6 +187,60 @@ void case_gfx1250_standalone_bridge()
     EXPECT_IR(ir, "call <8 x i16> @llvm.amdgcn.global.load.tr.b128.v8i16(");
     EXPECT_IR(ir, "call void @llvm.amdgcn.tensor.load.to.lds(");
     EXPECT_IR(ir, "call void @llvm.amdgcn.tensor.store.from.lds(");
+}
+
+void case_inline_asm_rejects_non_string_minimum_flavor()
+{
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "malformed_minimum_flavor") != ROCKE_OK)
+    {
+        fail("rocke_ir_builder_init", __LINE__);
+        return;
+    }
+    rocke_value_t* operand = rocke_b_const_i32(&b, 0);
+    rocke_value_t* operands[] = {operand};
+    const rocke_type_t* result_types[] = {rocke_i32()};
+    rocke_op_t* op
+        = rocke_b_inline_asm(&b, "v_mov_b32 $0, $1", "=v,v", operands, 1, result_types, 1, nullptr);
+    rocke_attr_set_int(&b, &op->attrs, "minimum_llvm_flavor", 23);
+    rocke_b_ret(&b);
+
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    const rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        rocke_ir_builder_kernel(&b), ROCKE_LLVM_FLAVOR_LLVM20, "gfx950", &ll, err, sizeof(err));
+    if(st != ROCKE_ERR_TYPE)
+        fail("non-string minimum_llvm_flavor did not return ROCKE_ERR_TYPE", __LINE__);
+    const char* expected
+        = "tile.inline_asm failed - minimum_llvm_flavor has a non-string value, expected a string";
+    if(strcmp(err, expected) != 0)
+        fail("non-string minimum_llvm_flavor diagnostic changed", __LINE__);
+    std::free(ll);
+    rocke_ir_builder_free(&b);
+}
+
+void case_scaled_mfma_shared_profile()
+{
+    const auto build = [](rocke_ir_builder_t* b) {
+        rocke_value_t* a = rocke_b_zero_vec(b, rocke_i32(), 8);
+        rocke_value_t* bb = rocke_b_zero_vec(b, rocke_i32(), 8);
+        rocke_value_t* c = rocke_b_zero_vec(b, rocke_f32(), 4);
+        rocke_value_t* a_scale = rocke_b_const_i32(b, 3);
+        rocke_value_t* b_scale = rocke_b_const_i32(b, 5);
+        rocke_b_mfma_scale_f32_16x16x128_f8f6f4(b, a, bb, c, a_scale, b_scale);
+    };
+    const std::string ir23
+        = lower_one("scaled_mfma_profile", build, "gfx950", ROCKE_LLVM_FLAVOR_LLVM23);
+    const std::string ir24
+        = lower_one("scaled_mfma_profile", build, "gfx950", ROCKE_LLVM_FLAVOR_LLVM24);
+    if(ir24 != ir23)
+        fail("LLVM24 scaled-MFMA output differs from its shared LLVM23 profile", __LINE__);
+    EXPECT_IR(ir24,
+              "declare <4 x float> "
+              "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32("
+              "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
+              "i32 immarg, i32, i32 immarg, i32)");
 }
 
 /* Build one kernel and return the C++ engine's HIP source. */
@@ -774,9 +833,10 @@ void case_dpp_ops_reject_untyped_raw_op()
 /* ---- mov_dpp8 ---- */
 void case_mov_dpp8_i32()
 {
-    const std::string ir = lower_one("dpp8i", [](rocke_ir_builder_t* b) {
-        rocke_b_mov_dpp8(b, rocke_b_const_i32(b, 1), 0x765432);
-    });
+    const std::string ir = lower_one(
+        "dpp8i",
+        [](rocke_ir_builder_t* b) { rocke_b_mov_dpp8(b, rocke_b_const_i32(b, 1), 0x765432); },
+        "gfx1201");
     EXPECT_IR(ir, "declare i32 @llvm.amdgcn.mov.dpp8.i32(i32, i32 immarg)");
     /* 0x765432 == 7754802, passed through as the 24-bit lane-select imm. */
     EXPECT_IR(ir, "call i32 @llvm.amdgcn.mov.dpp8.i32(i32 1, i32 7754802)");
@@ -784,9 +844,10 @@ void case_mov_dpp8_i32()
 
 void case_mov_dpp8_f32()
 {
-    const std::string ir = lower_one("dpp8f", [](rocke_ir_builder_t* b) {
-        rocke_b_mov_dpp8(b, rocke_b_const_f32(b, 1.0), 0x765432);
-    });
+    const std::string ir = lower_one(
+        "dpp8f",
+        [](rocke_ir_builder_t* b) { rocke_b_mov_dpp8(b, rocke_b_const_f32(b, 1.0), 0x765432); },
+        "gfx1201");
     EXPECT_IR(ir, "declare float @llvm.amdgcn.mov.dpp8.f32(float, i32 immarg)");
     EXPECT_IR(ir, "call float @llvm.amdgcn.mov.dpp8.f32(float");
 }
@@ -795,10 +856,13 @@ void case_mov_dpp8_both_types_coexist()
 {
     /* Both variants used to declare a bare @llvm.amdgcn.mov.dpp8, so a kernel
      * using each type emitted two conflicting declares for one symbol. */
-    const std::string ir = lower_one("dpp8_both", [](rocke_ir_builder_t* b) {
-        rocke_b_mov_dpp8(b, rocke_b_const_i32(b, 1), 0x11);
-        rocke_b_mov_dpp8(b, rocke_b_const_f32(b, 1.0), 0x11);
-    });
+    const std::string ir = lower_one(
+        "dpp8_both",
+        [](rocke_ir_builder_t* b) {
+            rocke_b_mov_dpp8(b, rocke_b_const_i32(b, 1), 0x11);
+            rocke_b_mov_dpp8(b, rocke_b_const_f32(b, 1.0), 0x11);
+        },
+        "gfx1201");
     EXPECT_IR(ir, "declare i32 @llvm.amdgcn.mov.dpp8.i32(");
     EXPECT_IR(ir, "declare float @llvm.amdgcn.mov.dpp8.f32(");
     EXPECT_NO_IR(ir, "@llvm.amdgcn.mov.dpp8(");
@@ -889,15 +953,18 @@ void case_writelane()
 /* ---- permlane16 / permlane64 / permlane32_swap ---- */
 void case_permlane16()
 {
-    const std::string ir = lower_one("pl16", [](rocke_ir_builder_t* b) {
-        rocke_b_permlane16(b,
-                           rocke_b_const_i32(b, 0),
-                           rocke_b_const_i32(b, 1),
-                           rocke_b_const_i32(b, 2),
-                           rocke_b_const_i32(b, 3),
-                           false,
-                           false);
-    });
+    const std::string ir = lower_one(
+        "pl16",
+        [](rocke_ir_builder_t* b) {
+            rocke_b_permlane16(b,
+                               rocke_b_const_i32(b, 0),
+                               rocke_b_const_i32(b, 1),
+                               rocke_b_const_i32(b, 2),
+                               rocke_b_const_i32(b, 3),
+                               false,
+                               false);
+        },
+        "gfx1201");
     /* The data type is an overloaded position, so the mangled name carries its
      * suffix. LLVM accepts the bare "permlane16" and auto-upgrades it, but
      * rewrites it to this on the way out, so the bare form is the one that
@@ -912,15 +979,18 @@ void case_permlane16()
 
 void case_permlane16_flags()
 {
-    const std::string ir = lower_one("pl16_flags", [](rocke_ir_builder_t* b) {
-        rocke_b_permlane16(b,
-                           rocke_b_const_i32(b, 0),
-                           rocke_b_const_i32(b, 1),
-                           rocke_b_const_i32(b, 2),
-                           rocke_b_const_i32(b, 3),
-                           true,
-                           true);
-    });
+    const std::string ir = lower_one(
+        "pl16_flags",
+        [](rocke_ir_builder_t* b) {
+            rocke_b_permlane16(b,
+                               rocke_b_const_i32(b, 0),
+                               rocke_b_const_i32(b, 1),
+                               rocke_b_const_i32(b, 2),
+                               rocke_b_const_i32(b, 3),
+                               true,
+                               true);
+        },
+        "gfx1201");
     EXPECT_IR(ir,
               "call i32 @llvm.amdgcn.permlane16.i32"
               "(i32 0, i32 1, i32 2, i32 3, i1 true, i1 true)");
@@ -1289,7 +1359,7 @@ void case_av_store_b128()
 void case_s_alloc_vgpr()
 {
     const std::string ir
-        = lower_one("valloc", [](rocke_ir_builder_t* b) { rocke_b_s_alloc_vgpr(b, 8); });
+        = lower_one("valloc", [](rocke_ir_builder_t* b) { rocke_b_s_alloc_vgpr(b, 8); }, "gfx1250");
     EXPECT_IR(ir, "declare i1 @llvm.amdgcn.s.alloc.vgpr(i32)");
     EXPECT_IR(ir, "call i1 @llvm.amdgcn.s.alloc.vgpr(i32 8)");
     /* The intrinsic returns i1; the IR value is an i32, so a zext is required. */
@@ -1315,17 +1385,20 @@ void case_wait_asyncmark()
 void case_s_wait_event()
 {
     const std::string ir
-        = lower_one("sevt", [](rocke_ir_builder_t* b) { rocke_b_s_wait_event(b, 1); });
+        = lower_one("sevt", [](rocke_ir_builder_t* b) { rocke_b_s_wait_event(b, 1); }, "gfx1201");
     EXPECT_IR(ir, "declare void @llvm.amdgcn.s.wait.event(i16 immarg)");
     EXPECT_IR(ir, "call void @llvm.amdgcn.s.wait.event(i16 1)");
 }
 
 void case_s_prefetch_inst()
 {
-    const std::string ir = lower_one("sprefetch", [](rocke_ir_builder_t* b) {
-        rocke_b_s_prefetch_inst(
-            b, global_ptr_param(b, "code", rocke_i32()), rocke_b_const_i32(b, 64));
-    });
+    const std::string ir = lower_one(
+        "sprefetch",
+        [](rocke_ir_builder_t* b) {
+            rocke_b_s_prefetch_inst(
+                b, global_ptr_param(b, "code", rocke_i32()), rocke_b_const_i32(b, 64));
+        },
+        "gfx1250");
     /* The operand is llvm_anyptr_ty, so the call and its declare have to name
      * the pointer's real space. A bare `ptr` for this addrspace(1) param is
      * what LLVM rejects with "'%code' defined with type 'ptr addrspace(1)' but
@@ -2873,13 +2946,104 @@ void case_memory_caps()
         rocke_memory_caps_t caps;
     };
     static const expected_caps table[] = {
-        {"gfx11-generic", {false, false, false, false, 4, 0, false, false, false, false}},
-        {"gfx1151", {false, false, false, false, 4, 0, false, false, false, false}},
-        {"gfx1201", {false, false, false, false, 4, 0, false, false, false, false}},
-        {"gfx1250", {false, true, false, true, 4, 0, true, true, true, true}},
-        {"gfx90a", {false, false, false, false, 4, 0, false, false, false, false}},
-        {"gfx942", {true, true, false, false, 4, 1, false, false, false, false}},
-        {"gfx950", {true, true, true, false, 4, 4, false, false, false, false}},
+        {"gfx11-generic",
+         {
+             .has_async_lds = false,
+             .has_async_global_lds = false,
+             .has_ds_read_tr = false,
+             .has_tdm = false,
+             .buffer_load_max_dwords = 4,
+             .async_lds_max_dwords = 0,
+             .has_scalar_data_prefetch = false,
+             .has_global_prefetch = false,
+             .has_cluster_launch = false,
+             .has_multicast_load = false,
+             .has_global_float_atomic_add = false,
+         }},
+        {"gfx1151",
+         {
+             .has_async_lds = false,
+             .has_async_global_lds = false,
+             .has_ds_read_tr = false,
+             .has_tdm = false,
+             .buffer_load_max_dwords = 4,
+             .async_lds_max_dwords = 0,
+             .has_scalar_data_prefetch = false,
+             .has_global_prefetch = false,
+             .has_cluster_launch = false,
+             .has_multicast_load = false,
+             .has_global_float_atomic_add = false,
+         }},
+        {"gfx1201",
+         {
+             .has_async_lds = false,
+             .has_async_global_lds = false,
+             .has_ds_read_tr = false,
+             .has_tdm = false,
+             .buffer_load_max_dwords = 4,
+             .async_lds_max_dwords = 0,
+             .has_scalar_data_prefetch = false,
+             .has_global_prefetch = false,
+             .has_cluster_launch = false,
+             .has_multicast_load = false,
+             .has_global_float_atomic_add = false,
+         }},
+        {"gfx1250",
+         {
+             .has_async_lds = false,
+             .has_async_global_lds = true,
+             .has_ds_read_tr = false,
+             .has_tdm = true,
+             .buffer_load_max_dwords = 4,
+             .async_lds_max_dwords = 0,
+             .has_scalar_data_prefetch = true,
+             .has_global_prefetch = true,
+             .has_cluster_launch = true,
+             .has_multicast_load = true,
+             .has_global_float_atomic_add = true,
+         }},
+        {"gfx90a",
+         {
+             .has_async_lds = false,
+             .has_async_global_lds = false,
+             .has_ds_read_tr = false,
+             .has_tdm = false,
+             .buffer_load_max_dwords = 4,
+             .async_lds_max_dwords = 0,
+             .has_scalar_data_prefetch = false,
+             .has_global_prefetch = false,
+             .has_cluster_launch = false,
+             .has_multicast_load = false,
+             .has_global_float_atomic_add = false,
+         }},
+        {"gfx942",
+         {
+             .has_async_lds = true,
+             .has_async_global_lds = true,
+             .has_ds_read_tr = false,
+             .has_tdm = false,
+             .buffer_load_max_dwords = 4,
+             .async_lds_max_dwords = 1,
+             .has_scalar_data_prefetch = false,
+             .has_global_prefetch = false,
+             .has_cluster_launch = false,
+             .has_multicast_load = false,
+             .has_global_float_atomic_add = false,
+         }},
+        {"gfx950",
+         {
+             .has_async_lds = true,
+             .has_async_global_lds = true,
+             .has_ds_read_tr = true,
+             .has_tdm = false,
+             .buffer_load_max_dwords = 4,
+             .async_lds_max_dwords = 4,
+             .has_scalar_data_prefetch = false,
+             .has_global_prefetch = false,
+             .has_cluster_launch = false,
+             .has_multicast_load = false,
+             .has_global_float_atomic_add = false,
+         }},
     };
     for(const expected_caps& row : table)
     {
@@ -2899,7 +3063,8 @@ void case_memory_caps()
            || got.has_scalar_data_prefetch != want.has_scalar_data_prefetch
            || got.has_global_prefetch != want.has_global_prefetch
            || got.has_cluster_launch != want.has_cluster_launch
-           || got.has_multicast_load != want.has_multicast_load)
+           || got.has_multicast_load != want.has_multicast_load
+           || got.has_global_float_atomic_add != want.has_global_float_atomic_add)
             fail(row.gfx, __LINE__);
     }
 }
@@ -3048,21 +3213,24 @@ void case_global_load_async_to_lds_b8()
     /* width_bytes=1 selects the LLVM 23 `.b8` async copy. The opcode is a
      * gfx1250 one, but its lowering is arch-independent, so this runs on the
      * default gfx950 backend -- the C++ engine has no gfx1250 ISA backend. */
-    const std::string ir = lower_one("gl_async_b8", [](rocke_ir_builder_t* b) {
-        rocke_value_t* src = global_ptr_param(b, "src", rocke_i32());
-        const int shape[] = {64};
-        rocke_value_t* lds = rocke_b_smem_alloc(b, rocke_i32(), shape, 1, "stage");
-        rocke_value_t* const idx[] = {rocke_b_const_i32(b, 0)};
-        rocke_b_global_load_async_to_lds(b,
-                                         src,
-                                         rocke_b_const_i32(b, 0),
-                                         lds,
-                                         idx,
-                                         /*num_lds_indices=*/1,
-                                         /*width_bytes=*/1,
-                                         /*coherency=*/0,
-                                         /*offset_bytes=*/0);
-    });
+    const std::string ir = lower_one(
+        "gl_async_b8",
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* src = global_ptr_param(b, "src", rocke_i32());
+            const int shape[] = {64};
+            rocke_value_t* lds = rocke_b_smem_alloc(b, rocke_i32(), shape, 1, "stage");
+            rocke_value_t* const idx[] = {rocke_b_const_i32(b, 0)};
+            rocke_b_global_load_async_to_lds(b,
+                                             src,
+                                             rocke_b_const_i32(b, 0),
+                                             lds,
+                                             idx,
+                                             /*num_lds_indices=*/1,
+                                             /*width_bytes=*/1,
+                                             /*coherency=*/0,
+                                             /*offset_bytes=*/0);
+        },
+        "gfx1250");
     EXPECT_IR(ir,
               "declare void @llvm.amdgcn.global.load.async.to.lds.b8("
               "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, "
@@ -3319,10 +3487,12 @@ void case_lowbit_dtype_aliases()
         if(strcmp(rocke_normalize_dtype(pair[0], scratch, sizeof(scratch)), pair[1]) != 0
            || strcmp(rocke_normalize_dtype(pair[1], scratch, sizeof(scratch)), pair[1]) != 0)
             fail("low-bit alias must resolve to explicit catalog key", __LINE__);
+        // The catalog lists fp4 and fp6 only as the scaled 32x32x64 atoms.
+        const rocke_mma_scale_filter_t e8m0_k32 = {"e8m0", "e8m0", ROCKE_MMA_SCALE_K32};
         const auto* arch = rocke_arch_target_from_gfx("gfx950");
-        const int k = strcmp(pair[0], "fp4") == 0 ? 128 : 96;
         if((strcmp(pair[0], "fp4") == 0 || strcmp(pair[0], "fp6") == 0)
-           && !rocke_mma_catalog_has_shape(&arch->mma, "mma", pair[0], pair[1], "fp32", 16, 16, k))
+           && !rocke_mma_catalog_has_shape(
+               &arch->mma, "mfma_scaled", pair[0], pair[1], "fp32", 32, 32, 64, &e8m0_k32))
             fail("low-bit aliases must resolve native catalog rows", __LINE__);
     }
 }
@@ -3366,6 +3536,7 @@ struct TestCase
 };
 
 const TestCase k_cases[] = {
+    {"scaled_mfma_shared_profile", case_scaled_mfma_shared_profile},
     {"lowbit_dtype_aliases", case_lowbit_dtype_aliases},
     {"wmma_result_count", case_wmma_result_count},
     {"ds_swizzle_raw_offset", case_ds_swizzle_raw_offset},
@@ -3439,6 +3610,8 @@ const TestCase k_cases[] = {
     {"hip_zext_uses_unsigned_source_cast", case_hip_zext_uses_unsigned_source_cast},
     {"gfx1250_scaled_wmma", case_gfx1250_scaled_wmma},
     {"gfx1250_standalone_bridge", case_gfx1250_standalone_bridge},
+    {"inline_asm_rejects_non_string_minimum_flavor",
+     case_inline_asm_rejects_non_string_minimum_flavor},
     {"flag_ops", case_flag_ops},
     {"fence_system_scope", case_fence_system_scope},
     {"flag_ops_hip", case_flag_ops_hip},

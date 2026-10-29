@@ -207,6 +207,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 // The hold mirrors InsertWaitAlu, which only runs with ESM2.
                 passFeatureConfig.dagFeatures.waitAluHoldStrictCount =
                     moduleOptions.EnableESM2 ? moduleOptions.WaitAluHoldStrictCount : -1;
+                passFeatureConfig.dagFeatures.waitAluScoreboard = moduleOptions.EnableESM2;
                 passFeatureConfig.dagFeatures.prefetchLeadWmmas = moduleOptions.PrefetchLeadWmmas;
                 passFeatureConfig.dagFeatures.prefetchLeadMinStageWmmas =
                     moduleOptions.PrefetchLeadMinStageWmmas;
@@ -275,7 +276,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 /*pgrValue=*/moduleOptions.PrefetchGlobalRead,
                 /*rule3SignalLeadCycles=*/
                 resolvedKnobs.clusterBarrierRule3SignalLeadCycles,
-                /*splitWaveLoop=*/moduleOptions.ClusterBarrierSplitWaveLoop));
+                /*splitWaveLoop=*/moduleOptions.ClusterBarrierSplitWaveLoop,
+                /*reduceClusterBarrierPerLoop=*/resolvedKnobs.reduceClusterBarrierPerLoop));
         }
 
         // Build the CFG after the flat region splice-backs so RegionClonePass can

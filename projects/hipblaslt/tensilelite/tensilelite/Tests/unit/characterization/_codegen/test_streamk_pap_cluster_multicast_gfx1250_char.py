@@ -75,7 +75,8 @@ def _emit(cluster_dim):
                                     cluster_dim=cluster_dim)
 
 
-@pytest.mark.parametrize("cluster_dim, a_has_peers", _SHAPES, ids=_SHAPE_IDS)
+@pytest.mark.parametrize("cluster_dim, a_has_peers", _SHAPES + [((1, 4), True)],
+                         ids=_SHAPE_IDS + ["cs1_ck4"])
 def test_streamk_pap_cluster_multicast_gfx1250_mask_liveness(cluster_dim, a_has_peers):
     """PAP keeps every mask that carries real peers live across the persistent
     refresh, and only frees the A mask when Ck == 1 makes it self-only."""

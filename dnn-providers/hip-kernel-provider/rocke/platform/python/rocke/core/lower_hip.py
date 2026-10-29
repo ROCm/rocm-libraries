@@ -27,6 +27,7 @@ from .ir import (
     F64,
     I32,
     _int_add_wrap_error,
+    _scf_for_carried_descriptor_error,
     KernelDef,
     Op,
     PtrType,
@@ -1198,6 +1199,8 @@ class _Lowerer:
         # 4-byte types (f32, i32) → __builtin_amdgcn_raw_buffer_load_b32.
         rsrc, voffset, soffset = op.operands
         elem_type = op.attrs["elem_type"]
+        if elem_type not in ("f16", "bf16", "f32", "i32"):
+            raise ValueError(f"tile.buffer_load: unsupported elem_type {elem_type!r}")
         hip_t = _hip_scalar_type(elem_type)
         tmp = f"_bl_{_name(op.result).lstrip('%')}"
         if elem_type in ("f16", "bf16"):
@@ -2060,36 +2063,6 @@ class _Lowerer:
             f"{_name(ptr)} + {_name(idx)}, {_name(val)});"
         )
 
-    def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
-        """HIP debug shim for P15 MX MFMA scaled.
-
-        Hipcc 20 does not expose a builtin for the scaled MX MFMA;
-        emit an inline-asm stub that documents the shape so kernel
-        authors can read the HIP source to sanity-check the data
-        flow. Production runs go through the LLVM path which has
-        the real intrinsic.
-        """
-        a, b, c, a_scale, b_scale = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P15 MX MFMA stub:"
-            f" scale_a={_name(a_scale)} scale_b={_name(b_scale)}"
-            f" mantissa_a={_name(a)} mantissa_b={_name(b)}"
-        )
-
-    def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P52 fp4 MFMA stub: "
-            f"a={_name(a)} b={_name(b)}"
-        )
-
-    def _op_tile_mfma_f32_16x16x96_fp6(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P52 fp6 MFMA stub: "
-            f"a={_name(a)} b={_name(b)}"
-        )
-
     def _op_tile_register_p_from_qk_c(self, op: Op) -> None:
         """HIP debug shim for the P13 register permutation."""
         (qk_c,) = op.operands
@@ -2725,6 +2698,9 @@ class _Lowerer:
     # -------------------- control flow --------------------
 
     def _op_scf_for(self, op: Op) -> None:
+        descriptor_error = _scf_for_carried_descriptor_error(op)
+        if descriptor_error is not None:
+            raise ValueError(descriptor_error)
         num_iter = op.attrs.get("num_iter_args", 0)
         lower = op.operands[0]
         upper = op.operands[1]

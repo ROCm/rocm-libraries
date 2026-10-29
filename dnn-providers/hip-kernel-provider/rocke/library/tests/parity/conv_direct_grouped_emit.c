@@ -19,8 +19,9 @@
  * rocke_direct_wgrad_gather_spec_t and, from index 148, the 4x4x4 MFMA
  * rocke_dw_wgrad_mfma_spec_t and rocke_grouped_wgrad_mfma_spec_t; from
  * index 163 the bf16 rocke_direct_conv_4c_spec_t; from index 166 the
- * depthwise forward kernels on the wave32 gfx1250) identically to the Python
- * emitter conv_direct_grouped_emit.py, builds the
+ * depthwise forward kernels on the wave32 gfx1250, from index 171 their
+ * channel-packed cpl > 1 forms) identically to the Python emitter
+ * conv_direct_grouped_emit.py, builds the
  * kernel via the matching rocke_build_direct_conv_*_new function and lowers via
  * rocke_lower_kernel_to_llvm (per-config arch, flavor AUTO) and prints the .ll
  * to stdout so the two outputs can be byte-compared.
@@ -91,7 +92,7 @@ enum
 
 /* bf16 4c configs 163..165 follow the direct wgrad ones. */
 #define FOURC_BF16_CFG_BASE 163
-/* Depthwise forward on a wave32 target (gfx1250), configs 166..170, follows
+/* Depthwise forward on a wave32 target (gfx1250), configs 166..178, follows
  * the bf16 4c ones: see _wave32_spec in the Python emitter. */
 #define WAVE32_CFG_BASE 166
 
@@ -855,6 +856,87 @@ static int make_wave32_cfg(int idx,
         sdw->block_w = 8;
         sdw->block_waves = 1;
         *kind = KIND_DW;
+        return 0;
+    /* Channel-packed (cpl > 1) depthwise forward: row-streaming and tiled. */
+    case 5:
+        *sdw = rocke_direct_depthwise_spec_default();
+        sdw->problem = mk_dw_problem(2, 14, 14, 64, 3, 1, 1, "fp16");
+        sdw->block_w = 8;
+        sdw->block_waves = 2;
+        sdw->wave_size = 32;
+        sdw->cpl = 2;
+        *kind = KIND_DW;
+        return 0;
+    case 6:
+        *sdw = rocke_direct_depthwise_spec_default();
+        sdw->problem = mk_dw_problem(2, 15, 15, 96, 5, 2, 2, "bf16");
+        sdw->block_w = 4;
+        sdw->block_waves = 1;
+        sdw->wave_size = 32;
+        sdw->cpl = 4;
+        *kind = KIND_DW;
+        return 0;
+    case 7:
+        *stiled = rocke_direct_depthwise_tiled_spec_default();
+        stiled->problem = mk_dw_problem(2, 16, 16, 96, 3, 1, 1, "bf16");
+        stiled->block_w = 8;
+        stiled->block_h = 2;
+        stiled->block_waves = 2;
+        stiled->wave_size = 32;
+        stiled->cpl = 2;
+        *kind = KIND_DW_TILED;
+        return 0;
+    case 8:
+        *stiled = rocke_direct_depthwise_tiled_spec_default();
+        stiled->problem = mk_dw_problem(2, 17, 17, 128, 7, 3, 2, "fp16");
+        stiled->block_w = 4;
+        stiled->block_h = 2;
+        stiled->block_waves = 1;
+        stiled->unroll_rows = true;
+        stiled->wave_size = 32;
+        stiled->cpl = 4;
+        *kind = KIND_DW_TILED;
+        return 0;
+    case 9:
+        *stiled = rocke_direct_depthwise_tiled_spec_default();
+        stiled->problem = mk_dw_problem(2, 12, 12, 64, 3, 1, 1, "bf16");
+        stiled->block_w = 8;
+        stiled->block_h = 1;
+        stiled->block_waves = 1;
+        stiled->wave_size = 32;
+        stiled->cpl = 4;
+        *kind = KIND_DW_TILED;
+        return 0;
+    case 10:
+        /* wave64 target. */
+        *sdw = rocke_direct_depthwise_spec_default();
+        sdw->problem = mk_dw_problem(2, 14, 14, 128, 3, 1, 1, "bf16");
+        sdw->block_w = 8;
+        sdw->block_waves = 1;
+        sdw->cpl = 2;
+        *arch = "gfx950";
+        *kind = KIND_DW;
+        return 0;
+    case 11:
+        /* Both engines reject: 98 channels are not a multiple of cpl 4. */
+        *sdw = rocke_direct_depthwise_spec_default();
+        sdw->problem = mk_dw_problem(2, 14, 14, 98, 3, 1, 1, "fp16");
+        sdw->block_w = 8;
+        sdw->block_waves = 1;
+        sdw->wave_size = 32;
+        sdw->cpl = 4;
+        *kind = KIND_DW;
+        return 0;
+    case 12:
+        /* Both engines reject: cpl must be 1, 2 or 4. */
+        *stiled = rocke_direct_depthwise_tiled_spec_default();
+        stiled->problem = mk_dw_problem(2, 16, 16, 96, 3, 1, 1, "bf16");
+        stiled->block_w = 8;
+        stiled->block_h = 2;
+        stiled->block_waves = 1;
+        stiled->wave_size = 32;
+        stiled->cpl = 3;
+        *kind = KIND_DW_TILED;
         return 0;
     default:
         return -1;

@@ -6,9 +6,9 @@
 # prove its LLVM-IR emission is byte-identical to the Python engine across every
 # kernel family. A green run means the dual-backend contract still holds.
 #
-# Unless ROCKE_LLVM_FLAVOR is already llvm23, a second gating lane re-runs the
-# gfx1250 family at llvm23, since its gated ops lower only at that flavor. The
-# families every config of which needs llvm23 run in that lane only.
+# When the selected emission profile lacks the LLVM23-generation target-op
+# capability, a second lane re-runs the affected families at llvm23. Profiles
+# that already carry the capability (llvm23 and llvm24) run them directly.
 #
 # Cross-platform (Windows + Linux) replacement for the legacy check_byte_identity.sh.
 # All paths are derived relative to this file so the rocke/platform/ tree stays copy-able.
@@ -37,7 +37,24 @@ GFX1250_FAMILY = "gfx1250_lowering"
 # Families whose every config uses an llvm23-gated op (their kernels move data
 # with TDM). Under another flavor both engines reject all of them, which the
 # gate reads as ALL_REJECTED, so they are compared in the llvm23 lane only.
-LLVM23_ONLY_FAMILIES = ("conv_direct_dgrad_wmma",)
+TARGET_OP_PROFILE_FAMILIES = (
+    "conv_direct_dgrad_wmma",
+    "conv_direct_fwd_wmma",
+    "conv_fwd_small_wmma",
+)
+
+
+def _selected_profile_supports_target_ops() -> bool:
+    """Resolve the selected lane once and query its structural profile."""
+    python_root = ROCKE / "python"
+    if str(python_root) not in sys.path:
+        sys.path.insert(0, str(python_root))
+    from rocke.core.lower_llvm import (
+        _resolve_llvm_flavor,
+        _supports_llvm23_target_ops,
+    )
+
+    return _supports_llvm23_target_ops(_resolve_llvm_flavor())
 
 
 def _cxx() -> str | None:
@@ -177,11 +194,11 @@ def main() -> int:
 
     # A dashboard per lane, beside the archive it describes: one shared path
     # meant the diagnostic ir run overwrote the gating run's JSON.
-    llvm23 = os.environ.get("ROCKE_LLVM_FLAVOR") == "llvm23"
+    supports_target_ops = _selected_profile_supports_target_ops()
     only_subs = [s for s in args.only.split(",") if s]
     llvm23_families = [
         f
-        for f in LLVM23_ONLY_FAMILIES
+        for f in TARGET_OP_PROFILE_FAMILIES
         if not only_subs or any(s in f for s in only_subs)
     ]
     # Under another flavor the default lane leaves the llvm23-only families
@@ -190,18 +207,21 @@ def main() -> int:
         "LLVM-IR (the contract)",
         str(build_root / "dashboard_ll.json"),
         ["--mode", "ll"]
-        + ([] if llvm23 else ["--exclude", ",".join(LLVM23_ONLY_FAMILIES)]),
+        + (
+            []
+            if supports_target_ops
+            else ["--exclude", ",".join(TARGET_OP_PROFILE_FAMILIES)]
+        ),
     )
-    # The gfx1250-only ops (prefetch, clusters, async stores, tensor moves, ...)
-    # lower only under llvm23. Under any other flavor both engines reject those
-    # configs, which reads as BOTH_REJECTED and passes without comparing a
-    # byte. Re-run the gfx1250 families at llvm23 so every invocation of this
-    # gate covers them, whatever flavor the host resolves to.
+    # The gfx1250-only ops need the LLVM23-generation target-op profile. Under
+    # an older profile both engines reject those configs, which reads as
+    # BOTH_REJECTED and passes without comparing a byte. Re-run affected
+    # families at llvm23 only when the selected profile lacks that capability.
     llvm23_only = [s for s in only_subs if s in GFX1250_FAMILY]
     if not args.only:
         llvm23_only = [GFX1250_FAMILY]
     llvm23_only += llvm23_families
-    if not llvm23 and llvm23_only:
+    if not supports_target_ops and llvm23_only:
         env = dict(os.environ, ROCKE_LLVM_FLAVOR="llvm23")
         status |= run_gate(
             "LLVM-IR, gfx1250 families at llvm23",
