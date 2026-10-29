@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import itertools
+import struct
 import os
 import sys
 from dataclasses import dataclass
@@ -2242,10 +2243,15 @@ def _measure_plans(
             return None
 
         # Each step packed once: a timed loop that packs per launch times the
-        # host, not a short kernel.
-        bound = [
-            launcher.bind(values, config=cfg) for launcher, values, cfg in launches
-        ]
+        # host, not a short kernel. A kernarg past its packed width (a byte
+        # extent over 2^31 on an i32 field) skips the plan, not the sweep.
+        try:
+            bound = [
+                launcher.bind(values, config=cfg) for launcher, values, cfg in launches
+            ]
+        except struct.error as e:
+            print(f"  [skip] {plan.label}: kernarg does not fit ({e})", flush=True)
+            return None
 
         def run(bound=bound):
             for launch in bound:
