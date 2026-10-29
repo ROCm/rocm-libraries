@@ -2150,6 +2150,9 @@ rocke_direct_dgrad_wmma_spec_t ddgw_build_spec(const py::dict& d, std::deque<std
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
     if(d.contains("sched") && !d["sched"].is_none())
         s.sched = keep(d["sched"].cast<std::string>());
+    s.pack_groups = dict_int(d, "pack_groups", s.pack_groups);
+    s.split_barrier = dict_bool(d, "split_barrier", s.split_barrier);
+    s.wave_epilogue = dict_bool(d, "wave_epilogue", s.wave_epilogue);
     return s;
 }
 
