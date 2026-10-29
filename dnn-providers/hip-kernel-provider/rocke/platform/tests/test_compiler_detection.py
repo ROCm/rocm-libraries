@@ -69,6 +69,18 @@ def test_query_cache_tracks_the_handle_not_its_filename(monkeypatch):
     assert comgr.loaded_compiler_info().llvm_version == (23, 0, 0)
 
 
+@pytest.mark.parametrize("error_type", [comgr.ComgrError, OSError, ValueError])
+def test_successful_load_query_errors_are_not_reclassified(monkeypatch, error_type):
+    lib = compiler_library((23, 0, 0))
+    failure = error_type("version query failed")
+    lib.LLVMGetVersion.side_effect = failure
+    monkeypatch.setattr(comgr, "_resolve_lib", lambda: lib)
+    for query in (comgr.loaded_compiler_info, comgr._require_compiler_info):
+        with pytest.raises(error_type, match="version query failed") as error:
+            query()
+        assert error.value is failure
+
+
 def test_hidden_llvm_uses_same_comgr_and_records_probe(monkeypatch):
     lib = SimpleNamespace(
         _name="static-comgr.so",
@@ -104,11 +116,17 @@ def test_unqueryable_loaded_library_is_unknown_not_another_install(monkeypatch):
             )
 
 
-def test_unavailable_library_does_not_prevent_offline_emission(monkeypatch):
-    with patch.object(comgr, "_resolve_lib", side_effect=comgr.ComgrError("missing")):
+@pytest.mark.parametrize("error_type", [comgr.ComgrError, OSError])
+def test_unavailable_library_does_not_prevent_offline_emission(monkeypatch, error_type):
+    failure = error_type("missing compiler dependency")
+    with patch.object(comgr, "_resolve_lib", side_effect=failure) as load:
         assert comgr.loaded_compiler_info() is None
-        with pytest.raises(comgr.ComgrError, match="could not be loaded"):
+        with pytest.raises(
+            comgr.ComgrError, match="missing compiler dependency"
+        ) as error:
             lower_llvm._resolve_llvm_flavor()
+        assert error.value.__cause__ is failure
+        assert load.call_count == 2
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm23")
     with patch.object(comgr, "_resolve_lib", side_effect=AssertionError("offline")):
         assert lower_llvm._resolve_llvm_flavor() == "llvm23"
@@ -129,13 +147,16 @@ def test_auto_lowering_recovers_then_retains_success(monkeypatch):
     monkeypatch.setattr(comgr, "_lib", None)
     monkeypatch.setattr(comgr, "_library_for_symbol", lambda fn: None)
     library = compiler_library((23, 0, 0))
-    load = Mock(side_effect=[comgr.ComgrError("missing"), library])
+    failure = comgr.ComgrError("missing compiler dependency")
+    load = Mock(side_effect=[failure, library])
     monkeypatch.setattr(comgr, "_load_lib", load)
     builder = IRBuilder("compiler_recovery")
     builder.kernel.attrs["max_workgroup_size"] = 64
     builder.const_i32(1)
-    with pytest.raises(comgr.ComgrError, match="could not be loaded"):
+    with pytest.raises(comgr.ComgrError, match="missing compiler dependency") as error:
         lower_llvm.lower_kernel_to_llvm(builder.kernel, arch="gfx950")
+    assert error.value.__cause__ is failure
+    load.assert_called_once()
     second = lower_llvm.lower_kernel_to_llvm(builder.kernel, arch="gfx950")
     assert lower_llvm._datalayout_for_flavor("llvm23") in second
     info = comgr.loaded_compiler_info()
@@ -202,7 +223,7 @@ def test_override_does_not_falsify_guard_evidence(monkeypatch):
     info = comgr.CompilerInfo(
         (20, 0, 0), "COMGR preprocessing", "requested.so", "loaded.so", "loaded.so"
     )
-    monkeypatch.setattr(comgr, "loaded_compiler_info", lambda: info)
+    monkeypatch.setattr(comgr, "_loaded_compiler_info", lambda *, required: info)
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm23")
     assert lower_llvm._resolve_llvm_flavor() == "llvm23"
     with pytest.raises(comgr.ComgrError) as error:
@@ -227,7 +248,7 @@ def test_unqualified_future_compiler_is_rejected_before_ir_shape_checks(
     info = comgr.CompilerInfo(
         (25, 0, 0), "fixture", "requested.so", "loaded.so", "loaded.so"
     )
-    monkeypatch.setattr(comgr, "loaded_compiler_info", lambda: info)
+    monkeypatch.setattr(comgr, "_loaded_compiler_info", lambda *, required: info)
     with pytest.raises(
         comgr.ComgrError, match="major 25.*latest qualified lane llvm24"
     ):
@@ -287,7 +308,7 @@ def test_compilation_requires_version_evidence_before_creating_inputs(
 ):
     info = comgr.CompilerInfo(version, "fixture", "compiler.so", None, None)
     monkeypatch.setattr(comgr, "_resolve_lib", lambda: object())
-    monkeypatch.setattr(comgr, "loaded_compiler_info", lambda: info)
+    monkeypatch.setattr(comgr, "_loaded_compiler_info", lambda *, required: info)
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm20")
     create = Mock(side_effect=RuntimeError("reached compiler input creation"))
     monkeypatch.setattr(comgr, "_create_data_set", create)
@@ -317,7 +338,7 @@ def test_explicit_offline_lowering_never_queries_comgr(monkeypatch):
     from rocke.core.ir import IRBuilder
 
     query = Mock(side_effect=AssertionError("offline emission queried COMGR"))
-    monkeypatch.setattr(comgr, "loaded_compiler_info", query)
+    monkeypatch.setattr(comgr, "_loaded_compiler_info", query)
     ir = lower_llvm.lower_kernel_to_llvm(
         IRBuilder("offline").kernel, llvm_flavor="llvm20", arch="gfx950"
     )

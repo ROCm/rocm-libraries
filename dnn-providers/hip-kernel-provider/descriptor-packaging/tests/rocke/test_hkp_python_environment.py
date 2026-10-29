@@ -462,16 +462,45 @@ def test_configure_explicit_comgr_is_sole_candidate(build_environment, loadable,
         assert "1 candidate(s) failed" in diagnostic
 
 
-def test_configure_preserves_runtime_comgr_override(build_environment):
+@pytest.mark.parametrize("relative", [False, True])
+@pytest.mark.parametrize("alias", [False, True])
+def test_configure_and_pack_preserve_runtime_comgr_override(
+    build_environment, relative, alias
+):
     env = build_environment()
-    fixture_library = _configure_comgr_consumer(env, sdk=False)
-    explicit = env.root / ("env-override.dll" if os.name == "nt" else "env-override.so")
+    fixture_library = _configure_comgr_consumer(env, sdk=True)
+    explicit = (
+        env.root
+        / "env compiler with spaces"
+        / ("env-override.dll" if os.name == "nt" else "env-override.so")
+    )
+    explicit.parent.mkdir()
     shutil.copyfile(fixture_library, explicit)
-    env.env["ROCKE_COMGR_LIB"] = str(explicit)
+    if alias:
+        link = explicit.with_name("compiler alias" + explicit.suffix)
+        try:
+            link.symlink_to(explicit)
+        except OSError as exc:
+            pytest.skip(f"compiler alias fixture requires symlink support: {exc}")
+        explicit = link
+    env.env["ROCKE_COMGR_LIB"] = (
+        "./" + explicit.relative_to(env.root).as_posix() if relative else str(explicit)
+    )
     env.configure(comgr_lib="")
     selection = (env.build_dir / "comgr-selection.txt").read_text(encoding="utf-8")
+    cache = (env.build_dir / "CMakeCache.txt").read_text(encoding="utf-8")
+    assert "HIPKERNELPROVIDER_ROCKE_COMGR_LIB:PATH=\n" in cache
+    # The build must use the configure-time selection even without that override
+    # in its ambient environment, and with a different working directory.
+    env.env.pop("ROCKE_COMGR_LIB")
+    env.run(env.cmake, "--build", env.build_dir, "--target", "hkp_packaging_first")
+    result = env.consumer()
     assert Path(selection.splitlines()[0]) == explicit
     assert Path(selection.split("ROCKE_COMGR_LIB;", 1)[1].strip()) == explicit
+    assert Path(result["env"]["ROCKE_COMGR_LIB"]) == explicit
+    assert Path(result["comgr"]) == explicit
+    tests = (env.build_dir / "CTestTestfile.cmake").read_text(encoding="utf-8")
+    assert tests.count(f'"--default-comgr" "{explicit.as_posix()}"') == 2
 
 
 def test_pth_runtime_and_parent_inventory_preserved(tmp_path, build_environment):

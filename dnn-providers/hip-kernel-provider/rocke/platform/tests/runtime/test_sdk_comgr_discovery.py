@@ -14,6 +14,7 @@ import pytest
 
 from rocke.runtime import comgr
 from rocke.runtime import runtime_coexistence as rc
+from rocke.core import lower_llvm
 
 
 @pytest.fixture
@@ -165,11 +166,46 @@ def test_unloadable_sdk_reports_extra_and_original_error(sdk_site, monkeypatch):
     assert "AMD ROCm wheel index" in str(error.value)
 
 
-def test_auto_lowering_without_compiler_reports_extra(monkeypatch):
-    monkeypatch.setattr(comgr, "loaded_compiler_info", lambda: None)
+@pytest.mark.parametrize(
+    "query", [comgr._require_compiler_info, lower_llvm._resolve_llvm_flavor]
+)
+@pytest.mark.parametrize("windows", [False, True])
+def test_required_compiler_query_preserves_sdk_load_failure(
+    sdk_site, monkeypatch, query, windows
+):
+    relative = "bin/amd_comgr.dll" if windows else "lib/libamd_comgr.so.3"
+    library = sdk_site / relative
+    library.parent.mkdir()
+    library.touch()
+    monkeypatch.setattr(rc, "_IS_WINDOWS", windows)
+    monkeypatch.setattr(comgr, "_IS_WINDOWS", windows)
+    monkeypatch.setattr(comgr, "_add_dll_dir", lambda path: None)
+    monkeypatch.delenv("ROCKE_LLVM_FLAVOR", raising=False)
+    attempts = []
+
+    def fail(path):
+        attempts.append(path)
+        raise OSError("missing compiler dependency")
+
+    monkeypatch.setattr(comgr.ctypes, "CDLL", fail)
+    with pytest.raises(comgr.ComgrError, match="Cannot determine LLVM flavor") as error:
+        query()
+    assert str(library) in str(error.value)
+    assert "missing compiler dependency" in str(error.value)
+    assert "offline IR emission" in str(error.value)
+    assert isinstance(error.value.__cause__, comgr.ComgrError)
+    assert attempts == [str(library)]
+    assert comgr._lib is None
+    assert comgr.loaded_compiler_info() is None
+    assert attempts == [str(library), str(library)]
+
+
+def test_auto_lowering_without_compiler_reports_extra(sdk_site, monkeypatch):
+    monkeypatch.delenv("ROCKE_LLVM_FLAVOR", raising=False)
     with pytest.raises(comgr.ComgrError, match=r"rocke\[sdk-core\]") as error:
         comgr._require_compiler_info()
     assert "offline IR emission" in str(error.value)
+    assert "no candidate path" in str(error.value)
 
 
 def test_sdk_release_lookup_does_not_need_runtime_imports(sdk_site, monkeypatch):
@@ -229,6 +265,15 @@ def test_torch_free_mapped_comgr_guard(sdk_site, tmp_path, monkeypatch, alias):
     else:
         with pytest.raises(comgr.ComgrError, match="second COMGR"):
             comgr._resolve_lib()
+        monkeypatch.delenv("ROCKE_LLVM_FLAVOR", raising=False)
+        for query in (comgr._require_compiler_info, lower_llvm._resolve_llvm_flavor):
+            with pytest.raises(comgr.ComgrError, match="second COMGR") as error:
+                query()
+            assert str(library) in str(error.value)
+            assert str(foreign) in str(error.value)
+            assert "separate process" in str(error.value)
+            assert isinstance(error.value.__cause__, comgr.ComgrError)
+        assert comgr.loaded_compiler_info() is None
         assert attempts == []
 
 
@@ -248,6 +293,11 @@ def test_multiple_mapped_comgrs_do_not_hide_conflict(sdk_site, tmp_path, monkeyp
     )
     with pytest.raises(comgr.ComgrError, match="second COMGR"):
         comgr._resolve_lib()
+    with pytest.raises(comgr.ComgrError, match="second COMGR") as error:
+        comgr._require_compiler_info()
+    assert str(library) in str(error.value)
+    assert str(foreign) in str(error.value)
+    assert isinstance(error.value.__cause__, comgr.ComgrError)
 
 
 def test_record_rejects_unowned_or_malformed_paths(sdk_site):

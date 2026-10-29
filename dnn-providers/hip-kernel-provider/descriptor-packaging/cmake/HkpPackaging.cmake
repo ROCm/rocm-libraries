@@ -1390,7 +1390,7 @@ A nonempty selection is the sole candidate; a failed load is a configure error."
     # An explicit CMake override is preserved; ROCKE_COMGR_LIB in the inherited
     # environment also remains authoritative when no CMake override was supplied.
     if(NOT HIPKERNELPROVIDER_ROCKE_COMGR_LIB AND NOT "$ENV{ROCKE_COMGR_LIB}" STREQUAL "")
-        set(HIPKERNELPROVIDER_ROCKE_COMGR_LIB "$ENV{ROCKE_COMGR_LIB}")
+        rocke_normalize_comgr_path(HIPKERNELPROVIDER_ROCKE_COMGR_LIB "$ENV{ROCKE_COMGR_LIB}")
     endif()
     hkp_default_rocke_comgr_lib()
 

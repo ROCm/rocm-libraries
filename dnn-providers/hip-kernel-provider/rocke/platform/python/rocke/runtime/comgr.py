@@ -381,11 +381,27 @@ def loaded_compiler_info() -> CompilerInfo | None:
     Failed loads may be retried. A successful load, including an unqueryable
     compiler, is retained for the process lifetime.
     """
+    return _loaded_compiler_info(required=False)
+
+
+def _compiler_info_error(reason: str) -> ComgrError:
+    return ComgrError(
+        f"Cannot determine LLVM flavor: {reason}. "
+        "Install 'rocke[sdk-core]' from an AMD ROCm wheel index or select "
+        "a queryable COMGR library for compilation, or set an explicit "
+        "LLVM flavor for offline IR emission."
+    )
+
+
+def _loaded_compiler_info(*, required: bool) -> CompilerInfo | None:
+    """Share loaded-handle evidence, preserving load errors for required callers."""
     global _llvm_version_lib, _compiler_info
     with _lib_lock:
         try:
             lib = _resolve_lib()
-        except (ComgrError, OSError):
+        except (ComgrError, OSError) as exc:
+            if required:
+                raise _compiler_info_error(f"COMGR could not be loaded: {exc}") from exc
             return None
         if _llvm_version_lib is lib:
             return _compiler_info
@@ -426,15 +442,10 @@ def loaded_compiler_info() -> CompilerInfo | None:
 
 def _require_compiler_info() -> CompilerInfo:
     """Require version evidence before automatic lowering or compilation."""
-    info = loaded_compiler_info()
+    info = _loaded_compiler_info(required=True)
     if info is None or info.llvm_version is None:
         reason = "COMGR could not be loaded" if info is None else info.describe()
-        raise ComgrError(
-            f"Cannot determine LLVM flavor: {reason}. "
-            "Install 'rocke[sdk-core]' from an AMD ROCm wheel index or select "
-            "a queryable COMGR library for compilation, or set an explicit "
-            "LLVM flavor for offline IR emission."
-        )
+        raise _compiler_info_error(reason)
     return info
 
 
