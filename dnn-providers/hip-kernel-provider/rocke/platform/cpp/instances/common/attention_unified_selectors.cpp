@@ -1408,12 +1408,11 @@ rocke_value_t* rocke_unified_attn_emit_qk_score(rocke_ir_builder_t* b,
         int i;
         for(i = 0; i < VEC; ++i)
         {
-            score
-                = rocke_b_fadd(b,
-                               score,
-                               rocke_b_fmul(b,
-                                            rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, qv, i)),
-                                            rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, kv, i))));
+            /* C leaves argument evaluation order unspecified: emit the q extract
+             * before the k extract, as Python does. */
+            rocke_value_t* qf = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, qv, i));
+            rocke_value_t* kf = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, kv, i));
+            score = rocke_b_fadd(b, score, rocke_b_fmul(b, qf, kf));
         }
     }
     /* Tail scalar fold for head_size not a multiple of VEC (empty for the
