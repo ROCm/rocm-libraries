@@ -112,18 +112,36 @@ namespace
     // Used for the reduction dimension when neither a scalar K nor an average hint is set.
     // It only steers selection and split-K; any value gives correct results.
     constexpr int64_t kDefaultK = 512;
-    constexpr int64_t kMXBlock  = 32;
 
     using ScalingFormat = RocblasltContractionProblem::ScalingFormat;
 
-    bool isMXFormat(ScalingFormat f)
+    // K elements per scale of an MX scale mode, 0 for any other mode.
+    int64_t mxBlockSize(ScalingFormat f)
     {
-        return f == ScalingFormat::Block_32_UE8M0 || f == ScalingFormat::Block_32_UE8M0_32_8_EXT;
+        switch(f)
+        {
+        case ScalingFormat::Block_32_UE8M0:
+        case ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        case ScalingFormat::Block_32_UE4M3:
+        case ScalingFormat::Block_32_UE5M3:
+            return 32;
+        case ScalingFormat::Block_16_UE8M0:
+        case ScalingFormat::Block_16_UE4M3:
+        case ScalingFormat::Block_16_UE5M3:
+            return 16;
+        default:
+            return 0;
+        }
     }
 
     bool isMX(rocblaslt_matmul_desc desc)
     {
-        return isMXFormat(desc->scaleAType);
+        return mxBlockSize(desc->scaleAType) != 0;
+    }
+
+    int64_t mxBlock(rocblaslt_matmul_desc desc)
+    {
+        return mxBlockSize(desc->scaleAType);
     }
 
     // Whether a kernel's in-device scale layout (Tensile MXScaleFormat) is the one the
@@ -225,8 +243,8 @@ namespace
               : !noScaleMode(desc->scaleAType) || !noScaleMode(desc->scaleBType))
         {
             log_error(__func__,
-                      "grouped GEMM supports only the HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0 "
-                      "and HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT scale modes, the "
+                      "grouped GEMM supports only the MX block scale modes (VEC16 and VEC32 "
+                      "with UE8M0, UE4M3, or UE5M3 scales, and BLK32_UE8M0_32_8_EXT), the "
                       "same on A and B");
             return rocblaslt_status_invalid_value;
         }
@@ -237,9 +255,9 @@ namespace
             log_error(__func__, "grouped GEMM does not support epilogues or scaling other than MX");
             return rocblaslt_status_invalid_value;
         }
-        if(mx && kIsUniform(desc, matA) && uniformK(desc, matA) % kMXBlock != 0)
+        if(mx && kIsUniform(desc, matA) && uniformK(desc, matA) % mxBlock(desc) != 0)
         {
-            log_error(__func__, "MX grouped GEMM needs K to be a multiple of 32");
+            log_error(__func__, "MX grouped GEMM needs K to be a multiple of the scale block size");
             return rocblaslt_status_invalid_value;
         }
         if(desc->pointermode != rocblaslt_pointer_mode_host
@@ -263,7 +281,7 @@ namespace
     {
         int64_t k = kIsUniform(desc, matA) ? uniformK(desc, matA) : h.avg_k ? h.avg_k : kDefaultK;
         if(isMX(desc))
-            k = (k + kMXBlock - 1) / kMXBlock * kMXBlock;
+            k = (k + mxBlock(desc) - 1) / mxBlock(desc) * mxBlock(desc);
         return std::max<int64_t>(k, 1);
     }
 
@@ -452,8 +470,8 @@ namespace
     }
 
     // The group shapes are never checked on the host, so an algo must also accept the
-    // smallest ones the layouts allow: 1 in each dimension set by a device array, or 32 in
-    // K for MX. Kernels that assume a minimum size or a size multiple reject these; a group
+    // smallest ones the layouts allow: 1 in each dimension set by a device array, or one
+    // scale block in K for MX. Kernels that assume a minimum size or a size multiple reject these; a group
     // below a kernel's minimum M or N makes it read before the group's A or B.
     rocblaslt_status buildSmallestData(rocblaslt_handle               handle,
                                        rocblaslt_matmul_desc          desc,
@@ -469,7 +487,7 @@ namespace
         Placeholders p;
         p.rows0 = p.rows = matD->rows_array == nullptr ? maxRows : 1;
         p.cols0 = p.cols = matD->cols_array == nullptr ? maxCols : 1;
-        p.k = kIsUniform(desc, matA) ? placeholderK(desc, matA, h) : isMX(desc) ? kMXBlock : 1;
+        p.k = kIsUniform(desc, matA) ? placeholderK(desc, matA, h) : isMX(desc) ? mxBlock(desc) : 1;
         size_t gemmCount = 0;
         return buildGroupedData(handle, desc, matA, matB, matC, matD, p, gemmData, gemmCount);
     }
@@ -529,10 +547,11 @@ namespace
         int32_t      groupCount;
         bool         transA;
         bool         transB;
-        // MX only: per-group scale tensor pointers, and the multiples the K blocks and the
-        // free dimension of each scale tensor are padded to.
+        // MX only: per-group scale tensor pointers, the K elements per scale, and the
+        // multiples the K blocks and the free dimension of each scale tensor are padded to.
         const void* const* aScalePtrs;
         const void* const* bScalePtrs;
+        int32_t            mxBlock;
         int32_t            mxKBlockMultiple;
         int32_t            mxFreeMultiple;
     };
@@ -573,7 +592,7 @@ namespace
     __device__ void mxScaleStrides(
         const PackArgs& args, int64_t k, int64_t freeDim, bool kIsRows, uint32_t& s1, uint32_t& s2)
     {
-        int64_t blocks = roundUp((k + kMXBlock - 1) / kMXBlock, args.mxKBlockMultiple);
+        int64_t blocks = roundUp((k + args.mxBlock - 1) / args.mxBlock, args.mxKBlockMultiple);
         int64_t free   = roundUp(freeDim, args.mxFreeMultiple);
         s1             = static_cast<uint32_t>(kIsRows ? blocks : free);
         s2             = static_cast<uint32_t>(blocks * free);
@@ -953,7 +972,8 @@ rocblaslt_status rocblaslt_grouped_matmul(rocblaslt_handle             handle,
             const bool padFree    = mxScaleTensorPadsFreeDim();
             args.aScalePtrs       = static_cast<const void* const*>(desc->scaleA);
             args.bScalePtrs       = static_cast<const void* const*>(desc->scaleB);
-            args.mxKBlockMultiple = padFree ? 8 : 128 / kMXBlock;
+            args.mxBlock          = static_cast<int32_t>(mxBlock(desc));
+            args.mxKBlockMultiple = padFree ? 8 : static_cast<int32_t>(128 / mxBlock(desc));
             args.mxFreeMultiple   = padFree ? 32 : 1;
         }
         if(desc->pointermode == rocblaslt_pointer_mode_host)

@@ -162,7 +162,52 @@ namespace
         }
     };
 
-    constexpr int64_t kMXBlock = 32;
+    enum class MXScaleType
+    {
+        UE8M0,
+        UE4M3,
+        UE5M3,
+    };
+
+    // K elements per scale and the scale element format of an MX scale mode.
+    struct MXScaleMode
+    {
+        int64_t     block;
+        MXScaleType type;
+    };
+
+    MXScaleMode mxScaleMode(hipblasLtMatmulMatrixScale_t mode)
+    {
+        switch(mode)
+        {
+        case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT:
+            return {16, MXScaleType::UE8M0};
+        case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3:
+            return {16, MXScaleType::UE4M3};
+        case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT:
+            return {32, MXScaleType::UE4M3};
+        case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT:
+            return {16, MXScaleType::UE5M3};
+        case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT:
+            return {32, MXScaleType::UE5M3};
+        default:
+            return {32, MXScaleType::UE8M0};
+        }
+    }
+
+    // Scale code of 2^e for e in -1..1.
+    uint8_t mxScaleCode(MXScaleType type, int e)
+    {
+        switch(type)
+        {
+        case MXScaleType::UE4M3:
+            return uint8_t((7 + e) << 3);
+        case MXScaleType::UE5M3:
+            return uint8_t((15 + e) << 3);
+        default:
+            return uint8_t(127 + e);
+        }
+    }
 
     int64_t roundUp(int64_t v, int64_t multiple)
     {
@@ -197,7 +242,7 @@ namespace
         return name.find("_MXA") != std::string::npos;
     }
 
-    MXPadding mxPadding()
+    MXPadding mxPadding(int64_t block)
     {
         int             device = 0;
         hipDeviceProp_t prop;
@@ -205,7 +250,7 @@ namespace
         EXPECT_EQ(hipGetDeviceProperties(&prop, device), hipSuccess);
         if(std::string(prop.gcnArchName).find("gfx950") != std::string::npos)
             return {8, 32};
-        return {4, 1};
+        return {128 / block, 1};
     }
 
     // gfx950 kernel layout (DGen::preSwizzleScalesGFX950) of a row-major rows x cols scale
@@ -225,19 +270,21 @@ namespace
     }
 
     // One grouped MX operand stored K x free per group (A with OP_T, B with OP_N), packed,
-    // with a UE8M0 scale for every 32 values along K. The device scales are pre-swizzled
-    // for the BLK32_UE8M0_32_8_EXT mode.
+    // with a scale for every block of K values. The device scales are pre-swizzled for the
+    // BLK32_UE8M0_32_8_EXT mode.
     struct MXOperand
     {
         std::vector<int64_t> k, free;
+        int64_t              block = 32;
         // Element offset of each group in values and in the device data.
         std::vector<size_t> offset;
         // Unscaled value of every element, column-major per group.
         std::vector<float> values;
-        // Rows (padded K blocks) of each group's scale tensor and its offset in scales.
+        // Rows (padded K blocks) of each group's scale tensor and its offset in scaleExp.
         std::vector<int64_t> scaleLd;
         std::vector<size_t>  scaleOffset;
-        std::vector<uint8_t> scales;
+        // Every scale is 2^scaleExp; the padding stays 2^0.
+        std::vector<int8_t>  scaleExp;
         void*                deviceData   = nullptr;
         void*                deviceScales = nullptr;
         // Device arrays of per-group pointers into deviceData and deviceScales.
@@ -247,12 +294,14 @@ namespace
         void init(const std::vector<int64_t>& kIn,
                   const std::vector<int64_t>& freeIn,
                   hipDataType                 type,
+                  MXScaleMode                 scale,
                   MXPadding                   pad,
                   bool                        preSwizzled,
                   std::mt19937&               rng)
         {
-            k    = kIn;
-            free = freeIn;
+            k                   = kIn;
+            free                = freeIn;
+            block               = scale.block;
             const size_t groups = k.size();
             offset.resize(groups);
             scaleLd.resize(groups);
@@ -262,7 +311,7 @@ namespace
             {
                 offset[g] = total;
                 total += size_t(k[g] * free[g]);
-                scaleLd[g]     = roundUp(k[g] / kMXBlock, pad.kBlockMultiple);
+                scaleLd[g]     = roundUp(k[g] / block, pad.kBlockMultiple);
                 scaleOffset[g] = scaleTotal;
                 scaleTotal += size_t(scaleLd[g] * roundUp(free[g], pad.freeMultiple));
             }
@@ -272,13 +321,17 @@ namespace
             values.resize(total);
             for(auto& v : values)
                 v = choices[pick(rng)];
-            // Exponents for 0.5, 1 and 2; the padding stays 1.
-            std::uniform_int_distribution<int> exponent(126, 128);
-            scales.assign(std::max<size_t>(scaleTotal, 1), 127);
+            // Scales of 0.5, 1 and 2.
+            std::uniform_int_distribution<int> exponent(-1, 1);
+            scaleExp.assign(std::max<size_t>(scaleTotal, 1), 0);
             for(size_t g = 0; g < groups; g++)
                 for(int64_t i = 0; i < free[g]; i++)
-                    for(int64_t b = 0; b < k[g] / kMXBlock; b++)
-                        scales[scaleOffset[g] + size_t(i * scaleLd[g] + b)] = uint8_t(exponent(rng));
+                    for(int64_t b = 0; b < k[g] / block; b++)
+                        scaleExp[scaleOffset[g] + size_t(i * scaleLd[g] + b)]
+                            = int8_t(exponent(rng));
+            std::vector<uint8_t> scales(scaleExp.size());
+            for(size_t s = 0; s < scales.size(); s++)
+                scales[s] = mxScaleCode(scale.type, scaleExp[s]);
 
             const bool           fp4 = type == HIP_R_4F_E2M1;
             std::vector<uint8_t> bytes(std::max<size_t>(fp4 ? total / 2 : total, 1), 0);
@@ -315,8 +368,8 @@ namespace
         // Scaled value at reduction index p of free index i.
         float at(size_t g, int64_t p, int64_t i) const
         {
-            float scale = std::ldexp(
-                1.f, int(scales[scaleOffset[g] + size_t(i * scaleLd[g] + p / kMXBlock)]) - 127);
+            float scale
+                = std::ldexp(1.f, scaleExp[scaleOffset[g] + size_t(i * scaleLd[g] + p / block)]);
             return values[offset[g] + size_t(i * k[g] + p)] * scale;
         }
 
@@ -702,8 +755,9 @@ namespace
                    hipblasLtMatmulMatrixScale_t   mode,
                    const std::vector<GroupShape>& shapes)
         {
-            const bool      preSwizzled = mode == HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
-            const MXPadding pad         = mxPadding();
+            const bool preSwizzled  = mode == HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+            const MXScaleMode scale = mxScaleMode(mode);
+            const MXPadding   pad   = mxPadding(scale.block);
             if(preSwizzled && pad.freeMultiple != 32)
                 GTEST_SKIP() << "Pre-swizzled MX scales are defined for gfx950 only";
             const int    groups = int(shapes.size());
@@ -717,8 +771,8 @@ namespace
             }
 
             MXOperand A, B;
-            A.init(k, m, elemType, pad, preSwizzled, rng);
-            B.init(k, n, elemType, pad, preSwizzled, rng);
+            A.init(k, m, elemType, scale, pad, preSwizzled, rng);
+            B.init(k, n, elemType, scale, pad, preSwizzled, rng);
             GroupedMatrix C, D;
             C.init(m, n, false, outType, rng);
             D.init(m, n, false, outType, rng);
@@ -981,6 +1035,18 @@ namespace
               kMXShapes);
     }
 
+    // MXFP4 with a UE4M3 or UE5M3 scale for every 16 values; skips where the library has no
+    // grouped kernels for these modes (gfx950 has none).
+    TEST_F(GroupedMatmul, smoke_MXFP4TNVec16UE4M3)
+    {
+        runMX(HIP_R_4F_E2M1, HIP_R_16BF, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3, kMXShapes);
+    }
+
+    TEST_F(GroupedMatmul, smoke_MXFP4TNVec16UE5M3)
+    {
+        runMX(HIP_R_4F_E2M1, HIP_R_16BF, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT, kMXShapes);
+    }
+
     // With the same FP8 layouts, the MX scale modes select only MX kernels and the scalar
     // scale mode selects only non-MX kernels.
     TEST_F(GroupedMatmul, smoke_MXAndFP8SelectDifferentKernels)
@@ -1217,6 +1283,17 @@ namespace
         EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(
                       handle, mxDesc, layK48, layK48, layOut, layOut, pref, 1, &result, &count),
                   HIPBLAS_STATUS_INVALID_VALUE);
+        // A 16-element scale block accepts K = 48 but not K = 40.
+        hipblasLtMatmulDesc_t vec16Desc = makeTNDesc(HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT);
+        EXPECT_NE(hipblasLtMatmulAlgoGetHeuristic(
+                      handle, vec16Desc, layK48, layK48, layOut, layOut, pref, 1, &result, &count),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        auto layK40 = makeLayout(
+            HIP_R_8F_E4M3, 3, nullptr, nullptr, nullptr, HIPBLASLT_INTEGER_WIDTH_32, 40, 8);
+        EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                      handle, vec16Desc, layK40, layK40, layOut, layOut, pref, 1, &result, &count),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        hipblasLtMatmulDescDestroy(vec16Desc);
         auto setScaleMode = [&](hipblasLtMatmulDescAttributes_t attr, hipblasLtMatmulMatrixScale_t mode) {
             EXPECT_EQ(hipblasLtMatmulDescSetAttribute(mxDesc, attr, &mode, sizeof(mode)),
                       HIPBLAS_STATUS_SUCCESS);
@@ -1236,7 +1313,7 @@ namespace
 
         hipblasLtMatmulPreferenceDestroy(pref);
         hipblasLtMatmulDescDestroy(desc);
-        for(auto l : {layA, layB, layD, layD3, regular, layK48, layK64, layOut})
+        for(auto l : {layA, layB, layD, layD3, regular, layK48, layK40, layK64, layOut})
             hipblasLtMatrixLayoutDestroy(l);
     }
 

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "hipblaslt_arguments.hpp"
+#include "hipblaslt_datatype2string.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <hip/hip_runtime.h>
@@ -31,9 +32,7 @@ inline std::string groupedCApiUnsupportedReason(const Arguments& arg)
        || arg.gradient)
         return "supports no epilogue, bias or aux output";
     if(arg.scaleB != arg.scaleA
-       || (arg.scaleA != hipblaslt_scaling_format::none
-           && arg.scaleA != hipblaslt_scaling_format::Block_32_UE8M0
-           && arg.scaleA != hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT))
+       || (arg.scaleA != hipblaslt_scaling_format::none && !isBlockScaling(arg.scaleA)))
         return "supports only the MX scale modes, the same on A and B";
     if(arg.scaleC || arg.scaleD || arg.scaleE || arg.scaleAlpha_vector || arg.amaxD)
         return "supports no scaling other than MX";
@@ -232,10 +231,31 @@ private:
                    const std::vector<void*>& scaleA,
                    const std::vector<void*>& scaleB)
     {
-        hipblasLtMatmulMatrixScale_t mode
-            = format == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
-                  ? HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT
-                  : HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+        hipblasLtMatmulMatrixScale_t mode;
+        switch(format)
+        {
+        case hipblaslt_scaling_format::Block_16_UE8M0:
+            mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT;
+            break;
+        case hipblaslt_scaling_format::Block_32_UE4M3:
+            mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT;
+            break;
+        case hipblaslt_scaling_format::Block_16_UE4M3:
+            mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3;
+            break;
+        case hipblaslt_scaling_format::Block_32_UE5M3:
+            mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT;
+            break;
+        case hipblaslt_scaling_format::Block_16_UE5M3:
+            mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT;
+            break;
+        case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+            mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+            break;
+        default:
+            mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+            break;
+        }
         if(!upload(scales_, scaleA) || !upload(scales_, scaleB))
             return false;
         void* arrayA = scales_[scales_.size() - 2];
