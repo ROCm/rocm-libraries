@@ -81,7 +81,7 @@ python dnn-providers/hip-kernel-provider/rocke/tools/run_checks.py
 
 It **auto-discovers** every `test_*.py` and every `<family>_emit.{py,c}` parity
 pair — so adding a new test needs **no** edit to any script or checklist. It runs,
-in order: relative-path guard → byte-identity gate (`llvm20`, `llvm22`, and `llvm23`) →
+in order: relative-path guard → byte-identity gate (`llvm20`, `llvm22`, `llvm23`, and `llvm24`) →
 platform + library parity → pytest (both suites) → on-GPU numeric (auto-skips
 when no device). Scope while iterating with:
 
@@ -212,8 +212,8 @@ device matching each required architecture.
 | Every affected `(spec, arch)` pair | Must be explicitly enumerated by the family emitters | Required for kernel behavior changed on that architecture; use a matching remote lane when local hardware is absent |
 | gfx950 baseline defaults | Covered only where the emitter defaults or pins gfx950 | Required for attention changes that affect gfx950 |
 
-All supported LLVM flavors (`llvm20`, `llvm22`, and `llvm23`) are part of
-"gate GREEN" — the runner does all three by default. If you lack a device for an
+All supported LLVM flavors (`llvm20`, `llvm22`, `llvm23`, and `llvm24`) are part of
+"gate GREEN" — the runner does all four by default. If you lack a device for an
 arch, use the remote GPU path rather
 than faking the lane or using CPU torch.
 
@@ -430,6 +430,7 @@ export ROCKE=$(pwd) PYTHONPATH=$ROCKE/Python
 ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py   # llvm20, build engine + gate
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # llvm22 flavor
 ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # llvm23 flavor
+ROCKE_LLVM_FLAVOR=llvm24 python tools/check_byte_identity.py   # llvm24 flavor
 python tools/check_byte_identity.py --only attention           # scope to a family
 ```
 
