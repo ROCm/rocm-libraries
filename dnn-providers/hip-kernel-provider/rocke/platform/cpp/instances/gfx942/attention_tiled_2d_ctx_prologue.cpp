@@ -118,9 +118,11 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->spec = spec;
     ctx->arch = arch;
     /* This body also stands in for the gfx950 Python builder (the fastKV
-     * register-P twin), which bakes the shape values gfx942 reads at runtime. */
+     * register-P twin), which bakes the head counts gfx942 reads at runtime but
+     * reads the batch and window at runtime as gfx942 does. */
     ctx->runtime_shape = rocke_a2d_streq(arch, "gfx942");
     ctx->runtime_search = ctx->runtime_shape || rocke_a2d_streq(arch, "gfx950");
+    ctx->runtime_window = ctx->runtime_search;
 
     /* ---- require_tiled_attention_arch(arch) (lines 1139-1141) ---- */
     if(!rocke_a2d_require_tiled_attention_arch(b, arch))
@@ -406,6 +408,9 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
         {
             ctx->num_qh_p = rocke_b_param(b, "num_query_heads", rocke_i32(), NULL);
             ctx->num_kv_p = rocke_b_param(b, "num_kv_heads", rocke_i32(), NULL);
+        }
+        if(ctx->runtime_window)
+        {
             ctx->sliding_window_p = rocke_b_param(b, "sliding_window", rocke_i32(), NULL);
         }
     }
@@ -755,7 +760,7 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
      * created an unused i32 0 here and a FRESH const in the loop scaffold,
      * allocating an extra SSA value that shifted every later %N. Cache it. */
     ctx->sw_const_v
-        = ctx->runtime_shape ? ctx->sliding_window_p : rocke_b_const_i32(b, ctx->SLIDING_WINDOW);
+        = ctx->runtime_window ? ctx->sliding_window_p : rocke_b_const_i32(b, ctx->SLIDING_WINDOW);
 
     /* ---- acc geometry the epilogue aliases (lines 2142-2143) ---- */
     ctx->ACC_N_TILES = USE_MFMA_32X32 ? (HD / 32) : PV_N_TILES;

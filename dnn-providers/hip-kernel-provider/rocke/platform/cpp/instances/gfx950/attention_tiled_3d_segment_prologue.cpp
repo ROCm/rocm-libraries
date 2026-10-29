@@ -328,6 +328,7 @@ void rocke_gfx950_attention_tiled_3d_declare_params(
     ctx->num_seqs_p = rocke_b_param(B, "num_seqs", rocke_i32(), NULL);
     ctx->bt_stride_p = rocke_b_param(B, "block_table_stride", rocke_i32(), NULL);
     ctx->qq_bias_stride0_p = rocke_b_param(B, "qq_bias_stride_0", rocke_i32(), NULL);
+    ctx->sliding_window_p = rocke_b_param(B, "sliding_window", rocke_i32(), NULL);
     if(ctx->strided_kv)
     {
         ctx->k_strides = rocke_declare_strided_kv_params(B, "k");
@@ -462,7 +463,7 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
     ctx->one_f = rocke_b_const_f32(B, 1.0);
     ctx->rcp_ln2 = rocke_b_const_f32(B, 1.4426950408889634);
     ctx->qk_scale = rocke_b_fmul(B, ctx->scale_p, ctx->rcp_ln2);
-    ctx->sw_const = rocke_b_const_i32(B, CFG.SLIDING_WINDOW);
+    ctx->sw_const = ctx->sliding_window_p;
     ctx->z8 = rocke_b_zero_vec(B, dtype, 8);
 
     /* ---- Q -> LDS (lines 482-512) ---- */

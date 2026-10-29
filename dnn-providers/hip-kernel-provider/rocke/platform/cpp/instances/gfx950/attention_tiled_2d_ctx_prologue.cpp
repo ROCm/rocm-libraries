@@ -292,6 +292,7 @@ bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* ctx,
         ctx->num_seqs_p = rocke_b_param(b, "num_seqs", rocke_i32(), NULL);
         ctx->bt_stride_p = rocke_b_param(b, "block_table_stride", rocke_i32(), NULL);
         ctx->qq_bias_stride0_p = rocke_b_param(b, "qq_bias_stride_0", rocke_i32(), NULL);
+        ctx->sliding_window_p = rocke_b_param(b, "sliding_window", rocke_i32(), NULL);
     }
 
     /* ---- grid ids + wave decomposition (lines 891-904) ---- *
@@ -467,10 +468,9 @@ bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* ctx,
     ctx->pv_fp8_scale_v
         = ctx->FP8_MFMA_PV ? rocke_b_fdiv(b, ctx->v_scale_p, rocke_b_const_f32(b, 240.0)) : NULL;
 
-    /* sw_const = const_i32(SLIDING_WINDOW). Created once in the constants block
-     * and reused by the tile-bound + mask regions (peer phases). */
-    ctx->sw_const_v = rocke_b_const_i32(b, SLIDING_WINDOW);
-    ctx->c0 = ctx->sw_const_v;
+    /* sw_const = rt["sliding_window"], reused by the tile-bound + mask regions
+     * (peer phases). */
+    ctx->sw_const_v = ctx->sliding_window_p;
 
     /* ---- acc geometry the loop-bounds / epilogue phases alias (lines 1380-1387) ---- */
     ctx->ACC_N_TILES = USE_MFMA_32X32 ? (HD / 32) : PV_N_TILES;

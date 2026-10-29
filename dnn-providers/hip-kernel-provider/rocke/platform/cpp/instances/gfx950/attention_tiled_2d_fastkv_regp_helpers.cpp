@@ -55,8 +55,9 @@ static rocke_status_t rocke__fastkv_gfx950_base_name(const rocke_attention_tiled
         snprintf(kv_buf, sizeof(kv_buf), "kv%s", s->kv_storage_dtype);
     else
         kv_buf[0] = '\0';
+    /* The window size is a kernarg; only whether the body masks one is baked. */
     if(s->sliding_window > 0)
-        snprintf(sw_buf, sizeof(sw_buf), "sw%d", s->sliding_window);
+        snprintf(sw_buf, sizeof(sw_buf), "sw");
     else
         sw_buf[0] = '\0';
     if(s->num_warps != 1)

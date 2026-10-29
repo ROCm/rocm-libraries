@@ -154,6 +154,10 @@ _warp_xor_reduce_sum_32lane = warp_xor_reduce_sum_32lane
 
 @dataclass(frozen=True)
 class UnifiedAttention2DTiledSpec:
+    # Problem fields this body reads as trailing i32 kernargs instead of baking
+    # them, in ABI order. The launch signature, the argument pack and the cache
+    # key read the same tuple (``_runtime_kernarg_fields``).
+    RUNTIME_KERNARG_FIELDS: ClassVar[Tuple[str, ...]] = ("sliding_window",)
     # The cu_q search derives its trip count from the num_seqs kernarg, so
     # num_seqs never reaches the IR and one binary serves every batch.
     RUNTIME_SEARCH_ITERS: ClassVar[bool] = True
@@ -904,7 +908,8 @@ class UnifiedAttention2DTiledSpec:
             self.dtype,
             f"kv{self.kv_storage_dtype}" if self.kv_storage_dtype else "",
             "" if not self.use_sinks else "sinks",
-            f"sw{self.sliding_window}" if self.sliding_window > 0 else "",
+            # The window size is a kernarg; only whether the body masks one is baked.
+            "sw" if self.sliding_window > 0 else "",
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
@@ -1291,6 +1296,9 @@ def build_unified_attention_2d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
+    # after every fixed param so the shared launch signature can append them.
+    rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}
     # Additive-bias params are appended only when the feature is on, so the
     # non-bias kernel ABI (and its IR) is unchanged.
     additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
@@ -1655,7 +1663,7 @@ def build_unified_attention_2d_tiled(
     # stays the same as the default bf16 path -- just softmax_scale /
     # ln(2) -- and we do NOT fold k_scale into qk_scale here.
     pv_fp8_scale = b.fdiv(v_scale_p, b.const_f32(240.0)) if FP8_MFMA_PV else None
-    sw_const = b.const_i32(int(SLIDING_WINDOW))
+    sw_const = rt["sliding_window"]
     z8 = b.zero_vec(dtype, 8)
 
     # ---------------- Q -> LDS (cooperative vec8 chunks) ----------------

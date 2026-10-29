@@ -1135,7 +1135,10 @@ class TestAttentionHelpers(unittest.TestCase):
             build_unified_attention_2d_tiled,
             build_unified_attention_3d_tiled,
         )
-        from kernels.common.attention_unified import _3d_signature, _attn_signature
+        from kernels.common.attention_unified import (
+            _tiled_2d_signature,
+            _tiled_3d_signatures,
+        )
 
         common = dict(
             head_size=64,
@@ -1152,11 +1155,8 @@ class TestAttentionHelpers(unittest.TestCase):
                 k = build_unified_attention_2d_tiled(
                     UnifiedAttention2DTiledSpec(**common, use_additive_bias=use_ab)
                 )
-                sig = _attn_signature(
-                    "bf16",
-                    include_bt_stride=True,
-                    include_qq_bias_stride=True,
-                    include_additive_bias=use_ab,
+                sig = _tiled_2d_signature(
+                    "gfx950", "bf16", include_additive_bias=use_ab
                 )
                 self.assertEqual([p.name for p in k.params], [a["name"] for a in sig])
                 self.assertEqual(
@@ -1168,7 +1168,9 @@ class TestAttentionHelpers(unittest.TestCase):
                         **common, num_segments=4, use_additive_bias=use_ab
                     )
                 )
-                sig = _3d_signature("bf16", include_additive_bias=use_ab)
+                sig, _ = _tiled_3d_signatures(
+                    "gfx950", "bf16", include_additive_bias=use_ab
+                )
                 self.assertEqual([p.name for p in seg.params], [a["name"] for a in sig])
 
     def test_unified_attention_additive_bias_must_be_bool(self):

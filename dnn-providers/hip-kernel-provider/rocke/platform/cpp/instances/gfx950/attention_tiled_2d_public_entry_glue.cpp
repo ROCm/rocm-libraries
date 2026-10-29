@@ -742,6 +742,7 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
         ctx->num_seqs_p = rocke_b_param(b, "num_seqs", rocke_i32(), NULL);
         ctx->bt_stride_p = rocke_b_param(b, "block_table_stride", rocke_i32(), NULL);
         ctx->qq_bias_stride0_p = rocke_b_param(b, "qq_bias_stride_0", rocke_i32(), NULL);
+        ctx->sliding_window_p = rocke_b_param(b, "sliding_window", rocke_i32(), NULL);
     }
 
     /* ---- grid ids + wave decomposition (Py891-904) ---- */
@@ -911,8 +912,7 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
      * here so the SSA id matches Python; the PV epilogue reuses this value. */
     ctx->pv_fp8_scale_v
         = FP8_MFMA_PV ? rocke_b_fdiv(b, ctx->v_scale_p, rocke_b_const_f32(b, 240.0)) : NULL;
-    ctx->sw_const_v = rocke_b_const_i32(b, SLIDING_WINDOW); /* sw_const (1150) */
-    ctx->c0 = ctx->sw_const_v;
+    ctx->sw_const_v = ctx->sliding_window_p; /* sw_const = rt["sliding_window"] */
 
     /* ---- acc geometry the epilogue aliases (Py1381-1382) ---- */
     ctx->ACC_N_TILES = USE_MFMA_32X32 ? (HD / 32) : PV_N_TILES;
@@ -1043,8 +1043,9 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
         snprintf(kv_buf, sizeof(kv_buf), "kv%s", s->kv_storage_dtype);
     else
         kv_buf[0] = '\0';
+    /* The window size is a kernarg; only whether the body masks one is baked. */
     if(s->sliding_window > 0)
-        snprintf(sw_buf, sizeof(sw_buf), "sw%d", s->sliding_window);
+        snprintf(sw_buf, sizeof(sw_buf), "sw");
     else
         sw_buf[0] = '\0';
     if(s->num_warps != 1)

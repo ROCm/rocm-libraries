@@ -175,6 +175,8 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* num_seqs_p;
     rocke_value_t* bt_stride_p;
     rocke_value_t* qq_bias_stride0_p;
+    /* RUNTIME_KERNARG_FIELDS params, in declaration order. */
+    rocke_value_t* sliding_window_p;
 
     /* ---- grid ids + wave decomposition ---- */
     rocke_value_t* q_block_global_idx;
@@ -246,14 +248,13 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* lane_rg_is2_v;
 
     /* ---- SSA constants ---- */
-    rocke_value_t* c0;
     rocke_value_t* zero_f;
     rocke_value_t* neg_inf_v; /* b.const_f32(-inf)               */
     rocke_value_t* one_f_v; /* b.const_f32(1.0)                */
     rocke_value_t* rcp_ln2_v; /* b.const_f32(1.4426950408889634) */
     rocke_value_t* qk_scale_v; /* derived from scale_p            */
     rocke_value_t* pv_fp8_scale_v; /* fdiv(v_scale, 240) when FP8_MFMA_PV (line 1149) */
-    rocke_value_t* sw_const_v; /* b.const_i32(SLIDING_WINDOW)     */
+    rocke_value_t* sw_const_v; /* the sliding_window kernarg      */
 
     /* ---- paged-KV byte descriptor (full transform DAG, lines 1163-1630) ---- */
     rocke_tensor_descriptor_t* q_desc; /* output/query [token,head,dim]   */

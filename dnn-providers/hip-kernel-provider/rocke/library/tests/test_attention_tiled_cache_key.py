@@ -442,6 +442,15 @@ _D128_FOLD = dict(
     sliding_window=4096,
     dtype="bf16",
 )
+_D128_SB_FP16 = dict(
+    num_query_heads=32,
+    num_kv_heads=8,
+    head_size=128,
+    block_size=16,
+    max_seqlen_q=4096,
+    max_seqlen_k=4096,
+    dtype="fp16",
+)
 # Two query tokens per sequence: the 3D searching grid, not the decode grid.
 _D128_TWO_TOKENS = dict(
     num_query_heads=32,
@@ -528,6 +537,43 @@ _SHARED_PAIRS = [
         "3d",
         P(total_q=6, num_seqs=3, **_D128_TWO_TOKENS),
         P(total_q=18, num_seqs=9, **_D128_TWO_TOKENS),
+    ),
+    # gfx950 reads the window size as a kernarg, so window sizes share a binary.
+    (
+        "gfx950-2d-sw256-vs-sw1024",
+        "gfx950",
+        "2d",
+        P(
+            total_q=2048,
+            num_seqs=2,
+            max_seqlen_q=1024,
+            max_seqlen_k=1024,
+            sliding_window=256,
+            **_D64_GQA8,
+        ),
+        P(
+            total_q=2048,
+            num_seqs=2,
+            max_seqlen_q=1024,
+            max_seqlen_k=1024,
+            sliding_window=1024,
+            **_D64_GQA8,
+        ),
+    ),
+    # The single-batch fp16 d128 window cohort picks its own KV tile.
+    (
+        "gfx950-2d-single-batch-sw256-vs-sw1024",
+        "gfx950",
+        "2d",
+        P(total_q=4096, num_seqs=1, sliding_window=256, **_D128_SB_FP16),
+        P(total_q=4096, num_seqs=1, sliding_window=1024, **_D128_SB_FP16),
+    ),
+    (
+        "gfx950-3d-decode-sw256-vs-sw4096",
+        "gfx950",
+        "3d",
+        P(total_q=4, num_seqs=4, sliding_window=256, **_D128_DECODE),
+        P(total_q=4, num_seqs=4, sliding_window=4096, **_D128_DECODE),
     ),
     # gfx942 reads the search trip count from num_seqs at runtime, so batch
     # sizes several log2 buckets apart share a binary on every builder route.

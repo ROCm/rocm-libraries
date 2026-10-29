@@ -177,17 +177,20 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* num_seqs_p;
     rocke_value_t* bt_stride_p;
     rocke_value_t* qq_bias_stride0_p;
-    /* RUNTIME_KERNARG_FIELDS params, in declaration order; set only when
-     * runtime_shape. */
+    /* RUNTIME_KERNARG_FIELDS params, in declaration order: the head counts when
+     * runtime_shape, the window when runtime_window. */
     rocke_value_t* num_qh_p;
     rocke_value_t* num_kv_p;
     rocke_value_t* sliding_window_p;
-    /* The gfx942 Python body: it reads its runtime kernargs and searches at
-     * runtime. False when this body stands in for the gfx950 builder. */
+    /* The gfx942 Python body: it reads the head counts as kernargs. False when
+     * this body stands in for the gfx950 builder. */
     bool runtime_shape;
     /* The cu_q search reads its trip count from num_seqs: true for gfx942 and
      * for the gfx950 builder this body also stands in for. */
     bool runtime_search;
+    /* The window size is the sliding_window kernarg: true for gfx942 and the
+     * gfx950 builder. */
+    bool runtime_window;
 
     /* ---- grid ids + wave decomposition (lines 1371-1388) ---- */
     rocke_value_t* q_block_global_idx;
