@@ -1623,8 +1623,7 @@ namespace TensileLite
                 // predates the gate (custom kernels, older logic) would receive
                 // a bit it misreads.
                 assert((magicShiftItersPerTile & 0x60000000u) == 0u);
-                if(usePerTileStreamKSplit(*this, problem, launch, tiles, itersPerTile)
-                   && problem.getParams().uniformSummationOrder() != 0)
+                if(usePerTileStreamKSplit(*this, problem, launch, tiles, itersPerTile))
                     magicShiftItersPerTile |= 0x20000000u;
 
                 args.template append<uint32_t>("itersPerTile", itersPerTile);

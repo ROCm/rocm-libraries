@@ -103,6 +103,8 @@ namespace
             = ContractionProblemGemm::GEMM(false, false, m, n, k, m, n, m, 1.0, false, batch);
         problem.setComputeInputTypeA(rocisa::DataType::Float);
         problem.setComputeInputTypeB(rocisa::DataType::Float);
+        // Scheduling tests allow uneven K splits; USO-specific cases enable it explicitly.
+        problem.setParams().setUniformSummationOrder(0);
         return problem;
     }
 
@@ -1566,8 +1568,7 @@ TEST(StreamKLaunchSummaryTest, GsuWorkspacePreservesSplitOneBiasD)
 }
 
 // ---------------------------------------------------------------------------
-// A workspace-starved parallel scenario, with uniform summation order OFF --
-// i.e. the default.
+// A workspace-starved parallel scenario, with uniform summation order explicitly OFF.
 //
 // Same shape as the test above, but with no workspace at all. getSKReduction()
 // still says parallel -- it never looks at the workspace -- but origami's
@@ -1594,7 +1595,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedNoUniformOrderReconcil
 
     // Anti-vacuity: the mode must be off.
     ASSERT_EQ(problem.getParams().uniformSummationOrder(), 0)
-        << "uniform summation order must default to off, otherwise this test is "
+        << "uniform summation order must be off for this scenario, otherwise this test is "
            "a duplicate of the variant below";
 
     ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
