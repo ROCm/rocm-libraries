@@ -165,6 +165,43 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         return p_tile;
     }
 
+    // Per-pixel mask with the bounds of each score row formed once (see ApplyRowRangeMask). Sink
+    // tokens and the generic mask keep the per-element predicate. The row ranges follow
+    // IsOutOfBoundUnsigned for every head dim, so this pipeline does not read
+    // Policy::kUseUnsignedCausalMask.
+    static constexpr bool kRowRangeMask =
+        !kHasSink && std::is_same_v<FmhaMask, SimplifiedGenericAttentionMask<true>>;
+
+    // Causal/window mask of one score tile: each row's valid key range is formed once, so every
+    // element costs one add, one unsigned compare and one select.
+    template <typename ScoreTile>
+    CK_TILE_DEVICE static void
+    ApplyRowRangeMask(ScoreTile& s, const FmhaMask& mask, index_t q_row0, index_t k_col0)
+    {
+        using Dstr           = typename ScoreTile::StaticTileDistribution;
+        constexpr auto spans = ScoreTile::get_distributed_spans();
+        using ColSpan        = remove_cvref_t<decltype(spans[I1])>;
+        constexpr auto col0 =
+            detail::make_tile_distributed_index(uniform_sequence_gen_t<ColSpan::Impl::size(), 0>{});
+        sweep_tile_span(spans[I0], [&](auto idx0) {
+            const index_t row =
+                q_row0 +
+                get_x_indices_from_distributed_indices(Dstr{}, make_tuple(idx0, col0)).at(I0);
+            const auto range = mask.GetRowRangeUnsigned(row);
+            uint32_t offset  = uint32_t(k_col0) - uint32_t(range.at(I0));
+            uint32_t width   = range.at(I1);
+            // Keep the row bounds opaque: otherwise the empty-row select is folded into a lane-mask
+            // OR for every element.
+            asm volatile("" : "+v"(offset), "+v"(width));
+            sweep_tile_span(spans[I1], [&](auto idx1) {
+                constexpr auto i_j = make_tuple(idx0, idx1);
+                const auto col     = get_x_indices_from_distributed_indices(Dstr{}, i_j).at(I1);
+                if(offset + uint32_t(col) >= width)
+                    s(i_j) = -numeric<SMPLComputeDataType>::infinity();
+            });
+        });
+    }
+
     // Prefill, double lds
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
@@ -437,11 +474,19 @@ struct BlockFmhaPipelineQRKSVSTdmSched
             integer_divide_ceil(physical_seqlen_k_end - physical_seqlen_k_start, kN0) +
             num_sink_loop;
 
-        constexpr bool kUseCountdownLoop = Policy::template UseCountdownLoop<Problem>();
-        bool even_buffer                 = true;
-        index_t i_total_loops            = 0;
-        index_t remaining_loops          = num_total_loop;
-        constexpr index_t k1_loops       = kN0 / kK1;
+        // The countdown loop keeps the remaining tile count and derives the key origin from the
+        // V window instead of a tile index, which shortens scalar live ranges: fewer SGPR spills
+        // and no SGPR reloads in the tile loop. The origin is not sink-aware. D192 N128 keeps the
+        // index loop: in the countdown form it spills VGPRs to scratch inside the tile loop.
+        // Policy::UseCountdownLoop (D128 without a mask) must stay a subset of this condition.
+        constexpr bool kUseCountdownLoop = !kHasSink &&
+                                           BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+                                           !(Geometry::kHeadDimQK == 192 && Geometry::kN == 128);
+        static_assert(!Policy::template UseCountdownLoop<Problem>() || kUseCountdownLoop);
+        bool even_buffer           = true;
+        index_t i_total_loops      = 0;
+        index_t remaining_loops    = num_total_loop;
+        constexpr index_t k1_loops = kN0 / kK1;
 
         static_assert(1 <= k1_loops);
         block_sync_lds<0>();
@@ -726,13 +771,43 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                         need_split_check = remaining_loops == 1 && needs_tail_predicate;
                     }
                     bool need_mask_check = false;
-                    if constexpr(kPadSeqLenK)
+                    if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
                     {
-                        need_mask_check = mask.IsEdgeTile(
+                        need_mask_check = mask.IsEdgeTileForValidRows(
                             q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
                     }
 
-                    if(__builtin_expect(need_split_check || need_mask_check, false))
+                    if constexpr(FmhaMask::IsMasking)
+                    {
+                        // The two predicates stay separate to keep each one cheap: a fused
+                        // predicate evaluates the mask compares on the KV-tail tile as well.
+                        if(__builtin_expect(need_split_check, false))
+                        {
+                            set_tile_if(s_acc,
+                                        -numeric<SMPLComputeDataType>::infinity(),
+                                        [&](auto tile_idx) {
+                                            const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                                            return physical_seqlen_k_end <= col;
+                                        });
+                        }
+                        if constexpr(kRowRangeMask)
+                        {
+                            if(__builtin_expect(need_mask_check, false))
+                                ApplyRowRangeMask(s_acc, mask, q_origin.at(I0), k_origin.at(I0));
+                        }
+                        else if(__builtin_expect(need_mask_check, false))
+                        {
+                            // Generic mask (the countdown loop excludes sinks).
+                            set_tile_if(s_acc,
+                                        -numeric<SMPLComputeDataType>::infinity(),
+                                        [&](auto tile_idx) {
+                                            const auto row = q_origin.at(I0) + tile_idx.at(I0);
+                                            const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                                            return mask.IsOutOfBound(row, col);
+                                        });
+                        }
+                    }
+                    else if(__builtin_expect(need_split_check || need_mask_check, false))
                     {
                         set_tile_if(
                             s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
@@ -769,26 +844,29 @@ struct BlockFmhaPipelineQRKSVSTdmSched
 
                     if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
                     {
-                        bool need_perpixel_check = mask.IsEdgeTile(
+                        // Rows past seqlen_q are never stored (the kernel's O and LSE views are
+                        // bounded by seqlen_q), so they do not force the per-pixel check on every
+                        // key tile of a partial last query tile.
+                        bool need_perpixel_check = mask.IsEdgeTileForValidRows(
                             q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
-                        if(need_perpixel_check)
+                        if constexpr(kRowRangeMask)
                         {
-                            set_tile_if(
-                                s_acc,
-                                -numeric<SMPLComputeDataType>::infinity(),
-                                [&](auto tile_idx) {
-                                    const auto row = q_origin.at(I0) + tile_idx.at(I0);
-                                    const auto col = k_origin.at(I0) + tile_idx.at(I1);
-                                    if constexpr(kHasSink)
-                                        return mask.IsOutOfSinkBound(row, col);
-                                    else if constexpr(Policy::kUseUnsignedCausalMask &&
-                                                      std::is_same_v<
-                                                          FmhaMask,
-                                                          SimplifiedGenericAttentionMask<true>>)
-                                        return mask.IsOutOfBoundUnsigned(row, col);
-                                    else
-                                        return mask.IsOutOfBound(row, col);
-                                });
+                            if(need_perpixel_check)
+                                ApplyRowRangeMask(s_acc, mask, q_origin.at(I0), k_origin.at(I0));
+                        }
+                        else if(need_perpixel_check)
+                        {
+                            // Sink tokens or the generic mask.
+                            set_tile_if(s_acc,
+                                        -numeric<SMPLComputeDataType>::infinity(),
+                                        [&](auto tile_idx) {
+                                            const auto row = q_origin.at(I0) + tile_idx.at(I0);
+                                            const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                                            if constexpr(kHasSink)
+                                                return mask.IsOutOfSinkBound(row, col);
+                                            else
+                                                return mask.IsOutOfBound(row, col);
+                                        });
                         }
                     }
                 }

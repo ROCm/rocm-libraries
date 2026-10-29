@@ -320,6 +320,18 @@ struct GenericAttentionMask
         }
     }
 
+    // Same contract as SimplifiedGenericAttentionMask::IsEdgeTileForValidRows. This mask keeps the
+    // conservative IsEdgeTile answer: without a local window it never tests the bottom edge, and
+    // the local-window form is not narrowed to the valid rows.
+    template <index_t TileHeight, index_t TileWidth>
+    CK_TILE_HOST_DEVICE constexpr auto IsEdgeTileForValidRows(index_t i_tile_top,
+                                                              index_t i_tile_left,
+                                                              number<TileHeight> h,
+                                                              number<TileWidth> w) const
+    {
+        return IsEdgeTile(i_tile_top, i_tile_left, h, w);
+    }
+
     // the key sequence length, i.e. one past the last valid X index
     CK_TILE_HOST_DEVICE constexpr index_t GetXTotal() const { return x_total; }
 
@@ -533,6 +545,19 @@ struct SimplifiedGenericAttentionMask
         }
     }
 
+    // The valid key columns of row i_y as (x_start, width): IsOutOfBoundUnsigned(i_y, i_x) is
+    // uint32_t(i_x - x_start) >= width. Lets a caller form the row's bounds once for all its
+    // columns.
+    CK_TILE_HOST_DEVICE constexpr auto GetRowRangeUnsigned(index_t i_y) const
+    {
+        static_assert(IsMasking);
+        const index_t x_start = -y + i_y + 1;
+        const index_t x_end   = min(i_y + x, x_total);
+        const uint32_t width =
+            i_y < y_total && x_start < x_end ? uint32_t(x_end) - uint32_t(x_start) : 0u;
+        return ck_tile::make_tuple(x_start, width);
+    }
+
     CK_TILE_HOST_DEVICE constexpr auto IsOutOfSinkBound(index_t i_y, index_t i_x) const
     {
         if constexpr(!IsMasking)
@@ -579,6 +604,30 @@ struct SimplifiedGenericAttentionMask
             bool top_right_edge   = i_x_end > min(i_y + x, x_total); // consider right pad
             bool bottom_left_edge = i_y_end > min(i_x + y, y_total); // consider bottom pad
             // bool is_partial_out_of_bound = i_x_end > x_end; // only consider right-pad for now
+
+            return top_right_edge || bottom_left_edge;
+        }
+    }
+
+    // IsEdgeTile for callers that never store rows at or beyond y_total: the padding rows of
+    // the last query tile do not make a tile an edge tile. With a bottom-right causal mask
+    // (y == y_total) IsEdgeTile reports every key tile of a partial last query tile as an edge
+    // tile, which forces the per-pixel check on the whole key loop of that tile.
+    template <index_t TileHeight, index_t TileWidth>
+    CK_TILE_HOST_DEVICE constexpr auto
+    IsEdgeTileForValidRows(index_t i_y, index_t i_x, number<TileHeight>, number<TileWidth>) const
+    {
+        if constexpr(!IsMasking)
+        {
+            return (i_x + TileWidth) > x_total;
+        }
+        else
+        {
+            index_t i_x_end = i_x + TileWidth;
+            index_t i_y_end = min(i_y + TileHeight, y_total);
+
+            bool top_right_edge   = i_x_end > min(i_y + x, x_total);
+            bool bottom_left_edge = i_y_end > min(i_x + y, y_total);
 
             return top_right_edge || bottom_left_edge;
         }
