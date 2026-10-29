@@ -150,11 +150,11 @@ Runtime entry points: `dispatch_gdn_decode(GdnDecodeRequest(...))` (single-token
 
 Linear attention carries a fixed-size recurrent state per value head instead of re-reading past tokens, so cost per token does not grow with sequence length. GDN ships a single-token decode kernel and a split chunkwise prefill mode; gfx950.
 
-GDN decode uses the static `(2, 16, 8)` dispatcher default whenever it is legal;
-batch changes its grid, not its auto tile. GDN prefill picks `value_splits` per
-`batch_heads`. Both tune the same tension -- splitting a head's value dimension
-across workgroups buys parallelism when the natural grid starves, and costs
-redundant tile reads once it does not.
+GDN decode runs one static `auto` configuration per case (gate kind x fused x
+state width; `instances/gdn.md`); batch changes its grid, not its configuration.
+GDN prefill picks `value_splits` per `batch_heads`. Both tune the same tension
+-- splitting a head's value dimension across workgroups buys parallelism when
+the natural grid starves, and costs redundant tile reads once it does not.
 
 ## Small Ops
 

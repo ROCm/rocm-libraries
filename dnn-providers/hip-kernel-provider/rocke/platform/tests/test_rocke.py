@@ -1261,6 +1261,44 @@ class TestBatchedGemmInstance(unittest.TestCase):
         self.assertIn("@llvm.amdgcn.workgroup.id.z", ll)
         self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.f16", ll)
 
+    def test_check_batched_offsets_fit_i32_dtl_byte_bound(self):
+        from rocke.instances.common.batched_gemm import (
+            check_batched_offsets_fit_i32,
+        )
+
+        # Without direct_to_lds the element bound applies: 2 * 1e9 fits i32.
+        check_batched_offsets_fit_i32(2, 1_000_000_000, 1, 1)
+
+        # With direct_to_lds the A/B loads are addressed with a byte offset,
+        # so A and B are bounded by 2 GiB of bytes -- stricter than the
+        # element bound for every dtype (f16: 2 * 1e9 elements = 4 GiB).
+        with self.assertRaises(ValueError):
+            check_batched_offsets_fit_i32(
+                2, 1_000_000_000, 1, 1, direct_to_lds=True, elem_bytes=2
+            )
+        # fp64: 2 * 300e6 * 8 bytes > 2 GiB.
+        with self.assertRaises(ValueError):
+            check_batched_offsets_fit_i32(
+                2, 300_000_000, 1, 1, direct_to_lds=True, elem_bytes=8
+            )
+        # fp64 within 2 GiB of bytes passes.
+        check_batched_offsets_fit_i32(
+            2, 100_000_000, 100_000_000, 1, direct_to_lds=True, elem_bytes=8
+        )
+        # C is written by the epilogue with element offsets: the element
+        # bound applies, not the byte bound.
+        check_batched_offsets_fit_i32(
+            2,
+            100_000_000,
+            100_000_000,
+            1_000_000_000,
+            direct_to_lds=True,
+            elem_bytes=8,
+        )
+        # direct_to_lds without an element size is a caller error.
+        with self.assertRaises(ValueError):
+            check_batched_offsets_fit_i32(2, 1, 1, 1, direct_to_lds=True)
+
 
 # ---------------------------------------------------------------------
 # CK Tile-inspired helpers (tensor_view / io / reduction / spec).

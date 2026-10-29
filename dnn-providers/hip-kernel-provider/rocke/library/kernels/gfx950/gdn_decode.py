@@ -76,10 +76,9 @@ an XOR butterfly (``quad_perm`` at offsets 1-2, ``ds_swizzle`` wider; with
 unfused kernel allocates no LDS (``fuse_out_norm`` adds a ``num_warps``-float
 LDS reduction when ``num_warps > 1``, ALGORITHM.md section 4.9; the
 ``conv_once`` and ``out_lds`` knobs add LDS blocks of their own, section
-4.10). Dispatch selects this tile from the gfx950 GDN registry: `auto` prefers
-one tile per request (``dispatch.gdn.gfx950.auto_tile``: GDN's static default,
-KDA's work-keyed table, or the shared fused default for a fused request), while
-an explicit `spec_id` pins a tile.
+4.10). Dispatch selects this tile from the gfx950 GDN registry: `auto` runs one
+static tile and knob stack per case (``dispatch.gdn.axes.AUTO_DEFAULTS``: gate
+kind x fused x state width), while an explicit `spec_id` pins a tile.
 
 ``simple=True`` is the v1 reference: one workgroup per ``(sequence, value_head)``,
 ``head_v_dim`` threads, thread ``t`` owning state row ``t`` (the full
@@ -623,7 +622,7 @@ class GdnDecodeSpec:
     # recurrence-only kernel at an identical work boundary.
     fuse_gate: bool = True
     wave_size: int = 64
-    # GDN's dispatcher default uses these values whenever they are legal.
+    # The tile of GDN's plain 16-bit ``auto`` row (dispatch/gdn/axes.py).
     # Direct callers still get a valid general-purpose configuration.
     num_warps: int = 2
     warp_threads_k: int = 16
