@@ -282,8 +282,12 @@ private:
 
     void release_from_earlier_tests(std::vector<M>& pool, size_t bytes)
     {
-        std::erase_if(
-            pool, [&](const M& m) { return m.capacity() >= bytes && m.restored_test < m_test; });
+        pool.erase(std::remove_if(pool.begin(),
+                                  pool.end(),
+                                  [&](const M& m) {
+                                      return m.capacity() >= bytes && m.restored_test < m_test;
+                                  }),
+                   pool.end());
     }
 
     static memory_pool& Instance()
