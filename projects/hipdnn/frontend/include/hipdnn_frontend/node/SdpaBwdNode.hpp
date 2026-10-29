@@ -357,6 +357,9 @@ public:
             HIPDNN_CHECK_ERROR(detail::validateScalarParameter(scale, "SCALE tensor"));
         }
 
+        // Rule 11: left_bound follows cuDNN and must be -1 or >= 1
+        HIPDNN_CHECK_ERROR(detail::validateSdpaLeftBound(attributes.left_bound, "SdpaBwdNode"));
+
         return {};
     }
 
