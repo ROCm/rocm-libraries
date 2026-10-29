@@ -194,11 +194,12 @@ def test_window_semantics_switch_keeps_ids(written, monkeypatch):
     ]
     assert window
     for c in window:
+        monkeypatch.setattr(P, "WINDOW_SEMANTICS", "develop")
         lb = P.bounds_written(c)[0]
+        assert G.case_id(c, c["dtype"], c["tol_class"]) == c["case_id"]
         monkeypatch.setattr(P, "WINDOW_SEMANTICS", "after_sem001")
         assert P.bounds_written(c)[0] == lb + 1 == c["W"]
         assert G.case_id(c, c["dtype"], c["tol_class"]) == c["case_id"]
-        monkeypatch.setattr(P, "WINDOW_SEMANTICS", "develop")
 
 
 # --------------------------------------------------------------------------

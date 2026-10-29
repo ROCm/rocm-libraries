@@ -898,8 +898,8 @@ def regression_and_defect_items():
         item("REG-13c", "quick", "regression", "A4 AW4 H63", (1, 1, 1, 1, 64, 64), W=1, R=0, regression_of="SEM-001",
              expected="dQ = dK = 0 within the class tolerance; dV = dO"),
         item("REG-13d", "quick", "regression", "A4 AW10 H70", (1, 1, 1, 1, 65, 65), W=64, R=0,
-             regression_of="#14287", expected="W=64 drops key 0 in row 64"),
-        item("REG-13e", "quick", "regression", "A4 AW10", (1, 1, 1, 1, 65, 65), W=65, R=0, regression_of="#14287",
+             regression_of="#14483", expected="W=64 drops key 0 in row 64"),
+        item("REG-13e", "quick", "regression", "A4 AW10", (1, 1, 1, 1, 65, 65), W=65, R=0, regression_of="#14483",
              expected="W=65 equals causal"),
         item("REG-14", "notrun", "probe", "V3 H79", (1, 2, 2, 2, 64, 96), bias=P.bias_spec("11"),
              inputs={"bias": "row 7 and column 5 all -inf"}, topology="AdditiveMask", oracle="14358+I4",
@@ -1832,7 +1832,7 @@ def report(cases):
         f"{r['claim_required']}, covered by claim-only cases {r['claim_covered']}; forbidden {len(r['forbidden'])}"
     )
 
-    print("\nLegality under develop, after #14287, after #14358")
+    print("\nLegality under develop before SEM-001, after #14483 (SEM-001, R13), after #14358")
     for sem in P.SEMANTICS:
         print(f"  {sem:<12} {dict(Counter(c['legality'][sem] for c in cases))}")
     viol = [

@@ -29,9 +29,10 @@ Band conventions (plan §1.2):
 * Row ``i`` has its diagonal key at ``i + off``, ``off = 0`` (TOP_LEFT) or
   ``Skv - Sq`` (BOTTOM_RIGHT). Key ``j`` is kept when ``j <= i + off + R`` and
   ``j >= i + off - W + 1``.
-* The graph's ``left_bound`` is ``W - 1`` on develop and ``W`` after SEM-001
-  (#14287 or #14358). ``WINDOW_SEMANTICS`` selects the one the generator
-  writes; case ids name ``W``, so they do not change when it flips.
+* The graph's ``left_bound`` is ``W`` since SEM-001 (#14483); before it,
+  develop kept ``left_bound + 1`` keys and the graph needed ``W - 1``.
+  ``WINDOW_SEMANTICS`` selects the one the generator writes; case ids name
+  ``W``, so they do not change when it flips.
 """
 
 from __future__ import annotations
@@ -55,9 +56,10 @@ LEVEL_DIR = {
 }
 NOTRUN = "notrun"  # declared, not written: the case waits for a gate (plan §4.1)
 
-# The generator's baseline is develop plus #14312 (O and Stats derived from
-# the forward in the fill). Each switch flips when its pull request lands.
-WINDOW_SEMANTICS = "develop"  # "develop": left_bound = W - 1; "after_sem001": W
+# The generator's baseline is develop, which has #14312 (O and Stats derived
+# from the forward in the fill) and #14483 (SEM-001: left_bound = L keeps L
+# keys). Each switch flips when its pull request lands.
+WINDOW_SEMANTICS = "after_sem001"  # "develop": left_bound = W - 1; "after_sem001": W
 WRITE_EXPECTED_REJECTION = False  # #14346 adds metadata.expected_rejection
 WRITE_GOLDEN_POINTERS = False  # gate GT1: golden data lands after #14358's lane
 
@@ -557,7 +559,8 @@ def fits_level(cost):
 # Legality (§2.8). The generator writes claim, regression and probe cases in
 # WF or EXT, rejection probes in U, and nothing outside F_active.
 #   F         frontend-legal on develop (rules R0-R12, tensor validate)
-#   F_R13     F plus R13 (left_bound -1 or >= 1), from #14287 or #14358
+#   F_R13     F plus R13 (left_bound -1 or >= 1), from #14483 (key after_14287:
+#             the closed PR #14483 replaced)
 #   F_R13R14  F_R13 plus R14 (right_bound >= -1), from #14358
 #   WF        well-formed: F_R13R14 plus the cuDNN tensor tables and support rules
 #   EXT       outside WF, with semantics hipDNN defines
@@ -1739,7 +1742,7 @@ H_SHAPES = {
     "H62": dict(Hq=2, Hk=2, Hv=2, tensor_layout={"K": "bstride0", "V": "bstride0"}, f=("T21",),
                 oracle="harness: zero strides rejected"),
     "H65": dict(**_H2, W=1, R=0, align="BR", f=("A4", "A2", "AW4"), purpose="regression",
-                regression_of="SEM-001 (#14287; window anchoring SEM-004)"),
+                regression_of="SEM-001 (#14483; window anchoring SEM-004)"),
     "H66": dict(**_H2, Sq=256, Skv=256, W=17, R=0, f=("A4",)),
     "H67": dict(**_H2, Sq=256, Skv=256, W=64, R=0, f=("A4",), dt=FP16),
     "H68": dict(**_H2, Sq=256, Skv=256, W=65, R=0, f=("A4",)),
@@ -2124,7 +2127,7 @@ GOLDEN = OrderedDict([
     ("GL-06", ("pr", "claim", "G-C", "P", dict(_GL, R=0))),
     ("GL-07", ("pr", "claim", "G-C", "D", dict(_GL, align="BR", R=0))),
     ("GL-08", ("pr", "claim", "G-C", "P", dict(_GL, Sq=203, Skv=113, align="BR", R=90))),
-    ("GL-10", ("pr", "claim", "G-C G-E", "P", dict(_GL, align="BR", W=2, R=0, regression_of="SEM-001 (#14287)"))),
+    ("GL-10", ("pr", "claim", "G-C G-E", "P", dict(_GL, align="BR", W=2, R=0, regression_of="SEM-001 (#14483)"))),
     ("GL-11", ("pr", "regression", "G-C G-E", "U", dict(_GL, scale="unset", regression_of="#12926"))),
     ("GL-12", ("pr", "probe", "G-C", "P", dict(_GL64, align="BR", R=0))),
     ("GL-13", ("pr", "regression", "G-E G-C", "D", dict(_GL, align="BR", attrs=_CM, regression_of="#13065"))),
