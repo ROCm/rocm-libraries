@@ -6447,13 +6447,10 @@ def _scalar_band_ok(
     context_len,
     query_pos,
     kpos,
-    *,
-    window: bool = True,
 ) -> Optional[Value]:
     """Visibility of key ``kpos`` for the query: the right bound ``k <= d + right``
     (``d = context_len + query_pos``) AND the left bound ``d - k < sliding_window``.
     ``None`` when neither bounds anything (the loop range already limits to kv_len).
-    ``window=False`` skips the left bound.
     """
     ok = None
     if p.right_bound >= 0:
@@ -6461,7 +6458,7 @@ def _scalar_band_ok(
         if p.right_bound > 0:
             upper = b.add(upper, b.const_i32(p.right_bound))
         ok = b.cmp_le(kpos, upper)
-    if window and p.sliding_window > 0:
+    if p.sliding_window > 0:
         dist = b.sub(b.add(context_len, query_pos), kpos)
         sw_ok = b.cmp_lt(dist, b.const_i32(p.sliding_window))
         ok = sw_ok if ok is None else b.land(ok, sw_ok)
@@ -6695,9 +6692,7 @@ class UnifiedAttention3DSpec(UnifiedAttention2DSpec):
             flags={
                 "tl": p.causal_top_left,
                 **_right_bound_flag(p),
-                # The default-mask 3D scalar kernel never applied the window (its name
-                # and IR are pinned); every other mask does.
-                "sw": p.sliding_window > 0 and not p.default_mask,
+                "sw": p.sliding_window > 0,
             },
         )
 
@@ -6803,11 +6798,9 @@ def build_unified_attention_3d(
             scale,
             rcp_ln2,
         )
-        # The scalar 3D segment kernel has never applied the left bound; keep that
-        # for the default mask (its IR is pinned) and honour it for every other mask.
-        band_ok = _scalar_band_ok(
-            b, p, context_len, query_pos, kpos, window=not p.default_mask
-        )
+        # Every mask, the default one included: the right (causal) bound, and
+        # the left (sliding-window) bound whenever sliding_window > 0.
+        band_ok = _scalar_band_ok(b, p, context_len, query_pos, kpos)
         if band_ok is not None:
             score = b.select(band_ok, score, neg_inf)
         new_m_raw = b.fmax(m_val, score)

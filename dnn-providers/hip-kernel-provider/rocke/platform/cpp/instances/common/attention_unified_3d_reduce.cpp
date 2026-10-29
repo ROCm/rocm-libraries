@@ -101,8 +101,12 @@ static rocke_value_t* rocke__q_offset(rocke_attn_unified_build_ctx_t* ctx,
  *                         iv_name="kpos")
  *   with loop as (kpos, (m_val, l_val, acc_val)):
  *       score = _emit_qk_score(...)
- *       causal_ok = cmp_le(kpos, context_len + query_pos)
- *       score = select(causal_ok, score, neg_inf)
+ *       band_ok = _scalar_band_ok(b, p, context_len, query_pos, kpos):
+ *           ok = cmp_le(kpos, context_len + query_pos)
+ *           if sliding_window > 0:
+ *               dist = sub(add(context_len, query_pos), kpos)
+ *               ok = land(ok, cmp_lt(dist, const_i32(sliding_window)))
+ *       score = select(band_ok, score, neg_inf)
  *       new_m_raw = fmax(m_val, score)
  *       new_m = select(fcmp("ogt", new_m_raw, neg_inf), new_m_raw, zero_f)
  *       alpha = exp2(m_val - new_m)
@@ -120,7 +124,7 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
     rocke_iter_arg_t iter_args[3];
     rocke_for_t loop;
     rocke_value_t *kpos, *m_val, *l_val, *acc_val;
-    rocke_value_t *score, *causal_ok, *new_m_raw, *new_m, *alpha, *prob, *new_l, *vv, *new_acc;
+    rocke_value_t *score, *band_ok, *new_m_raw, *new_m, *alpha, *prob, *new_l, *vv, *new_acc;
     rocke_value_t* yields[3];
 
     iter_args[0].name = "m";
@@ -162,9 +166,19 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
                                              ctx->abi_scale,
                                              ctx->rcp_ln2);
 
-    /* causal_ok = cmp_le(kpos, context_len + query_pos) */
-    causal_ok = rocke_b_cmp_le(b, kpos, rocke_b_add(b, ctx->context_len, ctx->query_pos));
-    score = rocke_b_select(b, causal_ok, score, ctx->neg_inf);
+    /* band_ok = _scalar_band_ok(...): the causal (right) bound, then the
+     * sliding-window (left) bound when sliding_window > 0. This builder supports
+     * only the default mask (bottom-right causal, right_bound 0). */
+    band_ok = rocke_b_cmp_le(b, kpos, rocke_b_add(b, ctx->context_len, ctx->query_pos));
+    if(ctx->p->sliding_window > 0)
+    {
+        rocke_value_t* dist
+            = rocke_b_sub(b, rocke_b_add(b, ctx->context_len, ctx->query_pos), kpos);
+        rocke_value_t* sw_ok
+            = rocke_b_cmp_lt(b, dist, rocke_b_const_i32(b, ctx->p->sliding_window));
+        band_ok = rocke_b_land(b, band_ok, sw_ok);
+    }
+    score = rocke_b_select(b, band_ok, score, ctx->neg_inf);
 
     /* A fully masked segment (or masked leading keys) keeps m at -inf: use 0 as
      * the exponent reference so alpha/prob are 0, not exp2(-inf - -inf) = NaN,

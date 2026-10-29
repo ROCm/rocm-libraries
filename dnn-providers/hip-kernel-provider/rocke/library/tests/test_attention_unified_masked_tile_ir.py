@@ -20,9 +20,9 @@ builders emit, so they run in every lane, GPU or not:
   exponent reference ``ref`` instead of a per-segment test.
 
 Covered: every tiled 2D epilogue branch on gfx942 and gfx950 at KV page sizes
-16 and 64, the scalar 2D kernel under the default mask and under windowed
-masks, the scalar 3D segment kernel under the default and a top-left windowed
-mask, and the scalar reduce.
+16 and 64, the scalar 2D and 3D segment kernels under the default mask and
+under windowed masks (bottom-right and top-left), and the scalar reduce. For
+the windowed masks the scalar kernels must also compare against the window.
 
 The checks follow the IR's def-use edges (loop iteration arguments, yields,
 compares, selects), not value names.
@@ -234,6 +234,37 @@ def test_scalar_carries_raw_running_max(kind, mask):
 def test_scalar_2d_keyless_guard_is_exact_zero(mask):
     # Every mask: bottom-right causal with Sq > Skv leaves rows keyless too.
     _check_keyless_guard(_scalar_kernel("2d", mask))
+
+
+@pytest.mark.parametrize("mask", [m for m, (w, _) in _SCALAR_MASKS.items() if w])
+@pytest.mark.parametrize("kind", ["2d", "3d"])
+def test_scalar_window_masks_the_score(kind, mask):
+    """A windowed problem compares ``d - k < sliding_window`` and that compare
+    feeds the select that masks the score to -inf, under every mask: the
+    default (bottom-right) mask with a window must not attend outside it."""
+    window, _ = _SCALAR_MASKS[mask]
+    kernel = _scalar_kernel(kind, mask)
+    users = _users(kernel)
+    bounds = [
+        op
+        for op in _walk(kernel.body)
+        if op.name == "arith.cmp"
+        and op.attrs.get("pred") == "lt"
+        and op.operands[1].op is not None
+        and op.operands[1].op.name == "arith.constant"
+        and op.operands[1].op.attrs.get("value") == window
+    ]
+    assert bounds, f"no compare against the window ({window})"
+    frontier = [bound.results[0] for bound in bounds]
+    for _ in range(3):  # the window compare may be and-ed with the causal one
+        ops = [op for value in frontier for op in users.get(id(value), [])]
+        if any(
+            op.name == "arith.select" and _is_const(op.operands[2], -math.inf)
+            for op in ops
+        ):
+            return
+        frontier = [result for op in ops for result in op.results]
+    raise AssertionError("the window compare does not mask the score to -inf")
 
 
 def test_scalar_reduce_carries_raw_running_max():

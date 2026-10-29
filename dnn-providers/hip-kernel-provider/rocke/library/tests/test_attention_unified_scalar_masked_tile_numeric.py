@@ -13,8 +13,9 @@ although the row sees keys.
 Covered:
 * scalar 2D (``backend="scalar"``), bottom-right and top-left, fp16 and bf16;
 * scalar split-3D segment + reduce (launched directly: no dispatcher route
-  reaches them), where a whole segment can be masked for a row and must not
-  set the merge's overall max;
+  reaches them), bottom-right and top-left, where a whole segment can be
+  masked for a row and must not set the merge's overall max, and the
+  bottom-right (default-mask) body must honour the window;
 * rows that see no key at all (top-left, ``q_len > kv_len``, and the default
   bottom-right mask with ``q_len > kv_len`` and no window): O must be 0.
 * a NaN per-segment sum must make the reduce give NaN for that row, not be
@@ -404,9 +405,10 @@ def test_scalar_2d_propagates_nan_query_row(rt, case, dtype):
 
 
 @pytest.mark.parametrize("dtype", _DTYPES)
-@pytest.mark.parametrize("case", ["top_left", "top_left_keyless"])
+@pytest.mark.parametrize("case", list(_CASES))
 def test_scalar_3d_masked_leading_keys_and_segments(rt, case, dtype):
-    # The scalar 3D body applies the window only for non-default masks.
+    # bottom_right is the default mask with a window: the 3D body must apply the
+    # window there too, not attend to every key before the diagonal.
     q_len, kv_len, top_left = _CASES[case]
     data = _inputs(dtype, q_len, kv_len)
     problem = _problem(dtype, q_len, kv_len, data["num_blocks"], top_left)

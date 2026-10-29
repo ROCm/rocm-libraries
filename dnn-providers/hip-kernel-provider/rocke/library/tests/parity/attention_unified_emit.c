@@ -9,11 +9,11 @@
  * (kernel name from rocke_unified_attention_2d_scalar_kernel_name), configs 6-7
  * as the scalar split-3D reduce (8 segments) of the problem named in
  * reduce_source() via rocke_build_unified_attention_reduce_scalar_new, and
- * configs 8-9 as the scalar split-3D segment kernel (8 segments) of the problem
- * named in segment_source() via rocke_build_unified_attention_3d_scalar_new. It
- * lowers the returned KernelDef via rocke_lower_kernel_to_llvm_ex (arch gfx950,
- * flavor AUTO) and prints the .ll to stdout so the two outputs can be
- * byte-compared.
+ * configs 8-10 as the scalar split-3D segment kernel (8 segments; config 10 with
+ * a sliding window) of the problem named in segment_source() via
+ * rocke_build_unified_attention_3d_scalar_new. It lowers the returned KernelDef
+ * via rocke_lower_kernel_to_llvm_ex (arch gfx950, flavor AUTO) and prints the .ll
+ * to stdout so the two outputs can be byte-compared.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -140,6 +140,8 @@ static int segment_source(int idx)
         return 2;
     case 9:
         return 1;
+    case 10:
+        return 3;
     default:
         return -1;
     }

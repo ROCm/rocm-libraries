@@ -7,10 +7,11 @@
 # by argv[1]: configs 0-5 build a UnifiedAttention2DSpec via
 # build_unified_attention_2d; configs 6-7 build the scalar split-3D reduce
 # (build_unified_attention_reduce, 8 segments) of the problem named in
-# _REDUCE_CONFIGS; configs 8-9 build the scalar split-3D segment kernel
+# _REDUCE_CONFIGS; configs 8-10 build the scalar split-3D segment kernel
 # (build_unified_attention_3d, 8 segments) of the problem named in
-# _SEGMENT_CONFIGS. Prints lower_kernel_to_llvm(arch='gfx950') to stdout so it
-# can be byte-compared with the C emitter attention_unified_emit.c.
+# _SEGMENT_CONFIGS (config 10 with a sliding window). Prints
+# lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared with
+# the C emitter attention_unified_emit.c.
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
     UnifiedAttention2DSpec,
@@ -113,8 +114,9 @@ _NUM_SEGMENTS = 8
 
 # Segment config index -> the 2D config whose problem the split-3D segment kernel
 # runs. Both engines build the segment kernel for the default (bottom-right
-# causal) mask, which every 2D config uses.
-_SEGMENT_CONFIGS = {8: 2, 9: 1}
+# causal) mask, which every 2D config uses; config 10 (problem 3) adds a sliding
+# window.
+_SEGMENT_CONFIGS = {8: 2, 9: 1, 10: 3}
 
 
 def _kernel(idx: int):
