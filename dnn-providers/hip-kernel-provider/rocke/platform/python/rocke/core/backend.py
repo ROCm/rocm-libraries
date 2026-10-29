@@ -1686,6 +1686,12 @@ def lower_conv_implicit_gemm(
             ir = serialize(k)
         return ll, ir
 
+    if spec.split_k == -1:
+        # Auto split-K is resolved on the Python side for both engines, so the
+        # C++ engine (explicit degrees only) builds the same kernel.
+        from kernels.common.conv_implicit_gemm import resolve_fwd_split_k_spec
+
+        spec = resolve_fwd_split_k_spec(spec, arch)
     eng = _import_engine()
     sd = conv_implicit_gemm_spec_to_dict(spec)
     return _lower_family(

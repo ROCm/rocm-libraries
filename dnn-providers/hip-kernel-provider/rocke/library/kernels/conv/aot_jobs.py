@@ -121,6 +121,7 @@ import itertools
 from dataclasses import dataclass
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
+from kernels.common.conv_split_k import FWD_SPLIT_K_ARCHS
 from kernels.conv.kernel_identity import KernelIdentity, current_llvm_flavor
 
 
@@ -341,9 +342,11 @@ CACHE_FWD_SPLIT_K_CLUSTER_TILES: Tuple[Tuple[int, int, int, int], ...] = (
 CACHE_FWD_SPLIT_K_CLUSTER_TILE_K = 64
 CACHE_FWD_SPLIT_K_CLUSTER_VEC = 8
 # Targets the split-K forward kernels are cached for: the ones they were
-# validated on. The cluster form also needs workgroup-cluster launch on the
-# target and the LLVM flavor that lowers the cluster attribute and barrier.
-CACHE_FWD_SPLIT_K_ARCHS: Tuple[str, ...] = ("gfx1250",)
+# validated on, which are also the ones the conv split-K resolver splits a
+# forward on (one tuple, so the cache and auto-deduction cannot drift). The
+# cluster form also needs workgroup-cluster launch on the target and the LLVM
+# flavor that lowers the cluster attribute and barrier.
+CACHE_FWD_SPLIT_K_ARCHS: Tuple[str, ...] = FWD_SPLIT_K_ARCHS
 CACHE_FWD_SPLIT_K_CLUSTER_FLAVORS: Tuple[str, ...] = ("llvm23",)
 
 # ---- wgrad stream-K axis (opt-in) -------------------------------------------

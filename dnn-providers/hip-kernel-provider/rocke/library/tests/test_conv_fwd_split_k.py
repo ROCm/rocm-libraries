@@ -3,8 +3,9 @@
 
 """Split-K forward implicit-GEMM conv (``ImplicitGemmConvSpec.split_k``).
 
-CPU: the validator gate, the ABI, and that ``split_k = 1`` builds the same
-kernel as before. GPU (gfx1250): Stage 1 + the Stage 2 reduce against the
+CPU: the validator gate, the ABI, that ``split_k = 1`` builds the same
+kernel as before, and the auto (``-1``) degree policy and its resolver. GPU
+(gfx1250): Stage 1 + the Stage 2 reduce against the
 reference across degrees, tiles, pipelines, epilogues, groups, strides, a
 partial last K tile and degrees past the K-tile count (empty slices).
 """
@@ -325,27 +326,270 @@ class TestClusterSplitKCache(unittest.TestCase):
 class TestSplitKDegrees(unittest.TestCase):
     """``--split-k`` / ``--split-k-degrees`` on a cached split-K forward binary."""
 
+    _IDENT = (
+        "fwd-implicit_gemm-bf16-2d-t16x16x64-w1x1-a16x16x32-v8x8x8-wavelet-"
+        "cshuffle-grp-sk2-2stage-wave32-gfx1250-llvm23"
+    )
+    # 9*512 = 4608 = 72 K tiles of 64: every degree below fits. 4 x 4 output
+    # tiles, so the policy splits as far as it goes (32).
+    _SMALL = ConvProblem(N=1, Hi=7, Wi=7, C=512, K=64, Y=3, X=3, pH=1, pW=1)
+    # 8*28*28/16 * 64/16 = 1568 output tiles of 16 x 16 fill the device unsplit.
+    _FULL = ConvProblem(N=8, Hi=28, Wi=28, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+
     def test_explicit_sweep_uses_the_given_degrees(self):
-        from benchmarks.common.benchmark_implicit_gemm_conv import (
-            _FWD_SPLIT_K_AUTO,
-            _runtime_split_ks,
-        )
+        from benchmarks.common.benchmark_implicit_gemm_conv import _runtime_split_ks
         from kernels.conv.kernel_identity import KernelIdentity
 
-        ident = KernelIdentity.from_label(
-            "fwd-implicit_gemm-bf16-2d-t16x16x64-w1x1-a16x16x32-v8x8x8-wavelet-"
-            "cshuffle-grp-sk2-2stage-wave32-gfx1250-llvm23"
-        )
-        # 9*512 = 4608 = 72 K tiles of 64: every degree below fits.
-        small = ConvProblem(N=1, Hi=7, Wi=7, C=512, K=64, Y=3, X=3, pH=1, pW=1)
-        self.assertEqual(_runtime_split_ks(small, ident, 0, (3,)), (3,))
-        self.assertEqual(_runtime_split_ks(small, ident, 0, (5, 3)), (5, 3))
-        # Auto keeps the forward ladder whatever the list says.
-        self.assertEqual(
-            _runtime_split_ks(small, ident, -1, (3,)),
-            tuple(sorted(_FWD_SPLIT_K_AUTO, reverse=True)),
-        )
+        ident = KernelIdentity.from_label(self._IDENT)
+        small = self._SMALL
+        # 0 sweeps the list plus the resolver's pick, as for wgrad.
+        self.assertEqual(_runtime_split_ks(small, ident, 0, (3,)), (32, 3))
+        self.assertEqual(_runtime_split_ks(small, ident, 0, (5, 3)), (32, 5, 3))
         self.assertEqual(_runtime_split_ks(small, ident, 6, (3,)), (6,))
+
+    def test_auto_launches_the_resolved_degree(self):
+        from benchmarks.common.benchmark_implicit_gemm_conv import _runtime_split_ks
+        from kernels.common.conv_split_k import resolve_conv_split_k
+        from kernels.conv.kernel_identity import KernelIdentity
+
+        ident = KernelIdentity.from_label(self._IDENT)
+        resolved = resolve_conv_split_k(
+            "fwd",
+            self._SMALL,
+            arch="gfx1250",
+            dtype="bf16",
+            tile_m=16,
+            tile_n=16,
+            tile_k=64,
+            block_size=32,
+        )
+        self.assertEqual(resolved.split_k, 32)
+        # Whatever the list says: -1 is the resolver's pick only.
+        self.assertEqual(_runtime_split_ks(self._SMALL, ident, -1, (3,)), (32,))
+
+    def test_auto_skips_the_split_binary_where_splitting_does_not_pay(self):
+        from benchmarks.common.benchmark_implicit_gemm_conv import _runtime_split_ks
+        from kernels.conv.kernel_identity import KernelIdentity
+
+        ident = KernelIdentity.from_label(self._IDENT)
+        big = TestSplitKDegrees._FULL
+        self.assertEqual(_runtime_split_ks(big, ident, -1), ())
+        # An explicit degree is still the caller's.
+        self.assertEqual(_runtime_split_ks(big, ident, 2), (2,))
+
+    def test_the_override_variable_forces_the_auto_degree(self):
+        from benchmarks.common.benchmark_implicit_gemm_conv import _runtime_split_ks
+        from kernels.conv.kernel_identity import KernelIdentity
+
+        ident = KernelIdentity.from_label(self._IDENT)
+        with mock.patch.dict(os.environ, {"ROCKE_CONV_SPLIT_K": "4"}):
+            self.assertEqual(_runtime_split_ks(self._SMALL, ident, -1), (4,))
+        with mock.patch.dict(os.environ, {"ROCKE_CONV_SPLIT_K": "off"}):
+            self.assertEqual(_runtime_split_ks(self._SMALL, ident, -1), ())
+
+
+class TestSplitKPolicy(unittest.TestCase):
+    """``select_split_k_fwd``: the auto forward degree from the GEMM, the tile
+    and the arch."""
+
+    def _pick(self, M, N, K, tile=(16, 16, 64), groups=1, arch="gfx1250"):
+        from rocke.helpers.split_k import select_split_k_fwd
+
+        tm, tn, tk = tile
+        return select_split_k_fwd(
+            M=M, N=N, K=K, tile_m=tm, tile_n=tn, tile_k=tk, groups=groups, arch=arch
+        ).split_k
+
+    def test_fills_toward_the_target_grid(self):
+        from rocke.helpers.split_k import FWD_SPLIT_K_TARGET_CTAS_PER_CU
+
+        target = 256 * FWD_SPLIT_K_TARGET_CTAS_PER_CU
+        # Deep enough that only the grid limits the degree.
+        for tiles in (1, 3, 64, 100, 255, 256, target // 2 - 1):
+            with self.subTest(tiles=tiles):
+                got = self._pick(16 * tiles, 16, 1 << 20)
+                want = min(32, 1 << ((target // tiles).bit_length() - 1))
+                self.assertEqual(got, want)
+                self.assertLessEqual(got * tiles, target)
+
+    def test_a_grid_that_fills_the_device_is_not_split(self):
+        from rocke.helpers.split_k import FWD_SPLIT_K_TARGET_CTAS_PER_CU
+
+        target = 256 * FWD_SPLIT_K_TARGET_CTAS_PER_CU
+        self.assertEqual(self._pick(16 * (target // 2), 16, 1 << 20), 1)
+        # Groups multiply the grid.
+        self.assertEqual(self._pick(16 * 8, 16, 1 << 20, groups=target // 16), 1)
+        self.assertGreater(self._pick(16 * 8, 16, 1 << 20, groups=2), 1)
+
+    def test_shallow_reductions_are_not_split(self):
+        from rocke.helpers.split_k import FWD_SPLIT_K_MIN_GEMM_K
+
+        self.assertEqual(self._pick(16, 16, FWD_SPLIT_K_MIN_GEMM_K - 1), 1)
+        self.assertGreater(self._pick(16, 16, FWD_SPLIT_K_MIN_GEMM_K), 1)
+
+    def test_every_slice_keeps_two_k_tiles(self):
+        for k_tiles in (8, 9, 15, 16, 33, 64, 65):
+            with self.subTest(k_tiles=k_tiles):
+                got = self._pick(16, 16, 64 * k_tiles)
+                self.assertGreaterEqual(k_tiles // got, 2)
+                self.assertEqual(got & (got - 1), 0)
+        # The same reduction in narrower K tiles splits further.
+        self.assertGreater(
+            self._pick(16, 16, 640, (16, 16, 32)), self._pick(16, 16, 640)
+        )
+
+    def test_a_smaller_part_splits_less(self):
+        from rocke.helpers.split_k import select_split_k_fwd
+
+        kw = dict(M=16 * 64, N=16, K=1 << 20, tile_m=16, tile_n=16, tile_k=64)
+        full = select_split_k_fwd(**kw).split_k
+        self.assertEqual(select_split_k_fwd(**kw, num_cus=128).split_k, full // 2)
+
+    def test_degrees_stay_on_the_ladder_and_under_the_cap(self):
+        from rocke.helpers.split_k import FWD_SPLIT_K_MAX
+
+        for M in (1, 49, 196, 784, 3136):
+            for K in (512, 2304, 4608, 17280):
+                with self.subTest(M=M, K=K):
+                    got = self._pick(M, 256, K, (32, 32, 64))
+                    self.assertEqual(got & (got - 1), 0)
+                    self.assertLessEqual(got, FWD_SPLIT_K_MAX)
+
+
+class TestSplitKResolver(unittest.TestCase):
+    """``resolve_conv_split_k("fwd", ...)``: where the forward splits, the
+    explicit and override paths, and the launch limits."""
+
+    def _resolve(self, problem, arch="gfx1250", tile=(16, 16, 64), **kw):
+        from kernels.common.conv_split_k import resolve_conv_split_k
+
+        tm, tn, tk = tile
+        return resolve_conv_split_k(
+            "fwd",
+            problem,
+            arch=arch,
+            dtype="bf16",
+            tile_m=tm,
+            tile_n=tn,
+            tile_k=tk,
+            block_size=32,
+            **kw,
+        )
+
+    def test_auto_follows_the_policy_on_gfx1250(self):
+        from rocke.helpers.split_k import select_split_k_fwd
+
+        p = TestSplitKDegrees._SMALL
+        got = self._resolve(p)
+        want = select_split_k_fwd(
+            M=p.M, N=p.kpg, K=p.K_gemm, tile_m=16, tile_n=16, tile_k=64
+        ).split_k
+        self.assertEqual((got.split_k, got.two_stage), (want, True))
+        self.assertGreater(want, 1)
+
+    def test_no_split_where_the_kernel_is_not_built(self):
+        p = TestSplitKDegrees._SMALL
+        for arch in ("gfx950", "gfx942", "gfx1201"):
+            with self.subTest(arch=arch):
+                r = self._resolve(p, arch=arch)
+                self.assertEqual((r.split_k, r.two_stage), (1, False))
+                # Even when forced: the kernel cannot be built there.
+                self.assertEqual(self._resolve(p, arch=arch, override=8).split_k, 1)
+        pointwise = ConvProblem(N=1, Hi=7, Wi=7, C=4096, K=64, Y=1, X=1)
+        self.assertEqual(self._resolve(pointwise).split_k, 1)
+        three_d = ConvProblem(
+            N=1,
+            Hi=4,
+            Wi=4,
+            C=512,
+            K=64,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+            Di=4,
+            Z=3,
+            sD=1,
+            pD=1,
+            dD=1,
+        )
+        self.assertEqual(self._resolve(three_d).split_k, 1)
+
+    def test_explicit_degrees_are_kept(self):
+        p = TestSplitKDegrees._SMALL
+        for sk in (1, 2, 3, 64):
+            with self.subTest(split_k=sk):
+                r = self._resolve(p, split_k=sk)
+                self.assertEqual((r.split_k, r.two_stage), (sk, sk > 1))
+
+    def test_override_is_held_to_the_launch_limits(self):
+        p = TestSplitKDegrees._SMALL
+        self.assertEqual(self._resolve(p, override=1).split_k, 1)
+        self.assertEqual(self._resolve(p, override=6).split_k, 6)
+        # gridDim.z carries group * split_k + slice.
+        grouped = ConvProblem(
+            N=1, Hi=7, Wi=7, C=40000, K=40000, Y=3, X=3, pH=1, pW=1, groups=10000
+        )
+        self.assertEqual(self._resolve(grouped, override=8).split_k, 6)
+        # The fp32 slabs are addressed through an i32 byte count.
+        from kernels.common.conv_fwd_split_k_reduce import fwd_split_k_workspace_nbytes
+        from kernels.common.conv_split_k import MAX_FWD_WS_BYTES
+
+        wide = ConvProblem(N=16, Hi=128, Wi=128, C=64, K=256, Y=3, X=3, pH=1, pW=1)
+        got = self._resolve(wide, override=64).split_k
+        self.assertLess(got, 64)
+        self.assertLessEqual(
+            fwd_split_k_workspace_nbytes(wide.M, wide.K, got), MAX_FWD_WS_BYTES
+        )
+        self.assertGreater(
+            fwd_split_k_workspace_nbytes(wide.M, wide.K, 2 * got), MAX_FWD_WS_BYTES
+        )
+
+    def test_a_split_k_binary_holder_gets_an_error_not_degree_1(self):
+        big = TestSplitKDegrees._FULL
+        self.assertEqual(self._resolve(big).split_k, 1)
+        with self.assertRaisesRegex(ValueError, "does not serve this problem"):
+            self._resolve(big, allow_unsplit=False)
+
+    def test_the_cache_builds_where_the_resolver_splits(self):
+        from kernels.common.conv_split_k import FWD_SPLIT_K_ARCHS
+        from kernels.conv.aot_jobs import CACHE_FWD_SPLIT_K_ARCHS
+
+        self.assertEqual(CACHE_FWD_SPLIT_K_ARCHS, FWD_SPLIT_K_ARCHS)
+
+
+class TestSplitKAutoBuild(unittest.TestCase):
+    """A spec with ``split_k=-1`` builds the binary its resolved degree
+    selects, in both engines' lowering entry."""
+
+    def test_auto_builds_the_split_binary_where_it_pays(self):
+        # 128 output tiles over 9 K tiles: the policy splits.
+        auto = build_implicit_gemm_conv(_spec(split_k=-1), arch="gfx1250")
+        split = build_implicit_gemm_conv(_spec(split_k=2), arch="gfx1250")
+        self.assertEqual(auto.name, split.name)
+        self.assertIn("ks_count", [p.name for p in auto.params])
+
+    def test_auto_builds_the_plain_kernel_where_it_does_not(self):
+        big = TestSplitKDegrees._FULL
+        auto = build_implicit_gemm_conv(_spec(problem=big, split_k=-1), arch="gfx1250")
+        plain = build_implicit_gemm_conv(_spec(problem=big), arch="gfx1250")
+        self.assertEqual(auto.name, plain.name)
+        self.assertNotIn("ks_count", [p.name for p in auto.params])
+
+    def test_the_backend_resolves_auto_for_the_cpp_engine(self):
+        from rocke.core import backend
+
+        seen = []
+
+        def _fake_lower_family(family, spec, *a, **kw):
+            seen.append(spec.split_k)
+
+        with mock.patch.object(
+            backend, "_lower_family", _fake_lower_family
+        ), mock.patch.object(backend, "_import_engine", lambda: None):
+            backend.lower_conv_implicit_gemm(_spec(split_k=-1), arch="gfx1250")
+            backend.lower_conv_implicit_gemm(_spec(split_k=-1), arch="gfx950")
+        self.assertEqual(seen, [4, 1])
 
 
 class TestSplitKAotScope(unittest.TestCase):
@@ -773,6 +1017,35 @@ class TestSplitKNumerics(unittest.TestCase):
                                 f"{name} {dtype} degree {degree} "
                                 f"unrolled={unrolled}: {err}",
                             )
+
+
+@unittest.skipIf(_GPU_SKIP, _GPU_SKIP)
+class TestSplitKAutoNumerics(unittest.TestCase):
+    """The binary an auto (-1) spec builds, launched at the resolved degree."""
+
+    def test_small_m_at_the_resolved_degree(self):
+        from kernels.common.conv_split_k import resolve_conv_split_k
+
+        problem = _CASES[0][1]
+        spec = _spec(problem=problem, split_k=-1)
+        degree = resolve_conv_split_k(
+            "fwd",
+            problem,
+            arch="gfx1250",
+            dtype="bf16",
+            tile_m=spec.tile_m,
+            tile_n=spec.tile_n,
+            tile_k=spec.tile_k,
+            block_size=spec.block_size,
+        ).split_k
+        self.assertGreater(degree, 1)
+        auto = build_implicit_gemm_conv(spec, arch="gfx1250")
+        split = build_implicit_gemm_conv(
+            _spec(problem=problem, split_k=2), arch="gfx1250"
+        )
+        self.assertEqual(auto.name, split.name)
+        err = _run(problem, {}, (degree,))[degree]
+        self.assertLess(err, 2e-2, f"degree {degree}: {err}")
 
 
 # (problem, spec knobs, degrees) for the single-launch cluster fold (mem only).

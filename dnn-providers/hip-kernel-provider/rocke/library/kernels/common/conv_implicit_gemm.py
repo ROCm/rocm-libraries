@@ -331,8 +331,10 @@ class ImplicitGemmConvSpec:
     # Split-K (WMMA only). ``split_k > 1`` builds the split-K binary, not a
     # fixed degree: the degree and the slice width arrive as the ``ks_count`` /
     # ``ks`` kernargs (as in wgrad), so one binary serves every degree and the
-    # AOT cache records it as 2. Every CTA reduces one slice of the
-    # [Z*]Y*X*cpg reduction and stores its fp32 partial tile into slab
+    # AOT cache records it as 2. ``-1`` (auto) is resolved by the builder
+    # through the conv split-K resolver (:func:`resolve_fwd_split_k_spec`)
+    # before validation, as for wgrad and dgrad. Every CTA reduces one slice
+    # of the [Z*]Y*X*cpg reduction and stores its fp32 partial tile into slab
     # ``slice`` of the ``ws_ptr`` workspace, laid out ``[ks_count][M][K]``;
     # Stage 2 (:mod:`kernels.common.conv_fwd_split_k_reduce`) sums the slabs and
     # casts into D. Every slab element is written by exactly one CTA (a slice
@@ -698,6 +700,38 @@ def fwd_split_k_reason(
         if _why is not None:
             return _why
     return None
+
+
+def resolve_fwd_split_k_spec(
+    spec: ImplicitGemmConvSpec, arch: str
+) -> ImplicitGemmConvSpec:
+    """``spec`` with an auto (``-1``) ``split_k`` resolved; any other spec is
+    returned unchanged.
+
+    The degree comes from the shared conv split-K resolver
+    (:func:`kernels.common.conv_split_k.resolve_conv_split_k`), so a builder
+    and the benchmark agree on it. It may resolve to 1 (the plain kernel):
+    where the split does not pay, or where this spec's arch cannot build it.
+    A resolved degree > 1 only selects the split-K binary -- the launch passes
+    the degree as ``ks_count`` -- so the caller launches with
+    ``resolve_conv_split_k`` 's answer, which this spec now records. The C++
+    engine, like its wgrad port, takes explicit degrees only.
+    """
+    if spec.split_k != -1:
+        return spec
+    from kernels.common.conv_split_k import resolve_conv_split_k
+
+    resolved = resolve_conv_split_k(
+        "fwd",
+        spec.problem,
+        arch=arch,
+        dtype=spec.data.dtype_d,
+        tile_m=spec.tile_m,
+        tile_n=spec.tile_n,
+        tile_k=spec.tile_k,
+        block_size=spec.block_size,
+    )
+    return dc_replace(spec, split_k=resolved.split_k)
 
 
 def is_valid_spec_for_problem(
@@ -1210,7 +1244,10 @@ def _build_implicit_gemm_conv_impl(
     only exists on gfx950 (e.g. the default wide ``16x16x32`` f16 atom)
     for ``gfx942`` fails with a clean structured error instead of an
     ``LLVM ERROR`` from comgr.
+
+    ``spec.split_k == -1`` is resolved first (:func:`resolve_fwd_split_k_spec`).
     """
+    spec = resolve_fwd_split_k_spec(spec, arch)
     spec.validate()
     ok, why = is_valid_spec(spec, arch=arch)
     if not ok:

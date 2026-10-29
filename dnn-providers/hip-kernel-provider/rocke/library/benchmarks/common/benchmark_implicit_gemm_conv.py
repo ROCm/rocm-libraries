@@ -108,10 +108,6 @@ _SPLIT_K_BUILD = 2
 # conv split-K resolver reads no environment; this benchmark maps the variable
 # onto its explicit ``override`` argument.
 _ENV_CONV_SPLIT_K = "ROCKE_CONV_SPLIT_K"
-# Degrees a cached split-K forward binary is timed at (the degree is a kernarg).
-# Forward split-K serves small-M layers, whose reduction is a few thousand deep:
-# past 32 the slices are a tile or two and the fp32 slabs dominate.
-_FWD_SPLIT_K_AUTO = (32, 16, 8, 4, 2)
 # A forward split only pays while the unsplit grid underfills the device: a
 # degree whose grid would exceed this many workgroups is not offered (it also
 # keeps large layers from timing hundreds of split candidates that cannot win).
@@ -1254,7 +1250,8 @@ def main() -> int:
         dest="split_k",
         metavar="N",
         help=(
-            "wgrad split-K degree: "
+            "wgrad split-K degree (and the forward one, for the cached "
+            "split-K forward binaries): "
             "0 = sweep the degrees of --split-k-degrees plus the one the "
             "split-K resolver picks for each kernel, "
             "1 = disabled, "
@@ -4808,12 +4805,15 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                                     if direction == "fwd"
                                     else ""
                                 )
-                                # fwd has no degree formula: -1 sweeps too.
                                 if args.split_k == 0
-                                or (direction == "fwd" and args.split_k == -1)
-                                else f"--split-k {args.split_k} does not fit "
-                                f"this problem (degree 1 is a separate "
-                                f"non-split-K binary)"
+                                else (
+                                    "the forward split-K policy does not "
+                                    "split this problem (the plain binary serves it)"
+                                    if direction == "fwd" and args.split_k == -1
+                                    else f"--split-k {args.split_k} does not fit "
+                                    f"this problem (degree 1 is a separate "
+                                    f"non-split-K binary)"
+                                )
                             ),
                             flush=True,
                         )
@@ -5389,8 +5389,11 @@ def _split_k_degrees(
     pinned degree the shape cannot take drops out here rather than failing at
     launch.
 
-    ``direction="fwd"`` serves the split-K forward binary: there is no
-    resolver degree, and a degree is also dropped when its grid exceeds
+    ``direction="fwd"`` serves the split-K forward binary: the resolver's
+    degree is the forward policy's
+    (:func:`rocke.helpers.split_k.select_split_k_fwd`), added only where it
+    splits -- where it does not, the plain forward binary is the one to time --
+    and a degree is also dropped when its grid exceeds
     ``_FWD_SPLIT_K_MAX_CTAS`` workgroups or its fp32 workspace passes the i32
     byte range.
     """
@@ -5428,6 +5431,24 @@ def _split_k_degrees(
             )
         except ValueError:
             pass  # this binary's reduction cannot serve the problem; nothing to add
+    elif include_resolved and direction == "fwd":
+        try:
+            candidates.add(
+                resolve_conv_split_k(
+                    "fwd",
+                    problem,
+                    arch=arch,
+                    dtype=dtype,
+                    tile_m=tile_m,
+                    tile_n=tile_n,
+                    tile_k=tile_k,
+                    block_size=block_size,
+                    override=_conv_split_k_override(),
+                    allow_unsplit=False,
+                ).split_k
+            )
+        except ValueError:
+            pass  # the forward split does not pay here; nothing to add
 
     def _fits(sk: int) -> bool:
         if direction != "fwd":
@@ -5481,10 +5502,12 @@ def _runtime_split_ks(
     ``requested`` is ``--split-k``, with the same meaning it has on the JIT
     sweep: 0 sweeps ``degrees`` (``--split-k-degrees``) plus the resolver's
     pick, -1 launches at the resolver's pick only, and a positive value pins
-    that degree. The forward split has no resolver: there 0 sweeps
-    ``degrees`` alone and -1 sweeps the forward ladder. The cache records ``split_k=2`` only as a marker that the
-    binary is the split-K one -- the degree itself is a kernarg -- so nothing
-    here is baked in and every mode is reachable at launch.
+    that degree -- for the forward split as for wgrad. Where the forward
+    policy does not split the problem, -1 yields no degree, so the plain
+    forward binary alone is timed. The cache records ``split_k=2`` only as a
+    marker that the binary is the split-K one -- the degree itself is a
+    kernarg -- so nothing here is baked in and every mode is reachable at
+    launch.
 
     Degree 1 is not among them: that is the separate non-atomic kernel, a
     different binary, so ``--split-k 1`` yields no degree and the caller skips
@@ -5513,16 +5536,13 @@ def _runtime_split_ks(
             include_resolved=False,
             direction="fwd",
         )
+    if requested == 0:
+        swept, include_resolved = degrees, True
+    elif requested == -1:
+        swept, include_resolved = (), True
+    else:
+        swept, include_resolved = (requested,), False
     if ident.direction == "fwd":
-        # No resolver for the forward split: 0 sweeps ``degrees`` as for
-        # wgrad, -1 sweeps the forward ladder, a positive value pins the
-        # degree.
-        if requested == 0:
-            swept = degrees
-        elif requested == -1:
-            swept = _FWD_SPLIT_K_AUTO
-        else:
-            swept = (requested,)
         return _split_k_degrees(
             problem,
             arch=ident.arch,
@@ -5534,15 +5554,9 @@ def _runtime_split_ks(
             group_merge=1,
             two_stage=True,
             degrees=swept,
-            include_resolved=False,
+            include_resolved=include_resolved,
             direction="fwd",
         )
-    if requested == 0:
-        swept, include_resolved = degrees, True
-    elif requested == -1:
-        swept, include_resolved = (), True
-    else:
-        swept, include_resolved = (requested,), False
     return _split_k_degrees(
         problem,
         arch=ident.arch,
