@@ -9,12 +9,11 @@ namespace ck_tile {
 
 namespace detail {
 
-// [KV buffer 0] ... [KV buffer kNumKVBuffers - 1][reserved]. One tile of the shared K/V
+// [KV buffer 0] ... [KV buffer kNumKVBuffers - 1]. One tile of the shared K/V
 // tensor per buffer serves as K (QK gemm) and as V (PV gemm, transposed reads). Q sits on
 // the last buffer: it is read before the main loop, and that buffer's first write follows
-// the loop-head barrier. The pipeline keeps S in registers and merges its warps in the
-// K/V buffers; the reserved 4 KiB only cap d128 at 8 workgroups per WGP, measured 2.5%
-// faster than 9 at seqlen_k 500 (4.5% slower at 128).
+// the loop-head barrier. The pipeline keeps S in registers and merges its warps in a K/V
+// buffer.
 template <typename Problem, typename QPadding, typename KVPadding, index_t kNumKVBuffers>
 struct QrTdmKVSharedLdsArenaLayout
 {
@@ -38,14 +37,12 @@ struct QrTdmKVSharedLdsArenaLayout
             .get_element_space_size() *
         sizeof(typename Problem::KDataType);
 
-    static constexpr index_t kReservedBytes = 4 * 1024;
-
     static_assert(kNumKVBuffers >= 2);
     // KV buffer i at i * kKVStride
     static constexpr index_t kKVStride = integer_least_multiple(kKVBytes, kRegionAlignment);
     static constexpr index_t kQOffset  = (kNumKVBuffers - 1) * kKVStride;
     static constexpr index_t kArenaBytes =
-        integer_least_multiple(kNumKVBuffers * kKVStride + kReservedBytes, kArenaAlignment);
+        integer_least_multiple(kNumKVBuffers * kKVStride, kArenaAlignment);
 
     static_assert(kQBytes <= kKVBytes && kArenaBytes <= 128 * 1024);
 };

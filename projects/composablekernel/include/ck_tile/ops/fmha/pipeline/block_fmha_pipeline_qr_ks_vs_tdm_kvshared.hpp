@@ -14,11 +14,11 @@ namespace ck_tile {
 // kNumKVBuffers LDS buffers, and serves both gemms. Trip i reads buffer i % kNumKVBuffers
 // while the TDM fills the others.
 //
-// The two warps split each tile's keys, 32 each, and run an online softmax of their own
+// Each warp (one or two) takes 32 keys of every tile and runs an online softmax of its own
 // over them: S^T = K Q^T, then O^T += V^T P^T with V^T read transposed. The WMMA C layout
 // of S^T (a lane holds one query and 16 keys) is the B operand layout of the PV WMMA, so P
 // goes from the exponent straight into it, with no S round trip through LDS and each score
-// exponentiated once. The warps meet only at the K/V buffer barrier, and at the end, where
+// exponentiated once. Two warps meet only at the K/V buffer barrier, and at the end, where
 // their (m, l, O) are merged through LDS. The V view is not read.
 template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSTdmKVSharedPolicy<>>
 struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<Problem_, Policy_>
@@ -57,10 +57,10 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
                   "qr_tdm_kvshared: Q, K and V of one head dim and data type");
     static_assert(std::is_same_v<KDataType, half_t> || std::is_same_v<KDataType, bf16_t>,
                   "qr_tdm_kvshared: fp16 or bf16");
-    static_assert(kM0 == 16 && kNWarp == 2 && kN0 == kNWarp * 32 &&
+    static_assert(kM0 == 16 && (kNWarp == 1 || kNWarp == 2) && kN0 == kNWarp * 32 &&
                       BlockFmhaShape::Gemm0BlockWarps::at(I0) == 1 &&
                       BlockFmhaShape::NumWarps == kNWarp && kSubQKHeaddim % 32 == 0,
-                  "qr_tdm_kvshared: 16 queries, two warps of 32 keys each");
+                  "qr_tdm_kvshared: 16 queries, one or two warps of 32 keys each");
     static_assert(!kHasLogitsSoftCap, "qr_tdm_kvshared: no logits soft-cap");
     static_assert(std::is_same_v<SMPLComputeDataType, float> &&
                   std::is_same_v<SaccDataType, float>);
@@ -394,6 +394,17 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
             i_read_buf  = i_read_buf + 1 == kNumKVBuffers ? 0 : i_read_buf + 1;
             i_write_buf = i_write_buf + 1 == kNumKVBuffers ? 0 : i_write_buf + 1;
 
+            const index_t kv_tile_start =
+                (num_sink_loop > i_total_loops)
+                    ? kv_load_start + i_total_loops * kN0
+                    : physical_seqlen_k_start + (i_total_loops - num_sink_loop) * kN0;
+
+            // A warp whose keys all lie past seqlen_k (on the last tile) skips the trip: its
+            // m, l and O^T stand.
+            if(i_total_loops >= num_sink_loop &&
+               kv_tile_start + i_warp * kKeyBlock * 16 >= physical_seqlen_k_end)
+                continue;
+
             // STAGE 1, S^T = K Q^T over this warp's keys, K read row-wise
             const LdsChar* const k_rows =
                 kv + (i_warp * kKeyBlock * 16 + i_q) * kKVRowBytes + i_half * 8 * sizeof(KDataType);
@@ -421,11 +432,6 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
                 v_operand[i_d] =
                     LoadOperandTransposed(v_cols + i_d * 16 * sizeof(KDataType), kKVRowBytes);
             });
-
-            const index_t kv_tile_start =
-                (num_sink_loop > i_total_loops)
-                    ? kv_load_start + i_total_loops * kN0
-                    : physical_seqlen_k_start + (i_total_loops - num_sink_loop) * kN0;
 
             // STAGE 2: scale_s, add bias, mask
             PingPong::ApplyScaleAndBias(
@@ -473,55 +479,69 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
                 [&](auto i_d) { o_t[i_d] = Wmma(v_operand[i_d], p, o_t[i_d]); });
         } while(++i_total_loops < num_total_loop);
 
-        // Merge the warps: each hands the other its m, l and the O^T blocks the other
-        // stores, through the K/V buffer no tile went to (read last before the last trip's
-        // barrier). Per query, m = max m_w, l = sum exp(m_w - m) l_w, O = sum exp(m_w - m)
-        // O_w / l.
-        constexpr index_t kXRowFloats  = kOHalf * 16 + 4; // 16 B apart: no bank conflicts
-        constexpr index_t kXWarpFloats = kM0 * (2 + kXRowFloats);
-        static_assert(kNWarp * kXWarpFloats * sizeof(float) <= Layout::kKVStride);
-        const auto x_lds = [&](index_t i_w) {
-            return reinterpret_cast<float*>(static_cast<char*>(smem_arena) +
-                                            (num_total_loop % kNumKVBuffers) * Layout::kKVStride) +
-                   i_w * kXWarpFloats;
-        };
-        const index_t i_other = kNWarp - 1 - i_warp;
-        const float l_q       = l_w + OtherHalf(l_w);
+        float m_q = m_w, l_sum = 0.f, l_q = 0.f;
+        if constexpr(kNWarp == 1)
         {
-            float* const x = x_lds(i_warp);
-            if(i_half == 0)
-            {
-                x[i_q * 2 + 0] = m_w;
-                x[i_q * 2 + 1] = l_q;
-            }
-            float* const row = x + kM0 * 2 + i_q * kXRowFloats + i_half * 8;
-            static_for<0, kOHalf, 1>{}([&](auto i_d) {
-                const F32x8 o = i_warp == 0 ? o_t[kOHalf + i_d] : o_t[i_d];
-                static_for<0, 8, 1>{}([&](auto i) { row[i_d * 16 + i.value] = o[i.value]; });
+            l_sum             = l_w + OtherHalf(l_w);
+            const float inv_l = l_sum == 0.f ? 0.f : 1.f / l_sum;
+            static_for<0, kOBlocks, 1>{}([&](auto i_d) {
+                static_for<0, 8, 1>{}([&](auto i) {
+                    o_acc.get_thread_buffer()[i_d.value * 8 + i.value] = o_t[i_d][i.value] * inv_l;
+                });
             });
         }
-        block_sync_lds();
+        else
+        {
+            // Merge the warps: each hands the other its m, l and the O^T blocks the other
+            // stores, through the K/V buffer no tile went to (read last before the last trip's
+            // barrier). Per query, m = max m_w, l = sum exp(m_w - m) l_w, O = sum exp(m_w - m)
+            // O_w / l.
+            constexpr index_t kXRowFloats  = kOHalf * 16 + 4; // 16 B apart: no bank conflicts
+            constexpr index_t kXWarpFloats = kM0 * (2 + kXRowFloats);
+            static_assert(kNWarp * kXWarpFloats * sizeof(float) <= Layout::kKVStride);
+            const auto x_lds = [&](index_t i_w) {
+                return reinterpret_cast<float*>(static_cast<char*>(smem_arena) +
+                                                (num_total_loop % kNumKVBuffers) *
+                                                    Layout::kKVStride) +
+                       i_w * kXWarpFloats;
+            };
+            const index_t i_other = kNWarp - 1 - i_warp;
+            l_q                   = l_w + OtherHalf(l_w);
+            {
+                float* const x = x_lds(i_warp);
+                if(i_half == 0)
+                {
+                    x[i_q * 2 + 0] = m_w;
+                    x[i_q * 2 + 1] = l_q;
+                }
+                float* const row = x + kM0 * 2 + i_q * kXRowFloats + i_half * 8;
+                static_for<0, kOHalf, 1>{}([&](auto i_d) {
+                    const F32x8 o = i_warp == 0 ? o_t[kOHalf + i_d] : o_t[i_d];
+                    static_for<0, 8, 1>{}([&](auto i) { row[i_d * 16 + i.value] = o[i.value]; });
+                });
+            }
+            block_sync_lds();
 
-        const float* const x = x_lds(i_other);
-        const float m_o      = x[i_q * 2 + 0];
-        const float m_q      = max(m_w, m_o);
-        const auto rescale   = [&](float m_i) {
-            return m_i == -numeric<float>::infinity() ? 0.f : exp2(exp_scale * (m_i - m_q));
-        };
-        const float f_w   = rescale(m_w);
-        const float f_o   = rescale(m_o);
-        const float l_sum = f_w * l_q + f_o * x[i_q * 2 + 1];
-        // a fully masked row, l == 0, gives 0
-        const float inv_l     = l_sum == 0.f ? 0.f : 1.f / l_sum;
-        const float* const xr = x + kM0 * 2 + i_q * kXRowFloats + i_half * 8;
-        static_for<0, kOHalf, 1>{}([&](auto i_d) {
-            const F32x8 o = i_warp == 0 ? o_t[i_d] : o_t[kOHalf + i_d];
-            static_for<0, 8, 1>{}([&](auto i) {
-                o_acc.get_thread_buffer()[i_d.value * 8 + i.value] =
-                    (f_w * o[i.value] + f_o * xr[i_d * 16 + i.value]) * inv_l;
+            const float* const x = x_lds(i_other);
+            const float m_o      = x[i_q * 2 + 0];
+            m_q                  = max(m_w, m_o);
+            const auto rescale   = [&](float m_i) {
+                return m_i == -numeric<float>::infinity() ? 0.f : exp2(exp_scale * (m_i - m_q));
+            };
+            const float f_w = rescale(m_w);
+            const float f_o = rescale(m_o);
+            l_sum           = f_w * l_q + f_o * x[i_q * 2 + 1];
+            // a fully masked row, l == 0, gives 0
+            const float inv_l     = l_sum == 0.f ? 0.f : 1.f / l_sum;
+            const float* const xr = x + kM0 * 2 + i_q * kXRowFloats + i_half * 8;
+            static_for<0, kOHalf, 1>{}([&](auto i_d) {
+                const F32x8 o = i_warp == 0 ? o_t[i_d] : o_t[kOHalf + i_d];
+                static_for<0, 8, 1>{}([&](auto i) {
+                    o_acc.get_thread_buffer()[i_d.value * 8 + i.value] =
+                        (f_w * o[i.value] + f_o * xr[i_d * 16 + i.value]) * inv_l;
+                });
             });
-        });
-
+        }
         if constexpr(kStoreLSE)
         {
             // natural log, as StoreLse; a fully masked row stores -inf, from log(0)

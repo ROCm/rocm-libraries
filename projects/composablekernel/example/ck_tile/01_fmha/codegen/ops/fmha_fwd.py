@@ -1596,6 +1596,12 @@ GFX125_QR_TDM_KV_SHARED = (
     " && a.stride_k == a.stride_v && a.nhead_stride_k == a.nhead_stride_v"
     " && a.batch_stride_k == a.batch_stride_v"
 )
+# At d128 a grid of at least 10 workgroups per CU runs qr_tdm_kvshared with one warp per
+# workgroup (32-key tiles); smaller grids keep two warps splitting each 64-key tile, which
+# keeps more warps in flight.
+GFX125_QR_TDM_KV_SHARED_ONE_WARP = (
+    "a.batch * a.nhead_q >= 10 * static_cast<ck_tile::index_t>(num_cus)"
+)
 
 
 def _gfx125_qr_tdm_crossover_constraint(hdim):
@@ -1790,10 +1796,11 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                               FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 ( 96,  96) : [FmhaFwdTileSize( 64,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint(( 96,  96))),
                               FmhaFwdTileSize(128,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                # qr_tdm_kvshared's tile (K and V one tensor), then qr_tdm_pingpong's.
+                # qr_tdm_kvshared's tiles (K and V one tensor), then qr_tdm_pingpong's.
                 # Up to 16 rows the 64-row tile would idle 3/4 of its M rows, so these
-                # spend their four warps on N instead.
-                (128, 128) : [FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 2, 1,  1, 2, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(f"a.max_seqlen_q <= 16 && {GFX125_QR_TDM_KV_SHARED}"), "qr_tdm_kvshared"),
+                # spend their warps on N instead.
+                (128, 128) : [FmhaFwdTileSize( 16,  32,  32, 128,  32,  128,  1, 1, 1,  1, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(f"a.max_seqlen_q <= 16 && {GFX125_QR_TDM_KV_SHARED} && {GFX125_QR_TDM_KV_SHARED_ONE_WARP}"), "qr_tdm_kvshared"),
+                              FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 2, 1,  1, 2, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(f"a.max_seqlen_q <= 16 && {GFX125_QR_TDM_KV_SHARED}"), "qr_tdm_kvshared"),
                               FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(f"a.max_seqlen_q <= 16 && {GFX125_QR_TDM_PINGPONG_RANGE}"), "qr_tdm_pingpong"),
                               FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(GFX125_QR_TDM_PINGPONG_RANGE), "qr_tdm_pingpong"),
                               FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(m64_d128_constraint)),

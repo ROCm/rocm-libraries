@@ -442,7 +442,14 @@ endforeach()
                 self.assertTrue(fallback)
                 self.assertTrue(all(k.F_hdim == 128 for k in fallback))
                 self.assertTrue(any(k.F_tile.F_bm0 < 128 for k in fallback))
-                self.assertTrue(all(k.F_tile.F_bn0 == 64 for k in fallback))
+                # qr_tdm_kvshared's one-warp tile takes 32 keys
+                self.assertTrue(
+                    all(
+                        k.F_tile.F_bn0 == 64
+                        for k in fallback
+                        if k.F_pipeline.tag != "qr_tdm_kvshared"
+                    )
+                )
                 self.assertTrue(any(k.F_pipeline.tag == "qr_tdm" for k in fallback))
                 self.assertEqual(len(kernels), len({k.filename for k in kernels}))
                 for kernel in fallback:
@@ -2010,12 +2017,13 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
         )
         dispatch = _CompiledDispatcher(self, pool, kernels)
 
-        def kernel(pipeline, bm0, mask="s_no"):
+        def kernel(pipeline, bm0, bn0=64, mask="s_no"):
             return dispatch.expected_id(
                 hdim=128,
                 mode="batch",
                 pipeline=pipeline,
                 bm0=bm0,
+                bn0=bn0,
                 mask=mask,
                 skpad="f",
                 dpad="f",
@@ -2028,12 +2036,17 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
             return dispatch.run(hdim_q=128, hdim_v=128, **changes)
 
         big = dict(batch=1280, nhead_q=2, nhead_k=2)
-        # K and V one tensor: up to 16 rows on any grid
+        # K and V one tensor: up to 16 rows on any grid, one warp from 10 workgroups per CU
+        below = dict(batch=1279, nhead_q=2, nhead_k=2)
         for length in (1, 16):
-            for grid in (dict(batch=1, nhead_q=1, nhead_k=1), big):
+            for grid, bn0 in (
+                (dict(batch=1, nhead_q=1, nhead_k=1), 64),
+                (below, 64),
+                (big, 32),
+            ):
                 self.assertEqual(
                     run(seqlen_q=length, seqlen_k=532, kv_shared=1, **grid),
-                    [kernel("qr_tdm_kvshared", 16)],
+                    [kernel("qr_tdm_kvshared", 16, bn0)],
                 )
         # two tensors, or more than 16 rows: as before
         self.assertEqual(

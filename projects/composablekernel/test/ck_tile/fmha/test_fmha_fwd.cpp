@@ -604,6 +604,10 @@ INSTANTIATE_TEST_SUITE_P(
            std::tuple{256, mode_enum::batch, 37, 16, 4097, "0", "n", true, false, 0},
            std::tuple{256, mode_enum::batch, 3, 16, 1000, "2", "n", false, true, 0},
            std::tuple{256, mode_enum::group, 2, 8, 509, "t:50,64", "a", true, true, 0},
+           // one warp per workgroup: 2 heads x 1280 batches give 10 workgroups per CU on
+           // up to 256 CUs
+           std::tuple{128, mode_enum::batch, 1280, 16, 100, "0", "n", true, true, 0},
+           std::tuple{128, mode_enum::batch, 1280, 9, 77, "t:50,64", "e", true, false, 1},
            // sink
            std::tuple{128, mode_enum::batch, 3, 16, 700, "0", "n", true, true, 1},
            std::tuple{256, mode_enum::batch, 3, 16, 1000, "2", "n", true, false, 1}));
@@ -662,7 +666,7 @@ TEST_P(QrTdmKVShared, DataTypeConfig)
             true); // kv_shared
         ASSERT_EQ(result, fwd_result::success);
         EXPECT_NE(selected_kernel.find("_qr_tdm_kvshared_"), std::string::npos) << selected_kernel;
-        EXPECT_NE(selected_kernel.find("_b16x64"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find("_b16x"), std::string::npos) << selected_kernel;
     }
 }
 
