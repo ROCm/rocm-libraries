@@ -608,9 +608,56 @@ constexpr std::array<ForwardCase, 12> kPartialQueryCases{{
      128},
 }};
 
+// Exercise every output row and component of the wider D64 key tile with the independent FP32
+// reference. BF16 selects N128 inside this contract; FP16 must retain its N64 fallback. Append
+// these inputs so every earlier case index remains stable.
+constexpr int kD64WideTileN = std::is_same_v<DataTypeConfig, FmhaFwdBf16> ? 128 : 64;
+constexpr std::array<ForwardCase, 4> kD64WideTileCases{{
+    {"D64BatchWideTileDense256",
+     64,
+     256,
+     256,
+     mask_enum::no_mask,
+     false,
+     4,
+     2,
+     SequencePointers::Batch,
+     kD64WideTileN},
+    {"D64BatchWideTileTopLeft256",
+     64,
+     256,
+     256,
+     mask_enum::mask_top_left,
+     false,
+     4,
+     2,
+     SequencePointers::Batch,
+     kD64WideTileN},
+    {"D64BatchWideTileBottomRight256",
+     64,
+     256,
+     256,
+     mask_enum::mask_bottom_right,
+     false,
+     4,
+     2,
+     SequencePointers::Batch,
+     kD64WideTileN},
+    {"D64BatchWideTileDense768",
+     64,
+     768,
+     768,
+     mask_enum::no_mask,
+     false,
+     4,
+     1,
+     SequencePointers::Batch,
+     kD64WideTileN},
+}};
+
 constexpr int kCaseCount =
     static_cast<int>(kCases.size() + kAdditionalCases.size() + kVirtualSinkCases.size() +
-                     kSelectorCases.size() + kPartialQueryCases.size());
+                     kSelectorCases.size() + kPartialQueryCases.size() + kD64WideTileCases.size());
 
 const ForwardCase& GetCase(int index)
 {
@@ -625,7 +672,10 @@ const ForwardCase& GetCase(int index)
     index -= static_cast<int>(kVirtualSinkCases.size());
     if(index < static_cast<int>(kSelectorCases.size()))
         return kSelectorCases[index];
-    return kPartialQueryCases[index - kSelectorCases.size()];
+    index -= static_cast<int>(kSelectorCases.size());
+    if(index < static_cast<int>(kPartialQueryCases.size()))
+        return kPartialQueryCases[index];
+    return kD64WideTileCases[index - kPartialQueryCases.size()];
 }
 
 enum class ValuePattern
