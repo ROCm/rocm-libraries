@@ -113,7 +113,9 @@ int64_t unboundedWindow(const SdpaProblem& problem)
 
 /// hipDNN's bounds as the kernel's top-left window: key j is kept iff
 /// i - window_left <= j <= i + window_right. hipDNN keeps kv in
-/// [q + align - left, q + align + right], with align = Skv - Sq at the bottom-right corner.
+/// [q + align - left, q + align + right], with align = Skv - Sq at the bottom-right corner and
+/// `left` the bound resolveMaskBounds stored: the graph's left_bound minus one (cuDNN's
+/// left_bound counts the diagonal key).
 std::array<int64_t, 2> windowFor(const FlydslSdpaRdnaBinding& binding, const SdpaProblem& problem)
 {
     const int64_t align = binding.alignBottomRight != 0 ? problem.seqLenKv - problem.seqLenQ : 0;

@@ -563,6 +563,20 @@ TEST(TestFlydslSdpaRdnaBinding, TheDeprecatedTopLeftBooleanIsCausalAtTheStoredAl
     EXPECT_EQ(boundInt(band, FLYDSL_SDPA_RDNA_ALIGN_BOTTOM_RIGHT_TOKEN), 0);
 }
 
+TEST(TestFlydslSdpaRdnaBinding, ALeftBoundCountsTheDiagonalKey)
+{
+    // cuDNN's left_bound L keeps L keys up to and including the diagonal; the kernels take
+    // the keys before it, L - 1: 1 is the diagonal alone (0 before it), 2 one key more.
+    SdpaGraphSpec spec;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.leftBound = 1;
+    EXPECT_EQ(boundInt(bindingsFor(spec), FLYDSL_SDPA_RDNA_LEFT_BOUND_TOKEN), 0);
+    spec.leftBound = 2;
+    EXPECT_EQ(boundInt(bindingsFor(spec), FLYDSL_SDPA_RDNA_LEFT_BOUND_TOKEN), 1);
+    spec.leftBound.reset();
+    EXPECT_EQ(boundInt(bindingsFor(spec), FLYDSL_SDPA_RDNA_LEFT_BOUND_TOKEN), -1);
+}
+
 TEST(TestFlydslSdpaRdnaBinding, AWindowBindsItsLeftBoundAndClampsAnOversizedOne)
 {
     // left_bound = L keeps the L keys ending at the diagonal (cuDNN); the kernel keeps
@@ -1930,6 +1944,27 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, AppliesASlidingWindowNarrowerThanATile)
     spec.kvHeads = 2;
     spec.stats = SdpaStats::LSE;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, KeepsLeftBoundKeysUpToAndIncludingTheDiagonal)
+{
+    SKIP_IF_NO_DEVICES();
+    // cuDNN's left_bound counts the diagonal key: 1 keeps the diagonal alone, so each row's
+    // O is its own V row; 2 adds the key before it. Both corners, more keys than queries.
+    for(const int64_t left : {int64_t{1}, int64_t{2}})
+    {
+        SCOPED_TRACE("left_bound " + std::to_string(left));
+        SdpaGraphSpec spec;
+        spec.leftBound = left;
+        spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+        spec.seqLenQ = 40;
+        spec.seqLenKv = 40;
+        spec.stats = SdpaStats::LSE;
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+        spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+        spec.seqLenKv = 72;
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+    }
 }
 
 TEST(TestGpuFlydslSdpaRdnaDispatch, AppliesALeftOnlyWindowWithTheNonCausalObject)

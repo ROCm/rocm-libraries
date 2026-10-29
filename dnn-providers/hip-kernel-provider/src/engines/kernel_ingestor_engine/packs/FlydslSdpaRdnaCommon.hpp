@@ -223,7 +223,8 @@ struct SdpaMask
  * @brief The graph's mask, or nullopt for one the kernel cannot apply.
  *
  * The kernel applies the reference's two-sided rule directly, so every bound pair is
- * served: causal (right 0), a band (right > 0), a sliding window (left >= 0), and either
+ * served: causal (right 0), a band (right > 0), a sliding window (a left_bound L >= 1, which
+ * keeps L keys up to and including the diagonal; resolveMaskBounds stores L - 1), and either
  * diagonal alignment. The deprecated causal booleans act as if their setter ran first, as
  * cuDNN's do and the reference resolves them: right 0, a right_bound the graph also sets
  * wins, and a left_bound is kept (a sliding window, as gpt-oss and Mistral graphs set it).

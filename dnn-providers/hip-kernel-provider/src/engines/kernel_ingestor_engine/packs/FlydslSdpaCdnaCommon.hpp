@@ -545,7 +545,8 @@ struct CdnaMask
 inline std::optional<CdnaMask>
     maskFor(const data_objects::SdpaAttributes& attributes, int64_t seqLenQ, int64_t seqLenKv)
 {
-    // The deprecated booleans resolved as the reference does (resolveMaskBounds).
+    // The deprecated booleans resolved as the reference does (resolveMaskBounds); `left` is
+    // the graph's left_bound minus one, the keys before the diagonal a row sees.
     const auto bounds = resolveMaskBounds(attributes);
     if(!bounds.has_value())
     {

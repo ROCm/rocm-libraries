@@ -705,10 +705,12 @@ TEST(TestFlydslSdpaCdnaBinding, BindsTheWindowsLowerEdgeOrNone)
     // align - (L - 1).
     EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 64), -63);
     EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 1), 0);
+    EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 2), -1);
     EXPECT_EQ(windowOf(SdpaMask::BOTTOM_RIGHT_CAUSAL, 256, 1024, 64), 705);
     // A window no row reaches is none, so the dual-wave objects still serve it.
     EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 256), CDNA_NO_WINDOW);
     EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 255), -254);
+    EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 254), -253);
 }
 
 TEST(TestFlydslSdpaCdnaBinding, BindsTheDiagonalOffset)
@@ -2208,9 +2210,10 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesATopLeftBand)
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, ServesSlidingWindows)
 {
-    // The diagonal alone (left_bound 1), narrower than a KV tile, across a tile boundary,
-    // and wider than the keys; top-left and bottom-right; ragged lengths.
-    for(const int64_t left : {int64_t{1}, int64_t{37}, int64_t{64}, int64_t{200}, int64_t{4096}})
+    // The diagonal alone (left_bound 1) and one key more, narrower than a KV tile, across a
+    // tile boundary, and wider than the keys; top-left and bottom-right; ragged lengths.
+    for(const int64_t left :
+        {int64_t{1}, int64_t{2}, int64_t{37}, int64_t{64}, int64_t{200}, int64_t{4096}})
     {
         SCOPED_TRACE("left_bound " + std::to_string(left));
         auto spec = cdnaSpec();
