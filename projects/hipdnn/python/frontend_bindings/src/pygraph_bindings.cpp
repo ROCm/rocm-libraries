@@ -110,7 +110,7 @@ std::unordered_map<int64_t, void*> cudnnVariantPack(const nb::dict& tensorToDevi
         return hipdnn_python::toVariantPack(tensorToDeviceBuffer);
     }
 
-    nb::dict filtered;
+    const nb::dict filtered;
     for(const auto& [key, value] : tensorToDeviceBuffer)
     {
         if(!key.is_none())

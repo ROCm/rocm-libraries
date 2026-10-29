@@ -5,6 +5,7 @@
 
 #include <nanobind/stl/string.h>
 
+#include <array>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -31,7 +32,7 @@ std::optional<DataType> dataTypeFromDtypeName(std::string_view name)
         std::string_view name;
         DataType type;
     };
-    static constexpr Entry ENTRIES[] = {
+    static constexpr std::array<Entry, 18> ENTRIES{{
         {"float16", DataType::HALF},
         {"half", DataType::HALF},
         {"bfloat16", DataType::BFLOAT16},
@@ -50,7 +51,7 @@ std::optional<DataType> dataTypeFromDtypeName(std::string_view name)
         {"float8_e8m0fnu", DataType::FP8_E8M0},
         {"float8_e4m3fnuz", DataType::FP8_E4M3_FNUZ},
         {"float8_e5m2fnuz", DataType::FP8_E5M2_FNUZ},
-    };
+    }};
     for(const auto& entry : ENTRIES)
     {
         if(entry.name == name)
@@ -163,7 +164,10 @@ std::optional<DataType> dataTypeFromDtypeObject(const nb::handle& dtype)
 
 void compatBindings(nb::module_& m)
 {
-    nb::exception<GraphNotSupportedException>(m, "GraphNotSupportedError", PyExc_RuntimeError);
+    // Constructing the exception registers it with the module and with nanobind's
+    // C++-to-Python translation; the object itself is not needed afterwards.
+    [[maybe_unused]] const nb::exception<GraphNotSupportedException> registered(
+        m, "GraphNotSupportedError", PyExc_RuntimeError);
 }
 
 } // namespace hipdnn_python
