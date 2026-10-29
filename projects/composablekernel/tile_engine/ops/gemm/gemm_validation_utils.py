@@ -544,6 +544,10 @@ GEMM_MX_WARP_TILE_SUPPORTED_COMBINATIONS = {
     },
 }
 
+GFX950_ASYNC_LOAD_BYTES = 16
+GFX950_WAVE_SIZE = 64
+MX_ELEMENT_BITS = {"fp4": 4, "fp8": 8}
+
 TRAIT_UNSUPPORTED_COMBINATIONS = {
     ("compv3", "cshuffle", "interwave"),
     ("compv3", "default", "interwave"),
@@ -1927,6 +1931,49 @@ def validate_gemm(
     return True, ""
 
 
+def gfx950_mx_comp_async_reject_reason(
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    num_waves: int,
+    warp_tile_k: int,
+    a_datatype: str,
+    b_datatype: str,
+) -> str:
+    """Mirror the gfx950 static_asserts in GemmPipelineAgBgCrCompAsyncDefaultPolicy
+    for the rcr layout, where both A and B are K-contiguous.
+
+    FP8 x FP8 goes through the XOR-swizzle path, which splits M/N per block across
+    the waves in rows of warp_size * KPack / warp_tile_k. Everything else uses the
+    base global vector width, which for 1-byte element types is 16 bytes only when
+    both K per block and the elements per thread divide by 16 bytes' worth; the
+    8-byte or 1-byte fallback cannot be issued by the gfx950 async buffer load.
+    """
+    if a_datatype == "fp8" and b_datatype == "fp8":
+        kpack = GFX950_ASYNC_LOAD_BYTES
+        row = num_waves * GFX950_WAVE_SIZE * kpack // warp_tile_k
+        for name, mn in (("M", tile_m), ("N", tile_n)):
+            if mn % row != 0:
+                return (
+                    f"gfx950 MX comp_async FP8 XOR swizzle needs {name} per block to be "
+                    f"a multiple of {row} for {num_waves} waves and warp tile K "
+                    f"{warp_tile_k}, got {mn}"
+                )
+        return ""
+
+    block_size = num_waves * GFX950_WAVE_SIZE
+    for operand, dtype, mn in (("A", a_datatype, tile_m), ("B", b_datatype, tile_n)):
+        elems = GFX950_ASYNC_LOAD_BYTES * 8 // MX_ELEMENT_BITS[dtype]
+        elems_per_thread = mn * tile_k // block_size
+        if tile_k % elems != 0 or elems_per_thread % elems != 0:
+            return (
+                f"gfx950 MX comp_async needs 16-byte async loads; {operand} "
+                f"({mn}x{tile_k} {dtype} over {num_waves} waves) gives "
+                f"{elems_per_thread} elements per thread, not a multiple of {elems}"
+            )
+    return ""
+
+
 def validate_gemm_mx(
     tile_m: int,
     tile_n: int,
@@ -1961,9 +2008,27 @@ def validate_gemm_mx(
     arch = _base_gfx_arch(gpu_target)
     if pipeline not in GEMM_MX_PIPELINES_BY_ARCH.get(arch, ()):
         return False, f"MX pipeline {pipeline!r} is not supported on {arch}"
+    if arch == "gfx950" and pipeline == "comp_async":
+        reason = gfx950_mx_comp_async_reject_reason(
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m * warp_n * warp_k,
+            warp_tile_k,
+            a_datatype,
+            b_datatype,
+        )
+        if reason:
+            return False, reason
     if arch == "gfx1250" and pipeline in ("comp_tdm", "comp_tdm_v2"):
-        if (warp_m, warp_n, warp_k) != (2, 2, 1):
-            return False, "gfx1250 MX GEMM requires 2x2x1 warps"
+        # GemmPipelineAgBgCrCompTDMV2 static_asserts NumWarps == 4. Any other
+        # product fails to compile, so reject it before codegen.
+        if pipeline == "comp_tdm_v2" and warp_m * warp_n * warp_k != 4:
+            return (
+                False,
+                "comp_tdm_v2 requires exactly 4 waves, "
+                f"got {warp_m}x{warp_n}x{warp_k}",
+            )
         # TdmEpilogue stages the full FP16 output tile in the shared LDS allocation.
         if tile_m * tile_n * 2 > LDS_SIZE_MAP[arch]:
             return False, "MX TDM epilogue exceeds the architecture LDS capacity"
@@ -2011,6 +2076,26 @@ def validate_gemm_mx(
             return False, "MX weight preshuffle requires tiles divisible by 32x128x256"
         if b_datatype == "fp4" and tile_n % 512:
             return False, "MX FP4 weight preshuffle requires N tiles divisible by 512"
+        # gfx950 is wave64. MXGemmPreshufflePipelineAGmemBGmemCRegV1 passes
+        # Bload_num + ScaleAload_num + ScaleBload_num to s_waitcnt, and that
+        # field is 6 bits (max 63). FP8 tile K 512 with tile N 512 exceeds it
+        # (32x512x512 -> 74, 64x512x512 -> 76, 128x512x512 -> 80).
+        # To actually support K=512, split the B and scale prefetches in
+        # wp_mx_pipeline_agmem_bgmem_creg_v1.hpp so each s_waitcnt is asked to
+        # leave at most 63 loads outstanding.
+        if arch == "gfx950" and a_datatype == "fp8" and b_datatype == "fp8":
+            wave_size = 64
+            n_warp = 4
+            bk1 = 16
+            k_iter = tile_k // warp_tile_k
+            bload_num = tile_n * warp_tile_k // n_warp // bk1 // wave_size * k_iter
+            scale_bload_num = tile_n * tile_k // n_warp // 32 // 2 // 2 // wave_size
+            scale_aload_num = tile_m * tile_k // warp_m // 32 // 2 // 2 // wave_size
+            if bload_num + scale_aload_num + scale_bload_num > 63:
+                return (
+                    False,
+                    "gfx950 FP8 weight preshuffle s_waitcnt vmcnt exceeds 63",
+                )
         return True, ""
 
     if arch == "gfx1250":

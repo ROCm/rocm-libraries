@@ -368,6 +368,33 @@ class TestValidationRules(unittest.TestCase):
                         (dtype, layout),
                     )
 
+    def test_mx_comp_async_gfx950_rejects_tiles_the_kernel_static_asserts(self):
+        # Each case was compiled for gfx950: rejected ones hit the policy's
+        # static_assert, accepted ones build. gfx1250 has no such limit.
+        valid = vu.is_tile_config_valid
+        rejected = (
+            ("fp4", (32, 32, 128, 2, 2, 1, 16, 16, 128)),
+            ("fp4", (16, 128, 256, 1, 4, 1, 16, 16, 128)),
+            ("fp4", (128, 32, 128, 2, 2, 1, 16, 16, 128)),
+            ("fp8", (16, 128, 256, 1, 4, 1, 16, 16, 128)),
+        )
+        accepted = (
+            ("fp4", (32, 32, 256, 2, 2, 1, 16, 16, 128)),
+            ("fp8", (32, 32, 128, 2, 2, 1, 16, 16, 128)),
+            ("fp8", (128, 32, 128, 2, 2, 1, 16, 16, 128)),
+        )
+        for expected, cases in ((False, rejected), (True, accepted)):
+            for dtype, tile in cases:
+                with self.subTest(dtype=dtype, tile=tile):
+                    self.assertEqual(
+                        valid(*tile, dtype, dtype, "fp16", "comp_async", "rcr", "gfx950", "mx_gemm"),
+                        expected,
+                    )
+
+        self.assertTrue(
+            valid(32, 32, 128, 2, 2, 1, 16, 16, 128, "fp8", "fp8", "fp16", "comp_async", "rcr", "gfx1250", "mx_gemm")
+        )
+
     def test_quant_ops_reject_gfx1250_pipelines(self):
         ok = vu.is_trait_combination_valid
         for prefix in (

@@ -198,11 +198,17 @@ struct BlockMXGemmASmemBRegCReg
                 scale_b_tile_tensors(inpack)(ikpack).get_thread_buffer()[0]);
 #endif
 
-            constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
+            constexpr index_t addr =
+                ((ikpack * MPackIterPerWarp + impack) * KXdlPack + ikxdl) * MXdlPack + imxdl +
+                m_preload;
             if constexpr(addr < (KIterPerWarp * MIterPerWarp) && (n_iter == NIterPerWarp - 1))
             {
-                constexpr auto AmIter = addr % 2 + addr / 4 * 2;
-                constexpr auto AkIter = addr / 2 % 2;
+                constexpr index_t next_imxdl  = addr % MXdlPack;
+                constexpr index_t next_ikxdl  = addr / MXdlPack % KXdlPack;
+                constexpr index_t next_impack = addr / (MXdlPack * KXdlPack) % MPackIterPerWarp;
+                constexpr index_t next_ikpack = addr / (MXdlPack * KXdlPack * MPackIterPerWarp);
+                constexpr index_t AmIter      = next_impack * MXdlPack + next_imxdl;
+                constexpr index_t AkIter      = next_ikpack * KXdlPack + next_ikxdl;
                 preloaded_a_warp_tensor(number<APackIter>{}) =
                     bit_cast<AWarpTensor>(load_tile_with_offset(
                         a_warp_window,
