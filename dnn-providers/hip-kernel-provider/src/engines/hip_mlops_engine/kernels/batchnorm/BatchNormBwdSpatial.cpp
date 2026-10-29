@@ -201,7 +201,7 @@ struct BatchNormBwdSpatialImpl<0, FpType, FpPrecType, FpAccumType>
         __shared__ FpPrecType s_lvar;
 #endif
         unsigned int index = 0;
-        unsigned int lid = threadIdx.x; //NOLINT(readability-static-accessed-through-instance)
+        const unsigned int lid = threadIdx.x; //NOLINT(readability-static-accessed-through-instance)
         const unsigned int grpid
             = blockIdx.x; //NOLINT(readability-static-accessed-through-instance)
         const unsigned int chwid
@@ -461,9 +461,10 @@ struct BatchNormBwdSpatialImpl<1, FpType, FpPrecType, FpAccumType>
         }
         else
         {
-            for(unsigned int k = lid; k < LESS; k += hip_plugin_bn_config::LAUNCH_DIM.GRP0)
+            for(unsigned int k = lid; k < LESS;
+                k += decltype(hip_plugin_bn_config::LAUNCH_DIM)::GRP0)
             {
-                FpPrecType in = cast<FpPrecType>(xIn[getTensorIndex(k)]);
+                auto in = cast<FpPrecType>(xIn[getTensorIndex(k)]);
                 mean += in;
                 variance = fma(in, in, variance);
             }
@@ -686,7 +687,7 @@ struct BatchNormBwdSpatialImpl<3, FpType, FpPrecType, FpAccumType>
         FpPrecType dyvalues[hip_plugin_bn_config::N];
         // NOLINTEND(modernize-avoid-c-arrays)
 
-        unsigned int lid = threadIdx.x; //NOLINT(readability-static-accessed-through-instance)
+        const unsigned int lid = threadIdx.x; //NOLINT(readability-static-accessed-through-instance)
         unsigned int grpid = blockIdx.x; //NOLINT(readability-static-accessed-through-instance)
         unsigned int index;
         const unsigned int cidx = grpid * hip_plugin_bn_config::HW;
@@ -1422,13 +1423,13 @@ extern "C" __global__ void
     {
 #if HIP_PLUGIN_BN_USESAVED == 0
         //NOLINTBEGIN(readability-static-accessed-through-instance)
-        unsigned int xGroupId = blockIdx.x;
-        unsigned int yGroupId = blockIdx.y;
-        unsigned int zGroupId = blockIdx.z;
+        const unsigned int xGroupId = blockIdx.x;
+        const unsigned int yGroupId = blockIdx.y;
+        const unsigned int zGroupId = blockIdx.z;
 
-        unsigned int xGroupSize = blockDim.x;
-        unsigned int yGroupSize = blockDim.y;
-        unsigned int zGroupSize = blockDim.z;
+        const unsigned int xGroupSize = blockDim.x;
+        const unsigned int yGroupSize = blockDim.y;
+        const unsigned int zGroupSize = blockDim.z;
         //NOLINTEND(readability-static-accessed-through-instance)
 
         s_lmean[xlid] = hip_kernel_provider::batchnorm::loadFromStash<fp_prec_c_type>(

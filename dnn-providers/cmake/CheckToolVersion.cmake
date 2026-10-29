@@ -256,7 +256,8 @@ function(findAndCheckRocmClangTidy)
         message(WARNING
             "ROCm clang-tidy disabled due to version mismatch (expected "
             "${EXPECTED_ROCM_CLANG_TIDY_VERSION}). Set EXPECTED_ROCM_CLANG_TIDY_VERSION to "
-            "the version you have, after reviewing the check deltas in ClangTidy.cmake, or "
+            "the version you have, after reviewing the CheckOptions comments in "
+            "projects/hipdnn/.clang-tidy, or "
             "set ALLOW_ROCM_CLANG_TIDY_VERSION_MISMATCH=ON to use it as-is."
         )
         unset(ROCM_CLANG_TIDY_EXE CACHE)

@@ -3,14 +3,13 @@
 
 include(${PROJECT_SOURCE_DIR}/../cmake/CheckToolVersion.cmake)
 
-# - This module makes the kernel sources that KernelEmbedding.cmake inlines into a
-# generated translation unit visible to clang-tidy.
+# - This module compiles the kernel sources that KernelEmbedding.cmake inlines into a
+# generated translation unit, so clang-tidy checks them as part of a normal build.
 #
-# An embedded kernel is never compiled by the build: embed_kernel_sources() reads it at
-# configure time and pastes its text into a raw string literal, so it has no entry in
-# compile_commands.json. add_kernel_tidy_target() closes the gap by creating a custom
-# target that invokes clang-tidy on the kernel files directly, passing the options
-# they need to compile standalone.
+# An embedded kernel is otherwise never compiled by the build: embed_kernel_sources()
+# reads it at configure time and pastes its text into a raw string literal. The object
+# library created below is intentionally not linked; its compile commands give
+# clang-tidy the hipRTC-compatible context and let the compiler track included headers.
 
 # List of kernel tidy targets created
 define_property(GLOBAL PROPERTY KERNELTIDY_TARGETS)
@@ -84,25 +83,20 @@ function(hiprtc_runtime_header out_var)
     set(${out_var} "${_header}" PARENT_SCOPE)
 endfunction()
 
-# add_kernel_tidy_target(NAME <target>  PRELUDE <header> FILES <kernel>...)
+# add_kernel_tidy_target(NAME <target> PRELUDE <header> FILES <kernel>...)
 #
-#   Create <target>, a custom target that runs clang-tidy over the embedded kernels in
-#   FILES. Builds explicitly, or through the `tidy` targets that  hip_kernel_provider_tidy_dependencies()
-#   wires up.
-#
-#   Each file gets its own command, so the generator runs them in parallel and re-checks
-#   only what changed: a per-file stamp under the build tree records the last successful
-#   run, and a file is re-checked when it, the prelude or the .clang-tidy config is newer.
-#
+#   Create an unlinked OBJECT library that compiles the embedded kernel translation units
+#   and runs clang-tidy on each one. The library is part of the default build, and every
+#   source depends on the headers listed in FILES so that header changes re-check kernels.
 #   Requires HIPRTC_RUNTIME_HEADER (see hiprtc_runtime_header()); no target is created
 #   when it is unset.
 #
-# Keep validation, compiler flags, and per-file build rules together.
-# cmake-lint: disable=R0915
+# Keep validation and compiler flags together.
+# cmake-lint: disable=R0912,R0915
 function(add_kernel_tidy_target)
     set(options "")
     set(oneValueArgs NAME PRELUDE)
-    set(multiValueArgs FILES)
+    set(multiValueArgs FILES COMPILE_DEFINITIONS)
     cmake_parse_arguments(PARSE_ARGV 0 KERNEL_TIDY "${options}" "${oneValueArgs}"
                           "${multiValueArgs}")
 
@@ -113,7 +107,7 @@ function(add_kernel_tidy_target)
     if(NOT KERNEL_TIDY_FILES)
         message(FATAL_ERROR "add_kernel_tidy_target called without any FILES!")
     endif()
-        if(NOT KERNEL_TIDY_PRELUDE)
+    if(NOT KERNEL_TIDY_PRELUDE)
         message(FATAL_ERROR "add_kernel_tidy_target called without a PRELUDE!")
     endif()
     if(NOT EXISTS "${KERNEL_TIDY_PRELUDE}")
@@ -155,68 +149,81 @@ function(add_kernel_tidy_target)
         return()
     endif()
     get_filename_component(KERNEL_TIDY_PRELUDE "${KERNEL_TIDY_PRELUDE}" ABSOLUTE)
-    set(_tidy_config "${PROJECT_SOURCE_DIR}/.clang-tidy")
+    get_filename_component(_tidy_config "${PROJECT_SOURCE_DIR}/.clang-tidy" ABSOLUTE)
+    if(NOT EXISTS "${_tidy_config}")
+        message(FATAL_ERROR
+                "add_kernel_tidy_target: clang-tidy config ${_tidy_config} does not exist.")
+    endif()
 
-    # Absolute, de-duplicated list of the directories the kernels include each other from.
-    set(_kernel_include_flags "")
-    set(_kernel_files "")
+    # Absolute, de-duplicated list of sources and directories they include each other from.
+    set(_kernel_include_dirs "")
+    set(_kernel_sources "")
+    set(_kernel_headers "")
     foreach(_kernel_file IN LISTS KERNEL_TIDY_FILES)
         get_filename_component(_kernel_file "${_kernel_file}" ABSOLUTE)
         if(NOT EXISTS "${_kernel_file}")
             message(FATAL_ERROR "add_kernel_tidy_target: ${_kernel_file} does not exist.")
         endif()
-        list(APPEND _kernel_files "${_kernel_file}")
         get_filename_component(_kernel_dir "${_kernel_file}" DIRECTORY)
-        list(APPEND _kernel_include_flags "-I${_kernel_dir}")
+        list(APPEND _kernel_include_dirs "${_kernel_dir}")
+        get_filename_component(_kernel_extension "${_kernel_file}" EXT)
+        if(_kernel_extension MATCHES "^\\.(cpp|cc|cxx)$")
+            list(APPEND _kernel_sources "${_kernel_file}")
+        else()
+            list(APPEND _kernel_headers "${_kernel_file}")
+        endif()
     endforeach()
-    list(REMOVE_DUPLICATES _kernel_files)
-    list(REMOVE_DUPLICATES _kernel_include_flags)
+    list(REMOVE_DUPLICATES _kernel_include_dirs)
+    list(REMOVE_DUPLICATES _kernel_sources)
+    list(REMOVE_DUPLICATES _kernel_headers)
+    if(NOT _kernel_sources)
+        message(FATAL_ERROR
+                "add_kernel_tidy_target: FILES contains no compilable kernel sources.")
+    endif()
 
-    # Flags after `--` replace the compile database, which has no entry for these files.
+    # These are the options needed to compile the sources outside of hipRTC.
     set(_kernel_tidy_compiler_flags
         -x hip
         --offload-device-only
-        -std=c++${CMAKE_CXX_STANDARD}
+        # Emit relocatable device code: a full device link needs the device libs that
+        # -nogpulib omits (hipRTC links them at runtime).
+        -fgpu-rdc
         -nogpulib
         -nogpuinc
         -D__HIPCC_RTC__
-        -include "${KERNEL_TIDY_PRELUDE}"
-        -include "${HIPRTC_RUNTIME_HEADER}"
-        ${_kernel_include_flags}
+        # SHELL: keeps each -include paired with its path; CMake de-duplicates bare options.
+        "SHELL:-include \"${KERNEL_TIDY_PRELUDE}\""
+        "SHELL:-include \"${HIPRTC_RUNTIME_HEADER}\""
     )
+    set(_gpu_targets "${GPU_TARGETS}")
+    if(NOT _gpu_targets)
+        set(_gpu_targets "${CMAKE_HIP_ARCHITECTURES}")
+    endif()
+    if(_gpu_targets)
+        foreach(_gpu_target IN LISTS _gpu_targets)
+            list(APPEND _kernel_tidy_compiler_flags "--offload-arch=${_gpu_target}")
+        endforeach()
+    endif()
 
-    set(_stamp_dir "${CMAKE_CURRENT_BINARY_DIR}/kernel_tidy")
-    set(_stamps "")
-    foreach(_kernel_file IN LISTS _kernel_files)
-        # Stamp names follow the kernel's path relative to the engine, not its bare
-        # filename: two kernels in different subdirectories may share a name, and a shared
-        # stamp would report one of them as checked when only the other ran.
-        file(RELATIVE_PATH _kernel_relative "${CMAKE_CURRENT_SOURCE_DIR}" "${_kernel_file}")
-        string(REGEX REPLACE "[^A-Za-z0-9]" "_" _stamp_token "${_kernel_relative}")
-        set(_stamp "${_stamp_dir}/${_stamp_token}.stamp")
+    # The driver writes no depfile for --offload-device-only compiles, so depend on the
+    # embedded headers explicitly to re-check kernels when they change.
+    set_source_files_properties(${_kernel_sources} PROPERTIES
+        OBJECT_DEPENDS
+            "${KERNEL_TIDY_PRELUDE};${HIPRTC_RUNTIME_HEADER};${_tidy_config};${_kernel_headers}"
+    )
+    add_library(${KERNEL_TIDY_NAME} OBJECT ${_kernel_sources})
+    set_target_properties(${KERNEL_TIDY_NAME} PROPERTIES
+        CXX_STANDARD "${CMAKE_CXX_STANDARD}"
+        CXX_STANDARD_REQUIRED ON
+        CXX_CLANG_TIDY
+            "${ROCM_CLANG_TIDY_EXE};-config-file=${_tidy_config};--quiet;--exclude-header-filter=hiprtc_runtime.h"
+    )
+    target_compile_options(${KERNEL_TIDY_NAME} PRIVATE ${_kernel_tidy_compiler_flags})
+    target_compile_definitions(${KERNEL_TIDY_NAME} PRIVATE ${KERNEL_TIDY_COMPILE_DEFINITIONS})
+    target_include_directories(${KERNEL_TIDY_NAME} PRIVATE ${_kernel_include_dirs})
 
-        add_custom_command(
-            OUTPUT ${_stamp}
-            COMMAND
-                     ${ROCM_CLANG_TIDY_EXE}
-                    -config-file=${_tidy_config} --quiet
-                    --exclude-header-filter=hiprtc_runtime.h
-                    ${_kernel_file}
-                    -- ${_kernel_tidy_compiler_flags}
-            COMMAND ${CMAKE_COMMAND} -E make_directory ${_stamp_dir}
-            COMMAND ${CMAKE_COMMAND} -E touch ${_stamp}
-            DEPENDS ${_kernel_file}  ${KERNEL_TIDY_PRELUDE} ${HIPRTC_RUNTIME_HEADER} ${_tidy_config}
-            COMMENT "Running clang-tidy on embedded kernel ${_kernel_relative}"
-            VERBATIM
-        )
-        list(APPEND _stamps ${_stamp})
-    endforeach()
-
-    add_custom_target(${KERNEL_TIDY_NAME}
-                      DEPENDS ${_stamps}
-                      COMMENT "Checking embedded kernels with clang-tidy")
-    # The header is generated in another directory scope, so the dependency has to be
-    # spelled out for generators that do not infer it from the stamp's DEPENDS.
+    # Keep compilation objects separate from the provider; this library only exists to
+    # expose normal compile commands and dependency tracking for the embedded sources.
     if(TARGET hiprtc_runtime_header)
         add_dependencies(${KERNEL_TIDY_NAME} hiprtc_runtime_header)
     endif()
@@ -225,12 +232,11 @@ function(add_kernel_tidy_target)
 endfunction()
 
 # hip_kernel_provider_tidy_dependencies()
-#   Make every `tidy` target built so far also run the kernel tidy targets.
+#   Make every `tidy` target built so far also build the kernel-check object libraries.
 #
-#   run-clang-tidy cannot reach the kernels on its own: they are not in
-#   compile_commands.json, and adding them to it is exactly the build-graph weight this
-#   module avoids. Depending on the targets is what puts them in a `tidy` run. Call this
-#   after add_clang_tidy_custom_target(), once the `tidy` targets exist.
+#   The object libraries are part of the default build; depending on them here also makes
+#   `tidy` run their clang-tidy checks. Call this after add_clang_tidy_custom_target(),
+#   once the `tidy` targets exist.
 function(hip_kernel_provider_tidy_dependencies)
     get_property(_kernel_tidy_targets GLOBAL PROPERTY KERNELTIDY_TARGETS)
     if(NOT _kernel_tidy_targets)
