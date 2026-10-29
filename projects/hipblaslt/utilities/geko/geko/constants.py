@@ -29,7 +29,8 @@ DTYPE = {
     "f4_r": "F4",
     "f32_c": "C",
     "f64_c": "Z",
-    # I8
+    "i8_r": "I8",
+    "i32_r": "I",
 }
 
 # Bytes per element for hipBLASLt dtype tokens.

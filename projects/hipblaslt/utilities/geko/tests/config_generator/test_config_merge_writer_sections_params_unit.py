@@ -328,6 +328,27 @@ def test_mx_bias_type_forced_to_s():
     assert bias == "[S]"
 
 
+def test_i8_bias_type_is_s_for_float_compute():
+    gen = csg.ConfigSectionGenerator(_section_cfg(dtype="I8"))
+    assert gen._resolve_bias_type() == "[S]"
+
+
+def test_i8_bias_type_is_none_for_int_compute():
+    cfg = _section_cfg(dtype="I8")
+    gt = GemmType.from_tensile("N", "N", "I8", "I8", "I")
+    cfg["GemmProblem"] = GemmConfig(gt, [[16, 16, 1, 16]])
+    gen = csg.ConfigSectionGenerator(cfg)
+    assert gen._resolve_bias_type() is None
+    assert gen._problem_type["#UseBias"] == "1"
+    assert "UseBias" not in gen._problem_type
+
+
+def test_i8_use_bias_enabled_for_float_compute():
+    gen = csg.ConfigSectionGenerator(_section_cfg(dtype="I8"))
+    assert gen._problem_type["UseBias"] == "1"
+    assert "#UseBias" not in gen._problem_type
+
+
 def test_mx_f8_problem_type_skips_use_scale_ab():
     """MX F8 should not emit UseScaleAB on gfx1250 (never sets it for MX there)."""
     gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=True, arch="gfx1250"))

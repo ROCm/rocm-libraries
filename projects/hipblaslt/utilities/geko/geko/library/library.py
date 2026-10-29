@@ -49,7 +49,7 @@ from geko.concurrency import parallel_for
 
 __all__ = ["Library", "LibraryCollection"]
 
-BIAS_MAP = {0: "S", 4: "H", 7: "B"}
+BIAS_MAP = {0: "S", 4: "H", 6: "I", 7: "B"}
 SAB_MAP = {"Scalar": "SAB", "Vector": "SABV"}
 SUPPORTED_INITIALIZATIONS = ("trig_float", "rand_int", "hpl")
 
@@ -340,10 +340,21 @@ class Library:
 
         self.problem["Activation"] = True
         self.problem["ActivationType"] = "hipblaslt_all"
-        self.problem["UseBias"] = 1
 
-        # If DestDataType is f8/b8 use [0, 4, 7]
-        bias_list = [0, 4, 7] if self.problem["DestDataType"] > 10 else [0, self.problem["DestDataType"]]
+        # If DestDataType is f8/b8 use [0, 4, 7]. Int8 (DataType == 8) is a
+        # special case: Bias is only supported when ComputeDataType is Float
+        # (code 0); with int32 compute (MFMA accumulation) there is no
+        # bias-capable kernel variant at all, so Bias is fully disabled,
+        # including for the bare-int8 variant where ComputeDataType is
+        # omitted (defaults to DataType == Int8, i.e. not Float).
+        if self.problem["DataType"] == 8:  # Int8
+            compute_type = self.problem.get("ComputeDataType", self.problem["DataType"])
+            i8_bias_supported = compute_type == 0
+            self.problem["UseBias"] = 1 if i8_bias_supported else 0
+            bias_list = [0] if i8_bias_supported else []
+        else:
+            self.problem["UseBias"] = 1
+            bias_list = [0, 4, 7] if self.problem["DestDataType"] > 10 else [0, self.problem["DestDataType"]]
         self.problem["BiasDataTypeList"] = sorted(set(bias_list))
         self.problem["UseScaleAlphaVec"] = 1
 
@@ -352,9 +363,12 @@ class Library:
             self.problem["UseScaleAB"] = "Scalar"
 
         sab = SAB_MAP.get(self.problem["UseScaleAB"], None)
-        btype = "".join([BIAS_MAP[bt] for bt in self.problem["BiasDataTypeList"]])
+        bias_segment = ""
+        if self.problem["BiasDataTypeList"]:
+            btype = "".join([BIAS_MAP[bt] for bt in self.problem["BiasDataTypeList"]])
+            bias_segment = f"_Bias{btype}"
 
-        epilogue_suffix = f"_Bias{btype}_HAS{('_' + sab) if sab is not None else ''}_SAV_UserArgs"
+        epilogue_suffix = f"{bias_segment}_HAS{('_' + sab) if sab is not None else ''}_SAV_UserArgs"
 
         def update_epilogue_string(s: str, suffix: str) -> str:
             if "_UserArgs" not in s:
@@ -430,8 +444,9 @@ class Library:
         transB = "C" if (self.problem["TransposeB"] and ccB) else ("T" if self.problem["TransposeB"] else "N")
 
         if initialization != "rand_int" and INDEX_TYPE_MAP[self.problem["DataType"]] == "i8_r":
+            logger.warning(f"Initialization {initialization} is not allowed for int8 datatype. Changing to rand_int")
             initialization = "rand_int"
-            logger.warning(f"Initialization {initialization} is not allowed for int8 datatype. Changed to rand_int")
+
 
         common = dict(
             function="matmul",
