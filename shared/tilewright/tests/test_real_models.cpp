@@ -268,6 +268,9 @@ TEST_CASE("shipped models rank repeated kernels like kernels scored one by one",
     REQUIRE(model);
     const tw::PoolOptions options = shipped_options(*model);
     const tw::CandidateSet set(model, pool, options);
+    // The same pool prepared: its rankings read the copy prepare() keeps.
+    const tw::CandidateSet prepared(model, pool, options);
+    prepared.prepare();
     const tw::detail::PoolKeys one_by_one = one_group_per_config(*model, pool);
     tw::ExecutionContext unsupported;
     const bool has_unsupported = unsupported_context(*model, hw, &unsupported);
@@ -290,11 +293,14 @@ TEST_CASE("shipped models rank repeated kernels like kernels scored one by one",
                                                                            nullptr,
                                                                            options.launch.get());
               REQUIRE(same_results(set.rank(p, hw, min_scored), expect));
+              REQUIRE(same_results(prepared.rank(p, hw, min_scored), expect));
               REQUIRE(same_results(
                   tw::rank_configs(
                       *model, p, hw, tw::ExecutionContext{}, pool, options, min_scored),
                   expect));
               REQUIRE(same_results(set.rank_top(p, hw, {}, min_scored),
+                                   scored_prefix(expect, min_scored)));
+              REQUIRE(same_results(prepared.rank_top(p, hw, {}, min_scored),
                                    scored_prefix(expect, min_scored)));
               for (const tw::Result& x : expect) scored += x.scored ? 1 : 0;
               if (!has_unsupported) continue;

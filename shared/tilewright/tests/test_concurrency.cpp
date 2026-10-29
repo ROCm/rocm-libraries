@@ -180,3 +180,59 @@ TEST_CASE("concurrent rankings that release and rebuild cached cells agree with 
   tw::set_cache_limit(saved);
   CHECK(failures.load() == 0);
 }
+
+TEST_CASE("rankings racing CandidateSet::prepare() agree with a serial run",
+          "[concurrency][cache]") {
+  ModelSpec spec = grid_model();
+  for (CellSpec& c : spec.cells)
+    c.signatures = {{128, 128, 64, 16, 16, 32, 0, 0}, {64, 64, 64, 16, 16, 32, 0, 0}};
+  const tw::ModelPtr model = load_spec(spec);
+  std::vector<tw::Config> pool;
+  for (std::size_t mt : {16, 32, 64, 128, 256})
+    for (std::size_t nt : {32, 64, 128}) pool.push_back(make_config(mt, nt, 64));
+  std::mt19937_64 rng(11);
+  std::vector<tw::Problem> problems;
+  std::vector<std::size_t> depth;
+  for (int i = 0; i < 48; ++i) {
+    problems.push_back(make_problem(1 + rng() % 5000, 1 + rng() % 5000, 1 + rng() % 5000));
+    depth.push_back(rng() % 2 ? 1 : 30);
+  }
+  std::vector<std::vector<tw::Result>> expect;
+  for (std::size_t i = 0; i < problems.size(); ++i)
+    expect.push_back(tw::rank_configs(*model, problems[i], test_hardware(), pool, depth[i]));
+
+  // Each round a fresh set: prepare() publishes its copy while other threads
+  // rank it, and one of them may build the kernel part that is copied in.
+  // `prepared` is relaxed so that only the engine's own publication orders the
+  // threads' reads of the copy after prepare() wrote it; each thread keeps
+  // ranking until it has seen prepare() return.
+  for (int round = 0; round < 6; ++round) {
+    const tw::CandidateSet set(model, pool);
+    std::atomic<bool> go{false}, prepared{false};
+    std::atomic<int> failures{0};
+    std::vector<std::thread> threads;
+    for (unsigned t = 0; t < 4; ++t)
+      threads.emplace_back([&, t] {
+        while (!go.load()) std::this_thread::yield();
+        std::vector<tw::Result> top;
+        int after = 0;
+        for (int iter = 0; iter < 40 || after < 20; ++iter) {
+          if (prepared.load(std::memory_order_relaxed)) ++after;
+          const std::size_t i = (t * 11 + static_cast<std::size_t>(iter) * 5) % problems.size();
+          bool ok             = false;
+          if (iter % 2 == 0) {
+            ok = same_results(set.rank(problems[i], test_hardware(), depth[i]), expect[i]);
+          } else {
+            set.rank_top(problems[i], test_hardware(), {}, depth[i], top);
+            ok = same_results(top, scored_prefix(expect[i], depth[i]));
+          }
+          if (!ok) ++failures;
+        }
+      });
+    go.store(true);
+    set.prepare();
+    prepared.store(true, std::memory_order_relaxed);
+    for (std::thread& th : threads) th.join();
+    CHECK(failures.load() == 0);
+  }
+}
