@@ -581,10 +581,10 @@ namespace
         rocblaslt_handle                           handle,
         hipStream_t                                stream,
         const TensileLite::ContractionProblemGemm& prob,
-        const void*                                D,
+        const TensileLite::ContractionInputs&      inputs,
         uint32_t                                   call_id)
     {
-        if(!handle || !handle->check_numerics || !D || call_id == 0)
+        if(!handle || !handle->check_numerics || (!inputs.d && !inputs.batchD) || call_id == 0)
             return rocblaslt_status_success;
 
         const int64_t m        = prob.c().sizes()[0];
@@ -595,6 +595,17 @@ namespace
         // Tensile builds column-major strides; row-major D has strides()[0] != 1.
         const bool        row_major = (prob.d().strides()[0] != 1);
         const hipDataType type_d    = tensile2HipType(prob.d().dataType());
+        const bool        ptr_array
+            = (prob.batchMode() == TensileLite::ContractionProblemGemm::BATCHMODE::POINTER_ARRAY);
+        const void* D
+            = ptr_array && inputs.batchD ? static_cast<const void*>(inputs.batchD) : inputs.d;
+        // Tensile stores offsets in bytes; the scanner adds an element offset.
+        const int64_t offset_d
+            = ptr_array && inputs.batchOffsetD != 0
+                  ? inputs.batchOffsetD
+                        / static_cast<int64_t>(
+                            TensileLite::DataTypeInfo::Get(prob.d().dataType()).elementSize)
+                  : 0;
 
         return hipblaslt_check_numerics_scan_D(handle,
                                                stream,
@@ -604,7 +615,9 @@ namespace
                                                D,
                                                ldd,
                                                stride_d,
-                                               row_major);
+                                               row_major,
+                                               ptr_array,
+                                               offset_d);
     }
 
     // Post-launch hook shared by single- and grouped-GEMM. Acquires one
@@ -619,9 +632,10 @@ namespace
             return rocblaslt_status_success;
         rocblaslt_status agg = rocblaslt_status_success;
         enumerate(call_id,
-                  [&](const TensileLite::ContractionProblemGemm& prob, const void* d) {
+                  [&](const TensileLite::ContractionProblemGemm& prob,
+                      const TensileLite::ContractionInputs&      inputs) {
                       const auto st = maybe_check_numerics_problem(
-                          handle, stream, prob, d, call_id);
+                          handle, stream, prob, inputs, call_id);
                       if(st != rocblaslt_status_success && agg == rocblaslt_status_success)
                           agg = st;
                   });
@@ -2030,6 +2044,16 @@ namespace
         return needsPadFreeDim;
     }
 
+    // The adaptive launch's occupancy probe target; none outside one.
+    void setOccupancyProbe(TensileLite::ContractionProblemParameters& params,
+                           const RocblasltContractionProblem&         prob)
+    {
+        if(const auto* launch = prob.adaptive_launch)
+            params.setOccupancyProbe(launch->probeAddr, launch->epoch, launch->minGrid);
+        else
+            params.setOccupancyProbe(nullptr, 0, 0);
+    }
+
     /****************************************************************
  * Construct a Tensile Problem from a RocblasltContractionProblem *
  ****************************************************************/
@@ -2062,6 +2086,10 @@ namespace
         double alpha = 0, beta = 0;
         assignAlphaBeta(compute_type, a_type, prob.alpha, prob.beta, &alpha, &beta);
         auto k = prob.k && alpha ? prob.k : 0;
+
+        // The caller pointer keeps this width. The f16 fallback below widens only
+        // the tensile compute type, because those kernels accumulate in float.
+        const auto scalarStorageType = compute_type;
 
         // fallback to f32 for f16 compute type after alpha/beta assignment
         if(prob.compute_type == rocblaslt_compute_f16)
@@ -2183,6 +2211,8 @@ namespace
                                || a_type == rocisa::DataType::ComplexDouble);
 
         auto alphaBetaType = isComplexInput ? a_type : compute_type;
+        // Do not load through alphaBetaType: for f16 compute it is the f32 fallback.
+        const auto scalarLoadType = isComplexInput ? a_type : scalarStorageType;
 
         tensileProblem.setAlphaType(alphaBetaType);
         tensileProblem.setBetaType(alphaBetaType);
@@ -2205,10 +2235,10 @@ namespace
             tensileProblem.setAlphaRestriction(TensileLite::toScalarValueEnum(0.0));
         else
             tensileProblem.setAlphaRestriction(
-                get_scalar_value_from_void_ptr(prob.alpha, alphaBetaType));
+                get_scalar_value_from_void_ptr(prob.alpha, scalarLoadType));
 
         tensileProblem.setBetaRestriction(
-            get_scalar_value_from_void_ptr(prob.beta, alphaBetaType));
+            get_scalar_value_from_void_ptr(prob.beta, scalarLoadType));
 
         // Add problem predicates for CEqualsD
         tensileProblem.setCEqualsD(prob.C == prob.D);
@@ -2355,6 +2385,7 @@ namespace
         // the effective CU budget. Non-StreamK=5 solutions ignore it.
         tensileProblem.setParams().setStreamKTileSchedulingMode(prob.streamk_tile_scheduling_ext);
         tensileProblem.setParams().setSmCountTarget(prob.sm_count_target);
+        setOccupancyProbe(tensileProblem.setParams(), prob);
 
         tensileProblem.setParams().setUniformSummationOrder(prob.uniform_summation_order != 0);
 
@@ -2472,6 +2503,10 @@ namespace
         double alpha = 0, beta = 0;
         assignAlphaBeta(compute_type, a_type, prob.alpha, prob.beta, &alpha, &beta);
 
+        // The caller pointer keeps this width. The f16 fallback below widens only
+        // the tensile compute type, because those kernels accumulate in float.
+        const auto scalarStorageType = compute_type;
+
         // fallback to f32 for f16 compute type after alpha/beta assignment
         if(prob.compute_type == rocblaslt_compute_f16)
         {
@@ -2489,6 +2524,8 @@ namespace
                                || a_type == rocisa::DataType::ComplexDouble);
 
         auto alphaBetaType = isComplexInput ? a_type : compute_type;
+        // Do not load through alphaBetaType: for f16 compute it is the f32 fallback.
+        const auto scalarLoadType = isComplexInput ? a_type : scalarStorageType;
 
         tensileProblem.setAlphaType(alphaBetaType);
         tensileProblem.setBetaType(alphaBetaType);
@@ -2511,10 +2548,10 @@ namespace
             tensileProblem.setAlphaRestriction(TensileLite::toScalarValueEnum(0.0));
         else
             tensileProblem.setAlphaRestriction(
-                get_scalar_value_from_void_ptr(prob.alpha, alphaBetaType));
+                get_scalar_value_from_void_ptr(prob.alpha, scalarLoadType));
 
         tensileProblem.setBetaRestriction(
-            get_scalar_value_from_void_ptr(prob.beta, alphaBetaType));
+            get_scalar_value_from_void_ptr(prob.beta, scalarLoadType));
 
         // Add problem predicates for CEqualsD
         tensileProblem.setCEqualsD(prob.C == prob.D);
@@ -2647,6 +2684,7 @@ namespace
         // companion block in ConstructTensileProblem for details.
         tensileProblem.setParams().setStreamKTileSchedulingMode(prob.streamk_tile_scheduling_ext);
         tensileProblem.setParams().setSmCountTarget(prob.sm_count_target);
+        setOccupancyProbe(tensileProblem.setParams(), prob);
 
         tensileProblem.setParams().setUniformSummationOrder(prob.uniform_summation_order != 0);
 
@@ -3644,7 +3682,8 @@ TensileLite::ProblemOverride
     po.swizzleA              = problem.swizzleA;
     po.swizzleB              = problem.swizzleB;
     po.streamkTileScheduling = problem.streamk_tile_scheduling_ext;
-    po.smCountTarget         = problem.sm_count_target;
+    // An adaptive hint is transient; the requested target is 0 then.
+    po.smCountTarget         = problem.adaptive_sm_count ? 0 : problem.sm_count_target;
     po.uniformSummationOrder = problem.uniform_summation_order != 0;
 
     const auto& device = getDeviceIdentity();
@@ -3709,7 +3748,7 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
 // enable.
 void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
-                                bool                   value)
+                                int32_t                value)
 {
     if(!gemmData)
         return;
@@ -3718,11 +3757,10 @@ void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
         auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
         if(data)
         {
-            const bool existing = data->problem.getParams().uniformSummationOrder();
-            data->problem.setParams().setUniformSummationOrder(existing || value);
+            data->problem.setParams().setUniformSummationOrder(value);
 
             // Kept in step for the same reason as the stream-K mode above.
-            data->tuningKey.uniformSummationOrder = existing || value;
+            data->tuningKey.uniformSummationOrder = value;
         }
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
@@ -3732,8 +3770,7 @@ void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
         {
             for(auto& g : data->problem.gemms)
             {
-                const bool existing = g.getParams().uniformSummationOrder();
-                g.setParams().setUniformSummationOrder(existing || value);
+                g.setParams().setUniformSummationOrder(value);
             }
         }
     }
@@ -6055,6 +6092,12 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             t_lastLaunchedIndex = solution->index;
             status = hip2RocStatus(
                 adapter->launchKernels(kernels, prob.stream, nullptr, nullptr, isPreloaded));
+            if(prob.adaptive_launch)
+                prob.adaptive_launch->probed
+                    = status == rocblaslt_status_success
+                      && std::any_of(kernels.begin(), kernels.end(), [](auto const& k) {
+                             return k.occupancyProbe;
+                         });
             if(rocblaslt::Debug::Instance().printLogAsMarker())
                 rocblaslt::Debug::Instance().logMarkerStop();
         }
@@ -6089,11 +6132,20 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
     rocblaslt_status status = rocblaslt_status_internal_error;
     try
     {
-        // Check if pointer is valid
-        // Update for the valid case: (alpha=0 && (A=NULL || B=NULL))
+        // Check if pointer is valid.
+        // A host alpha of 0 may leave A or B null. Load alpha at the scalar
+        // width: a 4-byte read of a HIP_R_16F alpha over-reads the caller
+        // (ROCM-31553). The ext API leaves scale_type invalid; the width then
+        // follows the compute type, or the A type when A is complex.
+        const hipDataType scalar_type
+            = alphaBetaScalarType(problem.scale_type, problem.compute_type, problem.a_type);
         if(problem.alpha == nullptr || problem.beta == nullptr || problem.C == nullptr
            || problem.D == nullptr
-           || ((*((float*)problem.alpha)) && (problem.A == nullptr || problem.B == nullptr)))
+           || alphaForbidsNullAB(scalar_type,
+                                 rocblaslt_pointer_mode_host,
+                                 problem.alpha,
+                                 problem.A,
+                                 problem.B))
         {
             log_error(__func__, "invalid data pointer");
             return rocblaslt_status_invalid_pointer;
@@ -6280,7 +6332,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 return rocblaslt_status_invalid_value;
             }
 
-            if(data->problem.getParams().uniformSummationOrder())
+            if(data->problem.getParams().uniformSummationOrder() == 1)
                 warnUniformSummationOrderBypass(__func__, tuning != nullptr);
 
             if(tuning)
@@ -6356,7 +6408,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             }
 
             if(!data->problem.gemms.empty()
-               && data->problem.gemms[0].getParams().uniformSummationOrder())
+               && data->problem.gemms[0].getParams().uniformSummationOrder() == 1)
                 warnUniformSummationOrderBypass(__func__, tuning != nullptr);
 
             if(tuning)
@@ -6570,7 +6622,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
             {
                 auto st = check_numerics_post_launch(
                     handle, stream, [&](uint32_t /*cid*/, auto visit) {
-                        visit(data->problem, data->inputs.d);
+                        visit(data->problem, data->inputs);
                     });
                 if(st != rocblaslt_status_success)
                     status = st;
@@ -6640,7 +6692,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
                         const size_t N = std::min(data->problem.gemms.size(),
                                                   data->inputs.grouped.size());
                         for(size_t i = 0; i < N; ++i)
-                            visit(data->problem.gemms[i], data->inputs.grouped[i].d);
+                            visit(data->problem.gemms[i], data->inputs.grouped[i]);
                     });
                 if(st != rocblaslt_status_success && status == rocblaslt_status_success)
                     status = st;
@@ -6963,7 +7015,7 @@ inline void reportNoSolutionFound(TensileLite::ContractionProblemGemm const& ten
 
     std::ostringstream msg;
     msg << "hipBLASLt-USO-NOSOLUTION"
-        << " uso=" << (tensile_prob.getParams().uniformSummationOrder() ? 1 : 0)
+        << " uso=" << (tensile_prob.getParams().uniformSummationOrder())
         << " op=" << tensile_prob.operationIdentifier() << " m=" << m << " n=" << n << " k=" << k
         << " batch=" << batch << " transA=" << (tensile_prob.transA() ? 1 : 0)
         << " transB=" << (tensile_prob.transB() ? 1 : 0)
@@ -7637,7 +7689,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         // is checked only at launch, which throws if it is missing). With USO
         // off, selection must not widen: problemPredicate && taskPredicate only.
         bool swMatch;
-        if(tensile_prob.getParams().uniformSummationOrder())
+        if(tensile_prob.getParams().uniformSummationOrder() == 1)
         {
             swMatch = TensileLite::softwarePredicate(TensileLite::SolutionLibrarySearchType::DEFAULT,
                                                      task,
@@ -7729,7 +7781,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             // setGroupedGemm(true) feeds the grouped-GEMM branch of
             // uniformSummationOrderSupported(), but it persists on the caller's
             // problem, so guard it to leave USO-off selection unchanged.
-            if(tensile_prob.gemms[i].getParams().uniformSummationOrder())
+            if(tensile_prob.gemms[i].getParams().uniformSummationOrder() == 1)
                 tensile_prob.gemms[i].setGroupedGemm(true);
             // set this flag for SW predicate
             tensile_prob.gemms[i].setParams().setFallbackStatus(isCUFallback);
@@ -7742,7 +7794,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             bool match = (*solution->hardwarePredicate)(*hardware);
             if(match)
             {
-                if(tensile_prob.gemms[i].getParams().uniformSummationOrder())
+                if(tensile_prob.gemms[i].getParams().uniformSummationOrder() == 1)
                     match = TensileLite::softwarePredicate(
                         TensileLite::SolutionLibrarySearchType::DEFAULT,
                         task,
@@ -8052,7 +8104,7 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
             // setGroupedGemm(true) feeds the grouped-GEMM branch of
             // uniformSummationOrderSupported(), but it persists on data->problem,
             // so guard it to leave USO-off selection unchanged.
-            if(data->problem.gemms[i].getParams().uniformSummationOrder())
+            if(data->problem.gemms[i].getParams().uniformSummationOrder() == 1)
                 data->problem.gemms[i].setGroupedGemm(true);
         }
 

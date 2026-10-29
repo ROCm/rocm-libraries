@@ -589,11 +589,15 @@ therefore matches a graph once. The compiled pattern and criteria are built once
 every graph; only the binding result is per-problem.
 
 A non-empty catalog commits the engine to producing a launchable kernel, because the catalog is
-settled during applicability. A later failure surfaces as a failed plan build, not a fallback to
-another engine. This is RFC 0017 §8.6's base-path invariant, and it is what makes match semantics
-load-bearing. A pattern or criteria set that accepts a graph its kernel cannot serve turns a decline
-into a user-visible error rather than a retry. That is the reason every quantity a kernel bakes must
-be pinned by a `$kernel.*` criterion ([§3](#3-criteria-vocabulary)).
+settled during applicability. A later failure is a bug in the engine, not a legal way to decline.
+This is RFC 0017 §8.6's base-path invariant, and it is what makes match semantics load-bearing.
+The frontend's default plan build does tolerate such a failure, logging a WARN and trying the other
+ranked engines, but that is a safety net and not a substitute for matching
+([RFC 0017 §8.6](0017_UniversalKernelDescriptor.md#86-the-base-path-invariant)). A pattern or
+criteria set that accepts a graph its kernel cannot serve turns a decline into a user-visible
+warning and a fallback, or into an error when no other engine can run the graph. That is the reason
+every quantity a kernel bakes must be pinned by a `$kernel.*` criterion
+([§3](#3-criteria-vocabulary)).
 
 Device properties are constant per stream, so a `$device.<field>` sub-expression (for example
 `$device.lds_size`) is evaluated once per graph. Architecture is not a match-time criterion at all

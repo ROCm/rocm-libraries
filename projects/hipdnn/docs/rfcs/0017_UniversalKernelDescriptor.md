@@ -130,6 +130,7 @@ adapter yet.
 | Heuristic sources | `NATIVE` (a registered C++ score symbol). Not yet built: LightGBM model; custom C-API library | other model formats, static tables |
 | Runtime drop-in | None | prebuilt code objects (opt-in, off by default); JIT-compiled sources. Prebuilt code objects ship through build-time packing (`kind: hsaco`) |
 | Multi-kernel launch program (e.g. SDPA backward) | Kernel descriptor: a `sources` map of several launches ([§15.1](#151-several-kernels-for-one-operation)), authored as `rocke` entries and launched in an order the pack's native handler owns | the dispatch-descriptor `launches[]` program, intermediates and cross-step checks; `hip` and `hsaco` entries; composition |
+| Independently selected kernels per engine (e.g. split SDPA backward) | None | kernel slots, [RFC 0021](0021_KernelSlots.md) (draft); orthogonal to `sources` ([§15.4](#154-execution-and-selection)) |
 | Selection composition: UCD (Universal Composite Descriptor) decomposition | None | composition |
 | JIT compilation; normalized providers | None | JIT |
 | Authoring workflow | agentic skills that draft, validate, and inspect descriptors | further skills for retraining, packaging, and migration |
@@ -1543,7 +1544,9 @@ arrives with no execution context, so in general no kernel has been chosen yet. 
 filter the config carries, load the dispatch descriptor of each surviving kernel's pack, and
 evaluate its workspace requirement over the cached bound token state: `workspace_bytes`, or for a
 multi-launch program the sum of its intermediates and each Launch's own scratch
-([Section 15.3](#153-intermediate-buffers)). Report the **maximum** across survivors.
+([Section 15.3](#153-intermediate-buffers)). Report the **maximum** across survivors. (For an engine
+with kernel slots, the shared region plus the largest slot scratch;
+[RFC 0021 § 6](0021_KernelSlots.md#6-shared-workspace-and-arguments).)
 *Why the dispatch descriptor loads here:* workspace is the first question whose answer is a
 dispatch property.
 *Stored:* the parsed dispatch descriptors, in the descriptor cache; the plan build reuses them.
@@ -1586,14 +1589,23 @@ hipDNN moves on to the next engine having lost nothing.
 
 After that the promise is binding. hipDNN has already chosen this engine on the strength of it, so
 a later failure (a heuristic that ranks nothing, a source that fails to resolve, a descriptor that
-fails validation) is not a fallback to another engine; it surfaces to the caller as a failed plan
-build. The catalog is settled during applicability and every later stage is a read, so the cost of
-being wrong is paid by the user, not absorbed by the framework. Producing no launchable kernel after
-accepting is a bug, not a legal outcome. For a multi-launch kernel
+fails validation, a resource or device error, an internal error) is not a legal way to decline and,
+over a stable inventory (scoped below), is a bug in the engine. The catalog is settled during
+applicability and every later stage is a read, so there is nothing an engine can legitimately learn
+late. Producing no launchable kernel after accepting is a bug, not a legal outcome. For a multi-launch kernel
 ([§15.1](#151-several-kernels-for-one-operation)) that includes the launch set: a kernel whose
 launch names differ from those its pack's handler declares is dropped when the catalog is built,
 never accepted. The same invariant applies to a composite's mandatory
 stage.
+
+The frontend nevertheless tolerates an engine that breaks the promise. The default
+`build_plans` finalizes the active plan, and when that fails for any reason it logs a WARN naming
+the engine and the failure and tries the other ranked plans, scanning from the top of the list, so
+a faulty engine does not take down a graph another engine can run. Each plan that fails logs its
+own WARN. When no plan builds, the call returns `GRAPH_EXECUTION_PLAN_CREATION_FAILED` with every
+attempted engine's failure in the message. This is a safety net, not a way to decline after
+applicability: it does not relax the invariant, and declining is returning false from
+`isApplicable`.
 
 The invariant is scoped to a stable inventory, which is the one thing the engine does not control.
 A drop-in pack may be deleted between the applicability that accepted it and the plan build that
@@ -2107,7 +2119,7 @@ a descriptor format with the subsystem it drives. Together they form the planned
 | KMD + metadata schema | The metadata format plus the field/type/default declaration and the feature contract the heuristic and matchers consume |
 | Runtime drop-in | Loading custom bundles, compatibility gating, and source-trust rules. Five open questions land here: the enablement and location mechanism; the minimum trust requirement for drop-in source, including whether JIT source is allowed at all; whether a pack may carry its own engine/heuristic pair or must bind an installed one; how an extension provider (a DSL wheel) is bundled and released; and the three removal/deprecation cases |
 | Adapters | Registering kernel-source and heuristic adapters |
-| Composition | Multi-kernel launch, intermediate buffers, and composite (UCD) graph decomposition |
+| Composition | Multi-kernel launch, intermediate buffers, and composite (UCD) graph decomposition. Independently selected kernels per engine are kernel slots ([RFC 0021](0021_KernelSlots.md), draft) |
 | JIT and normalized providers | JIT sources, general pattern matching, and normalizing existing providers onto the descriptor system |
 
 ---

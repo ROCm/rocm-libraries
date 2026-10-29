@@ -388,6 +388,9 @@ class StateValues:
   batchOffsetAKernArgOffset: int         = 0
   batchOffsetBKernArgOffset: int         = 0
   rndSeedKernArgOffset: int              = -1
+  # Kernarg byte offset of ProbeAddr (ProbeEpoch, ProbeGrid follow at +8, +12),
+  # relative to the shifted KernArgAddress; -1 when the kernel has no probe
+  probeKernArgOffset: int                = -1
   numSgprAlpha: int                      = 0 # For user arguments
   numSgprBeta: int                       = 0 # For user arguments
   numStoreSgprNames: List[str]           = field(init=False) # For post-loop kernel args
@@ -2294,7 +2297,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               iterCode.add(waitDsRead)
         else:
           if (kernel["UnrollMajorLDSB"] and not (kernel["ProblemType"]["DataTypeB"].isAnyFloat8() and kernel["ConvertAfterDS"])) and not kernel["UseF32XEmulation"]:
-            if iteration == 0 and i == (kernel["MIWaveTileA"] // kernel["numSubTiles"]):
+            # Complex products use four MFMAs before advancing B. Negations add
+            # scheduler slots, so waiting at index 4 also covers every conjugation.
+            secondWaitIndex = 4 if kernel["ProblemType"]["DataType"].isComplex() else kernel["MIWaveTileA"] // kernel["numSubTiles"]
+            if iteration == 0 and i == secondWaitIndex:
               # add 1 more waitcnt before using ds read data
               waitCode2 = deepcopy(waitCode)
               waitCode2.dscnt = localReadsIssuedInThisIter
@@ -8895,8 +8901,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           compColsB = kernel["MacroTile1"] // numComp
           segILWaveSpansCompB = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * kernel["VectorWidthB"] >= compColsB
           if wavesPerCompB == 1 and not segILWaveSpansCompB:
-            writeStride = kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
-            reachB = (numComp - 1) * writeStride + maxOffsetB // numComp
+            segOffsets = kernel["LDSSegInterleaveOffsets"]
+            readStride = segOffsets.get("readStrideBytesB", segOffsets["writeStrideBytes"])
+            reachB = (numComp - 1) * readStride + maxOffsetB // numComp
             maxOffsetB = max(maxOffsetB, reachB)
 
         numVgprMultiplierA = maxOffsetA // maxLDSConstOffset + 1
@@ -8906,6 +8913,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           numVgprMultiplierB = (maxOffsetB + maxLDSConstOffset - 1) // maxLDSConstOffset
         else:
           numVgprMultiplierB = maxOffsetB // maxLDSConstOffset + 1
+        readWindowsB = (kernel.get("LDSSegInterleaveOffsets") or {}).get("readAddressWindowsB")
+        if readWindowsB is not None:
+          assert maxLDSConstOffset == 65536 and readWindowsB[0] == 0
+          assert not kernel["ExpandPointerSwap"] and not kernel["LDSSegmentBRotate"]
+          numVgprMultiplierB = len(readWindowsB)
         numVgprMultiplierMXSA = maxOffsetMXSA // maxLDSConstOffset + 1
         numVgprMultiplierMXSB = maxOffsetMXSB // maxLDSConstOffset + 1
         numVgprMultiplierMetadata = maxOffsetMetadata // maxLDSConstOffset + 1
@@ -10142,9 +10154,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     self.defineSgpr("OrigLoopCounter", 1)
     if kernel.get("LDSSegmentBRotate"):
-      # B-rotate: per-wave LocalReadAddrB+1 - LocalReadAddrB+0 (pair 0: +64K, pair 1: 64K - 2*S).
+      # B-rotate: per-wave LocalReadAddrB+1 - LocalReadAddrB+0.
       # Defined here (not in defineVariableSgprs) because lraDeclareAddresses is emitted first.
       self.defineSgpr("BRotateLRDelta", 1)
+    if (kernel.get("LDSSegInterleaveOffsets") or {}).get("pairedBuffers"):
+      # A/B descriptors alias on separate waves; each wave keeps its own ping/pong mask.
+      self.defineSgpr("PairedTDMSwap", 1)
+      if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+        self.defineSgpr("PairedTDMScaleSwap", 1)
 
     # PostLoopStoreInNll: persistent "this tile fuses the store" predicate, precomputed
     # per-tile before the main loop (see computePostLoopFusedStore). It ANDs every
@@ -10614,7 +10631,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if self.states.lrvwTileMXSA > 1:
           if self.states.asmCaps["HasWMMA_V3"]:
             mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockA"]
-            numMXSA = numMXSA // int(tensorParametersA["MX"]["localReadInstruction"].blockWidth * 4 // mxUnit)
+            # Reads narrower than one MX unit give a ratio below 1, which the
+            # inner floor-divide truncates to 0 and then divides by. Keep the
+            # ratio fractional: such a read covers a fraction of a tile and
+            # needs proportionally more reads, not an error.
+            tilePerReadMXSA = tensorParametersA["MX"]["localReadInstruction"].blockWidth * 4 / mxUnit
+            numMXSA = int(numMXSA / tilePerReadMXSA)
           else:
             numMXSA = numMXSA // kernel["VectorWidthA"]
 
@@ -10652,7 +10674,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if self.states.lrvwTileMXSB > 1:
           if self.states.asmCaps["HasWMMA_V3"]:
             mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockB"]
-            numMXSB = numMXSB // int(tensorParametersB["MX"]["localReadInstruction"].blockWidth * 4 // mxUnit)
+            # Reads narrower than one MX unit give a ratio below 1, which the
+            # inner floor-divide truncates to 0 and then divides by. Keep the
+            # ratio fractional: such a read covers a fraction of a tile and
+            # needs proportionally more reads, not an error.
+            tilePerReadMXSB = tensorParametersB["MX"]["localReadInstruction"].blockWidth * 4 / mxUnit
+            numMXSB = int(numMXSB / tilePerReadMXSB)
           else:
             numMXSB = numMXSB // kernel["VectorWidthB"]
 
@@ -11091,6 +11118,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       swz = swizzleGeometry(kernel, cM)
       tP["swizzlePackK"]        = swz["packK"]
       tP["swizzleK"]            = swz["swizzleK"]
+      tP["swizzleLayoutK"]      = swz["layoutK"]
       tP["swizzleLaneSize"]     = swz["laneSize"]
       tP["swizzleLanesUsed"]    = swz["lanesUsed"]
       tP["swizzleLoadsPerLane"] = swz["loadsPerLane"]
@@ -12191,9 +12219,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       _reg("address", "Synchronizer")
       _reg("uint32", "GSUSync")
 
-    if isPersistentDataParallel(kernel) and not kernel["ProblemType"]["GroupedGemm"]:
+    if not kernel["ProblemType"]["GroupedGemm"]:
       for tensor in ("D", "C", "A", "B"):
         _reg("uint64", "BatchOffset" + tensor)
+
+    # One entry for the whole fixed-size fusegemmm a2a segment
+    if kernel["ProblemType"]["FusedGemmA2A"]:
+      _reg("uint32", "FusedA2ASegment")
 
   def _getKernelSource(self, kernel: Solution):
     """
