@@ -143,23 +143,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
 
     int8_t alpha_1[16] = {0}; // use dScaleAlphaVec instead, original alpha => 1.0
     if(scaleAlphaVec)
-    {
-        if(matmul_descr->compute_type == rocblaslt_compute_f64)
-        {
-            *((double*)alpha_1) = 1.f;
-            alpha               = alpha_1;
-        }
-        else if(matmul_descr->compute_type == rocblaslt_compute_i32)
-        {
-            *((int32_t*)alpha_1) = 1.f;
-            alpha                = alpha_1;
-        }
-        else
-        {
-            *((float*)alpha_1) = 1.f;
-            alpha              = alpha_1;
-        }
-    }
+        setTo1(matmul_descr->compute_type, alpha_1, &alpha);
 
     // FIXME: Is this still needed?
     // // check alignment of pointers before casting
@@ -613,7 +597,12 @@ rocblaslt_status
                                             batch_stride_b,
                                             batch_stride_c,
                                             batch_stride_d,
-                                            matmul_descr[i]->pointermode);
+                                            0,
+                                            0,
+                                            0,
+                                            0,
+                                            matmul_descr[i]->pointermode,
+                                            matmul_descr[i]->scale_type);
         if(validArgs == rocblaslt_status_success)
             continue;
 
@@ -871,9 +860,12 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
                                         workspaceSizeInBytes,
                                         stream);
 
-    // Update for the valid case: ((alpha_in_host && alpha=0) && (A=NULL || B=NULL))
-    bool alpha_A_B_violation
-        = (!alpha || ((matmul_descr->pointermode || (*((float*)alpha))) && (!A || !B)));
+    // A host alpha of 0 may leave A or B null. Load alpha at the scale-type
+    // width: a 4-byte read of a HIP_R_16F alpha over-reads the caller (ROCM-31553).
+    const hipDataType scalar_type = alphaBetaScalarType(
+        matmul_descr->scale_type, matmul_descr->compute_type, matA->type);
+    const bool alpha_A_B_violation = alphaForbidsNullAB(
+        scalar_type, matmul_descr->pointermode, alpha, A, B);
 
     // Check if pointer is valid
     if(alpha == nullptr || beta == nullptr || C == nullptr || D == nullptr || alpha_A_B_violation)
@@ -927,16 +919,15 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
 
     if(get_logger_layer_mode() != rocblaslt_layer_mode_none)
     {
-        hipDataType alpha_type = matA->type;
-        hipDataType beta_type  = matD->type;
-        
         // alpha is a device pointer when scaleAlpha_vector (pointermode != 0) is set;
         // avoid CPU dereference which causes an access violation on Windows.
+        // Both scalars have the descriptor scale type, which can be narrower
+        // than a float (HIP_R_16F is 2 bytes).
         auto alpha_scalar = (!matmul_descr->pointermode && alpha)
-                            ? get_alpha_beta_scalar(alpha_type, alpha)
+                            ? get_alpha_beta_scalar(matmul_descr->scale_type, alpha)
                             : hipblaslt_complex_double{0.0, 0.0};
         auto beta_scalar  = (!matmul_descr->pointermode && beta)
-                            ? get_alpha_beta_scalar(beta_type, beta)
+                            ? get_alpha_beta_scalar(matmul_descr->scale_type, beta)
                             : hipblaslt_complex_double{0.0, 0.0};
 
         log_trace(
