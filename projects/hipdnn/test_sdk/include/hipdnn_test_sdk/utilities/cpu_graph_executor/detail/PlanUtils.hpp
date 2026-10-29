@@ -10,6 +10,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -318,12 +319,17 @@ bool isSupportedSdpaSink(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttribu
     return dims == std::vector<int64_t>{1, qIt->second->dims()->Get(1), 1, 1};
 }
 
-/// Whether an SDPA node's runtime attention scale is one the references can read: absent, or one
-/// element that is baked, pass-by-value, or an ordinary FLOAT tensor. Works for forward and
-/// backward attributes.
+/// Whether an SDPA node's attention scale is one the references can read: a finite baked
+/// attn_scale_value, or a runtime scale that is absent or one element that is baked, pass-by-value,
+/// or an ordinary FLOAT tensor. Works for forward and backward attributes.
 template <typename SdpaAttributesType, typename TensorMap>
 bool isSupportedSdpaScaleOperand(const SdpaAttributesType& attrs, const TensorMap& tensorMap)
 {
+    // A non-finite scale turns every output into NaN, which no engine result can be graded against.
+    if(attrs.attn_scale_value().has_value() && !std::isfinite(attrs.attn_scale_value().value()))
+    {
+        return false;
+    }
     if(!attrs.scale_tensor_uid().has_value())
     {
         return true;
@@ -387,10 +393,21 @@ bool isSupportedSdpaDropout(const SdpaAttributesType& attrs, const TensorMap& te
     const auto* m = maskIt->second->dims();
     const auto* q = qIt->second->dims();
     const auto* k = kIt->second->dims();
-    return scaleCount == 1 && m->size() == 4 && q->size() == 4 && k->size() == 4
-           && (m->Get(0) == q->Get(0) || m->Get(0) == 1)
+    if(m->size() != 4 || q->size() != 4 || k->size() != 4)
+    {
+        return false;
+    }
+    // A paged K's dim 2 is its block size; the mask spans the paged key extent.
+    int64_t seqKv = k->Get(2);
+    if constexpr(std::is_same_v<SdpaAttributesType,
+                                hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>)
+    {
+        const auto paged = sdpaPagedMaxSeqKv(attrs, tensorMap);
+        seqKv = paged > 0 ? paged : seqKv;
+    }
+    return scaleCount == 1 && (m->Get(0) == q->Get(0) || m->Get(0) == 1)
            && (m->Get(1) == q->Get(1) || m->Get(1) == 1) && m->Get(2) == q->Get(2)
-           && m->Get(3) == k->Get(2);
+           && m->Get(3) == seqKv;
 }
 
 /// cuDNN's block-sparse mask as the references implement it (SEM-025): UINT8

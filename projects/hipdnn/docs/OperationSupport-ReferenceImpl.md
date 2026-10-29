@@ -45,7 +45,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | Resample Forward | FP16, BFP16, FP32 | Op-defined | CPU Reference | MAXPOOL / AVGPOOL modes only; optional INT32 index output |
 | Resample Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | Same modes as forward; MAXPOOL requires the INT32 index tensor |
 | SDPA Forward (dense) | FP16, BFP16, FP32, FP8 (E4M3, E5M2 and their FNUZ forms) | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
-| SDPA Forward (ragged) | BFP16, FP8 E4M3 | Op-defined | CPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset`; see [SDPA Restrictions](#sdpa-restrictions) |
+| SDPA Forward (ragged) | Native: BFP16, FP8 E4M3; other dtypes through the dense rewrite | Op-defined | CPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset`; see [SDPA Restrictions](#sdpa-restrictions) |
 | SDPA Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | BlockScale Quantize | FP32, FP16, BFP16 in; FP8, FP6, FP4 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
 | BlockScale Dequantize | FP8, FP6, FP4 in; FP32, FP16, BFP16 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
@@ -149,7 +149,8 @@ Design, the full feature table for both references, and how they are tested:
 | Ragged tensors | Through the dense rewrite (below) | Required on every Q/K/V/O | Through the dense rewrite (below) |
 | FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs. cuDNN `sdpa_fp8` softmax and output scaling: `scale_s` with `descale_s`, `scale_o`, and the `amax_s` / `amax_o` outputs, each a one-element `FLOAT` tensor (SEM-024); not with dropout | Optional `FLOAT` Q/K/V descales (scalar `[1]` or per KV head `[B, H_kv, 1, 1]`) for any registered dtype; softmax descale, softmax/output scales and amax go through the dense rewrite | - |
 
-"Not supported" means the reference reports the graph as not applicable; it never ignores an attribute.
+"Not supported" means the reference reports the graph as not applicable. Every attribute is implemented,
+declined, or an accepted engine hint (`generate_stats`, `mma_core_mode`, `implementation`, `compute_data_type`).
 "Through the dense rewrite" means the native ragged plan declines the feature and the executor runs the
 graph through the dense rewrite (below) under the dense column's rules.
 Dense FP8 forward is registered for `FP8_E4M3`, `FP8_E4M3_FNUZ`, `FP8_E5M2` and `FP8_E5M2_FNUZ` inputs

@@ -9,6 +9,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -149,6 +150,18 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
             return std::nullopt;
         }
         roleOf.emplace(role.uid, role);
+    }
+    // A ragged offset on a paged K/V container would count tokens through its pages, which no
+    // reference defines (ragged Q over a non-ragged paged K/V is fine), so it is declined.
+    if constexpr(std::is_same_v<AttrsT, hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT>)
+    {
+        if((attrs.page_table_k_tensor_uid.has_value()
+            && tensors.at(attrs.k_tensor_uid)->ragged_offset_tensor_uid.has_value())
+           || (attrs.page_table_v_tensor_uid.has_value()
+               && tensors.at(attrs.v_tensor_uid)->ragged_offset_tensor_uid.has_value()))
+        {
+            return std::nullopt;
+        }
     }
     // Only the node's primaries (and a packed LSE) may be ragged.
     for(const auto& [uid, tensor] : tensors)

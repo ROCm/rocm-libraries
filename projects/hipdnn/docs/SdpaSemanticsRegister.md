@@ -281,7 +281,8 @@ batch when `seq_len_q/kv` are set).
 - **hipDNN:** the references implement cuDNN's form: `(skv - sq) * slope(h)` added after the bias, with cuDNN's
   per-query-head slopes (`get_alibi_slope`: 2^(-8 (h+1)/n) for the closest power of two n <= H, then
   2^(-4 (2j+1)/n)). The plans accept `alibi_mask` only with top-left causal masking, as cuDNN does; bottom-right or
-  non-causal ALiBi is declined. The backward has no extra term.
+  non-causal ALiBi is declined. The frontend accepts those graphs, so the decline is a reference choice
+  that follows cuDNN, not an API limit. The backward has no extra term.
 - **Contract:** cuDNN. Adapters for FA/TE-style ALiBi must convert to cuDNN's form or use an explicit bias.
 
 ### SEM-022: Attention sinks

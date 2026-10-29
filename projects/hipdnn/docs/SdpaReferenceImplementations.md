@@ -68,14 +68,15 @@ bundles and the plan unit tests do.
 
 The table lists every attribute of the hipDNN SDPA graph nodes (`sdpa_attributes.fbs`,
 `sdpa_backward_attributes.fbs`). Both references support everything marked Yes. The plans decline
-(report "not applicable") anything else, field by field. They never ignore an attribute.
+(report "not applicable") anything else, field by field. Every attribute is implemented, declined, or
+listed as an accepted hint (the last row).
 
 ### 2.1 Forward (`SdpaAttributes`)
 
 | Feature | Support (CPU and GPU) | Semantics |
 |---|---|---|
 | Q/K/V/O dtypes | FP32; FP16; BF16 (O the same, or FP32 for FP16/BF16 inputs); FP8 E4M3, E4M3 FNUZ, E5M2, E5M2 FNUZ inputs with BF16 output or output in the input's fp8 format | compute in FP32 |
-| Layout | any strides: BHSD, BSHD, interleaved K/V rows | |
+| Layout | any positive strides: BHSD, BSHD, interleaved K/V rows | |
 | GQA / MQA | `H_q` divisible by `H_k` and `H_v` (independent) | |
 | `D_qk != D_v` | Yes | |
 | Scale (`attn_scale_value` or scale tensor, device or pass-by-value) | Yes; absent = 1.0 | SEM-013 |
@@ -83,16 +84,16 @@ The table lists every attribute of the hipDNN SDPA graph nodes (`sdpa_attributes
 | Diagonal band (`left_bound`, `right_bound`, `diagonal_alignment`; deprecated causal flags) | Yes; bottom-right measured from each batch's live lengths | SEM-001, 003, 004, 005 |
 | Padding (`seq_len_q/kv`, `padding_mask`) | INT32 `[B, 1, 1, 1]`, both; pad rows give `O = 0`, `LSE = -inf` | SEM-008, 010 |
 | Paged K/V (`page_table_k/v`, `max_seq_len_kv`) | K, V or both paged, each with its own block size; table INT32 `[B, 1, ceil(max/block), 1]`; extent inferred as cuDNN does when unset; needs padding | SEM-009 |
-| Ragged tensors (`ragged_offset` on any primary) | native forward for BF16 and FP8 E4M3; everything else (other dtypes, bias, sinks, paged K/V, backward) through the dense rewrite | RFC 0014 |
+| Ragged tensors (`ragged_offset` on any primary) | native forward for BF16 and FP8 E4M3; everything else (other dtypes, bias, sinks, ragged Q over paged K/V, backward) through the dense rewrite; a `ragged_offset` on a paged K/V container is declined | RFC 0014 |
 | Attention sink (`sink_token`) | FLOAT `[1, H_q, 1, 1]` | SEM-022 |
-| ALiBi (`alibi_mask`) | cuDNN slopes, `+ (skv - sq) * slope(h)`; top-left causal only (as cuDNN) | SEM-021 |
+| ALiBi (`alibi_mask`) | cuDNN slopes, `+ (skv - sq) * slope(h)`; top-left causal only (as cuDNN). The frontend accepts other alignments; the references decline them | SEM-021 |
 | Block-sparse mask (`block_mask`) | UINT8, one bit per 128 x 128 tile | SEM-025 |
 | Dropout, explicit mask (`dropout_mask`, `dropout_scale`) | FLOAT `[B or 1, H or 1, Sq, Skv]` | SEM-015 |
 | Dropout, Philox (`dropout_probability`, seed, offset) | only with an `rng_dump` output (the engine's keep mask is applied) | SEM-015 |
 | fp8 Q/K/V descales | scalar or `[B, H_kv, 1, 1]` FLOAT (a paged side needs a scalar on the GPU) | |
 | fp8 softmax / output scaling (`scale_s`, `descale_s`, `scale_o`, `amax_s`, `amax_o`) | one-element FLOAT; `scale_s` with `descale_s`; fp8 inputs only; not with dropout | SEM-024 |
 | Outputs: `stats` (LSE), `Max`, `Sum_exp` | FLOAT `[B, H, Sq, 1]` (packed when ragged) | SEM-011, 023 |
-| `generate_stats`, `mma_core_mode`, `implementation` | accepted; engine hints with no meaning for an FP32 oracle | |
+| `generate_stats`, `mma_core_mode`, `implementation`, the node's `compute_data_type` | accepted; engine hints with no meaning for an FP32 oracle | |
 
 ### 2.2 Backward (`SdpaBackwardAttributes`)
 
@@ -231,7 +232,8 @@ that its tests fail on the code before the change.
 Each plan reads and gates every schema field it could be given: dtype, shape, rank, presence and
 combination. Each rule has a decline test, and the CPU and GPU plans are tested with the same graphs
 (`SdpaFwdTestGraphs.hpp`). A graph a reference cannot run exactly is reported "not applicable", never
-run approximately.
+run approximately. The one exception is fp8 softmax scaling over more than 128 keys, which matches
+cuDNN only up to its per-tile quantization (SEM-024, section 5).
 
 ## 4. Test tiers
 
@@ -323,8 +325,7 @@ cuDNN, so they come first.
 - **Graphs the references accept but then fail on.** A few malformed operands are not yet declined by
   the plans and throw at execute instead: a descale whose shape is neither one element nor
   `[B, H_kv, 1, 1]`, mis-shaped Max / Sum_exp / stats outputs, `max_seq_len_kv` on a fully ragged graph
-  without paging, a ragged stats tensor on an otherwise dense graph, an explicit dropout mask sized to
-  a paged K's block, and an unknown `diagonal_alignment` value. A mis-shaped dBias passed directly to
+  without paging, a ragged stats tensor on an otherwise dense graph, and an unknown `diagonal_alignment` value. A mis-shaped dBias passed directly to
   the CPU backward is not validated either. Each should become a decline (or an up-front check) with a
   decline test.
 - **`mma_core_mode`** is accepted and ignored. If cuDNN changes P's precision under some modes (for

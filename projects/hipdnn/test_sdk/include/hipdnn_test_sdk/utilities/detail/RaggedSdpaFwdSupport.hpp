@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <unordered_map>
@@ -227,6 +228,13 @@ inline bool isSupportedRaggedSdpaFwdNode(
         {
             return false;
         }
+    }
+
+    // A non-finite baked scale is declined, as the dense plans do (isSupportedSdpaScaleOperand).
+    if(attributes.attn_scale_value().has_value()
+       && !std::isfinite(attributes.attn_scale_value().value()))
+    {
+        return false;
     }
 
     if(attributes.max_tensor_uid().has_value() || attributes.sum_exp_tensor_uid().has_value())

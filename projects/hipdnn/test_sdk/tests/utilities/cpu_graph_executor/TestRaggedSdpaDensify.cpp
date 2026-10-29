@@ -349,3 +349,19 @@ TEST(TestRaggedSdpaDensify, RaggedQOverPagedKvEqualsGatheredDense)
         }
     }
 }
+
+// A ragged_offset on a paged K/V container would count tokens through its pages, which neither
+// reference defines. The rewrite declines it, so the executor reports the graph not applicable
+// instead of accepting it and throwing at execute. Ragged Q over the same paged K/V still rewrites.
+TEST(TestRaggedSdpaDensify, RaggedOffsetOnPagedKvIsDeclined)
+{
+    const auto raggedKv = raggedQPagedKvGraph(false, true);
+    EXPECT_FALSE(hipdnn_test_sdk::detail::densifyRaggedSdpaGraph(raggedKv.data(), raggedKv.size())
+                     .has_value());
+    CpuReferenceGraphExecutor executor;
+    EXPECT_FALSE(executor.isApplicable(const_cast<uint8_t*>(raggedKv.data()), raggedKv.size()));
+
+    const auto denseKv = raggedQPagedKvGraph(false);
+    EXPECT_TRUE(hipdnn_test_sdk::detail::densifyRaggedSdpaGraph(denseKv.data(), denseKv.size())
+                    .has_value());
+}

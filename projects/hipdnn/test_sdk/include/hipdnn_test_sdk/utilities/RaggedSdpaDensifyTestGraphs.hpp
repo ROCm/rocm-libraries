@@ -195,7 +195,9 @@ inline std::vector<uint8_t> raggedGraph(bool backward, bool bias, bool ragged = 
 // a paged K/V cache ([NUM_BLOCKS, H, BLOCK, D] containers, page tables INT32 [B, 1, TABLE, 1],
 // seq_len_kv = KV_LENS), bottom-right causal, with an optional FLOAT sink [1, H, 1, 1].
 // max_seq_len_kv is left unset, so the extent comes from the tables (TABLE * BLOCK = SKV).
-inline std::vector<uint8_t> raggedQPagedKvGraph(bool sink)
+// raggedKv also gives the K/V containers a token-major ragged_offset (KV_OFFSETS), a layout no
+// reference defines.
+inline std::vector<uint8_t> raggedQPagedKvGraph(bool sink, bool raggedKv = false)
 {
     GraphT graph;
     graph.name = "ragged_q_paged_kv";
@@ -203,13 +205,19 @@ inline std::vector<uint8_t> raggedQPagedKvGraph(bool sink)
     graph.compute_data_type = DataType::FLOAT;
     graph.intermediate_data_type = DataType::FLOAT;
     const std::vector<int64_t> containerDims = {NUM_BLOCKS, H, BLOCK, D};
-    const std::vector<int64_t> containerStrides = {H * BLOCK * D, BLOCK * D, D, 1};
+    const std::vector<int64_t> containerStrides
+        = raggedKv ? packedStrides(BLOCK) : std::vector<int64_t>{H * BLOCK * D, BLOCK * D, D, 1};
+    const auto kvOffsets = raggedKv ? std::make_optional<int64_t>(KV_OFFSETS) : std::nullopt;
     auto& t = graph.tensors;
     t.push_back(tensor(Q, DataType::FLOAT, {B, H, SQ, D}, packedStrides(SQ), Q_OFFSETS));
-    t.push_back(tensor(K, DataType::FLOAT, containerDims, containerStrides));
-    t.push_back(tensor(V, DataType::FLOAT, containerDims, containerStrides));
+    t.push_back(tensor(K, DataType::FLOAT, containerDims, containerStrides, kvOffsets));
+    t.push_back(tensor(V, DataType::FLOAT, containerDims, containerStrides, kvOffsets));
     t.push_back(tensor(O, DataType::FLOAT, {B, H, SQ, D}, packedStrides(SQ), Q_OFFSETS));
     t.push_back(tensor(Q_OFFSETS, DataType::INT32, {B + 1, 1, 1, 1}, {1, 1, 1, 1}));
+    if(raggedKv)
+    {
+        t.push_back(tensor(KV_OFFSETS, DataType::INT32, {B + 1, 1, 1, 1}, {1, 1, 1, 1}));
+    }
     t.push_back(tensor(SEQ_Q, DataType::INT32, {B, 1, 1, 1}, {1, 1, 1, 1}));
     t.push_back(tensor(SEQ_KV, DataType::INT32, {B, 1, 1, 1}, {1, 1, 1, 1}));
     t.push_back(tensor(PAGE_TABLE_K, DataType::INT32, {B, 1, TABLE, 1}, {TABLE, TABLE, 1, 1}));

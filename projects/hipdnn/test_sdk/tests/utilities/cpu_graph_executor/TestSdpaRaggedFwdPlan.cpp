@@ -11,8 +11,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <optional>
@@ -852,6 +854,19 @@ TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForTwoElementScale)
     RaggedSdpaFwdGraphOptions options;
     options.scale = operandSpec(SCALE_UID, OperandStorage::TENSOR, SCALE_VALUE, {2});
     EXPECT_FALSE(accepts<Bf16Builder>(makeBf16GateGraph(options)));
+}
+
+// A non-finite baked attn_scale_value turns every output into NaN, so it is declined.
+TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonFiniteBakedScale)
+{
+    for(const float value :
+        {0.5F, std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()})
+    {
+        SdpaAttributesT attrs;
+        attrs.attn_scale_value = value;
+        EXPECT_EQ(accepts<Bf16Builder>(makeBf16GateGraph(withAttrs(attrs))), std::isfinite(value))
+            << "attn_scale_value " << value;
+    }
 }
 
 // An ordinary scale tensor is read back as one float, so it must be FLOAT.
