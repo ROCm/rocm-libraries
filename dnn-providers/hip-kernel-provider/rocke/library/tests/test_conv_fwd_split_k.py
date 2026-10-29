@@ -576,6 +576,34 @@ class TestSplitKAutoBuild(unittest.TestCase):
         self.assertEqual(auto.name, plain.name)
         self.assertNotIn("ks_count", [p.name for p in auto.params])
 
+    def test_auto_with_a_spec_the_split_cannot_take_builds_the_plain_kernel(self):
+        # The problem would split (see above), but a fused accumulator
+        # epilogue keeps the spec out of the split form: auto resolves to 1
+        # and builds the plain kernel with its epilogue, not an error.
+        from kernels.common.conv_implicit_gemm import (
+            ConvAccumulatorEpilogue,
+            resolve_fwd_split_k_spec,
+        )
+
+        for kw in (
+            dict(acc_epilogue=ConvAccumulatorEpilogue(relu=True)),
+            dict(acc_epilogue=ConvAccumulatorEpilogue(bias=1.0)),
+            dict(acc_epilogue=ConvAccumulatorEpilogue(clamp_min=-1.0, clamp_max=1.0)),
+            dict(acc_epilogue=ConvAccumulatorEpilogue(scale=2.0)),
+        ):
+            with self.subTest(**kw):
+                spec = _spec(split_k=-1, **kw)
+                self.assertEqual(resolve_fwd_split_k_spec(spec, "gfx1250").split_k, 1)
+        epi = dict(acc_epilogue=ConvAccumulatorEpilogue(relu=True))
+        auto = build_implicit_gemm_conv(_spec(split_k=-1, **epi), arch="gfx1250")
+        plain = build_implicit_gemm_conv(_spec(**epi), arch="gfx1250")
+        self.assertEqual(auto.name, plain.name)
+        self.assertNotIn("ks_count", [p.name for p in auto.params])
+        # The identity epilogue still splits.
+        self.assertEqual(
+            resolve_fwd_split_k_spec(_spec(split_k=-1), "gfx1250").split_k, 4
+        )
+
     def test_the_backend_resolves_auto_for_the_cpp_engine(self):
         from rocke.core import backend
 

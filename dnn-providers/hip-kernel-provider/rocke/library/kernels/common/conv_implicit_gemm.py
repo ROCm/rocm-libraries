@@ -708,6 +708,12 @@ def resolve_fwd_split_k_spec(
     """``spec`` with an auto (``-1``) ``split_k`` resolved; any other spec is
     returned unchanged.
 
+    A spec the split form cannot take (:func:`fwd_split_k_reason`: a fused
+    accumulator epilogue, async DMA, ``unroll_k`` and the like) resolves to 1,
+    as the problems that form cannot take do, so an auto request still builds
+    the plain kernel. The cluster settings are the caller's and stay out of
+    that check: their own errors still come from validation.
+
     The degree comes from the shared conv split-K resolver
     (:func:`kernels.common.conv_split_k.resolve_conv_split_k`), so a builder
     and the benchmark agree on it. It may resolve to 1 (the plain kernel):
@@ -731,7 +737,16 @@ def resolve_fwd_split_k_spec(
         tile_k=spec.tile_k,
         block_size=spec.block_size,
     )
-    return dc_replace(spec, split_k=resolved.split_k)
+    degree = resolved.split_k
+    if degree > 1:
+        from rocke.core.arch import ArchTarget
+
+        target = ArchTarget.from_gfx(arch)
+        family = "wmma" if target.wave_size == 32 else "mma"
+        probe = dc_replace(spec, split_k=degree, split_k_cluster=0)
+        if fwd_split_k_reason(probe, family, target) is not None:
+            degree = 1
+    return dc_replace(spec, split_k=degree)
 
 
 def is_valid_spec_for_problem(
