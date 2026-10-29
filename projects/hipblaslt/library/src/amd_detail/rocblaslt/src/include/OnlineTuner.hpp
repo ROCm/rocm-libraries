@@ -259,7 +259,9 @@ namespace rocblaslt
      *
      * The event pool is deliberately left alone. A pooled pair belongs to a
      * device and to the HIP runtime, not to a configuration, and destroying
-     * events is what the destructor already declines to do.
+     * events is what the destructor already declines to do. The pairs the
+     * dropped problems still had outstanding are retired, since nothing could
+     * reach them again and they would go on counting against livePairCap().
      */
         void reloadForTest();
 
@@ -276,6 +278,31 @@ namespace rocblaslt
         int coldCalls() const
         {
             return m_coldCalls;
+        }
+
+        /**
+         * @brief The most event pairs the tuner keeps alive on one device,
+         * pooled and outstanding together.
+         *
+         * A pair is only handed back by a later harvest of the problem that
+         * took it, so a shape dispatched once and never again keeps its pair
+         * for the life of the process; with no cold visits that is the
+         * ordinary life of a one-shot shape. The cap is what bounds that.
+         * Once a device holds this many and none is pooled, no new
+         * measurement starts there: beginMeasurement() declines, and the
+         * launch runs exactly as an untuned one would.
+         *
+         * Scaled by topK() * repeats(), which is one whole exploration and
+         * the most a single problem can have outstanding, so the configured
+         * depth is never what the cap starves; c_livePairExplorations of
+         * those is room for that many problems to have their entire
+         * exploration in flight on one device at once. At the defaults that
+         * is a few hundred pairs, a small, fixed number of runtime handles
+         * however many shapes the process goes through.
+         */
+        int livePairCap() const
+        {
+            return c_livePairExplorations * m_topK * m_repeats;
         }
 
         /**
@@ -478,7 +505,8 @@ namespace rocblaslt
         // at inFlightCap(). m_gaveUp means exploration ran past its visit
         // budget: no further launch is measured, but m_pending is still drained
         // before a winner is picked, so samples already paid for are not thrown
-        // away. m_declined counts launches refused because the cap was full.
+        // away. m_declined counts launches refused because a cap was full:
+        // this problem's inFlightCap(), or its device's livePairCap().
         //
         // m_coldCalls counts the visits spent before the candidate list was
         // registered at all, which is the only state a problem still inside
@@ -663,7 +691,7 @@ namespace rocblaslt
         void  publishResolution(size_t problemKey, const ProblemState& state);
         bool  acquireEvents(hipEvent_t& start, hipEvent_t& stop, int& device);
         void  recycleEvents(hipEvent_t start, hipEvent_t stop, int device);
-        void  retireEvents(hipEvent_t start, hipEvent_t stop);
+        void  retireEvents(hipEvent_t start, hipEvent_t stop, int device);
 
         bool m_enabled   = false;
         int  m_topK      = 0;
@@ -692,6 +720,10 @@ namespace rocblaslt
         std::unordered_map<int, std::vector<EventPair>> m_pairs;
         std::shared_timed_mutex                         m_mutex;
 
+        // Pairs created on each device and not yet retired, whether pooled or
+        // outstanding; what livePairCap() bounds. Same lock as m_pairs.
+        std::unordered_map<int, int> m_livePairs;
+
         // The resolved table is deliberately not the problem map: it is fixed
         // in size and never rehashes, which is what lets resolution() follow a
         // published entry with no lock at all. The entries themselves outlive
@@ -714,6 +746,9 @@ namespace rocblaslt
         // boundary into a cliff, where the 4097th problem to resolve and every
         // one after it was refused a published entry outright.
         static constexpr size_t c_resolutionSlots = 4096;
+
+        // See livePairCap().
+        static constexpr int c_livePairExplorations = 16;
 
         std::vector<std::unique_ptr<Resolution>> m_resolutionPool;
         std::atomic<const Resolution*>           m_resolutions[c_resolutionSlots] = {};

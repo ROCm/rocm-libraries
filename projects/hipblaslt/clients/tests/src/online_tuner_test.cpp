@@ -1279,6 +1279,69 @@ namespace
         EXPECT_GT(resolved->winnerTimeUs(), 0.0f) << "a winner with no measured time";
     }
 
+    // A shape dispatched once and never again keeps the event pair its one
+    // measurement took: pairs are only handed back by a later harvest of the
+    // same key, and that harvest never comes. With no cold visits that is the
+    // ordinary life of a one-shot shape, and a long tail of them is the
+    // workload online tuning exists for, so live pairs per device are capped.
+    // Past the cap no new measurement starts; the launch runs unmeasured and
+    // nothing about it changes.
+    TEST(OnlineTuner, LiveEventPairsOnADeviceAreCapped)
+    {
+        if(deviceCount() < 1)
+            GTEST_SKIP() << "no HIP device";
+
+        const Device device(0);
+
+        // Hands back what earlier cases left outstanding, so what is live now
+        // is only what the pool holds, and every pooled pair is one a new
+        // measurement can take without creating another.
+        tuner().reloadForTest();
+
+        const int cap = tuner().livePairCap();
+        ASSERT_GT(cap, 0);
+
+        constexpr size_t       base = 0x70000;
+        const std::vector<int> ranked{281, 282, 283};
+
+        int measured = 0;
+        for(int shape = 0; shape < cap + 8; ++shape)
+        {
+            const size_t key = base + static_cast<size_t>(shape);
+            ASSERT_EQ(tuner().selectCandidate(key, identityOf(key), ranked), 0) << shape;
+
+            hipEvent_t start = nullptr;
+            hipEvent_t stop  = nullptr;
+            if(!tuner().beginMeasurement(key, ranked[0], start, stop))
+            {
+                EXPECT_EQ(start, nullptr) << "a declined launch was handed an event";
+                EXPECT_EQ(stop, nullptr) << "a declined launch was handed an event";
+                continue;
+            }
+
+            ++measured;
+            device.bracket(start, stop);
+        }
+
+        EXPECT_EQ(measured, cap) << "one-shot shapes held more live event pairs than the cap";
+
+        // The cap does not stop reclamation: harvesting one of those shapes
+        // pools its pair, and a new shape can be measured again.
+        tuner().harvestPending(base);
+
+        const size_t late = base + static_cast<size_t>(cap) + 8;
+        ASSERT_EQ(tuner().selectCandidate(late, identityOf(late), ranked), 0);
+
+        hipEvent_t start = nullptr;
+        hipEvent_t stop  = nullptr;
+        ASSERT_TRUE(tuner().beginMeasurement(late, ranked[0], start, stop))
+            << "a pair handed back to the pool could not be measured with";
+        device.bracket(start, stop);
+
+        // Leave nothing outstanding for the cases after this one.
+        tuner().reloadForTest();
+    }
+
     // The event pool is on a process-wide singleton and the device is per
     // caller. Keyed on nothing, one vector hands device 1 the pairs device 0
     // recycled -- and hipEventRecord rejects a pair belonging to another

@@ -134,6 +134,12 @@ namespace rocblaslt
         for(std::atomic<const Resolution*>& slot : m_resolutions)
             slot.store(nullptr, std::memory_order_release);
 
+        // The pairs the dropped problems still had outstanding would otherwise
+        // be unreachable and still count against livePairCap().
+        for(auto& [key, state] : m_problems)
+            for(const PendingMeasurement& pending : state.m_pending)
+                retireEvents(pending.m_start, pending.m_stop, pending.m_device);
+
         m_problems.clear();
         m_resolutionPool.clear();
         m_winnerPool.clear();
@@ -487,7 +493,7 @@ namespace rocblaslt
                 state.m_samples[pending.m_candidate].push_back(milliseconds * 1000.0f);
             }
             else
-                retireEvents(pending.m_start, pending.m_stop);
+                retireEvents(pending.m_start, pending.m_stop, pending.m_device);
 
             if(m_verbose)
             {
@@ -559,9 +565,16 @@ namespace rocblaslt
             return false;
         }
 
+        // Declined the same way when the device is at livePairCap(), which is
+        // the cap doing its job, or when HIP will not create an event. Either
+        // way the launch goes ahead untimed, and the offer is left for the
+        // next launch this thread's visit makes.
         int device = 0;
         if(!acquireEvents(start, stop, device))
+        {
+            ++state.m_declined;
             return false;
+        }
 
         // Spent. The offer buys one sample, so a second launch claiming the
         // same one would issue a candidate twice on a single visit of it, and a
@@ -907,6 +920,10 @@ namespace rocblaslt
     // is wrong only in sign, by luck of the ordering, and a pair pooled in its
     // natural orientation would have returned a plausible positive number from
     // a different device's kernel.
+    //
+    // A new pair is only created while the device holds fewer than
+    // livePairCap() live ones. Past that, a measurement can still start on a
+    // pair some harvest handed back, and otherwise it does not start.
     bool OnlineTuner::acquireEvents(hipEvent_t& start, hipEvent_t& stop, int& device)
     {
         if(hipGetDevice(&device) != hipSuccess)
@@ -925,6 +942,10 @@ namespace rocblaslt
             return true;
         }
 
+        int& live = m_livePairs[device];
+        if(live >= livePairCap())
+            return false;
+
         EventPair pair;
         if(hipEventCreateWithFlags(&pair.m_start, hipEventDefault) != hipSuccess)
             return false;
@@ -933,9 +954,12 @@ namespace rocblaslt
         {
             // Pooling a lone handle would let it be paired with one from an
             // unrelated measurement, whose timestamps say nothing about either.
-            retireEvents(pair.m_start, nullptr);
+            // Never counted as live, so destroyed rather than retired.
+            static_cast<void>(hipEventDestroy(pair.m_start));
             return false;
         }
+
+        ++live;
 
         start = pair.m_start;
         stop  = pair.m_stop;
@@ -965,12 +989,19 @@ namespace rocblaslt
     // hipEventDestroy() does not block on a recorded-but-unretired event, it
     // defers the release, so this stays off the critical path. Its own failure
     // is not actionable and must not reach the caller's matmul.
-    void OnlineTuner::retireEvents(hipEvent_t start, hipEvent_t stop)
+    //
+    // device is the one the pair was created on, whose livePairCap() count
+    // the pair was charged to.
+    void OnlineTuner::retireEvents(hipEvent_t start, hipEvent_t stop, int device)
     {
         if(start)
             static_cast<void>(hipEventDestroy(start));
 
         if(stop)
             static_cast<void>(hipEventDestroy(stop));
+
+        int& live = m_livePairs[device];
+        if(live > 0)
+            --live;
     }
 } // namespace rocblaslt
