@@ -43,6 +43,8 @@
 #  include <thrust/distance.h>
 #  include <thrust/system/hip/detail/for_each.h>
 
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
+
 #  include <iterator>
 
 THRUST_NAMESPACE_BEGIN

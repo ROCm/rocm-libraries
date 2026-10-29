@@ -54,8 +54,8 @@
 // rocprim include
 #  include <rocprim/rocprim.hpp>
 
-#  include _THRUST_STD_INCLUDE(iterator)
-
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#  include _THRUST_STD_INCLUDE(__utility/pair.h)
 #  include _THRUST_STD_INCLUDE(cstdint)
 
 THRUST_NAMESPACE_BEGIN

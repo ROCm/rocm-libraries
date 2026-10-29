@@ -35,9 +35,11 @@
 #include <thrust/iterator/iterator_categories.h>
 #include <thrust/iterator/iterator_traversal_tags.h>
 
+#include _THRUST_STD_INCLUDE(__iterator/iterator_traits.h)
 #include _THRUST_STD_INCLUDE(__type_traits/conditional.h)
-#include _THRUST_STD_INCLUDE(iterator)
-#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_same.h)
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
 
 THRUST_NAMESPACE_BEGIN
 

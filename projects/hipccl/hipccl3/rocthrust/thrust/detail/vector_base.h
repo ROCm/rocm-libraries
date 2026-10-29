@@ -33,19 +33,18 @@
 #endif // no system header
 
 #include <thrust/detail/contiguous_storage.h>
-#include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/normal_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
 
 #include _THRUST_STD_INCLUDE(__iterator/iterator_traits.h)
+#include _THRUST_STD_INCLUDE(__iterator/reverse_iterator.h)
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__utility/move.h)
+#include _THRUST_STD_INCLUDE(__utility/swap.h)
 #include _THRUST_STD_INCLUDE(initializer_list)
-#include _THRUST_STD_INCLUDE(iterator)
-#include _THRUST_STD_INCLUDE(utility)
 
 #include <vector>
-
-#include _THRUST_STD_INCLUDE(initializer_list)
 
 THRUST_NAMESPACE_BEGIN
 

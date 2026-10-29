@@ -25,7 +25,7 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/advance.h>
+
 #include <thrust/count.h>
 #include <thrust/detail/internal_functional.h>
 #include <thrust/detail/temporary_array.h>
@@ -36,6 +36,8 @@
 #include <thrust/sort.h>
 #include <thrust/system/detail/generic/partition.h>
 
+#include _THRUST_STD_INCLUDE(__functional/not_fn.h)
+#include _THRUST_STD_INCLUDE(__iterator/advance.h)
 #include _THRUST_STD_INCLUDE(__utility/pair.h)
 
 THRUST_NAMESPACE_BEGIN

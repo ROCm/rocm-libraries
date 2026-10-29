@@ -33,11 +33,10 @@
 #endif // no system header
 #include <thrust/detail/type_traits/is_thrust_pointer.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER > 2020
-#  include _THRUST_STD_INCLUDE(iterator)
-#else
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(__iterator/concepts.h)
+#include _THRUST_STD_INCLUDE(__type_traits/integral_constant.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_pointer.h)
+#include _THRUST_STD_INCLUDE(__type_traits/remove_cvref.h)
 
 THRUST_NAMESPACE_BEGIN
 

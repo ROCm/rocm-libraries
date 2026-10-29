@@ -53,6 +53,8 @@
 #  include _THRUST_STD_INCLUDE(__algorithm/max.h)
 #  include _THRUST_STD_INCLUDE(__algorithm/min.h)
 #  include _THRUST_STD_INCLUDE(__bit/popcount.h)
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#  include _THRUST_STD_INCLUDE(__utility/pair.h)
 
 #  include <rocprim/rocprim.hpp>
 

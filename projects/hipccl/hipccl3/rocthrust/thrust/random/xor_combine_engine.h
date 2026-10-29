@@ -36,8 +36,8 @@
 #include <thrust/random/detail/random_core_access.h>
 #include <thrust/random/detail/xor_combine_engine_max.h>
 
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
 #include _THRUST_STD_INCLUDE(cstddef) // for size_t
-#include _THRUST_STD_INCLUDE(type_traits)
 
 #include <iostream>
 

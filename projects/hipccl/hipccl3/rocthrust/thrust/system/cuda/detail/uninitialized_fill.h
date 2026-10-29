@@ -47,8 +47,6 @@
 #  include <cuda/std/__type_traits/is_trivially_assignable.h>
 #  include <cuda/std/__type_traits/is_trivially_constructible.h>
 
-#  include <iterator>
-
 THRUST_NAMESPACE_BEGIN
 
 namespace cuda_cub

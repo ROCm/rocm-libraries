@@ -31,9 +31,8 @@
 #include <thrust/system/detail/bad_alloc.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <cstddef>
-#endif
+#include _THRUST_STD_INCLUDE(__utility/pair.h)
+#include _THRUST_STD_INCLUDE(cstddef)
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim

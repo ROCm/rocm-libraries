@@ -31,7 +31,10 @@
 #  pragma system_header
 #endif // no system header
 
-#include _THRUST_STD_INCLUDE(utility)
+#include _THRUST_STD_INCLUDE(__tuple_dir/get.h)
+#include _THRUST_STD_INCLUDE(__tuple_dir/tuple_element.h)
+#include _THRUST_STD_INCLUDE(__tuple_dir/tuple_size.h)
+#include _THRUST_STD_INCLUDE(__utility/pair.h)
 
 THRUST_NAMESPACE_BEGIN
 

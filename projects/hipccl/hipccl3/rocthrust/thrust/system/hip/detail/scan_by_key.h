@@ -51,6 +51,8 @@
 #  include <thrust/type_traits/is_contiguous_iterator.h>
 #  include <thrust/type_traits/unwrap_contiguous_iterator.h>
 
+#  include _THRUST_STD_INCLUDE(__functional/operations.h)
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
 #  include _THRUST_STD_INCLUDE(cstdint)
 
 // rocprim include

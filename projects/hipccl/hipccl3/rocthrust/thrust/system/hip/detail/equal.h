@@ -42,6 +42,8 @@
 
 #  include <thrust/system/hip/detail/mismatch.h>
 
+#  include _THRUST_STD_INCLUDE(__functional/operations.h)
+
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {

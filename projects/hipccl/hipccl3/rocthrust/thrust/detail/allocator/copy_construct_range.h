@@ -26,13 +26,11 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/advance.h>
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/copy.h>
 #include <thrust/detail/execution_policy.h>
 #include <thrust/detail/memory_wrapper.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
-#include <thrust/distance.h>
 #include <thrust/for_each.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/zip_iterator.h>

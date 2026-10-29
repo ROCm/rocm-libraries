@@ -29,14 +29,14 @@
 #include <thrust/detail/function.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/type_traits.h>
-#include <thrust/distance.h>
 #include <thrust/for_each.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/system/detail/generic/scalar/binary_search.h>
 #include <thrust/system/detail/generic/select_system.h>
 
-#include _THRUST_STD_INCLUDE(functional)
+#include _THRUST_STD_INCLUDE(__functional/operations.h)
+#include _THRUST_STD_INCLUDE(__iterator/distance.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail

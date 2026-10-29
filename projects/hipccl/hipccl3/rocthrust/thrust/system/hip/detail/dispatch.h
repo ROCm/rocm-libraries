@@ -29,12 +29,12 @@
 
 #include <thrust/detail/preprocessor.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(cstdint)
-#  include _THRUST_STD_INCLUDE(limits)
-#  include _THRUST_STD_INCLUDE(type_traits)
-#  include _THRUST_STD_INCLUDE(__host_stdlib/stdexcept)
-#endif
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_arithmetic.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_unsigned.h)
+#include _THRUST_STD_INCLUDE(cstdint)
+#include _THRUST_STD_INCLUDE(limits)
+#include _THRUST_STD_INCLUDE(__host_stdlib/stdexcept)
 
 #include <string>
 

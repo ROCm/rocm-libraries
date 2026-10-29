@@ -36,10 +36,8 @@
 #include <thrust/scatter.h>
 #include <thrust/transform.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(iterator)
-#endif
-
+#include _THRUST_STD_INCLUDE(__functional/not_fn.h)
+#include _THRUST_STD_INCLUDE(__functional/operations.h)
 #include _THRUST_STD_INCLUDE(__type_traits/conditional.h)
 #include _THRUST_STD_INCLUDE(limits)
 

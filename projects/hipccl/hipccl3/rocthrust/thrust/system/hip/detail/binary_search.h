@@ -36,6 +36,7 @@
 #  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/execution_policy.h>
 
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
 #  include _THRUST_STD_INCLUDE(cstdint)
 
 THRUST_NAMESPACE_BEGIN

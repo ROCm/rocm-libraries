@@ -39,8 +39,13 @@
 #include <thrust/detail/type_traits/is_call_possible.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
 
+#include _THRUST_STD_INCLUDE(__type_traits/add_lvalue_reference.h)
+#include _THRUST_STD_INCLUDE(__type_traits/conditional.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_empty.h)
+#include _THRUST_STD_INCLUDE(__type_traits/make_unsigned.h)
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
+#include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
 #include _THRUST_STD_INCLUDE(limits)
-#include _THRUST_STD_INCLUDE(type_traits)
 
 #include <new>
 
@@ -401,7 +406,7 @@ public:
 
   using size_type = typename eval_if<allocator_traits_detail::has_size_type<allocator_type>::value,
                                      allocator_traits_detail::nested_size_type<allocator_type>,
-                                     ::internal::make_unsigned<difference_type>>::type;
+                                     _THRUST_STD::make_unsigned<difference_type>>::type;
 
   using propagate_on_container_copy_assignment =
     typename eval_if<allocator_traits_detail::has_propagate_on_container_copy_assignment<allocator_type>::value,

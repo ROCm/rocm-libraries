@@ -28,12 +28,10 @@
 
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/type_traits.h>
-#include <thrust/distance.h>
 #include <thrust/system/detail/generic/select_system.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_trivially_copy_constructible.h)
 
 THRUST_NAMESPACE_BEGIN
 

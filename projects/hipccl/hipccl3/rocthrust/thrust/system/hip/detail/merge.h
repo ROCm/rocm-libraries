@@ -46,6 +46,8 @@
 #  include <thrust/system/hip/detail/dispatch.h>
 #  include <thrust/system/hip/detail/util.h>
 
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#  include _THRUST_STD_INCLUDE(__utility/pair.h)
 #  include _THRUST_STD_INCLUDE(cstdint)
 
 // rocPRIM includes

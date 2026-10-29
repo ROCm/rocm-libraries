@@ -35,6 +35,8 @@
 
 #include _THRUST_STD_INCLUDE(__algorithm/min.h)
 
+#include <nv/target>
+
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::sequential
 {

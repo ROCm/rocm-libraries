@@ -22,8 +22,6 @@
 #include <thrust/system/omp/detail/pragma_omp.h>
 
 #include _THRUST_LIBCXX_INCLUDE(__cmath/ceil_div.h)
-#include _THRUST_STD_INCLUDE(__algorithm/max.h)
-#include _THRUST_STD_INCLUDE(__algorithm/min.h)
 #include _THRUST_STD_INCLUDE(__functional/invoke.h)
 #include _THRUST_STD_INCLUDE(__iterator/advance.h)
 #include _THRUST_STD_INCLUDE(__iterator/distance.h)

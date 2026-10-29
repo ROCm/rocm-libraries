@@ -32,26 +32,17 @@
 #  pragma system_header
 #endif // no system header
 
-#include _THRUST_STD_INCLUDE(type_traits)
-
-#include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
-
-// TODO(libhipcxx): remove this namespace once libhipcxx gets ready
-namespace internal
-{
-using _THRUST_STD::is_arithmetic;
-using _THRUST_STD::make_unsigned;
-
-template <typename T>
-using make_unsigned_t = _THRUST_STD::make_unsigned_t<T>;
-
-template <typename T>
-using decay_t = _THRUST_STD::decay_t<T>;
-template <typename T>
-using remove_cvref = _THRUST_STD::remove_cvref<T>;
-template <typename T>
-using remove_cvref_t = _THRUST_STD::remove_cvref_t<T>;
-} // namespace internal
+#include _THRUST_STD_INCLUDE(__functional/invoke.h)
+#include _THRUST_STD_INCLUDE(__type_traits/conjunction.h)
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__type_traits/integral_constant.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_arithmetic.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_integral.h)
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
+// [NON-CCCL PARITY BEGIN]
+#include _THRUST_STD_INCLUDE(cstddef)
+// [NON-CCCL PARITY END]
 
 THRUST_NAMESPACE_BEGIN
 
@@ -75,7 +66,7 @@ struct is_non_bool_integral<bool> : public false_type
 {};
 
 template <typename T>
-struct is_non_bool_arithmetic : public ::internal::is_arithmetic<T>
+struct is_non_bool_arithmetic : public _THRUST_STD::is_arithmetic<T>
 {};
 template <>
 struct is_non_bool_arithmetic<bool> : public false_type
@@ -128,7 +119,7 @@ struct disable_if_convertible : disable_if<_THRUST_STD::is_convertible<T1, T2>::
 {};
 
 template <typename T>
-struct is_numeric : ::internal::_And<_THRUST_STD::is_convertible<int, T>, _THRUST_STD::is_convertible<T, int>>
+struct is_numeric : _THRUST_STD::_And<_THRUST_STD::is_convertible<int, T>, _THRUST_STD::is_convertible<T, int>>
 {}; // end is_numeric
 
 struct largest_available_float

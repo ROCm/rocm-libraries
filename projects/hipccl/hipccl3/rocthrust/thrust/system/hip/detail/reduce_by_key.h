@@ -54,11 +54,10 @@
 #  include <thrust/system/hip/detail/get_value.h>
 #  include <thrust/system/hip/detail/util.h>
 
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
-#    include _THRUST_STD_INCLUDE(iterator)
-#  endif
-
+#  include _THRUST_STD_INCLUDE(__functional/operations.h)
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
 #  include _THRUST_STD_INCLUDE(__type_traits/conditional.h)
+#  include _THRUST_STD_INCLUDE(__utility/pair.h)
 #  include _THRUST_STD_INCLUDE(cstdint)
 
 // rocprim include

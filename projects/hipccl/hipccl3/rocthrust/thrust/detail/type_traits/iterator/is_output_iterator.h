@@ -29,7 +29,9 @@
 #include <thrust/iterator/detail/any_assign.h>
 #include <thrust/iterator/iterator_traits.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_STD_INCLUDE(__type_traits/is_same.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_void.h)
+#include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
 
 THRUST_NAMESPACE_BEGIN
 

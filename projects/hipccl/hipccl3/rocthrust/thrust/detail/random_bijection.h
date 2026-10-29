@@ -23,7 +23,6 @@
 
 #include <thrust/random.h>
 
-#include _THRUST_STD_INCLUDE(__algorithm/max.h)
 #include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
 #include _THRUST_STD_INCLUDE(__type_traits/is_integral.h)
 #include _THRUST_STD_INCLUDE(__utility/forward.h)

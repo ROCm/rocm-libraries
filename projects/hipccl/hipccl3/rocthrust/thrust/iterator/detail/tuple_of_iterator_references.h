@@ -31,10 +31,10 @@
 #include <thrust/detail/reference_forward_declaration.h>
 #include <thrust/tuple.h>
 
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__utility/move.h)
 #include _THRUST_STD_INCLUDE(__utility/pair.h)
-
 #include _THRUST_STD_INCLUDE(tuple)
-#include _THRUST_STD_INCLUDE(type_traits)
 
 THRUST_NAMESPACE_BEGIN
 
