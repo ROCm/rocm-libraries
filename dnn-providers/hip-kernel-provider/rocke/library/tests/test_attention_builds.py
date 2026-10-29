@@ -1724,6 +1724,28 @@ class TestAttentionHelpers(unittest.TestCase):
                 spec=spec, scale=0.125, **{**good, "k": t(1, 512, 4, 128)}
             )
 
+    def test_every_dense_launcher_binds_the_runtime_kernargs(self):
+        """A module that packs kernargs with ``attention_dense_signature`` must take
+        the scalar values from ``attention_dense_runtime_args``. A hand-written list
+        drifts when the signature grows (the runtime head counts were missed in the
+        gfx950 builder CLI and live benchmark that way) and only fails on a GPU."""
+        from pathlib import Path
+
+        library = Path(__file__).resolve().parents[1]
+        offenders = []
+        for path in sorted(library.rglob("*.py")):
+            if "tests" in path.relative_to(library).parts:
+                continue
+            text = path.read_text(encoding="utf-8")
+            if (
+                "KernelLauncher(" not in text
+                or "attention_dense_signature(" not in text
+            ):
+                continue
+            if "attention_dense_runtime_args" not in text:
+                offenders.append(str(path.relative_to(library)))
+        self.assertEqual(offenders, [])
+
     def test_persist_decodes_build_with_distinct_names_on_both_arches(self):
         """Every persist decode an arch supports builds and has its own name,
         so no two decodes can share a cached binary."""

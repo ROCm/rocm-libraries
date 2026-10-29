@@ -977,27 +977,6 @@ def build_attention_dense(
     hkv = b.div(hq, _gqa())
     q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
 
-    # runtime_shape empty-row predicate, computed HERE (pre-loop) while seqlen_kv_p is
-    # the fresh kernarg value. seqlen_kv_p has no other post-loop use, so reading it in
-    # the epilogue returns a stale register; the per-row i1 carried across the loop does
-    # not. qtok is loop-invariant (q_tok0 + a lane constant), so it is valid pre-loop.
-    # Gated on WINDOW_EMPTY (not baked EMPTY_ROWS): one runtime_shape binary serves
-    # shapes with and without empty rows, and the predicate is a no-op (all rows keep
-    # has_key=True) when the runtime shape has none.
-    rt_empty_has_key = (
-        dense_row_has_key(
-            b,
-            b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0)),
-            seqlen_kv_p,
-            causal=causal,
-            diagonal=DIAG_OFF,
-            window=W,
-            right_bound=RIGHT,
-        )
-        if (WINDOW_EMPTY and spec.runtime_shape)
-        else None
-    )
-
     if varlen:
         # Per-sequence token bases from cu_seqlens; early-exit q-blocks that fall
         # past this sequence's length (packed [total_tok, H, D] layout).
@@ -1757,7 +1736,7 @@ def build_attention_dense(
         # (see _MAX_SCALE), so a max at the threshold means "no visible key": store zeros.
         # Under runtime_shape the runtime band can bump an empty row's max, so this
         # heuristic is unreliable there -- those rows are zeroed in the O store instead
-        # via rt_empty_has_key (computed pre-loop), by the integer bit-mask the LSE path uses.
+        # via row_has_key below, the integer bit-mask the LSE path uses.
         rcp_l = b.select(
             b.fcmp("ogt", m_i, b.const_f32(_EMPTY_ROW_MAX_GRID)),
             rcp_l,
@@ -1773,10 +1752,12 @@ def build_attention_dense(
     qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
     q_row_byte = b.add(o_base, b.mul(qtok, _stride_q()))
     d_half = b.mul(lane_h, b.const_i32(4))
-    # Under runtime_shape, zero keyless rows in the O store via the exact per-row
-    # predicate (against the runtime seqlen), the same integer bit-mask the LSE path
-    # uses. ``runtime_shape`` implies not varlen, so seqlen_kv_p is the right length.
-    if spec.emit_lse:
+    # The exact per-row "sees at least one key" predicate. LSE always needs it. A
+    # runtime_shape window kernel also needs it for the O store: one binary serves
+    # shapes with and without keyless rows (WINDOW_EMPTY, not baked EMPTY_ROWS), and
+    # for a shape without them the predicate keeps every row.
+    row_has_key = None
+    if spec.emit_lse or (WINDOW_EMPTY and spec.runtime_shape):
         row_has_key = dense_row_has_key(
             b,
             qtok,
@@ -1786,6 +1767,7 @@ def build_attention_dense(
             window=W,
             right_bound=RIGHT,
         )
+    if spec.emit_lse:
         if varlen:
             lse_index = b.add(b.mul(b.add(q_seq0, qtok), _hq_count()), hq)
             row_exists = b.cmp_lt(qtok, seqlen_q_b)
@@ -1828,7 +1810,9 @@ def build_attention_dense(
             dtype,
             D_TILES,
             spec.o_store_width,
-            row_has_key=row_has_key if spec.emit_lse else rt_empty_has_key,
+            # Zeroes keyless rows on the LSE path and on runtime_shape window
+            # kernels. None elsewhere, which keeps the baked store sequence.
+            row_has_key=row_has_key,
         )
     b.ret()
     return b.kernel
@@ -1839,8 +1823,8 @@ def _emit_o_store(
 ):
     """O = acc / l, ``width`` contiguous head-dim elements per global store.
 
-    ``row_has_key`` (LSE path only) zeroes rows that see no key; ``None`` emits the
-    unchanged store sequence.
+    ``row_has_key`` zeroes rows that see no key (LSE path and runtime_shape window
+    kernels). ``None`` emits the unchanged store sequence.
     """
     for dt in range(d_tiles):
         for g in range(4):
