@@ -4,7 +4,7 @@
 /**
  * @file BenchUhdRanking.cpp
  * @brief Disabled microbenchmark of UHD kernel ranking at catalog scale (RFC 0019 §9.4).
- *        Run with --gtest_also_run_disabled_tests --gtest_filter='*BenchUhdRanking*'.
+ *        Run with --gtest_also_run_disabled_tests --gtest_filter='*UhdRankingBenchmark*'.
  *        Sizes come from UHD_BENCH_{TREES,LEAVES,KERNELS,KFEATS,PFEATS,EXTRA,REPS}.
  */
 
@@ -18,6 +18,8 @@
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/TreeDataAdapter.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelHeuristicFactory.hpp>
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
+
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/GbdtModelTestBuilder.hpp>
@@ -48,8 +50,9 @@ using Clock = std::chrono::steady_clock;
 
 size_t envSize(const char* name, size_t fallback)
 {
-    const char* value = std::getenv(name);
-    return value == nullptr ? fallback : static_cast<size_t>(std::strtoull(value, nullptr, 10));
+    const std::string value = hipdnn_data_sdk::utilities::getEnv(name);
+    return value.empty() ? fallback
+                         : static_cast<size_t>(std::strtoull(value.c_str(), nullptr, 10));
 }
 
 /// A LightGBM-shaped tree: grow by splitting a random leaf until @p leaves leaves.
@@ -118,7 +121,7 @@ Stats timeIt(size_t reps, F&& body)
 
 } // namespace
 
-TEST(DISABLED_BenchUhdRanking, CatalogScale)
+TEST(TestIngestorUhdRankingBenchmark, DISABLED_CatalogScale)
 {
     const size_t trees = envSize("UHD_BENCH_TREES", 500);
     const size_t leaves = envSize("UHD_BENCH_LEAVES", 63);
