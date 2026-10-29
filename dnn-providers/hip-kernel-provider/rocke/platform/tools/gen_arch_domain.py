@@ -725,7 +725,9 @@ def _classify(rc: int, diag: str) -> tuple[str, str]:
         return STATUS_NAME_ABSENT, _first_error(diag)
     # Four ways the backend says "this target cannot lower that": no ISel
     # pattern, type legalisation cannot break the operand down, the lowering
-    # wants a libcall the device lacks, and (llvm23) it says so outright. All
+    # wants a libcall the device lacks, or LLVM names a missing target feature.
+    # LLVM 23 says the unsupported-subtarget case outright; LLVM 24 names the
+    # required feature instead. All
     # are reached only after the name resolved, so the flavor axis is already
     # settled by _name_exists() and cannot be confused with these.
     if (
@@ -733,6 +735,7 @@ def _classify(rc: int, diag: str) -> tuple[str, str]:
         or "do not know how to expand this operator's operand" in low
         or "no libcall available for" in low
         or "intrinsic not supported on subtarget" in low
+        or "requires target feature" in low
     ):
         return STATUS_ARCH_ABSENT, _first_error(diag)
     # The compiler died rather than answered. NOT arch_absent: we learned only

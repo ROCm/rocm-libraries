@@ -123,9 +123,21 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
 
                 self.assertEqual(sorted(tc.get("arches", [])), sorted(wired_arches()))
 
-    def test_llvm24_uses_the_shared_llvm23_declaration_profile(self):
-        self.assertEqual(G._decl_table("llvm24"), G._decl_table("llvm23"))
-        self.assertNotEqual(G._decl_table("llvm24"), G._decl_table("llvm20"))
+    def test_llvm24_changes_only_the_named_barrier_declarations(self):
+        llvm23 = G._decl_table("llvm23")
+        llvm24 = G._decl_table("llvm24")
+        self.assertEqual(llvm23.keys(), llvm24.keys())
+        changed = {key for key in llvm23 if llvm23[key] != llvm24[key]}
+        self.assertEqual(
+            changed,
+            {
+                "s.barrier.init",
+                "s.barrier.signal.var",
+                "s.barrier.join",
+                "s.wakeup.barrier",
+            },
+        )
+        self.assertTrue(all("addrspace(15)" in llvm24[key] for key in changed))
 
     def test_every_decl_key_is_covered_on_every_wired_arch(self):
         """The drift this file exists to catch: a decl key the artifact has no
@@ -719,6 +731,15 @@ class ClassifyTest(unittest.TestCase):
         )
         self.assertEqual(status, G.STATUS_ARCH_ABSENT)
         self.assertTrue(evidence)
+
+    def test_llvm24_missing_target_feature_is_arch_absent(self):
+        status, evidence = G._classify(
+            1,
+            "error: <unknown>:0:0: in function @probe void (ptr, i32): "
+            "llvm.amdgcn.mov.dpp8 requires target feature 'dpp8'",
+        )
+        self.assertEqual(status, G.STATUS_ARCH_ABSENT)
+        self.assertIn("requires target feature 'dpp8'", evidence)
 
     def test_selection_dag_addresses_are_not_persisted(self):
         """Allocator-dependent node addresses must not make --check flaky."""
