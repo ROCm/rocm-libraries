@@ -256,6 +256,7 @@ set( rocfft_source
   auxiliary.cpp
   data_set_descriptor.cpp
   exec_info.cpp
+  field.cpp
   plan.cpp
   transform.cpp
   repo.cpp
