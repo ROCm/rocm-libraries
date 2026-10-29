@@ -497,6 +497,8 @@ enum class csrsm_reuse_source
 // rocsparse_analysis_policy_reuse, which must also reuse its zero pivot.
 template <typename T>
 static void testing_csrsm_reuse(csrsm_reuse_source          source,
+                                rocsparse_operation         trans,
+                                rocsparse_fill_mode         uplo,
                                 rocsparse_int               nrhs,
                                 rocsparse_diag_type         diag,
                                 host_vector<rocsparse_int>& hcsr_row_ptr,
@@ -507,10 +509,9 @@ static void testing_csrsm_reuse(csrsm_reuse_source          source,
     rocsparse_local_mat_descr descr;
     rocsparse_local_mat_info  info;
 
-    CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_fill_mode(descr, rocsparse_fill_mode_lower));
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_fill_mode(descr, uplo));
     CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_diag_type(descr, diag));
 
-    const rocsparse_operation    trans = rocsparse_operation_none;
     const rocsparse_solve_policy spol  = rocsparse_solve_policy_auto;
     const rocsparse_int          M     = hcsr_row_ptr.size() - 1;
     const rocsparse_int          nnz   = hcsr_val.size();
@@ -543,7 +544,7 @@ static void testing_csrsm_reuse(csrsm_reuse_source          source,
     buffer_size = std::max(buffer_size, size);
     CHECK_ROCSPARSE_ERROR(rocsparse_csrsm_buffer_size<T>(handle,
                                                          trans,
-                                                         trans,
+                                                         rocsparse_operation_none,
                                                          M,
                                                          nrhs,
                                                          nnz,
@@ -614,7 +615,7 @@ static void testing_csrsm_reuse(csrsm_reuse_source          source,
 
     CHECK_ROCSPARSE_ERROR(rocsparse_csrsm_analysis<T>(handle,
                                                       trans,
-                                                      trans,
+                                                      rocsparse_operation_none,
                                                       M,
                                                       nrhs,
                                                       nnz,
@@ -637,7 +638,7 @@ static void testing_csrsm_reuse(csrsm_reuse_source          source,
 
     CHECK_ROCSPARSE_ERROR(rocsparse_csrsm_solve<T>(handle,
                                                    trans,
-                                                   trans,
+                                                   rocsparse_operation_none,
                                                    M,
                                                    nrhs,
                                                    nnz,
@@ -663,7 +664,7 @@ static void testing_csrsm_reuse(csrsm_reuse_source          source,
                                                 nrhs,
                                                 nnz,
                                                 trans,
-                                                trans,
+                                                rocsparse_operation_none,
                                                 alpha,
                                                 hcsr_row_ptr,
                                                 hcsr_col_ind,
@@ -672,7 +673,7 @@ static void testing_csrsm_reuse(csrsm_reuse_source          source,
                                                 hB.ld,
                                                 rocsparse_order_column,
                                                 diag,
-                                                rocsparse_fill_mode_lower,
+                                                uplo,
                                                 rocsparse_index_base_zero,
                                                 h_analysis_pivot,
                                                 h_solve_pivot);
@@ -690,29 +691,46 @@ static void testing_csrsm_reuse(csrsm_reuse_source          source,
 template <typename T>
 static void testing_csrsm_extra_template(const Arguments& arg)
 {
-    // [ 2          ]
-    // [ 1  4       ]
+    // [ 2     3    ]
+    // [ 1  4     2 ]
     // [    1  3    ]
     // [ 1     2  5 ]
-    host_vector<rocsparse_int> hcsr_row_ptr{0, 1, 3, 5, 8};
-    host_vector<rocsparse_int> hcsr_col_ind{0, 0, 1, 1, 2, 0, 2, 3};
-    host_vector<T>             hcsr_val{2, 1, 4, 1, 3, 1, 2, 5};
+    host_vector<rocsparse_int> hcsr_row_ptr{0, 2, 5, 7, 10};
+    host_vector<rocsparse_int> hcsr_col_ind{0, 2, 0, 1, 3, 1, 2, 0, 2, 3};
+    host_vector<T>             hcsr_val{2, 3, 1, 4, 2, 1, 3, 1, 2, 5};
 
     // Same matrix without the diagonal entry of row 2.
-    host_vector<rocsparse_int> hcsr_row_ptr_pivot{0, 1, 3, 4, 7};
-    host_vector<rocsparse_int> hcsr_col_ind_pivot{0, 0, 1, 1, 0, 2, 3};
-    host_vector<T>             hcsr_val_pivot{2, 1, 4, 1, 1, 2, 5};
+    host_vector<rocsparse_int> hcsr_row_ptr_pivot{0, 2, 5, 6, 9};
+    host_vector<rocsparse_int> hcsr_col_ind_pivot{0, 2, 0, 1, 3, 1, 0, 2, 3};
+    host_vector<T>             hcsr_val_pivot{2, 3, 1, 4, 2, 1, 1, 2, 5};
 
+    // The csrilu0 and csric0 analyses are only reused for a non-transposed lower solve.
+    // The other combinations check that csrsm falls back to its own analysis.
     for(auto source :
         {csrsm_reuse_source::csrsv, csrsm_reuse_source::csrilu0, csrsm_reuse_source::csric0})
     {
-        for(rocsparse_int nrhs : {1, 3})
+        for(auto trans : {rocsparse_operation_none,
+                          rocsparse_operation_transpose,
+                          rocsparse_operation_conjugate_transpose})
         {
-            for(auto diag : {rocsparse_diag_type_unit, rocsparse_diag_type_non_unit})
+            for(auto uplo : {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper})
             {
-                testing_csrsm_reuse<T>(source, nrhs, diag, hcsr_row_ptr, hcsr_col_ind, hcsr_val);
-                testing_csrsm_reuse<T>(
-                    source, nrhs, diag, hcsr_row_ptr_pivot, hcsr_col_ind_pivot, hcsr_val_pivot);
+                for(rocsparse_int nrhs : {1, 3})
+                {
+                    for(auto diag : {rocsparse_diag_type_unit, rocsparse_diag_type_non_unit})
+                    {
+                        testing_csrsm_reuse<T>(
+                            source, trans, uplo, nrhs, diag, hcsr_row_ptr, hcsr_col_ind, hcsr_val);
+                        testing_csrsm_reuse<T>(source,
+                                               trans,
+                                               uplo,
+                                               nrhs,
+                                               diag,
+                                               hcsr_row_ptr_pivot,
+                                               hcsr_col_ind_pivot,
+                                               hcsr_val_pivot);
+                    }
+                }
             }
         }
     }

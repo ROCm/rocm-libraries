@@ -74,16 +74,16 @@ rocsparse_status rocsparse::csrsm_analysis_core(rocsparse_handle          handle
                                                lower_none ? info->get_csrilu0_info() : nullptr,
                                                lower_none ? info->get_csric0_info() : nullptr,
                                                info->get_csrsv_info()};
-        for(rocsparse::trm_data_t* src : candidates)
+        for(rocsparse::trm_data_t* src_data : candidates)
         {
-            rocsparse::trm_info_t* p
-                = (src != nullptr) ? src->get(trans_A, descr->fill_mode) : nullptr;
-            if(p != nullptr)
+            rocsparse::trm_info_t* src_info
+                = (src_data != nullptr) ? src_data->get(trans_A, descr->fill_mode) : nullptr;
+            if(src_info != nullptr)
             {
-                dst->set(trans_A, descr->fill_mode, p);
-                if(src != dst)
+                if(src_data != dst)
                 {
-                    RETURN_IF_ROCSPARSE_ERROR(dst->copy_pivot_info_async(src, handle->stream));
+                    dst->set(trans_A, descr->fill_mode, src_info);
+                    RETURN_IF_ROCSPARSE_ERROR(dst->copy_pivot_info_async(src_data, handle->stream));
                 }
                 // A unit diagonal has no structural zero pivot.
                 if(descr->diag_type == rocsparse_diag_type_unit)

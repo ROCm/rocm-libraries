@@ -1624,7 +1624,9 @@ static void testing_sptrsm_csr_extra2(const Arguments& arg)
 
 // SpSV analysis on the matrix, then SpTRSM with rocsparse_analysis_policy_reuse, which must
 // also reuse its zero pivot.
-static void sptrsm_csr_reuse_spsv(int64_t                     nrhs,
+static void sptrsm_csr_reuse_spsv(rocsparse_operation         trans,
+                                  rocsparse_fill_mode         uplo,
+                                  int64_t                     nrhs,
                                   rocsparse_diag_type         diag,
                                   const std::vector<int32_t>& ptr,
                                   const std::vector<int32_t>& ind,
@@ -1636,11 +1638,9 @@ static void sptrsm_csr_reuse_spsv(int64_t                     nrhs,
     std::copy(ind.begin(), ind.end(), hA.ind.data());
     std::copy(val.begin(), val.end(), hA.val.data());
 
-    const rocsparse_operation trans = rocsparse_operation_none;
-    const rocsparse_fill_mode uplo  = rocsparse_fill_mode_lower;
-    const rocsparse_datatype  ttype = rocsparse_datatype_f32_r;
-    const int64_t             m     = hA.m;
-    float                     alpha = 1.0f;
+    const rocsparse_datatype ttype = rocsparse_datatype_f32_r;
+    const int64_t            m     = hA.m;
+    float                    alpha = 1.0f;
 
     host_dense_matrix<float> hB(m, nrhs);
     for(int64_t j = 0; j < nrhs; ++j)
@@ -1697,7 +1697,7 @@ static void sptrsm_csr_reuse_spsv(int64_t                     nrhs,
 
     rocsparse_local_sptrsm sptrsm_descr(handle,
                                         trans,
-                                        trans,
+                                        rocsparse_operation_none,
                                         rocsparse_sptrsm_alg_default,
                                         ttype,
                                         ttype,
@@ -1729,7 +1729,7 @@ static void sptrsm_csr_reuse_spsv(int64_t                     nrhs,
                                         nrhs,
                                         hA.nnz,
                                         trans,
-                                        trans,
+                                        rocsparse_operation_none,
                                         alpha,
                                         hA.ptr,
                                         hA.ind,
@@ -1763,25 +1763,31 @@ static void sptrsm_csr_reuse_spsv(int64_t                     nrhs,
 
 static void testing_sptrsm_csr_extra3(const Arguments& arg)
 {
-    // [ 2          ]
-    // [ 1  4       ]
+    // [ 2     3    ]
+    // [ 1  4     2 ]
     // [    1  3    ]
     // [ 1     2  5 ]
-    const std::vector<int32_t> ptr{0, 1, 3, 5, 8};
-    const std::vector<int32_t> ind{0, 0, 1, 1, 2, 0, 2, 3};
-    const std::vector<float>   val{2, 1, 4, 1, 3, 1, 2, 5};
+    const std::vector<int32_t> ptr{0, 2, 5, 7, 10};
+    const std::vector<int32_t> ind{0, 2, 0, 1, 3, 1, 2, 0, 2, 3};
+    const std::vector<float>   val{2, 3, 1, 4, 2, 1, 3, 1, 2, 5};
 
     // Same matrix without the diagonal entry of row 2.
-    const std::vector<int32_t> ptr_pivot{0, 1, 3, 4, 7};
-    const std::vector<int32_t> ind_pivot{0, 0, 1, 1, 0, 2, 3};
-    const std::vector<float>   val_pivot{2, 1, 4, 1, 1, 2, 5};
+    const std::vector<int32_t> ptr_pivot{0, 2, 5, 6, 9};
+    const std::vector<int32_t> ind_pivot{0, 2, 0, 1, 3, 1, 0, 2, 3};
+    const std::vector<float>   val_pivot{2, 3, 1, 4, 2, 1, 1, 2, 5};
 
-    for(int64_t nrhs : {1, 3})
+    for(auto trans : {rocsparse_operation_none, rocsparse_operation_transpose})
     {
-        for(auto diag : {rocsparse_diag_type_unit, rocsparse_diag_type_non_unit})
+        for(auto uplo : {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper})
         {
-            sptrsm_csr_reuse_spsv(nrhs, diag, ptr, ind, val);
-            sptrsm_csr_reuse_spsv(nrhs, diag, ptr_pivot, ind_pivot, val_pivot);
+            for(int64_t nrhs : {1, 3})
+            {
+                for(auto diag : {rocsparse_diag_type_unit, rocsparse_diag_type_non_unit})
+                {
+                    sptrsm_csr_reuse_spsv(trans, uplo, nrhs, diag, ptr, ind, val);
+                    sptrsm_csr_reuse_spsv(trans, uplo, nrhs, diag, ptr_pivot, ind_pivot, val_pivot);
+                }
+            }
         }
     }
 }
