@@ -37,3 +37,8 @@ data/nn/olc/<arch>/
 The models are tracked (2.1–2.5 MB each; `*.orr binary` in `shared/origami/.gitattributes`). An
 OLC model loads only through `origami::nn::load_olc_model`, which checks it against the build
 and the kernel library it serves.
+
+Each model is stamped with the Origami sources it was trained against, and a build whose sources
+differ refuses it. `origami-tests "[shipped]"` fails when that would happen and says whether to
+re-stamp (`shared/origami/tools/origami_olc_restamp.py`) or retrain; see "Shipped OLC
+models" in `shared/origami/README.md`. Retraining happens outside this repository (OrigamiML).
