@@ -372,14 +372,18 @@ private:
         auto defaultTimer = makeDefaultTimer(defaultEvents, defaultGate);
 
         // Validation: skipped for the whole comparison when the buffers cannot be checked.
-        // A skipped resolve still votes (with no images), so it is recorded as inconclusive.
+        // A resolve skipped for a graph-level reason (nothing to check) still votes with no
+        // images and is recorded as inconclusive. One skipped for the caller's buffers records
+        // nothing: another caller's buffers may allow a real check.
         const bool validating = _validation.has_value();
         bool captureOutputs = false;
+        bool recordWinner = true;
         if(validating)
         {
-            if(const auto skipReason = validationSkipReason(deviceBuffers, numDeviceBuffers))
+            if(const auto skip = validationSkipReason(deviceBuffers, numDeviceBuffers))
             {
-                HIPDNN_PLUGIN_LOG_WARN("ingestor: output validation skipped: " << *skipReason);
+                HIPDNN_PLUGIN_LOG_WARN("ingestor: output validation skipped: " << skip->reason);
+                recordWinner = !skip->bufferDependent;
             }
             else
             {
@@ -472,7 +476,7 @@ private:
         size_t best = 0;
         if(cohorts.has_value())
         {
-            best = chooseValidated(*cohorts, ranked);
+            best = chooseValidated(*cohorts, ranked, recordWinner);
         }
         else if(ranked.empty())
         {
@@ -507,15 +511,23 @@ private:
         return best;
     }
 
-    /// Why validation cannot run on these buffers, or nullopt when it can: nothing to check, an
-    /// output the caller did not bind, or an output sharing memory with an input (the fill would
-    /// destroy the input).
-    std::optional<std::string> validationSkipReason(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                                    uint32_t numDeviceBuffers) const
+    /// Why validation cannot run, and whether the cause is the caller's buffers.
+    struct ValidationSkip
+    {
+        std::string reason;
+        bool bufferDependent;
+    };
+
+    /// Why validation cannot run on these buffers, or nullopt when it can: nothing to check
+    /// (graph-level), an output the caller did not bind, or an output sharing memory with an
+    /// input (the fill would destroy the input); the last two are buffer-dependent.
+    std::optional<ValidationSkip>
+        validationSkipReason(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                             uint32_t numDeviceBuffers) const
     {
         if(_validation->outputs.empty())
         {
-            return "no output tensors to check";
+            return ValidationSkip{"no output tensors to check", false};
         }
         for(const auto& spec : _validation->outputs)
         {
@@ -523,14 +535,16 @@ private:
                 = detail::findDeviceBuffer(deviceBuffers, numDeviceBuffers, spec.uid);
             if(output == nullptr)
             {
-                return "output " + std::to_string(spec.uid) + " has a null device pointer";
+                return ValidationSkip{
+                    "output " + std::to_string(spec.uid) + " has a null device pointer", true};
             }
             for(const int64_t inputUid : _validation->inputUids)
             {
                 if(detail::findDeviceBuffer(deviceBuffers, numDeviceBuffers, inputUid) == output)
                 {
-                    return "output " + std::to_string(spec.uid) + " aliases input "
-                           + std::to_string(inputUid);
+                    return ValidationSkip{"output " + std::to_string(spec.uid) + " aliases input "
+                                              + std::to_string(inputUid),
+                                          true};
                 }
             }
         }
@@ -563,9 +577,11 @@ private:
     /// Elects the winner under validation and records it. @p ranked is every timed candidate,
     /// fastest first. A failed candidate is never served: with no passing candidate candidate 0
     /// is delegated to, with passing candidates but no usable time the lowest-index passing one
-    /// is, and neither case records anything.
+    /// is, and neither case records anything. @p recordWinner false (validation skipped for the
+    /// caller's buffers) also records nothing.
     size_t chooseValidated(const OutputCohorts& cohorts,
-                           const std::vector<std::pair<double, size_t>>& ranked) const
+                           const std::vector<std::pair<double, size_t>>& ranked,
+                           bool recordWinner) const
     {
         const auto decision = cohorts.decide();
         HIPDNN_PLUGIN_LOG_INFO("ingestor: output validation "
@@ -618,7 +634,7 @@ private:
                                << passingRanked.front().first << " ms among " << _candidates.size()
                                << " candidate(s)");
 
-        if(_validation->record)
+        if(recordWinner && _validation->record)
         {
             WinnerRecord record;
             record.entries.reserve(passingRanked.size());

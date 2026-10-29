@@ -231,6 +231,15 @@ class TestTensorFieldParsing:
         assert flags["token_index"] is False
         assert flags["token"] is False
 
+    def test_output_tensor_marks_the_written_tensors_only(self, load_test_config):
+        config = load_test_config("sdpa.yaml")
+        flags = {tf.name: tf.output_tensor for tf in config.tensor_fields}
+        assert flags["o"] is True
+        # Optional outputs resolved through a frontend_getter override are marked too.
+        assert flags["stats"] is True
+        assert flags["q"] is False
+        assert flags["attn_mask"] is False
+
     def test_tensor_array_work_data_dependent(self, tmp_path):
         config_file = tmp_path / "op.yaml"
         config_file.write_text(
@@ -1326,6 +1335,24 @@ class TestLoadConfigErrors:
         msg = str(excinfo.value)
         assert "mode_sentinel" in msg
         assert "sometimes" in msg
+
+    def test_non_boolean_output_tensor_is_rejected(self, tmp_path):
+        config_file = tmp_path / "bad_output.yaml"
+        config_file.write_text(
+            "operation:\n"
+            '  name: "Test"\n'
+            '  class_name: "TestDescriptor"\n'
+            '  fbs_table: "TestTable"\n'
+            '  fbs_generated_header: "test_generated.h"\n'
+            "  has_compute_data_type: false\n"
+            "  tensor_fields:\n"
+            '    - name: "x"\n'
+            '      fbs_field: "x_tensor_uid"\n'
+            '      attr_suffix: "X"\n'
+            '      output_tensor: "false"\n'
+        )
+        with pytest.raises(ConfigError, match="output_tensor"):
+            load_config(config_file)
 
     def test_non_boolean_work_data_dependent_is_rejected(self, tmp_path):
         """A quoted ``"false"`` is truthy; accepting it would annotate the field."""

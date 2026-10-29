@@ -405,7 +405,11 @@ protected:
         _mockBackend = std::make_shared<::testing::NiceMock<Mock_hipdnn_backend>>();
         detail::IHipdnnBackend::setInstance(_mockBackend);
         _handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
+        installDefaultBackendActions();
+    }
 
+    void installDefaultBackendActions()
+    {
         // Default: all descriptor creation succeeds with unique fake pointers
         _nextFakeDescIdx = 0;
         ON_CALL(*_mockBackend, backendCreateDescriptor(_, _))
@@ -13296,11 +13300,31 @@ TEST_F(TestGraph, ExhaustiveSweepExecutesTheWinnerLast)
     EXPECT_EQ(recorder.executedPlans, expectedCalls);
 }
 
+// Mock_hipdnn_backend leaves the exact-match cache write at the interface default, so a
+// test that must observe it uses this one.
+class RankingWriteMock : public ::testing::NiceMock<Mock_hipdnn_backend>
+{
+public:
+    MOCK_METHOD(hipdnnStatus_t,
+                writeEngineRankingResultsExt,
+                (hipdnnHandle_t handle,
+                 hipdnnBackendDescriptor_t graphDescriptor,
+                 const int64_t* engineIdsInRankOrder,
+                 size_t engineIdCount,
+                 hipdnnAutotuneCacheWriteOutcome_ext_t* outcome),
+                (override));
+};
+
 // A failed final winner execute fails the sweep and must not persist a winner whose output
 // the caller never received.
 TEST_F(TestGraph, ExhaustiveSweepReturnsTheErrorOfAFailedFinalWinnerExecuteAndCachesNothing)
 {
     ::testing::FLAGS_gmock_verbose = "error";
+    const auto rankingMock = std::make_shared<RankingWriteMock>();
+    _mockBackend = rankingMock;
+    detail::IHipdnnBackend::setInstance(_mockBackend);
+    installDefaultBackendActions();
+    EXPECT_CALL(*rankingMock, writeEngineRankingResultsExt(_, _, _, _, _)).Times(0);
     GraphTestUtils graph;
     createBasicBatchnormGraph(graph);
     ASSERT_TRUE(graph.validate().is_good());

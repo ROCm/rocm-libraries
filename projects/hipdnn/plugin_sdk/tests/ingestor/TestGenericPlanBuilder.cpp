@@ -65,6 +65,7 @@ namespace
 
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
+using namespace hipdnn_plugin_sdk::ingestor::host_hooks;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph;
 
@@ -2971,28 +2972,16 @@ DescriptorId validationKernelId(size_t index)
     return testId(static_cast<uint8_t>(0x70 + index));
 }
 
-std::vector<uint8_t> floatImage(std::initializer_list<float> values)
-{
-    std::vector<uint8_t> bytes(values.size() * sizeof(float));
-    size_t offset = 0;
-    for(const float value : values)
-    {
-        std::memcpy(bytes.data() + offset, &value, sizeof(float));
-        offset += sizeof(float);
-    }
-    return bytes;
-}
-
 /// What a correct kernel writes. @p variant moves one element by a single ulp, which the float
 /// tolerance accepts but a byte compare does not, so a buffer tells which correct kernel wrote it.
 std::vector<uint8_t> correctImage(size_t variant = 0)
 {
-    return floatImage({1.0F + static_cast<float>(variant) * 1.0e-7F, 2.0F, 3.0F, 4.0F});
+    return floatBytes({1.0F + static_cast<float>(variant) * 1.0e-7F, 2.0F, 3.0F, 4.0F});
 }
 
 std::vector<uint8_t> wrongImage()
 {
-    return floatImage({9.0F, 9.0F, 9.0F, 9.0F});
+    return floatBytes({9.0F, 9.0F, 9.0F, 9.0F});
 }
 
 class ScriptedPrepared : public PreparedDispatch
@@ -3170,17 +3159,6 @@ std::vector<std::string> fileLines(const std::filesystem::path& path)
         lines.push_back(line);
     }
     return lines;
-}
-
-std::vector<DescriptorId> entryIdsOf(const WinnerRecord& record)
-{
-    std::vector<DescriptorId> ids;
-    ids.reserve(record.entries.size());
-    for(const auto& entry : record.entries)
-    {
-        ids.push_back(entry.kernelId);
-    }
-    return ids;
 }
 
 std::vector<std::string> logsAt(const hipdnn_test_sdk::utilities::SharedLogRecorder& recorder,
@@ -3518,7 +3496,7 @@ TEST_F(TestIngestorGenericPlanBuilderValidation,
     EXPECT_EQ(buffers.output(), correctImage(1)) << "the fastest passing kernel wins";
     const auto stored = stateManager->winnerFor(winnerKey());
     ASSERT_TRUE(stored.has_value());
-    EXPECT_EQ(entryIdsOf(*stored),
+    EXPECT_EQ(entryIds(*stored),
               (std::vector<DescriptorId>{validationKernelId(1), validationKernelId(0)}))
         << "only passing kernels are recorded, fastest first";
     EXPECT_EQ(stored->validated, std::optional<CatalogDigest>(expectedDigest))
@@ -3552,7 +3530,7 @@ TEST_F(TestIngestorGenericPlanBuilderValidation,
     EXPECT_EQ(buffers.output(), correctImage(1));
     const auto stored = stateManager->winnerFor(winnerKey());
     ASSERT_TRUE(stored.has_value());
-    EXPECT_EQ(entryIdsOf(*stored),
+    EXPECT_EQ(entryIds(*stored),
               (std::vector<DescriptorId>{validationKernelId(1), validationKernelId(2)}));
     EXPECT_EQ(stored->validated, std::optional<CatalogDigest>(expectedDigest));
 
@@ -3849,10 +3827,20 @@ TEST_F(TestIngestorGenericPlanBuilderValidation, AliasedBuffersThroughTheBuilder
     EXPECT_EQ(_hookCounters.fills, 0);
     EXPECT_EQ(_hookCounters.snapshots, 0);
     EXPECT_TRUE(anyLogContainsAll(logsAt(recorder, HIPDNN_SEV_WARN), {"aliases input"}));
+    // Whether the check could run depends on the caller's buffers, so nothing is recorded.
+    EXPECT_FALSE(stateManager->winnerFor(winnerKey()).has_value());
+    EXPECT_LE(shardLines(engineName).size(), 1U) << "at most the version line, never a record";
+
+    // The next build with distinct buffers sweeps again, validates, and records.
+    ValidationContext second;
+    build(builder, /*benchmarking=*/true, second);
+    ASSERT_FALSE(second.servedWithoutBenchmark());
+    HostBuffers distinct;
+    execute(second, distinct);
+    EXPECT_GT(_hookCounters.fills, 0);
     const auto stored = stateManager->winnerFor(winnerKey());
     ASSERT_TRUE(stored.has_value());
-    EXPECT_EQ(stored->validated, std::optional<CatalogDigest>(expectedDigest))
-        << "an inconclusive resolve is still recorded as validated";
+    EXPECT_EQ(stored->validated, std::optional<CatalogDigest>(expectedDigest));
     EXPECT_EQ(stored->entries.size(), 3U);
 }
 

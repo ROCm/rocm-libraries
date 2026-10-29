@@ -331,7 +331,7 @@ UHD heuristics publish each node's logical FLOPs (`graph.flops`, `graph.nodes[i]
 
 ### 12a. Schema Annotations — `flatbuffers_sdk/schemas/<op>_attributes.fbs`
 
-`fragments/fbs_tensor_fields.txt` lists the op table's tensor-uid declarations with their annotations: `(cache_uid)` on every tensor reference, plus `work_data_dependent` on each field whose YAML entry sets `work_data_dependent: true`. Make the schema match, declare each attribute it uses at file scope, then run the `cache-key-hipdnn` and `node-operands-hipdnn` pre-commit hooks (or `scripts/gen_cache_key.py` and `scripts/gen_node_operands.py`) and commit the regenerated `cachekey_generated.h` and `node_operands_generated.h`. A stale `node_operands_generated.h` fails to compile: its `static_assert` pins `NodeAttributes::MAX`.
+`fragments/fbs_tensor_fields.txt` lists the op table's tensor-uid declarations with their annotations: `(cache_uid)` on every tensor reference, plus `work_data_dependent` on each field whose YAML entry sets `work_data_dependent: true` and `output_tensor` on each field whose entry sets `output_tensor: true`. Make the schema match, declare each attribute it uses at file scope, then run the `cache-key-hipdnn` and `node-operands-hipdnn` pre-commit hooks (or `scripts/gen_cache_key.py` and `scripts/gen_node_operands.py`) and commit the regenerated `cachekey_generated.h` and `node_operands_generated.h`. A stale `node_operands_generated.h` fails to compile: its `static_assert` pins `NodeAttributes::MAX`.
 
 ### 12b. FLOPs — `plugin_sdk/include/hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp`
 
@@ -388,6 +388,8 @@ tensor_fields:
     required: true
     work_data_dependent: true   # Group boundaries decide how many rows are multiplied
 ```
+
+A tensor-uid field annotated `output_tensor` in the schema (`long (cache_uid, output_tensor)`) sets `output_tensor: true` on its `tensor_fields` or `tensor_array_fields` entry (default `false`). Set it on every tensor the node writes (its frontend outputs, including optional ones such as SDPA's `stats`); inputs stay `false`. The kernel ingestor uses the annotation to find a graph's output buffers, so an unmarked output is invisible to it. The attribute list order is `cache_uid, work_data_dependent, output_tensor`.
 
 ### Required YAML Fields
 
@@ -506,6 +508,7 @@ tensor_array_fields:
     test_uids: [100, 101]   # UIDs for test tensor descriptors
     test_label: "PeerStats"  # Label used in test case names
     work_data_dependent: false  # See "Mapping FBS Fields to YAML"
+    output_tensor: false        # See "Mapping FBS Fields to YAML"
 ```
 
 ### Tips

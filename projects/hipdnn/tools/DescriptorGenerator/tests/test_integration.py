@@ -2722,6 +2722,15 @@ class TestWorkModelFragments:
         assert "(cache_uid, work_data_dependent)" not in rendered
         assert "    x_tensor_uid: long (cache_uid);\n" in rendered
 
+    def test_schema_fragment_marks_outputs_and_declares_the_attribute(
+        self, convolution_fwd_config, generator
+    ):
+        rendered = generator._render_template(
+            "fragments/fbs_tensor_fields.j2", convolution_fwd_config
+        )
+        assert 'attribute "output_tensor";' in rendered
+        assert "    y_tensor_uid: long (cache_uid, output_tensor);\n" in rendered
+
     def test_node_flops_stub_names_work_data_dependent_operands(
         self, load_test_config, generator
     ):

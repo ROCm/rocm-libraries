@@ -5,8 +5,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
-#include <initializer_list>
 #include <limits>
 #include <string>
 #include <vector>
@@ -17,6 +15,8 @@
 #include <hipdnn_plugin_sdk/OutputAgreement.hpp>
 #include <hipdnn_plugin_sdk/ingestor/OutputCohorts.hpp>
 
+#include "HostValidationHooks.hpp"
+
 /**
  * @file TestOutputCohorts.cpp
  * @brief Unit tests for OutputCohorts.hpp: how candidate output images are grouped into
@@ -26,23 +26,12 @@ namespace
 {
 
 using namespace hipdnn_plugin_sdk::ingestor;
+using hipdnn_plugin_sdk::ingestor::host_hooks::floatBytes;
 using hipdnn_plugin_sdk::output_agreement::firstDisagreement;
 using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
 using Verdict = OutputCohorts::Verdict;
 using ::testing::ElementsAre;
 using ::testing::HasSubstr;
-
-std::vector<uint8_t> floatBytes(std::initializer_list<float> values)
-{
-    std::vector<uint8_t> bytes(values.size() * sizeof(float));
-    size_t offset = 0;
-    for(const float value : values)
-    {
-        std::memcpy(bytes.data() + offset, &value, sizeof(float));
-        offset += sizeof(float);
-    }
-    return bytes;
-}
 
 OutputBufferSpec floatSpec(int64_t uid, size_t elements)
 {

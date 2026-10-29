@@ -144,6 +144,7 @@ namespace
 
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
+using namespace hipdnn_plugin_sdk::ingestor::host_hooks;
 using ::testing::_;
 using ::testing::ByMove;
 using ::testing::Field;
@@ -900,14 +901,6 @@ private:
     std::vector<uint8_t> _image;
 };
 
-std::vector<uint8_t> floatImage(float value)
-{
-    const std::array<float, 4> values{value, value, value, value};
-    std::vector<uint8_t> bytes(sizeof(values));
-    std::memcpy(bytes.data(), values.data(), bytes.size());
-    return bytes;
-}
-
 struct ValidatedSweep
 {
     std::vector<WinnerRecord> records;
@@ -928,11 +921,14 @@ ValidatedSweep runValidatedSweep(int failFromArm)
 
     std::vector<TestBenchmarkPlan::Candidate> candidates;
     candidates.push_back(
-        {testId(1), std::make_unique<WritingGpuPlan>(OUTPUT_UID, floatImage(9.0F))});
+        {testId(1),
+         std::make_unique<WritingGpuPlan>(OUTPUT_UID, floatBytes({9.0F, 9.0F, 9.0F, 9.0F}))});
     candidates.push_back(
-        {testId(2), std::make_unique<WritingGpuPlan>(OUTPUT_UID, floatImage(1.0F))});
+        {testId(2),
+         std::make_unique<WritingGpuPlan>(OUTPUT_UID, floatBytes({1.0F, 1.0F, 1.0F, 1.0F}))});
     candidates.push_back(
-        {testId(3), std::make_unique<WritingGpuPlan>(OUTPUT_UID, floatImage(1.0F))});
+        {testId(3),
+         std::make_unique<WritingGpuPlan>(OUTPUT_UID, floatBytes({1.0F, 1.0F, 1.0F, 1.0F}))});
 
     ValidatedSweep sweep;
     BenchmarkValidation validation;
@@ -957,18 +953,6 @@ ValidatedSweep runValidatedSweep(int failFromArm)
     }
     sweep.rejectedArms = gStreamWaitFaults.rejectedArms;
     return sweep;
-}
-
-std::vector<DescriptorId> sortedKernelIds(const WinnerRecord& record)
-{
-    std::vector<DescriptorId> ids;
-    ids.reserve(record.entries.size());
-    for(const auto& entry : record.entries)
-    {
-        ids.push_back(entry.kernelId);
-    }
-    std::sort(ids.begin(), ids.end());
-    return ids;
 }
 
 TEST_F(TestIngestorHipTimerFaults, ArmErrorRestartsTheWholeComparisonUnstalled)
@@ -1111,8 +1095,12 @@ TEST_F(TestIngestorHipTimerFaults, AStalledRestartWithValidationCountsOnlyTheSet
     ASSERT_EQ(restarted.records.size(), 1U);
     const auto& expected = unrestarted.records.front();
     const auto& actual = restarted.records.front();
-    EXPECT_EQ(sortedKernelIds(expected), (std::vector<DescriptorId>{testId(2), testId(3)}));
-    EXPECT_EQ(sortedKernelIds(actual), sortedKernelIds(expected));
+    auto expectedIds = entryIds(expected);
+    auto actualIds = entryIds(actual);
+    std::sort(expectedIds.begin(), expectedIds.end());
+    std::sort(actualIds.begin(), actualIds.end());
+    EXPECT_EQ(expectedIds, (std::vector<DescriptorId>{testId(2), testId(3)}));
+    EXPECT_EQ(actualIds, expectedIds);
     ASSERT_TRUE(expected.validated.has_value());
     ASSERT_TRUE(actual.validated.has_value());
     // The digest counts the wrong candidate once: a discarded pass's votes must not survive.

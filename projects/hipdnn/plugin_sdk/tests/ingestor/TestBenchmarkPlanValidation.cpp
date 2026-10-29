@@ -45,8 +45,10 @@ using namespace hipdnn_plugin_sdk::ingestor;
 using hipdnn_plugin_sdk::output_agreement::firstDisagreement;
 using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
 using hipdnn_plugin_sdk::ingestor::detail::findDeviceBuffer;
-using hipdnn_plugin_sdk::ingestor::testing::HookCounters;
-using hipdnn_plugin_sdk::ingestor::testing::hostValidationHooks;
+using hipdnn_plugin_sdk::ingestor::host_hooks::entryIds;
+using hipdnn_plugin_sdk::ingestor::host_hooks::floatBytes;
+using hipdnn_plugin_sdk::ingestor::host_hooks::HookCounters;
+using hipdnn_plugin_sdk::ingestor::host_hooks::hostValidationHooks;
 using hipdnn_test_sdk::utilities::SharedLogRecorder;
 
 /// A handle satisfying HasGetStream, which BenchmarkPlan's constructor static_asserts.
@@ -97,18 +99,6 @@ CatalogDigest digestOf(std::initializer_list<uint8_t> seeds)
     return catalogDigest(std::move(triples));
 }
 
-std::vector<uint8_t> floatBytes(std::initializer_list<float> values)
-{
-    std::vector<uint8_t> bytes(values.size() * sizeof(float));
-    size_t offset = 0;
-    for(const float value : values)
-    {
-        std::memcpy(bytes.data() + offset, &value, sizeof(float));
-        offset += sizeof(float);
-    }
-    return bytes;
-}
-
 /// What every correct kernel writes, up to the float tolerance.
 std::vector<uint8_t> correctImage()
 {
@@ -130,17 +120,6 @@ std::vector<uint8_t> wrongImage()
 std::vector<OutputBufferSpec> floatOutput()
 {
     return {{OUTPUT_UID, DataType::FLOAT, FOUR_FLOATS}};
-}
-
-std::vector<DescriptorId> entryIds(const WinnerRecord& record)
-{
-    std::vector<DescriptorId> ids;
-    ids.reserve(record.entries.size());
-    for(const auto& entry : record.entries)
-    {
-        ids.push_back(entry.kernelId);
-    }
-    return ids;
 }
 
 /// A plan double that writes fixed bytes into the host buffer bound to each uid, counting
@@ -788,10 +767,8 @@ TEST(TestIngestorBenchmarkPlanValidation,
 // ---------------------------------------------------------------------------
 
 /// Validation skipped: no hook ran, nothing was excluded (the fastest candidate wins even
-/// though it is the wrong one), and the resolve is recorded validated.
-void expectSkippedWithAWarning(Scenario& scenario,
-                               const SharedLogRecorder& recorder,
-                               const char* reason)
+/// though it is the wrong one), and the skip is warned about. Records nothing itself.
+void expectSkipped(Scenario& scenario, const SharedLogRecorder& recorder, const char* reason)
 {
     scenario.build(true);
     scenario.execute();
@@ -802,11 +779,17 @@ void expectSkippedWithAWarning(Scenario& scenario,
     EXPECT_TRUE(
         anyContainsAll(messagesAt(recorder, HIPDNN_SEV_WARN), {"validation skipped", reason}))
         << recorder.getRecordedLogsAsString();
-    ASSERT_TRUE(hasOneValidatedRecord(scenario));
-    const auto& record = scenario.records.front();
-    EXPECT_EQ(entryIds(record), (std::vector<DescriptorId>{idOf(0x11), idOf(0x10)}));
-    EXPECT_EQ(*record.validated, digestOf({0x10, 0x11}));
     EXPECT_TRUE(scenario.rankings.empty());
+}
+
+/// A skip caused by the caller's buffers: the resolve records nothing, so a call with usable
+/// buffers can still benchmark and record.
+void expectSkippedWithoutARecord(Scenario& scenario,
+                                 const SharedLogRecorder& recorder,
+                                 const char* reason)
+{
+    expectSkipped(scenario, recorder, reason);
+    EXPECT_TRUE(scenario.records.empty());
 }
 
 TEST(TestIngestorBenchmarkPlanValidation, AnOutputAliasingAnInputSkipsValidationWithAWarning)
@@ -817,7 +800,7 @@ TEST(TestIngestorBenchmarkPlanValidation, AnOutputAliasingAnInputSkipsValidation
     scenario.addBuffer(INPUT_UID, FOUR_FLOATS);
     scenario.aliasBuffer(INPUT_UID, OUTPUT_UID);
     addFastWrongSlowCorrect(scenario);
-    expectSkippedWithAWarning(scenario, recorder, "alias");
+    expectSkippedWithoutARecord(scenario, recorder, "alias");
 }
 
 TEST(TestIngestorBenchmarkPlanValidation, ANullOutputPointerSkipsValidation)
@@ -826,7 +809,7 @@ TEST(TestIngestorBenchmarkPlanValidation, ANullOutputPointerSkipsValidation)
     Scenario scenario(floatOutput());
     scenario.nullBuffer(OUTPUT_UID);
     addFastWrongSlowCorrect(scenario);
-    expectSkippedWithAWarning(scenario, recorder, "null");
+    expectSkippedWithoutARecord(scenario, recorder, "null");
 }
 
 /// Two float outputs, so a check that stops after the first one is caught.
@@ -844,7 +827,7 @@ TEST(TestIngestorBenchmarkPlanValidation, ANullSecondOutputPointerSkipsValidatio
     Scenario scenario(twoFloatOutputs());
     scenario.nullBuffer(SECOND_OUTPUT_UID);
     addFastWrongSlowCorrect(scenario);
-    expectSkippedWithAWarning(scenario, recorder, "null");
+    expectSkippedWithoutARecord(scenario, recorder, "null");
 }
 
 TEST(TestIngestorBenchmarkPlanValidation,
@@ -856,7 +839,7 @@ TEST(TestIngestorBenchmarkPlanValidation,
     scenario.addBuffer(INPUT_UID, FOUR_FLOATS);
     scenario.aliasBuffer(INPUT_UID, SECOND_OUTPUT_UID);
     addFastWrongSlowCorrect(scenario);
-    expectSkippedWithAWarning(scenario, recorder, "alias");
+    expectSkippedWithoutARecord(scenario, recorder, "alias");
     EXPECT_THAT(scenario.bufferBytes(SECOND_OUTPUT_UID), ::testing::Each(0x00));
 }
 
@@ -866,7 +849,12 @@ TEST(TestIngestorBenchmarkPlanValidation, AnEmptyOutputListSkipsValidation)
     Scenario scenario(std::vector<OutputBufferSpec>{});
     scenario.addBuffer(OUTPUT_UID, FOUR_FLOATS);
     addFastWrongSlowCorrect(scenario);
-    expectSkippedWithAWarning(scenario, recorder, "no output");
+    expectSkipped(scenario, recorder, "no output");
+    // Nothing to check is a property of the graph, so the resolve is recorded validated.
+    ASSERT_TRUE(hasOneValidatedRecord(scenario));
+    const auto& record = scenario.records.front();
+    EXPECT_EQ(entryIds(record), (std::vector<DescriptorId>{idOf(0x11), idOf(0x10)}));
+    EXPECT_EQ(*record.validated, digestOf({0x10, 0x11}));
 }
 
 // ---------------------------------------------------------------------------

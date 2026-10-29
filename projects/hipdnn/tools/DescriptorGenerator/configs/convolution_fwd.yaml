@@ -86,6 +86,7 @@ operation:
       fbs_field: "y_tensor_uid"
       attr_suffix: "Y"
       required: true
+      output_tensor: true
 
   data_fields:
     - name: "pre_padding"

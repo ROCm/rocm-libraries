@@ -2213,9 +2213,8 @@ the engine's UED revision, and the ranking metric. The ranked order is stored wi
 `validated` marker, the digest of the benchmarked candidate set (the knob-filtered, buildable candidates the
 sweep ranked or excluded), and lists only the kernels that passed validation; a kernel that failed is never
 recorded. The digest covers the failed kernels, so a validated record is served when its digest equals the
-full applicable catalog's digest, even though its entries name only the passing kernels. A sweep run with a
-knob pinned, a candidate dropped at plan build, one with no usable time, or one whose output copy failed
-leaves a record that is not served, and that graph benchmarks again in each process while validation is on. A record without the marker is not served while the mode is on, and the graph
+full applicable catalog's digest, even though its entries name only the passing kernels. A sweep whose candidate set is narrower than the catalog leaves a record that is not served; the
+causes are listed under "Winner cache" in [Environment.md](../Environment.md). That graph benchmarks again on every plan build while validation is on, and each such sweep appends a line to the shard. A record without the marker is not served while the mode is on, and the graph
 benchmarks again and appends a validated record that supersedes it. Not yet built: a persistent cache of model rankings.
 
 - **Load on demand, and never before applicability.** Descriptor discovery parses each UHD's JSON with

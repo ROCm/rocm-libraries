@@ -5,7 +5,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -19,6 +21,8 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
+#include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include "KernelIngestorTestFixtures.hpp"
 
@@ -365,11 +369,23 @@ TEST(TestIngestorGenericEngine, AnEngineModelAnswersOnlyForTheSelectorItWasTrain
     hipdnn_plugin_sdk::uhd::NativeScorerRegistry::unregisterSymbol(L1_SYMBOL);
 }
 
-/// An engine config as the backend stamps one: no knobs, only the ranking metric.
-flatbuffers::FlatBufferBuilder configWithMetric(const std::string& metric)
+/// An engine config as the backend stamps one: only the ranking metric, plus a pin of the block
+/// size knob when @p pinnedBlockSize is given.
+flatbuffers::FlatBufferBuilder configWithMetric(const std::string& metric,
+                                                std::optional<int64_t> pinnedBlockSize
+                                                = std::nullopt)
 {
     hipdnn_flatbuffers_sdk::data_objects::EngineConfigT config;
     config.ranking_metric = metric;
+    if(pinnedBlockSize.has_value())
+    {
+        auto pin = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT>();
+        pin->knob_id = BLOCK_SIZE;
+        hipdnn_flatbuffers_sdk::data_objects::IntValueT value;
+        value.value = *pinnedBlockSize;
+        pin->value.Set(value);
+        config.knobs.push_back(std::move(pin));
+    }
     flatbuffers::FlatBufferBuilder builder;
     builder.Finish(hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(builder, &config));
     return builder;
@@ -966,6 +982,212 @@ TEST(TestIngestorGenericEngine, AConfigurationDescriptionNamesTheL2ModelWithoutR
     ASSERT_EQ(evaluated.status, PredictionStatus::AVAILABLE) << evaluated.reason;
     EXPECT_EQ(evaluated.uhd_id, described.uhd_id);
     EXPECT_GT(scoredKernels.load(), 0);
+}
+
+/// An engine over @p kernels that predicts with benchmarking and validation on, as a validating
+/// sweep does: only a validated record may answer, and plan build refuses any other.
+class ValidatingEngineFixture
+{
+public:
+    explicit ValidatingEngineFixture(std::vector<KernelDescriptor> kernels)
+        : _engine(makeEngineWithKnobs({BLOCK_SIZE}),
+                  makeManager(std::move(kernels), _manager),
+                  _resolver)
+    {
+    }
+
+    ValidatingEngineFixture(const ValidatingEngineFixture&) = delete;
+    ValidatingEngineFixture& operator=(const ValidatingEngineFixture&) = delete;
+
+    /// Stores a record of @p ranked, best first, for @p graph. A validated record carries the
+    /// digest of every kernel the graph admits, so it also covers the ones it leaves unranked.
+    void record(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                const std::vector<DescriptorId>& ranked,
+                bool validated)
+    {
+        const auto properties = testDeviceProperties();
+        const auto admitted = _manager->unsortedDefinitions(MatchContext{graph, 0, properties});
+        WinnerRecord winner;
+        double timeMs = 1.0;
+        for(const auto& kernelId : ranked)
+        {
+            const auto kernel = std::find_if(
+                admitted.begin(), admitted.end(), [&](const KernelDefinition* definition) {
+                    return definition->kernelId == kernelId;
+                });
+            ASSERT_NE(kernel, admitted.end());
+            winner.entries.push_back(
+                {(*kernel)->kernelId, (*kernel)->packId, (*kernel)->dispatchId, timeMs});
+            timeMs += 1.0;
+        }
+        if(validated)
+        {
+            winner.validated = catalogDigest(admitted);
+        }
+        _manager->recordWinner(
+            WinnerKey{hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{graph},
+                      DeviceKey{properties}},
+            winner,
+            WinnerWriteCause::FRESH_MISS);
+    }
+
+    hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
+        predict(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                const std::string& metric,
+                std::optional<int64_t> pinnedBlockSize = std::nullopt)
+    {
+        const auto buffer = configWithMetric(metric, pinnedBlockSize);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
+            buffer.GetBufferPointer(), buffer.GetSize());
+        return _engine.getPrediction(
+            _handle, graph, config, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true);
+    }
+
+    /// The status plan build fails with for the same request.
+    std::optional<hipdnnPluginStatus_t>
+        planBuildFailure(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                         const std::string& metric,
+                         std::optional<int64_t> pinnedBlockSize)
+    {
+        const auto buffer = configWithMetric(metric, pinnedBlockSize);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
+            buffer.GetBufferPointer(), buffer.GetSize());
+        StubContext context;
+        try
+        {
+            _engine.initializeExecutionContext(_handle, graph, config, context);
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+        {
+            return error.getStatus();
+        }
+        return std::nullopt;
+    }
+
+private:
+    static std::unique_ptr<KernelIngestorStateManager<StubHandle>>
+        makeManager(std::vector<KernelDescriptor> kernels,
+                    KernelIngestorStateManager<StubHandle>*& manager)
+    {
+        MetadataSchema schema;
+        schema.id = SCHEMA_ID;
+        schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+                         {DTYPE, MetadataType::STRING, std::nullopt}};
+        KernelDescriptorPack pack;
+        pack.id = PACK_ID;
+        pack.engineId = ENGINE_ID;
+        pack.dispatchId = DISPATCH_ID;
+        pack.kernels = std::move(kernels);
+        HeuristicDescriptor model;
+        model.id = HEURISTIC_ID;
+        model.adapter = UhdAdapter::NATIVE;
+        model.nativeSymbol = SCORE_SYMBOL;
+        model.score = {"tflops", true, "identity"};
+        auto ranker
+            = UhdKernelHeuristic::tryCreate(model, "calibrated configuration", {BLOCK_SIZE});
+        if(ranker == nullptr)
+        {
+            throw std::runtime_error("the test ranker did not build");
+        }
+        auto owned = std::make_unique<KernelIngestorStateManager<StubHandle>>(
+            std::move(schema),
+            std::vector<MatchDescriptor>{},
+            makeStubDispatches(),
+            std::vector<KernelDescriptorPack>{std::move(pack)},
+            std::move(ranker),
+            GRAPH_MATCH_SYMBOL);
+        manager = owned.get();
+        return owned;
+    }
+
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _forceBenchmarking{
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "1"};
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _validateBenchmarking{
+        hipdnn_plugin_sdk::VALIDATE_BENCHMARKING_ENV_NAME, "1"};
+    const ScopedTestSymbols _symbols;
+    const StubDeviceResolver _resolver;
+    const StubWorkspaceHandler _workspaceHandler;
+    const ScopedDispatchRegistration<StubHandle> _dispatch{"hipdnn.kernel_ingestor.test.dispatch",
+                                                           _workspaceHandler};
+    KernelIngestorStateManager<StubHandle>* _manager = nullptr;
+    const StubEngine _engine;
+    StubHandle _handle;
+};
+
+/// The knob value a predicted configuration names, nullopt when it names none.
+std::optional<int64_t>
+    predictedBlockSize(const hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT& prediction)
+{
+    if(prediction.engine_config == nullptr)
+    {
+        return std::nullopt;
+    }
+    for(const auto& knob : prediction.engine_config->knobs)
+    {
+        if(knob->knob_id == BLOCK_SIZE && knob->value.AsIntValue() != nullptr)
+        {
+            return knob->value.AsIntValue()->value;
+        }
+    }
+    return std::nullopt;
+}
+
+/// A validating sweep refuses a legacy record at plan build, so a prediction must not answer
+/// from one: the record measured K64 fastest, and only a record the sweep would trust may say so.
+TEST(TestIngestorGenericEngine, AValidatingConfigurationPredictionIgnoresALegacyRecord)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+    // One engine per record: graphs differing only in their id share a content key.
+    const auto predictOver = [](bool validated) {
+        ValidatingEngineFixture fixture(
+            {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT"),
+             makeTestKernel(testId(0x65), "kernel_128_float", 128, "FLOAT")});
+        const TestGraph graph(makeGraphId(0x77));
+        fixture.record(graph, {testId(0x64), testId(0x65)}, validated);
+        return fixture.predict(graph, "time");
+    };
+
+    // The control: the same ranking, validated, answers from the record.
+    const auto control = predictOver(/*validated=*/true);
+    ASSERT_EQ(control.status, PredictionStatus::AVAILABLE) << control.reason;
+    EXPECT_DOUBLE_EQ(control.value, 1.0);
+    EXPECT_EQ(predictedBlockSize(control), std::optional<int64_t>(64));
+
+    // Refused, `time` has no calibrated ranker to fall back on.
+    const auto refused = predictOver(/*validated=*/false);
+    EXPECT_EQ(refused.status, PredictionStatus::UNAVAILABLE)
+        << "answered " << refused.value << " from a record plan build refuses";
+    EXPECT_EQ(refused.engine_config, nullptr);
+}
+
+/// A kernel a validated record leaves unranked failed validation: plan build never serves it, so
+/// it must not count against the uniqueness of a ranked kernel's knobs, and no pin can name it.
+TEST(TestIngestorGenericEngine, AValidatingConfigurationPredictionNeverNamesAnUnrankedKernel)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+    // K64 is ranked. The HALF kernel shares K64's block size but failed validation, as did K128.
+    ValidatingEngineFixture fixture(
+        {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT"),
+         makeTestKernel(testId(0x65), "kernel_64_half", 64, "HALF"),
+         makeTestKernel(testId(0x66), "kernel_128_float", 128, "FLOAT")});
+    const TestGraph graph(makeGraphId(0x79));
+    fixture.record(graph, {testId(0x64)}, /*validated=*/true);
+
+    // Without the unranked sibling in the way, block size 64 names the ranked kernel exactly.
+    for(const auto& pin : {std::optional<int64_t>(), std::optional<int64_t>(64)})
+    {
+        const auto prediction = fixture.predict(graph, "time", pin);
+        ASSERT_EQ(prediction.status, PredictionStatus::AVAILABLE) << prediction.reason;
+        EXPECT_DOUBLE_EQ(prediction.value, 1.0) << "the record's time for the ranked kernel";
+        EXPECT_EQ(predictedBlockSize(prediction), std::optional<int64_t>(64));
+    }
+
+    // Plan build refuses a pin that only an unranked kernel satisfies; so does the prediction.
+    EXPECT_EQ(fixture.planBuildFailure(graph, "time", 128),
+              std::optional<hipdnnPluginStatus_t>(HIPDNN_PLUGIN_STATUS_INVALID_VALUE));
+    const auto pinnedToUnranked = fixture.predict(graph, "time", 128);
+    EXPECT_EQ(pinnedToUnranked.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(pinnedToUnranked.engine_config, nullptr);
 }
 
 } // namespace

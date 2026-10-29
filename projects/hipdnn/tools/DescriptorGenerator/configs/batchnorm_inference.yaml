@@ -102,6 +102,7 @@ operation:
       fbs_field: "y_tensor_uid"
       attr_suffix: "Y_EXT"
       required: true
+      output_tensor: true
 
   data_fields: []
 

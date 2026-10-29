@@ -369,8 +369,9 @@ public:
             = contextFor(handle, opGraph, heuristics::rankingMetric(engineConfig).name);
         const auto& settings = executionContext.executionSettings().ingestorSettings;
         // Only a validated record may answer a validating sweep. "Validated" means resolved with
-        // validation on: a resolve whose check was skipped or inconclusive is recorded validated
-        // too, so such a record can still rank a kernel no comparison has checked.
+        // validation on: a resolve inconclusive for a graph-level reason (nothing comparable) is
+        // recorded validated too, so such a record can still rank a kernel no comparison has
+        // checked. A resolve skipped for the caller's buffers records nothing.
         const auto policy = recordPolicyFor(settings);
         const auto catalog = _stateManager.sortedCatalog(context, policy);
         if(catalog.entries.empty())

@@ -79,6 +79,7 @@ operation:
       fbs_field: "y_tensor_uid"
       attr_suffix: "Y_EXT"
       required: true
+      output_tensor: true
       frontend_getter: "get_y()"
 
     - name: "prev_running_mean"
@@ -103,24 +104,28 @@ operation:
       fbs_field: "mean_tensor_uid"
       attr_suffix: "MEAN_EXT"
       required: false
+      output_tensor: true
       frontend_getter: "get_mean()"
 
     - name: "inv_variance"
       fbs_field: "inv_variance_tensor_uid"
       attr_suffix: "INV_VARIANCE_EXT"
       required: false
+      output_tensor: true
       frontend_getter: "get_inv_variance()"
 
     - name: "next_running_mean"
       fbs_field: "next_running_mean_tensor_uid"
       attr_suffix: "NEXT_RUNNING_MEAN_EXT"
       required: false
+      output_tensor: true
       frontend_getter: "get_next_running_mean()"
 
     - name: "next_running_variance"
       fbs_field: "next_running_variance_tensor_uid"
       attr_suffix: "NEXT_RUNNING_VARIANCE_EXT"
       required: false
+      output_tensor: true
       frontend_getter: "get_next_running_variance()"
 
   data_fields: []

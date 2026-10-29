@@ -99,18 +99,21 @@ operation:
       fbs_field: "dx_tensor_uid"
       attr_suffix: "DX_EXT"
       required: true
+      output_tensor: true
       frontend_getter: "get_dx()"
 
     - name: "dscale"
       fbs_field: "dscale_tensor_uid"
       attr_suffix: "DSCALE_EXT"
       required: true
+      output_tensor: true
       frontend_getter: "get_dscale()"
 
     - name: "dbias"
       fbs_field: "dbias_tensor_uid"
       attr_suffix: "DBIAS_EXT"
       required: false
+      output_tensor: true
       frontend_getter: "get_dbias()"
 
   data_fields: []

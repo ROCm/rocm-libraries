@@ -77,6 +77,7 @@ operation:
       fbs_field: "dx_tensor_uid"
       attr_suffix: "DXDESC"
       required: true
+      output_tensor: true
       frontend_getter: "get_dx()"
 
     - name: "index"

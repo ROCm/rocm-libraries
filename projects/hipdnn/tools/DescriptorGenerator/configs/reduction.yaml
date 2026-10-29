@@ -50,6 +50,7 @@ operation:
       fbs_field: "out_tensor_uid"
       attr_suffix: "YDESC"
       required: true
+      output_tensor: true
 
   data_fields:
     - name: "mode"

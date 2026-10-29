@@ -98,6 +98,7 @@ operation:
       fbs_field: "dweight_tensor_uid"
       attr_suffix: "DWEIGHT_DESC"
       required: true
+      output_tensor: true
 
   data_fields: []
 

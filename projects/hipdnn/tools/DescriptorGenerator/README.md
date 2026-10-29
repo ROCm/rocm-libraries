@@ -90,7 +90,7 @@ See `CLAUDE.md` for detailed integration steps (especially steps 4-7 and 12).
 The YAML config maps FBS schema fields to hipDNN backend API concepts. To create a new config:
 
 1. Read the FBS schema in `flatbuffers_sdk/schemas/`
-2. Identify tensor UID fields (`*_tensor_uid: long`) → `tensor_fields`; a field annotated `work_data_dependent` sets `work_data_dependent: true`
+2. Identify tensor UID fields (`*_tensor_uid: long`) → `tensor_fields`; a field annotated `work_data_dependent` sets `work_data_dependent: true`, and a field annotated `output_tensor` (a tensor the node writes) sets `output_tensor: true`
 3. Identify data fields (vectors, enums, scalars) → `data_fields`
 4. Look at existing frontend node/attributes classes for naming conventions
 5. Use `convolution_fwd.yaml` as the reference config
@@ -135,6 +135,8 @@ operation:
       work_data_dependent: false      # true when the tensor's contents, not its shape,
                                       # decide the node's work (valid lengths, page tables,
                                       # routing offsets); emits the schema annotation
+      output_tensor: false            # true for a tensor the node writes; emits `output_tensor`,
+                                      # which the kernel ingestor uses to find a graph's output buffers
 
   data_fields:
     - name: "alpha"

@@ -62,6 +62,7 @@ operation:
       fbs_field: "out_0_tensor_uid"
       attr_suffix: "OUT_0_EXT"
       required: true
+      output_tensor: true
 
     - name: "in_1"
       fbs_field: "in_1_tensor_uid"

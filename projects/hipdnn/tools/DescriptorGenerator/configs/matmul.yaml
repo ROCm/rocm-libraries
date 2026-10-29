@@ -58,6 +58,7 @@ operation:
       fbs_field: "c_tensor_uid"
       attr_suffix: "CDESC"
       required: true
+      output_tensor: true
 
   data_fields: []
 

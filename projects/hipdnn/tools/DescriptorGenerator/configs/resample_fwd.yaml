@@ -77,12 +77,14 @@ operation:
       fbs_field: "y_tensor_uid"
       attr_suffix: "Y"
       required: true
+      output_tensor: true
       frontend_getter: "get_y()"
 
     - name: "index"
       fbs_field: "index_tensor_uid"
       attr_suffix: "INDEX"
       required: false
+      output_tensor: true
       frontend_getter: "get_index()"
 
   data_fields:

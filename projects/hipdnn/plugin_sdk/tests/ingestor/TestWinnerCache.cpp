@@ -120,6 +120,20 @@ TEST(TestIngestorWinnerCache, OrderByRecordSkipsAnEntryWhoseDispatchNoLongerAgre
     EXPECT_TRUE(orderByRecord(record, {&current}).empty());
 }
 
+// Two catalog kernels can share a kernel id across packs or dispatches; a record ranking one
+// must not count as ranking the other.
+TEST(TestIngestorWinnerCache, RecordRanksMatchesTheFullTripleNotTheKernelIdAlone)
+{
+    const auto ranked = definitionFor(0x01, 0xA1, 0xD1);
+    const auto otherPack = definitionFor(0x01, 0xB2, 0xD1);
+    const auto otherDispatch = definitionFor(0x01, 0xA1, 0xD2);
+    const WinnerRecord record{{entryFor(ranked, 1.0)}, std::nullopt};
+
+    EXPECT_TRUE(recordRanks(record, ranked));
+    EXPECT_FALSE(recordRanks(record, otherPack));
+    EXPECT_FALSE(recordRanks(record, otherDispatch));
+}
+
 TEST(TestIngestorWinnerCache, OrderByRecordDropsRecordEntriesAbsentFromTheCandidates)
 {
     const auto present = definitionFor(0x01);

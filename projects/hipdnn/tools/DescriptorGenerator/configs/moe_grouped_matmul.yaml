@@ -103,6 +103,7 @@ operation:
       fbs_field: "output_tensor_uid"
       attr_suffix: "OUTPUT_DESC"
       required: true
+      output_tensor: true
 
   data_fields:
     - name: "mode"

@@ -36,7 +36,7 @@ struct RankedEntry
     double timeMs = 0.0;
 };
 
-/// Digest of the catalog a validated record was measured over; see `catalogDigest()`.
+/// Digest of the benchmarked candidate set a validated record classified; see `catalogDigest()`.
 using CatalogDigest = uint64_t;
 
 /// The outcome of one benchmark. `entries` holds every usable candidate in benchmarked

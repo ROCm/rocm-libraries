@@ -207,6 +207,7 @@ operation:
       fbs_field: "o_tensor_uid"
       attr_suffix: "ODESC"
       required: true
+      output_tensor: true
       frontend_getter: "get_o()"
 
     # Optional input tensors
@@ -331,24 +332,28 @@ operation:
       fbs_field: "stats_tensor_uid"
       attr_suffix: "STATSDESC"
       required: false
+      output_tensor: true
       frontend_getter: "get_stats()"
 
     - name: "max_output"
       fbs_field: "max_tensor_uid"
       attr_suffix: "MAX_EXT"
       required: false
+      output_tensor: true
       frontend_getter: "get_max()"
 
     - name: "sum_exp"
       fbs_field: "sum_exp_tensor_uid"
       attr_suffix: "SUM_EXP_EXT"
       required: false
+      output_tensor: true
       frontend_getter: "get_sum_exp()"
 
     - name: "rng_dump"
       fbs_field: "rng_dump_tensor_uid"
       attr_suffix: "RNG_DUMP_EXT"
       required: false
+      output_tensor: true
       frontend_getter: "get_rng_dump()"
 
     # FP8 output tensors
@@ -356,12 +361,14 @@ operation:
       fbs_field: "amax_s_tensor_uid"
       attr_suffix: "AMAX_S_EXT"
       required: false
+      output_tensor: true
       frontend_getter: "get_amax_s()"
 
     - name: "amax_o"
       fbs_field: "amax_o_tensor_uid"
       attr_suffix: "AMAX_O_EXT"
       required: false
+      output_tensor: true
       frontend_getter: "get_amax_o()"
 
   data_fields:

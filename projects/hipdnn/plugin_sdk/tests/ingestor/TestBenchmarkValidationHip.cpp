@@ -100,6 +100,57 @@ TEST(TestIngestorBenchmarkValidationHip, ASnapshotReportsAMissingBufferAsAFailed
     EXPECT_FALSE(hooks.snapshot(stream.get(), nullptr, 0, specs, images));
 }
 
+// The second copy is rejected by the runtime because it reads past its allocation, after the
+// first copy was already enqueued. The hook must still drain the stream and report failure,
+// and the first image is whole by the time it returns.
+TEST(TestIngestorBenchmarkValidationHip, ASnapshotReportsAFailedSecondCopyAndKeepsTheFirstImage)
+{
+    SKIP_IF_NO_DEVICES();
+
+    constexpr size_t FIRST_BYTES = 64;
+    constexpr size_t SECOND_BYTES = 16;
+    constexpr size_t OVERSIZED_BYTES = 1U << 16;
+    const auto first = allocateDevice(FIRST_BYTES);
+    const auto second = allocateDevice(SECOND_BYTES);
+    ASSERT_EQ(hipMemset(first.get(), 0x5A, FIRST_BYTES), hipSuccess);
+    ASSERT_EQ(hipMemset(second.get(), 0x22, SECOND_BYTES), hipSuccess);
+    const std::vector<hipdnnPluginDeviceBuffer_t> buffers{{1, first.get()}, {2, second.get()}};
+    const std::vector<OutputBufferSpec> specs{{1, DataType::FLOAT, FIRST_BYTES},
+                                              {2, DataType::FLOAT, OVERSIZED_BYTES}};
+    const auto stream = createStream();
+    const auto hooks = hipValidationHooks();
+
+    OutputImages images;
+    EXPECT_FALSE(hooks.snapshot(
+        stream.get(), buffers.data(), static_cast<uint32_t>(buffers.size()), specs, images));
+
+    ASSERT_EQ(images.size(), 2U);
+    EXPECT_EQ(images[0], std::vector<uint8_t>(FIRST_BYTES, 0x5A));
+}
+
+TEST(TestIngestorBenchmarkValidationHip,
+     ASnapshotOfAZeroByteOutputYieldsAnEmptyImageAndCopiesTheRest)
+{
+    SKIP_IF_NO_DEVICES();
+
+    constexpr size_t BYTES = 32;
+    const auto empty = allocateDevice(BYTES);
+    const auto filled = allocateDevice(BYTES);
+    ASSERT_EQ(hipMemset(filled.get(), 0x3C, BYTES), hipSuccess);
+    const std::vector<hipdnnPluginDeviceBuffer_t> buffers{{1, empty.get()}, {2, filled.get()}};
+    const std::vector<OutputBufferSpec> specs{{1, DataType::FLOAT, 0}, {2, DataType::FLOAT, BYTES}};
+    const auto stream = createStream();
+    const auto hooks = hipValidationHooks();
+
+    OutputImages images;
+    ASSERT_TRUE(hooks.snapshot(
+        stream.get(), buffers.data(), static_cast<uint32_t>(buffers.size()), specs, images));
+
+    ASSERT_EQ(images.size(), 2U);
+    EXPECT_TRUE(images[0].empty());
+    EXPECT_EQ(images[1], std::vector<uint8_t>(BYTES, 0x3C));
+}
+
 /// A handle with a real stream, which the hooks and the plan's timer path use.
 struct StreamHandle
 {

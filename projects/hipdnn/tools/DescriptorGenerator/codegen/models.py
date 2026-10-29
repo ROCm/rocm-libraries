@@ -103,6 +103,9 @@ class TensorField:
     # The tensor's contents, not its shape, decide how much work the node does
     # (ragged offsets, valid lengths, page tables, block masks, routing offsets).
     work_data_dependent: bool = False
+    # The node writes this tensor: it is an output of the graph node, not an input.
+    # The kernel ingestor finds a graph's output buffers through this annotation.
+    output_tensor: bool = False
 
     @property
     def camel_name(self) -> str:
@@ -151,9 +154,12 @@ class TensorField:
 
 def _fbs_uid_attributes(tensor_field) -> str:
     """FBS attribute list of a tensor-reference field."""
+    attributes = ["cache_uid"]
     if tensor_field.work_data_dependent:
-        return "cache_uid, work_data_dependent"
-    return "cache_uid"
+        attributes.append("work_data_dependent")
+    if tensor_field.output_tensor:
+        attributes.append("output_tensor")
+    return ", ".join(attributes)
 
 
 def _to_camel_case(snake: str) -> str:
@@ -516,6 +522,8 @@ class TensorArrayField:
     test_label: str = ""
     # See TensorField.work_data_dependent.
     work_data_dependent: bool = False
+    # See TensorField.output_tensor.
+    output_tensor: bool = False
 
     @property
     def member_name(self) -> str:

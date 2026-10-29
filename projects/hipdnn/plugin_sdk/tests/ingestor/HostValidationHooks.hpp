@@ -8,20 +8,49 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_plugin_sdk/OutputAgreement.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/BenchmarkValidation.hpp>
+#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
 
 /**
  * @file HostValidationHooks.hpp
  * @brief Host stand-ins for BenchmarkPlan's output-validation hooks: memset and memcpy over
- *        buffers that live in host memory, so validation runs with no device.
+ *        buffers that live in host memory, so validation runs with no device, plus the small
+ *        helpers the validation tests share.
  */
-namespace hipdnn_plugin_sdk::ingestor::testing
+namespace hipdnn_plugin_sdk::ingestor::host_hooks
 {
+
+/// The raw bytes of @p values, the image a float output buffer holds.
+inline std::vector<uint8_t> floatBytes(std::initializer_list<float> values)
+{
+    std::vector<uint8_t> bytes(values.size() * sizeof(float));
+    size_t offset = 0;
+    for(const float value : values)
+    {
+        std::memcpy(bytes.data() + offset, &value, sizeof(float));
+        offset += sizeof(float);
+    }
+    return bytes;
+}
+
+/// The kernel ids of @p record's entries, in record order.
+inline std::vector<DescriptorId> entryIds(const WinnerRecord& record)
+{
+    std::vector<DescriptorId> ids;
+    ids.reserve(record.entries.size());
+    for(const auto& entry : record.entries)
+    {
+        ids.push_back(entry.kernelId);
+    }
+    return ids;
+}
 
 /// How many times the host hooks ran, and optional scripted snapshot faults.
 struct HookCounters
@@ -83,6 +112,6 @@ inline BenchmarkValidationHooks hostValidationHooks(HookCounters& counters)
     return hooks;
 }
 
-} // namespace hipdnn_plugin_sdk::ingestor::testing
+} // namespace hipdnn_plugin_sdk::ingestor::host_hooks
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
