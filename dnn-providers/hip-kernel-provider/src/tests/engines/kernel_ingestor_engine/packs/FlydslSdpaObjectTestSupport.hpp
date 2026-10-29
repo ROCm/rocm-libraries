@@ -6,19 +6,24 @@
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
 
 #include <cstddef>
+#include <cstdint>
+#include <string>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
+#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaTestGraphs.hpp"
 
 /**
  * @file FlydslSdpaObjectTestSupport.hpp
- * @brief The SDPA device harnesses, reached with a named object, and the split workspace
- *        both harnesses launch with.
+ * @brief The SDPA device harnesses, reached with a named object, the split workspace both
+ *        harnesses launch with, and what the per-object host walks read of a loaded object.
  *
  * The RDNA and CDNA dispatch suites each own a launch-and-compare harness that picks the
  * object to run itself. The per-object suite (TestFlydslSdpaObjects.cpp) names the object
@@ -92,6 +97,62 @@ private:
     size_t _bytes = 0;
     void* _base = nullptr;
 };
+
+/// The kernel @p kernel of @p pack as the engine's matchers read it, promoted from the loaded
+/// descriptors. A kernel may narrow the arch list its pack claims but never reach outside it,
+/// so an empty list on the kernel means "the pack's".
+template <typename Pack, typename Kernel>
+hipdnn_plugin_sdk::ingestor::KernelDefinition definitionOf(const Pack& pack, const Kernel& kernel)
+{
+    return hipdnn_plugin_sdk::ingestor::KernelDefinition{kernel.id,
+                                                         pack.id,
+                                                         pack.dispatchId,
+                                                         kernel.source,
+                                                         kernel.metadata,
+                                                         kernel.priority,
+                                                         kernel.arch.empty() ? pack.arch
+                                                                             : kernel.arch,
+                                                         kernel.originDirectory,
+                                                         kernel.name,
+                                                         kernel.treeRoot,
+                                                         kernel.sources};
+}
+
+/// A metadata field of type @p T, or nullptr when absent or of another type.
+template <typename T>
+const T* metadataValue(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+                       const char* field)
+{
+    const auto it = kernel.metadata.find(std::string(field));
+    return it == kernel.metadata.end() ? nullptr : std::get_if<T>(&it->second);
+}
+
+/// A metadata integer, or @p absent when the object's KMD has no such field (each family
+/// leaves out the fields its kernel fixes).
+inline int64_t intField(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+                        const char* field,
+                        int64_t absent = 0)
+{
+    const auto* value = metadataValue<int64_t>(kernel, field);
+    return value == nullptr ? absent : *value;
+}
+
+inline std::string stringField(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+                               const char* field)
+{
+    const auto* value = metadataValue<std::string>(kernel, field);
+    return value == nullptr ? std::string() : *value;
+}
+
+/// The device a host check stands in for when it matches an object of another arch.
+inline hipdnn_plugin_sdk::ingestor::DeviceProperties devicePropertiesFor(const std::string& arch)
+{
+    hipdnn_plugin_sdk::ingestor::DeviceProperties properties;
+    properties.gcnArchName = arch;
+    properties.warpSize = arch.rfind("gfx9", 0) == 0 ? 64 : 32;
+    properties.multiProcessorCount = 64;
+    return properties;
+}
 
 /// The RDNA engine a forced object belongs to.
 enum class RdnaObjectEngine

@@ -171,28 +171,6 @@ enum class ObjectSelection
     EVERY
 };
 
-/// A metadata field of type @p T, or nullptr when absent or of another type.
-template <typename T>
-const T* metadataValue(const KernelDefinition& kernel, const char* field)
-{
-    const auto it = kernel.metadata.find(std::string(field));
-    return it == kernel.metadata.end() ? nullptr : std::get_if<T>(&it->second);
-}
-
-/// A metadata integer, or @p absent when the object's KMD has no such field (each CDNA
-/// family leaves out the fields its kernel fixes).
-int64_t intField(const KernelDefinition& kernel, const char* field, int64_t absent = 0)
-{
-    const auto* value = metadataValue<int64_t>(kernel, field);
-    return value == nullptr ? absent : *value;
-}
-
-std::string stringField(const KernelDefinition& kernel, const char* field)
-{
-    const auto* value = metadataValue<std::string>(kernel, field);
-    return value == nullptr ? std::string() : *value;
-}
-
 /// The metadata fields a graph is derived from. The RDNA engines spell the generic head dim
 /// 0 and bound it by head_dim_max; the CDNA ones bucket by qk_mask.
 struct ObjectTraits
@@ -402,16 +380,6 @@ std::vector<ShapeAlternatives>
     return shapes;
 }
 
-/// The device a host check stands in for when it matches an object of another arch.
-DeviceProperties devicePropertiesFor(const std::string& arch)
-{
-    DeviceProperties properties;
-    properties.gcnArchName = arch;
-    properties.warpSize = arch.rfind("gfx9", 0) == 0 ? 64 : 32;
-    properties.multiProcessorCount = 64;
-    return properties;
-}
-
 /// Whether @p kernel's engine binds the graph @p spec describes and the object admits it.
 bool objectAdmits(const ObjectEngine& engine,
                   const SdpaGraphSpec& spec,
@@ -556,17 +524,7 @@ TEST_P(TestFlydslSdpaObjectGraphs, EveryLoadedObjectAdmitsTheGraphsBuiltFromItsM
     {
         for(const auto& kernel : pack.kernels)
         {
-            const KernelDefinition definition{kernel.id,
-                                              pack.id,
-                                              pack.dispatchId,
-                                              kernel.source,
-                                              kernel.metadata,
-                                              kernel.priority,
-                                              kernel.arch.empty() ? pack.arch : kernel.arch,
-                                              kernel.originDirectory,
-                                              kernel.name,
-                                              kernel.treeRoot,
-                                              kernel.sources};
+            const auto definition = definitionOf(pack, kernel);
             for(const auto& arch : definition.arch)
             {
                 objectsPerArch[arch].push_back(definition);
