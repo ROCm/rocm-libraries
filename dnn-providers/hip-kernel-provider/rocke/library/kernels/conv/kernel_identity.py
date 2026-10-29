@@ -139,21 +139,20 @@ class KernelIdentity:
     # wgrad only (WgradConvSpec.lds_kpack): K steps packed per LDS store on
     # the M-outer transpose-on-store. Left out of the hash at 1.
     lds_kpack: int = 1
-    # wgrad only (WgradConvSpec.xcd_remap): XCD count of the whole-grid remap.
-    # Left out of the hash at 0.
+    # wgrad (WgradConvSpec.xcd_remap: whole-grid remap) and fwd
+    # (ImplicitGemmConvSpec.xcd_remap: XCD-contiguous tile order): the XCD
+    # count, 0 = launch order. Left out of the hash at 0.
     xcd_remap: int = 0
     # wgrad only (WgradConvSpec.sep_addr): separable (1) / carried (2)
     # operand addressing. Left out of the hash at 0.
     sep_addr: int = 0
-    # dgrad only (DgradConvSpec.uniform_k_decode): the per-tile reduction
-    # decode K loop. Left out of the hash while False, like prefetch_addr.
+    # dgrad (DgradConvSpec.uniform_k_decode) and fwd
+    # (ImplicitGemmConvSpec.uniform_k_decode): the per-tile reduction decode
+    # K loop. Left out of the hash while False, like prefetch_addr.
     uniform_k_decode: bool = False
     # fwd only (ImplicitGemmConvSpec.reg_prefetch): the register-prefetch
     # K loop, 1 = one LDS buffer, 2 = two. Left out of the hash at 0.
     reg_prefetch: int = 0
-    # fwd only (ImplicitGemmConvSpec.xcd_remap): XCD count of the
-    # XCD-contiguous tile order, 0 = launch order. Left out of the hash at 0.
-    xcd_remap: int = 0
     # fwd only (ImplicitGemmConvSpec.lds_xor): XOR-swizzled, unpadded A/B LDS
     # tiles. Left out of the hash while False.
     lds_xor: bool = False
@@ -271,8 +270,6 @@ class KernelIdentity:
             del fields["uniform_k_decode"]
         if not fields["reg_prefetch"]:
             del fields["reg_prefetch"]
-        if not fields["xcd_remap"]:
-            del fields["xcd_remap"]
         if not fields["lds_xor"]:
             del fields["lds_xor"]
         if not fields["patch"]:
