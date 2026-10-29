@@ -849,6 +849,130 @@ TEST_CASE("a launch model plans each fully scored view key once, for its first c
   CHECK_THROWS_AS(with(m, std::make_shared<ThrowingLaunch>()).rank(p, hw), std::runtime_error);
 }
 
+// Records the configs a ranking asks it to prefetch and to plan, in call
+// order: (true, index) for prefetch(), (false, index) for plan(). The record
+// is reserved up front so that prefetch(), which must not throw, never
+// allocates.
+struct PrefetchLaunch final : tw::LaunchModel {
+  static constexpr std::size_t kRoom = 1024;
+  mutable std::vector<std::pair<bool, std::size_t>> calls;
+
+  PrefetchLaunch() { calls.reserve(kRoom); }
+
+  tw::LaunchPlan plan(const tw::Config& c,
+                      const tw::Problem&,
+                      const tw::ExecutionContext&) const override {
+    calls.emplace_back(false, c.index);
+    return index_plan(c);
+  }
+  void prefetch(const tw::Config& c) const noexcept override {
+    if (calls.size() < kRoom) calls.emplace_back(true, c.index);
+  }
+
+  // The configs of the prefetch() calls, or of the plan() calls, ascending.
+  std::vector<std::size_t> asked(bool prefetched) const {
+    std::vector<std::size_t> out;
+    for (const auto& [f, i] : calls)
+      if (f == prefetched) out.push_back(i);
+    std::sort(out.begin(), out.end());
+    return out;
+  }
+  // Whether each plan() call for a config of `configs` came after a
+  // prefetch() call for it.
+  bool prefetched_first(const std::vector<std::size_t>& configs) const {
+    for (auto at = calls.begin(); at != calls.end(); ++at) {
+      const auto& [f, i] = *at;
+      if (f || std::find(configs.begin(), configs.end(), i) == configs.end()) continue;
+      if (std::find(calls.begin(), at, std::make_pair(true, i)) == at) return false;
+    }
+    return true;
+  }
+};
+
+TEST_CASE("a ranking asks the launch model to prefetch the whitelist tier it will plan",
+          "[v3][launch]") {
+  const tw::Hardware hw              = test_hardware();
+  const tw::Problem p                = make_problem(1000, 2000, 512);
+  const tw::ExecutionContext excl    = {};
+  const std::vector<tw::Config> pool = variant_pool();
+  // Every cell whitelists signatures 1 and 2; configs 7 and 8 are variants of
+  // them, and every config is feasible for `p`.
+  ModelSpec keyed = v3_grid({});
+  for (CellSpec& cell : keyed.cells)
+    cell.view_key_hashes = {key_hash(pool[1], {}), key_hash(pool[2], {})};
+  const tw::ModelPtr m = load_spec(keyed);
+  const auto with = [&](const tw::ModelPtr& model, std::shared_ptr<const tw::LaunchModel> launch) {
+    return tw::CandidateSet(model, pool, tw::PoolOptions{tw::TieBreak::PoolOrder, launch});
+  };
+  // The same plans without the hook. Every ranking below is of a new
+  // candidate set, so the re-rank memo answers none of them.
+  const auto unhooked = [&](const tw::ModelPtr& model, std::size_t min_scored) {
+    auto rec = std::make_shared<RecordingLaunch>();
+    rec->fn  = &index_plan;
+    return with(model, rec).rank(p, hw, excl, min_scored);
+  };
+  // The first configs of the whitelisted keys, which the whitelist tier plans
+  // and, with TW_LEVER_PREFETCH, asks to prefetch first.
+  const std::vector<std::size_t> tier = {1, 2};
+#if TW_LEVER_PREFETCH
+  const std::vector<std::size_t> prefetched = tier;
+#else
+  const std::vector<std::size_t> prefetched;
+#endif
+
+  // The whitelist tier alone: unprepared, prepared, and through rank_top.
+  for (int mode = 0; mode < 3; ++mode) {
+    auto launch                = std::make_shared<PrefetchLaunch>();
+    const tw::CandidateSet set = with(m, launch);
+    if (mode == 1) set.prepare();
+    if (mode == 2) {
+      CHECK(same_results(set.rank_top(p, hw, excl, 1), scored_prefix(unhooked(m, 1), 1)));
+    } else {
+      const std::vector<tw::Result> r = set.rank(p, hw, excl, 0);
+      std::vector<std::size_t> scored = scored_indices(r);
+      std::sort(scored.begin(), scored.end());
+      CHECK(scored == std::vector<std::size_t>{1, 2, 7, 8});
+      CHECK(same_results(r, unhooked(m, 0)));
+    }
+    CHECK(launch->asked(true) == prefetched);
+    CHECK(launch->asked(false) == tier);
+    CHECK(launch->prefetched_first(prefetched));
+  }
+
+  // Both tiers: the second, every other feasible key, is planned only.
+  {
+    auto launch                     = std::make_shared<PrefetchLaunch>();
+    const std::vector<tw::Result> r = with(m, launch).rank(p, hw, excl, kAll);
+    CHECK(scored_indices(r).size() == pool.size());
+    CHECK(same_results(r, unhooked(m, kAll)));
+    CHECK(launch->asked(true) == prefetched);
+    CHECK(launch->asked(false) == std::vector<std::size_t>{0, 1, 2, 3, 4, 5});
+    CHECK(launch->prefetched_first(prefetched));
+  }
+
+  // Nothing is prefetched without a whitelist, and nothing is asked for by a
+  // v2 model or for an unsupported context.
+  {
+    const tw::ModelPtr open = load_spec(v3_grid({}));
+    auto launch             = std::make_shared<PrefetchLaunch>();
+    CHECK(same_results(with(open, launch).rank(p, hw, excl, 0), unhooked(open, 0)));
+    CHECK(launch->asked(true).empty());
+    CHECK(launch->asked(false) == std::vector<std::size_t>{0, 1, 2, 3, 4, 5});
+
+    auto v2 = std::make_shared<PrefetchLaunch>();
+    with(load_spec(grid_model()), v2).rank(p, hw, kAll);
+    CHECK(v2->calls.empty());
+
+    ModelSpec narrow = keyed;
+    narrow.schedules = 0x1;
+    auto unsupported = std::make_shared<PrefetchLaunch>();
+    CHECK(scored_indices(
+              with(load_spec(narrow), unsupported).rank(p, hw, context(0, tw::Schedule::Dynamic)))
+              .empty());
+    CHECK(unsupported->calls.empty());
+  }
+}
+
 // Launches by occupancy, its launch key.
 struct OccupancyLaunch final : tw::LaunchModel {
   mutable std::vector<std::size_t> asked;
