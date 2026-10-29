@@ -2018,6 +2018,22 @@ void testing_matmul_with_bias(const Arguments& arg,
             throw std::invalid_argument("scaleB=1001 requires transB=N");
     }
 
+    // MX scales are sized below from the logical extent, but the generator is handed the
+    // leading dimension as its stride and sizes its own buffer from that. A padded leading
+    // dimension therefore produces more scales than were allocated, which the generator
+    // memcpys over the end of the host buffer, and swizzles on a grid the device does not
+    // read back the same way. Reject it here, alongside the orientation guards and before
+    // the stream and events exist, so throwing does not leak them.
+    for(int i = 0; i < std::max(1, arg.grouped_gemm); i++)
+    {
+        auto const aRow = transA == HIPBLAS_OP_N ? arg.M[i] : arg.K[i];
+        auto const bRow = transB == HIPBLAS_OP_N ? arg.K[i] : arg.N[i];
+        if(isBlockScaling(arg.scaleA) && arg.lda[i] != aRow)
+            throw std::invalid_argument("MX scales require lda equal to the rows stored");
+        if(isBlockScaling(arg.scaleB) && arg.ldb[i] != bRow)
+            throw std::invalid_argument("MX scales require ldb equal to the rows stored");
+    }
+
     double gpu_time_used, cpu_time_used, gpu_mem_gbytes;
     gpu_time_used = cpu_time_used = gpu_mem_gbytes = 0.0;
     bool                   HMM                     = arg.HMM;
@@ -2218,17 +2234,6 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         size_D_copy[i] = (arg.unit_check || arg.norm_check || arg.allclose_check) ? size_D[i] : 0;
         size_scaleAlphaVec[i] = arg.scaleAlpha_vector ? M[i] : 0;
-
-        // MX scales are sized below from the logical extent, but the generator is handed
-        // the leading dimension as its stride and sizes its own buffer from that. A padded
-        // leading dimension therefore produces more scales than were allocated, which the
-        // generator then memcpys over the end of the host buffer, and swizzles on a grid
-        // that no longer matches what the device reads. Reject it rather than corrupt
-        // memory. The same guard already covers the fast_check path below.
-        if(isBlockScaling(arg.scaleA) && lda[i] != A_row[i])
-            throw std::invalid_argument("MX scales require lda equal to the rows stored");
-        if(isBlockScaling(arg.scaleB) && ldb[i] != B_row[i])
-            throw std::invalid_argument("MX scales require ldb equal to the rows stored");
 
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
