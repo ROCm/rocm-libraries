@@ -120,6 +120,20 @@ def dgrad_reference(dY: torch.Tensor, W: torch.Tensor, p) -> torch.Tensor:
     slices = _batch_slices(p, dY.shape[0])
     if len(slices) > 1:
         return torch.cat([dgrad_reference(dY[n0 : n0 + n], W, p) for n0, n in slices])
+    if getattr(p, "is_3d", False):
+        # NDHWK -> NKDHW, KZYXC -> KCZYX, NCDHW -> NDHWC.
+        dY_t = dY.float().cuda().permute(0, 4, 1, 2, 3).contiguous()
+        W_t = W.float().cuda().permute(0, 4, 1, 2, 3).contiguous()
+        dX_ncdhw = torch.nn.grad.conv3d_input(
+            input_size=(dY.shape[0], p.C, p.Di, p.Hi, p.Wi),
+            weight=W_t,
+            grad_output=dY_t,
+            stride=(p.sD, p.sH, p.sW),
+            padding=(p.pD, p.pH, p.pW),
+            dilation=(p.dD, p.dH, p.dW),
+            groups=p.groups,
+        )
+        return dX_ncdhw.permute(0, 2, 3, 4, 1).contiguous()
     dY_t = dY.float().cuda().permute(0, 3, 1, 2).contiguous()  # NHWK -> NKHW
     W_t = W.float().cuda().permute(0, 3, 1, 2).contiguous()  # KYXC -> KCYX
     dX_nchw = torch.nn.grad.conv2d_input(
