@@ -3,6 +3,12 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND 5.3.0 for ROCm 10.3.0
+
+### Changed
+
+* Replaced offset applied to scrambled Sobol direction vectors with Linear Matrix Scramble. The output of ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32 and ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64 is not bitwise compatible with previous releases.
+
 ## rocRAND 5.2.0 for ROCm 10.2.0
 
 ### Optimized
