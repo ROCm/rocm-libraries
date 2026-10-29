@@ -5891,6 +5891,14 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
         }
     }
+    // Every solution checked in this call writes the same D, so a solution that skips its store
+    // would be checked against the previous solution's result. Filling D with all ones first (NaN
+    // in the IEEE floating types) makes such a solution fail instead.
+    const bool checksResults = arg.unit_check || arg.norm_check || arg.allclose_check;
+    auto       poisonD       = [&]() {
+        for(auto& d : *dDp)
+            CHECK_HIP_ERROR(hipMemsetAsync(d.buf(), 0xFF, d.getNumBytes(), stream));
+    };
     if(!arg.timing)
     {
         // fast_check launches and checks each solution fast_check_repeat times, solution by
@@ -6001,6 +6009,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                     CHECK_HIP_ERROR(
                         fast_check_fill_sentinel_device((*dDp)[i].buf(), To, size_D[i], stream));
             }
+            else if(checksResults && !arg.c_equal_d)
+                poisonD();
             if(fcCheckE)
                 for(int i = 0; i < gemm_count; i++)
                     CHECK_HIP_ERROR(
@@ -6551,7 +6561,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         // Every path prepares a candidate with this first.
         auto prepareCandidate = [&](size_t) {
-            if((arg.unit_check || arg.norm_check || arg.allclose_check) && arg.c_equal_d)
+            if(checksResults && arg.c_equal_d)
             {
                 if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
                 {
@@ -6568,6 +6578,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                     }
                 }
             }
+            else if(checksResults)
+                poisonD();
             perf_monitor = EfficiencyMonitor::create();
         };
         auto skipped = [&](size_t sol, double warm_time, double best_warm_time) {
