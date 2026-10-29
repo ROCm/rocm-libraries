@@ -6685,9 +6685,9 @@ class Solution(collections.abc.Mapping):
       if _bRotReason is not None:
         reject(state, printRejectionReason, "LDSSegmentBRotate: %s" % _bRotReason)
         return
-    # Persistent kernels retain their existing interleave offsets and buffer swaps.
-    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and not _segAligned and not isPersistent(state):
-      _pairedReason = None if state["LDSSegmentBRotate"] else segPairedReason(state, isPersistent(state))
+    # Tight layouts pair each component's ping/pong buffers, including persistent kernels.
+    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and not _segAligned:
+      _pairedReason = None if state["LDSSegmentBRotate"] else segPairedReason(state)
       if _pairedReason is None:
         _pairedOffsets = segPairedOffsets(state)
         _pairedReason = "layout exceeds MaxLDS" if _pairedOffsets is None else segPairedLayoutReason(state, _pairedOffsets)

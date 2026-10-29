@@ -215,19 +215,51 @@ def test_paired_capacity_includes_only_final_layout_and_other_lds_users(
 
 
 @pytest.mark.parametrize("mode", [-1, 1])
-def test_streamk_retains_existing_tight_interleave(derive, mode):
+@pytest.mark.parametrize("streamk", [3, 4, 5], ids=["static", "dynamic", "hybrid"])
+def test_streamk_uses_paired_tight_interleave(derive, mode, streamk):
     # Match the MXFP8 StreamK geometry shipped in the gfx1250 Origami logic.
     sol, out = derive(mode, mi=[16, 16, 128, 1, 1, 1, 5, 2, 2],
-                      StreamK=3, GlobalSplitU=0, SourceSwap=False, HalfPLR=0,
+                      StreamK=streamk, GlobalSplitU=0, SourceSwap=False, HalfPLR=0,
                       VectorWidthA=1, VectorWidthB=1, DepthU=512,
                       PrefetchGlobalRead=2,
                       ProblemType={"DestDataType": "s", "MXBlockA": 32, "MXBlockB": 32})
     assert sol["Valid"], out
     assert sol["LDSSegmentInterleave"] == 1
-    assert sol["LDSSegInterleaveOffsets"] == {
-        "ldsBaseB": 8448, "writeStrideBytes": 92928, "footprintPacked": True,
-        "bBaseline": True, "ldsBaseMXSA": 101376, "ldsBaseMXSB": 101888,
-    }
-    assert sol["StoreSwapAddr"] is False
+    offsets = sol["LDSSegInterleaveOffsets"]
+    assert offsets["pairedBuffers"] is True
+    assert offsets["bBaseline"] is True
+    assert sol["StoreSwapAddr"] is True
     assert sol["NumLdsBlk"] == 2
-    assert sol["LdsNumBytes"] == 235520
+    assert offsets["pairedUsedBytes"] <= sol["LdsNumBytes"] <= sol["MaxLDS"]
+
+
+@pytest.mark.parametrize("problem_index", [0, 1, 2], ids=["bf16", "fp8-shared-B", "mxfp8"])
+def test_persistent_yaml_reaches_paired_tail_reset(problem_index):
+    from pathlib import Path
+    from config_harness import solutions_from_config, emit_kernels_from_config
+
+    config = (Path(__file__).resolve().parents[1] / "common" / "streamk" /
+              "gfx1250" / "core" / "paired_lds_tail.yaml")
+    solutions = solutions_from_config(config, arch="gfx1250", problem_index=problem_index,
+                                     expected_fork_count=4)
+    # A supported YAML fork must not disappear or silently use the old layout.
+    assert len(solutions) == 4
+    assert {(s["TileProcessingStrategy"], s["PrefetchGlobalRead"]) for s in solutions} == {
+        (strategy, pgr) for strategy in ("StreamK", "DataParallel") for pgr in (1, 2)
+    }
+    for sol in solutions:
+        assert sol["LDSSegInterleaveOffsets"]["pairedBuffers"] is True
+        assert sol["PrefetchAcrossPersistent"] == 0
+        # MX scales require block-aligned K, but must still retain a K tail.
+        assert sol["AssertSummationElementMultiple"] == (32 if problem_index == 2 else 1)
+        assert sol["AssertSummationElementMultiple"] < sol["DepthU"]
+
+    emitted = emit_kernels_from_config(config, arch="gfx1250", limit=None, canonical=False,
+                                       problem_index=problem_index, expected_fork_count=4)
+    assert len(emitted) == 4
+    for name, source, error in emitted:
+        assert error == 0, name
+        assert "Reset to paired ping buffer" in source, name
+        assert "sgprPairedTDMSwap" in source, name
+        if problem_index == 2:
+            assert "sgprPairedTDMScaleSwap" in source, name
