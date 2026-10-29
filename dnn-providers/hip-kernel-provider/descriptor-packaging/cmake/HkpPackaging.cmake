@@ -2361,8 +2361,7 @@ endfunction()
 # ---------------------------------------------------------------------------
 # _hkp_write_census_shard(<arch> <text>)
 #   Write <arch>'s shard CTest file into the test descriptor build tree, copy the files
-#   reserved with the shard beside it, and fail if the text names a *.toml, by bare name,
-#   that is not there.
+#   reserved with the shard beside it, and fail if the text names a *.toml that is not there.
 # ---------------------------------------------------------------------------
 function(_hkp_write_census_shard arch text)
     set(_shard_dir "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/census/${arch}")
@@ -2377,9 +2376,8 @@ function(_hkp_write_census_shard arch text)
         configure_file("${_file}" "${_shard_dir}/${_name}" COPYONLY)
     endforeach()
 
-    # Bare names only: the emitters write a TOML's file name, never a path. Both quoting
-    # forms an entry can carry -- "name.toml" and [[name.toml]] -- leave that name intact,
-    # so matching the name alone covers either.
+    # Bare names only: the emitters write a TOML's file name, never a path, quoted as
+    # "name.toml" or [[name.toml]], so matching the name covers both forms.
     string(REGEX MATCHALL "[A-Za-z0-9_.-]+\\.toml" _named "${text}")
     list(REMOVE_DUPLICATES _named)
     foreach(_name IN LISTS _named)

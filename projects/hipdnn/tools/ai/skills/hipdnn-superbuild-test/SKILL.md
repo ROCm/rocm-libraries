@@ -34,17 +34,17 @@ Infer options from the user request:
      executable under it.
    - `<installed-ctest-root>`: the CTest root of an *installed* tree, which for this
      provider is `<install-prefix>/bin/hip_kernel_provider`, not the prefix itself.
-   - `<build-ctest-root>`: the build-tree registration of the same provider suites,
-     `<build-dir>/dnn-providers/hip-kernel-provider/src`. It registers the categorized
-     engine-pinned suites with absolute paths; list one engine's with
-     `ctest --test-dir <build-ctest-root> -N -L <engine-label>`, where the label is the
-     engine ID with every character outside `[A-Za-z0-9_.-]` mapped to `_` (for example
-     `hipkernel_Gfx950AttentionDense`). The provider's `install_CTestTestfile.cmake` (or
-     `CTestTestfile.cmake.install`) in the build tree is install-only: CTest does not read
-     it there. The per-arch census shard runs in either tree, at
+   - `<build-ctest-root>`: `<build-dir>/dnn-providers/hip-kernel-provider/src`, the
+     build-tree registration of the categorized engine-pinned suites, with absolute paths.
+     List one engine's with `ctest --test-dir <build-ctest-root> -N -L <engine-label>`,
+     where the label is the engine ID with every character outside `[A-Za-z0-9_.-]` mapped
+     to `_` (for example `hipkernel_Gfx950AttentionDense`). The provider's
+     `install_CTestTestfile.cmake` (or `CTestTestfile.cmake.install`) in the build tree is
+     install-only: CTest does not read it there. The per-arch census shard runs in either
+     tree, at
      `<build-dir>/lib/hipdnn_plugins/engines/test_arch_content/hip-kernel-provider/census/<arch>`
-     in the build tree (`<build-dir>/bin/...` on Windows) and the same relative path under the
-     install prefix.
+     in the build tree (`<build-dir>/bin/...` on Windows) and the same relative path under
+     the install prefix.
    - `<PY>`: for the corpus-sweep command below, the Python interpreter the active
      workspace or repository instructions mandate, otherwise the active venv's
      `python`. Resolve it once and substitute the full path.

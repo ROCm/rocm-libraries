@@ -848,8 +848,7 @@ ctest --test-dir "$BUILD/lib/hipdnn_plugins/engines/test_arch_content/hip-kernel
 ```
 
 The provider's `install_CTestTestfile.cmake` (or `CTestTestfile.cmake.install`) in the build
-tree is a staging file for the installed root: CTest does not read it there, and it runs
-only once installed.
+tree is a staging file for the installed root; CTest does not read it there.
 
 Other bundles in the production root may register their own targets; they are not
 evidence for yours. Replace `<your-bundle-ctest-target>` with the name your own

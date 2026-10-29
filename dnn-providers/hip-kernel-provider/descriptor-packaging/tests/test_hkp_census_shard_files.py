@@ -1,9 +1,7 @@
 """Files a census shard reads by bare name sit beside its build-tree CTest file.
 
 Runs the real hkp_reserve_census_shard() and hkp_finalize_census_install() from
-HkpPackaging.cmake under ``cmake -P``. A shard entry passes ``--test-config <name>.toml``
-by bare name, so the shard runs from the build tree only if the reserved TOML is copied
-beside it; a shard that names a TOML nothing places must fail configuration.
+HkpPackaging.cmake under ``cmake -P``.
 """
 
 import subprocess
