@@ -575,7 +575,7 @@ TEST(TestSdpaFwdNode, PreValidateDrainRunsBeforeShapeChecks)
     EXPECT_EQ(err.err_msg.find("rank"), std::string::npos) << err.err_msg;
 }
 
-// -- Rule 6c: cu_seq_len_q / cu_seq_len_kv --
+// -- Rule 6d: cu_seq_len_q / cu_seq_len_kv --
 
 namespace
 {
@@ -762,4 +762,30 @@ TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenNotInt32)
     auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("cu_seq_len_kv must have INT32"), std::string::npos) << err.err_msg;
+}
+
+// left_bound follows cuDNN: L keeps the L keys ending at the diagonal; 0 is rejected and
+// -1 is unbounded.
+TEST(TestSdpaFwdNode, PreValidateChecksLeftBound)
+{
+    const auto validateWithLeftBound = [](int64_t leftBound) {
+        auto attrs = makeMinimalAttrs(
+            makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 8, 32, 64), makeTensor4D(2, 8, 32, 64));
+        attrs.set_diagonal_band_left_bound(leftBound);
+        const GraphAttributes graphAttrs;
+        const SdpaFwdNode node(std::move(attrs), graphAttrs);
+        return node.pre_validate_node();
+    };
+
+    for(const int64_t valid : {int64_t{-1}, int64_t{1}, int64_t{64}})
+    {
+        const auto err = validateWithLeftBound(valid);
+        EXPECT_EQ(err.code, error_code_t::OK) << "left_bound=" << valid << ": " << err.err_msg;
+    }
+    for(const int64_t invalid : {int64_t{0}, int64_t{-2}})
+    {
+        const auto err = validateWithLeftBound(invalid);
+        EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << "left_bound=" << invalid;
+        EXPECT_NE(err.err_msg.find("left_bound"), std::string::npos) << err.err_msg;
+    }
 }

@@ -1318,6 +1318,15 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, BuildRejectsInvalidMaskAttributes)
     EXPECT_THROW(bf16Builder.buildNodePlan(badBoundWrap, badBoundWrap.getNode(0)),
                  std::invalid_argument);
 
+    // cuDNN's left_bound counts the diagonal, so 0 keeps no key at or before it.
+    SdpaAttributesT zeroLeftBound;
+    zeroLeftBound.left_bound = 0;
+    auto zeroLeftGraph = makeRaggedGraph(zeroLeftBound);
+    auto zeroLeftWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        zeroLeftGraph.GetBufferPointer(), zeroLeftGraph.GetSize());
+    EXPECT_THROW(bf16Builder.buildNodePlan(zeroLeftWrap, zeroLeftWrap.getNode(0)),
+                 std::invalid_argument);
+
     SdpaAttributesT badRightBound;
     badRightBound.right_bound = -2;
     auto badRightGraph = makeRaggedGraph(badRightBound);

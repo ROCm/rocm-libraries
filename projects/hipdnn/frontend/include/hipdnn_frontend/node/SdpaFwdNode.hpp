@@ -166,7 +166,10 @@ public:
             HIPDNN_CHECK_ERROR(detail::validateScalarParameter(scale, "SCALE tensor"));
         }
 
-        // Rule 6c: cu_seq_len_q / cu_seq_len_kv (cuDNN 9.25+).
+        // Rule 6c: left_bound follows cuDNN and must be -1 or >= 1
+        HIPDNN_CHECK_ERROR(detail::validateSdpaLeftBound(attributes.left_bound, "SdpaFwdNode"));
+
+        // Rule 6d: cu_seq_len_q / cu_seq_len_kv (cuDNN 9.25+).
         // - Each side (Q, KV) uses either seq_len_* or cu_seq_len_*, never both. The sides may
         //   differ; cuDNN 9.24 required cu on both.
         // - If either side is cumulative: padding_mask is required, both sides need a length
