@@ -230,7 +230,7 @@ Decode split rule history:
   and slower under another. Re-measure these on a compiler change.
 - **Coverage.**
   - The series-wide comparison used one device per architecture and one compiler build,
-    which the PR names only as the benchmark's ROCm build, so its LLVM flavor is not
+    which the PR names only as the benchmark's ROCm build, so its LLVM version is not
     recorded; the gfx942 head-size-256 loader was also compared across LLVM 22 and 23
     (§2.2). A GQA ratio that does not divide 16 runs the scalar kernels in both arms
     (§7).
@@ -275,8 +275,9 @@ reference before it was timed. The gates it lists:
   and the [cache policy](../../../tests/test_attention_tiled_3d_kv_cache_policy.py), and
   a platform [ISA test](../../../../platform/tests/core/test_buffer_lds_cache_policy_isa.py)
   of the cache-policy bits on gfx942 and gfx950.
-- Python and C++ engines emit byte-identical LLVM IR at `llvm20`, `llvm22` and
-  `llvm23` ([`check_byte_identity.py`](../../../../platform/tools/check_byte_identity.py)),
+- Python and C++ engines emit byte-identical LLVM IR at every flavor the gate runs
+  (`llvm20`, `llvm22` and `llvm23` when the series landed;
+  [`check_byte_identity.py`](../../../../platform/tools/check_byte_identity.py)),
   with the `.py`/`.c` emitter pairs
   [gfx942](../../../tests/parity/gfx942_attention_tiled_3d_emit.py),
   [gfx950](../../../tests/parity/gfx950_attention_tiled_3d_emit.py) and
@@ -320,11 +321,11 @@ up as in [BUILDING.md](../../../../BUILDING.md) and see
 
 ```bash
 # Gates that need no GPU: relative-path guard, Python/C++ byte identity, parity, pytest.
-# --flavor llvm20 or llvm22 pins one flavor. The series also ran llvm23, which this
-# runner does not take: ROCKE_LLVM_FLAVOR=llvm23 python platform/tools/check_byte_identity.py
+# The byte-identity gate runs every LLVM flavor the runner supports (the --flavor
+# choices) unless --flavor <name> pins one of them.
 python tools/run_checks.py --steps guard,gate,parity,pytest
 
-# Representative IR goldens (prints "IR parity OK" for llvm20, llvm22 and llvm23).
+# Representative IR goldens (prints "IR parity OK" with the flavors it checked).
 PYTHONPATH=platform/python:library \
   python platform/tests/instances/rocke_ir_parity_harness.py \
     --check platform/tests/golden/rocke_representative_ir_sha256.json
@@ -435,14 +436,22 @@ and note what this harness does and does not do:
   gfx950, `decode_table_sweep` checks each candidate against a reference (tolerance
   2e-2) before timing it by HIP-graph replay, over batched head-size-128 decode shapes
   (`--batch` overrides); the file is identical at `503f5c82876` and `b53003d7bb6`.
-  gfx942 has no decode benchmark in the repo that checks outputs: check each timed shape
-  against a reference on both arms before timing, or publish no relative result from the
-  run ([platform/AGENTS.md](../../../../platform/AGENTS.md) Compliance).
-- Set `ROCKE_LLVM_FLAVOR` the same on both arms and record it with the ROCm version, the
-  device (gfx id and CU count), both commits, every `HIPDNN_*` and `ROCKE_*` variable
-  set, and per shape the correctness status and max error (runbook §2.4 and §15.1). The
-  compiler-dependent levers of §4 can flip between flavors, and the PR does not record
-  which one the series used.
+  gfx942 has no decode-specific harness that checks outputs, but the arch-generic
+  [`attention_combo_sweep`](../../../benchmarks/common/attention_combo_sweep.py) checks
+  each registry candidate against a reference (default tolerance 3e-2) before timing it,
+  one shape grid per run (`--arch gfx942 --seqlen-q 1`); the file is identical at
+  `503f5c82876` and `b53003d7bb6`. For `benchmark_decode_live` on either architecture,
+  check each timed shape against a reference on both arms before timing, or publish no
+  relative result from the run ([platform/AGENTS.md](../../../../platform/AGENTS.md)
+  Compliance).
+- Run both arms against the same compiler, the COMGR library the process loads, and
+  record its LLVM version (`loaded_compiler_info().describe()` from
+  `rocke.runtime.comgr`) with the ROCm version, the device (gfx id and CU count), both
+  commits, every `HIPDNN_*` and `ROCKE_*` variable set, and per shape the correctness
+  status and max error (runbook §2.4 and §15.1). Leave `ROCKE_LLVM_FLAVOR` unset so that
+  each arm takes its flavor from that compiler; a set value changes only the emitted IR,
+  not the compiler. The compiler-dependent levers of §4 can flip between compiler
+  versions, and the PR does not record which one the series used.
 - It builds each shape's inputs once and reuses them for every timed call, so it
   measures the warm case (§4). A non-temporal comparison needs K/V that is not
   cache-resident between calls, which no in-repo harness provides: allocate distinct K/V
@@ -452,8 +461,14 @@ and note what this harness does and does not do:
   [§6.6](../../../../platform/dsl_docs/optimization/optimization_runbook.md#66-caches)),
   so that a call does not find an earlier call's K/V in the caches.
 - `decode_shapes.json` holds only single-sequence shapes (batch 1, head sizes 128 and
-  256, `block_size` 16), while most outcomes in §2 are about batched decode. Add runs
-  with `--batch <N>`, which overrides every shape's batch, to cover them.
+  256, `block_size` 16), while most outcomes in §2 are about batched decode. The gfx950
+  harness covers them with `--batch <N>`, which overrides every shape's batch. The gfx942
+  harness has no `--batch`: pass
+  [`decode_batch_sweep_shapes.json`](../../../benchmarks/gfx942/attention/decode/decode_batch_sweep_shapes.json)
+  to `--shapes` (bf16, head sizes 64 and 128, `block_size` 16, batches 8 to 256), or
+  change the `batch` of every shape in a copy of `decode_shapes.json` (each shape sets
+  its own `batch` of 1, which a model-level `batch` does not override); that is how to
+  batch head size 256 there.
 
 ## 7. Open items
 
@@ -489,12 +504,14 @@ and note what this harness does and does not do:
   On gfx950, `decode_table_sweep --sweep-level full --tuning-sample 0` walks every legal
   tuning spec and checks each against a reference before timing it; tuning specs use the
   architecture's full-part CU count when `num_cus` is unset (§3), so run it on a part
-  with that count. gfx942 has no such driver in the repo.
+  with that count. On gfx942, the arch-generic `attention_combo_sweep` does the same, one
+  shape grid per run, with `--arch gfx942 --seqlen-q 1` and
+  `--sweep-level full --tuning-sample 0`.
 - **Unrecorded conditions.** The input dtypes and tolerance of the correctness check in
   the timed runs, the K/V residency of the per-lever A/Bs that do not state it, the LLVM
-  flavor of the series-wide comparison and which harness the PR means by "the forced-3D
-  parity harness" (§6) are not in the PR description; ask the series' author and record
-  them here. The series' shape corpus is not in the repo either (§6).
+  version of the compiler in the series-wide comparison and which harness the PR means
+  by "the forced-3D parity harness" (§6) are not in the PR description; ask the series'
+  author and record them here. The series' shape corpus is not in the repo either (§6).
 
 ## 8. Decision
 
