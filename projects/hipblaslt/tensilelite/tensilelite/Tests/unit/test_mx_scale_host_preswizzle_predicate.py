@@ -17,7 +17,7 @@ distinction.
 
 import pytest
 
-from Tensile.Contractions import (
+from tensilelite.Contractions import (
     MX_SCALE_FORMAT_CODES,
     ProblemPredicate,
     mxScaleFormatCode,
