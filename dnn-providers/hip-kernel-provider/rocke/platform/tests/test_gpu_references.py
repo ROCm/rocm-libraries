@@ -103,6 +103,32 @@ file(WRITE "${{CMAKE_CURRENT_BINARY_DIR}}/variants.txt" "${{variants}}")
     return tmp_path
 
 
+def publish_variant(project, operation, variant):
+    """Qualify and publish another variant of the operation's gfx942 fixture bundle.
+
+    Each variant publishes its own qualification: copying a sibling's lock and
+    archive would publish that sibling's frozen baseline as this variant's.
+    """
+    bundle = project / operation
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    encoded = json.dumps(dict(manifest, variant=variant)).encode()
+    (bundle / "manifest.json").write_bytes(encoded)
+    tests = project / "library/tests"
+    lock = (
+        tests
+        / f"{operation}_reference/architectures/gfx942/{variant}/baseline_lock.json"
+    )
+    lock.parent.mkdir(parents=True)
+    (lock.parent / "__init__.py").touch()
+    pinned = json.loads((lock.parents[1] / _VARIANT / "baseline_lock.json").read_text())
+    lock.write_text(
+        json.dumps(dict(pinned, manifest_sha256=hashlib.sha256(encoded).hexdigest()))
+    )
+    archive = tests / f"reference_bundles/{operation}/gfx942/{variant}.tar.gz"
+    pack(project, operation, lock, archive)
+    track(archive)
+
+
 def pack(project, operation, lock, archive):
     """Pack the operation's fixture bundle after checking it against `lock`."""
     subprocess.run(
@@ -344,9 +370,7 @@ def test_an_architecture_installs_each_published_variant(project):
     tests = project / "library/tests"
     variants = tests / "conv_reference/architectures/gfx942"
     archives = tests / "reference_bundles/conv/gfx942"
-    shutil.copytree(variants / _VARIANT, variants / "second")
-    shutil.copyfile(archives / f"{_VARIANT}.tar.gz", archives / "second.tar.gz")
-    track(archives / "second.tar.gz")
+    publish_variant(project, "conv", "second")
     result = configure(project)
     assert result.returncode == 0, result.stdout + result.stderr
     assert installed(project)["conv"] == ["gfx942"]
@@ -371,9 +395,7 @@ def test_artifact_cli_lists_the_variants_that_configuration_installs(project):
     tests = project / "library/tests"
     variants = tests / "conv_reference/architectures/gfx942"
     archives = tests / "reference_bundles/conv/gfx942"
-    shutil.copytree(variants / _VARIANT, variants / "second")
-    shutil.copyfile(archives / f"{_VARIANT}.tar.gz", archives / "second.tar.gz")
-    track(archives / "second.tar.gz")
+    publish_variant(project, "conv", "second")
     # An adapter without a committed lock is enrolled but not published.
     (variants / "draft").mkdir()
     (variants / "draft/__init__.py").touch()
@@ -787,3 +809,17 @@ def test_reference_ctests_keep_the_shared_reference_labels(tmp_path):
             f"{name} lacks the {shared} labels {sorted(missing)}: the patterns in "
             f"{categories.name} no longer match it"
         )
+
+
+def test_a_variant_cannot_publish_a_copy_of_another_variants_bundle(project):
+    """Copying a variant's lock and archive does not give a new variant a baseline."""
+    tests = project / "library/tests"
+    variants = tests / "conv_reference/architectures/gfx942"
+    archives = tests / "reference_bundles/conv/gfx942"
+    shutil.copytree(variants / _VARIANT, variants / "second")
+    shutil.copyfile(archives / f"{_VARIANT}.tar.gz", archives / "second.tar.gz")
+    track(archives / "second.tar.gz")
+    result = configure(project)
+    assert result.returncode != 0
+    output = " ".join((result.stdout + result.stderr).split())
+    assert "publishes this bundle as" in output, output

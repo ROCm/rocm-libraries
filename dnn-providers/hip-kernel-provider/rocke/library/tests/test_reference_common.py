@@ -2530,6 +2530,29 @@ def _qualified_cohort(tmp_path, operation, index=0):
     return spec, architecture, bundle, lock
 
 
+def _variant_bundle(bundle, variant, directory):
+    """Make ``bundle`` the selected variant's own qualification; return its lock."""
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    lock = directory / f"{variant}-lock.json"
+    _relock(bundle, dict(manifest, variant=variant), lock)
+    return lock
+
+
+def _committed_lock(lock, architecture, variant):
+    """A ``baseline_lock`` that commits ``lock`` for one slot only.
+
+    Another variant's committed lock must not pin the same bundle, so every
+    other slot gets a lock path that does not exist.
+    """
+
+    def baseline_lock(name, chosen=None):
+        if name == architecture and chosen in (None, variant):
+            return lock
+        return lock.with_name(f"uncommitted-{name}-{chosen}.json")
+
+    return baseline_lock
+
+
 def _relock(bundle, manifest, lock):
     encoded = json.dumps(manifest).encode()
     (bundle / "manifest.json").write_bytes(encoded)
@@ -2819,6 +2842,101 @@ def test_qualification_records_the_selected_variant(
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
+def test_a_pre_variant_bundle_belongs_to_the_variant_whose_lock_pins_it(
+    second_variant, tmp_path, monkeypatch, capsys, operation
+):
+    """No lock passes a pre-variant manifest off as a sibling variant's.
+
+    Published manifests predate the variant field. The variant whose committed
+    lock pins one owns it, so selecting another variant that enrolls the same
+    cases fails in verify, diff, the pytest lookup, and staging, whether the
+    lock passed is the committed one or the qualification-lock.json shipped
+    with the bundle.
+    """
+    from reference_common import artifact as common_artifact
+    from reference_common import cli as common_cli
+    from reference_common.numeric import file_digest, payload_digests, write_json
+
+    spec = second_variant
+    architecture = spec.architectures.ARCHITECTURES[0]
+    baseline = tmp_path / "baseline"
+    runtime = baseline / "source/platform/python/rocke"
+    runtime.mkdir(parents=True)
+    (runtime / "__init__.py").write_text('"""Host qualification fixture."""\n')
+    write_json(
+        baseline / "snapshot.json",
+        {"revision": "a" * 40, "files": payload_digests(baseline / "source")},
+    )
+    narrow, wide = (
+        spec.architectures.get_adapter(architecture, variant)
+        for variant in ("narrow", "wide")
+    )
+    case = min(narrow.CASES, key=lambda c: math.prod(c.output_shape))
+    for target in (narrow, wide):
+        monkeypatch.setattr(target, "CASES", (case,))
+
+    def worker(request, **kwargs):
+        if "export" in request:
+            Path(request["export"]).write_bytes(b"synthetic-code-object")
+        with np.load(request["inputs"], allow_pickle=False) as arrays:
+            reference = spec.contract.independent_reference(case, dict(arrays))
+        return [encode(reference, case.dtype)] * request["repetitions"], {
+            "kernel": {"sha256": "0" * 64},
+            "device_target": f"{architecture}:fixture",
+            "compiler": {"fixture": True},
+            "launches": request["repetitions"],
+            "torch_imported": False,
+        }
+
+    monkeypatch.setattr(common_cli, "run_worker", worker)
+    bundle = tmp_path / "bundle"
+    spec.qualify(baseline, bundle, 2, architecture, variant="narrow")
+    # Publish it in the pre-variant form, with a shipped lock that names none.
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    del manifest["variant"]
+    write_json(bundle / "manifest.json", manifest)
+    shipped = bundle / "qualification-lock.json"
+    write_json(
+        shipped,
+        dict(
+            json.loads(shipped.read_text()),
+            manifest_sha256=file_digest(bundle / "manifest.json"),
+        ),
+    )
+    lock = spec.architectures.baseline_lock(architecture, "narrow")
+    lock.write_text(shipped.read_text())
+    monkeypatch.setattr(
+        common_artifact,
+        "published",
+        lambda operation=None: [{"variant": "narrow", "lock": str(lock)}],
+    )
+    assert spec.load_bundle(bundle, lock, architecture=architecture, variant="narrow")
+    validate_bundle(bundle, lock, operation=operation, variant="narrow")
+    capsys.readouterr()
+
+    expected = (
+        f"wrong reference variant: {lock.resolve()} publishes this bundle as "
+        f"'narrow', but the selected {spec.label} {architecture} variant is 'wide'"
+    )
+    for passed in (lock, shipped):
+        with pytest.raises(ValueError) as error:
+            spec.load_bundle(bundle, passed, architecture=architecture, variant="wide")
+        assert str(error.value).startswith(expected)
+        for command in ("verify", "diff"):
+            with pytest.raises(SystemExit) as exit:
+                spec.main(
+                    [command, "--arch", architecture, "--variant", "wide"]
+                    + ["--bundle", str(bundle), "--lock", str(passed)]
+                )
+            assert exit.value.code == 2
+            output = capsys.readouterr()
+            assert output.out == ""
+            assert output.err.count(expected) == 1
+        with pytest.raises(InconsistentLockError, match="publishes this bundle as"):
+            validate_bundle(bundle, passed, operation=operation, variant="wide")
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
 @pytest.mark.parametrize("form", ["directory", "archive"])
 def test_diff_reports_every_difference_that_verification_rejects(
     tmp_path, capsys, monkeypatch, operation, form
@@ -2988,7 +3106,9 @@ def test_diff_defaults_to_the_published_bundle_and_committed_lock(
         common_cli, "default_bundle_path", lambda *args, **kwargs: published
     )
     monkeypatch.setattr(
-        spec.architectures, "baseline_lock", lambda name, variant=None: lock
+        spec.architectures,
+        "baseline_lock",
+        _committed_lock(lock, architecture, variant),
     )
     if fetched is None:
         with pytest.raises(SystemExit) as exit:
@@ -3034,18 +3154,20 @@ def test_diff_compares_every_published_variant(
         "default_bundle_path",
         lambda tests, name, *, operation, variant: published / variant,
     )
+    locks = {}
     for variant in ("narrow", "wide"):
         shutil.copytree(bundle, published / variant)
+        locks[variant] = _variant_bundle(published / variant, variant, tmp_path)
     matched = (
         f"{spec.label} {architecture} wide: all {len(cases)} enrolled cases match "
         f"{published / 'wide'}\n"
     )
     # An unpublished variant, without a lock, is not compared.
-    shutil.copy(lock, registry.baseline_lock(architecture, "wide"))
+    shutil.copy(locks["wide"], registry.baseline_lock(architecture, "wide"))
     spec.main(["diff", "--arch", architecture])
     assert capsys.readouterr().out == matched
 
-    shutil.copy(lock, registry.baseline_lock(architecture, "narrow"))
+    shutil.copy(locks["narrow"], registry.baseline_lock(architecture, "narrow"))
     with pytest.raises(SystemExit) as exit:
         spec.main(["diff", "--arch", architecture])
     assert exit.value.code == 1
@@ -3264,7 +3386,10 @@ def test_status_reports_every_enrolled_variant_and_exits_on_a_difference(
     )
     for variant in ("narrow", "wide"):
         shutil.copytree(bundle, published / first / variant)
-        shutil.copy(lock, registry.baseline_lock(first, variant))
+        shutil.copy(
+            _variant_bundle(published / first / variant, variant, tmp_path),
+            registry.baseline_lock(first, variant),
+        )
     # Paths below the working directory are shown relative to it.
     monkeypatch.chdir(tmp_path)
     script = Path(__file__).resolve().with_name(f"run_{operation}_reference.py")
@@ -3318,7 +3443,7 @@ def test_status_reports_every_enrolled_variant_and_exits_on_a_difference(
         f"differ, including kernel.hsaco; see the full error with: {diff('wide')}"
     )
     # A difference decides the status even beside an unusable bundle.
-    shutil.copy(lock, registry.baseline_lock(first, "narrow"))
+    shutil.copy(tmp_path / "narrow-lock.json", registry.baseline_lock(first, "narrow"))
     with pytest.raises(SystemExit) as exit:
         spec.main(["status"])
     assert exit.value.code == 1
@@ -3748,7 +3873,9 @@ def test_locked_cohort_check_names_the_lock_and_the_requalification(
     target = spec.architectures.get_adapter(architecture, variant)
     lock = tmp_path / "baseline_lock.json"
     monkeypatch.setattr(
-        spec.architectures, "baseline_lock", lambda name, variant=None: lock
+        spec.architectures,
+        "baseline_lock",
+        _committed_lock(lock, architecture, variant),
     )
     pinned = {"schema": 2, "baseline_revision": "a" * 40, "manifest_sha256": "0" * 64}
     lock.write_text(json.dumps(pinned))
@@ -3820,7 +3947,9 @@ def test_published_cohort_check_names_unqualified_cases(
     monkeypatch.setattr(target, "CASES", cases[:-1])
     spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
     monkeypatch.setattr(
-        spec.architectures, "baseline_lock", lambda name, variant=None: lock
+        spec.architectures,
+        "baseline_lock",
+        _committed_lock(lock, architecture, variant),
     )
     tests = tmp_path / (
         "bin/hip_kernel_provider/tests/library/tests"
@@ -4863,9 +4992,7 @@ def test_rejected_bundles_say_how_to_replace_them(
         monkeypatch.setattr(
             spec.architectures,
             "baseline_lock",
-            lambda name, variant=None: (
-                lock if name == architecture else tmp_path / f"{name}.json"
-            ),
+            _committed_lock(lock, architecture, variant),
         )
     # The problem names these paths and values.
     paths, values = [], []
@@ -5212,3 +5339,18 @@ def test_pinned_correctness_failures_show_the_reported_values(
             config,
         )
     assert expected in str(error.value)
+
+
+def test_committed_locks_pin_distinct_manifests():
+    """Each published variant pins its own qualification's manifest."""
+    from importlib import import_module
+
+    pinned = {}
+    for operation, architecture, variant in _published_variants():
+        registry = import_module(f"{operation}_reference.architectures")
+        lock = json.loads(registry.baseline_lock(architecture, variant).read_text())
+        pinned.setdefault(lock["manifest_sha256"], []).append(
+            f"{operation} {architecture} {variant}"
+        )
+    shared = [slots for slots in pinned.values() if len(slots) > 1]
+    assert not shared, f"locks of different variants pin one manifest: {shared}"

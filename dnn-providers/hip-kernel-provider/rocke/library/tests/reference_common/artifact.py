@@ -136,10 +136,10 @@ def validate_bundle(
     declared = manifest.get("operation", "sdpa")
     if declared != manifest_operation(operation):
         raise ValueError(f"bundle operation {declared!r} does not match {operation!r}")
-    # Manifests qualified before variants predate the variant field and are
-    # likewise identified through the selected lock, which is the variant's.
-    # Every archive that the lock accepts declares the same variant, so a
-    # mismatch is the lock's and no fetch repairs it.
+    # Manifests qualified before variants predate the variant field; each
+    # belongs to the variant whose committed lock pins it, as in cli.py.
+    # Every archive that the lock accepts has the same variant, so a mismatch
+    # is the lock's and no fetch repairs it.
     if variant is not None and manifest.get("variant", variant) != variant:
         raise InconsistentLockError(
             f"bundle variant {manifest['variant']!r} does not match {variant!r}\n"
@@ -147,6 +147,15 @@ def validate_bundle(
             f"{manifest['variant']!r}; a variant's lock and archive must come "
             "from its own qualification"
         )
+    if variant is not None and "variant" not in manifest:
+        for entry in published(operation):
+            other = json.loads(Path(entry["lock"]).read_text())
+            if entry["variant"] != variant and other.get("manifest_sha256") == digest:
+                raise InconsistentLockError(
+                    f"bundle variant {entry['variant']!r} does not match {variant!r}\n"
+                    f"  {entry['lock']} publishes this bundle as {entry['variant']!r}; "
+                    "a variant's lock and archive must come from its own qualification"
+                )
     if manifest["schema"] != 2:
         raise ValueError("only tensor-free schema-2 reference bundles are supported")
     # A candidate lock from an earlier qualification may lack the digest; host

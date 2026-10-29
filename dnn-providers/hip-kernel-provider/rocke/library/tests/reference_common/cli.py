@@ -597,14 +597,30 @@ class ReferenceOperation:
                 f"wrong reference operation: the manifest declares {declared!r}, "
                 f"but {self.label} bundles declare {expected!r}"
             )
-        # Manifests qualified before variants declare none and are likewise
-        # identified through the selected lock, which is the variant's.
+        # A manifest qualified before variants declares none. It belongs to
+        # the variant whose committed lock pins it, so no lock passed with it,
+        # including the qualification-lock.json shipped in its archive, makes
+        # it another variant's baseline.
         declared = manifest.get("variant", variant)
         if declared != variant:
             raise ValueError(
                 f"wrong reference variant: the manifest declares {declared!r}, but "
                 f"the selected {self.label} {architecture} variant is {variant!r}"
             )
+        if "variant" not in manifest:
+            for other in self.architectures.variants(architecture):
+                committed = self.architectures.baseline_lock(architecture, other)
+                if (
+                    other != variant
+                    and committed.is_file()
+                    and json.loads(committed.read_text()).get("manifest_sha256")
+                    == digest
+                ):
+                    raise ValueError(
+                        f"wrong reference variant: {_shown(committed)} publishes "
+                        f"this bundle as {other!r}, but the selected {self.label} "
+                        f"{architecture} variant is {variant!r}"
+                    )
         # As staging does, reject a lock mixed from two qualifications: it pins
         # this manifest but another cohort, so no fetch can repair it. A
         # candidate lock from before the digest has none to check.
