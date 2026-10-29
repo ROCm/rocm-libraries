@@ -29,13 +29,9 @@
 # Automatic probes are named by their bare arch, so a NAME equal to an automatically
 # probed arch is declared twice and fails configure.
 
-# Fixed-arch slotted fixtures. slotted_hsaco and slotted_multi_launch are authored for one
-# arch each and are packed and shipped only by a build that selects it (HkpPackaging.cmake,
-# _hkp_wire_fixed_arch_root). A build that does not select the arch gets the same root
-# packed here for that arch, uninstalled, so packaging signal for the fixture does not
-# depend on which arch the lane builds. A lane that selects the arch has the real root and
-# the packed-load gtest instead, so the probe is not declared there. multi_launch is all
-# rocKE and needs it ON.
+# Fixed-arch slotted fixtures (_hkp_wire_fixed_arch_root in HkpPackaging.cmake): a build
+# that does not select the arch packs the root here instead, uninstalled, so packaging
+# signal does not depend on the lane's arches. multi_launch is all rocKE and needs it ON.
 hkp_selected_arches(_hkp_probe_selected _hkp_probe_selected_source)
 if(NOT "gfx950" IN_LIST _hkp_probe_selected)
     hkp_add_packaging_probe(ARCH gfx950 NAME slotted-hsaco-gfx950

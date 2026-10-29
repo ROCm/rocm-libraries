@@ -56,22 +56,19 @@ std::string compositeCandidateId(size_t slotCount, const TPart& part)
 } // namespace detail
 
 /// The IPlan of a slotted engine with benchmarking enabled (RFC 0021 §7). Slots share one stream
-/// and have no time of their own, so it times whole programs, varying one slot at a time, on the
-/// first execute() and serves the winners program from then on:
+/// and have no time of their own, so the first execute() times whole programs, varying one slot
+/// at a time, and every later one serves the winners program:
 ///
 ///  1. The reference program: every slot at its reference pick, the first kernel in plan-build
 ///     order. A reference pick that fails at launch is replaced, for this benchmark only, by its
 ///     slot's next kernel.
-///  2. For every slot not already covered by a winner record, each of its other kernels, with
-///     the remaining slots at their reference picks: 1 + sum(K - 1) runs, not the product.
-///  3. The winners program, each slot at its measured winner. If it fails, the reference
-///     program is served and no program record is written.
+///  2. Each other kernel of every slot without a winner record, the remaining slots at their
+///     reference picks: 1 + sum(K - 1) runs, not the product. A covered slot is not re-measured.
+///  3. The winners program. If it fails, the reference program is served and no program record
+///     is written.
 ///
-/// A covered slot is not re-measured: its first kernel is its winner. With every slot covered
-/// only the winners program is timed, which is how a stale program record is re-established.
-/// Each slot's ranking is built from the whole-program times of its runs.
-///
-/// Timing goes through IPlan::execute() only.
+/// With every slot covered only the winners program is timed, which re-establishes a stale
+/// program record. Timing goes through IPlan::execute() only.
 template <typename THandle>
 class SlotProgramBenchmark : public IPlan<THandle>
 {
@@ -435,9 +432,8 @@ private:
         return settled;
     }
 
-    /// Resolves the served program on the first call and caches it. The lock spans the whole
-    /// comparison, so a second thread racing the first execute() blocks instead of running
-    /// against the first thread's buffers.
+    /// Resolves the served program on the first call and caches it; the lock spans the whole
+    /// comparison, as in BenchmarkPlan::resolveChosen().
     const Program* resolveServed(const Launch& launch) const
     {
         const std::lock_guard<std::mutex> lock(_mutex);
@@ -487,12 +483,8 @@ private:
         if(settled.winnersRun.has_value())
         {
             nlohmann::json record = nlohmann::json::object();
-            record["event"] = "ingestor.benchmark.program";
-            record["benchmark"] = _benchmarkId;
-            if(!_deviceIdentity.empty())
-            {
-                record["device"] = _deviceIdentity;
-            }
+            detail::recordEnvelope(
+                record, "ingestor.benchmark.program", _benchmarkId, _deviceIdentity);
             record["program"] = describe(settled.winners);
             if(settled.winnersRun->timing.has_value())
             {

@@ -340,7 +340,6 @@ hipdnn_frontend::EngineCandidatePage slottedPage()
     return page;
 }
 
-/// The result of running candidate @p index of @p page.
 hipdnn_frontend::AutotuneResult resultFor(const hipdnn_frontend::EngineCandidatePage& page,
                                           size_t index,
                                           bool succeeded,
@@ -362,12 +361,9 @@ TEST(TestCandidatePageJson, ASweepIsUsableOnlyWhenItsReferenceProgramTimed)
     const auto references = slotReferences(slottedCatalog());
     const auto other = (references.program + 1) % page.candidates.size();
 
-    // Present, succeeded, timed.
     EXPECT_TRUE(
         referenceProgramTimed({resultFor(page, references.program, true, 5)}, page, references));
-    // Absent: only another candidate ran.
     EXPECT_FALSE(referenceProgramTimed({resultFor(page, other, true, 5)}, page, references));
-    // Present but failed, or succeeded without a single timed iteration.
     EXPECT_FALSE(
         referenceProgramTimed({resultFor(page, references.program, false, 5)}, page, references));
     EXPECT_FALSE(
@@ -407,15 +403,17 @@ TEST(TestCandidatePageJson, EachMeasuredConfigurationFindsItsOwnCatalogPositions
     for(size_t index = ids.size(); index-- > 0;)
     {
         const auto result = resultFor(page, index, true, 5);
-        const auto row = slotRowOf(page, references, toVariantKnobs(result.knobSettings));
+        const auto row = measuredCandidate(page, references, toVariantKnobs(result.knobSettings));
         ASSERT_TRUE(row.has_value());
-        EXPECT_EQ(row->candidateId, ids[index]);
-        EXPECT_EQ(row->reference, marks.at(ids[index]));
+        EXPECT_EQ(row->candidate->id, ids[index]);
+        EXPECT_EQ(row->slotReference, marks.at(ids[index]));
+        EXPECT_FALSE(
+            measuredCandidate(page, {}, toVariantKnobs(result.knobSettings))->slotReference);
     }
 
     hipdnn_frontend::AutotuneResult unenrolled;
     unenrolled.knobSettings = {hipdnn_frontend::KnobSetting("tile", int64_t{999})};
-    EXPECT_FALSE(slotRowOf(page, references, toVariantKnobs(unenrolled.knobSettings)));
+    EXPECT_FALSE(measuredCandidate(page, references, toVariantKnobs(unenrolled.knobSettings)));
 }
 
 TEST(TestCandidatePageJson, ANonDescriptorEnginesIdsAreOpaqueEvenWhenTheyContainAnEquals)

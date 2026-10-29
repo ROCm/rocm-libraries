@@ -288,18 +288,6 @@ inline bool rankersContentIdentified(
     return !heuristic || identified(*heuristic);
 }
 
-/// Each slot's declared knobs, in the UED's slot order.
-inline std::vector<std::vector<std::string>> slotKnobsOf(const EngineDescriptor& engine)
-{
-    std::vector<std::vector<std::string>> slotKnobs;
-    slotKnobs.reserve(engine.slots.size());
-    for(const auto& slot : engine.slots)
-    {
-        slotKnobs.push_back(slot.knobs);
-    }
-    return slotKnobs;
-}
-
 } // namespace detail
 
 /// @brief The engine facts a cached ranking's validity depends on, for `EngineIdentity`.
@@ -384,22 +372,15 @@ inline EngineIdentity engineIdentity(const DescriptorSet& set)
 /// @param knobs The UED's declared knobs for RFC 0019 §6.3 check 2. Defaulted from @p set;
 ///        pass it if `set.engine` was moved out, or the check passes vacuously.
 ///
-/// A set with `slots` builds a slotted manager: one KernelSlotInput per slot, with that slot's
-/// ranker built against the slot's own KMD fields and knobs, and with `ws.*` tokens kept out of
-/// the ranker's features (RFC 0021 §6).
-/// @param slotKnobs Each slot's declared knobs, in slot order, for the same check. Defaulted
-///        from `set.engine.slots`; pass it if `set.engine` was moved out.
-/// @param sharedWorkspaceToken The UED's `shared_workspace` token. Defaulted from @p set; pass
-///        it if `set.engine` was moved out, or the engine's token goes unvalidated.
+/// A set with `slots` builds a slotted manager, each slot's ranker built against that slot's own
+/// KMD fields and knobs (RFC 0021 §6).
 template <typename THandle>
 std::unique_ptr<KernelIngestorStateManager<THandle>>
     makeStateManager(DescriptorSet set,
                      const std::string& graphMatchSymbol,
                      std::string describedBy = {},
                      EngineIdentity engine = {},
-                     std::vector<std::string> knobs = {},
-                     std::vector<std::vector<std::string>> slotKnobs = {},
-                     std::string sharedWorkspaceToken = {})
+                     std::vector<std::string> knobs = {})
 {
     if(describedBy.empty())
     {
@@ -415,25 +396,19 @@ std::unique_ptr<KernelIngestorStateManager<THandle>>
     }
     if(!set.slots.empty())
     {
-        if(slotKnobs.empty())
-        {
-            slotKnobs = detail::slotKnobsOf(set.engine);
-        }
-        if(sharedWorkspaceToken.empty())
-        {
-            sharedWorkspaceToken = set.engine.sharedWorkspaceToken;
-        }
-        slotKnobs.resize(set.slots.size());
+        const std::vector<std::string> noKnobs;
         std::vector<KernelSlotInput> slots;
         slots.reserve(set.slots.size());
         for(size_t i = 0; i < set.slots.size(); ++i)
         {
             auto& slot = set.slots[i];
             const auto slotFields = slot.schema.fieldNames();
+            const auto& slotKnobs
+                = i < set.engine.slots.size() ? set.engine.slots[i].knobs : noKnobs;
             const auto slotDescription = describedBy + " slot '" + slot.name + "'";
             auto heuristic = makeKernelHeuristic(slot.heuristic,
                                                  slotDescription,
-                                                 slotKnobs[i],
+                                                 slotKnobs,
                                                  slotFields,
                                                  slot.heuristicsByMetric,
                                                  slot.unavailableHeuristicArches,
@@ -448,7 +423,7 @@ std::unique_ptr<KernelIngestorStateManager<THandle>>
             std::move(set.matchers),
             std::move(set.dispatches),
             graphMatchSymbol,
-            std::move(sharedWorkspaceToken),
+            set.engine.sharedWorkspaceToken,
             describedBy,
             KernelIngestorStateManager<THandle>::DEFAULT_CATALOG_CACHE_CAPACITY,
             std::move(engine));
@@ -487,13 +462,11 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
     auto describedBy = describeDescriptor("engine", set.engine.name, set.engine.id);
     auto identity = engineIdentity(set);
     auto knobs = set.engine.knobs;
-    auto slotKnobs = detail::slotKnobsOf(set.engine);
-    auto sharedWorkspaceToken = set.engine.sharedWorkspaceToken;
     auto predictions = std::move(set.enginePredictionsByMetric);
     auto unavailablePredictionArches = std::move(set.unavailableEnginePredictionArches);
     auto provenance = enginePredictionProvenance(set);
     auto selectorRevision = engineSelectorRevision(set);
-    auto engine = std::move(set.engine);
+    auto engine = set.engine;
     auto graphMatchSymbol = engine.graphMatchNativeSymbol;
     return std::make_unique<GenericEngine<THandle, TSettings, TContext>>(
         std::move(engine),
@@ -501,9 +474,7 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
                                   std::move(graphMatchSymbol),
                                   std::move(describedBy),
                                   std::move(identity),
-                                  std::move(knobs),
-                                  std::move(slotKnobs),
-                                  std::move(sharedWorkspaceToken)),
+                                  std::move(knobs)),
         deviceResolver,
         std::move(predictions),
         std::move(unavailablePredictionArches),

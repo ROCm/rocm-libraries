@@ -190,13 +190,9 @@ candidate is every slot's pick, named `prep=<id>|dkdv=<id>|dq=<id>`, and a knob 
   reference kernel that fails to launch fails the sweep, naming the reference program; fix or
   remove that kernel, as no row is dropped. (The runtime benchmark instead moves a failing
   reference pick to the slot's next kernel.)
-- **Train (step 7, L2).** One run per slot, with `generate --dataset <dataset dir> --slot
-  <slot> --no-promote --target avgTimeMs --objective min --features ...`; the dataset is a
-  published (CSV) one, so the model is left for `promote`. The command, what `--slot` rewrites
-  and the training-problem minimum are in the uhd_gen README ("Slotted engines").
-- **Install.** `promote` with `--role sort_kernel_catalog` installs the slot's ranker under
-  `heuristics/<ued-id>/<slot>/` and its refusals are listed in the uhd_gen README ("Slotted engines"). See
-  [validate.md](validate.md).
+- **Train (step 7, L2).** One run per slot: `generate --dataset <dataset dir> --slot <slot>
+  --no-promote --target avgTimeMs --objective min --features ...`; `promote` installs it.
+- **Install.** `promote --role sort_kernel_catalog`; see the uhd_gen README ("Slotted engines") and [validate.md](validate.md).
 - **Dispatch and launches.** Each slot has its own UDD (dispatch symbol
   `<namespace>.<slot>_dispatch`), because packs with different launch sets need different
   dispatch descriptors. A slot's kernels may be multi-launch UKD 1.1 `sources` (a packaged
@@ -204,10 +200,6 @@ candidate is every slot's pick, named `prep=<id>|dkdv=<id>|dq=<id>`, and a knob 
   kernel that lives in the selected UKD's own code object, as an `hsaco` UKD requires, is
   launched by symbol: the KMD records its name and the slot's native handler launches it
   (RFC 0021 §3); no `sources` entry is needed.
-- **Local tests.** The `uhd_gen` slot tests need pandas, pyarrow and lightgbm, which CI does
-  not install: they skip in CI and run only locally.
-- **Reference picks.** The sweep's and the runtime's differ (kernel-id order against
-  plan-build order); the README covers it.
 
 ## Decision rules
 

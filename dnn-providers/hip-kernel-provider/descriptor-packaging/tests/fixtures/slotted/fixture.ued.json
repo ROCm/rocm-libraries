@@ -7,13 +7,9 @@
   },
   "shared_workspace": "ws.bytes",
   "predict_engine": {
-    "default": [
-      "d5a00000-0000-4000-8000-000000000012"
-    ]
+    "default": ["d5a00000-0000-4000-8000-000000000012"]
   },
-  "behavior_notes": [
-    "runtime_compilation"
-  ],
+  "behavior_notes": ["runtime_compilation"],
   "slots": [
     {
       "name": "prep",
@@ -25,9 +21,7 @@
       "sort_kernel_catalog": {
         "default": "d5a00000-0000-4000-8000-000000000010"
       },
-      "knobs": [
-        "block_m"
-      ]
+      "knobs": ["block_m"]
     },
     {
       "name": "dq",
@@ -35,9 +29,7 @@
       "sort_kernel_catalog": {
         "default": "d5a00000-0000-4000-8000-000000000011"
       },
-      "knobs": [
-        "block_n"
-      ]
+      "knobs": ["block_n"]
     }
   ]
 }

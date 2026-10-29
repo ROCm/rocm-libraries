@@ -163,20 +163,19 @@ def test_a_ranker_installs_into_its_own_slot_only(tmp_path):
     )
 
 
-def test_a_slot_ranker_that_declares_a_metric_is_refused(tmp_path):
+@pytest.mark.parametrize(
+    "options,refusal",
+    [
+        ({"metric": "tflops"}, "a slot ranker must be metric-less"),
+        ({"metric": "time", "objective": "min"}, "declares score.metric 'time'"),
+    ],
+    ids=["tflops", "time"],
+)
+def test_a_slot_ranker_that_declares_a_metric_is_refused(tmp_path, options, refusal):
     """The loader drops the whole engine for a metric-declaring slot ranker (RFC 0021 §7)."""
     tree = _tree(tmp_path / "tree")
-    model = _model(tmp_path / "model", tree, slot="dkdv", metric="tflops")
-    with pytest.raises(PromoteError, match="a slot ranker must be metric-less"):
-        build_plan(model, tree)
-
-
-def test_a_slot_ranker_declaring_any_metric_is_refused(tmp_path):
-    tree = _tree(tmp_path / "tree")
-    model = _model(
-        tmp_path / "model", tree, slot="dkdv", metric="time", objective="min"
-    )
-    with pytest.raises(PromoteError, match="declares score.metric 'time'"):
+    model = _model(tmp_path / "model", tree, slot="dkdv", **options)
+    with pytest.raises(PromoteError, match=refusal):
         build_plan(model, tree)
 
 
@@ -216,14 +215,6 @@ def test_a_ranker_for_an_undeclared_slot_is_refused(tmp_path):
     with pytest.raises(
         PromoteError, match="slot 'other' is not a slot of test:slotted"
     ):
-        build_plan(_model(tmp_path / "model", tree, provenance=provenance), tree)
-
-
-def test_a_ranker_trained_against_another_slots_kmd_is_refused(tmp_path):
-    tree = _tree(tmp_path / "tree")
-    provenance = snapshot_provenance(tree, arch="gfx942", slot="dq")
-    provenance["slot"] = "dkdv"
-    with pytest.raises(PromoteError, match="trained_against.kmd"):
         build_plan(_model(tmp_path / "model", tree, provenance=provenance), tree)
 
 

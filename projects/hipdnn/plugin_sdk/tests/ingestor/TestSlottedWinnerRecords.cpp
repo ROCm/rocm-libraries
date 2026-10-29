@@ -146,17 +146,9 @@ WinnerKey baseKeyFor(const ContentCarryingTestGraph& graph, const DeviceProperti
 }
 
 /// A ranking of @p packSeed's kernels in the given order, with ascending times.
-WinnerRecord ranking(uint8_t packSeed, std::initializer_list<uint8_t> kernels)
+WinnerRecord ranking(uint8_t packSeed, const std::vector<uint8_t>& kernels)
 {
-    WinnerRecord record;
-    record.reserve(kernels.size());
-    double time = 1.0;
-    for(const auto kernel : kernels)
-    {
-        record.push_back(RankedEntry{testId(kernel), testId(packSeed), DISPATCH_ID, time});
-        time += 1.0;
-    }
-    return record;
+    return makeRanking(testId(packSeed), DISPATCH_ID, kernels);
 }
 
 /// Winners 0x12 / 0x23 / 0x31, each ranking covering its slot's catalog.
@@ -214,6 +206,50 @@ std::vector<std::string> kernelOrder(const Catalog& catalog)
         names.push_back(entry->name);
     }
     return names;
+}
+
+void recordGood(Manager& manager, const WinnerKey& key)
+{
+    manager.recordSlotted(key,
+                          goodSlotRecords(),
+                          goodProgram(),
+                          WinnerWriteCause::FRESH_MISS,
+                          WinnerWriteCause::FRESH_MISS);
+}
+
+class TestSlottedWinnerRecordsInMemory : public ::testing::Test
+{
+public:
+    const ScopedGraphMatch match;
+    const ContentCarryingTestGraph graph = makeGraph();
+    const DeviceProperties properties = testDeviceProperties();
+    const WinnerKey base = baseKeyFor(graph, properties);
+};
+
+class TestSlottedWinnerRecords : public TestSlottedWinnerRecordsInMemory
+{
+protected:
+    const ScopedCacheDir _cacheDir{::testing::UnitTest::GetInstance()->current_test_info()->name()};
+};
+
+/// Writes the slot records and a good program for the base key through one manager, and returns
+/// a fresh manager over the same shard after @p append added lines to it.
+std::unique_ptr<Manager> managerOverShardWith(const TestSlottedWinnerRecordsInMemory& scenario,
+                                              const std::vector<std::string>& append)
+{
+    recordGood(*makeManager(namedEngine()), scenario.base);
+    {
+        EXPECT_TRUE(std::filesystem::exists(shardPath(scenario.properties)));
+        std::ofstream out(shardPath(scenario.properties), std::ios::app);
+        EXPECT_TRUE(out.is_open());
+        for(const auto& line : append)
+        {
+            out << line << "\n";
+        }
+    }
+    auto reader = makeManager(namedEngine());
+    seeCatalogs(*reader, scenario.graph, scenario.properties);
+    return reader;
 }
 
 // ---------------------------------------------------------------------------
@@ -346,20 +382,9 @@ TEST(TestSlottedWinnerRecordCodec, AMalformedProgramLineIsSkipped)
 // recordSlotted: one locked append, program line only behind valid slot records
 // ---------------------------------------------------------------------------
 
-TEST(TestSlottedWinnerRecords, SlotRecordsThenTheProgramLineLandInOneAppend)
+TEST_F(TestSlottedWinnerRecords, SlotRecordsThenTheProgramLineLandInOneAppend)
 {
-    const ScopedGraphMatch match;
-    const ScopedCacheDir cacheDir("one_append");
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto base = baseKeyFor(graph, properties);
-
-    makeManager(namedEngine())
-        ->recordSlotted(base,
-                        goodSlotRecords(),
-                        goodProgram(),
-                        WinnerWriteCause::FRESH_MISS,
-                        WinnerWriteCause::FRESH_MISS);
+    recordGood(*makeManager(namedEngine()), base);
 
     const auto lines = shardLines(shardPath(properties));
     ASSERT_EQ(lines.size(), 5U) << "version line, three slot records, one program line";
@@ -375,19 +400,9 @@ TEST(TestSlottedWinnerRecords, SlotRecordsThenTheProgramLineLandInOneAppend)
     EXPECT_TRUE(program->program.has_value()) << "the program line comes last";
 }
 
-TEST(TestSlottedWinnerRecords, AValidProgramIsServedByAFreshManagerOnceItHasSeenTheCatalogs)
+TEST_F(TestSlottedWinnerRecords, AValidProgramIsServedByAFreshManagerOnceItHasSeenTheCatalogs)
 {
-    const ScopedGraphMatch match;
-    const ScopedCacheDir cacheDir("serves_program");
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto base = baseKeyFor(graph, properties);
-    makeManager(namedEngine())
-        ->recordSlotted(base,
-                        goodSlotRecords(),
-                        goodProgram(),
-                        WinnerWriteCause::FRESH_MISS,
-                        WinnerWriteCause::FRESH_MISS);
+    recordGood(*makeManager(namedEngine()), base);
 
     const auto reader = makeManager(namedEngine());
     EXPECT_FALSE(reader->programFor(base).has_value())
@@ -400,19 +415,10 @@ TEST(TestSlottedWinnerRecords, AValidProgramIsServedByAFreshManagerOnceItHasSeen
     EXPECT_EQ(program->picks[1].kernelId, testId(0x23));
 }
 
-TEST(TestSlottedWinnerRecords, ARewrittenSlotWinnerInvalidatesTheProgramAtReadTime)
+TEST_F(TestSlottedWinnerRecords, ARewrittenSlotWinnerInvalidatesTheProgramAtReadTime)
 {
-    const ScopedGraphMatch match;
-    const ScopedCacheDir cacheDir("slot_rewrite");
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto base = baseKeyFor(graph, properties);
     const auto manager = makeManager(namedEngine());
-    manager->recordSlotted(base,
-                           goodSlotRecords(),
-                           goodProgram(),
-                           WinnerWriteCause::FRESH_MISS,
-                           WinnerWriteCause::FRESH_MISS);
+    recordGood(*manager, base);
     seeCatalogs(*manager, graph, properties);
     ASSERT_TRUE(manager->programFor(base).has_value());
 
@@ -431,19 +437,9 @@ TEST(TestSlottedWinnerRecords, ARewrittenSlotWinnerInvalidatesTheProgramAtReadTi
         << "the rewrite is what the shard holds, not just what this manager remembers";
 }
 
-TEST(TestSlottedWinnerRecords, ACatalogThatGainedAKernelInvalidatesTheProgram)
+TEST_F(TestSlottedWinnerRecords, ACatalogThatGainedAKernelInvalidatesTheProgram)
 {
-    const ScopedGraphMatch match;
-    const ScopedCacheDir cacheDir("catalog_change");
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto base = baseKeyFor(graph, properties);
-    makeManager(namedEngine())
-        ->recordSlotted(base,
-                        goodSlotRecords(),
-                        goodProgram(),
-                        WinnerWriteCause::FRESH_MISS,
-                        WinnerWriteCause::FRESH_MISS);
+    recordGood(*makeManager(namedEngine()), base);
 
     const auto grown = makeManager(namedEngine(), true);
     seeCatalogs(*grown, graph, properties);
@@ -452,12 +448,8 @@ TEST(TestSlottedWinnerRecords, ACatalogThatGainedAKernelInvalidatesTheProgram)
         << "kernel 0x24 was never measured against the recorded winners";
 }
 
-TEST(TestSlottedWinnerRecords, AProgramNamingAKernelOutsideTheCatalogIsInvalid)
+TEST_F(TestSlottedWinnerRecordsInMemory, AProgramNamingAKernelOutsideTheCatalogIsInvalid)
 {
-    const ScopedGraphMatch match;
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto base = baseKeyFor(graph, properties);
     const auto manager = makeManager({});
     // The winners agree with the program, but the winner is not a kernel of the dq catalog.
     manager->recordSlotted(base,
@@ -472,88 +464,38 @@ TEST(TestSlottedWinnerRecords, AProgramNamingAKernelOutsideTheCatalogIsInvalid)
     EXPECT_FALSE(manager->programFor(base).has_value());
 }
 
-/// Writes the slot records and a good program for the base key through one manager, and returns
-/// a fresh manager over the same shard after @p append added lines to it.
-std::unique_ptr<Manager> managerOverShardWith(const ContentCarryingTestGraph& graph,
-                                              const DeviceProperties& properties,
-                                              const std::vector<std::string>& append)
+TEST_F(TestSlottedWinnerRecordsInMemory, ALaterProgramLineThatFailsAtReadTimeIsInvalid)
 {
-    const auto base = baseKeyFor(graph, properties);
-    makeManager(namedEngine())
-        ->recordSlotted(base,
-                        goodSlotRecords(),
-                        goodProgram(),
-                        WinnerWriteCause::FRESH_MISS,
-                        WinnerWriteCause::FRESH_MISS);
+    // The kernels are the recorded winners; only the picks differ.
+    const std::vector<std::pair<std::string, ProgramRecord>> rows{
+        {"reordered",
+         ProgramRecord{{{"dkdv", testId(0x23)}, {"prep", testId(0x12)}, {"dq", testId(0x31)}},
+                       1.0}},
+        {"too_few", ProgramRecord{{{"prep", testId(0x12)}, {"dkdv", testId(0x23)}}, 1.0}},
+        {"too_many",
+         ProgramRecord{{{"prep", testId(0x12)},
+                        {"dkdv", testId(0x23)},
+                        {"dq", testId(0x31)},
+                        {"dq", testId(0x31)}},
+                       1.0}}};
+
+    for(const auto& [name, program] : rows)
     {
-        EXPECT_TRUE(std::filesystem::exists(shardPath(properties)));
-        std::ofstream out(shardPath(properties), std::ios::app);
-        EXPECT_TRUE(out.is_open());
-        for(const auto& line : append)
-        {
-            out << line << "\n";
-        }
-    }
-    auto reader = makeManager(namedEngine());
-    seeCatalogs(*reader, graph, properties);
-    return reader;
-}
-
-TEST(TestSlottedWinnerRecords, ALaterProgramLineNamingTheSlotsOutOfOrderIsInvalid)
-{
-    const ScopedGraphMatch match;
-    const ScopedCacheDir cacheDir("program_reordered");
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto base = baseKeyFor(graph, properties);
-    // The kernels are the recorded winners; only the slot order differs from launch order.
-    const ProgramRecord reordered{
-        {{"dkdv", testId(0x23)}, {"prep", testId(0x12)}, {"dq", testId(0x31)}}, 1.0};
-
-    const auto reader
-        = managerOverShardWith(graph, properties, {encodeProgramLine(base, reordered)});
-
-    EXPECT_FALSE(reader->programFor(base).has_value());
-}
-
-TEST(TestSlottedWinnerRecords, ALaterProgramLineWithTooFewOrTooManyPicksIsInvalid)
-{
-    const ScopedGraphMatch match;
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto base = baseKeyFor(graph, properties);
-    const ProgramRecord tooFew{{{"prep", testId(0x12)}, {"dkdv", testId(0x23)}}, 1.0};
-    const ProgramRecord tooMany{{{"prep", testId(0x12)},
-                                 {"dkdv", testId(0x23)},
-                                 {"dq", testId(0x31)},
-                                 {"dq", testId(0x31)}},
-                                1.0};
-
-    for(const auto& program : {tooFew, tooMany})
-    {
-        const ScopedCacheDir cacheDir("program_picks_" + std::to_string(program.picks.size()));
-        const auto reader
-            = managerOverShardWith(graph, properties, {encodeProgramLine(base, program)});
-        EXPECT_FALSE(reader->programFor(base).has_value()) << program.picks.size();
+        const ScopedCacheDir cacheDir(name);
+        const auto reader = managerOverShardWith(*this, {encodeProgramLine(base, program)});
+        EXPECT_FALSE(reader->programFor(base).has_value()) << name;
     }
 }
 
-/// A torn or unreadable line after a good program line is skipped, so the good program stands.
-TEST(TestSlottedWinnerRecords, UnreadableLinesAfterAProgramLeaveItStanding)
+TEST_F(TestSlottedWinnerRecords, UnreadableLinesAfterAProgramLeaveItStanding)
 {
-    const ScopedGraphMatch match;
-    const ScopedCacheDir cacheDir("program_unreadable_tail");
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto base = baseKeyFor(graph, properties);
     auto emptySlot = nlohmann::json::parse(encodeProgramLine(base, goodProgram()));
     emptySlot["program"][1]["slot"] = "";
     auto noTime = nlohmann::json::parse(encodeProgramLine(base, goodProgram()));
     noTime.erase("time_ms");
 
     const auto reader = managerOverShardWith(
-        graph,
-        properties,
+        *this,
         {emptySlot.dump(), noTime.dump(), R"({"v":3,"program":[{"slot":"prep","kernel_id":"1)"});
 
     const auto program = reader->programFor(base);
@@ -563,28 +505,17 @@ TEST(TestSlottedWinnerRecords, UnreadableLinesAfterAProgramLeaveItStanding)
 
 /// A shard is shared by engines of both kinds under one identity: a slotted engine reads the
 /// slot and program lines, never a whole-graph (v2) line.
-TEST(TestSlottedWinnerRecords, ASlottedEngineIgnoresAWholeGraphRecordInItsShard)
+TEST_F(TestSlottedWinnerRecords, ASlottedEngineIgnoresAWholeGraphRecordInItsShard)
 {
-    const ScopedGraphMatch match;
-    const ScopedCacheDir cacheDir("slotted_ignores_v2");
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto base = baseKeyFor(graph, properties);
-
-    const auto reader = managerOverShardWith(
-        graph, properties, {encodeWinnerRecordLine(base, ranking(DKDV_PACK, {0x21}))});
+    const auto reader
+        = managerOverShardWith(*this, {encodeWinnerRecordLine(base, ranking(DKDV_PACK, {0x21}))});
 
     EXPECT_FALSE(reader->winnerFor(base).has_value());
     EXPECT_TRUE(reader->programFor(base).has_value());
 }
 
-TEST(TestSlottedWinnerRecords, AProgramLineNeverLandsBehindSlotRecordsWithOtherWinners)
+TEST_F(TestSlottedWinnerRecords, AProgramLineNeverLandsBehindSlotRecordsWithOtherWinners)
 {
-    const ScopedGraphMatch match;
-    const ScopedCacheDir cacheDir("never_without_slots");
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto base = baseKeyFor(graph, properties);
     const auto manager = makeManager(namedEngine());
 
     // dkdv's record crowns 0x23, but the program names 0x21.
@@ -604,14 +535,8 @@ TEST(TestSlottedWinnerRecords, AProgramLineNeverLandsBehindSlotRecordsWithOtherW
     EXPECT_FALSE(manager->programFor(base).has_value());
 }
 
-TEST(TestSlottedWinnerRecords, AProgramOnlyCallWithNoSlotRecordsOnDiskWritesNothing)
+TEST_F(TestSlottedWinnerRecords, AProgramOnlyCallWithNoSlotRecordsOnDiskWritesNothing)
 {
-    const ScopedGraphMatch match;
-    const ScopedCacheDir cacheDir("program_only_empty");
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto base = baseKeyFor(graph, properties);
-
     makeManager(namedEngine())
         ->recordSlotted(
             base, {}, goodProgram(), WinnerWriteCause::FRESH_MISS, WinnerWriteCause::FRESH_MISS);
@@ -620,13 +545,8 @@ TEST(TestSlottedWinnerRecords, AProgramOnlyCallWithNoSlotRecordsOnDiskWritesNoth
     EXPECT_EQ(lines.size(), 1U) << "only the version line; no program line without slot records";
 }
 
-TEST(TestSlottedWinnerRecords, AProgramOnlyCallIsLegalOnceTheSlotRecordsAreOnDisk)
+TEST_F(TestSlottedWinnerRecords, AProgramOnlyCallIsLegalOnceTheSlotRecordsAreOnDisk)
 {
-    const ScopedGraphMatch match;
-    const ScopedCacheDir cacheDir("program_only");
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto base = baseKeyFor(graph, properties);
     makeManager(namedEngine())
         ->recordSlotted(base,
                         goodSlotRecords(),
@@ -644,7 +564,7 @@ TEST(TestSlottedWinnerRecords, AProgramOnlyCallIsLegalOnceTheSlotRecordsAreOnDis
     EXPECT_TRUE(manager->programFor(base).has_value());
 }
 
-TEST(TestSlottedWinnerRecords, AnUnkeyableGraphsRecordsAreNeitherCachedNorWritten)
+TEST(TestSlottedWinnerRecordsOwnSetup, AnUnkeyableGraphsRecordsAreNeitherCachedNorWritten)
 {
     const ScopedGraphMatch match;
     const ScopedCacheDir cacheDir("unkeyable");
@@ -654,33 +574,18 @@ TEST(TestSlottedWinnerRecords, AnUnkeyableGraphsRecordsAreNeitherCachedNorWritte
     ASSERT_FALSE(base.graph.isUsable());
     const auto manager = makeManager(namedEngine());
 
-    manager->recordSlotted(base,
-                           goodSlotRecords(),
-                           goodProgram(),
-                           WinnerWriteCause::FRESH_MISS,
-                           WinnerWriteCause::FRESH_MISS);
+    recordGood(*manager, base);
 
     EXPECT_EQ(manager->winnerCacheSize(), 0U);
     EXPECT_TRUE(shardLines(shardPath(properties)).empty()) << "no shard is opened for it";
 }
 
-TEST(TestSlottedWinnerRecords, ARacingWritersProgramLineIsKeptWhenTheCallersProgramIsDropped)
+TEST_F(TestSlottedWinnerRecords, ARacingWritersProgramLineIsKeptWhenTheCallersProgramIsDropped)
 {
-    const ScopedGraphMatch match;
-    const ScopedCacheDir cacheDir("racing_writer");
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto base = baseKeyFor(graph, properties);
-
     // The loser has already read the (empty) shard when the winner appends its records.
     const auto loser = makeManager(namedEngine());
     seeCatalogs(*loser, graph, properties);
-    makeManager(namedEngine())
-        ->recordSlotted(base,
-                        goodSlotRecords(),
-                        goodProgram(),
-                        WinnerWriteCause::FRESH_MISS,
-                        WinnerWriteCause::FRESH_MISS);
+    recordGood(*makeManager(namedEngine()), base);
     ASSERT_EQ(shardLines(shardPath(properties)).size(), 5U);
 
     // Different winners: the loser adopts the winner's slot records, so its own program names
@@ -701,27 +606,14 @@ TEST(TestSlottedWinnerRecords, ARacingWritersProgramLineIsKeptWhenTheCallersProg
     EXPECT_EQ(program->picks[0].kernelId, testId(0x12));
 }
 
-TEST(TestSlottedWinnerRecords, EachPartFollowsItsOwnWriteCause)
+TEST_F(TestSlottedWinnerRecords, EachPartFollowsItsOwnWriteCause)
 {
-    const ScopedGraphMatch match;
-    const ScopedCacheDir cacheDir("causes");
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto base = baseKeyFor(graph, properties);
     const auto manager = makeManager(namedEngine());
-    manager->recordSlotted(base,
-                           goodSlotRecords(),
-                           goodProgram(),
-                           WinnerWriteCause::FRESH_MISS,
-                           WinnerWriteCause::FRESH_MISS);
+    recordGood(*manager, base);
     ASSERT_EQ(shardLines(shardPath(properties)).size(), 5U);
 
     // A fresh miss adopts what is on disk, for both parts.
-    manager->recordSlotted(base,
-                           goodSlotRecords(),
-                           goodProgram(),
-                           WinnerWriteCause::FRESH_MISS,
-                           WinnerWriteCause::FRESH_MISS);
+    recordGood(*manager, base);
     EXPECT_EQ(shardLines(shardPath(properties)).size(), 5U);
 
     // Slot records superseded, program line adopted: three new lines.
@@ -745,17 +637,14 @@ TEST(TestSlottedWinnerRecords, EachPartFollowsItsOwnWriteCause)
 // Slot-keyed adoption and coverage
 // ---------------------------------------------------------------------------
 
-TEST(TestSlottedWinnerRecords, ACoveringSlotRecordOrdersThatSlotsCatalog)
+TEST_F(TestSlottedWinnerRecordsInMemory, ACoveringSlotRecordOrdersThatSlotsCatalog)
 {
-    const ScopedGraphMatch match;
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
     const auto manager = makeManager({});
     ASSERT_EQ(kernelOrder(manager->sortedCatalog(1, context)),
               (std::vector<std::string>{"dkdv_33", "dkdv_34", "dkdv_35"}));
 
-    manager->recordSlotted(baseKeyFor(graph, properties),
+    manager->recordSlotted(base,
                            {{"dkdv", ranking(DKDV_PACK, {0x23, 0x21, 0x22})}},
                            std::nullopt,
                            WinnerWriteCause::FRESH_MISS,
@@ -770,14 +659,11 @@ TEST(TestSlottedWinnerRecords, ACoveringSlotRecordOrdersThatSlotsCatalog)
     EXPECT_NE(manager->sortedCatalog(1, context).measuredRecord, nullptr);
 }
 
-TEST(TestSlottedWinnerRecords, APartialSlotRecordLeavesTheRankerOrderIntact)
+TEST_F(TestSlottedWinnerRecordsInMemory, APartialSlotRecordLeavesTheRankerOrderIntact)
 {
-    const ScopedGraphMatch match;
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
     const auto manager = makeManager({});
-    manager->recordSlotted(baseKeyFor(graph, properties),
+    manager->recordSlotted(base,
                            {{"dkdv", ranking(DKDV_PACK, {0x23, 0x21})}},
                            std::nullopt,
                            WinnerWriteCause::FRESH_MISS,
@@ -793,12 +679,8 @@ TEST(TestSlottedWinnerRecords, APartialSlotRecordLeavesTheRankerOrderIntact)
 // Guards, in-memory operation and LRU accounting
 // ---------------------------------------------------------------------------
 
-TEST(TestSlottedWinnerRecords, SlottedAndUnslottedEntryPointsRefuseTheOtherKind)
+TEST_F(TestSlottedWinnerRecordsInMemory, SlottedAndUnslottedEntryPointsRefuseTheOtherKind)
 {
-    const ScopedGraphMatch match;
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto base = baseKeyFor(graph, properties);
     WinnerKey dkdvKey = base;
     dkdvKey.slot = "dkdv";
     const auto manager = makeManager({});
@@ -835,7 +717,7 @@ TEST(TestSlottedWinnerRecords, SlottedAndUnslottedEntryPointsRefuseTheOtherKind)
     EXPECT_TRUE(manager->winnerFor(dkdvKey).has_value());
 }
 
-TEST(TestSlottedWinnerRecords, AnUnslottedEngineWritesNoSlotOrProgramLine)
+TEST(TestSlottedWinnerRecordsOwnSetup, AnUnslottedEngineWritesNoSlotOrProgramLine)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto graph = makeGraph();
@@ -855,12 +737,8 @@ TEST(TestSlottedWinnerRecords, AnUnslottedEngineWritesNoSlotOrProgramLine)
     EXPECT_FALSE(unslotted->programFor(base).has_value());
 }
 
-TEST(TestSlottedWinnerRecords, WithoutAShardTheInMemoryRecordsStandInAndAreValidated)
+TEST_F(TestSlottedWinnerRecordsInMemory, WithoutAShardTheInMemoryRecordsStandInAndAreValidated)
 {
-    const ScopedGraphMatch match;
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto base = baseKeyFor(graph, properties);
     const auto manager = makeManager({});
 
     manager->recordSlotted(
@@ -868,28 +746,16 @@ TEST(TestSlottedWinnerRecords, WithoutAShardTheInMemoryRecordsStandInAndAreValid
     seeCatalogs(*manager, graph, properties);
     EXPECT_FALSE(manager->programFor(base).has_value()) << "no slot records, no program";
 
-    manager->recordSlotted(base,
-                           goodSlotRecords(),
-                           goodProgram(),
-                           WinnerWriteCause::FRESH_MISS,
-                           WinnerWriteCause::FRESH_MISS);
+    recordGood(*manager, base);
     EXPECT_TRUE(manager->programFor(base).has_value());
 }
 
-TEST(TestSlottedWinnerRecords, ProgramAndSlotRecordsAreLruAccountedSeparately)
+TEST_F(TestSlottedWinnerRecordsInMemory, ProgramAndSlotRecordsAreLruAccountedSeparately)
 {
-    const ScopedGraphMatch match;
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto base = baseKeyFor(graph, properties);
     // Room for the three slot records, and for the program record in its own cache.
     const auto manager = makeManager({}, false, 3);
 
-    manager->recordSlotted(base,
-                           goodSlotRecords(),
-                           goodProgram(),
-                           WinnerWriteCause::FRESH_MISS,
-                           WinnerWriteCause::FRESH_MISS);
+    recordGood(*manager, base);
 
     seeCatalogs(*manager, graph, properties);
     EXPECT_TRUE(manager->programFor(base).has_value())

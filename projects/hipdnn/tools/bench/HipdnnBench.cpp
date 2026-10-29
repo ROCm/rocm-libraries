@@ -1256,11 +1256,13 @@ int runBench(const std::vector<std::string>& args)
         return 1;
     }
 
-    const auto candidateFor = [&catalog](const auto& tuple) {
-        return std::find_if(
-            catalog.candidates.begin(), catalog.candidates.end(), [&tuple](const auto& item) {
-                return item.variant.knobSettings == tuple;
-            });
+    const auto enrolled = [&catalog, &slotted](const auto& tuple) {
+        auto measured = hipdnn_bench::measuredCandidate(catalog, slotted, tuple);
+        if(!measured)
+        {
+            std::cerr << "Measured configuration was not an enrolled catalog candidate\n";
+        }
+        return measured;
     };
 
     // A slotted sweep trains every slot's ranker against the other slots' reference kernels,
@@ -1335,29 +1337,17 @@ int runBench(const std::vector<std::string>& args)
         {
             const auto& result = results[index];
             const auto tuple = toVariantKnobs(result.knobSettings);
-            const auto candidate = candidateFor(tuple);
-            if(candidate == catalog.candidates.end())
+            const auto measured = enrolled(tuple);
+            if(!measured)
             {
-                std::cerr << "Measured configuration was not an enrolled catalog candidate\n";
                 return 1;
             }
-            std::optional<std::string> slotReference;
-            if(!slotted.slots.empty())
-            {
-                const auto row = hipdnn_bench::slotRowOf(catalog, slotted, tuple);
-                if(!row)
-                {
-                    std::cerr << "Measured configuration was not an enrolled catalog candidate\n";
-                    return 1;
-                }
-                slotReference = row->reference;
-            }
             output["results"].push_back(
-                hipdnn_bench::sweepResultJson(candidate->id,
+                hipdnn_bench::sweepResultJson(measured->candidate->id,
                                               hipdnn_bench::knobJson(tuple),
-                                              candidate->kernelFeatures,
+                                              measured->candidate->kernelFeatures,
                                               outcomeOf(result, verdicts[index], ""),
-                                              slotReference));
+                                              measured->slotReference));
         }
         std::cout << output.dump() << "\n";
         return results.empty() ? 2 : 0;
@@ -1434,14 +1424,12 @@ int runBench(const std::vector<std::string>& args)
         std::vector<std::string> slotValues;
         if(!slotted.slots.empty())
         {
-            const auto row
-                = hipdnn_bench::slotRowOf(catalog, slotted, toVariantKnobs(result.knobSettings));
-            if(!row)
+            const auto measured = enrolled(toVariantKnobs(result.knobSettings));
+            if(!measured)
             {
-                std::cerr << "Measured configuration was not an enrolled catalog candidate\n";
                 return 1;
             }
-            slotValues = {row->candidateId, row->reference};
+            slotValues = {measured->candidate->id, *measured->slotReference};
         }
         std::cout << hipdnn_bench::csvRow(
             problemId, graphKey, features, queries, knobs, outcome, slotValues)

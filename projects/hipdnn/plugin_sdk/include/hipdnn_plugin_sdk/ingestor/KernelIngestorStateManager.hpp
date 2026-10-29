@@ -173,13 +173,9 @@ inline constexpr const char* SCRATCH_OFFSET_TOKEN = "ws.scratch_offset";
 /// (sortedDefinitions), getMaxWorkspaceSize (dispatchHandlerFor per survivor, max), and
 /// initializeExecutionContext (sortedDefinitions().front(), getDispatchDetails).
 ///
-/// Slots (RFC 0021). The manager holds one SlotState per slot: its schema, definitions,
-/// ordinal domains, ranker and catalogs. An unslotted engine is exactly one implicit slot with
-/// an empty name, and the accessors above and below that take no slot answer for it only. A
-/// slotted engine answers through the overloads that take a slot index; the slot-less ones
-/// throw std::logic_error, because no single catalog answers for several slots. One graph match
-/// serves a catalog build for every slot, and the engine applies only if every slot's catalog is
-/// non-empty and its `shared_workspace` token is valid (slotProgramVerdict).
+/// Slots (RFC 0021 §3). An unslotted engine is one implicit slot with an empty name; the
+/// accessors that take no slot answer for it only, and throw std::logic_error on a slotted
+/// engine, because no single catalog answers for several slots.
 ///
 /// Pinned in place. Catalogs hold pointers into each slot's definitions, which are built once at
 /// construction and never mutated, so the manager can be neither copied nor moved.
@@ -287,7 +283,6 @@ public:
     {
     }
 
-    // Pinned in place: catalog pointers into each slot's `definitions` rely on a stable address.
     KernelIngestorStateManager(const KernelIngestorStateManager&) = delete;
     KernelIngestorStateManager& operator=(const KernelIngestorStateManager&) = delete;
     KernelIngestorStateManager(KernelIngestorStateManager&&) = delete;
@@ -340,6 +335,18 @@ public:
     const std::string& slotName(size_t slot) const
     {
         return slotAt(slot).name;
+    }
+
+    /// The index of the slot named @p name; nullopt when none has that name.
+    std::optional<size_t> slotIndex(const std::string& name) const
+    {
+        const auto found
+            = std::find_if(_slots.begin(), _slots.end(), [&name](const SlotState& slot) {
+                  return slot.name == name;
+              });
+        return found == _slots.end()
+                   ? std::nullopt
+                   : std::optional<size_t>(static_cast<size_t>(found - _slots.begin()));
     }
 
     /// The metadata schema slot @p slot's kernels declare.
@@ -438,9 +445,8 @@ public:
         {
             if(auto cached = _verdictCache.get(*key); cached.has_value())
             {
-                HIPDNN_PLUGIN_LOG_TRACE("ingestor: engine '" << _engine.name
-                                                             << "' catalog cache hit for device "
-                                                             << context.deviceId);
+                HIPDNN_PLUGIN_LOG_TRACE(_logPrefix << "catalog cache hit for device "
+                                                   << context.deviceId);
                 if(!cached->applicable)
                 {
                     logCachedDecline(context, cached->declineReason);
@@ -541,9 +547,8 @@ public:
                                    });
         if(verdict.has_value())
         {
-            HIPDNN_PLUGIN_LOG_TRACE("ingestor: engine '" << _engine.name
-                                                         << "' catalog cache hit for device "
-                                                         << context.deviceId);
+            HIPDNN_PLUGIN_LOG_TRACE(_logPrefix << "catalog cache hit for device "
+                                               << context.deviceId);
             if(!*verdict)
             {
                 logCachedDecline(context, declineReason);
@@ -557,9 +562,9 @@ public:
     /// when the entry was built, so this is what attributes a later call's decline.
     void logCachedDecline(const MatchContext& context, const std::string& reason = {}) const
     {
-        HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
-                               << _engine.name << "' reuses its cached decline for device "
-                               << context.deviceId << (reason.empty() ? "" : ": " + reason));
+        HIPDNN_PLUGIN_LOG_INFO(_logPrefix << "reuses its cached decline for device "
+                                          << context.deviceId
+                                          << (reason.empty() ? "" : ": " + reason));
     }
 
     /// The graph-level half of a miss: the arch gate of every slot's packs, graph_match and, for
@@ -704,7 +709,7 @@ public:
                          : "KernelIngestorStateManager::recordWinner takes no slot on an "
                            "unslotted engine");
         }
-        if(_slotted && !hasSlot(key.slot))
+        if(_slotted && !slotIndex(key.slot).has_value())
         {
             throw std::invalid_argument("recordWinner: unknown slot '" + key.slot + "'");
         }
@@ -803,19 +808,17 @@ public:
         return program;
     }
 
-    /// Records slotted benchmark results as ONE locked append: each @p slotRecords entry
-    /// (slot name, per-slot ranking) is written under `baseKey` with its slot set, and
-    /// @p program, if present, is written as the program line for @p baseKey (whose
-    /// `slot` MUST be empty). Either part may be absent: a program-line-only call is legal,
-    /// and an empty ranking is skipped as in `recordWinner`. @p slotCause applies to the per-slot
-    /// records and @p programCause to the program line, with the same semantics as
-    /// `recordWinner`'s cause.
+    /// Records slotted benchmark results as ONE locked append: each @p slotRecords entry (slot
+    /// name, per-slot ranking) is written under @p baseKey (whose `slot` MUST be empty) with its
+    /// slot set, and @p program, if present, as the program line. Either part may be absent; an
+    /// empty ranking is skipped as in `recordWinner`. @p slotCause and @p programCause have
+    /// `recordWinner`'s cause semantics.
     ///
     /// A program line is written only if, once this call's slot records are in, every slot's
-    /// record has the program's pick as its winner; otherwise it is dropped (logged) and the
-    /// slot records are still written. On that mismatch the in-memory program is replaced by the
-    /// shard's last program line for the key, if any (validated at read time). Slot lines precede the program line, so a failed append
-    /// never leaves a program line without its slot records.
+    /// record has the program's pick as its winner; otherwise it is dropped (logged), the slot
+    /// records are still written, and the in-memory program becomes the shard's last program
+    /// line for the key, if any (validated at read time). Slot lines precede the program line, so
+    /// a failed append never leaves a program line without its slot records.
     /// @throws std::logic_error on an unslotted engine.
     /// @throws std::invalid_argument @p baseKey names a slot, a record names an unknown slot,
     ///         or @p program does not name every slot once, in launch order.
@@ -832,7 +835,7 @@ public:
         }
         for(const auto& entry : slotRecords)
         {
-            if(!hasSlot(entry.first))
+            if(!slotIndex(entry.first).has_value())
             {
                 throw std::invalid_argument("recordSlotted: unknown slot '" + entry.first + "'");
             }
@@ -1035,6 +1038,7 @@ private:
         , _calibratedCache(catalogCacheCapacity)
         , _verdictCache(catalogCacheCapacity)
         , _engine(std::move(engine))
+        , _logPrefix("ingestor: engine '" + _engine.name + "' ")
         , _winnerCache(winnerCacheCapacity)
         , _programCache(winnerCacheCapacity)
         , _slotCatalogIds(catalogCacheCapacity)
@@ -1259,13 +1263,6 @@ private:
             throw std::logic_error(std::string("KernelIngestorStateManager::") + accessor
                                    + " needs a slotted engine");
         }
-    }
-
-    bool hasSlot(const std::string& name) const
-    {
-        return std::any_of(_slots.begin(), _slots.end(), [&name](const SlotState& slot) {
-            return slot.name == name;
-        });
     }
 
     /// One memoized full-catalog calibrated ranking, with the id of the model that produced it.
@@ -1641,8 +1638,7 @@ private:
             const auto* reason = context.deviceId == NO_DEVICE
                                      ? "no device resolved"
                                      : "resolved device reports no gcnArchName";
-            HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '" << _engine.name << "' " << reason
-                                                        << "; no kernel applies");
+            HIPDNN_PLUGIN_LOG_INFO(_logPrefix << reason << "; no kernel applies");
             return Catalog{};
         }
 
@@ -1659,9 +1655,8 @@ private:
         {
             if(auto cached = _catalogCache.get(*key); cached.has_value())
             {
-                HIPDNN_PLUGIN_LOG_TRACE("ingestor: engine '" << _engine.name
-                                                             << "' catalog cache hit for device "
-                                                             << context.deviceId);
+                HIPDNN_PLUGIN_LOG_TRACE(_logPrefix << "catalog cache hit for device "
+                                                   << context.deviceId);
                 if(!_slotted && cached->entries.empty())
                 {
                     logCachedDecline(context);
@@ -1790,7 +1785,6 @@ private:
     using GraphMatcherMemo
         = std::unordered_map<DescriptorId, GraphMatcherVerdict, DescriptorIdHash>;
 
-    /// The catalogs of every slot and whether the engine accepts the graph.
     struct SlottedBuild
     {
         std::vector<Catalog> catalogs;
@@ -1831,9 +1825,9 @@ private:
                 {
                     verdict.declineReason
                         = "slot '" + _slots[i].name + "' has no applicable kernel";
-                    HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
-                                           << _engine.name << "' declined the graph on device "
-                                           << context.deviceId << ": " << verdict.declineReason);
+                    HIPDNN_PLUGIN_LOG_INFO(_logPrefix << "declined the graph on device "
+                                                      << context.deviceId << ": "
+                                                      << verdict.declineReason);
                     break;
                 }
             }
@@ -1930,10 +1924,8 @@ private:
         {
             constexpr std::string_view SUFFIX = ".offset";
             const bool isOffsetToken
-                = name.size() > detail::WORKSPACE_TOKEN_ROOT.size() + SUFFIX.size()
-                  && name.compare(
-                         0, detail::WORKSPACE_TOKEN_ROOT.size(), detail::WORKSPACE_TOKEN_ROOT)
-                         == 0
+                = detail::isWorkspaceToken(name) && name.front() != '$'
+                  && name.size() > detail::WORKSPACE_TOKEN_ROOT.size() + SUFFIX.size()
                   && name.compare(name.size() - SUFFIX.size(), SUFFIX.size(), SUFFIX) == 0;
             if(!isOffsetToken)
             {
@@ -1964,10 +1956,9 @@ private:
         {
             return true;
         }
-        HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '" << _engine.name << "' pack "
-                                                    << toString(pack.id)
-                                                    << " does not support device arch '"
-                                                    << context.deviceProperties.gcnArchName << "'");
+        HIPDNN_PLUGIN_LOG_INFO(_logPrefix << "pack " << toString(pack.id)
+                                          << " does not support device arch '"
+                                          << context.deviceProperties.gcnArchName << "'");
         return false;
     }
 
@@ -2023,9 +2014,8 @@ private:
                                                : _graphMatchFn(context);
         if(!stage.bound.has_value())
         {
-            HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '" << _engine.name
-                                                        << "' declined graph_match for device "
-                                                        << context.deviceId);
+            HIPDNN_PLUGIN_LOG_INFO(_logPrefix << "declined graph_match for device "
+                                              << context.deviceId);
             if(_slotted)
             {
                 stage.declineReason = "graph_match declined the graph";
@@ -2037,9 +2027,9 @@ private:
             stage.declineReason = checkSharedWorkspace(*stage.bound, stage.sharedWorkspaceBytes);
             if(!stage.declineReason.empty())
             {
-                HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '"
-                                        << _engine.name << "' declined the graph on device "
-                                        << context.deviceId << ": " << stage.declineReason);
+                HIPDNN_PLUGIN_LOG_ERROR(_logPrefix << "declined the graph on device "
+                                                   << context.deviceId << ": "
+                                                   << stage.declineReason);
                 return stage;
             }
         }
@@ -2109,9 +2099,8 @@ private:
 
             if(!graphLevelMatchersPass(pack, context, graphVerdicts, bound))
             {
-                HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
-                                       << _engine.name << "' pack " << toString(pack.id)
-                                       << " declined at a graph-scoped matcher");
+                HIPDNN_PLUGIN_LOG_INFO(_logPrefix << "pack " << toString(pack.id)
+                                                  << " declined at a graph-scoped matcher");
                 continue;
             }
 
@@ -2125,11 +2114,10 @@ private:
                 // stops being true the next time this loop changes.
                 if(!archSupports(precomputed.arch, context.deviceProperties.gcnArchName))
                 {
-                    HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
-                                           << _engine.name << "' kernel "
-                                           << toString(precomputed.kernelId)
-                                           << " does not support device arch '"
-                                           << context.deviceProperties.gcnArchName << "'");
+                    HIPDNN_PLUGIN_LOG_INFO(_logPrefix << "kernel " << toString(precomputed.kernelId)
+                                                      << " does not support device arch '"
+                                                      << context.deviceProperties.gcnArchName
+                                                      << "'");
                     continue;
                 }
 
@@ -2144,27 +2132,24 @@ private:
 
             if(admitted == 0)
             {
-                HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
-                                       << _engine.name << "' pack " << toString(pack.id)
-                                       << " admitted no kernel of " << pack.kernels.size()
+                HIPDNN_PLUGIN_LOG_INFO(_logPrefix
+                                       << "pack " << toString(pack.id) << " admitted no kernel of "
+                                       << pack.kernels.size()
                                        << " at the arch gate or a kernel-scoped matcher");
                 continue;
             }
 
-            HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
-                                   << _engine.name << "' pack " << toString(pack.id) << " admitted "
-                                   << admitted << " of " << pack.kernels.size()
-                                   << " kernel(s) after kernel-scoped matching");
+            HIPDNN_PLUGIN_LOG_INFO(_logPrefix << "pack " << toString(pack.id) << " admitted "
+                                              << admitted << " of " << pack.kernels.size()
+                                              << " kernel(s) after kernel-scoped matching");
         }
 
         shadowByArchTier(catalog, context);
 
-        HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
-                               << _engine.name << "' "
-                               << (_slotted ? "slot '" + slot.name + "' catalog" : "catalog")
-                               << " for device " << context.deviceId << " holds "
-                               << catalog.entries.size() << " kernel(s) from " << slot.packs.size()
-                               << " pack(s)");
+        HIPDNN_PLUGIN_LOG_INFO(
+            _logPrefix << (_slotted ? "slot '" + slot.name + "' catalog" : "catalog")
+                       << " for device " << context.deviceId << " holds " << catalog.entries.size()
+                       << " kernel(s) from " << slot.packs.size() << " pack(s)");
         return catalog;
     }
 
@@ -2209,11 +2194,11 @@ private:
             {
                 tiers[i] = SHADOWED;
                 anyShadowed = true;
-                HIPDNN_PLUGIN_LOG_INFO(
-                    "ingestor: engine '"
-                    << _engine.name << "' kernel " << toString(entries[i]->kernelId)
-                    << " is shadowed by kernel " << toString(entries[winner]->kernelId)
-                    << " at a better arch tier on device " << context.deviceProperties.gcnArchName);
+                HIPDNN_PLUGIN_LOG_INFO(_logPrefix << "kernel " << toString(entries[i]->kernelId)
+                                                  << " is shadowed by kernel "
+                                                  << toString(entries[winner]->kernelId)
+                                                  << " at a better arch tier on device "
+                                                  << context.deviceProperties.gcnArchName);
             }
         }
         if(!anyShadowed)
@@ -2282,6 +2267,25 @@ private:
         return true;
     }
 
+    /// Opens the shard of @p gcnArchName, or logs the failure once and returns empty.
+    /// @p deterministicDecline is set when the shard's version does not match: no retry changes
+    /// that for the life of the process.
+    std::optional<hipdnn_data_sdk::utilities::LineStoreShard>
+        openShardLogged(const std::string& gcnArchName, bool& deterministicDecline) const
+    {
+        using hipdnn_data_sdk::utilities::LineStoreStatus;
+        auto [shard, status] = openWinnerCacheShard(_engine, gcnArchName);
+        deterministicDecline = status == LineStoreStatus::VERSION_MISMATCH;
+        if(status == LineStoreStatus::OK && shard.has_value())
+        {
+            return std::move(shard);
+        }
+        logShardFailureOnce(deterministicDecline ? WinnerShardFailureKind::VERSION_MISMATCH
+                                                 : WinnerShardFailureKind::OPEN,
+                            gcnArchName);
+        return std::nullopt;
+    }
+
     /// Loads the on-disk shard covering @p gcnArchName into `_winnerCache` once, tracked
     /// by `_loadedWinnerShards`. File I/O runs with `_winnerCacheMutex` UNHELD, so a slow
     /// disk read never blocks an unrelated call.
@@ -2317,19 +2321,7 @@ private:
 
         std::vector<DecodedWinnerLine> decoded;
         bool attemptSettled = false;
-        auto [shard, openStatus] = openWinnerCacheShard(_engine, gcnArchName);
-        if(openStatus == hipdnn_data_sdk::utilities::LineStoreStatus::VERSION_MISMATCH)
-        {
-            // Deterministic for this process: the shard's version line will not change
-            // under us, so there is nothing to retry.
-            attemptSettled = true;
-            logShardFailureOnce(WinnerShardFailureKind::VERSION_MISMATCH, gcnArchName);
-        }
-        else if(openStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK || !shard.has_value())
-        {
-            logShardFailureOnce(WinnerShardFailureKind::OPEN, gcnArchName);
-        }
-        else
+        if(auto shard = openShardLogged(gcnArchName, attemptSettled))
         {
             auto [records, readStatus]
                 = hipdnn_data_sdk::utilities::readAllLines(*shard, &decodeWinnerLine);
@@ -2411,15 +2403,10 @@ private:
             return std::nullopt;
         }
 
-        auto [shard, openStatus] = openWinnerCacheShard(_engine, gcnArchName);
-        if(openStatus == hipdnn_data_sdk::utilities::LineStoreStatus::VERSION_MISMATCH)
+        bool deterministicDecline = false;
+        auto shard = openShardLogged(gcnArchName, deterministicDecline);
+        if(!shard.has_value())
         {
-            logShardFailureOnce(WinnerShardFailureKind::VERSION_MISMATCH, gcnArchName);
-            return std::nullopt;
-        }
-        if(openStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK || !shard.has_value())
-        {
-            logShardFailureOnce(WinnerShardFailureKind::OPEN, gcnArchName);
             return std::nullopt;
         }
 
@@ -2514,14 +2501,9 @@ private:
         std::vector<std::string> lines;
     };
 
-    /// Decides what @p slotRecords and @p program contribute, from the lines @p onDisk holds
-    /// (nullptr when no shard is usable, in which case the in-memory slot rankings stand in).
-    /// Each slot record follows @p slotCause as `writeBackToShard` does, the program line
-    /// @p programCause. A program line is planned only if it names, for every slot, the winner
-    /// (first entry) of that slot's record as it will stand after this write; a mismatch drops
-    /// the program line and keeps the slot records, so a program line never lands without
-    /// valid slot records, and the in-memory program is replaced by the last program line for
-    /// the key in @p onDisk, if any. Last-line-wins over @p onDisk, as in the reader.
+    /// What @p slotRecords and @p program contribute, from the lines @p onDisk holds (nullptr
+    /// when no shard is usable: the in-memory slot rankings stand in). The rules are
+    /// `recordSlotted`'s; last-line-wins over @p onDisk, as in the reader.
     SlottedWritePlan
         planSlottedWrite(const WinnerKey& baseKey,
                          const std::vector<std::pair<std::string, WinnerRecord>>& slotRecords,
@@ -2633,8 +2615,7 @@ private:
 
     /// `recordSlotted`'s disk half: reads the shard, plans and appends every line under one hold
     /// of the shard's lock. A disk failure degrades to the in-memory plan, as `writeBackToShard`
-    /// does. A failed append stops the sequence, so the program line, last, never lands without
-    /// its slot records.
+    /// does.
     SlottedWritePlan
         writeSlottedToShard(const WinnerKey& baseKey,
                             const std::vector<std::pair<std::string, WinnerRecord>>& slotRecords,
@@ -2744,6 +2725,7 @@ private:
     /// The engine's identity. The name locates the on-disk winner-cache shard (empty disables
     /// it); the revision is the version half of every CatalogKey.
     EngineIdentity _engine;
+    std::string _logPrefix;
 
     /// Separate from _catalogCache so benchmarked rankings and catalogs cannot evict each other.
     mutable LruCache<WinnerKey, WinnerRecord, WinnerKeyHash> _winnerCache;

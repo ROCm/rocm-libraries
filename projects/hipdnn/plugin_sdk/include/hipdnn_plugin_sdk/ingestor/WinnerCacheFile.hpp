@@ -314,9 +314,7 @@ inline std::optional<DeviceProperties> readDeviceProperties(const nlohmann::json
 /// array of ranked entries. `DescriptorId`s use the same UUID text format as
 /// `DescriptorLoader.hpp` (`formatUuid`/`parseUuid`).
 ///
-/// The encoder picks the format: a key with no slot is the unslotted whole-graph record, written
-/// as format v2; a key with a slot is a slot record, written as v3 with a
-/// `slot` field. v3 is therefore only ever written for slotted engines.
+/// The format follows the key: v2 without a slot, v3 (with a `slot` field) with one.
 inline std::string encodeWinnerRecordLine(const WinnerKey& key, const WinnerRecord& record)
 {
     nlohmann::json entries = nlohmann::json::array();

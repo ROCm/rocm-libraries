@@ -229,10 +229,7 @@ def mint_ids(
 
     ids = {}
     if config.is_slotted:
-        # One KMD, one UDD, and one ranker UHD when the slot ranks, per slot
-        # (RFC 0021 §3, §4): a slot's dispatch descriptor names its own handler.
-        # A slot takes the ids its namesake held in the previous bundle; a slot
-        # the previous bundle lacked is new and gets fresh ids.
+        # RFC 0021 §3, §4: a slot keeps the ids its namesake held in the previous bundle.
         held_slots = engine.slots if engine else {}
         for slot_index, slot in enumerate(config.slots):
             docs = held_slots.get(slot.name)
@@ -847,7 +844,6 @@ def build_kdp(
     """
     pack_index = _pack_index(config, pack)
     slot = config.slot_of(pack) if config.is_slotted else None
-    # The KMD this pack's kernels fill: the engine's, or its slot's.
     kmd_scope = config.slot_view(slot) if slot is not None else config
     matchers = [ids["kernel_match"]]
     if config.has_operation_umd(pack):
@@ -1580,45 +1576,35 @@ class IngestorGenerator:
         if resolution is not None and resolution.satellite:
             return [f"{ddir}/{config.kdp_stem(pack)}.kdp.json" for pack in config.packs]
         if config.is_slotted:
-            return self._slotted_descriptor_files(config)
-        files = [
-            f"{ddir}/{slug}.kmd.json",
-            f"{ddir}/{slug}.ued.json",
-            f"{ddir}/{slug}.udd.json",
-        ]
-        if config.engine.has_heuristic:
-            files.append(f"{ddir}/{slug}.uhd.json")
-        files.append(f"{ddir}/kernel_dtype_matches_graph.umd.json")
-        for pack in config.packs:
-            files.append(f"{ddir}/{config.kdp_stem(pack)}.kdp.json")
-            if config.is_multi_pack:
-                files.append(f"{ddir}/operation_is_{pack.discriminator}.umd.json")
-        files.append(f"packs/{config.native_class_name}Native.cpp")
-        files.append(f"tests/Test{config.engine.pascal_name}Packs.cpp")
-        files.append(f"tests/Test{config.engine.pascal_name}Matchers.cpp")
-        for fragment in FRAGMENT_FILENAMES:
-            files.append(f"fragments/{fragment}")
-        return files
-
-    @staticmethod
-    def _slotted_descriptor_files(config: IngestorConfig) -> list[str]:
-        """The descriptor files of a slotted engine (RFC 0021): one KMD and
-        one UDD (and one UHD when the slot ranks) per slot, one KDP per pack."""
-        slug = config.engine.slug
-        ddir = config.descriptor_dir
-        files = [f"{ddir}/{slug}_{slot.name}.kmd.json" for slot in config.slots]
-        files.append(f"{ddir}/{slug}.ued.json")
-        files += [f"{ddir}/{slug}_{slot.name}.udd.json" for slot in config.slots]
-        files += [
-            f"{ddir}/{slug}_{slot.name}.uhd.json"
-            for slot in config.slots
-            if slot.ranker
-        ]
+            # RFC 0021: one KMD and one UDD (and one UHD when the slot ranks) per slot.
+            files = [f"{ddir}/{slug}_{slot.name}.kmd.json" for slot in config.slots]
+            files.append(f"{ddir}/{slug}.ued.json")
+            files += [f"{ddir}/{slug}_{slot.name}.udd.json" for slot in config.slots]
+            files += [
+                f"{ddir}/{slug}_{slot.name}.uhd.json"
+                for slot in config.slots
+                if slot.ranker
+            ]
+        else:
+            files = [
+                f"{ddir}/{slug}.kmd.json",
+                f"{ddir}/{slug}.ued.json",
+                f"{ddir}/{slug}.udd.json",
+            ]
+            if config.engine.has_heuristic:
+                files.append(f"{ddir}/{slug}.uhd.json")
         files.append(f"{ddir}/kernel_dtype_matches_graph.umd.json")
         for pack in config.packs:
             files.append(f"{ddir}/{config.kdp_stem(pack)}.kdp.json")
             if config.has_operation_umd(pack):
                 files.append(f"{ddir}/operation_is_{pack.discriminator}.umd.json")
+        if config.is_slotted:
+            return files
+        files.append(f"packs/{config.native_class_name}Native.cpp")
+        files.append(f"tests/Test{config.engine.pascal_name}Packs.cpp")
+        files.append(f"tests/Test{config.engine.pascal_name}Matchers.cpp")
+        for fragment in FRAGMENT_FILENAMES:
+            files.append(f"fragments/{fragment}")
         return files
 
     @staticmethod
@@ -1684,43 +1670,30 @@ class IngestorGenerator:
             write_text(rel, _dump(obj))
 
         kdp_documents = resolution.kdp_documents
-        if config.is_slotted:
-            for slot in config.slots:
-                write_json(
-                    f"{ddir}/{slug}_{slot.name}.kmd.json",
-                    build_slot_kmd(config, slot, ids),
-                )
-            write_json(f"{ddir}/{slug}.ued.json", build_ued(config, ids))
-            for slot in config.slots:
-                write_json(
-                    f"{ddir}/{slug}_{slot.name}.udd.json",
-                    build_slot_udd(config, slot, ids),
-                )
-            for slot in config.slots:
-                uhd = build_slot_uhd(config, slot, ids)
-                if uhd is not None:
-                    write_json(f"{ddir}/{slug}_{slot.name}.uhd.json", uhd)
-            write_json(
-                f"{ddir}/kernel_dtype_matches_graph.umd.json",
-                build_kernel_match_umd(config, ids),
-            )
-            for pack, document in kdp_documents:
-                write_json(f"{ddir}/{config.kdp_stem(pack)}.kdp.json", document)
-                op_umd = build_operation_umd(config, pack, ids)
-                if op_umd is not None:
-                    write_json(
-                        f"{ddir}/operation_is_{pack.discriminator}.umd.json", op_umd
-                    )
-            return written
-        emitted = emitted_inventory(config, kdp_documents)
-
         if not resolution.satellite:
-            write_json(f"{ddir}/{slug}.kmd.json", build_kmd(config, ids))
-            write_json(f"{ddir}/{slug}.ued.json", build_ued(config, ids))
-            write_json(f"{ddir}/{slug}.udd.json", build_udd(config, ids))
-            uhd = build_uhd(config, ids)
-            if uhd is not None:
-                write_json(f"{ddir}/{slug}.uhd.json", uhd)
+            if config.is_slotted:
+                for slot in config.slots:
+                    write_json(
+                        f"{ddir}/{slug}_{slot.name}.kmd.json",
+                        build_slot_kmd(config, slot, ids),
+                    )
+                write_json(f"{ddir}/{slug}.ued.json", build_ued(config, ids))
+                for slot in config.slots:
+                    write_json(
+                        f"{ddir}/{slug}_{slot.name}.udd.json",
+                        build_slot_udd(config, slot, ids),
+                    )
+                for slot in config.slots:
+                    uhd = build_slot_uhd(config, slot, ids)
+                    if uhd is not None:
+                        write_json(f"{ddir}/{slug}_{slot.name}.uhd.json", uhd)
+            else:
+                write_json(f"{ddir}/{slug}.kmd.json", build_kmd(config, ids))
+                write_json(f"{ddir}/{slug}.ued.json", build_ued(config, ids))
+                write_json(f"{ddir}/{slug}.udd.json", build_udd(config, ids))
+                uhd = build_uhd(config, ids)
+                if uhd is not None:
+                    write_json(f"{ddir}/{slug}.uhd.json", uhd)
             write_json(
                 f"{ddir}/kernel_dtype_matches_graph.umd.json",
                 build_kernel_match_umd(config, ids),
@@ -1733,6 +1706,9 @@ class IngestorGenerator:
                     f"{ddir}/operation_is_{pack.discriminator}.umd.json",
                     op_umd,
                 )
+        if config.is_slotted:
+            return written
+        emitted = emitted_inventory(config, kdp_documents)
 
         # --- C++ stubs/tests ---
         packs_dir = output_dir / "packs"

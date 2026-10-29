@@ -19,7 +19,7 @@ import pandas as pd
 from .catalog import candidate_density
 from .corpus_io import read_corpus_frame
 from .correctness import measured_rows
-from .dataset.training_table import slot_kernels, slot_training_rows
+from .dataset.training_table import slot_training_rows
 from .evaluate import regret_of, resolve_grouping
 
 __all__ = [
@@ -170,16 +170,13 @@ def analyse_knobs(
     # is meaningless (orphaned problems just leave the comparison). Non-varying ones are
     # graph-bound if a problem column twins them, else pinned by the pack's generator.
     graph_bound = graph_bound_twins(usable.columns)
-    # A slotted engine's knobs are `kernel.<slot>.<field>`, and the problem column that twins
-    # one is named by the field alone.
-    slotted = "kernel" in usable.columns and any(
-        slot_kernels(identity) for identity in usable["kernel"].dropna().unique()
-    )
     within = usable.groupby(group, dropna=False)
     knobs = []
     for name in knob_columns(usable):
         short = name[len(_KERNEL_PREFIX) :]
-        bound = short.rsplit(".", 1)[-1] if slotted else short
+        # A slotted engine's knob is `kernel.<slot>.<field>`; the problem column that twins
+        # it is named by the field alone.
+        bound = short.rsplit(".", 1)[-1]
         values = sorted(usable[name].dropna().unique().tolist(), key=repr)
         tunable = bool((within[name].nunique(dropna=False) > 1).any())
         ablation = KnobAblation(

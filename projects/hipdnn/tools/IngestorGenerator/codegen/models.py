@@ -464,9 +464,6 @@ class EngineSpec:
 class SlotSpec:
     """One ``slots[]`` entry (RFC 0021): everything an engine uses to select a
     kernel, for one position in its launch order.
-
-    A slot owns its KMD and, when it ranks, a metric-less native ranker, so the
-    kernels of its packs fill ``kmd_fields`` and its knobs name those fields.
     """
 
     name: str

@@ -205,7 +205,6 @@ def load_config(path: Path) -> IngestorConfig:
             engine_raw.get("behavior_notes"), "engine.behavior_notes"
         ),
         knobs=_require_sequence(engine_raw.get("knobs"), "engine.knobs"),
-        # A slotted engine's rankers are the slots' own.
         heuristic="none" if slotted else engine_raw.get("heuristic", "native"),
         census_name_symbol=engine_raw.get("census_name_symbol"),
         shared_workspace=engine_raw.get("shared_workspace", ""),
@@ -218,7 +217,6 @@ def load_config(path: Path) -> IngestorConfig:
     for pack_raw in raw.get("packs", []):
         if "name" not in pack_raw:
             raise ConfigError(f"packs entry missing required key 'name': {pack_raw!r}")
-        # The KMD this pack's kernels fill: the engine's, or its slot's.
         pack_slot = _pack_slot(pack_raw, slotted, slots_by_name)
         pack_fields = pack_slot.kmd_fields if slotted else kmd_fields
         kmd_field_names = {f.name for f in pack_fields}
@@ -1619,7 +1617,6 @@ def _reject_deprecated_keys(raw: dict) -> None:
     retired top-level keys are named so an out-of-tree config still setting
     them is told they were retired.
     """
-    # The engine's own fields, then each slot's: one rule for every kmd_fields list.
     field_lists = [raw.get("kmd_fields", [])]
     field_lists += [
         slot_raw.get("kmd_fields", []) or [] for slot_raw in raw.get("slots", []) or []

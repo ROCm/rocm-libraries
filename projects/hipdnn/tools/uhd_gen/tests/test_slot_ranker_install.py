@@ -19,7 +19,7 @@ pytest.importorskip("lightgbm")
 pytest.importorskip("flatbuffers")
 
 from uhd_gen.__main__ import main  # noqa: E402
-from uhd_gen.dataset import store  # noqa: E402
+from uhd_gen.tests.test_slotted_sweep import _dataset  # noqa: E402
 
 SWEEP = Path(__file__).parent / "fixtures" / "slotted_sweep.csv"
 UED = "1f2a3b4c-5d6e-4f70-8192-a3b4c5d6e7f8"
@@ -92,24 +92,6 @@ def _many_problems(tmp_path: Path, count: int = 12) -> Path:
     return path
 
 
-def _add_sweep(tmp_path: Path, sweep: Path) -> Path:
-    dataset = tmp_path / "ds"
-    store.add(
-        dataset,
-        *store.from_csv(
-            [sweep],
-            engine="SLOTTED_FIXTURE",
-            engine_id=7,
-            role="sort_kernel_catalog",
-            arch="gfx942",
-            selector_revision="fixture/1",
-            collected_at="2026-10-18T00:00:00+00:00",
-            label="slotted-sweep",
-        ),
-    )
-    return dataset
-
-
 def _generate(dataset, tree, evaluator, output, *objective) -> int:
     """`generate --slot dkdv` over the sweep; `objective` is the target or the metric."""
     return main(
@@ -147,7 +129,7 @@ def _generate(dataset, tree, evaluator, output, *objective) -> int:
 
 
 def test_a_slot_ranker_trained_from_a_sweep_installs_into_its_slot(tmp_path, evaluator):
-    dataset = _add_sweep(tmp_path, _many_problems(tmp_path))
+    dataset = _dataset(tmp_path, _many_problems(tmp_path))
     tree = _tree(tmp_path / "tree")
     output = tmp_path / "out"
     assert (
@@ -213,7 +195,7 @@ def test_a_slot_ranker_that_declares_a_metric_is_refused(tmp_path, evaluator, ca
     frame = pd.read_csv(sweep)
     frame["graph.flops"] = 4e12
     frame.to_csv(sweep, index=False)
-    dataset = _add_sweep(tmp_path, sweep)
+    dataset = _dataset(tmp_path, sweep)
     output = tmp_path / "out"
     assert (
         _generate(

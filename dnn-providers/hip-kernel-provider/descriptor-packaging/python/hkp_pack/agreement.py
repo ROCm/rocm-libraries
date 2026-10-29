@@ -68,13 +68,13 @@ def pack_kmd_reference(engine, kdp, where):
     if name is None:
         raise HkpPackError(
             f"{where} declares no slot, which every pack of slotted engine "
-            f"'{engine.get('id')}' must"
+            f"'{engine.get('name')}' must"
         )
     for slot in slots:
         if slot.get("name") == name:
             return slot.get("metadata")
     raise HkpPackError(
-        f"{where} names slot {name!r}, which engine '{engine.get('id')}' does not declare"
+        f"{where} names slot {name!r}, which engine '{engine.get('name')}' does not declare"
     )
 
 

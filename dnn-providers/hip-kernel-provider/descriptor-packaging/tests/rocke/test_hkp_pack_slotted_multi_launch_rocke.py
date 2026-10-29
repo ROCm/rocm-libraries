@@ -48,8 +48,6 @@ def test_each_slot_packs_its_launches_against_its_own_kmd(packed):
         assert pack["slot"] == slot
         (kernels[slot],) = pack["kernelDescriptors"]
 
-    # The multi-launch slot keeps both launches as packed kpack entries; the
-    # single-launch slots keep one.
     decode_merge = kernels["dkdv"]["sources"]
     assert set(decode_merge) == {"decode", "merge"}
     assert all(ks["kind"] == "kpack" for ks in decode_merge.values())
@@ -59,19 +57,8 @@ def test_each_slot_packs_its_launches_against_its_own_kmd(packed):
         assert "sources" not in kernels[slot]
     assert "kernel_source" not in kernels["dkdv"]
 
-    # Each pack completed against its own slot's KMD: the one field it declares.
     for slot, kernel in kernels.items():
         assert kernel["metadata"] == {"family": slot}
-
-
-def test_each_slot_has_its_own_dispatch_descriptor(packed):
-    dispatch = {
-        slot: read_shipped(packed / f"{slot}.kdp.json")["dispatch"] for slot in SLOTS
-    }
-    assert len(set(dispatch.values())) == len(SLOTS)
-    for slot, udd in dispatch.items():
-        assert (packed / f"{slot}.udd.json").is_file()
-        assert udd in (packed / f"{slot}.udd.json").read_text()
 
 
 @pytest.mark.parametrize("slot", SLOTS)

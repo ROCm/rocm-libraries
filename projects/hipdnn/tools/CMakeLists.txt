@@ -485,73 +485,43 @@ endif()
 ]])
         # cmake-format: on
 
-        add_test(
-            NAME hipdnn_validate_descriptors_smoke
-            COMMAND
-                ${CMAKE_COMMAND}
-                "-DHIPDNN_VALIDATE_DESCRIPTORS_TOOL=$<TARGET_FILE:hipdnn_validate_descriptors>"
-                "-DHIPDNN_VALIDATE_DESCRIPTORS_ROOT=${HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ROOT}"
-                "-DHIPDNN_VALIDATE_DESCRIPTORS_ENGINE=${HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ENGINE}"
-                -P "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsSmokeTest.cmake"
+        set(HIPDNN_VALIDATE_DESCRIPTORS_TESTS)
+        # <test suffix>|<root>|<engine>. The multi-launch bundle has its own engine: a validator
+        # that stopped declaring the pack's launch names has its kernels dropped with an ERROR
+        # and exits non-zero here, which the single-launch root cannot show.
+        foreach(
+            smokeCase
+            "smoke|${HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ROOT}|${HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ENGINE}"
+            "smoke_multi_launch|${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/multi_launch|hipkernel:ValidateFixtureMultiLaunch"
         )
-        set(HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_smoke)
-
-        # The multi-launch bundle: kernels carrying a `sources` map, one pair naming two
-        # kernels and one naming a kernel under both launch names. It has its own engine,
-        # and the same driver script. A validator that stopped declaring the pack's launch
-        # names has its kernels dropped with an ERROR and exits non-zero here, which the
-        # single-launch root cannot show.
-        set(HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ROOT
-            "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/multi_launch"
-        )
-        set(HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ENGINE "hipkernel:ValidateFixtureMultiLaunch")
-        add_test(
-            NAME hipdnn_validate_descriptors_smoke_multi_launch
-            COMMAND
-                ${CMAKE_COMMAND}
-                "-DHIPDNN_VALIDATE_DESCRIPTORS_TOOL=$<TARGET_FILE:hipdnn_validate_descriptors>"
-                "-DHIPDNN_VALIDATE_DESCRIPTORS_ROOT=${HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ROOT}"
-                "-DHIPDNN_VALIDATE_DESCRIPTORS_ENGINE=${HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ENGINE}"
-                -P "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsSmokeTest.cmake"
-        )
-        list(APPEND HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_smoke_multi_launch)
-
-        # The slotted multi-launch bundle: a single-launch slot beside a slot whose kernels carry a
-        # kpack `sources` map, each slot with its own dispatch descriptor (RFC 0021 §4). Needs no
-        # compiler: the loader reads only the descriptors. A validator that harvested only
-        # `set.packs`, or gave both slots one stub, drops the engine and fails here.
-        set(HIPDNN_VALIDATE_DESCRIPTORS_SLOTTED_MULTI_LAUNCH_ROOT
-            "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/slotted_multi_launch"
-        )
-        set(HIPDNN_VALIDATE_DESCRIPTORS_SLOTTED_MULTI_LAUNCH_ENGINE
-            "hipkernel:ValidateFixtureSlottedMultiLaunch"
-        )
-        add_test(
-            NAME hipdnn_validate_descriptors_slotted_multi_launch
-            COMMAND
-                ${CMAKE_COMMAND}
-                "-DHIPDNN_VALIDATE_DESCRIPTORS_TOOL=$<TARGET_FILE:hipdnn_validate_descriptors>"
-                "-DHIPDNN_VALIDATE_DESCRIPTORS_ROOT=${HIPDNN_VALIDATE_DESCRIPTORS_SLOTTED_MULTI_LAUNCH_ROOT}"
-                "-DHIPDNN_VALIDATE_DESCRIPTORS_ENGINE=${HIPDNN_VALIDATE_DESCRIPTORS_SLOTTED_MULTI_LAUNCH_ENGINE}"
-                -P "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsSmokeTest.cmake"
-        )
-        list(APPEND HIPDNN_VALIDATE_DESCRIPTORS_TESTS
-             hipdnn_validate_descriptors_slotted_multi_launch
-        )
+            string(REPLACE "|" ";" smokeCase "${smokeCase}")
+            list(GET smokeCase 0 smokeName)
+            list(GET smokeCase 1 smokeRoot)
+            list(GET smokeCase 2 smokeEngine)
+            add_test(
+                NAME hipdnn_validate_descriptors_${smokeName}
+                COMMAND
+                    ${CMAKE_COMMAND}
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_TOOL=$<TARGET_FILE:hipdnn_validate_descriptors>"
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_ROOT=${smokeRoot}"
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_ENGINE=${smokeEngine}"
+                    -P "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsSmokeTest.cmake"
+            )
+            list(APPEND HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_${smokeName})
+        endforeach()
 
         # <fixture>:<exit status>:<model checks>[:<diagnostic>], as the fixtures' README states
         # them; the optional diagnostic is a colon-free text a reported diagnostic must contain. A
         # predict_engine model is admitted only through the L1 guards, so a static_order
         # estimate fails the run while a static_order kernel ranker does not. A ranker whose
-        # features need a sample, run without one, is admitted with extraction skipped. The
-        # slotted fixtures other than slotted_valid are one-file overlays on it, or
-        # recorded samples for it (see the fixtures' README).
+        # features need a sample, run without one, is admitted with extraction skipped.
         set(HIPDNN_VALIDATE_DESCRIPTORS_OVERLAY_FIXTURES
             slotted_ranker_undeclared_field
             slotted_ranker_unexposed_axis
             slotted_ranker_reads_workspace_token
             slotted_two_ws_tokens
             slotted_ranker_names_other_slot
+            slotted_multi_launch
         )
         foreach(
             roleFixture
@@ -560,6 +530,7 @@ endif()
             "l1_static_order:1:sort_kernel_catalog=true,predict_engine=false"
             "l1_native:0:sort_kernel_catalog=true,predict_engine=true"
             "slotted_valid:0:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=true,predict_engine=true"
+            "slotted_multi_launch:0:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=true,predict_engine=true"
             "slotted_ranker_undeclared_field:1:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=false,predict_engine=true:Feature references an undeclared KMD field"
             "slotted_ranker_unexposed_axis:1:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=false,predict_engine=true:which its UED does not expose as knobs"
             "slotted_ranker_reads_workspace_token:1:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=false,predict_engine=true:a shared-workspace token a slotted engine reserves"
@@ -577,9 +548,6 @@ endif()
                 list(GET roleFixture 3 fixtureDiagnostic)
                 set(fixtureDiagnosticArg "-DHIPDNN_VALIDATE_DESCRIPTORS_DIAGNOSTIC=${fixtureDiagnostic}")
             endif()
-            # An overlay case is slotted_valid with the overlay directory's files laid over a
-            # copy of it; the feature-samples case validates slotted_valid itself against its
-            # recorded samples.
             set(fixtureRoot "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/${fixtureName}")
             set(fixtureCaseArgs)
             if(fixtureName IN_LIST HIPDNN_VALIDATE_DESCRIPTORS_OVERLAY_FIXTURES)

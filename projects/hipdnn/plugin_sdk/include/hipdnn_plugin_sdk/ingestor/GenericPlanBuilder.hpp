@@ -1076,8 +1076,7 @@ private:
         return filtered;
     }
 
-    /// One engine knob: a KMD field of slot @p slot, advertised under @p id. An unslotted
-    /// engine's id is the bare field name; a slotted engine's is `<slot>.<field>`.
+    /// One engine knob: a KMD field of slot @p slot, advertised under @p id (see getCustomKnobs).
     struct KnobRef
     {
         size_t slot;

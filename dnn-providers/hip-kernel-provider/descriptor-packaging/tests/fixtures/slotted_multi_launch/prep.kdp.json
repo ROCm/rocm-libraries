@@ -2,12 +2,8 @@
   "version": "1.1",
   "id": "d5b00000-0000-4000-8000-00000000000b",
   "name": "hipkernel:slotted_multi_launch_prep",
-  "arch": [
-    "gfx1151"
-  ],
-  "matchers": [
-    "d5b00000-0000-4000-8000-000000000005"
-  ],
+  "arch": ["gfx1151"],
+  "matchers": ["d5b00000-0000-4000-8000-000000000005"],
   "engine": "d5b00000-0000-4000-8000-000000000001",
   "dispatch": "d5b00000-0000-4000-8000-000000000008",
   "slot": "prep",
@@ -16,9 +12,7 @@
       "version": "1.0",
       "id": "d5b00000-0000-4000-8000-00000000000e",
       "name": "prep.wmma_decode",
-      "arch": [
-        "gfx1151"
-      ],
+      "arch": ["gfx1151"],
       "kernel_source": {
         "kind": "rocke",
         "source": "kernels/gfx1151/wmma_fmha_decode.py",
@@ -40,9 +34,7 @@
               "engine_id": "d5b00000-0000-4000-8000-000000000001",
               "kmd_id": "d5b00000-0000-4000-8000-000000000002",
               "metadata_fields": [],
-              "matcher_only_fields": [
-                "family"
-              ],
+              "matcher_only_fields": ["family"],
               "bindings": {},
               "vocabulary": {}
             }

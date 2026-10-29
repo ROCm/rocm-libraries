@@ -7,9 +7,7 @@
   "native": {
     "symbol": "hipkernel.slotted_fixture.dkdv_score"
   },
-  "features_signature": [
-    "$kernel.block_m"
-  ],
+  "features_signature": ["$kernel.block_m"],
   "features_hash": "sha256:81b192ab2f421858",
   "trained_against": {
     "ued": {

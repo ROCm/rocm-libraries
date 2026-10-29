@@ -86,7 +86,6 @@ public:
         _failing = std::move(program);
     }
 
-    /// Makes @p seed's kernel cost @p cost instead of its COSTS entry.
     void setCost(uint8_t seed, double cost)
     {
         _costs[seed] = cost;
@@ -190,15 +189,24 @@ public:
         return _graph;
     }
 
+    static Settings benchSettings(const Settings& extra = {})
+    {
+        Settings settings{{hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1}};
+        settings.insert(settings.end(), extra.begin(), extra.end());
+        return settings;
+    }
+
+    StubContext planFor(const Settings& extra = {})
+    {
+        flatbuffers::FlatBufferBuilder builder;
+        return _fixture.planFor(_graph, makeIntKnobsEngineConfig(builder, benchSettings(extra)));
+    }
+
     /// Builds the plan with benchmarking on (and @p extra settings), executes it once and
     /// returns the program a second execution then runs.
     Program benchmarkAndServe(const Settings& extra = {})
     {
-        Settings settings{{hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1}};
-        settings.insert(settings.end(), extra.begin(), extra.end());
-        flatbuffers::FlatBufferBuilder builder;
-        const auto config = makeIntKnobsEngineConfig(builder, settings);
-        const auto context = _fixture.planFor(_graph, config);
+        const auto context = planFor(extra);
 
         std::vector<char> workspace(WORKSPACE_BYTES);
         const StubHandle handle;
@@ -214,14 +222,9 @@ public:
         return served;
     }
 
-    /// The workspace size the benchmarking plan reports for @p extra settings.
     size_t benchmarkingWorkspaceSize(const Settings& extra = {})
     {
-        Settings settings{{hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1}};
-        settings.insert(settings.end(), extra.begin(), extra.end());
-        flatbuffers::FlatBufferBuilder builder;
-        const auto config = makeIntKnobsEngineConfig(builder, settings);
-        const auto context = _fixture.planFor(_graph, config);
+        const auto context = planFor(extra);
         const StubHandle handle;
         return context.plan().getWorkspaceSize(handle);
     }
@@ -230,8 +233,7 @@ public:
     size_t benchmarkingWorkspaceEstimate()
     {
         flatbuffers::FlatBufferBuilder builder;
-        const auto config = makeIntKnobsEngineConfig(
-            builder, Settings{{hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1}});
+        const auto config = makeIntKnobsEngineConfig(builder, benchSettings());
         const StubHandle handle;
         return _fixture.engine().getMaxWorkspaceSize(handle, _graph, config);
     }
@@ -256,14 +258,9 @@ public:
     /// Writes a record covering @p slot's catalog, as an earlier benchmark would have.
     void seedSlotRecord(size_t slot, const std::vector<uint8_t>& ranking)
     {
-        WinnerRecord record;
-        for(const auto seed : ranking)
-        {
-            record.push_back(RankedEntry{testId(seed),
-                                         testId(static_cast<uint8_t>(0x10 * (slot + 1))),
-                                         testId(static_cast<uint8_t>(0xD0 + slot)),
-                                         1.0});
-        }
+        auto record = makeRanking(testId(static_cast<uint8_t>(0x10 * (slot + 1))),
+                                  testId(static_cast<uint8_t>(0xD0 + slot)),
+                                  ranking);
         // Reading the catalog notes it, which a program record's validity is judged against.
         const auto properties = testDeviceProperties();
         const MatchContext context{
@@ -276,7 +273,6 @@ public:
                                          WinnerWriteCause::FRESH_MISS);
     }
 
-    /// The prediction of the engine's configuration for the graph under @p settings.
     PredictionResult predict(const Settings& settings = {})
     {
         // The time metric: the test graph carries no FLOP count for the default one.
@@ -306,15 +302,9 @@ public:
     void recordMeasuredProgramWithoutBuildingCatalogs()
     {
         const auto rankingOf = [](size_t slot, const std::vector<uint8_t>& seeds) {
-            WinnerRecord record;
-            for(const auto seed : seeds)
-            {
-                record.push_back(RankedEntry{testId(seed),
-                                             testId(static_cast<uint8_t>(0x10 * (slot + 1))),
-                                             testId(static_cast<uint8_t>(0xD0 + slot)),
-                                             1.0});
-            }
-            return record;
+            return makeRanking(testId(static_cast<uint8_t>(0x10 * (slot + 1))),
+                               testId(static_cast<uint8_t>(0xD0 + slot)),
+                               seeds);
         };
         ProgramRecord program;
         for(size_t slot = 0; slot < 3; ++slot)
@@ -347,7 +337,6 @@ std::vector<uint8_t> seedsOf(const WinnerRecord& record)
     return seeds;
 }
 
-/// The int knob values @p config pins, by knob id.
 std::map<std::string, int64_t>
     pinnedKnobs(const hipdnn_flatbuffers_sdk::data_objects::EngineConfigT& config)
 {
@@ -367,6 +356,15 @@ Program picksOf(const ProgramRecord& program)
         picks.push_back(seedOf(pick.kernelId));
     }
     return picks;
+}
+
+void expectNoRecords(const Bench& bench)
+{
+    for(const auto* slot : {"prep", "dkdv", "dq"})
+    {
+        EXPECT_FALSE(bench.slotRecord(slot).has_value()) << slot;
+    }
+    EXPECT_FALSE(bench.programRecord().has_value());
 }
 
 TEST(TestSlotProgramBenchmark, TimesTheReferenceThenOneSlotVariedRunsThenTheWinnersProgram)
@@ -390,10 +388,7 @@ TEST(TestSlotProgramBenchmark, TimesTheReferenceThenOneSlotVariedRunsThenTheWinn
 TEST(TestSlotProgramBenchmark, ABenchmarkingPlanIsNotSaveable)
 {
     Bench bench;
-    flatbuffers::FlatBufferBuilder builder;
-    const auto config = makeIntKnobsEngineConfig(
-        builder, Settings{{hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1}});
-    const auto context = bench.fixture().planFor(bench.graph(), config);
+    const auto context = bench.planFor();
 
     // Before and after the benchmark has picked a program: RFC 0021 §11, a slot program is not
     // serialized (RFC 0009), though every slot's pick is a saveable GenericPlan.
@@ -468,7 +463,6 @@ std::vector<nlohmann::json> loggedRecords(const TRecorder& recorder, const std::
     return records;
 }
 
-/// The id of a program of @p seeds as the program row names it.
 std::string programId(const Program& seeds)
 {
     std::string id;
@@ -542,13 +536,21 @@ TEST(TestSlotProgramBenchmark, AKernelThatFailsToLaunchIsLoggedAsAFailedRowWithI
     EXPECT_EQ(failed, 1U);
 }
 
-TEST(TestSlotProgramBenchmark, AFailedWinnersProgramIsLoggedAsTheFailingRowNotTheReference)
+TEST(TestSlotProgramBenchmark, AFailedWinnersProgramServesTheReferenceAndIsLoggedAsTheFailingRow)
 {
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     Bench bench;
     bench.clock().failToTime(WINNERS);
-    ASSERT_EQ(bench.benchmarkAndServe(), REFERENCE);
+
+    const auto served = bench.benchmarkAndServe();
+
+    EXPECT_EQ(served, REFERENCE);
+    EXPECT_EQ(bench.clock().runs().back(), WINNERS) << "the winners program was attempted";
+    EXPECT_FALSE(bench.programRecord().has_value());
+    // The slot records stand: their measurements are sound.
+    ASSERT_TRUE(bench.slotRecord("dkdv").has_value());
+    EXPECT_EQ(seedsOf(*bench.slotRecord("dkdv")), (std::vector<uint8_t>{0x23, 0x21, 0x22}));
 
     const auto programs = loggedRecords(recorder, "ingestor.benchmark.program");
     ASSERT_EQ(programs.size(), 1U);
@@ -580,21 +582,6 @@ TEST(TestSlotProgramBenchmark, ABenchmarkedProblemIsServedFromItsRecordsWithoutT
 
     EXPECT_EQ(bench.clock().sampleCount(), 0U);
     EXPECT_EQ(served, WINNERS);
-}
-
-TEST(TestSlotProgramBenchmark, AFailedWinnersProgramServesTheReferenceAndWritesNoProgramLine)
-{
-    Bench bench;
-    bench.clock().failToTime(WINNERS);
-
-    const auto served = bench.benchmarkAndServe();
-
-    EXPECT_EQ(served, REFERENCE);
-    EXPECT_EQ(bench.clock().runs().back(), WINNERS) << "the winners program was attempted";
-    EXPECT_FALSE(bench.programRecord().has_value());
-    // The slot records stand: their measurements are sound.
-    ASSERT_TRUE(bench.slotRecord("dkdv").has_value());
-    EXPECT_EQ(seedsOf(*bench.slotRecord("dkdv")), (std::vector<uint8_t>{0x23, 0x21, 0x22}));
 }
 
 TEST(TestSlotProgramBenchmark, AStaleProgramLineIsSupersededWhenItsWinnersAreTimedAgain)
@@ -655,7 +642,6 @@ TEST(TestSlotProgramBenchmark, WithOnlyTheProgramRecordInvalidOnlyTheWinnersProg
 TEST(TestSlotProgramBenchmark, ACoveredSlotIsNotMeasuredAndItsRecordIsNotRewritten)
 {
     Bench bench;
-    // dkdv's catalog is covered, with dkdv_c ahead.
     bench.seedSlotRecord(1, {0x23, 0x21, 0x22});
 
     const auto served = bench.benchmarkAndServe();
@@ -692,7 +678,6 @@ TEST(TestSlotProgramBenchmark, AReferencePickThatFailsToLaunchAdvancesItsSlotToT
 TEST(TestSlotProgramBenchmark, ASlotWhoseReferenceHasNoNextKernelServesTheProgramWithoutRecords)
 {
     Bench bench;
-    // dq's two kernels both fail to launch.
     bench.fixture().log().failingLaunch.insert(testId(0x31));
     bench.fixture().log().failingLaunch.insert(testId(0x32));
 
@@ -700,11 +685,7 @@ TEST(TestSlotProgramBenchmark, ASlotWhoseReferenceHasNoNextKernelServesTheProgra
     EXPECT_THROW(bench.benchmarkAndServe(), std::runtime_error);
 
     EXPECT_EQ(bench.clock().sampleCount(), 0U);
-    for(const auto* slot : {"prep", "dkdv", "dq"})
-    {
-        EXPECT_FALSE(bench.slotRecord(slot).has_value()) << slot;
-    }
-    EXPECT_FALSE(bench.programRecord().has_value());
+    expectNoRecords(bench);
 }
 
 TEST(TestSlotProgramBenchmark, AKnobFilterTimesTheFilteredCatalogsAndWritesNoRecords)
@@ -718,11 +699,7 @@ TEST(TestSlotProgramBenchmark, AKnobFilterTimesTheFilteredCatalogsAndWritesNoRec
         REFERENCE, {0x12, 0x21, 0x31}, {0x11, 0x21, 0x32}, {0x12, 0x21, 0x31}};
     EXPECT_EQ(bench.clock().runs(), expected);
     EXPECT_EQ(served, (Program{0x12, 0x21, 0x31}));
-    for(const auto* slot : {"prep", "dkdv", "dq"})
-    {
-        EXPECT_FALSE(bench.slotRecord(slot).has_value()) << slot;
-    }
-    EXPECT_FALSE(bench.programRecord().has_value());
+    expectNoRecords(bench);
 }
 
 TEST(TestSlotProgramBenchmark, AWorkspaceLimitTimesThePrunedCatalogsAndWritesNoRecords)
@@ -736,11 +713,7 @@ TEST(TestSlotProgramBenchmark, AWorkspaceLimitTimesThePrunedCatalogsAndWritesNoR
         REFERENCE, {0x12, 0x21, 0x31}, {0x11, 0x23, 0x31}, {0x12, 0x23, 0x31}};
     EXPECT_EQ(bench.clock().runs(), expected);
     EXPECT_EQ(servedLimited, (Program{0x12, 0x23, 0x31}));
-    for(const auto* slot : {"prep", "dkdv", "dq"})
-    {
-        EXPECT_FALSE(bench.slotRecord(slot).has_value()) << slot;
-    }
-    EXPECT_FALSE(bench.programRecord().has_value());
+    expectNoRecords(bench);
 }
 
 TEST(TestSlotProgramBenchmark, ANarrowedPlanWhoseSlotsAreAllCoveredIsServedWithoutTiming)
@@ -904,6 +877,21 @@ void expectCompleteComparison(Bench& bench, const Program& served)
     EXPECT_EQ(picksOf(*program), served);
 }
 
+/// Runs @p check on every entry of every slot's record, after requiring each record to exist.
+template <typename TCheck>
+void forEachSlotEntry(const Bench& bench, TCheck check)
+{
+    for(const std::string slot : {"prep", "dkdv", "dq"})
+    {
+        const auto record = bench.slotRecord(slot);
+        ASSERT_TRUE(record.has_value()) << slot;
+        for(const auto& entry : *record)
+        {
+            check(slot, entry);
+        }
+    }
+}
+
 /// A device that cannot wait on a stream value has no stall gate to arm. The slot program
 /// benchmark then times every program unstalled in one pass: nothing is discarded or re-timed.
 class TestSlotProgramBenchmarkUnsupportedDevice : public StreamWaitFaultsFixture
@@ -912,7 +900,6 @@ class TestSlotProgramBenchmarkUnsupportedDevice : public StreamWaitFaultsFixture
 
 TEST_F(TestSlotProgramBenchmarkUnsupportedDevice, StartsUnstalledAndKeepsEverySample)
 {
-    // The unstalled launches the benchmark makes on a device that never stalls.
     size_t unstalledLaunches = 0;
     {
         Bench reference;
@@ -934,15 +921,9 @@ TEST_F(TestSlotProgramBenchmarkUnsupportedDevice, StartsUnstalledAndKeepsEverySa
     EXPECT_EQ(bench.fixture().log().launches.size(), unstalledLaunches)
         << "samples were discarded or re-timed";
     expectCompleteComparison(bench, served);
-    for(const std::string slot : {"prep", "dkdv", "dq"})
-    {
-        const auto record = bench.slotRecord(slot);
-        ASSERT_TRUE(record.has_value()) << slot;
-        for(const auto& entry : *record)
-        {
-            EXPECT_LT(entry.timeMs, STALLED_READING_MS) << slot;
-        }
-    }
+    forEachSlotEntry(bench, [&](const std::string& slot, const RankedEntry& entry) {
+        EXPECT_LT(entry.timeMs, STALLED_READING_MS) << slot;
+    });
 }
 
 /// The real default timer arms a stall gate on every sample of a stalled pass. A fault injected
@@ -976,7 +957,6 @@ TEST_F(TestSlotProgramBenchmarkStallRestart, AStalledPassThatCompletesIsNotResta
 
 TEST_F(TestSlotProgramBenchmarkStallRestart, AnUnstallableReferenceRestartsTheComparisonUnstalled)
 {
-    // The reference program's first sample cannot arm the gate.
     gStreamWaitFaults.failFromArm = 1;
     Bench bench(/*defaultTimer=*/true);
 
@@ -1004,12 +984,18 @@ TEST_F(TestSlotProgramBenchmarkStallRestart,
     expectCompleteComparison(bench, served);
 }
 
+/// The winners program is the last program timed, so no later stalled arm exposes a restart that
+/// re-times only the winners program. Stalled readings carry a value no unstalled reading of
+/// these short kernels approaches: a ranking or program record holding one mixed a stalled
+/// sample into the comparison.
 TEST_F(TestSlotProgramBenchmarkStallRestart,
-       AnUnstallableWinnersProgramRestartsTheComparisonUnstalled)
+       AnUnstallableWinnersProgramRestartsTheComparisonUnstalledKeepingNoStalledSample)
 {
+    constexpr float STALLED_READING_MS = 1.0e6F;
     // The reference and the four one-slot variations are timed stalled; the winners program's
     // first sample cannot arm.
     gStreamWaitFaults.failFromArm = 5 * SAMPLES_PER_RUN + 1;
+    gStreamWaitFaults.stalledReadingMs = STALLED_READING_MS;
     Bench bench(/*defaultTimer=*/true);
 
     const auto served = bench.benchmarkAndServe();
@@ -1017,35 +1003,11 @@ TEST_F(TestSlotProgramBenchmarkStallRestart,
     // The stalled pass stops at that arm and the unstalled restart never arms again.
     EXPECT_EQ(gStreamWaitFaults.rejectedArms, 1);
     EXPECT_EQ(gStreamWaitFaults.armCalls, 5 * SAMPLES_PER_RUN + 1);
-    expectCompleteComparison(bench, served);
-}
-
-/// The winners program is the last program timed, so no later stalled arm exposes a restart that
-/// re-times only the winners program. Stalled readings carry a value no unstalled reading of
-/// these short kernels approaches: a ranking or program record holding one mixed a stalled
-/// sample into the comparison.
-TEST_F(TestSlotProgramBenchmarkStallRestart,
-       AnUnstallableWinnersProgramKeepsNoStalledSampleInTheRestartedComparison)
-{
-    constexpr float STALLED_READING_MS = 1.0e6F;
-    gStreamWaitFaults.failFromArm = 5 * SAMPLES_PER_RUN + 1;
-    gStreamWaitFaults.stalledReadingMs = STALLED_READING_MS;
-    Bench bench(/*defaultTimer=*/true);
-
-    const auto served = bench.benchmarkAndServe();
-
-    // The reference and the four variations were timed stalled before the winners arm failed.
     EXPECT_EQ(gStreamWaitFaults.stalledReadings, 5 * SAMPLES_PER_RUN);
     expectCompleteComparison(bench, served);
-    for(const std::string slot : {"prep", "dkdv", "dq"})
-    {
-        const auto record = bench.slotRecord(slot);
-        ASSERT_TRUE(record.has_value()) << slot;
-        for(const auto& entry : *record)
-        {
-            EXPECT_LT(entry.timeMs, STALLED_READING_MS) << slot;
-        }
-    }
+    forEachSlotEntry(bench, [&](const std::string& slot, const RankedEntry& entry) {
+        EXPECT_LT(entry.timeMs, STALLED_READING_MS) << slot;
+    });
     const auto program = bench.programRecord();
     ASSERT_TRUE(program.has_value());
     EXPECT_LT(program->timeMs, STALLED_READING_MS);
@@ -1067,15 +1029,9 @@ TEST_F(TestSlotProgramBenchmarkStallRestart,
     // is timed stalled, and the restart arms no more gates.
     EXPECT_EQ(gStreamWaitFaults.stalledReadings, 1 + MAX_NEGATIVE_SAMPLE_RETRIES);
     expectCompleteComparison(bench, served);
-    for(const std::string slot : {"prep", "dkdv", "dq"})
-    {
-        const auto record = bench.slotRecord(slot);
-        ASSERT_TRUE(record.has_value()) << slot;
-        for(const auto& entry : *record)
-        {
-            EXPECT_GE(entry.timeMs, 0.0) << slot;
-        }
-    }
+    forEachSlotEntry(bench, [](const std::string& slot, const RankedEntry& entry) {
+        EXPECT_GE(entry.timeMs, 0.0) << slot;
+    });
 }
 #endif
 

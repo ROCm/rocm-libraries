@@ -234,10 +234,9 @@ bool unitTreeHasShard(const std::string& arch)
     });
 }
 
-/// The shards of @p fixture, authored for the one arch @p arch (a fixed-arch root, packed
-/// only by a build that selects the arch). Decided from the staged content, never from
-/// GPU_TARGETS or the device: a skip when the unit tree has no @p arch shard, so this build
-/// does not pack for it, and otherwise the fixture's @p arch shard is required.
+/// The shards of @p fixture, authored for the one arch @p arch. Decided from the staged
+/// content, never from GPU_TARGETS or the device: a skip when the unit tree has no @p arch
+/// shard, and otherwise the fixture's @p arch shard is required.
 #define REQUIRE_PACKED_FIXED_ARCH_FIXTURE_SHARDS(fixtureShards, fixture, arch, packingTarget)     \
     REQUIRE_PACKED_SHARDS(unitShards);                                                            \
     if(!unitTreeHasShard(arch))                                                                   \
@@ -348,6 +347,24 @@ DescriptorFileCounts countDescriptorFiles(const std::filesystem::path& shard)
         counts.models += endsWith(".uhd.json") ? 1U : 0U;
     }
     return counts;
+}
+
+/// @p shard holds the expected number of each descriptor file, and the loader accepted
+/// every one (see DescriptorFileCounts).
+void expectLoaderAcceptedEveryFile(const std::filesystem::path& shard,
+                                   size_t engines,
+                                   size_t packs,
+                                   size_t models)
+{
+    const auto counts = countDescriptorFiles(shard);
+    EXPECT_EQ(counts.engines, engines) << shard;
+    EXPECT_EQ(counts.packs, packs) << shard;
+    EXPECT_EQ(counts.models, models) << shard;
+
+    const DescriptorCatalog catalog = loadDescriptorCatalog(shard);
+    EXPECT_EQ(catalog.engines.size(), counts.engines) << shard;
+    EXPECT_EQ(catalog.packs.size(), counts.packs) << shard;
+    EXPECT_EQ(catalog.heuristics.size(), counts.models) << shard;
 }
 
 } // namespace
@@ -632,32 +649,8 @@ TEST(TestPackedDescriptorLoad, PackedKernelsWereRewrittenToKpackForm)
 // A packed SLOTTED engine (RFC 0021)
 // ---------------------------------------------------------------------------
 
-/// Every descriptor the packer wrote for the slotted fixture is one the loader accepts.
-///
-/// Counted for the reason EveryPackedDescriptorInTheShardIsLoaded counts: the loader skips
-/// a file it cannot parse, so a 1.1 UED, KDP or UHD the loader refuses would vanish, and
-/// every later case here would run on whatever survived.
-TEST(TestPackedDescriptorLoad, EverySlottedDescriptorInTheShardIsLoaded)
-{
-    REQUIRE_PACKED_SLOTTED_SHARDS(shards);
-
-    for(const auto& shard : shards)
-    {
-        const auto counts = countDescriptorFiles(shard);
-        ASSERT_EQ(counts.engines, 1U) << shard;
-        ASSERT_EQ(counts.packs, 3U) << shard;
-        ASSERT_EQ(counts.models, 3U) << shard;
-
-        const DescriptorCatalog catalog = loadDescriptorCatalog(shard);
-
-        EXPECT_EQ(catalog.engines.size(), counts.engines) << shard;
-        EXPECT_EQ(catalog.packs.size(), counts.packs) << shard;
-        EXPECT_EQ(catalog.heuristics.size(), counts.models) << shard;
-    }
-}
-
-/// The slotted engine resolves, every slot keeps its own pack and KMD, and the kernels
-/// each pack carried reach their slot and no other.
+/// The slotted engine resolves, every slot keeps its own pack, KMD and dispatch
+/// descriptor, and the kernels each pack carried reach their slot and no other.
 ///
 /// An engine the loader drops would leave resolveDescriptorSets() without the name; a slot
 /// whose pack the loader dropped is a warning, not an error, and leaves the engine
@@ -668,6 +661,8 @@ TEST(TestPackedDescriptorLoad, PackedSlottedEngineKeepsEverySlotsPack)
 
     for(const auto& shard : shards)
     {
+        expectLoaderAcceptedEveryFile(shard, 1U, 3U, 3U);
+
         const auto sets = resolveDescriptorSets(loadDescriptorCatalog(shard));
         const auto engine = std::find_if(sets.begin(), sets.end(), [](const auto& set) {
             return set.engine.name == SLOTTED_ENGINE;
@@ -680,18 +675,23 @@ TEST(TestPackedDescriptorLoad, PackedSlottedEngineKeepsEverySlotsPack)
 
         std::vector<std::string> names;
         std::vector<size_t> kernelCounts;
+        std::vector<std::string> dispatches;
         for(const auto& slot : engine->slots)
         {
             names.push_back(slot.name);
             ASSERT_EQ(slot.packs.size(), 1U)
                 << shard << ": slot '" << slot.name << "' lost its pack.";
             kernelCounts.push_back(slot.packs.front().kernels.size());
+            dispatches.push_back(
+                hipdnn_plugin_sdk::ingestor::toString(slot.packs.front().dispatchId));
             EXPECT_EQ(slot.packs.front().slot, slot.name) << shard;
         }
+        std::sort(dispatches.begin(), dispatches.end());
+        EXPECT_EQ(std::unique(dispatches.begin(), dispatches.end()), dispatches.end())
+            << shard << ": two slots share a dispatch descriptor";
         EXPECT_EQ(names, (std::vector<std::string>{"prep", "dkdv", "dq"})) << shard;
         EXPECT_EQ(kernelCounts, (std::vector<size_t>{1, 2, 2})) << shard;
 
-        // One KMD per slot: the packs completed against their own slot's schema.
         ASSERT_EQ(engine->slots.size(), 3U);
         EXPECT_NE(engine->slots[0].schema.id, engine->slots[1].schema.id) << shard;
         EXPECT_NE(engine->slots[1].schema.id, engine->slots[2].schema.id) << shard;
@@ -705,9 +705,7 @@ TEST(TestPackedDescriptorLoad, PackedSlottedEngineKeepsEverySlotsPack)
 ///
 /// A model that fails it is disabled with an error and the engine stays registered with
 /// declared-order fallback, so the engine and its packs can look healthy while every
-/// ranker is gone. The checks that decide it are the ones the packer mirrors: the slot a
-/// ranker names, its slot's KMD, the `kmds` of the estimate, and the matcher the packs
-/// share. `unavailable*` lists what the loader refused by name.
+/// ranker is gone. `unavailable*` lists what the loader refused by name.
 TEST(TestPackedDescriptorLoad, PackedSlottedModelsAreBoundToTheirSlots)
 {
     REQUIRE_PACKED_SLOTTED_SHARDS(shards);
@@ -759,22 +757,18 @@ TEST(TestPackedDescriptorLoad, PackedSlottedModelsAreBoundToTheirSlots)
 // Consumer-shaped slotted fixtures: authored hsaco slots, and multi-launch rocKE slots
 // ---------------------------------------------------------------------------
 
-/// The hsaco fixture loads whole: every slot keeps its pack and its own dispatch, `dq`
-/// ships its gfx950 pack alone (its generic-target pack belongs to the generic's members),
-/// and `dq`'s kernel carries the field naming a second symbol of its code object.
+/// The hsaco fixture loads whole: every slot keeps its pack, `dq` ships its gfx950 pack
+/// alone (its generic-target pack belongs to the generic's members), and `dq`'s kernel
+/// carries the field naming a second symbol of its code object.
 TEST(TestPackedDescriptorLoad, PackedSlottedHsacoEngineLoadsWithEverySlotPopulated)
 {
     REQUIRE_PACKED_SLOTTED_HSACO_SHARDS(shards);
 
     for(const auto& shard : shards)
     {
-        const auto counts = countDescriptorFiles(shard);
-        const DescriptorCatalog catalog = loadDescriptorCatalog(shard);
-        EXPECT_EQ(catalog.engines.size(), counts.engines) << shard;
-        EXPECT_EQ(catalog.packs.size(), counts.packs) << shard;
-        EXPECT_EQ(counts.packs, 3U) << shard;
+        expectLoaderAcceptedEveryFile(shard, 1U, 3U, 0U);
 
-        const auto sets = resolveDescriptorSets(catalog);
+        const auto sets = resolveDescriptorSets(loadDescriptorCatalog(shard));
         const auto* engine = findEngine(sets, SLOTTED_HSACO_ENGINE);
         ASSERT_NE(engine, nullptr) << shard << " resolved no engine named " << SLOTTED_HSACO_ENGINE;
         ASSERT_EQ(engine->slots.size(), 3U) << shard;
@@ -782,7 +776,6 @@ TEST(TestPackedDescriptorLoad, PackedSlottedHsacoEngineLoadsWithEverySlotPopulat
         const std::vector<std::string> names{"prep", "dkdv", "dq"};
         const std::vector<std::string> symbols{
             "HsacoFixtureScale", "HsacoFixtureAdd", "HsacoFixtureAdd"};
-        std::vector<std::string> dispatches;
         for(size_t index = 0; index < names.size(); ++index)
         {
             const auto& slot = engine->slots[index];
@@ -793,15 +786,8 @@ TEST(TestPackedDescriptorLoad, PackedSlottedHsacoEngineLoadsWithEverySlotPopulat
             EXPECT_TRUE(kernel.sources.empty()) << "an authored hsaco kernel is one launch";
             EXPECT_EQ(kernel.source.kind, KernelSourceKind::KPACK) << shard;
             EXPECT_EQ(kernel.source.symbol, symbols[index]) << shard;
-            dispatches.push_back(
-                hipdnn_plugin_sdk::ingestor::toString(slot.packs.front().dispatchId));
         }
-        std::sort(dispatches.begin(), dispatches.end());
-        EXPECT_EQ(std::unique(dispatches.begin(), dispatches.end()), dispatches.end())
-            << shard << ": two slots share a dispatch descriptor";
 
-        // The second symbol is named by the dq kernel's metadata and is a different kernel
-        // of the same object, launched by the handler by symbol.
         const auto& dq = engine->slots[2];
         EXPECT_TRUE(std::any_of(dq.schema.fields.begin(),
                                 dq.schema.fields.end(),
@@ -819,33 +805,25 @@ TEST(TestPackedDescriptorLoad, PackedSlottedHsacoEngineLoadsWithEverySlotPopulat
 }
 
 /// The multi-launch fixture loads whole: the `dkdv` slot's kernel keeps both launches as
-/// KPACK `sources` with their own symbols, `prep` and `dq` stay single-launch, and every
-/// slot has its own dispatch descriptor.
+/// KPACK `sources` with their own symbols, and `prep` and `dq` stay single-launch.
 TEST(TestPackedDescriptorLoad, PackedSlottedMultiLaunchEngineKeepsEachSlotsLaunches)
 {
     REQUIRE_PACKED_SLOTTED_MULTI_LAUNCH_SHARDS(shards);
 
     for(const auto& shard : shards)
     {
-        const auto counts = countDescriptorFiles(shard);
-        const DescriptorCatalog catalog = loadDescriptorCatalog(shard);
-        EXPECT_EQ(catalog.engines.size(), counts.engines) << shard;
-        EXPECT_EQ(catalog.packs.size(), counts.packs) << shard;
-        EXPECT_EQ(counts.packs, 3U) << shard;
+        expectLoaderAcceptedEveryFile(shard, 1U, 3U, 0U);
 
-        const auto sets = resolveDescriptorSets(catalog);
+        const auto sets = resolveDescriptorSets(loadDescriptorCatalog(shard));
         const auto* engine = findEngine(sets, SLOTTED_MULTI_LAUNCH_ENGINE);
         ASSERT_NE(engine, nullptr)
             << shard << " resolved no engine named " << SLOTTED_MULTI_LAUNCH_ENGINE;
         ASSERT_EQ(engine->slots.size(), 3U) << shard;
 
-        std::vector<std::string> dispatches;
         for(const auto& slot : engine->slots)
         {
             ASSERT_EQ(slot.packs.size(), 1U) << shard << ": slot '" << slot.name << "'";
             ASSERT_EQ(slot.packs.front().kernels.size(), 1U) << shard;
-            dispatches.push_back(
-                hipdnn_plugin_sdk::ingestor::toString(slot.packs.front().dispatchId));
 
             const auto& kernel = slot.packs.front().kernels.front();
             if(slot.name == "dkdv")
@@ -862,9 +840,6 @@ TEST(TestPackedDescriptorLoad, PackedSlottedMultiLaunchEngineKeepsEachSlotsLaunc
                 EXPECT_EQ(kernel.source.kind, KernelSourceKind::KPACK) << shard;
             }
         }
-        std::sort(dispatches.begin(), dispatches.end());
-        EXPECT_EQ(std::unique(dispatches.begin(), dispatches.end()), dispatches.end())
-            << shard << ": two slots share a dispatch descriptor";
     }
 
     expectPackedLaunchesAreUsable(shards);

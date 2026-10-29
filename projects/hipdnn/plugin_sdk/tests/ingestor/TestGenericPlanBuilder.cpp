@@ -505,11 +505,7 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsAdvertisesANonIntegerFieldAsA
     EXPECT_NE(dtype->description.find("ordinal"), std::string::npos);
 }
 
-/// Golden pin of an unslotted engine's advertised knobs: the ids are the bare KMD field
-/// names in the UED's declared order (never prefixed), an INT field is addressed by its
-/// own value and a non-INT one by its ordinal, each default is the top-ranked value, and
-/// the constraint lists the values in ranked-first order with step 1. The catalog is
-/// {64 FLOAT, 256 FLOAT, 64 HALF} scored by block size, so 256 FLOAT ranks first.
+/// The catalog is {64 FLOAT, 256 FLOAT, 64 HALF} scored by block size, so 256 FLOAT ranks first.
 TEST(TestIngestorGenericPlanBuilder, UnslottedGoldenCustomKnobsAreBareKmdFieldIdsWithPinnedDomains)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptEveryKernel);

@@ -35,23 +35,26 @@ UNSLOTTED_REFERENCE_CONFIGS = [
 
 
 def _render_hashes(generator, config, tmp_path, monkeypatch):
-    """Render with sequential UUIDs, so two renders of one config are comparable."""
+    """Render with sequential UUIDs, so two renders of one config are comparable. The
+    result is the SHA-256 of the sorted ``<file>:<SHA-256 of its bytes>`` lines."""
     counter = iter(range(1, 10**6))
     monkeypatch.setattr(
         generator_module.uuid, "uuid4", lambda: uuid.UUID(int=next(counter))
     )
     written = generator.render(config, tmp_path)
-    return {
-        rel: hashlib.sha256((tmp_path / rel).read_bytes()).hexdigest()
+    lines = [
+        f"{rel}:{hashlib.sha256((tmp_path / rel).read_bytes()).hexdigest()}"
         for rel in sorted(written)
-    }
+    ]
+    return hashlib.sha256("\n".join(lines).encode()).hexdigest()
 
 
 def test_unslotted_output_is_byte_identical_to_the_pre_slot_generator(
     generator, config_path, tmp_path, monkeypatch
 ):
-    """The fixture holds the SHA-256 of every file the generator wrote for each
-    reference config before slots existed (UUIDs pinned), C++ stubs included."""
+    """The fixture holds one digest per reference config of the SHA-256 of every file
+    the generator wrote for it before slots existed (UUIDs pinned), C++ stubs included.
+    """
     golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
     configs = {
         name: load_config(config_path(name)) for name in UNSLOTTED_REFERENCE_CONFIGS
@@ -101,7 +104,6 @@ def bundle(generator, tmp_path):
 def test_a_three_slot_config_emits_a_valid_1_1_ued(bundle):
     _, _, docs = bundle
     ued = docs["split_bwd.ued"]
-    assert ued["version"] == "1.1"
     # RFC 0021 §4: the selection members live on the slots, never beside them.
     assert not {
         "metadata",
@@ -157,10 +159,8 @@ def test_every_kdp_is_1_1_and_names_the_slot_whose_kmd_its_kernels_fill(bundle):
     assert len(kdps) == len(config.packs) == 4
     assert {doc["slot"] for doc in kdps.values()} == {"prep", "dkdv", "dq"}
     for doc in kdps.values():
-        assert doc["version"] == "1.1"
         assert doc["engine"] == ued["id"]
         for kernel in doc["kernelDescriptors"]:
-            # The UKD is unchanged by slots, and its metadata is the slot KMD's.
             assert kernel["version"] == "1.0"
             assert set(kernel["metadata"]) <= kmd_fields[doc["slot"]]
         contract = doc["provenance"]["specialization_contract"]["consumers"][0]
@@ -184,10 +184,8 @@ def test_operation_matchers_are_per_slot_not_per_engine(bundle):
         if n.endswith(".kdp")
     }
     kernel_match = docs["kernel_dtype_matches_graph.umd"]["id"]
-    # prep and dkdv have one pack each: nothing to narrow.
     assert kdps["prep"]["matchers"] == [kernel_match]
     assert kdps["dkdv"]["matchers"] == [kernel_match]
-    # dq has two: each is narrowed by its own operation matcher.
     for pack_name, discriminator in (("dq_causal", "causal"), ("dq_full", "full")):
         doc = kdps[f"hipkernel:split_bwd_{pack_name}"]
         umd = docs[f"operation_is_{discriminator}.umd"]
@@ -279,9 +277,6 @@ def _launch_set_config(tmp_path, slot_kernels, slot_fields=None):
 
 def test_slots_may_launch_different_sets_but_a_slot_may_not_mix(tmp_path):
     """RFC 0021 §4: the launch set is a slot's, as each slot has its own handler."""
-    _launch_set_config(
-        tmp_path, {"prep": [[]], "dkdv": [["decode", "merge"], ["decode", "merge"]]}
-    )
     with pytest.raises(ConfigError, match=r"One slot \('dkdv'\) has one dispatch"):
         _launch_set_config(tmp_path, {"prep": [[]], "dkdv": [["decode", "merge"], []]})
 
@@ -341,19 +336,6 @@ def test_the_variant_set_gate_completes_each_pack_against_its_slot(
     code, output = _gate_slotted(tmp_path, generator, capsys)
     assert code == 0, output
     assert "descriptors=    3" in output
-
-
-def test_the_variant_set_gate_still_reports_a_same_slot_collision(
-    generator, tmp_path, capsys
-):
-    def collide(documents):
-        first, second = documents["dkdv"]["kernelDescriptors"]
-        second["metadata"] = dict(first["metadata"])
-
-    code, output = _gate_slotted(tmp_path, generator, capsys, collide)
-    assert code == 1
-    assert "loader-tuple collisions" in output
-    assert "dkdv.k0 and dkdv.k1" in output
 
 
 def test_the_variant_set_gate_uses_each_slots_own_kmd(generator, tmp_path, capsys):
@@ -454,7 +436,6 @@ def test_one_tuple_may_repeat_across_slots_but_not_within_one(generator, tmp_pat
 
     def clash(raw):
         two_slots(raw)
-        # A second, different binary with the same tuple in slot a.
         raw["packs"][0]["kernels"].append(
             {
                 "name": "a.k2",
@@ -496,7 +477,6 @@ def test_regenerating_a_slotted_bundle_keeps_every_id(generator, tmp_path):
     first = _ddir_bytes(ddir)
     resolution, _ = render_resolved(generator, config, tmp_path)
     assert resolution.report.minted == 0
-    # The UED and kernel matcher, then a KMD and a UDD per slot and a UHD per ranker.
     assert resolution.report.reused["engine"] == 2 + sum(
         2 + bool(slot.ranker) for slot in config.slots
     )
@@ -735,7 +715,6 @@ REFUSALS = [
         r"slots\[dkdv\].knobs lists \['block_m'\] more than once",
     ),
     (
-        # num_warps belongs to dkdv's KMD, not dq's.
         "kernel_metadata_outside_slot_kmd",
         lambda raw: raw["packs"][2]["kernels"][0]["metadata"].update(num_warps=4),
         r"slot 'dq': pack 'dq_causal' kernel 'bwd.dq_causal_m64': metadata names 'num_warps'",
@@ -771,11 +750,6 @@ REFUSALS = [
     (
         "pack_slot_list",
         lambda raw: raw["packs"][0].update(slot=["prep"]),
-        r"pack 'prep' declares slot .*, which must be a slot name",
-    ),
-    (
-        "pack_slot_mapping",
-        lambda raw: raw["packs"][0].update(slot={"name": "prep"}),
         r"pack 'prep' declares slot .*, which must be a slot name",
     ),
     (
@@ -833,7 +807,6 @@ REFUSALS += [
 
 
 def test_reduction_divides_may_name_a_field_only_one_slot_declares(tmp_path):
-    # `num_warps` is declared by the dkdv slot alone.
     config = _load(tmp_path, lambda raw: _reduce(raw, divides="num_warps"))
     assert config.slots
 

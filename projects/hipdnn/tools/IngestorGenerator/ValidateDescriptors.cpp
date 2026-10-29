@@ -313,9 +313,8 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets,
         {
             harvested.dispatch.try_emplace(dispatch.dispatchSymbol);
         }
-        // A slotted engine's packs live on its slots (RFC 0021 §4); each slot binds its own
-        // dispatch descriptor, so every dispatch symbol gets one stub with its pack's launch
-        // names.
+        // A slotted engine's packs live on its slots (RFC 0021 §4), each bound to its own
+        // dispatch descriptor, so each dispatch symbol gets a stub with its pack's launch names.
         const auto harvestPacks = [&](const std::vector<KernelDescriptorPack>& packs) {
             for(const auto& pack : packs)
             {
@@ -587,9 +586,7 @@ FeatureCheck checkEngineModel(const DescriptorSet& set,
 }
 
 /// Where a role-bound model is admitted: an unslotted engine, or one slot of a slotted engine
-/// (RFC 0021 §8 runs the per-engine checks per slot). A slot ranker reads its own slot's KMD
-/// fields and knobs, resolves against its own slot's loaded rankers and ranks only its own
-/// slot's packs.
+/// (RFC 0021 §8), whose ranker sees only that slot's KMD fields, knobs, rankers and packs.
 struct SelectionScope
 {
     /// The slot's name; empty for an unslotted engine and for engine-level roles.
@@ -706,13 +703,8 @@ nlohmann::json validateModels(const DescriptorCatalog& catalog,
 
         // Engine-level roles (`predict_engine`) read no slot's KMD, so a slotted engine
         // declares no fields for them (RFC 0021 §9: the model names every slot's KMD).
-        std::unordered_set<std::string> engineFields;
-        for(const auto& field : set.schema.fields)
-        {
-            engineFields.insert(field.name);
-        }
         const SelectionScope engineScope{
-            {}, std::move(engineFields), set.engine.knobs, set.heuristicsByMetric, set.packs};
+            {}, set.schema.fieldNames(), set.engine.knobs, set.heuristicsByMetric, set.packs};
 
         const auto checkModel = [&](const char* role,
                                     const std::string& arch,
@@ -789,18 +781,12 @@ nlohmann::json validateModels(const DescriptorCatalog& catalog,
                 });
             };
         checkRole("sort_kernel_catalog", set.engine.sortKernelCatalog, engineScope);
-        // RFC 0021 §8: a slot's ranker is admitted against that slot's own KMD, knobs,
-        // loaded rankers and packs, in launch order.
+        // RFC 0021 §8: a slot's ranker is admitted against that slot's own scope.
         for(size_t index = 0; index < set.slots.size() && index < set.engine.slots.size(); ++index)
         {
             const auto& slot = set.slots[index];
-            std::unordered_set<std::string> slotFields;
-            for(const auto& field : slot.schema.fields)
-            {
-                slotFields.insert(field.name);
-            }
             const SelectionScope slotScope{slot.name,
-                                           std::move(slotFields),
+                                           slot.schema.fieldNames(),
                                            set.engine.slots[index].knobs,
                                            slot.heuristicsByMetric,
                                            slot.packs};

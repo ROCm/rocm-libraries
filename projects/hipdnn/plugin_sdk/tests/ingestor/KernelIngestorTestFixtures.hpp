@@ -1192,6 +1192,43 @@ inline KernelDescriptorPack makeSlotPack(uint8_t packSeed,
     return pack;
 }
 
+/// makeSlotKernel with one kpack entry per name in @p launches, each of its own symbol, in place
+/// of `source`.
+inline KernelDescriptor makeMultiLaunchKernel(uint8_t seed,
+                                              const std::string& name,
+                                              MetadataValues metadata,
+                                              const std::set<std::string>& launches)
+{
+    auto kernel = makeSlotKernel(seed, name, std::move(metadata));
+    kernel.source = KernelSource{};
+    for(const auto& launch : launches)
+    {
+        auto symbol = name;
+        symbol += "/";
+        symbol += launch;
+        kernel.sources.emplace(launch,
+                               makeKpackSource("kpack/test.kpack", symbol, launch + "_kernel"));
+    }
+    return kernel;
+}
+
+/// A ranking of the kernels testId(@p seeds), best first, from pack @p packId and dispatch
+/// @p dispatchId. Times ascend from 1.0, so the first entry measures 1.0 ms.
+inline WinnerRecord makeRanking(const DescriptorId& packId,
+                                const DescriptorId& dispatchId,
+                                const std::vector<uint8_t>& seeds)
+{
+    WinnerRecord record;
+    record.reserve(seeds.size());
+    double time = 1.0;
+    for(const auto seed : seeds)
+    {
+        record.push_back(RankedEntry{testId(seed), packId, dispatchId, time});
+        time += 1.0;
+    }
+    return record;
+}
+
 /// A synthetic three-slot engine (prep, dkdv, dq; RFC 0021) for plan, workspace and enumeration
 /// tests. Its native graph match publishes the shared-workspace tokens, and each slot's handler
 /// records what it was launched with. Nested so that its names stay out of other fixtures' scopes.
@@ -1238,7 +1275,6 @@ inline std::optional<BoundTokens> slottedGraphMatch(const MatchContext& /*contex
         {SEQLEN_TOKEN, int64_t{128}}};
 }
 
-/// One launch as a slot handler saw it.
 struct SlotLaunch
 {
     std::string slot;
@@ -1257,7 +1293,6 @@ struct SlotLog
     std::set<DescriptorId> failingPrepare;
     /// Kernels whose prepare throws a HipdnnPluginException of the given status.
     std::map<DescriptorId, hipdnnPluginStatus_t> failingPrepareWithStatus;
-    /// Kernels whose launch throws.
     std::set<DescriptorId> failingLaunch;
 
     std::vector<std::string> slotOrder() const
@@ -1415,35 +1450,19 @@ public:
             DispatchRegistry<StubHandle>::registerSymbol(_symbols.back(), _handlers.back().get());
             dispatches.push_back({dispatchId, names[slot] + " dispatch", _symbols.back()});
 
-            KernelDescriptorPack pack;
-            pack.id = testId(base);
-            pack.name = names[slot] + " pack";
-            pack.engineId = ENGINE_ID;
-            pack.dispatchId = dispatchId;
-            pack.slot = names[slot];
+            std::vector<KernelDescriptor> kernels;
             for(const auto& spec : kernelsBySlot[slot])
             {
-                KernelDescriptor kernel;
-                kernel.id = testId(spec.seed);
-                kernel.name = spec.name;
-                kernel.source.sourceFile = "Test.cpp";
-                kernel.source.entryPoint = spec.name;
-                if(!slotLaunches.empty())
-                {
-                    kernel.source = KernelSource{};
-                    for(const auto& launch : slotLaunches)
-                    {
-                        kernel.sources.emplace(
-                            launch,
-                            makeKpackSource("kpack/test.kpack",
-                                            std::string(spec.name) + "/" + launch,
-                                            launch + "_kernel"));
-                    }
-                }
-                kernel.metadata = {{BLOCK_M, MetadataValue{spec.blockM}},
-                                   {SCRATCH, MetadataValue{spec.scratch}}};
-                pack.kernels.push_back(std::move(kernel));
+                MetadataValues metadata{{BLOCK_M, MetadataValue{spec.blockM}},
+                                        {SCRATCH, MetadataValue{spec.scratch}}};
+                kernels.push_back(
+                    slotLaunches.empty()
+                        ? makeSlotKernel(spec.seed, spec.name, std::move(metadata))
+                        : makeMultiLaunchKernel(
+                              spec.seed, spec.name, std::move(metadata), slotLaunches));
             }
+            auto pack = makeSlotPack(base, names[slot], std::move(kernels));
+            pack.dispatchId = dispatchId;
 
             MetadataSchema schema{testId(static_cast<uint8_t>(0xA0 + slot)),
                                   names[slot] + " kmd",
@@ -1527,7 +1546,6 @@ public:
         return settings;
     }
 
-    /// Builds the plan @p config selects for @p graph.
     StubContext planFor(const TestGraph& graph,
                         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config)
     {

@@ -467,46 +467,31 @@ def provenance_for_engine(
     ued_dependency = resolve("ued", ued_id)
     ued_dependency["revision"] = ued.get("revision", "1.0")
     slots = declared_slots(ued)
-    if slots is None:
-        if slot is not None:
-            raise ProvenanceError(
-                f"engine {ued.get('name', ued_id)!r} declares no slots, so it has no "
-                f"slot {slot!r}"
-            )
-        matchers = _pack_matchers(index, ued_id, arch)
-        return validate_provenance(
-            {
-                "ued": ued_dependency,
-                "kmd": resolve("kmd", ued.get("metadata")),
-                "umd": [resolve("umd", identity) for identity in sorted(matchers)],
-            }
+    if slots is None and slot is not None:
+        raise ProvenanceError(
+            f"engine {ued.get('name', ued_id)!r} declares no slots, so it has no "
+            f"slot {slot!r}"
         )
-    matchers = _pack_matchers(index, ued_id, arch, slot)
-    umd = [resolve("umd", identity) for identity in sorted(matchers)]
-    if slot is not None:
+    matchers = sorted(_pack_matchers(index, ued_id, arch, slot))
+    snapshot = {"ued": ued_dependency}
+    if slots is None:
+        snapshot["kmd"] = resolve("kmd", ued.get("metadata"))
+    umd = [resolve("umd", identity) for identity in matchers]
+    if slots is not None and slot is not None:
         entry = next((item for item in slots if item["name"] == slot), None)
         if entry is None:
             raise ProvenanceError(
                 f"engine {ued.get('name', ued_id)!r} declares no slot {slot!r}"
             )
-        return validate_provenance(
-            {
-                "ued": ued_dependency,
-                "kmd": resolve("kmd", entry.get("metadata")),
-                "slot": slot,
-                "umd": umd,
-            }
-        )
-    return validate_provenance(
-        {
-            "ued": ued_dependency,
-            "kmds": [
-                {"slot": item["name"], **resolve("kmd", item.get("metadata"))}
-                for item in slots
-            ],
-            "umd": umd,
-        }
-    )
+        snapshot["kmd"] = resolve("kmd", entry.get("metadata"))
+        snapshot["slot"] = slot
+    elif slots is not None:
+        snapshot["kmds"] = [
+            {"slot": item["name"], **resolve("kmd", item.get("metadata"))}
+            for item in slots
+        ]
+    snapshot["umd"] = umd
+    return validate_provenance(snapshot)
 
 
 def snapshot_provenance(

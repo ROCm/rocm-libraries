@@ -24,6 +24,7 @@ from .artifact import (
     verify_tree_artifact,
 )
 from .correctness import REASON, VERDICT, numerical_reason, numerical_verdict
+from .dataset.training_table import WORKSPACE_PREFIX
 from .features import (
     compute_features_hash,
     evaluator_feature_semantics_revision,
@@ -788,32 +789,29 @@ def _build_plan(
         if slots is not None
         else None
     )
-    if slot is not None and metric is not None:
-        # The loader drops the whole engine for a slot ranker that declares a metric
-        # (RFC 0021 §7): refuse it here instead of installing an engine that cannot load.
-        raise PromoteError(
-            f"{engine_name} slot '{slot}' ranker {identity} declares score.metric "
-            f"'{metric}'; a slot ranker must be metric-less"
-        )
-    workspace = (
-        sorted(
+    if slot is not None:
+        if metric is not None:
+            # The loader drops the whole engine for a slot ranker that declares a metric
+            # (RFC 0021 §7): refuse it here instead of installing an engine that cannot load.
+            raise PromoteError(
+                f"{engine_name} slot '{slot}' ranker {identity} declares score.metric "
+                f"'{metric}'; a slot ranker must be metric-less"
+            )
+        workspace = sorted(
             reference
             for reference in signature_references(
                 descriptor.get("features_signature") or []
             )
-            if reference.startswith("$ws.")
+            if reference.startswith("$" + WORKSPACE_PREFIX)
         )
-        if slot is not None
-        else []
-    )
-    if workspace:
-        # The loader disables a slot ranker that reads a shared-workspace token (RFC 0021
-        # §6), leaving the slot on declared order: refuse it here instead.
-        raise PromoteError(
-            f"{engine_name} slot '{slot}' ranker {identity} reads {workspace}; the "
-            "shared-workspace tokens are reserved by a slotted engine and never reach a "
-            "slot's feature row"
-        )
+        if workspace:
+            # The loader disables a slot ranker that reads a shared-workspace token (RFC 0021
+            # §6), leaving the slot on declared order: refuse it here instead.
+            raise PromoteError(
+                f"{engine_name} slot '{slot}' ranker {identity} reads {workspace}; the "
+                "shared-workspace tokens are reserved by a slotted engine and never reach a "
+                "slot's feature row"
+            )
     # One directory per metric (RFC 0019 §3.1); a metric-less ranker uses the arch
     # directory. A slot's rankers live under the slot's own directory.
     destination_dir = ued_path.parent / "heuristics" / original_ued["id"]

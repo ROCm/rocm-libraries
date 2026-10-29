@@ -411,8 +411,6 @@ def main() -> None:
 
     if args.check_placeholders:
         if config.is_slotted:
-            # A slotted engine generates descriptors only, so there is no file to fill
-            # and a pass here would check nothing.
             print(
                 "Error: --check-placeholders is not supported for slotted engines "
                 "(descriptors only: there are no hook bodies to fill).",

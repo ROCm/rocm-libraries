@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 
+from . import agreement
 from . import generic_targets as gtmod
 from . import sources as sourcesmod
 from .errors import HkpPackError
@@ -1684,16 +1685,7 @@ def _validate_slot_packs(flat):
                     f"'{engine}' declares no slots"
                 )
             continue
-        if slot is None:
-            raise HkpPackError(
-                f"KDP {kdp.path.name} declares no slot, which every pack of "
-                f"slotted engine '{engine}' must"
-            )
-        if slot not in {declared["name"] for declared in ued.doc["slots"]}:
-            raise HkpPackError(
-                f"KDP {kdp.path.name} names slot '{slot}', which engine "
-                f"'{engine}' does not declare"
-            )
+        agreement.pack_kmd_reference(ued.doc, kdp.doc, f"KDP {kdp.path.name}")
         served = claimed.setdefault(canonical_id(ued.id), {})
         for entry in kdp.doc["kernelDescriptors"]:
             kernel = canonical_id(entry if isinstance(entry, str) else entry.get("id"))

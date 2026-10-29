@@ -669,17 +669,11 @@ WinnerRecord recordFor(uint8_t kernel, double timeMs)
 /// UUID text is already a plain path component, so it reaches the shard path verbatim.
 const std::string UHD_ID = toString(HEURISTIC_ID);
 
-// ---------------------------------------------------------------------------
-// Golden pins of the unslotted on-disk contract.
-// Every expected value below is spelled out literally, derived from the codec in
-// WinnerCacheFile.hpp, so a change to an unslotted engine's persisted bytes or shard
-// location fails here rather than silently orphaning existing caches.
-// ---------------------------------------------------------------------------
+// Golden pins of the unslotted on-disk contract: expected values are literal so a change to
+// persisted bytes or shard location fails here rather than silently orphaning caches.
 
-/// The persisted line: format v2, keys in nlohmann's sorted order, device fields as plain
-/// JSON, ranked entries with UUID text ids. The graph payload is base64 of the graph's
-/// serialized bytes, so it is spliced in from GraphContentKey::toJson() instead of spelled
-/// out; its envelope is pinned separately.
+/// The graph payload is base64 of the graph's serialized bytes, so it is spliced in from
+/// GraphContentKey::toJson() instead of spelled out; its envelope is pinned separately.
 TEST(TestIngestorWinnerCache, UnslottedGoldenWinnerRecordLineBytesAreFormatV2)
 {
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
@@ -709,9 +703,6 @@ TEST(TestIngestorWinnerCache, UnslottedGoldenWinnerRecordLineBytesAreFormatV2)
     EXPECT_EQ(detail::WINNER_LINE_FORMAT_VERSION, 2);
 }
 
-/// The shard path relative to the cache root, as the forward-slash string it is documented
-/// as: `ingestor-winners/<data-sdk version>/<sanitized engine>/<uhd id>/
-/// <revision>-<model hash>/<base arch>/winners.jsonl`.
 std::string relativeShardPath(const EngineIdentity& engine, std::string_view gcnArchName)
 {
     const auto path = winnerCacheShardPath(engine, gcnArchName);
@@ -719,7 +710,7 @@ std::string relativeShardPath(const EngineIdentity& engine, std::string_view gcn
 }
 
 /// The sanitized engine component is `<stem>-<FNV-1a of the whole name>`; for "test:Golden"
-/// that is `test_Golden-89323a9478aa8f9c`. The model hash is truncated to 16 hex digits.
+/// that is `test_Golden-89323a9478aa8f9c`.
 TEST(TestIngestorWinnerCache, UnslottedGoldenShardPathLayoutForAnEngineWithAModel)
 {
     const ScopedCacheDir cacheDir("unslotted_golden_path_model");
@@ -742,8 +733,6 @@ TEST(TestIngestorWinnerCache, UnslottedGoldenShardPathLayoutForAnEngineWithoutAM
                   + "/test_Golden-89323a9478aa8f9c/no-uhd/1.0.0-unhashed/gfx950/winners.jsonl");
 }
 
-/// What the state manager really writes: the data-SDK version line, then exactly
-/// encodeWinnerRecordLine() for the record.
 TEST(TestIngestorWinnerCacheStateManager,
      UnslottedGoldenShardHoldsTheVersionLineThenTheEncodedRecord)
 {

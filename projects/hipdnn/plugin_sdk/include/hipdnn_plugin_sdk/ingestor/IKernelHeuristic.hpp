@@ -46,6 +46,17 @@ namespace detail
 /// The root of the shared-workspace tokens a graph match publishes (RFC 0021 §6): `ws.<name>`.
 inline constexpr std::string_view WORKSPACE_TOKEN_ROOT = "ws.";
 
+/// True when @p name, after an optional leading `$`, is under the `ws.` root that names the
+/// shared-workspace tokens (RFC 0021 §6).
+inline bool isWorkspaceToken(std::string_view name)
+{
+    if(!name.empty() && name.front() == '$')
+    {
+        name.remove_prefix(1);
+    }
+    return name.substr(0, WORKSPACE_TOKEN_ROOT.size()) == WORKSPACE_TOKEN_ROOT;
+}
+
 /// `priority` descending, then id ascending (RFC 0019 §5 step 5). Never discovery order, which
 /// varies by filesystem.
 inline std::vector<const KernelDefinition*>

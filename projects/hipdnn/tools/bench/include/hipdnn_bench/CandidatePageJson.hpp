@@ -170,7 +170,6 @@ inline SlotReferences slotReferences(const std::vector<std::string>& candidateId
     return references;
 }
 
-/// A configuration as the knob map a candidate's variant is keyed by.
 inline std::map<hipdnn_frontend::KnobType_t, hipdnn_frontend::KnobValueVariant>
     toVariantKnobs(const std::vector<hipdnn_frontend::KnobSetting>& configuration)
 {
@@ -209,32 +208,36 @@ inline std::string slotReferenceText(const std::vector<std::string>& marks)
     return text;
 }
 
-/// The slot columns of a measured configuration: its candidate's composite id and its
-/// `slot_reference` text. The marks are per catalog position, so the candidate is found by its
-/// knob tuple in @p catalog, never by the result's own position. Empty when @p knobs match no
-/// enrolled candidate.
-struct SlotRow
+/// A measured configuration's catalog candidate and its `slot_reference` text (empty for an
+/// unslotted catalog). The marks are per catalog position, so the candidate is found by its
+/// knob tuple in @p catalog, never by the result's own position.
+struct MeasuredCandidate
 {
-    std::string candidateId;
-    std::string reference;
+    const hipdnn_frontend::EngineCandidate* candidate;
+    std::optional<std::string> slotReference;
 };
 
-inline std::optional<SlotRow>
-    slotRowOf(const hipdnn_frontend::EngineCandidatePage& catalog,
-              const SlotReferences& references,
-              const std::map<hipdnn_frontend::KnobType_t, hipdnn_frontend::KnobValueVariant>& knobs)
+/// Empty when @p knobs match no enrolled candidate.
+inline std::optional<MeasuredCandidate> measuredCandidate(
+    const hipdnn_frontend::EngineCandidatePage& catalog,
+    const SlotReferences& references,
+    const std::map<hipdnn_frontend::KnobType_t, hipdnn_frontend::KnobValueVariant>& knobs)
 {
-    const auto candidate
+    const auto found
         = std::find_if(catalog.candidates.begin(),
                        catalog.candidates.end(),
                        [&knobs](const auto& item) { return item.variant.knobSettings == knobs; });
-    if(candidate == catalog.candidates.end())
+    if(found == catalog.candidates.end())
     {
         return std::nullopt;
     }
-    return SlotRow{candidate->id,
-                   slotReferenceText(references.marks.at(
-                       static_cast<size_t>(std::distance(catalog.candidates.begin(), candidate))))};
+    if(references.slots.empty())
+    {
+        return MeasuredCandidate{&*found, std::nullopt};
+    }
+    return MeasuredCandidate{&*found,
+                             slotReferenceText(references.marks.at(static_cast<size_t>(
+                                 std::distance(catalog.candidates.begin(), found))))};
 }
 
 /// @p page as JSON, naming the graph by @p graphKey (@ref graphContentKey) and the id it

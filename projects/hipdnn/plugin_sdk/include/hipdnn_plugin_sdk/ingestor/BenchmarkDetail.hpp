@@ -107,10 +107,24 @@ struct SampleOutcome
     bool restartUnstalled = false;
 };
 
-/// The fields common to every candidate log row, layered over the candidate's @p features.
-/// `benchmark` plus `device` identify one problem, as the winner cache keys on both; `device` is
-/// omitted when unidentified. The envelope is written last so a feature key can never overwrite
-/// the row's identity.
+/// Writes the fields every benchmark log row carries: @p event, and `benchmark` plus `device`,
+/// which identify one problem as the winner cache keys on both. `device` is omitted when
+/// unidentified.
+inline void recordEnvelope(nlohmann::json& record,
+                           const char* event,
+                           const std::string& benchmarkId,
+                           const std::string& deviceIdentity)
+{
+    record["event"] = event;
+    record["benchmark"] = benchmarkId;
+    if(!deviceIdentity.empty())
+    {
+        record["device"] = deviceIdentity;
+    }
+}
+
+/// The fields common to every candidate log row, layered over the candidate's @p features. The
+/// envelope is written after them so a feature key can never overwrite the row's identity.
 inline nlohmann::json candidateRecord(const nlohmann::json& features,
                                       const std::string& benchmarkId,
                                       const std::string& deviceIdentity,
@@ -119,12 +133,7 @@ inline nlohmann::json candidateRecord(const nlohmann::json& features,
                                       const DescriptorId& dispatchId)
 {
     nlohmann::json record = features;
-    record["event"] = "ingestor.benchmark.candidate";
-    record["benchmark"] = benchmarkId;
-    if(!deviceIdentity.empty())
-    {
-        record["device"] = deviceIdentity;
-    }
+    recordEnvelope(record, "ingestor.benchmark.candidate", benchmarkId, deviceIdentity);
     record["kernel"] = toString(kernelId);
     record["pack"] = toString(packId);
     record["dispatch"] = toString(dispatchId);
@@ -321,6 +330,9 @@ SampleOutcome sampleRuns(const IPlan<THandle>& plan,
                          TDefaultTimer& timer,
                          bool stalled)
 {
+    const auto warn = [&describe](const auto& what) {
+        HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '" << describe() << "' " << what);
+    };
     try
     {
         for(int warmup = 0; warmup < BENCHMARK_WARMUP_RUNS; ++warmup)
@@ -332,9 +344,7 @@ SampleOutcome sampleRuns(const IPlan<THandle>& plan,
         // their synchronization and can run without a HIP device.
         if(!injected && hipStreamSynchronize(handle.getStream()) != hipSuccess)
         {
-            HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
-                                   << describe()
-                                   << "' failed to drain its warmup runs; scored unusable");
+            warn("failed to drain its warmup runs; scored unusable");
             return {std::nullopt, "warmup-not-drained", false};
         }
 
@@ -353,36 +363,26 @@ SampleOutcome sampleRuns(const IPlan<THandle>& plan,
 
             if(sample.timedOut)
             {
-                HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
-                                       << describe()
-                                       << "' hit a stall watchdog timeout; the whole "
-                                          "comparison will restart unstalled");
+                warn("hit a stall watchdog timeout; the whole comparison will restart unstalled");
                 return {std::nullopt, "stall-watchdog-timeout", true};
             }
             if(!sample.elapsedMs.has_value())
             {
-                HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
-                                       << describe()
-                                       << "' failed to time a launch; scored unusable");
+                warn("failed to time a launch; scored unusable");
                 return {std::nullopt, "launch-not-timed", false};
             }
             if(stalled && !sample.stallUsed)
             {
                 // Measured but not stalled (unsupported device, transient arm failure):
                 // restart like a timeout.
-                HIPDNN_PLUGIN_LOG_WARN(
-                    "ingestor: benchmarking candidate '"
-                    << describe()
-                    << "' measured without an actual stall during a stalled pass; the "
-                       "whole comparison will restart unstalled");
+                warn("measured without an actual stall during a stalled pass; the whole "
+                     "comparison will restart unstalled");
                 return {std::nullopt, "measured-unstalled", true};
             }
             if(!std::isfinite(*sample.elapsedMs))
             {
                 // NaN/Inf means the event pair is broken: no retry.
-                HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
-                                       << describe()
-                                       << "' reported a non-finite elapsed time; scored unusable");
+                warn("reported a non-finite elapsed time; scored unusable");
                 return {std::nullopt, "non-finite-elapsed-time", false};
             }
             if(*sample.elapsedMs < 0.0)
@@ -391,27 +391,18 @@ SampleOutcome sampleRuns(const IPlan<THandle>& plan,
                 if(negativeSampleRetriesLeft > 0)
                 {
                     --negativeSampleRetriesLeft;
-                    HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
-                                           << describe()
-                                           << "' reported a negative elapsed time; "
-                                              "discarding it and re-measuring");
+                    warn("reported a negative elapsed time; discarding it and re-measuring");
                     continue;
                 }
                 if(stalled)
                 {
-                    HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
-                                           << describe()
-                                           << "' reported a negative stalled elapsed time "
-                                              "after exhausting "
-                                           << MAX_NEGATIVE_SAMPLE_RETRIES
-                                           << " retries; the whole comparison will "
-                                              "restart unstalled");
+                    warn("reported a negative stalled elapsed time after exhausting "
+                         + std::to_string(MAX_NEGATIVE_SAMPLE_RETRIES)
+                         + " retries; the whole comparison will restart unstalled");
                     return {std::nullopt, "negative-stalled-elapsed-time", true};
                 }
-                HIPDNN_PLUGIN_LOG_WARN(
-                    "ingestor: benchmarking candidate '"
-                    << describe() << "' reported a negative elapsed time after exhausting "
-                    << MAX_NEGATIVE_SAMPLE_RETRIES << " retries; scored unusable");
+                warn("reported a negative elapsed time after exhausting "
+                     + std::to_string(MAX_NEGATIVE_SAMPLE_RETRIES) + " retries; scored unusable");
                 return {std::nullopt, "negative-elapsed-time", false};
             }
             samples.push_back(*sample.elapsedMs);
@@ -421,8 +412,7 @@ SampleOutcome sampleRuns(const IPlan<THandle>& plan,
     }
     catch(const std::exception& error)
     {
-        HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
-                               << describe() << "' threw and is scored unusable: " << error.what());
+        warn(std::string("threw and is scored unusable: ") + error.what());
         return {std::nullopt, error.what(), false};
     }
     catch(...)
@@ -430,9 +420,7 @@ SampleOutcome sampleRuns(const IPlan<THandle>& plan,
         // launch() and an injected Timer have no exception contract. An escaping
         // exception would leave the plan unresolved and re-run the comparison on
         // every execute().
-        HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
-                               << describe()
-                               << "' threw a non-standard exception and is scored unusable");
+        warn("threw a non-standard exception and is scored unusable");
         return {std::nullopt, "non-standard-exception", false};
     }
 }

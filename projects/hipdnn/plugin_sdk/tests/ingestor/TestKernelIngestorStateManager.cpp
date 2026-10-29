@@ -1859,7 +1859,6 @@ INSTANTIATE_TEST_SUITE_P(
                     std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
                     std::string{});
             }},
-        // An id names one candidate per device, even when the metadata tuples differ.
         StateManagerConstructionThrowCase{
             "RejectsTwoKernelsSharingAKernelId",
             "is declared twice on an arch both declarations reach",

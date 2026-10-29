@@ -3,6 +3,7 @@
 """Descriptor snapshots name real owned dependencies, never inferred versions."""
 import copy
 import json
+from pathlib import Path
 
 import pytest
 
@@ -512,64 +513,48 @@ def _ranker(**overrides):
     return base
 
 
-def _estimate(**overrides):
-    base = {
-        "ued": _dep(UED_SLOTTED, "1.0"),
-        "kmds": [{"slot": "a", **_dep(KMD_DQ, "1.0")}],
-        "umd": [],
-    }
-    base.update(overrides)
-    return base
+_SLOT_CORPUS = json.loads(
+    (
+        Path(__file__).resolve().parents[3]
+        / "plugin_sdk/tests/ingestor/uhd/fixtures/conformance/trained_against_slots.json"
+    ).read_text(encoding="utf-8")
+)
+
+
+def _patched(base, patch):
+    """@p base with the RFC 6902 add/replace/remove steps of @p patch applied."""
+    doc = copy.deepcopy(base)
+    for step in patch:
+        *parents, leaf = step["path"].split("/")[1:]
+        node = doc
+        for token in parents:
+            node = node[int(token) if isinstance(node, list) else token]
+        if isinstance(node, list):
+            leaf = len(node) if leaf == "-" else int(leaf)
+        if step["op"] == "remove":
+            del node[leaf]
+        elif step["op"] == "add" and isinstance(node, list):
+            node.insert(leaf, step["value"])
+        else:
+            node[leaf] = step["value"]
+    return doc
 
 
 @pytest.mark.parametrize(
-    "snapshot,refusal",
-    [
-        (
-            _ranker(kmds=[{"slot": "dkdv", **_dep(KMD_DKDV, "2.3")}]),
-            "names both kmd and kmds",
-        ),
-        (
-            {"ued": _dep(UED_SLOTTED, "1.0"), "umd": [], "slot": "dkdv"},
-            "slot requires kmd",
-        ),
-        (_estimate(slot="a"), "slot requires kmd, and excludes kmds"),
-        (_ranker(slot="Bad"), "trained_against.slot 'Bad' is not a valid slot name"),
-        (
-            _ranker(slot="global"),
-            "trained_against.slot 'global' is not a valid slot name",
-        ),
-        (_ranker(slot=3), "is not a valid slot name"),
-        (_estimate(kmds=[]), "trained_against.kmds must be a non-empty array"),
-        (_estimate(kmds={}), "trained_against.kmds must be a non-empty array"),
-        (
-            _estimate(kmds=[{"slot": "a", **_dep(KMD_DQ, "1.0")}] * 2),
-            "kmds names slot 'a' twice",
-        ),
-        (
-            _estimate(kmds=[{"slot": "global", **_dep(KMD_DQ, "1.0")}]),
-            "kmds slot 'global' is not a valid slot name",
-        ),
-        (
-            _estimate(kmds=[{"id": KMD_DQ, "revision": "1.0"}]),
-            "kmds entries require exactly slot, id and revision",
-        ),
-        (
-            _estimate(kmds=[{"slot": "a", **_dep(KMD_DQ, "1")}]),
-            "expected semantic revision",
-        ),
-        (
-            {k: v for k, v in _estimate().items() if k != "umd"},
-            "requires exactly ued, kmds and umd",
-        ),
-        ({"selector_revision": "r", "slot": "dkdv"}, "slot requires kmd"),
-    ],
+    "row",
+    [row for row in _SLOT_CORPUS["rows"] if "uhd_gen" not in row.get("skip", [])],
+    ids=lambda row: row["name"],
 )
-def test_malformed_slot_provenance_is_refused_like_the_loader_refuses_it(
-    snapshot, refusal
-):
-    with pytest.raises(ProvenanceError, match=refusal):
-        validate_provenance(snapshot)
+def test_slot_provenance_is_refused_like_the_loader_refuses_it(row):
+    """The corpus the runtime parser and the packer also run: `trained_against` rows."""
+    trained = _patched(_SLOT_CORPUS["bases"][row["base"]], row["patch"])[
+        "trained_against"
+    ]
+    if not row.get("reject"):
+        assert validate_provenance(trained) == trained
+        return
+    with pytest.raises(ProvenanceError, match=row.get("uhd_gen")):
+        validate_provenance(trained)
 
 
 def test_a_slot_ranker_may_omit_the_optional_slot_member():

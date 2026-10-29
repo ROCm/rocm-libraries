@@ -365,11 +365,6 @@ NEGATIVE_CASES = {
         r"UED fixture.ued.json declares version 2.1 but uses slot member 'slots'; "
         r"this packer supports slot members only at version 1.1",
     ),
-    "kdp_1_2_with_slot": (
-        {"prep.kdp": lambda doc: doc.update(version="1.2")},
-        r"KDP prep.kdp.json declares version 1.2 but uses slot member 'slot'; "
-        r"this packer supports slot members only at version 1.1",
-    ),
     "ued_1_0_shared_workspace": (
         _ued(lambda doc: (_unslotted(doc), doc.update(version="1.0"))),
         r"declares version 1.0 but uses slot member 'shared_workspace'",

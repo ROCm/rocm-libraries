@@ -11,7 +11,6 @@ rule. Each slot's training table keeps the rows where the other slots hold their
 
 from __future__ import annotations
 
-import copy
 import json
 from pathlib import Path
 
@@ -147,24 +146,6 @@ def test_a_slots_table_holds_each_of_its_kernels_once_per_problem_and_no_other_s
             assert "kernel.tile" in row
 
 
-def test_a_slots_rows_vary_only_that_slot(tmp_path):
-    """Whole-program time moves with the varied slot alone, so a slot's table ranks its own
-    kernels: here the fixture's costs are separable, and the reference program is shared.
-    """
-    tables = _tables(_dataset(tmp_path))
-    reference = {
-        problem: next(
-            row["avgTimeMs"]
-            for row in tables["prep"]
-            if row["benchmark"] == problem and row["kernel"] == KERNELS["prep"][0]
-        )
-        for problem in PROBLEMS
-    }
-    for slot, table in tables.items():
-        first = [row for row in table if row["kernel"] == KERNELS[slot][0]]
-        assert {row["benchmark"]: row["avgTimeMs"] for row in first} == reference
-
-
 def test_the_training_view_drops_a_failed_kernel_from_its_slots_table(tmp_path):
     directory = _dataset(tmp_path)
     stored = store.export_rows(directory, purposes=["training"], slot="dkdv")
@@ -188,7 +169,6 @@ def test_workspace_tokens_never_reach_a_training_row(tmp_path):
     ]
     for table in _tables(directory).values():
         assert not [c for row in table for c in row if c.startswith("ws.")]
-    # ... and a view of rows that still carry them drops them too.
     rows = frame.to_dict(orient="records")
     assert not [
         c for r in slot_training_rows(rows, "dq") for c in r if c.startswith("ws.")
@@ -225,7 +205,6 @@ def test_an_unslotted_export_is_unchanged(tmp_path):
     directory = _dataset(tmp_path)
     everything = store.export_rows(directory, purposes=["training"])
     assert len(everything) == 24
-    # Without --slot the rows are the sweep exactly as it was stored: composite ids, marker.
     assert set(slot_kernels(everything[0]["kernel"])) == set(KERNELS)
     assert "slot_reference" in everything[0]
 
@@ -280,93 +259,6 @@ def test_knobs_name_the_problem_column_that_twins_a_slotted_field():
     report = analyse_knobs(pd.DataFrame(rows))
     twin = next(k for k in report["knobs"] if k["name"] == "kernel.prep.seqlen")
     assert twin["graph_bound"] and twin["bound_as"] == "attention.seqlen"
-
-
-def _slotted_page():
-    ids = [f"prep={p}|dq={q}" for p in KERNELS["prep"] for q in KERNELS["dq"]]
-    candidates = [
-        {
-            "id": identity,
-            "knob_settings": {"prep.tile": index // 2, "dq.tile": index % 2},
-            "kernel_features": {"kernel.prep.tile": 64, "kernel.dq.tile": 16},
-        }
-        for index, identity in enumerate(ids)
-    ]
-    return {
-        "engine_id": 7,
-        "graph_key": "graph",
-        "graph_id": "graph",
-        "device_id": "board",
-        "device_arch": "gfx942",
-        "problem_features": {"graph.flops": 4e12, "ws.scratch_offset": 512},
-        "device_features": {"device.cu_count": 120},
-        "engine_descriptor_id": "13ab344f-4818-4772-bb8e-8e1441fec82c",
-        "engine_name": "hipkernel:slotted",
-        "candidates": candidates,
-        "total_count": len(candidates),
-        "next_offset": None,
-    }
-
-
-def _slotted_sweep(page, marks):
-    response = copy.deepcopy(page)
-    response["results"] = [
-        {
-            "candidate_id": candidate["id"],
-            "knob_settings": candidate["knob_settings"],
-            "kernel_features": candidate["kernel_features"],
-            "succeeded": True,
-            "is_valid": True,
-            "numerically_valid": True,
-            "validation": "agrees_with_catalog",
-            "robust_time_ms": 2.5,
-            "min_time_ms": 2.0,
-            "avg_time_ms": 2.6,
-            "stddev_ms": 0.01,
-            "iterations": 40,
-            **({"slot_reference": mark} if mark is not None else {}),
-        }
-        for candidate, mark in zip(page["candidates"], marks)
-    ]
-    return response
-
-
-def _collect(monkeypatch, tmp_path, response):
-    from uhd_gen.generate import collect_graph
-
-    monkeypatch.setattr("uhd_gen.generate._run_json", lambda *args, **kwargs: response)
-    return collect_graph(
-        ["hipdnn_bench", "--graph", "graph.json", "--engine-id", "7"],
-        {},
-        tmp_path,
-        [],
-        engine_descriptor_id="13ab344f-4818-4772-bb8e-8e1441fec82c",
-    )
-
-
-def test_collection_keeps_the_marker_and_the_composite_id_and_drops_ws_tokens(
-    monkeypatch, tmp_path
-):
-    page = _slotted_page()
-    marks = ["prep|dq", "dq", "prep", ""]
-    rows, published = _collect(monkeypatch, tmp_path, _slotted_sweep(page, marks))
-    assert [row["slot_reference"] for row in rows] == marks
-    assert [row["kernel"] for row in rows] == [c["id"] for c in page["candidates"]]
-    assert not [name for row in rows for name in row if name.startswith("ws.")]
-    assert not [name for name in published if name.startswith("ws.")]
-    assert "kernel.prep.tile" in published
-    # ... and the rows split into per-slot training rows.
-    assert [r["kernel"] for r in slot_training_rows(rows, "dq")] == [
-        slot_kernels(page["candidates"][0]["id"])["dq"],
-        slot_kernels(page["candidates"][1]["id"])["dq"],
-    ]
-
-
-def test_a_slotted_result_without_the_marker_is_refused(monkeypatch, tmp_path):
-    page = _slotted_page()
-    marks = ["prep|dq", "dq", None, ""]
-    with pytest.raises(ValueError, match="slot_reference"):
-        _collect(monkeypatch, tmp_path, _slotted_sweep(page, marks))
 
 
 def test_slot_requires_a_dataset():

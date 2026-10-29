@@ -2995,60 +2995,54 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
         const bool slotted = !engine.slots.empty();
         const MetadataSchema* schema = nullptr;
         std::vector<const MetadataSchema*> slotSchemas;
+        // Rejected here rather than left to GenericEngine's constructor, which throws on an
+        // undeclared knob: by then copyEngineIds has already advertised the id, so the throw
+        // takes the whole provider down instead of costing one engine.
+        const auto resolveSchema
+            = [&](const std::string& label,
+                  const DescriptorId& schemaId,
+                  const std::vector<std::string>& knobs) -> const MetadataSchema* {
+            const auto* resolved = detail::findDescriptor(catalog.schemas, schemaId);
+            if(resolved == nullptr)
+            {
+                HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: "
+                                        << label << " names metadata schema " << toString(schemaId)
+                                        << ", which no descriptor defines; dropping it");
+                return resolved;
+            }
+            if(const auto* undeclared = findUndeclaredKnob(knobs, resolved->fields))
+            {
+                HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: "
+                                        << label << " exposes knob '" << *undeclared
+                                        << "', which metadata schema '" << resolved->name
+                                        << "' does not declare; dropping it");
+                return nullptr;
+            }
+            return resolved;
+        };
+        const std::string engineLabel = "engine '" + engine.name + "'";
         if(!slotted)
         {
-            schema = detail::findDescriptor(catalog.schemas, engine.metadataSchemaId);
+            schema = resolveSchema(engineLabel, engine.metadataSchemaId, engine.knobs);
             if(schema == nullptr)
             {
-                HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
-                                        << engine.name << "' names metadata schema "
-                                        << toString(engine.metadataSchemaId)
-                                        << ", which no descriptor defines; dropping it");
-                continue;
-            }
-            if(const auto* undeclared = findUndeclaredKnob(engine, schema->fields))
-            {
-                // Rejected here rather than left to GenericEngine's constructor, which throws
-                // on it: by then copyEngineIds has already advertised the id, so the throw
-                // takes the whole provider down instead of costing one engine.
-                HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
-                                        << engine.name << "' exposes knob '" << *undeclared
-                                        << "', which metadata schema '" << schema->name
-                                        << "' does not declare; dropping it");
                 continue;
             }
         }
         else
         {
             // RFC 0021 §8: the per-engine checks run per slot.
-            bool slotsResolve = true;
             for(const auto& slot : engine.slots)
             {
-                const auto* slotSchema
-                    = detail::findDescriptor(catalog.schemas, slot.metadataSchemaId);
+                const auto* slotSchema = resolveSchema(
+                    engineLabel + " slot '" + slot.name + "'", slot.metadataSchemaId, slot.knobs);
                 if(slotSchema == nullptr)
                 {
-                    HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
-                                            << engine.name << "' slot '" << slot.name
-                                            << "' names metadata schema "
-                                            << toString(slot.metadataSchemaId)
-                                            << ", which no descriptor defines; dropping it");
-                    slotsResolve = false;
-                    break;
-                }
-                if(const auto* undeclared = findUndeclaredKnob(slot, slotSchema->fields))
-                {
-                    HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
-                                            << engine.name << "' slot '" << slot.name
-                                            << "' exposes knob '" << *undeclared
-                                            << "', which metadata schema '" << slotSchema->name
-                                            << "' does not declare; dropping it");
-                    slotsResolve = false;
                     break;
                 }
                 slotSchemas.push_back(slotSchema);
             }
-            if(!slotsResolve)
+            if(slotSchemas.size() != engine.slots.size())
             {
                 continue;
             }

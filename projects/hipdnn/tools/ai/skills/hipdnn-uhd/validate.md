@@ -128,13 +128,9 @@ The commands above hold per slot ([generate.md](generate.md), "Slotted engines")
   the slot's candidate and incumbent on them.
 - **GPU step.** `validate_l2.py` and `decide.py` have no slot option; report that step as not
   run for a slot ranker rather than reading a whole-engine result as that slot's.
-- **Install.** The same `promote` command; the slot comes from the model's
-  `trained_against.slot`. Where it installs and what it refuses are in the
-  uhd_gen README ("Slotted engines"). A `predict_engine` model installs at the engine and must name every slot's KMD in
-  `trained_against.kmds`.
+- **Install.** The same `promote` (rules: uhd_gen README, "Slotted engines"); the slot comes from `trained_against.slot`; a `predict_engine` model installs at the engine.
 - **Check the install.** `hipdnn_validate_descriptors <installed root> --expect-engine <engine>
   --json` lists each slot ranker in `model_checks` with its `slot`.
-- **Versions.** Slot-bearing files are `1.1`; a 1.0 runtime skips them with a warning.
 
 ## Metrics at runtime
 

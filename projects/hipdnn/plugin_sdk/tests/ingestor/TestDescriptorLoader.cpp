@@ -6302,16 +6302,11 @@ TEST(TestDescriptorLoader, SkipsAStandaloneKernelOnAnUnsupportedMajor)
     EXPECT_EQ(sets.front().engine.name, "test:valid");
 }
 
-// ---------------------------------------------------------------------------------------
-// RFC 0021 kernel slots: descriptor model and loader.
-// ---------------------------------------------------------------------------------------
-
 namespace
 {
 
 const std::string SLOTTED_GRAPH_MATCH_SYMBOL = "descriptorloader.slotted_graph_match";
 
-/// A UUID of set @p tag with @p n spelled into its second group, so one set can mint dozens.
 std::string slotUuid(char tag, int n)
 {
     static constexpr std::string_view HEX = "0123456789abcdef";
@@ -6334,8 +6329,8 @@ constexpr int SLOT_PACK_PREP = 0x10;
 constexpr int SLOT_PACK_DKDV = 0x11;
 constexpr int SLOT_PACK_DQ = 0x12;
 constexpr int SLOT_KERNEL_PREP = 0x20; // two kernels: 0x20, 0x21
-constexpr int SLOT_KERNEL_DKDV = 0x22; // 0x22, 0x23
-constexpr int SLOT_KERNEL_DQ = 0x24; // 0x24, 0x25
+constexpr int SLOT_KERNEL_DKDV = 0x22;
+constexpr int SLOT_KERNEL_DQ = 0x24;
 
 /// A valid split-backward-shaped engine: three slots (`prep`, `dkdv`, `dq`), one pack and two
 /// kernels each. `dkdv` and `dq` carry a metric-less ranker and the `block_size` knob; the
@@ -6440,7 +6435,6 @@ Documents makeSlottedDocuments(char tag, const std::string& engineName)
     return documents;
 }
 
-/// The document of type @p suffix whose `id` is @p id.
 nlohmann::json& documentById(Documents& documents, std::string_view suffix, const std::string& id)
 {
     for(auto& document : documents)
@@ -6453,7 +6447,6 @@ nlohmann::json& documentById(Documents& documents, std::string_view suffix, cons
     throw std::runtime_error("no document of type " + std::string(suffix) + " with id " + id);
 }
 
-/// The pack serving @p slot.
 nlohmann::json& slotPack(Documents& documents, const std::string& slot)
 {
     for(auto& document : documents)
@@ -6498,7 +6491,6 @@ nlohmann::json trainedAgainstWithoutKmd(Documents& documents)
                           {"umd", matchers}};
 }
 
-/// `kmds` naming each of @p slots, in order.
 nlohmann::json kmdsOf(Documents& documents, const std::vector<std::pair<std::string, int>>& slots)
 {
     auto kmds = nlohmann::json::array();
@@ -6541,7 +6533,6 @@ TEST(TestDescriptorLoader, LoadsAThreeSlotSetWithPerSlotState)
     EXPECT_EQ(std::get<std::string>(set.slots[1].packs.front().kernels[0].metadata.at("variant")),
               "b");
 
-    // Per-slot rankers: `prep` ships none, the others one metric-less ranker each.
     EXPECT_FALSE(set.slots[0].heuristic.has_value());
     EXPECT_TRUE(set.slots[0].heuristicsByMetric.empty());
     EXPECT_EQ(set.slots[1].heuristicsByMetric.at("").count("default"), 1u);
@@ -6549,8 +6540,6 @@ TEST(TestDescriptorLoader, LoadsAThreeSlotSetWithPerSlotState)
     EXPECT_EQ(set.engine.slots[1].knobs, std::vector<std::string>{"block_size"});
     EXPECT_TRUE(set.engine.slots[0].knobs.empty());
 
-    // The slotted engine's selection state lives only in its slots; matchers and dispatches
-    // are the union over them.
     EXPECT_TRUE(set.packs.empty());
     EXPECT_FALSE(set.heuristic.has_value());
     EXPECT_TRUE(set.heuristicsByMetric.empty());
@@ -6593,9 +6582,6 @@ TEST(TestDescriptorLoader, AcceptsFormat11OnAnUnslottedEngine)
     EXPECT_EQ(sets.front().packs.front().kernels.size(), 3u);
 }
 
-/// The version of each file type is its own: a UKD's version says whether it carries `sources`,
-/// a KDP's whether it carries slot members. A slotted (1.1) KDP therefore holds inline kernels
-/// at either UKD version, a single-launch 1.0 one beside a multi-launch 1.1 one.
 TEST(TestDescriptorLoader, ASlottedKdpHoldsInlineKernelsAtTheirOwnUkdVersions)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("slot_ukd_versions"));
@@ -6619,8 +6605,6 @@ TEST(TestDescriptorLoader, ASlottedKdpHoldsInlineKernelsAtTheirOwnUkdVersions)
     EXPECT_EQ(dkdv[1].source.kind, KernelSourceKind::EMBEDDED_SOURCE);
 }
 
-/// The 1.1 of the slotted KDP does not stand in for the kernel's own version: an inline kernel
-/// labelled 1.0 that carries `sources` is a mislabelled file, and its pack is dropped.
 TEST(TestDescriptorLoader, AnInlineUkdLabelled10IsRefusedItsSourcesInsideASlottedKdp)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("slot_ukd_mislabelled"));
@@ -6713,7 +6697,6 @@ INSTANTIATE_TEST_SUITE_P(
     Slot,
     TestDescriptorLoaderSlotRules,
     ::testing::Values(
-        // The slot list itself.
         SlotRule{
             "slots_empty",
             false,
@@ -6753,7 +6736,6 @@ INSTANTIATE_TEST_SUITE_P(
                  },
                  {"unknown key 'predict_applicable_kernels'"},
                  0},
-        // Engine-level selection members beside `slots`.
         SlotRule{"metadata_beside_slots",
                  false,
                  [](Documents& d) {
@@ -6787,7 +6769,6 @@ INSTANTIATE_TEST_SUITE_P(
                  {"key 'predict_applicable_kernels' in",
                   "must not appear beside 'slots'; declare it per slot"},
                  0},
-        // `shared_workspace`.
         SlotRule{"shared_workspace_without_graph_match",
                  false,
                  [](Documents& d) { documentOfType(d, ".ued.json").erase("graph_match"); },
@@ -6803,7 +6784,6 @@ INSTANTIATE_TEST_SUITE_P(
                  },
                  {"key 'shared_workspace' in", "requires 'slots'"},
                  0},
-        // A 1.0-labelled file carrying a 1.1 member.
         SlotRule{"ued_1_0_with_slots",
                  false,
                  [](Documents& d) { documentOfType(d, ".ued.json")["version"] = "1.0"; },
@@ -6826,7 +6806,6 @@ INSTANTIATE_TEST_SUITE_P(
                  {"declares version 1.0 but uses slot member 'slot'; slot members require "
                   "version 1.1"},
                  1},
-        // A pack's `slot`.
         SlotRule{"kdp_slot_name_invalid",
                  false,
                  [](Documents& d) { slotPack(d, "dkdv")["slot"] = "Dkdv"; },
@@ -6867,7 +6846,6 @@ INSTANTIATE_TEST_SUITE_P(
                  {"supplies metadata field 'variant', which schema 'prep fields' does not "
                   "declare"},
                  1},
-        // Per-slot checks that cost the engine.
         SlotRule{"slot_ranker_declares_a_metric",
                  false,
                  [](Documents& d) {
@@ -6944,8 +6922,6 @@ TEST(TestDescriptorLoader, UnslottedEngineWithNoLoadablePackIsStillDropped)
         recorder.hasLogContaining(HIPDNN_SEV_ERROR, "has no loadable kernel pack; dropping it"));
 }
 
-/// A slot ranker records the slot it was trained for: `trained_against` carries `slot` beside
-/// its slot's `kmd` (RFC 0021 §9), in a 1.1 UHD.
 TEST(TestDescriptorLoader, LoadsASlotRankerRecordingItsSlotProvenance)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ranker_provenance"));
@@ -6977,8 +6953,6 @@ class TestDescriptorLoaderRankerProvenance : public ::testing::TestWithParam<Ran
 {
 };
 
-/// A slot ranker whose provenance names another slot, another slot's KMD, or the `kmds` form
-/// is disabled, and the engine stays with that slot ranking by the fallback order.
 TEST_P(TestDescriptorLoaderRankerProvenance, DisablesTheRankerAndKeepsTheEngine)
 {
     const auto& testCase = GetParam();
@@ -7004,7 +6978,6 @@ TEST_P(TestDescriptorLoaderRankerProvenance, DisablesTheRankerAndKeepsTheEngine)
     EXPECT_TRUE(sets.front().slots[1].heuristicsByMetric.empty());
     EXPECT_FALSE(sets.front().slots[1].heuristic.has_value());
     EXPECT_EQ(sets.front().slots[1].unavailableHeuristicArches.at("").count("default"), 1u);
-    // The sibling slot's ranker is untouched.
     EXPECT_TRUE(sets.front().slots[2].heuristic.has_value());
 }
 
@@ -7091,7 +7064,6 @@ INSTANTIATE_TEST_SUITE_P(
         return pascalCase(info.param.name);
     });
 
-/// An unslotted engine has no slot to name, so a model recording one cannot be its model.
 TEST(TestDescriptorLoader, DisablesAnUnslottedEnginesRankerNamingASlot)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unslotted_slot_prov"));
@@ -7119,7 +7091,6 @@ TEST(TestDescriptorLoader, DisablesAnUnslottedEnginesRankerNamingASlot)
 class TestDescriptorLoaderSlottedEstimate : public ::testing::Test
 {
 protected:
-    /// A slotted engine whose `predict_engine` model records @p trained.
     static std::vector<DescriptorSet>
         load(const std::string& name, const std::function<void(nlohmann::json&, Documents&)>& edit)
     {

@@ -94,17 +94,6 @@ inline uhd::FeatureExtractionContext::ValueMap queryVarsFrom(const BoundTokens& 
     return vars;
 }
 
-/// True when @p name, after an optional leading `$`, is under the `ws.` root that names the
-/// shared-workspace tokens (RFC 0021 §6).
-inline bool isWorkspaceToken(std::string_view name)
-{
-    if(!name.empty() && name.front() == '$')
-    {
-        name.remove_prefix(1);
-    }
-    return name.substr(0, WORKSPACE_TOKEN_ROOT.size()) == WORKSPACE_TOKEN_ROOT;
-}
-
 /// True for a name in a namespace the engine publishes itself: `graph.*` and `device.*`
 /// (problemFeatures), `constraint.*` (engineFeatures) and `kernel.*` (kernel metadata).
 /// @param reserveWorkspace Also reserves the `ws.*` root, the shared-workspace tokens of a

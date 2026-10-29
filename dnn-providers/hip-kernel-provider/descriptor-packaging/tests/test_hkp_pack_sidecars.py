@@ -3,6 +3,7 @@
 """Tests that the packer resolves and carries the model file a trained UHD names."""
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import shutil
@@ -395,21 +396,7 @@ def _canonical_uhd_validator():
         "invalid_hash",
         "unknown_header",
         "format_1_1",
-        "slot_provenance",
-        "kmds_provenance",
         "unsupported_format",
-        "slot_in_1_0",
-        "kmds_in_1_0",
-        "slot_without_kmd",
-        "slot_with_kmds",
-        "kmd_and_kmds",
-        "empty_kmds",
-        "kmds_without_slot_name",
-        "kmds_global_slot",
-        "kmds_uppercase_slot",
-        "slot_global",
-        "slot_uppercase",
-        "slot_not_string",
         "tflops_metric",
         "time_metric",
         "units_field",
@@ -429,8 +416,6 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
     valid = mutation in (
         "valid",
         "format_1_1",
-        "slot_provenance",
-        "kmds_provenance",
         "tflops_metric",
         "time_metric",
         "feature_semantics",
@@ -460,51 +445,6 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
         doc["version"] = "1.1"
     elif mutation == "unsupported_format":
         doc["version"] = "1.2"
-    elif mutation in (
-        "slot_provenance",
-        "slot_in_1_0",
-        "slot_global",
-        "slot_uppercase",
-        "slot_not_string",
-    ):
-        # RFC 0021 §9: `slot` beside `kmd` is a slot ranker's provenance, and 1.1-only.
-        doc["version"] = "1.0" if mutation == "slot_in_1_0" else "1.1"
-        doc["trained_against"]["slot"] = {
-            "slot_global": "global",
-            "slot_uppercase": "Dkdv",
-            "slot_not_string": 7,
-        }.get(mutation, "dkdv")
-    elif mutation in (
-        "kmds_provenance",
-        "kmds_in_1_0",
-        "slot_with_kmds",
-        "kmd_and_kmds",
-        "empty_kmds",
-        "kmds_without_slot_name",
-        "kmds_global_slot",
-        "kmds_uppercase_slot",
-    ):
-        trained = doc["trained_against"]
-        kmd = trained["kmd"]
-        slots = [{"slot": "prep", **kmd}, {"slot": "dkdv", **kmd}]
-        doc["version"] = "1.0" if mutation == "kmds_in_1_0" else "1.1"
-        if mutation != "kmd_and_kmds":
-            del trained["kmd"]
-        trained["kmds"] = slots
-        if mutation == "slot_with_kmds":
-            trained["slot"] = "dkdv"
-        elif mutation == "empty_kmds":
-            trained["kmds"] = []
-        elif mutation == "kmds_without_slot_name":
-            del slots[0]["slot"]
-        elif mutation == "kmds_global_slot":
-            slots[0]["slot"] = "global"
-        elif mutation == "kmds_uppercase_slot":
-            slots[0]["slot"] = "Prep"
-    elif mutation == "slot_without_kmd":
-        doc["version"] = "1.1"
-        doc["trained_against"].pop("kmd")
-        doc["trained_against"]["slot"] = "dkdv"
     elif mutation == "tflops_metric":
         doc["score"] = {"metric": "tflops", "calibrated": True, "transform": "log1p"}
     elif mutation == "time_metric":
@@ -536,6 +476,63 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
     _write_json(root / "heuristic.uhd.json", doc)
     (root / "model.bin").write_bytes(b"artifact")
     assert validator.is_valid(doc) == valid
+    if valid:
+        flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
+        assert flat.descriptors[0].sidecars[0].source.read_bytes() == b"artifact"
+    else:
+        with pytest.raises(HkpPackError):
+            load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
+
+
+_SLOT_CORPUS_PATH = (
+    "projects/hipdnn/plugin_sdk/tests/ingestor/uhd/fixtures/conformance/"
+    "trained_against_slots.json"
+)
+_ROOT = _repo_root()
+_SLOT_CORPUS = (
+    json.loads((_ROOT / _SLOT_CORPUS_PATH).read_text(encoding="utf-8"))
+    if _ROOT
+    else {"bases": {}, "rows": []}
+)
+
+
+def _patched(base: dict, patch: list) -> dict:
+    """@p base with the RFC 6902 add/replace/remove steps of @p patch applied."""
+    doc = copy.deepcopy(base)
+    for step in patch:
+        *parents, leaf = step["path"].split("/")[1:]
+        node = doc
+        for token in parents:
+            node = node[int(token) if isinstance(node, list) else token]
+        if isinstance(node, list):
+            leaf = len(node) if leaf == "-" else int(leaf)
+        if step["op"] == "remove":
+            del node[leaf]
+        elif step["op"] == "add" and isinstance(node, list):
+            node.insert(leaf, step["value"])
+        else:
+            node[leaf] = step["value"]
+    return doc
+
+
+@pytest.mark.parametrize("row", _SLOT_CORPUS["rows"], ids=lambda row: row["name"])
+def test_packaging_and_canonical_schema_agree_on_slot_provenance(tmp_path, row):
+    """The `trained_against` header grammar of RFC 0021 §9, from the corpus the runtime
+    parser and `uhd_gen` also run."""
+    validator = _canonical_uhd_validator()
+    patched = _patched(_SLOT_CORPUS["bases"][row["base"]], row["patch"])
+    doc = _model_uhd("model.bin")
+    doc["version"] = patched["version"]
+    doc["trained_against"] = patched["trained_against"]
+    valid = not row.get("reject")
+    skipped = row.get("skip", [])
+    root = tmp_path / "src"
+    _write_json(root / "heuristic.uhd.json", doc)
+    (root / "model.bin").write_bytes(b"artifact")
+    if "schema" not in skipped:
+        assert validator.is_valid(doc) == valid
+    if "packer" in skipped:
+        return
     if valid:
         flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
         assert flat.descriptors[0].sidecars[0].source.read_bytes() == b"artifact"

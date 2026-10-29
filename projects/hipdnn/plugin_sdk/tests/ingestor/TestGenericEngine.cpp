@@ -124,7 +124,8 @@ TEST(TestIngestorGenericEngine, GetDetailsReportsTheEnginesKnobs)
 {
     const ScopedTestSymbols symbols;
     const StubDeviceResolver resolver;
-    const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), makeStubStateManager(), resolver);
+    const StubEngine engine(
+        makeEngineWithKnobs({BLOCK_SIZE, DTYPE}), makeStubStateManager(), resolver);
 
     StubHandle handle;
     const TestGraph graph(makeGraphId(0x62));
@@ -140,11 +141,15 @@ TEST(TestIngestorGenericEngine, GetDetailsReportsTheEnginesKnobs)
     // The UED name, so a graph-time record identifies its engine the same way the
     // getEngineName entry point does.
     EXPECT_EQ(wrapper.name(), "test:engine");
-    // GenericEngine::getDetails() always prepends the out-of-band benchmarking knob
-    // (Task 1.4), so a UED declaring one knob of its own advertises two; looked up by
-    // name, since the prepend fixes a position Phase 2 must not assume by index either.
-    ASSERT_EQ(wrapper.knobCount(), 2U);
+    // GenericEngine::getDetails() always prepends the out-of-band benchmarking knob (Task 1.4).
+    ASSERT_EQ(wrapper.knobCount(), 3U);
     EXPECT_EQ(wrapper.getKnobByName(BLOCK_SIZE).knobId(), BLOCK_SIZE);
+    const auto& knobs = wrapper.knobWrappers();
+    ASSERT_EQ(knobs.size(), 3U);
+    EXPECT_EQ(knobs[0]->knobId(), "global.benchmarking");
+    EXPECT_EQ(knobs[0]->description(), "Enable benchmarking");
+    EXPECT_EQ(knobs[1]->knobId(), "block_size");
+    EXPECT_EQ(knobs[2]->knobId(), "dtype");
 }
 
 /// GenericEngine::getDetails() advertises global.benchmarking out-of-band, so a UED
@@ -969,40 +974,6 @@ TEST(TestIngestorGenericEngine, AConfigurationDescriptionNamesTheL2ModelWithoutR
     EXPECT_GT(scoredKernels.load(), 0);
 }
 
-// ---------------------------------------------------------------------------
-// Golden pins of the unslotted engine contract.
-// ---------------------------------------------------------------------------
-
-/// getDetails advertises the out-of-band benchmarking knob first, then one knob per UED
-/// knob under its bare KMD field id, in declaration order. The stub catalog holds the one
-/// kernel {block_size 64, dtype FLOAT}.
-TEST(TestIngestorGenericEngine,
-     UnslottedGoldenGetDetailsAdvertisesBareKmdFieldIdsAfterTheBenchmarkingKnob)
-{
-    // Knob contents are pinned by TestGenericPlanBuilder; this test fixes order and ids.
-    const ScopedTestSymbols symbols;
-    const StubDeviceResolver resolver;
-    const StubEngine engine(
-        makeEngineWithKnobs({BLOCK_SIZE, DTYPE}), makeStubStateManager(), resolver);
-
-    StubHandle handle;
-    const TestGraph graph(makeGraphId(0x6E));
-    hipdnnPluginConstData_t details{};
-    engine.getDetails(handle, graph, details);
-
-    ASSERT_NE(details.ptr, nullptr);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper wrapper(details.ptr,
-                                                                                     details.size);
-    ASSERT_TRUE(wrapper.isValid());
-    const auto& knobs = wrapper.knobWrappers();
-    ASSERT_EQ(knobs.size(), 3U);
-
-    EXPECT_EQ(knobs[0]->knobId(), "global.benchmarking");
-    EXPECT_EQ(knobs[0]->description(), "Enable benchmarking");
-    EXPECT_EQ(knobs[1]->knobId(), "block_size");
-    EXPECT_EQ(knobs[2]->knobId(), "dtype");
-}
-
 /// An unslotted descriptor set with one matcher, one dispatch and one kernel, built the
 /// way the fixtures build them, so the hashes pinned below are over a fully known value.
 DescriptorSet makeUnslottedGoldenSet(bool withRanker)
@@ -1040,10 +1011,8 @@ DescriptorSet makeUnslottedGoldenSet(bool withRanker)
     return set;
 }
 
-/// The selector revision is `generic-untuned-v1/` plus the SHA-256 of the compact,
-/// key-sorted JSON of the set's provenance, graph match, knobs, rankers, matchers,
-/// dispatches and packs. Expected digests were computed over that JSON independently of
-/// the C++ (sorted keys, no whitespace); any change to what an unslotted engine hashes, or
+/// Expected digests were computed independently of the C++ over the set's compact,
+/// key-sorted JSON; any change to what an unslotted engine hashes, or
 /// how, changes them and orphans every trained model's `trained_against`.
 TEST(TestIngestorGenericEngine, UnslottedGoldenSelectorRevisionPinsTheSetWithAndWithoutARanker)
 {
@@ -1089,8 +1058,6 @@ TEST(TestIngestorGenericEngine, UnslottedGoldenEngineIdentity)
     }
 }
 
-/// A ranker naming a model artifact with no digest cannot be versioned, so the engine is
-/// not content-identified and the winner cache is declined; a digest restores it.
 TEST(TestIngestorGenericEngine, UnslottedGoldenContentIdentifiedNeedsADigestForANamedArtifact)
 {
     auto set = makeUnslottedGoldenSet(/*withRanker=*/true);
@@ -1102,7 +1069,6 @@ TEST(TestIngestorGenericEngine, UnslottedGoldenContentIdentifiedNeedsADigestForA
     EXPECT_TRUE(engineContentIdentified(set));
     EXPECT_TRUE(engineIdentity(set).contentIdentified);
 
-    // The per-metric rankers are checked too, not only the default.
     auto perMetric = makeUnslottedGoldenSet(/*withRanker=*/false);
     HeuristicDescriptor modelled;
     modelled.id = HEURISTIC_ID;
@@ -1112,9 +1078,6 @@ TEST(TestIngestorGenericEngine, UnslottedGoldenContentIdentifiedNeedsADigestForA
     EXPECT_FALSE(engineContentIdentified(perMetric));
 }
 
-/// An engine built without an explicit selector revision reports
-/// `generic-untuned-v1/<UED id>/<UED revision>`: a model trained against exactly that
-/// string is served, and one trained against anything else is refused naming it.
 TEST(TestIngestorGenericEngine, UnslottedGoldenDefaultSelectorRevisionIsTheUedIdAndRevision)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;

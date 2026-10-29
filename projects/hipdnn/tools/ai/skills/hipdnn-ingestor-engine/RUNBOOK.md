@@ -1139,27 +1139,18 @@ Kernels whose choices depend on each other belong in **one** slot, launched by t
 dispatch handler. Only slot-bearing UED, KDP and UHD files are version `1.1`, and a UKD is
 `1.1` only when it carries `sources` (slotted or not); every other file stays `1.0`.
 
-- **Authoring.** The generator config gains `engine.shared_workspace: ws.<token>`, a
-  `slots[]` list (`name`, `kmd_fields`, `knobs`, `ranker: true`, `specialization`) and a
-  `slot` on every pack; `tests/fixtures/slotted_three_slot.yaml` is the reference. A slot
-  name matches `^[a-z][a-z0-9_]*$` and is never `global`. The loader refuses
-  `kmd_fields`, `specialization`, `engine.knobs` and a non-`none` `engine.heuristic` beside
-  `slots`; declare each per slot. A slotted config renders descriptors only, no C++ stub, and
-  `generate.py --check-placeholders` is refused for it. A slot ranker is a metric-less
-  `native` UHD (a promoted trained ranker replaces it), and a slot without one orders its
-  catalog by priority, then id.
-  `shared_workspace` without `slots` is a config error.
-- **Shared workspace.** The native graph match publishes the `shared_workspace` token (the
-  shared region's bytes), `ws.scratch_offset` (that size rounded up to 256 B) and one
-  `ws.<name>.offset` per shared object. Catalog build declines the engine with an error naming
-  the token when it is missing, not an integer or negative, when `ws.scratch_offset` is not
-  the rounded size, or when an offset token is not a non-negative integer. Handlers get the
-  **unshifted** workspace base, read the offset tokens in `prepare()`, and add them at
-  `launch()`. A slotted kernel's `workspaceBytes` is its scratch only; the plan's workspace
-  is the aligned shared region plus the largest scratch, a null workspace is rejected when
-  that is non-zero, and `global.workspace_size_limit` applies to the total. The `ws.` root
-  is reserved: never a ranker feature, a `problem_features` entry or a training column.
-  Shared runtime arguments (scale, dropout) are ordinary tokens.
+- **Authoring.** Config keys and refusals (`engine.shared_workspace`, `slots[]`, a `slot` on
+  every pack): the IngestorGenerator README ("Slotted engines"). A slot name matches
+  `^[a-z][a-z0-9_]*$` and is never `global`; a slot without a ranker orders its catalog by
+  priority, then id. `shared_workspace` without `slots` is a config error.
+- **Shared workspace** (RFC 0021 §6). The native graph match publishes the `shared_workspace`
+  token, `ws.scratch_offset` and one `ws.<name>.offset` per shared object; catalog build
+  declines the engine on a malformed token. Handlers get the **unshifted** workspace base,
+  read the offset tokens in `prepare()`, and add them at `launch()`. The `ws.` root is
+  reserved: never a ranker feature, a `problem_features` entry or a training column. A slotted
+  kernel's `workspaceBytes` is its scratch only: the plan's workspace is the aligned shared
+  region plus the largest scratch, a null workspace is rejected when that is non-zero, and
+  `global.workspace_size_limit` applies to the total.
 - **Validation (stage 4).** `hipdnn_validate_descriptors` checks each slot's ranker against
   that slot's own KMD, knobs and packs, and reports it in `model_checks` with its `slot`;
   see its fixtures' README for each refusal. A slot with no loadable pack only warns:
@@ -1167,22 +1158,12 @@ dispatch handler. Only slot-bearing UED, KDP and UHD files are version `1.1`, an
 - **Knobs and candidates.** A knob on slot `s` is `s.<field>` and filters that slot only; a
   setting that empties the slot is rejected, naming the knob. Enumeration lists the product
   of the slot catalogs, named `prep=<id>|dkdv=<id>|dq=<id>`.
-- **Benchmarking.** With `global.benchmarking` on, `SlotProgramBenchmark` runs when any slot
-  has no winner record or the program record is invalid; when only the program record is
-  invalid it re-times just the winners program. It times the reference program (each slot's
-  first kernel in plan-build order; a reference pick that fails at launch is replaced, for
-  this benchmark only, by the slot's next kernel), then each other kernel with the rest at their reference
-  picks (1 + Σ(K−1) runs), then the winners program. A failed winners program serves the
-  reference program and writes no program record. A covered slot is skipped. Under a knob
-  filter or workspace limit only an uncovered slot is timed and nothing is recorded.
-- **Winner records.** `winners.jsonl` v3 holds, per slot, the v2 record line plus a `slot`
-  field, and one `program` line: `[{slot, kernel_id}, ...]` in slot order plus `time_ms`.
-  Both are written in one locked append, and v3 is written only for a slotted engine (the
-  decoder reads v2 and v3). A program record is valid on read only if every kernel it names
-  is in the current catalogs, equals the slot winner, and that slot's record covers its whole
-  catalog. The shard path uses the UED id and one digest over all slots' rankers, taken in
-  slot order with each slot's name; a slot ranker with a model and no
-  hash disables persistence.
+- **Benchmarking and winner records.** With `global.benchmarking` on, `SlotProgramBenchmark`
+  times a reference program, each other kernel against it, then the winners program, and
+  writes per-slot records plus one `program` record to `winners.jsonl` v3 (RFC 0021 §7, §10).
+  A covered slot is skipped; under a knob filter or workspace limit nothing is recorded. A
+  program record is valid on read only if every kernel it names is in the current catalogs,
+  equals the slot winner, and that slot's record covers its whole catalog.
 - **Predictions and heuristics.** A configuration-kind `getPrediction` evaluated through
   `predictConfiguration` is `UNAVAILABLE` unless a valid program record exists; the
   engine-level estimate comes from the engine-level model and needs no program record. Slot

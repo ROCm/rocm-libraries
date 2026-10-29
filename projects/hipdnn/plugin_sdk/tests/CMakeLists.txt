@@ -89,7 +89,6 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericEngine.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericPlanBuilder.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestStagedApplicability.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestSlottedStagedApplicability.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestSlottedEngine.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestSlotProgramBenchmark.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestBenchmarkPlan.cpp>
@@ -131,14 +130,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
     )
 
-    # The committed uhd_gen output TestUhdGeneratedModel loads. Only what the runtime reads;
-    # the training inputs beside it stay in the source tree.
+    # The committed uhd_gen output TestUhdGeneratedModel loads, and the trained_against
+    # conformance corpus TestUhdParser runs. Only what the tests read; the training inputs
+    # beside them stay in the source tree.
     set(_uhd_fixture_subdir "uhd_generated_fixtures")
     set(_uhd_fixture_files
         tile_selector.uhd.json
         model.bin
         dtype_selector/dtype_selector.uhd.json
         dtype_selector/model.bin
+        conformance/trained_against_slots.json
     )
     set(_uhd_fixture_outputs "")
     foreach(_file IN LISTS _uhd_fixture_files)

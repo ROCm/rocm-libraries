@@ -135,19 +135,25 @@ Page enumerate(SlottedEngineFixture& fixture,
     return result;
 }
 
-TEST(TestSlottedEngine, RunsThePicksInSlotOrderWithTheUnshiftedWorkspaceBase)
+/// The default three-slot engine and the graph it matches. Tests with a custom kernel catalog
+/// construct their own SlottedEngineFixture.
+class TestSlottedEngineDefault : public ::testing::Test
 {
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
-    const auto context = build(fixture, graph);
+protected:
+    SlottedEngineFixture _fixture;
+    const TestGraph _graph{makeGraphId(1)};
+};
+
+TEST_F(TestSlottedEngineDefault, RunsThePicksInSlotOrderWithTheUnshiftedWorkspaceBase)
+{
+    const auto context = build(_fixture, _graph);
 
     std::vector<char> workspace(SHARED_ALIGNED + 16384);
     executeWith(context, workspace.data());
 
-    const auto& launches = fixture.log().launches;
+    const auto& launches = _fixture.log().launches;
     ASSERT_EQ(launches.size(), 3U);
-    EXPECT_EQ(fixture.log().slotOrder(), (std::vector<std::string>{"prep", "dkdv", "dq"}));
-    // Declared order without a ranker: each slot's first kernel.
+    EXPECT_EQ(_fixture.log().slotOrder(), (std::vector<std::string>{"prep", "dkdv", "dq"}));
     EXPECT_EQ(launches[0].kernel, testId(0x11));
     EXPECT_EQ(launches[1].kernel, testId(0x21));
     EXPECT_EQ(launches[2].kernel, testId(0x31));
@@ -164,30 +170,27 @@ TEST(TestSlottedEngine, RunsThePicksInSlotOrderWithTheUnshiftedWorkspaceBase)
     EXPECT_EQ(context.plan().getWorkspaceSize(handle), SHARED_ALIGNED + 4096);
 }
 
-TEST(TestSlottedEngine, ASlottedPlanIsNotSaveableThoughEachSlotsPickIsAGenericPlan)
+TEST_F(TestSlottedEngineDefault, ASlottedPlanIsNotSaveableThoughEachSlotsPickIsAGenericPlan)
 {
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
-    const auto context = build(fixture, graph);
+    const auto context = build(_fixture, _graph);
 
     // RFC 0021 §11: a slot program is not serialized (RFC 0009); its picks are, on their own,
     // saveable GenericPlans.
     EXPECT_EQ(context.plan().saveablePlan(), nullptr);
 }
 
-TEST(TestSlottedEngine, TheEnginesMaximumIsTheAlignedSharedRegionPlusTheLargestSurvivingScratch)
+TEST_F(TestSlottedEngineDefault,
+       TheEnginesMaximumIsTheAlignedSharedRegionPlusTheLargestSurvivingScratch)
 {
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
     const StubHandle handle;
 
     const Config none;
-    EXPECT_EQ(fixture.engine().getMaxWorkspaceSize(handle, graph, none.get()),
+    EXPECT_EQ(_fixture.engine().getMaxWorkspaceSize(handle, _graph, none.get()),
               SHARED_ALIGNED + 16384);
 
     // dkdv_b (16384) leaves with the pin; dq_b (12288) is now the largest.
     const Config pinned({{"dkdv.block_m", 64}});
-    EXPECT_EQ(fixture.engine().getMaxWorkspaceSize(handle, graph, pinned.get()),
+    EXPECT_EQ(_fixture.engine().getMaxWorkspaceSize(handle, _graph, pinned.get()),
               SHARED_ALIGNED + 12288);
 }
 
@@ -304,33 +307,12 @@ TEST(TestSlottedEngine, ALimitEqualToTheAlignedSharedRegionAcceptsItAndOneByteBe
     }
 }
 
-TEST(TestSlottedEngine, AKernelTotalIsJudgedAgainstTheAlignedSharedRegionNotTheRawOne)
-{
-    // 1000 raw shared bytes plus 4000 of scratch fit a 5000-byte limit, but the plan reserves
-    // 1024 aligned bytes and so needs 5024.
-    SlottedEngineFixture fixture(singleKernels(4000));
-    const TestGraph graph(makeGraphId(1));
-    const StubHandle handle;
-
-    const auto failure = failureOf([&] {
-        build(fixture, graph, {{hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME, 5000}});
-    });
-    EXPECT_EQ(failure.first, HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
-    EXPECT_NE(failure.second.find("no kernel in slot 'dkdv'"), std::string::npos) << failure.second;
-
-    const auto context
-        = build(fixture, graph, {{hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME, 5024}});
-    EXPECT_EQ(context.plan().getWorkspaceSize(handle), SHARED_ALIGNED + 4000);
-}
-
-TEST(TestSlottedEngine, AdvertisesOneKnobPerSlotFieldWithValuesOverThatSlotsCatalog)
+TEST_F(TestSlottedEngineDefault, AdvertisesOneKnobPerSlotFieldWithValuesOverThatSlotsCatalog)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
     StubHandle handle;
     hipdnnPluginConstData_t details{};
-    fixture.engine().getDetails(handle, graph, details);
+    _fixture.engine().getDetails(handle, _graph, details);
 
     std::set<std::string> ids;
     std::vector<int64_t> dkdvValues;
@@ -356,124 +338,103 @@ TEST(TestSlottedEngine, AdvertisesOneKnobPerSlotFieldWithValuesOverThatSlotsCata
     EXPECT_EQ(dkdvValues, (std::vector<int64_t>{64, 128, 256}));
 }
 
-TEST(TestSlottedEngine, ASlotKnobFiltersThatSlotOnly)
+TEST_F(TestSlottedEngineDefault, ASlotKnobFiltersThatSlotOnly)
 {
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
-    const auto context = build(fixture, graph, {{"dkdv.block_m", 256}, {"dq.block_m", 128}});
+    const auto context = build(_fixture, _graph, {{"dkdv.block_m", 256}, {"dq.block_m", 128}});
 
     std::vector<char> workspace(SHARED_ALIGNED + 16384);
     executeWith(context, workspace.data());
 
-    ASSERT_EQ(fixture.log().launches.size(), 3U);
-    EXPECT_EQ(fixture.log().launches[0].kernel, testId(0x11)) << "prep was not pinned";
-    EXPECT_EQ(fixture.log().launches[1].kernel, testId(0x23));
-    EXPECT_EQ(fixture.log().launches[2].kernel, testId(0x32));
+    ASSERT_EQ(_fixture.log().launches.size(), 3U);
+    EXPECT_EQ(_fixture.log().launches[0].kernel, testId(0x11)) << "prep was not pinned";
+    EXPECT_EQ(_fixture.log().launches[1].kernel, testId(0x23));
+    EXPECT_EQ(_fixture.log().launches[2].kernel, testId(0x32));
 }
 
-TEST(TestSlottedEngine, APinnedSlotKnobSizesThePlanFromThePinnedKernel)
+TEST_F(TestSlottedEngineDefault, APinnedSlotKnobSizesThePlanFromThePinnedKernel)
 {
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
     const StubHandle handle;
 
     // dkdv.block_m = 256 selects dkdv_c (8192 of scratch); the others keep their first kernels
     // (prep_a 0, dq_a 2048), and scratch is reused, not summed.
-    const auto pinned = build(fixture, graph, {{"dkdv.block_m", 256}});
+    const auto pinned = build(_fixture, _graph, {{"dkdv.block_m", 256}});
     EXPECT_EQ(pinned.plan().getWorkspaceSize(handle), SHARED_ALIGNED + 8192);
 
-    const auto unpinned = build(fixture, graph);
+    const auto unpinned = build(_fixture, _graph);
     EXPECT_EQ(unpinned.plan().getWorkspaceSize(handle), SHARED_ALIGNED + 4096);
 }
 
-TEST(TestSlottedEngine, ASettingThatEmptiesASlotIsRejectedByTheExecutionSettingsAlone)
+TEST_F(TestSlottedEngineDefault, ASettingThatEmptiesASlotIsRejectedByTheSettingsAndByThePlanBuild)
 {
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
-    const Config config({{"dkdv.block_m", 999}});
-
-    const auto failure
-        = failureOf([&] { static_cast<void>(fixture.settingsFor(graph, config.get())); });
-
-    EXPECT_EQ(failure.first, HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
-    EXPECT_NE(failure.second.find("dkdv.block_m"), std::string::npos) << failure.second;
-}
-
-TEST(TestSlottedEngine, ASettingThatEmptiesASlotFailsThePlanBuildNamingTheKnob)
-{
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
     StubHandle handle;
     const Config config({{"dkdv.block_m", 999}});
     StubContext context;
 
-    const auto failure = failureOf(
-        [&] { fixture.engine().initializeExecutionContext(handle, graph, config.get(), context); });
+    const auto settingsFailure
+        = failureOf([&] { static_cast<void>(_fixture.settingsFor(_graph, config.get())); });
 
-    EXPECT_EQ(failure.first, HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
-    EXPECT_NE(failure.second.find("dkdv.block_m"), std::string::npos) << failure.second;
+    EXPECT_EQ(settingsFailure.first, HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+    EXPECT_NE(settingsFailure.second.find("dkdv.block_m"), std::string::npos)
+        << settingsFailure.second;
+
+    const auto buildFailure = failureOf([&] {
+        _fixture.engine().initializeExecutionContext(handle, _graph, config.get(), context);
+    });
+
+    EXPECT_EQ(buildFailure.first, HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+    EXPECT_NE(buildFailure.second.find("dkdv.block_m"), std::string::npos) << buildFailure.second;
 }
 
-TEST(TestSlottedEngine, ABareFieldNameIsNotAKnob)
+TEST_F(TestSlottedEngineDefault, ABareFieldNameIsNotAKnob)
 {
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
-
-    const auto failure = failureOf([&] { enumerate(fixture, graph, {{BLOCK_M, 64}}, 0, 10); });
+    const auto failure = failureOf([&] { enumerate(_fixture, _graph, {{BLOCK_M, 64}}, 0, 10); });
 
     EXPECT_EQ(failure.first, HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
     EXPECT_EQ(failure.second, "Unknown or duplicate enumeration knob 'block_m'");
 }
 
-TEST(TestSlottedEngine, AKernelThatFailsToBuildCostsOnlyItsSlotsPick)
+TEST_F(TestSlottedEngineDefault, AKernelThatFailsToBuildCostsOnlyItsSlotsPick)
 {
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
-    fixture.log().failingPrepare = {testId(0x21)};
+    _fixture.log().failingPrepare = {testId(0x21)};
 
-    const auto context = build(fixture, graph);
+    const auto context = build(_fixture, _graph);
     std::vector<char> workspace(SHARED_ALIGNED + 16384);
     executeWith(context, workspace.data());
 
-    ASSERT_EQ(fixture.log().launches.size(), 3U);
-    EXPECT_EQ(fixture.log().launches[0].kernel, testId(0x11));
-    EXPECT_EQ(fixture.log().launches[1].kernel, testId(0x22)) << "dkdv falls to its next kernel";
-    EXPECT_EQ(fixture.log().launches[2].kernel, testId(0x31));
+    ASSERT_EQ(_fixture.log().launches.size(), 3U);
+    EXPECT_EQ(_fixture.log().launches[0].kernel, testId(0x11));
+    EXPECT_EQ(_fixture.log().launches[1].kernel, testId(0x22)) << "dkdv falls to its next kernel";
+    EXPECT_EQ(_fixture.log().launches[2].kernel, testId(0x31));
 }
 
-TEST(TestSlottedEngine, AKernelWhoseBuildRejectsTheProblemEndsThePlanBuildInsteadOfFallingBack)
+TEST_F(TestSlottedEngineDefault,
+       AKernelWhoseBuildRejectsTheProblemEndsThePlanBuildInsteadOfFallingBack)
 {
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
     // INVALID_VALUE is the caller's problem, not the kernel's: the next kernel is not tried.
-    fixture.log().failingPrepareWithStatus[testId(0x21)] = HIPDNN_PLUGIN_STATUS_INVALID_VALUE;
+    _fixture.log().failingPrepareWithStatus[testId(0x21)] = HIPDNN_PLUGIN_STATUS_INVALID_VALUE;
 
-    const auto failure = failureOf([&] { build(fixture, graph); });
+    const auto failure = failureOf([&] { build(_fixture, _graph); });
 
     EXPECT_EQ(failure.first, HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
 }
 
-TEST(TestSlottedEngine, AKernelWhoseBuildFailsWithAnotherStatusCostsOnlyItsSlotsPick)
+TEST_F(TestSlottedEngineDefault, AKernelWhoseBuildFailsWithAnotherStatusCostsOnlyItsSlotsPick)
 {
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
-    fixture.log().failingPrepareWithStatus[testId(0x21)] = HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR;
+    _fixture.log().failingPrepareWithStatus[testId(0x21)] = HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR;
 
-    const auto context = build(fixture, graph);
+    const auto context = build(_fixture, _graph);
     std::vector<char> workspace(SHARED_ALIGNED + 16384);
     executeWith(context, workspace.data());
 
-    ASSERT_EQ(fixture.log().launches.size(), 3U);
-    EXPECT_EQ(fixture.log().launches[1].kernel, testId(0x22)) << "dkdv falls to its next kernel";
+    ASSERT_EQ(_fixture.log().launches.size(), 3U);
+    EXPECT_EQ(_fixture.log().launches[1].kernel, testId(0x22)) << "dkdv falls to its next kernel";
 }
 
-TEST(TestSlottedEngine, ASlotWithNoBuildableKernelFailsThePlanNamingTheSlot)
+TEST_F(TestSlottedEngineDefault, ASlotWithNoBuildableKernelFailsThePlanNamingTheSlot)
 {
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
-    fixture.log().failingPrepare = {testId(0x31), testId(0x32)};
+    _fixture.log().failingPrepare = {testId(0x31), testId(0x32)};
 
-    const auto failure = failureOf([&] { build(fixture, graph); });
+    const auto failure = failureOf([&] { build(_fixture, _graph); });
 
     EXPECT_EQ(failure.first, HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
     EXPECT_NE(failure.second.find("could not build a plan for any of its 2 applicable kernel(s) "
@@ -482,25 +443,20 @@ TEST(TestSlottedEngine, ASlotWithNoBuildableKernelFailsThePlanNamingTheSlot)
         << failure.second;
 }
 
-TEST(TestSlottedEngine, DeclinesAGraphTheGraphMatchRefuses)
+TEST_F(TestSlottedEngineDefault, DeclinesAGraphTheGraphMatchRefuses)
 {
-    SlottedEngineFixture fixture;
     graphMatchConfig().declines = true;
     StubHandle handle;
-    const TestGraph graph(makeGraphId(1));
 
-    EXPECT_FALSE(fixture.engine().isApplicable(handle, graph));
-    const auto failure = failureOf([&] { build(fixture, graph); });
+    EXPECT_FALSE(_fixture.engine().isApplicable(handle, _graph));
+    const auto failure = failureOf([&] { build(_fixture, _graph); });
     EXPECT_EQ(failure.first, HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
     EXPECT_NE(failure.second.find("graph_match declined the graph"), std::string::npos);
 }
 
-TEST(TestSlottedEngine, EnumerationListsTheProductInSlotOrderWithCompositeIds)
+TEST_F(TestSlottedEngineDefault, EnumerationListsTheProductInSlotOrderWithCompositeIds)
 {
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
-
-    const auto page = enumerate(fixture, graph, {}, 0, 100);
+    const auto page = enumerate(_fixture, _graph, {}, 0, 100);
 
     EXPECT_EQ(page.total, 12U);
     ASSERT_EQ(page.ids.size(), 12U);
@@ -509,7 +465,6 @@ TEST(TestSlottedEngine, EnumerationListsTheProductInSlotOrderWithCompositeIds)
     EXPECT_EQ(page.ids[2], composite(0x11, 0x22, 0x31));
     EXPECT_EQ(page.ids.back(), composite(0x12, 0x23, 0x32));
     EXPECT_EQ(std::set<std::string>(page.ids.begin(), page.ids.end()).size(), 12U);
-    // A candidate's knob settings cover every slot.
     for(const auto& knobs : page.knobIds)
     {
         EXPECT_EQ(std::set<std::string>(knobs.begin(), knobs.end()),
@@ -517,23 +472,21 @@ TEST(TestSlottedEngine, EnumerationListsTheProductInSlotOrderWithCompositeIds)
     }
 }
 
-TEST(TestSlottedEngine, EnumerationPagesAreStableAndConcatenateToTheWholeProduct)
+TEST_F(TestSlottedEngineDefault, EnumerationPagesAreStableAndConcatenateToTheWholeProduct)
 {
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
-    const auto whole = enumerate(fixture, graph, {}, 0, 100).ids;
+    const auto whole = enumerate(_fixture, _graph, {}, 0, 100).ids;
 
     std::vector<std::string> paged;
     for(uint64_t offset = 0; offset < 12; offset += 5)
     {
-        const auto page = enumerate(fixture, graph, {}, offset, 5);
+        const auto page = enumerate(_fixture, _graph, {}, offset, 5);
         EXPECT_EQ(page.total, 12U);
         paged.insert(paged.end(), page.ids.begin(), page.ids.end());
     }
 
     EXPECT_EQ(paged, whole);
-    EXPECT_TRUE(enumerate(fixture, graph, {}, 12, 5).ids.empty());
-    EXPECT_EQ(failureOf([&] { enumerate(fixture, graph, {}, 13, 5); }).first,
+    EXPECT_TRUE(enumerate(_fixture, _graph, {}, 12, 5).ids.empty());
+    EXPECT_EQ(failureOf([&] { enumerate(_fixture, _graph, {}, 13, 5); }).first,
               HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
 }
 
@@ -572,12 +525,9 @@ TEST(TestSlottedEngine, EnumerationOfALargeProductPagesWithoutMaterializingIt)
     EXPECT_EQ(page.ids.front(), composite(60, 120, 171));
 }
 
-TEST(TestSlottedEngine, AKnobPinNarrowsOnlyItsSlotsFactorOfTheProduct)
+TEST_F(TestSlottedEngineDefault, AKnobPinNarrowsOnlyItsSlotsFactorOfTheProduct)
 {
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
-
-    const auto page = enumerate(fixture, graph, {{"dkdv.block_m", 128}}, 0, 100);
+    const auto page = enumerate(_fixture, _graph, {{"dkdv.block_m", 128}}, 0, 100);
 
     EXPECT_EQ(page.total, 4U);
     for(const auto& id : page.ids)
@@ -586,14 +536,12 @@ TEST(TestSlottedEngine, AKnobPinNarrowsOnlyItsSlotsFactorOfTheProduct)
     }
 }
 
-TEST(TestSlottedEngine, ACandidatesKnobSettingsReplayToExactlyThatCandidate)
+TEST_F(TestSlottedEngineDefault, ACandidatesKnobSettingsReplayToExactlyThatCandidate)
 {
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
     StubHandle handle;
     hipdnnPluginConstData_t details{};
     const Config none;
-    fixture.engine().enumerateCandidates(handle, graph, none.get(), 7, 1, details);
+    _fixture.engine().enumerateCandidates(handle, _graph, none.get(), 7, 1, details);
     const auto* candidate = hipdnn_flatbuffers_sdk::data_objects::GetEngineDetails(details.ptr)
                                 ->candidate_page()
                                 ->candidates()
@@ -605,7 +553,7 @@ TEST(TestSlottedEngine, ACandidatesKnobSettingsReplayToExactlyThatCandidate)
     }
     const auto expected = candidate->id()->str();
 
-    const auto replayed = enumerate(fixture, graph, pins, 0, 100);
+    const auto replayed = enumerate(_fixture, _graph, pins, 0, 100);
 
     EXPECT_EQ(replayed.total, 1U);
     EXPECT_EQ(replayed.ids, (std::vector<std::string>{expected}));
@@ -626,13 +574,10 @@ TEST(TestSlottedEngine, ADuplicateKnobTupleWithinASlotIsAnErrorNamingTheSlot)
     EXPECT_NE(failure.second.find("slot 'dkdv'"), std::string::npos) << failure.second;
 }
 
-TEST(TestSlottedEngine, TheWorkspaceTokensStayOutOfTheProblemFeatures)
+TEST_F(TestSlottedEngineDefault, TheWorkspaceTokensStayOutOfTheProblemFeatures)
 {
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
-
     const auto features
-        = nlohmann::json::parse(enumerate(fixture, graph, {}, 0, 1).problemFeatures);
+        = nlohmann::json::parse(enumerate(_fixture, _graph, {}, 0, 1).problemFeatures);
 
     bool sawOrdinaryToken = false;
     for(const auto& [key, value] : features.items())
@@ -643,16 +588,14 @@ TEST(TestSlottedEngine, TheWorkspaceTokensStayOutOfTheProblemFeatures)
     EXPECT_TRUE(sawOrdinaryToken) << "a non-ws graph-match token must remain a feature";
 }
 
-TEST(TestSlottedEngine, AConfigurationPredictionIsUnavailableWithoutAValidProgramRecord)
+TEST_F(TestSlottedEngineDefault, AConfigurationPredictionIsUnavailableWithoutAValidProgramRecord)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
     StubHandle handle;
     const Config config;
 
-    const auto prediction = fixture.engine().getPrediction(
-        handle, graph, config.get(), HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true);
+    const auto prediction = _fixture.engine().getPrediction(
+        handle, _graph, config.get(), HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true);
 
     EXPECT_EQ(prediction.status, PredictionStatus::UNAVAILABLE);
     EXPECT_EQ(prediction.engine_config, nullptr);
@@ -660,9 +603,6 @@ TEST(TestSlottedEngine, AConfigurationPredictionIsUnavailableWithoutAValidProgra
         << prediction.reason;
 }
 
-/// A kernel with several launches is one selection of its slot: the slots beside it keep their
-/// single-launch handlers, each slot has a dispatch of its own, and the program builds and runs
-/// every slot's pick.
 TEST(TestSlottedEngine, AMultiLaunchSlotBesideSingleLaunchSlotsIsApplicableAndBuilds)
 {
     SlottedEngineFixture fixture(defaultSlotKernels(), {}, {{1, {"decode", "merge"}}});

@@ -231,11 +231,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         add_dependencies(hip_kernel_provider_tests hkp_packaging_multi_launch)
     endif()
 
-    # The packed-load test also reads the slotted fixtures' shards (RFC 0021), which sit
-    # beside the unit tree rather than inside it. The two fixed-arch roots (slotted_hsaco
-    # for gfx950, slotted_multi_launch for gfx1151) pack only in a build that selects their
-    # arch; the test decides from the staged shards, so no define here follows GPU_TARGETS.
-    # The multi-launch root is rocKE content, and rocKE is the only thing the test is told.
+    # The packed-load test also reads the slotted fixtures' shards (RFC 0021), beside the
+    # unit tree. The fixed-arch roots pack only for their arch (_hkp_wire_fixed_arch_root);
+    # the test decides from the staged shards, so no define follows GPU_TARGETS. rocKE is
+    # the only thing it is told.
     foreach(_hkp_slotted hkp_packaging_slotted hkp_packaging_slotted_hsaco
                          hkp_packaging_slotted_multi_launch)
         if(TARGET ${_hkp_slotted})

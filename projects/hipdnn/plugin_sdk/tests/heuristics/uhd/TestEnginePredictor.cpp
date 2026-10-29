@@ -392,8 +392,7 @@ TEST_F(TestEnginePredictor, AModelTrainedOnOtherFeatureSemanticsIsUnavailable)
     EXPECT_EQ(scorerCalls, 0U);
 }
 
-/// A slotted engine's model records `kmds` in a 1.1 document (RFC 0021 §9); the engine role
-/// must estimate from it rather than refusing the provenance form.
+/// RFC 0021 §9: a slotted engine's model records `kmds` in a 1.1 document.
 TEST_F(TestEnginePredictor, AModelNamingEverySlotsKmdIsEstimatedAndAMalformedOneIsNot)
 {
     auto slotted = document();
@@ -408,8 +407,7 @@ TEST_F(TestEnginePredictor, AModelNamingEverySlotsKmdIsEstimatedAndAMalformedOne
     ASSERT_EQ(result.status, PredictionStatus::AVAILABLE) << result.reason;
     EXPECT_NEAR(result.value, 42.0, 1e-12);
 
-    // A config that bypassed the parser is judged by the same slot rules: a repeated slot is
-    // refused, and no estimate is produced.
+    // A config that bypassed the parser is judged by the same slot rules.
     scorerCalls = 0;
     cfg.trainedAgainst["kmds"].push_back(cfg.trainedAgainst["kmds"][0]);
     const auto refused = predict(cfg);

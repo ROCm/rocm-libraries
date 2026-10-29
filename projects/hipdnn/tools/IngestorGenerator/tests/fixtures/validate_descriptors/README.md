@@ -127,14 +127,11 @@ the engine. In `model_checks` a slot ranker carries a `slot` key, spelled `<role
 the expected verdicts below and in the CTest roleFixture list (for example
 `sort_kernel_catalog@dq`).
 
-`slotted_multi_launch/` is a standalone slotted bundle (engine
-`hipkernel:ValidateFixtureSlottedMultiLaunch`): a single-launch `prep` slot and a `dkdv`
-slot whose kernels carry a kpack `sources` map with the launches `decode` and `merge`, each
-slot with its own KMD, UDD and KDP and no UHD. Expected: exit 0 with the engine loaded
-(`hipdnn_validate_descriptors_slotted_multi_launch`); it needs no compiler. A validator that
-walked only `set.packs` or shared one dispatch stub between the slots would drop the engine.
+`slotted_multi_launch/` overlays `dkdv.kdp.json` (a kpack `sources` map, launches `decode` and
+`merge`) on `slotted_valid/`. Expected: exit 0 with the engine loaded; a validator that harvested
+only `set.packs` or shared one dispatch stub between the slots would drop it.
 
-Every other `slotted_*` directory holds only the file that changes: an overlay, or for
+Every `slotted_*` directory but `slotted_valid/` holds only the file that changes: an overlay, or for
 `slotted_feature_samples_ws/` the `feature_samples.json` the case validates `slotted_valid/`
 against. The CTest driver copies `slotted_valid/` into the build tree, lays an overlay file
 over the copy and validates the copy (`-DHIPDNN_VALIDATE_DESCRIPTORS_OVERLAY`). The

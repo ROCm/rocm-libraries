@@ -41,13 +41,7 @@ from .features import (
     require_admissible_kernel_axes,
     signature_references,
 )
-from .dataset.training_table import (
-    SLOT_REFERENCE,
-    WORKSPACE_PREFIX,
-    best_per_shape,
-    slot_kernels,
-    slot_training_rows,
-)
+from .dataset.training_table import best_per_shape, slot_training_rows
 from .knobs import graph_bound_twins
 from .provenance import ROLES, descriptor_id, snapshot_provenance
 from .immediate import (
@@ -521,11 +515,6 @@ def slot_view(measured: dict, slot: str, provenance: dict) -> dict:
             source: slot_training_rows(rows, slot)
             for source, rows in measured["rows"].items()
         },
-        "published": {
-            name
-            for name in measured["published"]
-            if not name.startswith(WORKSPACE_PREFIX)
-        },
         "kernel_fields": {
             named for name in measured["kernel_fields"] if (named := field(name))
         },
@@ -855,10 +844,6 @@ def collect_graph(
     published = set(_feature_map(first, "problem_features")) | set(
         _feature_map(first, "device_features")
     )
-    if slot_kernels(candidates[0]["id"]):
-        published = {
-            name for name in published if not name.startswith(WORKSPACE_PREFIX)
-        }
     # A crashing kernel loses the whole graph's rows; one that fails to build or run is
     # reported as an unsucceeded result and still reaches the corpus.
     results = measured.get("results")
@@ -934,26 +919,11 @@ def collect_graph(
             # §13.2: suppressed here, where the row is built, so every consumer sees it
             # suppressed; otherwise a wrong-but-fast kernel becomes the label.
             suppress_timings(row)
-        slotted = bool(slot_kernels(candidate["id"]))
-        if slotted:
-            # RFC 0021 §6: the marker says whose training row this is, and workspace tokens
-            # (which the engine already withholds) are never a training feature.
-            row[SLOT_REFERENCE] = result.get(SLOT_REFERENCE)
-            if not isinstance(row[SLOT_REFERENCE], str):
-                raise ValueError(
-                    "a slotted sweep's result must carry the benchmark's slot_reference marker"
-                )
         for mapping in (
             first["problem_features"],
             first["device_features"],
             candidate["kernel_features"],
         ):
-            if slotted:
-                mapping = {
-                    name: value
-                    for name, value in mapping.items()
-                    if not name.startswith(WORKSPACE_PREFIX)
-                }
             collision = set(row) & set(mapping)
             if collision:
                 raise ValueError(

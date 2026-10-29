@@ -7,8 +7,6 @@
 
 #include <gtest/gtest.h>
 
-/// Skips the calling test unless the current device can wait on a stream value, the primitive
-/// the stall gate arms with.
 #define SKIP_UNLESS_STREAM_WAIT_VALUE()                                          \
     do                                                                           \
     {                                                                            \
@@ -122,7 +120,6 @@ extern "C" [[gnu::used]] inline hipError_t
 }
 // NOLINTEND(readability-identifier-naming, bugprone-reserved-identifier)
 
-/// Arms the fault seam for each test on a device, and disarms it after.
 class StreamWaitFaultsFixture : public ::testing::Test
 {
 protected:

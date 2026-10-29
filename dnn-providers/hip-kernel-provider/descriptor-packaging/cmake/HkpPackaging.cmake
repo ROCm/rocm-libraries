@@ -1807,54 +1807,46 @@ function(hkp_add_packaging)
         PACK_JOBS 1
         ${_root_args})
 
-    # The slotted fixture of the pytest suite (RFC 0021), packed once more so that
-    # the packed-load test reads the packer's real output for a slotted engine. It is a
-    # sibling of the unit and integration trees, not a subtree of one: the unit tree is
-    # walked by hkp_verify_embedded_sources(), and the fixture's embedded sources name
-    # no kernel any binary registers. The wildcard arch packs it for every selected arch.
+    # Shared by the three slotted roots; _root_args stays last (EXCLUDE_FOLDERS).
+    set(_slotted_args
+        HIPCC "${HKP_HIPCC}"
+        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
+        PACK_JOBS 1
+        ${_root_args})
+
+    # The slotted fixture of the pytest suite (RFC 0021). A sibling of the unit and
+    # integration trees, not a subtree: hkp_verify_embedded_sources() walks the unit tree
+    # and the fixture's embedded sources name no kernel any binary registers. The wildcard
+    # arch packs it for every selected arch.
     _hkp_wire_root(
         NAME slotted
         SOURCE_ROOT "${HKP_FIXTURES}/${HIPKERNELPROVIDER_TEST_SET_SLOTTED}"
         ARCHES "${_arches}"
-        HIPCC "${HKP_HIPCC}"
-        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
         OUT_ROOT "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_SLOTTED}"
-        PACK_JOBS 1
-        ${_root_args})
+        ${_slotted_args})
 
     # The consumer-shaped slotted fixture: authored hsaco slots, `dq` with a second
-    # symbol of its object named by a KMD field and a generic-target pack. Its gfx950
-    # shard is device-specific, so the root packs for gfx950 only when the build selects
-    # it and is dormant otherwise; a lone generic `dq` must not ship to another arch. The
-    # packed-load test decides from the shards present, and the `slotted-hsaco-gfx950`
-    # packaging probe covers a build that does not select gfx950. hsaco runs no compiler,
-    # so rocKE state does not gate it.
+    # symbol of its object named by a KMD field and a generic-target pack. gfx950 only
+    # (see _hkp_wire_fixed_arch_root): a lone generic `dq` must not ship to another arch.
+    # hsaco runs no compiler, so rocKE state does not gate it.
     _hkp_wire_fixed_arch_root(
         NAME slotted_hsaco
         ARCH gfx950
         SELECTED "${_arches}"
         SOURCE_ROOT "${HKP_FIXTURES}/${HIPKERNELPROVIDER_TEST_SET_SLOTTED_HSACO}"
-        HIPCC "${HKP_HIPCC}"
-        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
         OUT_ROOT "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_SLOTTED_HSACO}"
-        PACK_JOBS 1
-        ${_root_args})
+        ${_slotted_args})
 
     # The slotted multi-launch fixture: every slot is rocKE (develop's gfx1151 decode
-    # builders), so it packs only with rocKE on, and for gfx1151 only when the build
-    # selects it. Absent otherwise, with its tests; the `slotted-multi-launch-gfx1151`
-    # packaging probe covers a build that does not select gfx1151.
+    # builders), so it needs rocKE on, and gfx1151 selected (_hkp_wire_fixed_arch_root).
     if(HIPKERNELPROVIDER_ENABLE_ROCKE)
         _hkp_wire_fixed_arch_root(
             NAME slotted_multi_launch
             ARCH gfx1151
             SELECTED "${_arches}"
             SOURCE_ROOT "${HKP_FIXTURES}/${HIPKERNELPROVIDER_TEST_SET_SLOTTED_MULTI_LAUNCH}"
-            HIPCC "${HKP_HIPCC}"
-            ROCM_KPACK_DIR "${_rocm_kpack_dir}"
             OUT_ROOT "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_SLOTTED_MULTI_LAUNCH}"
-            PACK_JOBS 1
-            ${_root_args})
+            ${_slotted_args})
     endif()
 
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}")

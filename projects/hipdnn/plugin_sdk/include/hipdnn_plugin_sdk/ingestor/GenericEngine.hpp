@@ -35,7 +35,10 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// The first of @p knobs that @p fields does not declare, or nullptr.
+/// The first of @p knobs that @p fields does not declare, or nullptr. RFC 0017
+/// §4 treats an undeclared knob as a load error, since the field supplies its type,
+/// default, and legal values. Shared with the descriptor loader so a bad engine is
+/// rejected while reading it, before its id is ever advertised.
 inline const std::string* findUndeclaredKnob(const std::vector<std::string>& knobs,
                                              const std::vector<MetadataField>& fields)
 {
@@ -53,21 +56,11 @@ inline const std::string* findUndeclaredKnob(const std::vector<std::string>& kno
     return nullptr;
 }
 
-/// The first knob @p engine exposes that @p fields does not declare, or nullptr. RFC 0017
-/// §4 treats an undeclared knob as a load error, since the field supplies its type,
-/// default, and legal values. Shared with the descriptor loader so a bad engine is
-/// rejected while reading it, before its id is ever advertised.
+/// The first knob @p engine exposes that @p fields does not declare, or nullptr.
 inline const std::string* findUndeclaredKnob(const EngineDescriptor& engine,
                                              const std::vector<MetadataField>& fields)
 {
     return findUndeclaredKnob(engine.knobs, fields);
-}
-
-/// The per-slot form (RFC 0021 §8): a slot's knobs are checked against that slot's KMD.
-inline const std::string* findUndeclaredKnob(const SlotDescriptor& slot,
-                                             const std::vector<MetadataField>& fields)
-{
-    return findUndeclaredKnob(slot.knobs, fields);
 }
 
 /// One hipDNN engine, defined entirely by a UED and the packs naming it. The
@@ -100,29 +93,34 @@ public:
                                                      : std::move(selectorRevision))
         , _provenance(std::move(provenance))
     {
-        if(!_stateManager->isSlotted())
-        {
-            if(const auto* undeclared
-               = findUndeclaredKnob(_engine, _stateManager->metadataSchema().fields))
+        const auto check = [](const std::string& label,
+                              const std::vector<std::string>& knobs,
+                              const std::vector<MetadataField>& fields) {
+            if(const auto* undeclared = findUndeclaredKnob(knobs, fields))
             {
-                throw std::invalid_argument("engine '" + _engine.name + "' exposes knob '"
-                                            + *undeclared
+                throw std::invalid_argument(label + " exposes knob '" + *undeclared
                                             + "', which its metadata schema does not declare");
             }
+        };
+        const auto engineLabel = "engine '" + _engine.name + "'";
+        if(!_stateManager->isSlotted())
+        {
+            check(engineLabel, _engine.knobs, _stateManager->metadataSchema().fields);
         }
         else
         {
             // RFC 0021 §8: each slot's knobs name fields of that slot's own KMD.
             for(const auto& slot : _engine.slots)
             {
-                const auto slotIndex = slotIndexOf(slot.name);
-                if(const auto* undeclared
-                   = findUndeclaredKnob(slot, _stateManager->slotSchema(slotIndex).fields))
+                const auto index = _stateManager->slotIndex(slot.name);
+                if(!index.has_value())
                 {
-                    throw std::invalid_argument("engine '" + _engine.name + "' slot '" + slot.name
-                                                + "' exposes knob '" + *undeclared
-                                                + "', which its metadata schema does not declare");
+                    throw std::invalid_argument(engineLabel + " declares slot '" + slot.name
+                                                + "', which its state manager does not hold");
                 }
+                check(engineLabel + " slot '" + slot.name + "'",
+                      slot.knobs,
+                      _stateManager->slotSchema(*index).fields);
             }
         }
         // RFC 0019 §3.1: the UED role map is this engine's L1 binding, keyed by each UHD's metric.
@@ -368,21 +366,6 @@ public:
     }
 
 private:
-    /// The state manager's index of the slot @p name.
-    /// @throws std::invalid_argument the state manager holds no slot of that name.
-    size_t slotIndexOf(const std::string& name) const
-    {
-        for(size_t i = 0; i < _stateManager->slotCount(); ++i)
-        {
-            if(_stateManager->slotName(i) == name)
-            {
-                return i;
-            }
-        }
-        throw std::invalid_argument("engine '" + _engine.name + "' declares slot '" + name
-                                    + "', which its state manager does not hold");
-    }
-
     EngineDescriptor _engine;
     std::unique_ptr<KernelIngestorStateManager<THandle>> _stateManager;
     int64_t _id;
