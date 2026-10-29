@@ -852,21 +852,23 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   if (hardware.arch == hardware_t::architecture_t::gfx1250 && results.size() > 1) {
     constexpr double GFX1250_MEM_TIE_BAND = 0.02;
 
-    auto mem_bound = [&](const config_t& c) {
-      gemm::context_t ctx(problem, hardware, c);
+    // Not a re-sort: only the candidates within the band are looked at and at most one moves to
+    // the front, so the tie-break order above still holds for everything else.
+    auto mem_bound = [&](const config_t& c, const gemm::context_t& ctx) {
       return gemm::compute_memory_latency(problem, hardware, c, ctx) >
              static_cast<double>(gemm::compute_mt_compute_latency(problem, hardware, c));
     };
-    if (mem_bound(results.front().config)) {
+    const gemm::context_t front_ctx(problem, hardware, results.front().config);
+    if (mem_bound(results.front().config, front_ctx)) {
       const double limit = results.front().latency * (1.0 + GFX1250_MEM_TIE_BAND);
       size_t best        = 0;
-      size_t best_ts     = gemm::context_t(problem, hardware, results.front().config).num_timesteps;
+      size_t best_ts     = front_ctx.num_timesteps;
       for (size_t i = 1; i < results.size() && results[i].latency <= limit; ++i) {
-        const auto& c   = results[i].config;
-        const size_t ts = gemm::context_t(problem, hardware, c).num_timesteps;
-        if (ts > best_ts && mem_bound(c)) {
+        const auto& c = results[i].config;
+        const gemm::context_t ctx(problem, hardware, c);
+        if (ctx.num_timesteps > best_ts && mem_bound(c, ctx)) {
           best    = i;
-          best_ts = ts;
+          best_ts = ctx.num_timesteps;
         }
       }
       if (best > 0)
