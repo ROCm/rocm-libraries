@@ -705,6 +705,28 @@ Repeat the native lane in a clean
 relocated install without source directories or native caches available; a
 source-only pass cannot establish installed-artifact support.
 
+### 5.2 Single-arch tests: `arch_specific`
+
+A test that names one gfx target can hide a gap. The code under test may support more targets.
+Run such a test for each supported target. Use `subTest` or `pytest.mark.parametrize`.
+
+If the feature exists on a subset of targets only, mark the test with `arch_specific`.
+The decorator records the target list and the reason. It does not skip the test.
+
+```python
+from rocke.tests.arch_marks import arch_specific
+
+@arch_specific(("gfx950",), reason="mxfp6 A-scale layout exists on gfx950 only")
+def test_mxfp6_scale_thread_broadcast_across_k_blocks() -> None: ...
+```
+
+- **`archs`**: a non-empty list of names that `ArchTarget.from_gfx` accepts. A string raises `TypeError`.
+- **`reason`**: a non-empty sentence. A blank reason raises `ValueError`.
+- **Scope**: the decorator works on a function, a method, and a class. It works with `unittest` and `pytest`.
+- **Dependencies**: the helper imports no `torch`.
+
+The helper lives in `platform/python/rocke/tests/arch_marks.py`. Both `platform/tests` and `library/tests` import it as `rocke.tests.arch_marks`.
+
 ## 6. Invariants & contracts
 
 Cross-cutting properties every change must preserve:
