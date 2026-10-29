@@ -102,7 +102,8 @@ def test_occupancy_probe_emission():
 
     # A plain store; every branch goes to the one skip label.
     store = next(line for i, line in zip(items, lines) if isinstance(i, GlobalStoreB32))
-    assert store.startswith("global_store_dword ")
+    # Accept both mnemonics: older targets emit global_store_dword, newer (gfx950+) emit global_store_b32.
+    assert store.startswith("global_store_dword ") or store.startswith("global_store_b32 ")
     assert " sc0" not in store and " sc1" not in store and " nt" not in store
     labelName = next(i for i in items if isinstance(i, Label)).getLabelName()
     assert all(labelName in line for i, line in zip(items, lines)
