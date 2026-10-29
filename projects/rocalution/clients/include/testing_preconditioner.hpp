@@ -382,10 +382,14 @@ void testing_preconditioner_all(Arguments argus)
 template <typename T>
 void testing_itilu0_convergence_history(Arguments argus)
 {
+    // The host backend falls back to ILU0 and records no history
+    if(get_arch_rocalution() == "cpu")
+    {
+        GTEST_SKIP() << "ItILU0 records a convergence history only on the accelerator";
+    }
+
     LocalMatrix<T> matrix;
     getLaplacianTestMatrix<T>(argus, matrix);
-
-    // The host backend falls back to ILU0 and records no history
     matrix.MoveToAccelerator();
 
     const int maxiter = 30;
