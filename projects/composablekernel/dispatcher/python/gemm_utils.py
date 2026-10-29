@@ -476,6 +476,7 @@ class GemmKernelConfig:
             pipeline=self.pipeline,
             epilogue=self.epilogue,
             variant=self.variant,
+            reduction_strategy=self.reduction_strategy,
         )
         if reason:
             reason = (
@@ -2685,6 +2686,7 @@ def expand_sweep(
     mabd_cli_overrides: Optional[Dict[str, Any]] = None,
     vector_sizes: Optional[List[Tuple[int, int, int]]] = None,
     rejects: Optional[Dict[str, int]] = None,
+    reduction_strategies: Optional[List[str]] = None,
 ) -> List[GemmKernelConfig]:
     """Expand a Tile Engine GEMM JSON sweep config into GemmKernelConfig list.
 
@@ -2715,6 +2717,11 @@ def expand_sweep(
     only. Each base config is emitted once per distinct resolved triple; a
     triple that is illegal for the tile is dropped and its reason counted in
     ``rejects`` (when given).
+
+    ``reduction_strategies`` (Stream-K only) replaces the config's
+    ``streamk_config.reduction_strategy`` list. It must be applied here rather
+    than on the returned configs, because a fixed C width that is illegal for
+    the atomic strategy is legal for linear and tree.
     """
     # Multi-ABD is fp16-only end-to-end (codegen, ctypes lib, and GpuMultiABDRunner
     # all assume fp16). Reject other dtypes here -- before any codegen/build -- so
@@ -2776,7 +2783,9 @@ def expand_sweep(
     # variants keep a single dummy value so the product is unaffected.
     if variant == "stream_k":
         sk = cfg.get("streamk_config", {})
-        reductions = _expand_values(sk.get("reduction_strategy"), ["atomic"])
+        reductions = reduction_strategies or _expand_values(
+            sk.get("reduction_strategy"), ["atomic"]
+        )
     else:
         reductions = ["atomic"]
 
@@ -2916,6 +2925,11 @@ def expand_sweep(
         # 12. The previous "per-wave repeat must be a power of two" rule was too
         # broad and needlessly dropped 90 valid configs. The "default" epilogue
         # stores directly and is exempt.
+        # Match TileConfig.is_valid(): the K block must divide across all K waves.
+        if variant == "stream_k":
+            k_div = wk * wtk
+            if k_div <= 0 or tk < k_div or tk % k_div != 0:
+                continue
         m_div = wm * wtm
         n_div = wn * wtn
         if m_div <= 0 or n_div <= 0 or tm % m_div != 0 or tn % n_div != 0:
