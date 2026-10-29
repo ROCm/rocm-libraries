@@ -3736,7 +3736,7 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
 // enable.
 void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
-                                bool                   value)
+                                int32_t                value)
 {
     if(!gemmData)
         return;
@@ -3745,11 +3745,10 @@ void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
         auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
         if(data)
         {
-            const bool existing = data->problem.getParams().uniformSummationOrder();
-            data->problem.setParams().setUniformSummationOrder(existing || value);
+            data->problem.setParams().setUniformSummationOrder(value);
 
             // Kept in step for the same reason as the stream-K mode above.
-            data->tuningKey.uniformSummationOrder = existing || value;
+            data->tuningKey.uniformSummationOrder = value;
         }
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
@@ -3759,8 +3758,7 @@ void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
         {
             for(auto& g : data->problem.gemms)
             {
-                const bool existing = g.getParams().uniformSummationOrder();
-                g.setParams().setUniformSummationOrder(existing || value);
+                g.setParams().setUniformSummationOrder(value);
             }
         }
     }
@@ -6313,7 +6311,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 return rocblaslt_status_invalid_value;
             }
 
-            if(data->problem.getParams().uniformSummationOrder())
+            if(data->problem.getParams().uniformSummationOrder() == 1)
                 warnUniformSummationOrderBypass(__func__, tuning != nullptr);
 
             if(tuning)
@@ -6389,7 +6387,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             }
 
             if(!data->problem.gemms.empty()
-               && data->problem.gemms[0].getParams().uniformSummationOrder())
+               && data->problem.gemms[0].getParams().uniformSummationOrder() == 1)
                 warnUniformSummationOrderBypass(__func__, tuning != nullptr);
 
             if(tuning)
@@ -6996,7 +6994,7 @@ inline void reportNoSolutionFound(TensileLite::ContractionProblemGemm const& ten
 
     std::ostringstream msg;
     msg << "hipBLASLt-USO-NOSOLUTION"
-        << " uso=" << (tensile_prob.getParams().uniformSummationOrder() ? 1 : 0)
+        << " uso=" << (tensile_prob.getParams().uniformSummationOrder())
         << " op=" << tensile_prob.operationIdentifier() << " m=" << m << " n=" << n << " k=" << k
         << " batch=" << batch << " transA=" << (tensile_prob.transA() ? 1 : 0)
         << " transB=" << (tensile_prob.transB() ? 1 : 0)
@@ -7684,7 +7682,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         // is checked only at launch, which throws if it is missing). With USO
         // off, selection must not widen: problemPredicate && taskPredicate only.
         bool swMatch;
-        if(tensile_prob.getParams().uniformSummationOrder())
+        if(tensile_prob.getParams().uniformSummationOrder() == 1)
         {
             swMatch = TensileLite::softwarePredicate(TensileLite::SolutionLibrarySearchType::DEFAULT,
                                                      task,
@@ -7776,7 +7774,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             // setGroupedGemm(true) feeds the grouped-GEMM branch of
             // uniformSummationOrderSupported(), but it persists on the caller's
             // problem, so guard it to leave USO-off selection unchanged.
-            if(tensile_prob.gemms[i].getParams().uniformSummationOrder())
+            if(tensile_prob.gemms[i].getParams().uniformSummationOrder() == 1)
                 tensile_prob.gemms[i].setGroupedGemm(true);
             // set this flag for SW predicate
             tensile_prob.gemms[i].setParams().setFallbackStatus(isCUFallback);
@@ -7789,7 +7787,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             bool match = (*solution->hardwarePredicate)(*hardware);
             if(match)
             {
-                if(tensile_prob.gemms[i].getParams().uniformSummationOrder())
+                if(tensile_prob.gemms[i].getParams().uniformSummationOrder() == 1)
                     match = TensileLite::softwarePredicate(
                         TensileLite::SolutionLibrarySearchType::DEFAULT,
                         task,
@@ -8099,7 +8097,7 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
             // setGroupedGemm(true) feeds the grouped-GEMM branch of
             // uniformSummationOrderSupported(), but it persists on data->problem,
             // so guard it to leave USO-off selection unchanged.
-            if(data->problem.gemms[i].getParams().uniformSummationOrder())
+            if(data->problem.gemms[i].getParams().uniformSummationOrder() == 1)
                 data->problem.gemms[i].setGroupedGemm(true);
         }
 

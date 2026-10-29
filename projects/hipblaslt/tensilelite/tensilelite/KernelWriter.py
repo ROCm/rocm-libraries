@@ -8901,8 +8901,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           compColsB = kernel["MacroTile1"] // numComp
           segILWaveSpansCompB = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * kernel["VectorWidthB"] >= compColsB
           if wavesPerCompB == 1 and not segILWaveSpansCompB:
-            writeStride = kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
-            reachB = (numComp - 1) * writeStride + maxOffsetB // numComp
+            segOffsets = kernel["LDSSegInterleaveOffsets"]
+            readStride = segOffsets.get("readStrideBytesB", segOffsets["writeStrideBytes"])
+            reachB = (numComp - 1) * readStride + maxOffsetB // numComp
             maxOffsetB = max(maxOffsetB, reachB)
 
         numVgprMultiplierA = maxOffsetA // maxLDSConstOffset + 1
@@ -8912,6 +8913,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           numVgprMultiplierB = (maxOffsetB + maxLDSConstOffset - 1) // maxLDSConstOffset
         else:
           numVgprMultiplierB = maxOffsetB // maxLDSConstOffset + 1
+        readWindowsB = (kernel.get("LDSSegInterleaveOffsets") or {}).get("readAddressWindowsB")
+        if readWindowsB is not None:
+          assert maxLDSConstOffset == 65536 and readWindowsB[0] == 0
+          assert not kernel["ExpandPointerSwap"] and not kernel["LDSSegmentBRotate"]
+          numVgprMultiplierB = len(readWindowsB)
         numVgprMultiplierMXSA = maxOffsetMXSA // maxLDSConstOffset + 1
         numVgprMultiplierMXSB = maxOffsetMXSB // maxLDSConstOffset + 1
         numVgprMultiplierMetadata = maxOffsetMetadata // maxLDSConstOffset + 1
@@ -10148,9 +10154,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     self.defineSgpr("OrigLoopCounter", 1)
     if kernel.get("LDSSegmentBRotate"):
-      # B-rotate: per-wave LocalReadAddrB+1 - LocalReadAddrB+0 (pair 0: +64K, pair 1: 64K - 2*S).
+      # B-rotate: per-wave LocalReadAddrB+1 - LocalReadAddrB+0.
       # Defined here (not in defineVariableSgprs) because lraDeclareAddresses is emitted first.
       self.defineSgpr("BRotateLRDelta", 1)
+    if (kernel.get("LDSSegInterleaveOffsets") or {}).get("pairedBuffers"):
+      # A/B descriptors alias on separate waves; each wave keeps its own ping/pong mask.
+      self.defineSgpr("PairedTDMSwap", 1)
+      if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+        self.defineSgpr("PairedTDMScaleSwap", 1)
 
     # PostLoopStoreInNll: persistent "this tile fuses the store" predicate, precomputed
     # per-tile before the main loop (see computePostLoopFusedStore). It ANDs every
@@ -10620,7 +10631,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if self.states.lrvwTileMXSA > 1:
           if self.states.asmCaps["HasWMMA_V3"]:
             mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockA"]
-            numMXSA = numMXSA // int(tensorParametersA["MX"]["localReadInstruction"].blockWidth * 4 // mxUnit)
+            # Reads narrower than one MX unit give a ratio below 1, which the
+            # inner floor-divide truncates to 0 and then divides by. Keep the
+            # ratio fractional: such a read covers a fraction of a tile and
+            # needs proportionally more reads, not an error.
+            tilePerReadMXSA = tensorParametersA["MX"]["localReadInstruction"].blockWidth * 4 / mxUnit
+            numMXSA = int(numMXSA / tilePerReadMXSA)
           else:
             numMXSA = numMXSA // kernel["VectorWidthA"]
 
@@ -10658,7 +10674,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if self.states.lrvwTileMXSB > 1:
           if self.states.asmCaps["HasWMMA_V3"]:
             mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockB"]
-            numMXSB = numMXSB // int(tensorParametersB["MX"]["localReadInstruction"].blockWidth * 4 // mxUnit)
+            # Reads narrower than one MX unit give a ratio below 1, which the
+            # inner floor-divide truncates to 0 and then divides by. Keep the
+            # ratio fractional: such a read covers a fraction of a tile and
+            # needs proportionally more reads, not an error.
+            tilePerReadMXSB = tensorParametersB["MX"]["localReadInstruction"].blockWidth * 4 / mxUnit
+            numMXSB = int(numMXSB / tilePerReadMXSB)
           else:
             numMXSB = numMXSB // kernel["VectorWidthB"]
 
@@ -11097,6 +11118,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       swz = swizzleGeometry(kernel, cM)
       tP["swizzlePackK"]        = swz["packK"]
       tP["swizzleK"]            = swz["swizzleK"]
+      tP["swizzleLayoutK"]      = swz["layoutK"]
       tP["swizzleLaneSize"]     = swz["laneSize"]
       tP["swizzleLanesUsed"]    = swz["lanesUsed"]
       tP["swizzleLoadsPerLane"] = swz["loadsPerLane"]

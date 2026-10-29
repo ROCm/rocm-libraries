@@ -156,7 +156,7 @@ namespace TensileLite
                                    const MySolution& solution,
                                    const MyProblem&  problem)
     {
-        if(problem.getParams().uniformSummationOrder())
+        if(problem.getParams().uniformSummationOrder() != 0)
             return (*solution.hardwarePredicate)(hardware)
                    && softwarePredicate(
                        SolutionLibrarySearchType::DEFAULT, task, hardware, solution, problem);

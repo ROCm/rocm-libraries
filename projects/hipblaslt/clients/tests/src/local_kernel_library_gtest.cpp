@@ -11,13 +11,14 @@
 #include <thread>
 #include <vector>
 
-#include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/LocalKernelIndex.hpp>
 #include <Tensile/LocalKernelLibrary.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
+#include <Tensile/hip/HipHardware.hpp>
+#include <origami/hardware.hpp>
 
 using namespace TensileLite;
 
@@ -31,9 +32,30 @@ namespace
     constexpr size_t kN = 256;
     constexpr size_t kK = 64;
 
-    AMDGPU makeGpu()
+    // Selection reads analytical hardware through hip::HipAMDGPU. The XCD count
+    // is not a power of two, so a StreamK dynamic-queue kernel stays excluded.
+    hip::HipAMDGPU makeGpu()
     {
-        return AMDGPU(AMDGPU::Processor::gfx950, 256, "gfx950");
+        using arch_t = origami::hardware_t::architecture_t;
+        hip::HipAMDGPU device;
+        device.processor        = AMDGPU::Processor::gfx950;
+        device.computeUnitCount = 256;
+        device.deviceName       = "gfx950";
+        // Analytical hardware with values selected for test purposes.
+        device.analyticalHardware
+            = std::make_shared<origami::hardware_t>(arch_t::gfx950,
+                                                    /*N_CU=*/256,
+                                                    /*lds_capacity=*/163840,
+                                                    /*rf_capacity=*/262144,
+                                                    /*NUM_XCD=*/6,
+                                                    1.0,
+                                                    1.0,
+                                                    1.0,
+                                                    /*L2_capacity=*/4000000,
+                                                    /*compute_clock_ghz=*/1.2,
+                                                    /*parallel_mi_cu=*/1,
+                                                    std::make_tuple(0.0, 0.008, 0.0));
+        return device;
     }
 
     ContractionProblemGemm
@@ -496,8 +518,8 @@ TEST(LocalKernelLibrary, smoke_FindAllHonoursSearchType)
 }
 
 // The DEFAULT search applies the software predicate the shipped libraries do,
-// which drops StreamK dynamic-queue kernels where the XCD count is not known
-// to be a power of two. makeGpu() carries no XCD count.
+// which drops StreamK dynamic-queue kernels when the XCD count is not a power
+// of two. makeGpu() reports six XCDs.
 TEST(LocalKernelLibrary, smoke_FindAllAppliesSoftwarePredicate)
 {
     auto         problem = makeProblem();

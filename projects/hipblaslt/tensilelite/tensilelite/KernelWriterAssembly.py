@@ -93,7 +93,7 @@ from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCus
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, persistentSpatialCluster, plsinBlockSchedTile
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
-from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinBlockSchedTile, isMxf4SubtilePath
+from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinBlockSchedTile, isMxf4SubtilePath, isSubtileSwizzledTensor
 from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
 from .Common.DataType import DataType
 from .Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
@@ -5313,12 +5313,25 @@ class KernelWriterAssembly(KernelWriter):
                           strideF, comment="numLine * stride"))
                 if isMxSwizzledScaleLayout:
                   module.add(SAddU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr(stmp+0), src1=extra_bytes, comment="buffer_load limit for %s"%tc))
+                elif isPreShuffledAB:
+                  # numLine is measured in 16-row blocks.  Convert the logical
+                  # row stride to the physical block stride before adding the
+                  # final DepthU-wide block covered by this SRD.
+                  module.add(SMulI32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=swizzleSize0,
+                                     comment="numLine * stride * %u (row-block stride)"%swizzleSize0))
+                  module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=extra_bytes,
+                                     comment="+ swizzleBlock*DepthU/swizzleSize1"))
+                  module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]),
+                                               comment="buffer_load limit for %s (pre-shuffled, tile-boundary)"%tc))
                 else:
                   # (numLine * stride + DepthU) * bpe  -- mirrors scale path structure
                   module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=extra_bytes, comment="+ DepthU (one K step)"))
                   module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]), comment="buffer_load limit for %s (tile-boundary, avoids 32-bit overflow)"%tc))
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
                     strideF, comment="tlu=0, scaled tile-offset by stride"))
+          if isPreShuffledAB:
+            module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
+                      swizzleSize0, comment="pre-shuffled: scale by %u rows per block"%swizzleSize0))
         elif useFixedSrd2:
           # Unit-stride tile dim (TLU=1): the strided formula above cannot fire,
           # and without this Srd+2 stays 0 and every load returns 0.  Bound the
@@ -6013,8 +6026,14 @@ class KernelWriterAssembly(KernelWriter):
     if tP["isSwizzled"]:
       # "StrideA0I" or "StrideB1J"
       strideName = "Stride%s%s"%(tc,self.states.indexChars[tP["idx"]])
+      # On the subtile path the stride is the pre-shuffled 16-row block stride, so
+      # it has to follow the padding the host applied when it laid the tensor out,
+      # not the per-wave swizzleK block.  They differ whenever swizzleK > one
+      # operand -- 32 against 8 for gfx942 f16 -- so the classic path keeps
+      # swizzleK, which is the granularity its own host layout pads to.
+      alignK = tP["swizzleLayoutK"] if isSubtileSwizzledTensor(kernel) else tP["swizzleK"]
       module.addModuleAsFlatItems(self.setTo(strideName, "SizeL"))
-      module.addModuleAsFlatItems(self.alignTo(strideName, strideName, tP["swizzleK"]))
+      module.addModuleAsFlatItems(self.alignTo(strideName, strideName, alignK))
 
     if kernel["BufferLoad"]:
       # maxAddrSgpr = size[n] * stride[n-1]
@@ -6806,6 +6825,13 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VAddU32(dst=vgpr("LocalReadAddrB+1"), src0=sgpr("BRotateLRDelta"), src1=vgpr("LocalReadAddrB+0"), \
                          comment="B-rotate: other component"))
       return module
+    windows = (kernel.get("LDSSegInterleaveOffsets") or {}).get("readAddressWindows" + tc)
+    if windows is not None:
+      assert len(windows) == numLra and windows[0] == 0
+      for i, window in enumerate(windows[1:], 1):
+        module.add(VAddU32(dst=vgpr("LocalReadAddr%s+%u"%(tc,i)), src0=window * maxOff,
+                           src1=vgpr("LocalReadAddr%s"%tc), comment="Reachable LDS read window %u" % window))
+      return module
     for i in range(1, numLra):
       module.add(VAddU32(dst=vgpr("LocalReadAddr%s+%u"%(tc,i)), src0=(i * maxOff), \
         src1=vgpr("LocalReadAddr%s"%tc), comment="Final Offset Plus %uK"%((i * maxOff) / 1024)))
@@ -6833,10 +6859,12 @@ class KernelWriterAssembly(KernelWriter):
                            src0=hex(_ldsBase), src1=vgpr("LocalReadAddr%s+0"%tc),
                            comment=" += LdsOffset%s (lower)"%tc))
       if tc == "B" and kernel.get("LDSSegmentBRotate"):
-        # B-rotate: SIMD pair 1 (odd wave) reads B half h from component 1-h. LocalRead reaches
-        # half h through LocalReadAddrB+h with immediate (h*S + within) - h*64K, S = component
-        # stride. So pair p needs +0 = root + p*S and +1 = +0 + 64K - p*2S (the per-wave delta).
+        # B-rotate: SIMD pair 1 (odd wave) reads B half h from component 1-h.
+        # LocalRead uses logical stride R; the physical LDS component stride is S.
+        # Pair p needs +0 = root + p*S and +1 = +0 + S - (R % 64K) - p*2S.
         compStride = _segOff["writeStrideBytes"]
+        readStride = _segOff.get("readStrideBytesB", compStride)
+        baseDelta = compStride - readStride % self.states.regCaps["maxLDSConstOffset"]
         with self.allocTmpSgpr(1, tag="bRotatePair") as tmpSgprInfo:
           pairSgpr = sgpr(tmpSgprInfo.idx)
           module.add(VReadfirstlaneB32(dst=pairSgpr, src=vgpr("Serial"), comment="B-rotate: tId"))
@@ -6845,8 +6873,8 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SAndB32(dst=pairSgpr, src0=pairSgpr, src1=1, comment="B-rotate: pair = wave id & 1"))
           module.add(SMulI32(dst=sgpr("BRotateLRDelta"), src0=pairSgpr, src1=2 * compStride, \
                              comment="B-rotate: pair * 2S"))
-          module.add(SSubU32(dst=sgpr("BRotateLRDelta"), src0=self.states.regCaps["maxLDSConstOffset"], \
-                             src1=sgpr("BRotateLRDelta"), comment="B-rotate: delta = 64K - pair*2S"))
+          module.add(SSubU32(dst=sgpr("BRotateLRDelta"), src0=baseDelta, \
+                             src1=sgpr("BRotateLRDelta"), comment="B-rotate: component delta minus pair*2S"))
           module.add(SMulI32(dst=pairSgpr, src0=pairSgpr, src1=compStride, comment="B-rotate: pair * S"))
           module.add(VAddU32(dst=vgpr("LocalReadAddrB+0"), src0=pairSgpr, src1=vgpr("LocalReadAddrB+0"), \
                              comment="B-rotate: pair 1 reads the other component first"))
@@ -6875,6 +6903,8 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["StoreSwapAddr"]:
       _lrSwapBlk = self._decoupledSwapStride(kernel, tc) if self._dcpDivergent(kernel) \
                    else kernel["LdsOffsetA_Blk"]
+      if (kernel.get("LDSSegInterleaveOffsets") or {}).get("pairedBuffers"):
+        _lrSwapBlk = kernel["LDSSegInterleaveOffsets"]["bufferStride" + tc]
       module.add(VAddU32(dst=vgpr("LocalReadSwapAddr%s"%tc), src0=_lrSwapBlk, src1=vgpr("LocalReadAddr%s"%tc), \
                          comment="Calculate starting lds addr of second buffer" ))
       module.add(VXorB32(dst=vgpr("LocalReadSwapAddr%s"%tc), \
@@ -12995,6 +13025,13 @@ class KernelWriterAssembly(KernelWriter):
 
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     ldsAddrSgprName: str = comp.getLdsAddrSgprName(f"tdm{tc}Group0")
+
+    if (kernel.get("LDSSegInterleaveOffsets") or {}).get("pairedBuffers"):
+      module = Module("TDM LDS swap (paired buffers)")
+      swapMask = "PairedTDMScaleSwap" if tc.startswith("MXS") else "PairedTDMSwap"
+      module.add(SXorB32(sgpr(ldsAddrSgprName), sgpr(ldsAddrSgprName), sgpr(swapMask),
+                         "Swap the owning wave's paired TDM buffers"))
+      return module
 
     if self._dcpDivergent(kernel):
       return self._tdmSwapLdsOffsetDecoupled(kernel, tP, ldsAddrSgprName)
@@ -22379,8 +22416,14 @@ class KernelWriterAssembly(KernelWriter):
       else:
         mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr("WaveIdx"), dataBytes, f"woffset = WaveIdx * (mt // numWaves * du * bpe // dim1Divisor)"))
       if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
-        mod.add(SLShiftRightB32(sgpr(tmpPadSgprIdx), int(log2(ldsBlockSizePerPad)), sgpr(waveOffsetSgprIdx), \
+        if ldsBlockSizePerPad & (ldsBlockSizePerPad - 1) == 0:
+          mod.add(SLShiftRightB32(sgpr(tmpPadSgprIdx), int(log2(ldsBlockSizePerPad)), sgpr(waveOffsetSgprIdx), \
                 f"numPadBlocks = woffset >> log2({ldsBlockSizePerPad=})"))
+        else:
+          # Padding intervals can be non-powers of two (e.g. six rows).
+          with self.allocTmpSgpr(2, tag="tdmPaddingDivide") as divideTmp:
+            mod.add(scalarStaticDivideAndRemainder(
+                tmpPadSgprIdx, -1, waveOffsetSgprIdx, ldsBlockSizePerPad, divideTmp, 0))
         mod.add(SMulI32(sgpr(tmpPadSgprIdx), sgpr(tmpPadSgprIdx), ldsPadSize, \
                 f"padBytes = numPadBlocks * ({ldsPadSize=})"))
         mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(tmpPadSgprIdx), \
@@ -22519,8 +22562,14 @@ class KernelWriterAssembly(KernelWriter):
     # footprintPacked: writeStrideBytes is the post-pad footprint fA+fB; A/B tiles are packed
     # exactly, so the component jump must NOT be re-padded (tile-internal pad is set below).
     if ldsBlockSizePerPad != 0 and ldsPadSize != 0 and not _segFootprint:
-      mod.add(SLShiftRightB32(sgpr(tmpIdx), int(log2(ldsBlockSizePerPad)), sgpr(offsetIdx), \
+      if ldsBlockSizePerPad & (ldsBlockSizePerPad - 1) == 0:
+        mod.add(SLShiftRightB32(sgpr(tmpIdx), int(log2(ldsBlockSizePerPad)), sgpr(offsetIdx), \
               f"numPadBlocks = woffset >> log2({ldsBlockSizePerPad=})"))
+      else:
+        # Padding intervals can be non-powers of two (e.g. six rows).
+        with self.allocTmpSgpr(2, tag="tdmPaddingDivide") as divideTmp:
+          mod.add(scalarStaticDivideAndRemainder(
+              tmpIdx, -1, offsetIdx, ldsBlockSizePerPad, divideTmp, 0))
       mod.add(SMulI32(sgpr(tmpIdx), sgpr(tmpIdx), ldsPadSize, \
               f"padBytes = numPadBlocks * ({ldsPadSize=})"))
       mod.add(SAddU32(sgpr(offsetIdx), sgpr(offsetIdx), sgpr(tmpIdx), \
@@ -22615,6 +22664,13 @@ class KernelWriterAssembly(KernelWriter):
                                   ldsConstOffset, ldsBlockSizePerPad, ldsPadSize,
                                   waveOffsetSgprIdx, tmpPadSgprIdx))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
+      if (kernel.get("LDSSegInterleaveOffsets") or {}).get("pairedBuffers"):
+        # Each descriptor set has one per-wave mask; scales own a separate set.
+        swapMask = "PairedTDMScaleSwap" if isMX else "PairedTDMSwap"
+        mod.add(SAddU32(sgpr(swapMask), sgpr(waveOffsetSgprIdx),
+                         kernel["LDSSegInterleaveOffsets"]["bufferStride" + tc], "Paired TDM buffer base"))
+        mod.add(SXorB32(sgpr(swapMask), sgpr(swapMask), sgpr(waveOffsetSgprIdx),
+                         "Per-wave paired TDM buffer swap mask"))
 
     #TODO: refactor, currently special handling for FP4 along K-dim
     sizeShifter = 1 if dtype.isFloat4() else 0
