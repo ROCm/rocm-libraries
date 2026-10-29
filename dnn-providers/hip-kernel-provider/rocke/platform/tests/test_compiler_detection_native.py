@@ -250,7 +250,7 @@ def sdk_fixture(site, suffix="", text=None):
         "Metadata-Version: 2.1\nName: rocm-sdk-core\nVersion: 7.9.0rc1\n"
     )
     (metadata / "RECORD").write_text(
-        f"{library.relative_to(site).as_posix()},,\n" f"{core.name}/__init__.py,,\n"
+        f"{library.relative_to(site).as_posix()},,\n{core.name}/__init__.py,,\n"
     )
     return library
 
@@ -490,7 +490,9 @@ def test_build_sidecar_tracks_selected_sdk_site_after_parent_relocation(
 
 
 @pytest.mark.parametrize(
-    "provider_layout", [False, True], ids=["standalone", "provider"]
+    "provider_layout",
+    [False, True, "nested"],
+    ids=["standalone", "provider", "nested-provider"],
 )
 def test_cmake_build_sidecar_discovers_user_site_sdk(
     native_detector, tmp_path, provider_layout
@@ -544,15 +546,16 @@ def test_cmake_build_sidecar_discovers_user_site_sdk(
     library = sdk_fixture(site, "_7_9_nonce")
     build = tmp_path / "build"
     project = PLATFORM
+    output_root = build / "child" if provider_layout == "nested" else build
     if provider_layout:
         project = tmp_path / "umbrella"
         project.mkdir()
         (project / "CMakeLists.txt").write_text(
             "cmake_minimum_required(VERSION 3.16)\n"
             "project(provider_layout LANGUAGES CXX)\n"
-            'set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")\n'
-            'set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")\n'
-            'set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")\n'
+            f'set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "{output_root.as_posix()}/bin")\n'
+            f'set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "{output_root.as_posix()}/lib")\n'
+            f'set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "{output_root.as_posix()}/lib")\n'
             f'add_subdirectory("{PLATFORM.as_posix()}" provider/rocke/platform)\n'
         )
     # Exercise the production CMake call site: importing write_location directly
@@ -579,7 +582,7 @@ def test_cmake_build_sidecar_discovers_user_site_sdk(
     assert not Path(relative).is_absolute()
     assert (build / relative).resolve() == site.resolve()
     native = (
-        build / "lib" / native_detector.name
+        output_root / "lib" / native_detector.name
         if provider_layout
         else build / native_detector.name
     )
@@ -599,8 +602,8 @@ def test_cmake_build_sidecar_discovers_user_site_sdk(
     assert info["native"]["requested_comgr"] == str(library)
 
     if provider_layout:
-        binary = build / "bin" / "native-detector"
-        binary.parent.mkdir(exist_ok=True)
+        binary = output_root / "bin" / "native-detector"
+        binary.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(
             [
                 "c++",
@@ -966,3 +969,207 @@ def test_invalid_build_sidecar_does_not_load_compiler(
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def build_native_probe(native_detector, binary):
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [
+            "c++",
+            "-std=c++20",
+            "-x",
+            "c++",
+            "-",
+            "-x",
+            "none",
+            str(native_detector.parent / "librocke_core.a"),
+            "-ldl",
+            "-pthread",
+            "-o",
+            str(binary),
+        ],
+        input=(
+            "#include <cstdio>\n"
+            "namespace ckc { struct CompilerInfo { unsigned major,minor,patch;"
+            "const char *source,*requested,*comgr,*query; };"
+            "const CompilerInfo* candidate_compiler_info(); }\n"
+            'int main(){auto p=ckc::candidate_compiler_info();if(!p){std::puts("0\\n");return 0;}'
+            'std::printf("%u\\n%s\\n",p->major,p->requested);return 0;}\n'
+        ),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.mark.parametrize("local_sdk", [False, True])
+def test_native_discovery_stays_in_physical_prefix(
+    native_detector, tmp_path, local_sdk
+):
+    # Both decoys are RECORD-owned SDKs, so rejecting a bare planted .so cannot
+    # accidentally satisfy this boundary test.
+    sdk_fixture(tmp_path / "lib" / "python3.12" / "site-packages")
+    cwd = tmp_path / "unrelated"
+    sdk_fixture(cwd / "lib" / "python3.12" / "site-packages")
+    prefix = tmp_path / "owned-prefix"
+    site = prefix / "lib" / "python3.12" / "site-packages"
+    library = sdk_fixture(site) if local_sdk else None
+    binary = prefix / "bin" / "probe"
+    build_native_probe(native_detector, binary)
+    env = automatic_env(site)
+    env.pop("PYTHONPATH", None)
+    result = subprocess.run(
+        ["probe"],
+        executable=str(binary),
+        cwd=cwd,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.splitlines() == (
+        ["23", str(library)] if local_sdk else ["0", ""]
+    )
+
+
+def test_relative_loaded_module_ignores_changed_cwd(native_detector, tmp_path):
+    prefix = tmp_path / "owned-prefix"
+    site = prefix / "lib" / "python3.12" / "site-packages"
+    library = sdk_fixture(site)
+    native = prefix / "lib" / native_detector.name
+    shutil.copyfile(native_detector, native)
+    decoy = tmp_path / "unrelated"
+    sdk_fixture(decoy / "lib" / "python3.12" / "site-packages")
+    script = (
+        "import ctypes, os, sys\n"
+        "retained = ctypes.CDLL('lib/detector.so')\n"
+        "os.chdir(sys.argv[2])\n" + PROBE
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(native), str(decoy)],
+        cwd=prefix,
+        env=automatic_env(site),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    info = json.loads(result.stdout)
+    assert info["native"] == info["python"]
+    assert info["native"]["requested_comgr"] == str(library)
+
+
+def test_build_descriptor_uses_physical_symlink_base(
+    native_detector, tmp_path, monkeypatch
+):
+    generator = PLATFORM / "tools" / "gen_sdk_comgr_location.py"
+    if not generator.is_file():
+        pytest.skip("configure-time generator is absent from installed tests")
+    site = tmp_path / "physical" / "env" / "site-packages"
+    library = sdk_fixture(site)
+    build = tmp_path / "physical" / "build"
+    build.mkdir()
+    native = build / native_detector.name
+    shutil.copyfile(native_detector, native)
+    alias = tmp_path / "deeper" / "alias" / "build"
+    alias.parent.mkdir(parents=True)
+    alias.symlink_to(build, target_is_directory=True)
+    spec = importlib.util.spec_from_file_location("sdk_location_generator", generator)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(
+        module.metadata,
+        "distribution",
+        lambda name: SimpleNamespace(locate_file=lambda relative: site),
+    )
+    module.write_location(alias)
+    assert (build / "rocke_sdk_site.txt").read_text().splitlines() == [
+        "rocke-sdk-site-v1",
+        os.path.join("..", "env", "site-packages"),
+    ]
+    result = subprocess.run(
+        [sys.executable, "-c", PROBE, str(alias / native.name)],
+        cwd=tmp_path,
+        env=automatic_env(site),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    info = json.loads(result.stdout)
+    assert info["native"] == info["python"]
+    assert Path(info["native"]["requested_comgr"]).resolve() == library
+
+
+@pytest.mark.parametrize(
+    "selection", ["package", "provider", "environment", "relative-environment"]
+)
+def test_source_native_ctest_uses_effective_build_comgr(
+    native_detector, tmp_path, selection
+):
+    if not (PLATFORM / "CMakeLists.txt").is_file():
+        pytest.skip("production source CMake project is absent from installed tests")
+    # No SDK is installed for the configuring interpreter. A real native AUTO
+    # test therefore fails if its package/override default is not forwarded.
+    library = sdk_fixture(tmp_path / "compiler-site")
+    package = tmp_path / "comgr-config"
+    package.mkdir()
+    (package / "amd_comgr-config.cmake").write_text(
+        "add_library(amd_comgr SHARED IMPORTED)\n"
+        f'set_target_properties(amd_comgr PROPERTIES IMPORTED_LOCATION "{library.as_posix()}")\n',
+        encoding="utf-8",
+    )
+    build = tmp_path / "build"
+    env = automatic_env(tmp_path / "absent-site")
+    command = [
+        "cmake",
+        "-S",
+        str(PLATFORM),
+        "-B",
+        str(build),
+        "-DHIPKERNELPROVIDER_ENABLE_ROCKE=ON",
+        "-DBUILD_TESTING=ON",
+        "-DROCKE_INSTALL_TESTS=OFF",
+        "-DROCKE_BUILD_PYBIND=OFF",
+        f"-DPython3_EXECUTABLE={sys.executable}",
+        f"-Damd_comgr_DIR={package}",
+    ]
+    if selection == "provider":
+        command.append(f"-DHIPKERNELPROVIDER_ROCKE_COMGR_LIB={library}")
+    elif selection in ("environment", "relative-environment"):
+        env["ROCKE_COMGR_LIB"] = (
+            os.path.relpath(library)
+            if selection == "relative-environment"
+            else str(library)
+        )
+    subprocess.run(command, env=env, check=True, capture_output=True, text=True)
+    subprocess.run(
+        [
+            "cmake",
+            "--build",
+            str(build),
+            "--target",
+            "rocke_ir_serialize_roundtrip",
+            "-j",
+            "2",
+        ],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    env.pop("ROCKE_COMGR_LIB", None)
+    ctest = [
+        "ctest",
+        "--test-dir",
+        str(build),
+        "-R",
+        "^rocke_ir_serialize_roundtrip$",
+        "--output-on-failure",
+        "--no-tests=error",
+    ]
+    result = subprocess.run(ctest, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    # A caller's bad override is preserved and reaches native AUTO; silently
+    # replacing it with the valid build default would make this control pass.
+    env["ROCKE_COMGR_LIB"] = str(tmp_path / "missing-comgr.so")
+    result = subprocess.run(ctest, env=env, capture_output=True, text=True)
+    assert result.returncode != 0, result.stdout + result.stderr

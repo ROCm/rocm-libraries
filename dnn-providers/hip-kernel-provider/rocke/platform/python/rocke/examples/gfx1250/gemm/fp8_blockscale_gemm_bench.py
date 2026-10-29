@@ -72,7 +72,7 @@ def _build(arch, M, N, K, block_k):
 def main() -> int:
     from rocke.runtime.comgr import prefer_bundled_lib
 
-    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
+    prefer_bundled_lib()  # Query the selected compiler for informational release metadata.
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--m", type=int, default=4096)
     p.add_argument("--n", type=int, default=2048)

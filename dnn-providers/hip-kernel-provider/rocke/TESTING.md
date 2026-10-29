@@ -509,6 +509,11 @@ and selected library host/GPU suites. Test registration is authoritative in
 test-category YAML and TheRock's tier selection determine which registered
 tests actually execute. Check the selected list in the job log or with CTest's
 verbose listing. Registration alone does not establish CI coverage.
+The hipDNN source superbuild CI also runs build-tree CTest. With provider tests
+enabled, `rocke_compiler_discovery_source` runs the native discovery pytest file
+against the freshly built archive, including CMake descriptor tests that require
+source files absent from the installed test artifact.
+
 
 The wheel-based hipDNN superbuild lane installs the built platform wheel with
 its `sdk-core` extra before CTest. It uses the shared SDK dependency for COMGR

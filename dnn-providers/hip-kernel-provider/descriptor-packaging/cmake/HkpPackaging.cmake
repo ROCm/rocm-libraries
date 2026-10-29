@@ -6,6 +6,7 @@
 # hkp = Hip Kernel-provider Packaging.
 
 include_guard(GLOBAL)
+include("${CMAKE_CURRENT_LIST_DIR}/../../rocke/platform/cmake/RockeTestEnvironment.cmake")
 
 # Captured at include time so it survives into functions: inside a function
 # CMAKE_CURRENT_LIST_DIR reflects the invoking listfile, not this module.
@@ -722,49 +723,8 @@ endfunction()
 #   would not.
 # ---------------------------------------------------------------------------
 function(hkp_imported_library_location target out_path)
-    set(_derived "")
-    # A multi-config generator does not know the configuration at configure
-    # time, so CMAKE_BUILD_TYPE may be empty and the rest of the order decides.
-    # NOCONFIG is what an export() with no build type emits.
-    set(_preferred "")
-    if(CMAKE_BUILD_TYPE)
-        string(TOUPPER "${CMAKE_BUILD_TYPE}" _preferred)
-    endif()
-    list(APPEND _preferred RELEASE RELWITHDEBINFO MINSIZEREL DEBUG NOCONFIG)
-
-    # IN_LIST against a NOTFOUND property is a hard error, which is what the
-    # guard prevents.
-    get_target_property(_cfgs ${target} IMPORTED_CONFIGURATIONS)
-    if(_cfgs)
-        foreach(_cfg IN LISTS _preferred)
-            if(NOT _cfg IN_LIST _cfgs)
-                continue()
-            endif()
-            get_target_property(_loc ${target} IMPORTED_LOCATION_${_cfg})
-            if(_loc AND EXISTS "${_loc}")
-                set(_derived "${_loc}")
-                break()
-            endif()
-        endforeach()
-    endif()
-    # Nothing preferred resolved: any real library beats none.
-    if(NOT _derived AND _cfgs)
-        foreach(_cfg IN LISTS _cfgs)
-            get_target_property(_loc ${target} IMPORTED_LOCATION_${_cfg})
-            if(_loc AND EXISTS "${_loc}")
-                set(_derived "${_loc}")
-                break()
-            endif()
-        endforeach()
-    endif()
-    # A package that exports no configurations at all.
-    if(NOT _derived)
-        get_target_property(_loc ${target} IMPORTED_LOCATION)
-        if(_loc AND EXISTS "${_loc}")
-            set(_derived "${_loc}")
-        endif()
-    endif()
-    set(${out_path} "${_derived}" PARENT_SCOPE)
+    rocke_imported_library_location(${target} _location)
+    set(${out_path} "${_location}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -1818,11 +1778,8 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     if(rocm_kpack_dir)
         list(APPEND _pyenv "HIPKERNELPROVIDER_ROCM_KPACK_DIR=${rocm_kpack_dir}")
     endif()
-    # Forward the rocke comgr override so the comgr-dependent tier resolves the
-    # same library the pack step does.
-    if(rocke_comgr_lib)
-        list(APPEND _pyenv "ROCKE_COMGR_LIB=${rocke_comgr_lib}")
-    endif()
+    # Use the pack compiler by default, preserving a runtime caller override.
+    rocke_comgr_test_launcher(_comgr_test_launch "${rocke_comgr_lib}")
 
     execute_process(
         COMMAND "${Python3_EXECUTABLE}" -c "import pytest"
@@ -1842,13 +1799,13 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     endif()
 
     add_test(NAME hip-kernel-provider-hkp-pack-quick
-             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m quick -v
+             COMMAND ${_comgr_test_launch} "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m quick -v
                      ${_rocke_ignore})
     set_tests_properties(hip-kernel-provider-hkp-pack-quick PROPERTIES
         ENVIRONMENT "${_pyenv}")
 
     add_test(NAME hip-kernel-provider-hkp-pack
-             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m "not quick" -v
+             COMMAND ${_comgr_test_launch} "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m "not quick" -v
                      ${_rocke_ignore})
     set_tests_properties(hip-kernel-provider-hkp-pack PROPERTIES
         ENVIRONMENT "${_pyenv}")

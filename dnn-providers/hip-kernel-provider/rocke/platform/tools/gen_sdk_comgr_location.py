@@ -17,6 +17,7 @@ from pathlib import Path
 
 
 def write_location(build_root: Path) -> None:
+    build_root = build_root.resolve()
     try:
         site = Path(metadata.distribution("rocm-sdk-core").locate_file(""))
     except metadata.PackageNotFoundError:

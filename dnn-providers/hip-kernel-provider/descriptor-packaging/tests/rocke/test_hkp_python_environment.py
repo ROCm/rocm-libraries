@@ -290,7 +290,8 @@ def _configure_comgr_consumer(environment, *, sdk, package=True):
         "package-comgr.dll" if os.name == "nt" else "package-comgr.so"
     )
     shutil.copyfile(loadable, competing)
-    package_target = ""
+    # A no-package fixture must stay negative even on SDK-provisioned CI hosts.
+    package_target = "set(CMAKE_DISABLE_FIND_PACKAGE_amd_comgr TRUE)\n"
     if package:
         package_target = f"""add_library(amd_comgr SHARED IMPORTED)
 set_target_properties(amd_comgr PROPERTIES IMPORTED_LOCATION "{competing.as_posix()}")
@@ -366,7 +367,8 @@ def test_configure_and_pack_use_imported_comgr(build_environment, sdk, package):
     assert Path(result["comgr"]) == expected
     assert Path(result["env"]["ROCKE_COMGR_LIB"]) == expected
     tests = (env.build_dir / "CTestTestfile.cmake").read_text(encoding="utf-8")
-    assert tests.count(f"ROCKE_COMGR_LIB={expected.as_posix()}") == 2
+    assert tests.count(f'"--default-comgr" "{expected.as_posix()}"') == 2
+    assert "ROCKE_COMGR_LIB=" not in tests
 
 
 @pytest.mark.parametrize(
@@ -452,8 +454,8 @@ def test_configure_explicit_comgr_is_sole_candidate(build_environment, loadable,
     proc = env.configure(comgr_lib=explicit, success=loadable)
     if loadable:
         selection = (env.build_dir / "comgr-selection.txt").read_text(encoding="utf-8")
-        assert selection.splitlines()[0] == explicit.as_posix()
-        assert f"ROCKE_COMGR_LIB;{explicit.as_posix()}" in selection
+        assert Path(selection.splitlines()[0]) == explicit
+        assert Path(selection.split("ROCKE_COMGR_LIB;", 1)[1].strip()) == explicit
     else:
         diagnostic = " ".join((proc.stdout + proc.stderr).split())
         assert explicit.as_posix() in diagnostic
@@ -468,8 +470,8 @@ def test_configure_preserves_runtime_comgr_override(build_environment):
     env.env["ROCKE_COMGR_LIB"] = str(explicit)
     env.configure(comgr_lib="")
     selection = (env.build_dir / "comgr-selection.txt").read_text(encoding="utf-8")
-    assert selection.splitlines()[0] == explicit.as_posix()
-    assert f"ROCKE_COMGR_LIB;{explicit.as_posix()}" in selection
+    assert Path(selection.splitlines()[0]) == explicit
+    assert Path(selection.split("ROCKE_COMGR_LIB;", 1)[1].strip()) == explicit
 
 
 def test_pth_runtime_and_parent_inventory_preserved(tmp_path, build_environment):
@@ -646,3 +648,49 @@ def test_failed_refresh_clears_readiness_and_recovers(failure, build_environment
     env.build()
     _assert_wheels(env, "repaired")
     assert "removed_module" not in env.consumer()["modules"]
+
+
+@pytest.mark.parametrize(
+    "override", ["unset", "empty", "valid", "missing", "unloadable"]
+)
+def test_ctest_comgr_default_preserves_runtime_override(build_environment, override):
+    env = build_environment()
+    fixture_library = _configure_comgr_consumer(env, sdk=True)
+    default = next(env.source.glob("package-comgr.*"))
+    alternate = env.root / ("caller.dll" if os.name == "nt" else "caller.so")
+    if override == "valid":
+        shutil.copyfile(fixture_library, alternate)
+    elif override == "unloadable":
+        alternate.write_text("not a shared library", encoding="utf-8")
+    # Execute a small real resolver probe through the production CTest command.
+    # The fixture's pytest module needs no test dependencies or GPU toolchain.
+    (env.runtime / "pytest.py").write_text(
+        "import sys\n"
+        f"sys.path.insert(0, {str(env.source / 'rocke/platform/python')!r})\n"
+        "from rocke.runtime import comgr\n"
+        "print('COMGR_SELECTED=' + comgr._resolve_lib()._name)\n",
+        encoding="utf-8",
+    )
+    env.configure(comgr_lib="")
+    if override != "unset":
+        env.env["ROCKE_COMGR_LIB"] = "" if override == "empty" else str(alternate)
+    ctest = Path(env.cmake).with_name("ctest" + Path(env.cmake).suffix)
+    proc = env.run(
+        ctest,
+        "--test-dir",
+        env.build_dir,
+        "-R",
+        "hkp-pack-quick$",
+        "-V",
+        success=override not in ("missing", "unloadable"),
+    )
+    if override in ("missing", "unloadable"):
+        assert "1 candidate(s) failed" in proc.stdout + proc.stderr
+    else:
+        expected = alternate if override == "valid" else default
+        selected = next(
+            line.split("COMGR_SELECTED=", 1)[1]
+            for line in proc.stdout.splitlines()
+            if "COMGR_SELECTED=" in line
+        )
+        assert Path(selected) == expected

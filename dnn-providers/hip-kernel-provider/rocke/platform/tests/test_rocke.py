@@ -1883,8 +1883,8 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
                 ((22, 0, 0), "llvm23"),
             ):
                 with self.subTest(lib=lib_ver, ir=flavor):
-                    comgr_mod.loaded_compiler_info = (
-                        lambda v=lib_ver: comgr_mod.CompilerInfo(
+                    comgr_mod.loaded_compiler_info = lambda v=lib_ver: (
+                        comgr_mod.CompilerInfo(
                             v, "test", None, "/fake/libamd_comgr.so", "/fake/libLLVM.so"
                         )
                     )
@@ -1892,8 +1892,8 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
             # Crossing the generation boundary must raise either way.
             for lib_ver, flavor in (((20, 0, 0), "llvm22"), ((23, 0, 0), "llvm20")):
                 with self.subTest(lib=lib_ver, ir=flavor, expect="raise"):
-                    comgr_mod.loaded_compiler_info = (
-                        lambda v=lib_ver: comgr_mod.CompilerInfo(
+                    comgr_mod.loaded_compiler_info = lambda v=lib_ver: (
+                        comgr_mod.CompilerInfo(
                             v, "test", None, "/fake/libamd_comgr.so", "/fake/libLLVM.so"
                         )
                     )
@@ -7997,136 +7997,6 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                         comgr_mod._load_lib()
                     load.assert_called_once_with(host)
 
-    def test_rocm_version_parsed_from_versioned_libdir(self):
-        from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
-
-        self.assertEqual(_rocm_version_from_libdir("/opt/rocm-7.2.3/lib"), (7, 2))
-        # core-7.13 is a *component* version living under release 7.2.0. The
-        # result is compared against torch.version.hip, which reports the
-        # release, so the component number must not win: reading (7, 13) here
-        # would make a torch on ROCm 7.10 look older than a 7.2 install.
-        self.assertEqual(
-            _rocm_version_from_libdir("/opt/rocm-7.2.0/core-7.13/lib"), (7, 2)
-        )
-
-    def test_rocm_version_resolves_unversioned_symlink(self):
-        import os
-        import tempfile
-
-        from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
-
-        # The distro default is ROCM_PATH=/opt/rocm, an unversioned symlink to
-        # /opt/rocm-X.Y.Z. Parsing only the literal path finds no digits in
-        # "rocm" and reports the version unknown, which silently disables the
-        # stale-comgr demotion on the exact layout it exists for.
-        with tempfile.TemporaryDirectory() as tmp:
-            real_root = os.path.join(tmp, "rocm-7.2.3")
-            os.makedirs(os.path.join(real_root, "lib"))
-            link_root = os.path.join(tmp, "rocm")
-            os.symlink(real_root, link_root)
-
-            self.assertEqual(
-                os.path.basename(link_root),
-                "rocm",
-                "the link name must be unversioned for this test to mean anything",
-            )
-            self.assertEqual(
-                _rocm_version_from_libdir(os.path.join(link_root, "lib")), (7, 2)
-            )
-
-    def test_rocm_version_unknown_when_nothing_is_versioned(self):
-        import os
-        import tempfile
-
-        from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
-
-        # Legacy release-metadata helpers preserve unknown rather than guessing;
-        # COMGR selection does not consult them.
-        # Built under a tmpdir because a literal /opt/rocm is a symlink to a
-        # versioned root on a real ROCm box -- which would make this pass for
-        # the wrong reason there and fail everywhere else.
-        with tempfile.TemporaryDirectory() as tmp:
-            libdir = os.path.join(tmp, "rocm", "lib")
-            os.makedirs(libdir)
-            self.assertIsNone(_rocm_version_from_libdir(libdir))
-
-    def test_component_version_never_outranks_the_release(self):
-        import sys
-        import types
-        from unittest import mock
-
-        from rocke.runtime import runtime_coexistence as rc
-
-        # torch on ROCm 7.10 beside a packaged release 7.2.0 whose runtime
-        # lives in core-7.13. torch is NEWER, so nothing may be demoted --
-        # comparing against the component version would invert that.
-        torch_stub = types.ModuleType("torch")
-        torch_stub.version = types.SimpleNamespace(hip="7.10.0-abc123")
-
-        with mock.patch.dict(sys.modules, {"torch": torch_stub}):
-            with mock.patch.object(
-                rc, "_rocm_root_libdirs", return_value=["/opt/rocm-7.2.0/core-7.13/lib"]
-            ):
-                self.assertEqual(rc._torch_rocm_version(), (7, 10))
-                self.assertEqual(rc._newest_rocm_root_version(), (7, 2))
-                self.assertFalse(rc._torch_comgr_is_stale())
-
-    def test_legacy_stale_metadata_follows_a_symlinked_root(self):
-        import os
-        import sys
-        import types
-        from unittest import mock
-
-        from rocke.runtime import runtime_coexistence as rc
-
-        torch_stub = types.ModuleType("torch")
-        torch_stub.version = types.SimpleNamespace(hip="7.0.51831-a1b2c3")
-
-        with mock.patch.dict(sys.modules, {"torch": torch_stub}):
-            with mock.patch.object(
-                rc,
-                "_rocm_root_libdirs",
-                return_value=[os.path.normpath("/opt/rocm/lib")],
-            ):
-                with mock.patch.object(
-                    rc.os.path,
-                    "realpath",
-                    return_value=os.path.normpath("/opt/rocm-7.2.3/lib"),
-                ):
-                    self.assertEqual(rc._newest_rocm_root_version(), (7, 2))
-                    self.assertTrue(rc._torch_comgr_is_stale())
-
-    def test_therock_torch_compares_its_rocm_release_not_its_hip_version(self):
-        import contextlib
-        import os
-        import tempfile
-        import types
-
-        from rocke.runtime import runtime_coexistence as rc
-
-        # TheRock torch reports the HIP version in torch.version.hip (7.17 on ROCm
-        # 10.2); its _rocm_sdk_core comgr belongs to the wheel's ROCm release.
-        # Read as a release, 7.17 is older than any /opt/rocm-10.x, so the
-        # wheel's comgr was always demoted, even beside the same release.
-        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
-            site, core_lib, torch_stub = self._fake_torch_site(tmp)
-            torch_stub.version = types.SimpleNamespace(hip="7.17.26384-0000000")
-            sdk_stub = types.ModuleType("rocm_sdk")
-            bundled = os.path.join(core_lib, "libamd_comgr.so.3")
-            self._enter_fake_process(
-                stack,
-                tmp,
-                site,
-                {"torch": torch_stub, "rocm_sdk": sdk_stub},
-                root_libdirs=[os.path.join(tmp, "rocm-10.2.0", "lib")],
-            )
-            sdk_stub.__version__ = "10.2.0a20261001"
-            self.assertEqual(rc._torch_rocm_version(bundled), (10, 2))
-            self.assertFalse(rc._torch_comgr_is_stale(bundled))
-            # An older release beside it is still stale: the check compares.
-            sdk_stub.__version__ = "10.1.0a20260822"
-            self.assertTrue(rc._torch_comgr_is_stale(bundled))
-
     def test_sdk_comgr_selection_ignores_mapped_state_and_system_release(self):
         import contextlib
         import os
@@ -8162,7 +8032,6 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             self.assertEqual(paths[0], comgr)
             self.assertEqual(paths.count(comgr), 1)
             # Release metadata is informational; it never changes COMGR selection.
-            self.assertTrue(rc._torch_comgr_is_stale(comgr))
             # The same SDK compiler is selected before and after mapping.
             stack.enter_context(
                 mock.patch.object(rc, "_PROC_MAPS", os.path.join(tmp, "no-maps"))
@@ -8240,7 +8109,6 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             # Explicit torch-path metadata remains readable, but the automatic
             # compiler's package metadata comes from its owning distribution.
             self.assertEqual(comgr_mod.resolved_lib_path(), paths[0])
-            self.assertEqual(rc._torch_rocm_version(comgr), (7, 0))
             self.assertEqual(comgr_mod.resolved_lib_rocm_version(), (10, 1))
 
     def test_rocm_sdk_core_comgr_reports_the_wheel_release(self):

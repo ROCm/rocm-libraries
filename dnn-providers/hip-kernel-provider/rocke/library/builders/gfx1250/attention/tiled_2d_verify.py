@@ -127,7 +127,7 @@ def _scenario(name: str):
 def main() -> int:
     from rocke.runtime.comgr import prefer_bundled_lib
 
-    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
+    prefer_bundled_lib()  # Query the selected compiler for informational release metadata.
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--arch", default="gfx1250")
     ap.add_argument(

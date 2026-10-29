@@ -17,6 +17,22 @@ include(GNUInstallDirs)
 # Required: the engine's copy of the intrinsic arch-domain table is generated
 # at build time from the committed JSON columns (see below).
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/RockeTestEnvironment.cmake")
+set(_ROCKE_BUILD_COMGR_DEFAULT "${HIPKERNELPROVIDER_ROCKE_COMGR_LIB}")
+if(NOT _ROCKE_BUILD_COMGR_DEFAULT)
+  set(_ROCKE_BUILD_COMGR_DEFAULT "$ENV{ROCKE_COMGR_LIB}")
+endif()
+if(NOT _ROCKE_BUILD_COMGR_DEFAULT)
+  # The provider's packaging assertion is configured later, so resolve the same
+  # exported build package here without persisting a default as a user override.
+  if(HIPKERNELPROVIDER_ENABLE_ROCKE AND NOT TARGET amd_comgr)
+    find_package(amd_comgr CONFIG QUIET)
+  endif()
+  if(TARGET amd_comgr)
+    rocke_imported_library_location(amd_comgr _ROCKE_BUILD_COMGR_DEFAULT)
+  endif()
+endif()
+rocke_comgr_test_launcher(_ROCKE_TEST_LAUNCH "${_ROCKE_BUILD_COMGR_DEFAULT}")
 
 # Build-tree executables need the selected interpreter's SDK site even when the
 # build lives outside its virtualenv. Keep a site descriptor at the top-level

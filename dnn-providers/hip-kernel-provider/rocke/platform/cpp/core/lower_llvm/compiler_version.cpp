@@ -62,11 +62,12 @@ void* load(const std::string& path)
 }
 
 /* Query loaded-module provenance without opening or parsing version files. */
-std::string library_for_symbol(void* address)
+std::string library_for_symbol(void* address, bool physical = false)
 {
     if(!address)
         return {};
 #ifdef _WIN32
+    (void)physical;
     HMODULE module = nullptr;
     if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
                                | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
@@ -77,8 +78,41 @@ std::string library_for_symbol(void* address)
     DWORD size = GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
     return size && size < path.size() ? fs::path(path.data()).string() : std::string();
 #else
+#ifdef __linux__
+    if(!physical)
+    {
+        Dl_info info{};
+        return dladdr(address, &info) && info.dli_fname ? info.dli_fname : "";
+    }
+    // dladdr may retain relative argv[0] or a relative dlopen name. Resolve the
+    // containing mapping by address, never against a later working directory.
+    std::ifstream maps("/proc/self/maps");
+    std::string line;
+    const auto value = reinterpret_cast<uintptr_t>(address);
+    while(std::getline(maps, line))
+    {
+        std::istringstream fields(line);
+        std::string range, field, path;
+        fields >> range;
+        for(int i = 0; i < 4; ++i)
+            fields >> field;
+        std::getline(fields >> std::ws, path);
+        auto separator = range.find('-');
+        if(separator == std::string::npos)
+            continue;
+        auto start = std::strtoull(range.c_str(), nullptr, 16);
+        auto end = std::strtoull(range.c_str() + separator + 1, nullptr, 16);
+        if(start <= value && value < end)
+            return fs::path(path).is_absolute() ? path : std::string();
+    }
+    return {};
+#else
     Dl_info info{};
-    return dladdr(address, &info) && info.dli_fname ? info.dli_fname : "";
+    if(dladdr(address, &info) && info.dli_fname
+       && (!physical || fs::path(info.dli_fname).is_absolute()))
+        return info.dli_fname;
+    return {};
+#endif
 #endif
 }
 
@@ -209,45 +243,92 @@ std::string executable_path()
 #endif
 }
 
+// Recognize adjacent installed layouts. Unknown layouts can use metadata or a
+// descriptor in the module's own directory, or an explicit runtime override.
+fs::path installation_root(const fs::path& directory)
+{
+    for(auto root = directory; !root.empty() && root != root.parent_path();
+        root = root.parent_path())
+    {
+        auto name = root.filename().string();
+#ifdef _WIN32
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+#endif
+        if(name == "site-packages")
+            return root;
+        if(name == "bin" || name == "sbin" || name == "libexec" || name == "lib" || name == "lib64")
+            return root.parent_path();
+    }
+    return directory;
+}
+
+std::optional<std::string> build_sdk_comgr_in(const fs::path& root)
+{
+    std::ifstream descriptor(root / "rocke_sdk_site.txt");
+    std::string marker, location;
+    if(!std::getline(descriptor, marker))
+        return std::nullopt;
+    const bool absolute = marker == "rocke-sdk-site-absolute-v1";
+    if((!absolute && marker != "rocke-sdk-site-v1") || !std::getline(descriptor, location)
+       || location.empty())
+        return std::string();
+    const fs::path site(location);
+    if(site.is_absolute() != absolute || (!absolute && site.has_root_path()))
+        return std::string();
+    // The writer computes relative paths from the physical build directory.
+    std::error_code error;
+    auto physical_root = fs::canonical(root, error);
+    if(error)
+        return std::string();
+    auto selected = sdk_comgr_in(absolute ? site : physical_root / site);
+    return selected ? *selected : std::string();
+}
+
 std::string discover_sdk_comgr()
 {
     std::vector<fs::path> visited;
     for(const auto& anchor :
-        {library_for_symbol(reinterpret_cast<void*>(&discover_sdk_comgr)), executable_path()})
+        {library_for_symbol(reinterpret_cast<void*>(&discover_sdk_comgr), true), executable_path()})
     {
         if(anchor.empty())
             continue;
-        for(auto root = fs::absolute(anchor).parent_path(); !root.empty();
-            root = root.parent_path())
+        std::error_code error;
+        if(!fs::path(anchor).is_absolute())
+            continue;
+        auto physical = fs::canonical(anchor, error);
+        if(error)
+            continue;
+        const auto directory = physical.parent_path();
+        const auto prefix = installation_root(directory);
+        if(std::find(visited.begin(), visited.end(), prefix) == visited.end())
         {
-            if(std::find(visited.begin(), visited.end(), root) == visited.end())
+            visited.push_back(prefix);
+            if(auto selected = sdk_comgr_in(prefix); selected)
+                return *selected;
+            if(auto selected = sdk_comgr_in(prefix / "Lib" / "site-packages"); selected)
+                return *selected;
+            for(const char* lib : {"lib", "lib64"})
+                for(const auto& python : children(prefix / lib))
+                    if(python.filename().string().starts_with("python"))
+                        if(auto selected = sdk_comgr_in(python / "site-packages"); selected)
+                            return *selected;
+        }
+        if(auto selected = build_sdk_comgr_in(directory); selected)
+            return *selected;
+        if(directory != prefix)
+            if(auto selected = build_sdk_comgr_in(prefix); selected)
+                return *selected;
+        // Nested CMake outputs may be below the top-level build root. Only a
+        // CMake build marker permits this lookup; never search ancestor SDKs.
+        for(auto root = directory; !root.empty(); root = root.parent_path())
+        {
+            if(fs::is_regular_file(root / "CMakeCache.txt", error))
             {
-                visited.push_back(root);
-                if(auto selected = sdk_comgr_in(root); selected)
+                if(auto selected = build_sdk_comgr_in(root); selected)
                     return *selected;
-                if(auto selected = sdk_comgr_in(root / "Lib" / "site-packages"); selected)
-                    return *selected;
-                for(const char* lib : {"lib", "lib64"})
-                    for(const auto& python : children(root / lib))
-                        if(python.filename().string().starts_with("python"))
-                            if(auto selected = sdk_comgr_in(python / "site-packages"); selected)
-                                return *selected;
-                // Configure-time selected Python site, for build-tree consumers
-                // only. The site sidecar is deliberately not installed.
-                std::ifstream descriptor(root / "rocke_sdk_site.txt");
-                std::string marker, location;
-                if(std::getline(descriptor, marker))
-                {
-                    const bool absolute = marker == "rocke-sdk-site-absolute-v1";
-                    if((!absolute && marker != "rocke-sdk-site-v1")
-                       || !std::getline(descriptor, location) || location.empty())
-                        return {};
-                    const fs::path site(location);
-                    if(site.is_absolute() != absolute || (!absolute && site.has_root_path()))
-                        return {};
-                    auto selected = sdk_comgr_in(absolute ? site : root / site);
-                    return selected ? *selected : std::string();
-                }
+                break;
             }
             if(root == root.parent_path())
                 break;

@@ -469,9 +469,7 @@ function(hkp_load_packaging_probes rocm_kpack_dir hipcc rocke_comgr_lib)
     if(rocm_kpack_dir)
         list(APPEND _pyenv "HIPKERNELPROVIDER_ROCM_KPACK_DIR=${rocm_kpack_dir}")
     endif()
-    if(rocke_comgr_lib)
-        list(APPEND _pyenv "ROCKE_COMGR_LIB=${rocke_comgr_lib}")
-    endif()
+    rocke_comgr_test_launcher(_comgr_test_launch "${rocke_comgr_lib}")
     # Tests that pack rocKE content live under probes/tests/rocke/ and nowhere else; a
     # build with rocKE OFF has no rocKE toolchain to run them, so it never collects them
     # (as hkp_register_tests does for tests/rocke).
@@ -480,7 +478,7 @@ function(hkp_load_packaging_probes rocm_kpack_dir hipcc rocke_comgr_lib)
         set(_rocke_ignore "--ignore=${HKP_PKG_DIR}/probes/tests/rocke")
     endif()
     add_test(NAME hkp-probe-tools
-             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/probes/tests" -v
+             COMMAND ${_comgr_test_launch} "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/probes/tests" -v
                      ${_rocke_ignore})
     set_tests_properties(hkp-probe-tools PROPERTIES ENVIRONMENT "${_pyenv}")
 

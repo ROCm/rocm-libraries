@@ -11,9 +11,14 @@ requires only NumPy; the optional `sdk-core` extra installs the shared
 `rocm-sdk-core` package. Neither discovery nor COMGR loading imports torch or
 calls `rocm_sdk.initialize_process` to initialize HIP.
 
-From the `platform` directory, install the extra using an AMD package index:
+From the `platform` directory, create a virtualenv and install the extra using
+an AMD package index. The venv also avoids PEP 668 restrictions on
+distribution-managed Python installations:
 
 ```sh
+python -m venv ../compiler-env
+. ../compiler-env/bin/activate
+# PowerShell: ../compiler-env/Scripts/Activate.ps1
 python -m pip install -e '.[sdk-core]' --extra-index-url https://stable.repo.amd.com/rocm/whl-next/
 ```
 
@@ -59,6 +64,43 @@ directory, or Windows `amd_comgr.dll` and numeric versioned DLL names under
 supported. Windows registers the selected DLL directory for its dependencies.
 Wheel inspection establishes package contents; it is not a Windows runtime
 compilation result.
+
+For source-only use without installing rocKE, provision `rocm-sdk-core` in
+that interpreter's venv and set `PYTHONPATH` to `platform/python`. Alternatively,
+select a specific compiler explicitly (POSIX example, from `platform`):
+
+```sh
+export PYTHONPATH="$PWD/python"
+export ROCKE_COMGR_LIB=/path/to/compiler/lib/libamd_comgr.so.3
+python -c 'from rocke.runtime.comgr import loaded_compiler_info; print(loaded_compiler_info())'
+```
+
+On PowerShell, use `$env:PYTHONPATH = (Join-Path $PWD "python")` and
+`$env:ROCKE_COMGR_LIB = "C:\compiler\bin\amd_comgr.dll"`. An override names
+one file; an unavailable file fails even if another SDK is installed.
+
+Native AUTO uses the physical loaded module or executable, independent of
+`argv[0]`, the working directory, and symlink aliases. Supported adjacent
+layouts include `<prefix>/bin`, `<prefix>/lib` or `lib64` (including nested
+library directories), and Python `site-packages`. Lookup stays within that
+prefix or site; it never selects SDK metadata from a parent installation.
+A build-tree descriptor resolves relative to its physical directory. Nested
+CMake outputs locate it at the nearest top-level CMake build marker.
+
+To relocate an installed native deployment, move the whole prefix, including
+its SDK metadata and payload. If the SDK lives elsewhere, update the runtime
+override to its new location before launching the consumer:
+
+```sh
+export ROCKE_COMGR_LIB=/new/sdk/lib/libamd_comgr.so.3
+/new/install/bin/my_native_consumer
+```
+
+CMake's provider override, inherited configure-time override, or exported
+`amd_comgr` package can supply the build compiler. Source/build-tree CTests
+use that selection as a default; a nonempty override supplied when running
+CTest takes precedence. Installed CTest manifests contain no build compiler
+path, so provision the runtime SDK or set a deployment-valid override.
 
 An existing system ROCm/HIP SDK compiler remains usable without the extra by
 setting `ROCKE_COMGR_LIB` to that library. `ROCM_PATH`, `ROCM_HOME`, and
