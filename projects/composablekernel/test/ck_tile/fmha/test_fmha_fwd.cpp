@@ -1602,7 +1602,7 @@ TEST_P(SplitKV, DataTypeConfig)
 // Paged split-kv. Kept apart from the SplitKV matrix above so that adding a
 // page_block_size axis does not multiply out every existing combination.
 // The cases below are the ones that stress what paging adds on top of a split:
-// a split start that is not kN0 aligned (num_splits 3/5/7 against these
+// a split start that is not kN0 aligned (num_splits 3/5/8 against these
 // seqlen_k), page crossings, a partial last page, and a page larger than kN0.
 class PagedSplitKV
     : public TestWithParam<std::tuple<std::tuple<int, int>,

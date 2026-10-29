@@ -12,25 +12,15 @@
 
 namespace ck_tile {
 
-// IGLP "bulk" grouping for the gemm1 (P*V) sched_group_barrier hints. Instead of
-// the fine 1-MFMA:1-DS_READ interleave, issue all DS_READ first then all MFMA, so
-// the V ds_load_tr16 latency hides behind a burst of back-to-back WMMAs (the
-// accumulators are independent). Measured on gfx1250 bf16: +3.0% d128, +2.6%
-// d160, +1.6% d192 at s=16384. On by default; disable with
-// -DCK_TILE_FMHA_TDM_IGLP_BULK=0.
-#ifndef CK_TILE_FMHA_TDM_IGLP_BULK
-#define CK_TILE_FMHA_TDM_IGLP_BULK 1
-#endif
-
 // This pipeline is qkv all located in LDS, targeting gfx1250
 template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSTdmDefaultPolicy>
 
 // Split-kv copy of BlockFmhaPipelineQRKSVSTdm's single-V / double-K path.
 //
 // Source of truth: block_fmha_pipeline_qr_ks_vs_tdm.hpp. The loop skeleton, the
-// K ping-pong, the progressive K reload and the TDM/IGLP scheduling below are a
-// verbatim copy of run_single_v_double_k_lds_buffer there -- keep them in sync
-// by hand. Only three things differ:
+// K ping-pong and the progressive K reload below are a verbatim copy of
+// run_single_v_double_k_lds_buffer there -- keep them in sync by hand. Only
+// three things differ:
 //   1. the entry point takes the split-kv calling convention (page block
 //      navigators, variant hooks, num_splits / i_split, one LDS arena pointer),
 //   2. the tile range is this split's slice of the key sequence,
@@ -124,7 +114,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     // every KV tile). The same choice sets the V navigator's VirtualDim to 0.
     //
     // The affine flag is the same requirement make_k_dram documents: this path
-    // loads K and V with bare load_tile_tdm (not LoadTdmFullTileOrPadded), and
+    // loads K and V with bare load_tile_tdm (not the prefill's
+    // LoadTdmFullTileOrPadded), and
     // a software-padded view lets the box-major DMA pull in real neighbouring
     // memory instead of clamping.
     static constexpr bool kUsesUntransposedVKernelPath = true;
@@ -153,122 +144,6 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     // header is included by essentially every fmha instance, so touching it
     // rebuilds the whole instance library.
     static constexpr bool kSkipMinSeqlenQ = false;
-
-    // Select independent local-max chains from the tensor distribution; no
-    // data type, pipeline feature, or physical register layout is assumed.
-    template <typename Tensor>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetRowMaxPartialCount()
-    {
-        using TensorType                = remove_cvref_t<Tensor>;
-        constexpr auto spans            = TensorType::get_distributed_spans();
-        constexpr index_t local_columns = container_reduce(spans[I1].impl_, multiplies<>{}, 1);
-        constexpr index_t preferred     = FmhaMask::IsMasking ? 2 : 4;
-        if constexpr(local_columns >= preferred && local_columns % preferred == 0)
-            return preferred;
-        else
-            return 0;
-    }
-
-    template <typename Tensor>
-    CK_TILE_DEVICE static auto ReduceRowMaxLocal(const Tensor& scores)
-    {
-        const auto f_max           = [](auto a, auto b) { return max(a, b); };
-        constexpr auto spans       = Tensor::get_distributed_spans();
-        constexpr index_t partials = GetRowMaxPartialCount<Tensor>();
-        if constexpr(partials > 0)
-        {
-            constexpr index_t local_columns = container_reduce(spans[I1].impl_, multiplies<>{}, 1);
-            constexpr auto columns =
-                make_naive_tensor_descriptor_packed(sequence_to_tuple_of_number(spans[I1].impl_));
-            constexpr auto distribution = make_static_tile_distribution(
-                ck_tile::detail::make_reduce_tile_distribution_encoding(
-                    Tensor::get_tile_distribution().get_static_tile_distribution_encoding(),
-                    sequence<1>{}));
-            auto maxima = make_static_distributed_tensor<SMPLComputeDataType>(distribution);
-            // Masked tiles favor fewer initialized chains; dense tiles favor
-            // four data-seeded chains. Keep the maxNum identity in both paths.
-            constexpr index_t cols_per_partial = local_columns / partials;
-            sweep_tile_span(spans[I0], [&](auto row) {
-                thread_buffer<SMPLComputeDataType, partials> partial;
-                if constexpr(FmhaMask::IsMasking)
-                {
-                    static_for<0, partials, 1>{}(
-                        [&](auto i) { partial(i) = -numeric<SMPLComputeDataType>::infinity(); });
-                }
-                sweep_tile_span(spans[I1], [&](auto col) {
-                    constexpr index_t offset = columns.calculate_offset(col.impl_);
-                    constexpr index_t group  = offset / cols_per_partial;
-                    if constexpr(!FmhaMask::IsMasking && offset % cols_per_partial == 0)
-                        partial(number<group>{}) = scores[make_tuple(row, col)];
-                    else
-                        partial(number<group>{}) =
-                            max(partial[number<group>{}], scores[make_tuple(row, col)]);
-                });
-                const auto local = [&]() {
-                    if constexpr(partials == 2)
-                        return max(partial[number<0>{}], partial[number<1>{}]);
-                    else
-                        return max(max(partial[number<0>{}], partial[number<1>{}]),
-                                   max(partial[number<2>{}], partial[number<3>{}]));
-                }();
-                if constexpr(FmhaMask::IsMasking)
-                    maxima(make_tuple(row)) = local;
-                else
-                {
-                    // Apply the original identity once, including for all-NaN rows.
-                    maxima(make_tuple(row)) = max(local, -numeric<SMPLComputeDataType>::infinity());
-                }
-            });
-            return maxima;
-        }
-        else
-        {
-            return block_tile_reduce<SMPLComputeDataType>(
-                scores, sequence<1>{}, f_max, -numeric<SMPLComputeDataType>::infinity());
-        }
-    }
-
-    // A paired-half wave32 reduction has one partial in each 16-lane half.
-    // Exchange those partials on VALU instead of putting a bpermute in the
-    // LDS dependency queue. Other distributions retain the generic path.
-    template <typename Tensor, typename ReduceFunc>
-    CK_TILE_DEVICE static void ReduceRowSync(Tensor& tensor, const ReduceFunc& reduce)
-    {
-        using Dstr                   = typename Tensor::StaticTileDistribution;
-        using Encode                 = typename Dstr::DstrEncode;
-        using Detail                 = typename Encode::detail;
-        constexpr index_t lane_dim   = Dstr::get_num_of_dimension_p() - 1;
-        constexpr bool paired_halves = [] {
-            index_t lane_reductions = 0;
-            bool supported          = true;
-            static_for<0, Dstr::get_num_of_dimension_r(), 1>{}([&](auto r) {
-                if constexpr(Detail::does_p_own_r_[lane_dim][r] && Encode::rs_lengths_[r] > 1)
-                {
-                    ++lane_reductions;
-                    supported &= Encode::rs_lengths_[r] == 2 &&
-                                 Detail::ps_over_rs_derivative_[lane_dim][r] == 16;
-                }
-            });
-            return supported && lane_reductions == 1;
-        }();
-        if constexpr(paired_halves)
-        {
-            using DataType = typename Tensor::DataType;
-
-            static_assert(get_warp_size() == 32);
-            static_assert(sizeof(DataType) == sizeof(int32_t));
-            static_for<0, Tensor::get_thread_buffer_size(), 1>{}([&](auto i) {
-                const auto local              = tensor.get_thread_buffer()[i];
-                const auto remote             = bit_cast<DataType>(__builtin_amdgcn_permlanex16(
-                    0, bit_cast<int32_t>(local), 0x76543210, 0xfedcba98, false, true));
-                tensor.get_thread_buffer()(i) = reduce(local, remote);
-            });
-        }
-        else
-        {
-            block_tile_reduce_sync(tensor, reduce, bool_constant<false>{});
-        }
-    }
 
     static constexpr bool kHwGemm1Scale = is_any_of<VDataType, fp8_t, bf8_t>::value &&
                                           BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 128;
@@ -422,40 +297,6 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     }();
 
     static constexpr const char* name = "qr_tdm";
-
-    // The progressive M128 traversal has the fragment shape required by the
-    // staged hand-off below. Element types and attention features do not alter
-    // those LDS fragment lifetimes.
-    static constexpr bool kStagedKPairs =
-        kProgressiveDsLoadK && kM0 == 128 && kQKHeaddim == 128 && kK0 == 32;
-    static constexpr bool kUseIglpBulkScheduling = CK_TILE_FMHA_TDM_IGLP_BULK && !kStagedKPairs;
-
-    // Unchecked TDM bounds need a stronger, independent range proof. Keep this
-    // separate from K staging so padded/group/sink/custom-mask configurations
-    // can use the staged traversal without inheriting the full-box shortcut.
-    static constexpr bool kTdmBoxesAlwaysInBounds =
-        kStagedKPairs && !kIsGroupMode && !kPadSeqLenK && !kPadHeadDimQ && !kPadHeadDimV &&
-        !kHasSink && !kSkipMinSeqlenQ &&
-        (!FmhaMask::IsMasking || std::is_same_v<FmhaMask, GenericAttentionMask<true, false>>);
-
-    template <bool AllowDenseFullBox = false, typename LdsWindow, typename DramWindow>
-    CK_TILE_DEVICE static void LoadTdmFullTileOrPadded(const TDMConfig& config,
-                                                       LdsWindow& lds_window,
-                                                       const DramWindow& dram_window)
-    {
-        if constexpr(kTdmBoxesAlwaysInBounds && (FmhaMask::IsMasking || AllowDenseFullBox))
-        {
-            // K/V start on N64 boundaries. The dense/causal range never
-            // exceeds the nonzero, N64-aligned, unpadded K sequence,
-            // and tail prefetches repeat the final valid tile. Each warp's
-            // box is therefore full, even on the final loop iteration.
-            load_tile_tdm_full_tile(config, lds_window, dram_window);
-        }
-        else
-        {
-            load_tile_tdm(config, lds_window, dram_window);
-        }
-    }
 
     // Progressive K reload: pull the next four K accesses back into k_tile once
     // the WMMA sweep has consumed the fragments they overwrite. Both the single

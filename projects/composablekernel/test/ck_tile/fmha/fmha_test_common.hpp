@@ -118,10 +118,7 @@ struct SplitKVModel
                                                         CK_TILE_FMHA_FWD_FAST_EXP2>,
                                                     ck_tile::SimplifiedGenericAttentionMask<Mask>,
                                                     Traits>;
-    // Geometry does not instantiate until used; it goes through
-    // FmhaTdmSchedSupportedGeometry, which asserts kM == 128.
     using TdmPipeline = ck_tile::BlockFmhaFwdSplitKVPipelineQRKSVSTdm<Problem>;
-    using Geometry    = ck_tile::FmhaTdmSchedGeometryFor<Problem>;
 };
 
 class Gfx125FmhaTest : public ::testing::Test
