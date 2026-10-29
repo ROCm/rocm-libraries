@@ -189,6 +189,26 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS"
         TIMEOUT 180)
 
+    # generate.py -m generic emits these pipelines with GenericAttentionMask, which no other
+    # test instantiates; compile one blob per pipeline path (device -fsyntax-only, no GPU).
+    list(GET FMHA_QR_TDM_SCHED_GPU_TARGETS 0 FMHA_QR_TDM_SCHED_FIRST_GPU_TARGET)
+    # The blobs need the configure-level GPU feature macros (CK_USE_GFX1250, CK_TILE_USE_WMMA, ...).
+    get_directory_property(FMHA_QR_TDM_SCHED_DEFINITIONS COMPILE_DEFINITIONS)
+    string(REPLACE ";" "\n" FMHA_QR_TDM_SCHED_DEFINITIONS "${FMHA_QR_TDM_SCHED_DEFINITIONS}")
+    file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/qr_tdm_sched_generic_mask_defines.txt
+        "${FMHA_QR_TDM_SCHED_DEFINITIONS}\n")
+    add_test(NAME test_ck_tile_fmha_qr_tdm_sched_generic_mask
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_qr_tdm_sched_generic_mask.py
+            --compiler=${CMAKE_HIP_COMPILER}
+            --ck-root=${PROJECT_SOURCE_DIR}
+            --ck-build=${PROJECT_BINARY_DIR}
+            --gpu-target=${FMHA_QR_TDM_SCHED_FIRST_GPU_TARGET}
+            --defines-file=${CMAKE_CURRENT_BINARY_DIR}/qr_tdm_sched_generic_mask_defines.txt -v)
+    set_tests_properties(test_ck_tile_fmha_qr_tdm_sched_generic_mask PROPERTIES
+        LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS"
+        TIMEOUT 1200)
+
     foreach(dtype IN ITEMS bf16 fp16)
         if(TARGET ${FMHA_FWD_INSTANCES})
             set(target test_ck_tile_fmha_qr_tdm_sched_fwd_${dtype})
@@ -255,6 +275,14 @@ list(APPEND FMHA_QR_TDM_SCHED_TEST_TARGETS test_ck_tile_fmha_reference)
 # without the edge below the binary is never built and ctest reports Not Run.
 # Keep the umbrella a superset of what the regex matches.
 add_dependencies(${TEST_NAME} test_ck_tile_fmha_reference)
+
+# Host test of the simplified attention mask's edge-tile check for partial query tiles.
+add_gtest_executable(test_ck_tile_fmha_mask_edge_tile test_fmha_mask_edge_tile.cpp)
+add_dependencies(${TEST_NAME} test_ck_tile_fmha_mask_edge_tile)
+get_test_property(test_ck_tile_fmha_mask_edge_tile LABELS FMHA_MASK_COMMON_LABELS)
+set_tests_properties(test_ck_tile_fmha_mask_edge_tile PROPERTIES
+    LABELS "${FMHA_MASK_COMMON_LABELS};${TEST_NAME};CK_TILE_FMHA_TESTS")
+list(APPEND FMHA_QR_TDM_SCHED_TEST_TARGETS test_ck_tile_fmha_mask_edge_tile)
 
 # Python integration test for the fmha_fwd codegen path.
 #
