@@ -150,6 +150,11 @@ namespace TensileLite
         return m_streamK5ForceMode;
     }
 
+    int Debug::streamKReductionForceMode() const
+    {
+        return m_streamKReductionForceMode;
+    }
+
     int Debug::useExperimentalSelection() const
     {
         return m_experimentSelection;
@@ -243,6 +248,16 @@ namespace TensileLite
                 m_streamK5ForceMode = static_cast<int>(val);
         }
 
+        // StreamK reduction debug override (-1=grid policy, 0=in-kernel fixup, 1=parallel).
+        const char* skReductionForce = std::getenv("TENSILE_PERSISTENT_REDUCTION_FORCE_MODE");
+        if(skReductionForce)
+        {
+            char* end = nullptr;
+            const long val = strtol(skReductionForce, &end, 0);
+            if(end != skReductionForce && *end == '\0' && val >= -1 && val <= 1)
+                m_streamKReductionForceMode = static_cast<int>(val);
+        }
+
         const char* exp_select = std::getenv("TENSILE_SOLUTION_SELECTION_METHOD");
         if(exp_select)
             m_experimentSelection = strtol(exp_select, nullptr, 0);
@@ -307,6 +322,16 @@ namespace TensileLite
             const long val = strtol(sk5Force, &end, 0);
             if(end != sk5Force && *end == '\0' && val >= -1 && val <= 1)
                 m_streamK5ForceMode = static_cast<int>(val);
+        }
+
+        const char* skReductionForce = std::getenv("TENSILE_PERSISTENT_REDUCTION_FORCE_MODE");
+        m_streamKReductionForceMode  = -1;
+        if(skReductionForce)
+        {
+            char*      end = nullptr;
+            const long val = strtol(skReductionForce, &end, 0);
+            if(end != skReductionForce && *end == '\0' && val >= -1 && val <= 1)
+                m_streamKReductionForceMode = static_cast<int>(val);
         }
     }
 

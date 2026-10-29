@@ -364,6 +364,16 @@ DEF_T(VWmmaF3216x16x128F8f6f4Inst, "v_wmma_f32_16x16x128_f8f6f4", .format = WMMA
                       { MatrixFmtModifiers(FP4, FP4), 1, 8 } },
     .coissue = 0x00C8, .coissueOverride = { { MatrixFmtModifiers(FP4, FP4), 0x0008 } },
     .operand_fields = { {S0, .size=512}, {S1, .size=512} })
+DEF_BATCH(.format = WMMA_FLOAT8MIX_16x16x128, .flags = {WMMA_XDL},
+    VWmmaF1616x16x128Bf8Bf8Inst, "v_wmma_f16_16x16x128_bf8_bf8",
+        .operand_fields = { {D0, .size=128}, {S0, .size=512}, {S1, .size=512}, {S2, .size=128} },
+    VWmmaF1616x16x128Bf8Fp8Inst, "v_wmma_f16_16x16x128_bf8_fp8",
+        .operand_fields = { {D0, .size=128}, {S0, .size=512}, {S1, .size=512}, {S2, .size=128} },
+    VWmmaF1616x16x128Fp8Bf8Inst, "v_wmma_f16_16x16x128_fp8_bf8",
+        .operand_fields = { {D0, .size=128}, {S0, .size=512}, {S1, .size=512}, {S2, .size=128} },
+    VWmmaF1616x16x128Fp8Fp8Inst, "v_wmma_f16_16x16x128_fp8_fp8",
+        .operand_fields = { {D0, .size=128}, {S0, .size=512}, {S1, .size=512}, {S2, .size=128} },
+)
 
 // === gfx12-only WMMA (not available on gfx1250) ===
 // FIXME: These instructions exist in gfx12 but NOT in gfx1250.
@@ -395,6 +405,7 @@ DEF_BATCH(.format = SOP1,
     SCvtU32F32Inst, "s_cvt_u32_f32", .logical = "SCvtU32F32",
     SFf1I32B32Inst, "s_ff1_i32_b32", .flags = {HasSideEffect}, .logical = "SFf1B32",
     SSendmsgRtnB32Inst, "s_sendmsg_rtn_b32", .flags = {HasSideEffect}, .logical = "SSendMsgRtnB32",
+    SFlbitI32B32Inst, "s_flbit_i32_b32", .logical = "SFlbitI32B32",
     SAndSaveexecB64Inst, "s_and_saveexec_b64", .flags = {Branch, ImplicitReadEXEC, ImplicitWriteEXEC, ImplicitWriteSCC}, .logical = "SAndSaveExecB64",
         .operand_fields = { {D0, .size=64, .type=sreg}, {S0, .size=64} },
     SOrSaveexecB64Inst, "s_or_saveexec_b64", .flags = {HasSideEffect, ImplicitReadEXEC, ImplicitWriteEXEC, ImplicitWriteSCC}, .logical = "SOrSaveExecB64",
@@ -534,7 +545,7 @@ DEF_BATCH(.format = SOP2,
     SBfmB32Inst, "s_bfm_b32", .logical = "SBfmB32",
 
     SCselectB32Inst, "s_cselect_b32", .flags = {ImplicitReadSCC}, .logical = "SCSelectB32",
-    SCselectB64Inst, "s_cselect_b64", .flags = {ImplicitReadSCC},
+    SCselectB64Inst, "s_cselect_b64", .flags = {ImplicitReadSCC}, .logical = "SCSelectB64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
     SLshl1AddU32Inst, "s_lshl1_add_u32", .flags = {ImplicitWriteSCC}, .logical = "SLShiftLeft1AddU32",
     SLshl2AddU32Inst, "s_lshl2_add_u32", .flags = {ImplicitWriteSCC}, .logical = "SLShiftLeft2AddU32",
@@ -931,8 +942,13 @@ DEF_BATCH(.format = VOP3,
     VMed3F32Inst, "v_med3_f32", .logical = "VMed3F32",
     VMaximumMinimumF32Inst, "v_maximumminimum_f32", .logical = "VMaximumMinimumF32",
     VMed3I32Inst, "v_med3_i32", .logical = "VMed3I32",
+)
+// 2 sources: VOP3 would leave the phantom src2 the StinkyIRVerifier reports as missing.
+DEF_BATCH(.format = VOP3_2SRC,
     VPackB32F16Inst, "v_pack_b32_f16", .logical = "VPackF16toB32",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
+)
+DEF_BATCH(.format = VOP3,
     VPermB32Inst, "v_perm_b32", .logical = "VPermB32",
 )
 
@@ -952,6 +968,20 @@ DEF_BATCH(.format = VOP3P,
     VPkAddF32Inst, "v_pk_add_f32", .logical = {"VAddPKF32", "_VAddPKF32"}, .flags = {Commutative},
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
     VPkFmaF16Inst, "v_pk_fma_f16", .logical = "VFmaPKF16", .flags = {Commutative},
+        .operand_fields = {
+            {D0, vdst, vgpr, 32},
+            {S0, src0, src, 32},
+            {S1, src1, src, 32},
+            {S2, src2, src, 32},
+        },
+    VPkMaximum3F16Inst, "v_pk_maximum3_f16", .logical = "VPkMaximum3F16", .flags = {Commutative},
+        .operand_fields = {
+            {D0, vdst, vgpr, 32},
+            {S0, src0, src, 32},
+            {S1, src1, src, 32},
+            {S2, src2, src, 32},
+        },
+    VPkMinimum3F16Inst, "v_pk_minimum3_f16", .logical = "VPkMinimum3F16", .flags = {Commutative},
         .operand_fields = {
             {D0, vdst, vgpr, 32},
             {S0, src0, src, 32},
@@ -1375,6 +1405,14 @@ DEF_T(VCvtScalePk8F16Fp8Inst, "v_cvt_scale_pk8_f16_fp8",
     .operand_fields = {
         {D0, vdst, vgpr, 128},
         {S0, src0, src_vgpr, 64},
+        {S1, src1, src, 32},
+    },
+)
+DEF_T(VCvtScalePk8F16Fp4Inst, "v_cvt_scale_pk8_f16_fp4",
+    .format = VOP3,
+    .operand_fields = {
+        {D0, vdst, vgpr, 128},
+        {S0, src0, src_vgpr, 32},
         {S1, src1, src, 32},
     },
 )

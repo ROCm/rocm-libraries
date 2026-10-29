@@ -10,6 +10,7 @@ from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32
 from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, MemTokenData
 from rocisa.functions import scalarMultiply64Bpe
 from math import log2, ceil, prod
+from ..SolutionStructs.segment_interleave import mn_major_b
 # from ..KernelWriterAssembly import KernelWriterAssembly
 
 class TensorDataMoverLoad(TensorDataMover):
@@ -235,6 +236,8 @@ class TensorDataMoverLoad(TensorDataMover):
                 else:
                     # M/N-splitting: offset within same k_group along tile dimension
                     mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * mxUnit * bpe), f"woffset = wCompId * mt//numComp({mt // numComp}) * mxUnit({mxUnit}) * bpe({bpe})"))
+            elif tc == "B" and mn_major_b(kernel):
+                mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * bpe), f"woffset = wCompId * MT({mt}) // numComp({numComp}) * bpe({bpe}): one N half per component"))
             else:
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(tile1Size // numComp * bpe // tdmSplit), f"woffset = wCompId * mt // numComp({numComp}) * bpe({bpe}) // tdmSplit({tdmSplit})"))
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tdmSeparateStride, f"woffset *= tdmSeparateStride"))

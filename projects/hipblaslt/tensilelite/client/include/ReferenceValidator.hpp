@@ -37,6 +37,8 @@
 #include "DataInitialization.hpp"
 
 #include <cstddef>
+#include <map>
+#include <vector>
 
 namespace TensileLite
 {
@@ -129,12 +131,22 @@ namespace TensileLite
         private:
             void allocateResultBuffer(size_t bytes);
 
+            void selectF16AccumulationReference(ContractionProblemGemm const& problem,
+                                                ContractionSolution const&    solution);
+
             bool shouldSkipNullTensor(const std::string& tensorName,
                                       bool hasNullPointer,
                                       bool hasZeroElements) const;
 
             std::vector<std::shared_ptr<DeviceContext>> m_devices;
             std::vector<std::shared_ptr<ProblemInputs>> m_referenceInputs;
+
+            // f16 accumulation depends on the K order, which each launch decides: one reference D
+            // per order and device.
+            using F16AccumulationCache = std::map<std::vector<uint64_t>, std::vector<uint8_t>>;
+            std::shared_ptr<Hardware>         m_hardware;
+            std::vector<uint64_t>             m_f16AccumulationOrder;
+            std::vector<F16AccumulationCache> m_f16AccumulationReferences;
 
             size_t                   m_cpuResultBufferSize = 0;
             std::shared_ptr<uint8_t> m_cpuResultBuffer;
