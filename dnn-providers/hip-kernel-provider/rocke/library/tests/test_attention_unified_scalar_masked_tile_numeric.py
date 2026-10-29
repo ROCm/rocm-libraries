@@ -19,10 +19,11 @@ Covered:
   bottom-right mask with ``q_len > kv_len`` and no window): O must be 0.
 * a NaN per-segment sum must make the reduce give NaN for that row, not be
   skipped as an empty segment; a NaN query row must give NaN O in scalar 2D.
+* the default-mask scalar 3D body (bottom-right causal, no window) on a
+  ``q_len == kv_len`` prefill, where early rows see only masked keys in their
+  trailing segments: those segments must count as empty, not give NaN.
 
-Not covered: the default-mask scalar 3D body, which applies no window (and
-whose prefill rows with fully masked trailing segments are a separate
-question), sinks, softcap and multi-sequence batches.
+Not covered: sinks, softcap and multi-sequence batches.
 """
 
 import math
@@ -375,6 +376,27 @@ def test_scalar_3d_masked_leading_keys_and_segments(case, dtype):
     out = _run_scalar_3d(problem, data)
     torch.cuda.synchronize()
     ref, has_key = _reference(data, kv_len, top_left)
+    _check(out, ref, has_key, dtype)
+
+
+@requires_cdna3_or_4
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_scalar_3d_default_mask_masked_trailing_segments(dtype):
+    """Default mask with q_len == kv_len = 128, keys split over 8 segments.
+
+    Row 0 sees key 0 only, so every later segment sees only masked keys.
+    Without a safe exponent reference alpha = exp2(-inf - -inf) is NaN, l is
+    NaN and the reduce turns the whole row into NaN.
+    """
+    q_len = kv_len = 128
+    data = _inputs(dtype, q_len, kv_len)
+    problem = _problem(dtype, q_len, kv_len, data["num_blocks"], False, window=0)
+    assert problem.default_mask
+    out = _run_scalar_3d(problem, data)
+    torch.cuda.synchronize()
+    ref, has_key = _reference(data, kv_len, False, window=0)
+    assert bool(has_key.all())
     _check(out, ref, has_key, dtype)
 
 

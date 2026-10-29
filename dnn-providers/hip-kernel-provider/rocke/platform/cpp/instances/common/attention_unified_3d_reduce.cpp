@@ -103,13 +103,14 @@ static rocke_value_t* rocke__q_offset(rocke_attn_unified_build_ctx_t* ctx,
  *       score = _emit_qk_score(...)
  *       causal_ok = cmp_le(kpos, context_len + query_pos)
  *       score = select(causal_ok, score, neg_inf)
- *       new_m = fmax(m_val, score)
+ *       new_m_raw = fmax(m_val, score)
+ *       new_m = select(fcmp("ogt", new_m_raw, neg_inf), new_m_raw, zero_f)
  *       alpha = exp2(m_val - new_m)
  *       prob  = exp2(score - new_m)
  *       new_l = fadd(fmul(l_val, alpha), prob)
  *       vv    = _emit_v_load(...)
  *       new_acc = fadd(fmul(acc_val, alpha), fmul(prob, vv))
- *       scf_yield(new_m, new_l, new_acc)
+ *       scf_yield(new_m_raw, new_l, new_acc)
  *
  * Stashes loop.results[0..2] in ctx->loop_m / loop_l / loop_acc.
  * ============================================================ */
@@ -119,7 +120,7 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
     rocke_iter_arg_t iter_args[3];
     rocke_for_t loop;
     rocke_value_t *kpos, *m_val, *l_val, *acc_val;
-    rocke_value_t *score, *causal_ok, *new_m, *alpha, *prob, *new_l, *vv, *new_acc;
+    rocke_value_t *score, *causal_ok, *new_m_raw, *new_m, *alpha, *prob, *new_l, *vv, *new_acc;
     rocke_value_t* yields[3];
 
     iter_args[0].name = "m";
@@ -152,6 +153,7 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
                                              ctx->abi_query,
                                              ctx->abi_key,
                                              ctx->abi_block_tables,
+                                             ctx->block_table_stride,
                                              ctx->seq_idx,
                                              ctx->q_tok,
                                              ctx->q_head,
@@ -164,7 +166,13 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
     causal_ok = rocke_b_cmp_le(b, kpos, rocke_b_add(b, ctx->context_len, ctx->query_pos));
     score = rocke_b_select(b, causal_ok, score, ctx->neg_inf);
 
-    new_m = rocke_b_fmax(b, m_val, score);
+    /* A fully masked segment (or masked leading keys) keeps m at -inf: use 0 as
+     * the exponent reference so alpha/prob are 0, not exp2(-inf - -inf) = NaN,
+     * but yield the raw max so the reduce still sees an empty segment.
+     * Python evaluates select's operands left to right: fcmp first. */
+    new_m_raw = rocke_b_fmax(b, m_val, score);
+    new_m = rocke_b_select(
+        b, rocke_b_fcmp(b, "ogt", new_m_raw, ctx->neg_inf), new_m_raw, ctx->zero_f);
     alpha = rocke_b_exp2(b, rocke_b_fsub(b, m_val, new_m));
     prob = rocke_b_exp2(b, rocke_b_fsub(b, score, new_m));
     new_l = rocke_b_fadd(b, rocke_b_fmul(b, l_val, alpha), prob);
@@ -174,6 +182,7 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
                                         ctx->dtype,
                                         ctx->abi_value,
                                         ctx->abi_block_tables,
+                                        ctx->block_table_stride,
                                         ctx->seq_idx,
                                         ctx->kv_head,
                                         kpos,
@@ -181,7 +190,7 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
 
     new_acc = rocke_b_fadd(b, rocke_b_fmul(b, acc_val, alpha), rocke_b_fmul(b, prob, vv));
 
-    yields[0] = new_m;
+    yields[0] = new_m_raw;
     yields[1] = new_l;
     yields[2] = new_acc;
     rocke_b_scf_yield(b, yields, 3);
@@ -318,20 +327,18 @@ void rocke_attn_unified_declare_reduce_params(rocke_attn_unified_build_ctx_t* ct
  *   with max_loop as (seg, (mx,)):
  *       idx, _ = ml_desc.offset(b, token=q_tok, head=q_head, seg=seg)
  *       mv = global_load_f32(segm_max, idx)
- *       lv = global_load_f32(segm_expsum, idx)
- *       mv = select(fcmp("oeq", lv, zero), neg_inf, mv)
  *       scf_yield(fmax(mx, mv))
  *   overall = max_loop.results[0]
  *
- * A segment that saw no key stores max = -inf with sum = 0: it is skipped.
- * Only an exact zero sum counts as empty, so a NaN sum still propagates.
+ * A segment that saw no key stores max = -inf with sum = 0 (the segment kernel
+ * carries the raw max), so this pass ignores it without reading the sum.
  * ============================================================ */
 void rocke_attn_unified_emit_reduce_max_loop(rocke_attn_unified_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
     rocke_iter_arg_t iter_args[1];
     rocke_for_t max_loop;
-    rocke_value_t *seg, *mx, *idx, *mv, *lv, *empty;
+    rocke_value_t *seg, *mx, *idx, *mv;
     rocke_value_t* yields[1];
 
     iter_args[0].name = "mx";
@@ -354,9 +361,6 @@ void rocke_attn_unified_emit_reduce_max_loop(rocke_attn_unified_build_ctx_t* ctx
 
     idx = rocke__ml_offset(ctx, ctx->q_tok, ctx->q_head, seg);
     mv = rocke_b_global_load_f32(b, ctx->segm_max, idx, 0);
-    lv = rocke_b_global_load_f32(b, ctx->segm_expsum, idx, 0);
-    empty = rocke_b_fcmp(b, "oeq", lv, ctx->zero_f);
-    mv = rocke_b_select(b, empty, ctx->neg_inf, mv);
 
     yields[0] = rocke_b_fmax(b, mx, mv);
     rocke_b_scf_yield(b, yields, 1);

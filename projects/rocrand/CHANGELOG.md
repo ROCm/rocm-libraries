@@ -3,6 +3,13 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND 5.3.0 for ROCm 10.3.0
+
+### Resolved Issues
+
+* Fixed race condition inside `poisson` distribution.
+
+
 ## rocRAND 5.2.0 for ROCm 10.2.0
 
 ### Optimized

@@ -88,17 +88,20 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
         return checkResult;
     }
 
-    constexpr std::array<std::array<hiptensorDataType_t, 2>, 4> validDataTypes
-        = {{// typeA, typeC, typeScalar
+    constexpr std::array<std::array<hiptensorDataType_t, 2>, 6> validDataTypes
+        = {{// typeA, typeScalar
             {HIPTENSOR_R_16F, HIPTENSOR_R_16F},
             {HIPTENSOR_R_16F, HIPTENSOR_R_32F},
+            {HIPTENSOR_R_16BF, HIPTENSOR_R_16BF},
+            {HIPTENSOR_R_16BF, HIPTENSOR_R_32F},
             {HIPTENSOR_R_32F, HIPTENSOR_R_32F},
             {HIPTENSOR_R_64F, HIPTENSOR_R_64F}}};
 
     std::array<hiptensorDataType_t, 2> inputTensorTypes = {descA->mType, typeScalar};
-    if(std::none_of(validDataTypes.cbegin(),
-                    validDataTypes.cend(),
-                    [&inputTensorTypes](auto&& types) { return types == inputTensorTypes; }))
+    if(descA->mType != descB->mType
+       || std::none_of(validDataTypes.cbegin(),
+                       validDataTypes.cend(),
+                       [&inputTensorTypes](auto&& types) { return types == inputTensorTypes; }))
     {
         auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
         snprintf(msg,

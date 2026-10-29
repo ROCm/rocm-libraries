@@ -813,18 +813,19 @@ def _cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     ``arch`` sits at index 1 like every other key family in this module, so
     ``_assert_cache_key_arch`` can check key-vs-compile agreement uniformly and
     two arches can never alias to one cached kernel.
+
+    Like the tiled keys, it holds only fields the scalar 2D build reads. The
+    dynamic shape (``total_q``, ``num_seqs``, ``max_seqlen_q``, ``max_seqlen_k``)
+    reaches the kernel as kernargs or the launch grid, never as IR, so one binary
+    serves every batch. ``test_attention_scalar_cache_key.py`` enforces this.
     """
     return (
         "scalar",
         arch,
-        problem.total_q,
-        problem.num_seqs,
         problem.num_query_heads,
         problem.num_kv_heads,
         problem.head_size,
         problem.block_size,
-        problem.max_seqlen_q,
-        problem.max_seqlen_k,
         problem.dtype,
         problem.q_dtype,
         problem.sliding_window,
@@ -5785,7 +5786,7 @@ def _get_scalar_launcher(
         kernel_name=kname,
         signature=_attn_signature(
             problem.dtype,
-            include_bt_stride=False,
+            include_bt_stride=True,
             kv_dtype=_kv_storage_dtype(problem),
         ),
         cache_key=("scalar",) + cache_key,
@@ -6397,7 +6398,7 @@ def run_unified_attention_torch(
         softcap=softcap,
         sinks=sinks,
         bt_stride=bt_stride,
-        include_bt_stride=False,
+        include_bt_stride=True,
         k_scale=k_scale,
         v_scale=v_scale,
         out_scale=out_scale,
@@ -6439,7 +6440,6 @@ class UnifiedAttention2DSpec:
         p = self.problem
         return kernel_name_join(
             self.name,
-            f"q{p.total_q}",
             f"h{p.num_query_heads}",
             f"kv{p.num_kv_heads}",
             f"d{p.head_size}",
@@ -6544,6 +6544,7 @@ def build_unified_attention_2d(
     _out_scale = b.param("out_scale", F32)
     softcap = b.param("softcap", F32)
     num_seqs = b.param("num_seqs", I32)
+    bt_stride = b.param("block_table_stride", I32)
 
     q_tok = b.block_id_x()
     q_head = b.block_id_y()
@@ -6600,16 +6601,8 @@ def build_unified_attention_2d(
         iv_name="kpos",
     )
     with loop as (kpos, (m_val, l_val, acc_val)):
-        block_idx, token_in_block = _magic_div_mod(b, kpos, p.block_size)
-        physical = b.global_load_i32(
-            block_tables,
-            b.add(
-                b.mul(
-                    seq_idx,
-                    b.const_i32((p.max_seqlen_k + p.block_size - 1) // p.block_size),
-                ),
-                block_idx,
-            ),
+        physical, token_in_block = _physical_block_and_token(
+            b, p, block_tables, bt_stride, seq_idx, kpos
         )
 
         # Vectorised QK dot product. Both Q[q_tok, q_head, :] and
@@ -6725,7 +6718,6 @@ class UnifiedAttention3DSpec(UnifiedAttention2DSpec):
         p = self.problem
         return kernel_name_join(
             self.name,
-            f"q{p.total_q}",
             f"h{p.num_query_heads}",
             f"kv{p.num_kv_heads}",
             f"d{p.head_size}",
@@ -6783,6 +6775,7 @@ def build_unified_attention_3d(
     scale = abi["scale"]
     _softcap = b.param("softcap", F32)
     num_seqs = b.param("num_seqs", I32)
+    bt_stride = b.param("block_table_stride", I32)
 
     q_tok = b.block_id_x()
     q_head = b.block_id_y()
@@ -6833,6 +6826,7 @@ def build_unified_attention_3d(
             query,
             key,
             block_tables,
+            bt_stride,
             seq_idx,
             q_tok,
             q_head,
@@ -6849,22 +6843,20 @@ def build_unified_attention_3d(
         if band_ok is not None:
             score = b.select(band_ok, score, neg_inf)
         new_m_raw = b.fmax(m_val, score)
-        new_m = new_m_raw
-        if not p.default_mask:
-            # Non-default masks can leave whole segments or a segment's leading
-            # keys masked (top-left decode sees only key 0; a window or right bound
-            # skips others). Use 0 as the exponent reference there so alpha/prob
-            # are 0 rather than NaN, but carry and store the raw max: it stays -inf
-            # until a key is seen, so the reduce ignores an empty segment and a
-            # masked prefix cannot pin m at 0. The default mask keeps its pinned IR
-            # without this guard, although it can reach the case: a default-mask
-            # prefill row whose causal limit ends before a trailing segment sees
-            # only masked keys there, so that segment's alpha is exp2(-inf - -inf).
-            new_m = b.select(b.fcmp("ogt", new_m_raw, neg_inf), new_m_raw, zero_f)
+        # A segment, or a segment's leading keys, can be fully masked for a row:
+        # a default-mask prefill row whose causal limit ends before a trailing
+        # segment, top-left decode (only key 0 visible), a window or right bound.
+        # Use 0 as the exponent reference there so alpha/prob are 0 rather than
+        # exp2(-inf - -inf) = NaN, but carry and store the raw max: it stays -inf
+        # until a key is seen, so the reduce ignores an empty segment and a
+        # masked prefix cannot pin m at 0.
+        new_m = b.select(b.fcmp("ogt", new_m_raw, neg_inf), new_m_raw, zero_f)
         alpha = b.exp2(b.fsub(m_val, new_m))
         prob = b.exp2(b.fsub(score, new_m))
         new_l = b.fadd(b.fmul(l_val, alpha), prob)
-        vv = _emit_v_load(b, p, dtype, value, block_tables, seq_idx, kv_head, kpos, dim)
+        vv = _emit_v_load(
+            b, p, dtype, value, block_tables, bt_stride, seq_idx, kv_head, kpos, dim
+        )
         new_acc = b.fadd(b.fmul(acc_val, alpha), b.fmul(prob, vv))
         b.scf_yield(new_m_raw, new_l, new_acc)
 
@@ -6901,7 +6893,6 @@ class UnifiedAttentionReduceSpec:
         p = self.problem
         return kernel_name_join(
             self.name,
-            f"q{p.total_q}",
             f"h{p.num_query_heads}",
             f"d{p.head_size}",
             f"seg{self.num_segments}",
@@ -6952,15 +6943,14 @@ def build_unified_attention_reduce(
         [("mx", neg_inf)],
         iv_name="seg",
     )
-    # A segment that saw no key stores max = -inf with sum = 0. It carries no
-    # mass: skip it in both passes, and give a row with no key at all O = 0
-    # instead of NaN from exp2(-inf - -inf) or acc * rcp(0). Only an exact zero
-    # sum counts as empty, so a NaN sum or denominator still yields NaN.
+    # A segment that saw no key stores max = -inf with sum = 0: the segment kernel
+    # carries the raw max, so the max pass ignores that segment as is. The combine
+    # pass weights it by 0, and a row with no key at all gets O = 0 instead of NaN
+    # from exp2(-inf - -inf) or acc * rcp(0). Only an exact zero sum counts as
+    # empty, so a NaN sum or denominator still yields NaN.
     with max_loop as (seg, (mx,)):
         idx, _ = ml_desc.offset(b, token=q_tok, head=q_head, seg=seg)
         mv = b.global_load_f32(segm_max, idx)
-        lv = b.global_load_f32(segm_expsum, idx)
-        mv = b.select(b.fcmp("oeq", lv, zero), neg_inf, mv)
         b.scf_yield(b.fmax(mx, mv))
     overall = max_loop.results[0]
     red = b.scf_for_iter(
@@ -7148,6 +7138,7 @@ def _emit_qk_score(
     query: Value,
     key: Value,
     block_tables: Value,
+    bt_stride: Value,
     seq_idx: Value,
     q_tok: Value,
     q_head: Value,
@@ -7176,7 +7167,7 @@ def _emit_qk_score(
     """
     score = b.const_f32(0.0)
     physical, token_in_block = _physical_block_and_token(
-        b, p, block_tables, seq_idx, kpos
+        b, p, block_tables, bt_stride, seq_idx, kpos
     )
     q_desc = _q_descriptor(p)
     kv_desc = _paged_kv_descriptor(p)
@@ -7227,13 +7218,14 @@ def _emit_v_load(
     dtype: Type,
     value: Value,
     block_tables: Value,
+    bt_stride: Value,
     seq_idx: Value,
     kv_head: Value,
     kpos: Value,
     dim: Value,
 ) -> Value:
     physical, token_in_block = _physical_block_and_token(
-        b, p, block_tables, seq_idx, kpos
+        b, p, block_tables, bt_stride, seq_idx, kpos
     )
     v_off = _paged_kv_descriptor(p).offset(
         b,
@@ -7249,12 +7241,17 @@ def _physical_block_and_token(
     b: IRBuilder,
     p: UnifiedAttentionProblem,
     block_tables: Value,
+    bt_stride: Value,
     seq_idx: Value,
     kpos: Value,
 ) -> Tuple[Value, Value]:
+    """Look up ``kpos``'s physical KV block in row ``seq_idx`` of the block table.
+
+    ``bt_stride`` is the table's row stride kernarg, not a value derived from
+    ``max_seqlen_k``: callers may allocate rows wider than the longest sequence.
+    """
     block_idx, token_in_block = _magic_div_mod(b, kpos, p.block_size)
-    max_blocks = (p.max_seqlen_k + p.block_size - 1) // p.block_size
     physical = b.global_load_i32(
-        block_tables, b.add(b.mul(seq_idx, b.const_i32(max_blocks)), block_idx)
+        block_tables, b.add(b.mul(seq_idx, bt_stride), block_idx)
     )
     return physical, token_in_block

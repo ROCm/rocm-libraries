@@ -115,20 +115,18 @@ void rocke_attn_unified_emit_2d_softmax_loop(rocke_attn_unified_build_ctx_t* ctx
         rocke_value_t* l_val = loop.iter_vars[1];
         rocke_value_t* acc_val = loop.iter_vars[2];
 
-        /* block_idx, token_in_block = _magic_div_mod(b, kpos, p.block_size) */
-        rocke_value_t* block_idx = NULL;
+        /* physical, token_in_block = _physical_block_and_token(
+         *     b, p, block_tables, bt_stride, seq_idx, kpos) */
+        rocke_value_t* physical = NULL;
         rocke_value_t* token_in_block = NULL;
-        (void)rocke_unified_attn_magic_div_mod(b, kpos, p->block_size, &block_idx, &token_in_block);
-
-        /* physical = global_load_i32(block_tables,
-         *     seq_idx * ceil(max_seqlen_k/block_size) + block_idx) */
-        int max_blocks_2d = (p->max_seqlen_k + p->block_size - 1) / p->block_size;
-        rocke_value_t* physical = rocke_b_global_load_i32(
-            b,
-            ctx->abi_block_tables,
-            rocke_b_add(
-                b, rocke_b_mul(b, ctx->seq_idx, rocke_b_const_i32(b, max_blocks_2d)), block_idx),
-            /*align=*/4);
+        (void)rocke_unified_attn_physical_block_and_token(b,
+                                                          &ctx->sel_p,
+                                                          ctx->abi_block_tables,
+                                                          ctx->block_table_stride,
+                                                          ctx->seq_idx,
+                                                          kpos,
+                                                          &physical,
+                                                          &token_in_block);
 
         /* Vectorised QK dot product (vec8 main fold + scalar tail). */
         rocke_value_t* score = ctx->zero_f;
