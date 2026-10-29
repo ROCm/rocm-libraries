@@ -49,6 +49,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -85,6 +86,14 @@ namespace
     };
     auto const* const gEnvironment = ::testing::AddGlobalTestEnvironment(new RockeOnly);
 
+    // The JIT lines of the whole program ("rocKE JIT: <s> of <n> launches specialized ...;
+    // <first decline reason>"): plans, launches, specialized launches, declines by reason.
+    struct JitTotals
+    {
+        int64_t                        plans = 0, launches = 0, specialized = 0;
+        std::map<std::string, int64_t> declines;
+    };
+
     class LogCapture
     {
     public:
@@ -119,15 +128,86 @@ namespace
             return out;
         }
 
+        // The last line that contains `text` ("" if none).
+        std::string last(std::string const& text) const
+        {
+            std::scoped_lock lock(sMutex);
+            for(auto it = sLines.rbegin(); it != sLines.rend(); ++it)
+            {
+                if(it->find(text) != std::string::npos)
+                {
+                    return *it;
+                }
+            }
+            return "";
+        }
+
+        // The JIT lines of the whole program (JitTotals).
+        static JitTotals jitTotals()
+        {
+            std::scoped_lock lock(sMutex);
+            return sJit;
+        }
+
     private:
         static void callback(int32_t, char const* func, char const* msg)
         {
             std::scoped_lock lock(sMutex);
             sLines.push_back(std::string(func) + ": " + msg);
+            std::string const line = msg;
+            auto const        at   = line.find("rocKE JIT: ");
+            int               s = 0, n = 0;
+            if(at != std::string::npos
+               && std::sscanf(line.c_str() + at, "rocKE JIT: %d of %d launches", &s, &n) == 2)
+            {
+                sJit.plans++;
+                sJit.launches += n;
+                sJit.specialized += s;
+                if(s < n)
+                {
+                    auto const note = line.find("; ", at);
+                    sJit.declines[note == std::string::npos ? "?" : line.substr(note + 2)] += n - s;
+                }
+            }
         }
         static inline std::mutex               sMutex;
         static inline std::vector<std::string> sLines;
+        static inline JitTotals                sJit;
     };
+
+    // Prints the JIT totals of the program (HIPTENSOR_ROCKE_TEST_JIT=1) at its end.
+    struct JitReport : ::testing::Environment
+    {
+        void TearDown() override
+        {
+            auto const t = LogCapture::jitTotals();
+            if(t.plans == 0)
+            {
+                return;
+            }
+            std::printf("rocKE JIT totals: %lld of %lld launches specialized in %lld plans\n",
+                        static_cast<long long>(t.specialized),
+                        static_cast<long long>(t.launches),
+                        static_cast<long long>(t.plans));
+            for(auto const& [why, count] : t.declines)
+            {
+                std::printf("  declined %lld (first reason of a plan): %s\n",
+                            static_cast<long long>(count),
+                            why.c_str());
+            }
+        }
+    };
+    auto const* const gJitReport = ::testing::AddGlobalTestEnvironment(new JitReport);
+
+    // HIPTENSOR_ROCKE_TEST_JIT=1 with HIPTENSOR_ROCKE_JIT=all: the JIT must specialize every
+    // elementwise launch (every launch of the pack's generic kernel has a JIT class).
+    bool jitAll()
+    {
+        char const* jit  = std::getenv("HIPTENSOR_ROCKE_TEST_JIT");
+        char const* mode = std::getenv("HIPTENSOR_ROCKE_JIT");
+        return jit != nullptr && std::string(jit) == "1" && mode != nullptr
+               && std::string(mode) == "all";
+    }
 
     void setEnv(char const* name, char const* value)
     {
@@ -756,6 +836,20 @@ namespace
         }
         api.plans.push_back(plan);
         EXPECT_TRUE(log.contains("Backend: rocke")) << log.all();
+        if(jitMode == HIPTENSOR_JIT_MODE_DEFAULT && jitAll())
+        {
+            auto const line = log.last("rocKE JIT: ");
+            int        s = 0, n = 0;
+            if(!line.empty()
+               && std::sscanf(line.c_str() + line.find("rocKE JIT: "),
+                              "rocKE JIT: %d of %d launches",
+                              &s,
+                              &n)
+                      == 2)
+            {
+                EXPECT_EQ(s, n) << line;
+            }
+        }
         uint64_t required = 0;
         EXPECT_EQ(
             hiptensorPlanGetAttribute(
@@ -2378,6 +2472,733 @@ namespace
 
     INSTANTIATE_TEST_SUITE_P(Rocke, RockeReduction, ::testing::ValuesIn(reductionCases()));
 
+    // --------------------------------------------------------- tuned reduction classes
+
+    // MAX / MIN of the reduction reference: NaN propagates (hipTensor's reductions)
+    double reduceRef(hiptensorOperator_t op, double r, double x)
+    {
+        if((op == HIPTENSOR_OP_MAX || op == HIPTENSOR_OP_MIN) && (std::isnan(r) || std::isnan(x)))
+        {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        return binaryRef(op, r, x);
+    }
+
+    double reduceIdentity(hiptensorOperator_t op)
+    {
+        return op == HIPTENSOR_OP_MUL   ? 1.0
+               : op == HIPTENSOR_OP_MAX ? -INFINITY
+               : op == HIPTENSOR_OP_MIN ? INFINITY
+                                        : 0.0;
+    }
+
+    // A reduction the tuned classes serve: A's modes / extents (A stored in a random mode order
+    // with padding), D's modes (stored in a random order), the operators, scales, NaN data and
+    // misaligned buffers. Integer data: every result is exact after one rounding.
+    struct TunedReductionCase
+    {
+        hiptensorDataType_t  type;
+        hiptensorOperator_t  op;
+        std::string          modesA;
+        std::string          modesD;
+        std::vector<int64_t> extents; // per mode of modesA
+        int                  seed;
+        hiptensorOperator_t  opA     = HIPTENSOR_OP_IDENTITY;
+        hiptensorOperator_t  opC     = HIPTENSOR_OP_IDENTITY;
+        double               alpha   = 1.0;
+        double               beta    = 0.0;
+        int                  nanA    = 0; // NaN elements of A
+        bool                 nanC    = false; // C all NaN (beta 0: never read)
+        bool                 allNanA = false; // A all NaN (alpha 0: never read)
+        size_t               skew    = 0; // A, C, D this many elements past aligned addresses
+    };
+
+    std::ostream& operator<<(std::ostream& os, TunedReductionCase const& c)
+    {
+        return os << "type " << int(c.type) << " op " << int(c.op) << " A " << c.modesA << " D '"
+                  << c.modesD << "' seed " << c.seed;
+    }
+
+    class RockeTunedReduction : public ::testing::TestWithParam<TunedReductionCase>
+    {
+    };
+
+    TEST_P(RockeTunedReduction, ExactAndPicked)
+    {
+        auto const   c = GetParam();
+        std::mt19937 rng(c.seed);
+        ApiObjects   api;
+        if(!api.supports(c.type))
+        {
+            GTEST_SKIP() << "data type not supported on this device";
+        }
+        LogCapture                 log;
+        std::vector<int32_t>       ma(c.modesA.begin(), c.modesA.end());
+        std::vector<int32_t>       md(c.modesD.begin(), c.modesD.end());
+        std::map<int32_t, int64_t> ext;
+        for(size_t i = 0; i < ma.size(); i++)
+        {
+            ext[ma[i]] = c.extents[i];
+        }
+        std::vector<int32_t> red;
+        for(auto m : ma)
+        {
+            if(std::find(md.begin(), md.end(), m) == md.end())
+            {
+                red.push_back(m);
+            }
+        }
+        int  range = c.op == HIPTENSOR_OP_MUL ? 1 : 3;
+        auto A     = makeTensor(c.type, ma, ext, rng, true, range);
+        auto C     = makeTensor(c.type, md, ext, rng, true);
+        auto D     = C;
+        std::fill(D.values.begin(), D.values.end(), cplx(-77, 0));
+        if(c.allNanA)
+        {
+            std::fill(A.values.begin(), A.values.end(), cplx(NAN, 0));
+        }
+        for(int i = 0; i < c.nanA; i++)
+        {
+            A.values[rng() % A.values.size()] = cplx(NAN, 0);
+        }
+        auto Cread = C;
+        if(c.nanC)
+        {
+            std::fill(C.values.begin(), C.values.end(), cplx(NAN, 0));
+        }
+        auto const scalarType = c.type == HIPTENSOR_R_64F ? HIPTENSOR_R_64F : HIPTENSOR_R_32F;
+        auto const compute
+            = c.type == HIPTENSOR_R_64F ? HIPTENSOR_COMPUTE_DESC_64F : HIPTENSOR_COMPUTE_DESC_32F;
+        Scalar alpha, beta;
+        alpha.re = c.alpha;
+        beta.re  = c.beta;
+
+        hiptensorOperationDescriptor_t desc = nullptr;
+        auto dA = describe(api, A), dC = describe(api, C), dD = describe(api, D);
+        ASSERT_EQ(hiptensorCreateReduction(api.handle,
+                                           &desc,
+                                           dA,
+                                           A.modes.data(),
+                                           c.opA,
+                                           dC,
+                                           C.modes.data(),
+                                           c.opC,
+                                           dD,
+                                           D.modes.data(),
+                                           c.op,
+                                           compute),
+                  HIPTENSOR_STATUS_SUCCESS);
+        api.keep(desc);
+        uint64_t     workspaceSize = 0;
+        SelectionLog sel;
+        auto         plan = planWith(api, desc, {}, log, workspaceSize, &sel);
+        ASSERT_NE(plan, nullptr);
+        // the pack of every rocKE target carries the tuned classes: the rule picks one
+        EXPECT_EQ(sel.pick.rfind("rreduce:", 0), 0u) << sel.pick << "\n" << log.all();
+        Device dev;
+        void*  pA = dev.upload(A, c.skew);
+        void*  pC = dev.upload(C, c.skew);
+        void*  pD = dev.upload(D, c.skew);
+        void*  ws = nullptr;
+        if(workspaceSize > 0)
+        {
+            // NaN-filled: a partial that is not written before it is read shows
+            ASSERT_EQ(hipMalloc(&ws, workspaceSize), hipSuccess);
+            ASSERT_EQ(hipMemset(ws, 0xFF, workspaceSize), hipSuccess);
+            dev.buffers.push_back(ws);
+        }
+        Stream stream;
+        ASSERT_EQ(hiptensorReduce(api.handle,
+                                  plan,
+                                  alpha.as(scalarType),
+                                  pA,
+                                  beta.as(scalarType),
+                                  pC,
+                                  pD,
+                                  ws,
+                                  workspaceSize,
+                                  stream.s),
+                  HIPTENSOR_STATUS_SUCCESS)
+            << log.all();
+        ASSERT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
+        Tensor got = D;
+        dev.download(pD, got);
+        int64_t bad = 0;
+        forEachIndex(md, ext, [&](auto index) {
+            double r = reduceIdentity(c.op);
+            if(c.alpha != 0.0)
+            {
+                forEachIndex(red, ext, [&](auto rindex) {
+                    auto full = index;
+                    for(auto& kv : rindex)
+                    {
+                        full[kv.first] = kv.second;
+                    }
+                    r = reduceRef(c.op, r, unaryRef(c.opA, A.values[A.offset(full)].real()));
+                });
+            }
+            double want = c.alpha != 0.0 ? c.alpha * r : 0.0;
+            if(c.beta != 0.0)
+            {
+                want += c.beta * unaryRef(c.opC, Cread.values[Cread.offset(index)].real());
+            }
+            want            = roundTo(want, c.type);
+            double const g  = got.values[got.offset(index)].real();
+            bool const   ok = std::isnan(want) ? std::isnan(g) : g == want;
+            if(!ok && bad++ < 5)
+            {
+                ADD_FAILURE() << "output " << got.offset(index) << " got " << g << " want " << want
+                              << " (" << sel.pick << ")";
+            }
+        });
+        EXPECT_EQ(bad, 0) << sel.pick;
+    }
+
+    std::vector<TunedReductionCase> tunedReductionCases()
+    {
+        std::vector<TunedReductionCase> out;
+        int                             seed = 2600;
+        auto                            add  = [&](TunedReductionCase c) {
+            c.seed = seed++;
+            out.push_back(c);
+        };
+        for(auto type : {HIPTENSOR_R_16F, HIPTENSOR_R_16BF, HIPTENSOR_R_32F, HIPTENSOR_R_64F})
+        {
+            for(auto op : {HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL, HIPTENSOR_OP_MAX, HIPTENSOR_OP_MIN})
+            {
+                // the innermost stored mode reduced (row classes) or kept (col classes), a full
+                // reduction (split partials), two reduced runs, three kept runs
+                add({type, op, "ab", "b", {4096, 96}, 0});
+                add({type, op, "ab", "a", {96, 3000}, 0});
+                add({type, op, "a", "", {1 << 20}, 0});
+                add({type, op, "abc", "ca", {64, 129, 48}, 0});
+                add({type, op, "abcde", "bd", {24, 9, 16, 7, 33}, 0});
+                // scales and operators: beta with opC, a NaN C that beta 0 never reads, an A of
+                // NaN that alpha 0 never reads
+                add({type,
+                     op,
+                     "ab",
+                     "b",
+                     {512, 40},
+                     0,
+                     HIPTENSOR_OP_IDENTITY,
+                     HIPTENSOR_OP_NEG,
+                     2.0,
+                     -1.0});
+                add({type,
+                     op,
+                     "ab",
+                     "a",
+                     {40, 512},
+                     0,
+                     HIPTENSOR_OP_IDENTITY,
+                     HIPTENSOR_OP_IDENTITY,
+                     0.5,
+                     0.0,
+                     0,
+                     true});
+                add({type,
+                     op,
+                     "ab",
+                     "a",
+                     {40, 512},
+                     0,
+                     HIPTENSOR_OP_IDENTITY,
+                     HIPTENSOR_OP_ABS,
+                     0.0,
+                     2.0,
+                     0,
+                     false,
+                     true});
+                // NaN reaches exactly the outputs whose reduction reads one (MAX / MIN too)
+                add({type,
+                     op,
+                     "abc",
+                     "c",
+                     {256, 3, 64},
+                     0,
+                     HIPTENSOR_OP_IDENTITY,
+                     HIPTENSOR_OP_IDENTITY,
+                     1.0,
+                     0.0,
+                     5});
+                add({type,
+                     op,
+                     "abc",
+                     "a",
+                     {64, 3, 256},
+                     0,
+                     HIPTENSOR_OP_IDENTITY,
+                     HIPTENSOR_OP_IDENTITY,
+                     1.0,
+                     0.0,
+                     5});
+                // opA (the una classes)
+                for(auto opA : {HIPTENSOR_OP_ABS, HIPTENSOR_OP_NEG, HIPTENSOR_OP_RELU})
+                {
+                    add({type,
+                         op,
+                         "abc",
+                         op == HIPTENSOR_OP_MUL ? "c" : "b",
+                         {300, 33, 20},
+                         0,
+                         opA});
+                }
+                // A, C and D one element past aligned addresses: the vector classes fall back
+                add({type,
+                     op,
+                     "ab",
+                     "b",
+                     {1024, 64},
+                     0,
+                     HIPTENSOR_OP_IDENTITY,
+                     HIPTENSOR_OP_IDENTITY,
+                     1.0,
+                     1.0,
+                     0,
+                     false,
+                     false,
+                     1});
+                add({type,
+                     op,
+                     "ab",
+                     "a",
+                     {64, 1024},
+                     0,
+                     HIPTENSOR_OP_IDENTITY,
+                     HIPTENSOR_OP_IDENTITY,
+                     1.0,
+                     1.0,
+                     0,
+                     false,
+                     false,
+                     1});
+            }
+        }
+        return out;
+    }
+
+    INSTANTIATE_TEST_SUITE_P(Rocke,
+                             RockeTunedReduction,
+                             ::testing::ValuesIn(tunedReductionCases()));
+
+    // The planner's untuned choice is rocKE's (kernels.common.hiptensor_aot.rreduce_host
+    // .untuned_choices): the first candidate of these problems (packed column-major A and D, not in
+    // the route table) is the one rocKE's test_hiptensor_aot_rreduce_table.py PICKS_GFX950 expects
+    // for gfx950 with 256 compute units. Regenerate both lists when the table's palette or
+    // prototypes change.
+    struct TunedPickCase
+    {
+        hiptensorDataType_t  type;
+        hiptensorOperator_t  op;
+        std::string          modesA;
+        std::string          modesD;
+        std::vector<int64_t> extents;
+        bool                 una;
+        std::string          pick;
+    };
+
+    std::ostream& operator<<(std::ostream& os, TunedPickCase const& c)
+    {
+        return os << "type " << int(c.type) << " op " << int(c.op) << " A " << c.modesA << " D '"
+                  << c.modesD << "'";
+    }
+
+    class RockeTunedPick : public ::testing::TestWithParam<TunedPickCase>
+    {
+    };
+
+    TEST_P(RockeTunedPick, SameAsRocke)
+    {
+        auto const      c      = GetParam();
+        int             device = 0;
+        hipDeviceProp_t props;
+        ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+        ASSERT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
+        if(deviceArch() != "gfx950" || props.multiProcessorCount != 256)
+        {
+            GTEST_SKIP() << "the expected picks are rocKE's for gfx950 with 256 compute units";
+        }
+        ApiObjects api;
+        if(!api.supports(c.type))
+        {
+            GTEST_SKIP() << "data type not supported on this device";
+        }
+        LogCapture                 log;
+        std::map<int32_t, int64_t> ext;
+        Tensor                     A, D;
+        A.type = D.type = c.type;
+        int64_t stride  = 1;
+        for(size_t i = 0; i < c.modesA.size(); i++)
+        {
+            ext[c.modesA[i]] = c.extents[i];
+            A.modes.push_back(c.modesA[i]);
+            A.extents.push_back(c.extents[i]);
+            A.strides.push_back(stride);
+            stride *= c.extents[i];
+        }
+        stride = 1;
+        for(char m : c.modesD)
+        {
+            D.modes.push_back(m);
+            D.extents.push_back(ext.at(m));
+            D.strides.push_back(stride);
+            stride *= ext.at(m);
+        }
+        auto const compute
+            = c.type == HIPTENSOR_R_64F ? HIPTENSOR_COMPUTE_DESC_64F : HIPTENSOR_COMPUTE_DESC_32F;
+        hiptensorOperationDescriptor_t desc = nullptr;
+        auto                           dA = describe(api, A), dD = describe(api, D);
+        ASSERT_EQ(hiptensorCreateReduction(api.handle,
+                                           &desc,
+                                           dA,
+                                           A.modes.data(),
+                                           c.una ? HIPTENSOR_OP_ABS : HIPTENSOR_OP_IDENTITY,
+                                           dD,
+                                           D.modes.data(),
+                                           HIPTENSOR_OP_IDENTITY,
+                                           dD,
+                                           D.modes.data(),
+                                           c.op,
+                                           compute),
+                  HIPTENSOR_STATUS_SUCCESS);
+        api.keep(desc);
+        uint64_t     workspaceSize = 0;
+        SelectionLog sel;
+        auto         plan = planWith(api, desc, {}, log, workspaceSize, &sel);
+        ASSERT_NE(plan, nullptr);
+        EXPECT_EQ(sel.pick, c.pick) << log.all();
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        Rocke,
+        RockeTunedPick,
+        ::testing::Values(
+            TunedPickCase{
+                HIPTENSOR_R_16F,
+                HIPTENSOR_OP_ADD,
+                "ab",
+                "b",
+                {3000, 70},
+                false,
+                "rreduce:hiptensor_aot_rreduce_row_add_f16_f16_r1_b256_v8_l256_u4_nt_i32:split2"},
+            TunedPickCase{
+                HIPTENSOR_R_32F,
+                HIPTENSOR_OP_MAX,
+                "ab",
+                "a",
+                {70, 3000},
+                false,
+                "rreduce:hiptensor_aot_rreduce_col_max_f32_f32_r1_b512_v2_l32_u8_nt_i32:split128"},
+            TunedPickCase{
+                HIPTENSOR_R_16BF,
+                HIPTENSOR_OP_MIN,
+                "abc",
+                "b",
+                {100, 50, 30},
+                false,
+                "rreduce:hiptensor_aot_rreduce_row_min_bf16_bf16_r2_b512_v4_l512_u4_nt_i32:split2"},
+            TunedPickCase{
+                HIPTENSOR_R_64F,
+                HIPTENSOR_OP_ADD,
+                "abcd",
+                "bd",
+                {17, 33, 9, 40},
+                false,
+                "rreduce:hiptensor_aot_rreduce_row_add_f64_f64_r8_b256_v1_l1_u4_nt_i32:split128"},
+            TunedPickCase{
+                HIPTENSOR_R_32F,
+                HIPTENSOR_OP_ADD,
+                "a",
+                "",
+                {1000003},
+                false,
+                "rreduce:hiptensor_aot_rreduce_row_add_f32_f32_r8_b256_v1_l1_u4_nt_i32:split1024"},
+            TunedPickCase{HIPTENSOR_R_16F,
+                          HIPTENSOR_OP_MAX,
+                          "abc",
+                          "ac",
+                          {8, 2000, 12},
+                          false,
+                          "rreduce:hiptensor_aot_rreduce_col_max_f16_f16_r2_b256_v8_l1_w8_u4_nt_"
+                          "i32:split128"},
+            TunedPickCase{HIPTENSOR_R_32F,
+                          HIPTENSOR_OP_MUL,
+                          "abc",
+                          "c",
+                          {640, 3, 50},
+                          true,
+                          "rreduce:hiptensor_aot_rreduce_row_mul_f32_f32_r2_b256_v4_l32_u8_nt_una_"
+                          "i32:split8"},
+            TunedPickCase{
+                HIPTENSOR_R_64F,
+                HIPTENSOR_OP_MAX,
+                "abcde",
+                "eb",
+                {6, 7, 8, 9, 10},
+                false,
+                "rreduce:hiptensor_aot_rreduce_row_max_f64_f64_r2_b1024_v2_l16_u4_nt_i32:split8"}));
+
+    // The problems of rocKE's reduction route table run with their tuned knobs (the reduction doc
+    // rows, packed column-major, as hipTensor's benchmarks describe them): device-format data
+    // generated in place (no per-element host records), an exact reference over A's storage.
+    struct TableReductionCase
+    {
+        hiptensorDataType_t  type;
+        hiptensorOperator_t  op;
+        std::string          modesA;
+        std::string          modesD;
+        std::vector<int64_t> extents;
+    };
+
+    std::ostream& operator<<(std::ostream& os, TableReductionCase const& c)
+    {
+        return os << "type " << int(c.type) << " op " << int(c.op) << " A " << c.modesA << " D '"
+                  << c.modesD << "'";
+    }
+
+    class RockeTableReduction : public ::testing::TestWithParam<TableReductionCase>
+    {
+    };
+
+    // value i of the generated A: an integer in [-2, 2] (+-1 for products)
+    double tableValue(uint64_t i, bool pm1)
+    {
+        uint64_t h = (i + 0x51ED27ull) * 0x9E3779B97F4A7C15ull;
+        h ^= h >> 29;
+        return pm1 ? ((h >> 7) & 1 ? 1.0 : -1.0) : double(int64_t((h >> 7) % 5) - 2);
+    }
+
+    void putRaw(uint8_t* p, hiptensorDataType_t t, double v)
+    {
+        switch(t)
+        {
+        case HIPTENSOR_R_16F:
+        {
+            _Float16 x = static_cast<_Float16>(v);
+            std::memcpy(p, &x, 2);
+            break;
+        }
+        case HIPTENSOR_R_16BF:
+        {
+            hip_bfloat16 x(static_cast<float>(v));
+            std::memcpy(p, &x, 2);
+            break;
+        }
+        case HIPTENSOR_R_32F:
+        {
+            float x = static_cast<float>(v);
+            std::memcpy(p, &x, 4);
+            break;
+        }
+        default:
+            std::memcpy(p, &v, 8);
+            break;
+        }
+    }
+
+    double getRaw(uint8_t const* p, hiptensorDataType_t t)
+    {
+        switch(t)
+        {
+        case HIPTENSOR_R_16F:
+        {
+            _Float16 x;
+            std::memcpy(&x, p, 2);
+            return static_cast<double>(x);
+        }
+        case HIPTENSOR_R_16BF:
+        {
+            hip_bfloat16 x;
+            std::memcpy(&x, p, 2);
+            return static_cast<double>(static_cast<float>(x));
+        }
+        case HIPTENSOR_R_32F:
+        {
+            float x;
+            std::memcpy(&x, p, 4);
+            return x;
+        }
+        default:
+        {
+            double x;
+            std::memcpy(&x, p, 8);
+            return x;
+        }
+        }
+    }
+
+    TEST_P(RockeTableReduction, TunedRouteExact)
+    {
+        auto const c = GetParam();
+        ApiObjects api;
+        if(!api.supports(c.type))
+        {
+            GTEST_SKIP() << "data type not supported on this device";
+        }
+        LogCapture           log;
+        size_t const         eb = sizeOf(c.type);
+        std::vector<int64_t> extD, strideA(c.modesA.size()), strideD;
+        int64_t              nA = 1;
+        for(size_t i = 0; i < c.modesA.size(); i++)
+        {
+            strideA[i] = nA;
+            nA *= c.extents[i];
+        }
+        int64_t nD = 1;
+        // D's stride of each mode of A (0: reduced)
+        std::vector<int64_t> dOfA(c.modesA.size(), 0);
+        for(char m : c.modesD)
+        {
+            auto i  = c.modesA.find(m);
+            dOfA[i] = nD;
+            extD.push_back(c.extents[i]);
+            strideD.push_back(nD);
+            nD *= c.extents[i];
+        }
+        std::vector<int32_t>           ma(c.modesA.begin(), c.modesA.end());
+        std::vector<int32_t>           md(c.modesD.begin(), c.modesD.end());
+        hiptensorOperationDescriptor_t desc = nullptr;
+        auto                           dA   = api.tensor(c.extents, strideA, c.type);
+        auto                           dD   = api.tensor(extD, strideD, c.type);
+        auto const                     compute
+            = c.type == HIPTENSOR_R_64F ? HIPTENSOR_COMPUTE_DESC_64F : HIPTENSOR_COMPUTE_DESC_32F;
+        ASSERT_EQ(hiptensorCreateReduction(api.handle,
+                                           &desc,
+                                           dA,
+                                           ma.data(),
+                                           HIPTENSOR_OP_IDENTITY,
+                                           dD,
+                                           md.data(),
+                                           HIPTENSOR_OP_IDENTITY,
+                                           dD,
+                                           md.data(),
+                                           c.op,
+                                           compute),
+                  HIPTENSOR_STATUS_SUCCESS);
+        api.keep(desc);
+        uint64_t     workspaceSize = 0;
+        SelectionLog sel;
+        auto         plan = planWith(api, desc, {}, log, workspaceSize, &sel);
+        ASSERT_NE(plan, nullptr);
+        if(deviceArch() == "gfx950")
+        {
+            // the table's tuned route
+            EXPECT_EQ(sel.source, "TUNED") << log.all();
+            EXPECT_EQ(sel.pick.rfind("rreduce:tuned:", 0), 0u) << sel.pick;
+        }
+        bool const           pm1 = c.op == HIPTENSOR_OP_MUL;
+        std::vector<uint8_t> a(size_t(nA) * eb);
+        for(int64_t i = 0; i < nA; i++)
+        {
+            putRaw(a.data() + size_t(i) * eb, c.type, tableValue(uint64_t(i), pm1));
+        }
+        void *pA = nullptr, *pC = nullptr, *pD = nullptr, *ws = nullptr;
+        ASSERT_EQ(hipMalloc(&pA, a.size()), hipSuccess);
+        ASSERT_EQ(hipMalloc(&pC, size_t(nD) * eb), hipSuccess);
+        ASSERT_EQ(hipMalloc(&pD, size_t(nD) * eb), hipSuccess);
+        // C all NaN: beta 0 never reads it
+        ASSERT_EQ(hipMemset(pC, 0xFF, size_t(nD) * eb), hipSuccess);
+        ASSERT_EQ(hipMemset(pD, 0xFF, size_t(nD) * eb), hipSuccess);
+        if(workspaceSize > 0)
+        {
+            ASSERT_EQ(hipMalloc(&ws, workspaceSize), hipSuccess);
+            ASSERT_EQ(hipMemset(ws, 0xFF, workspaceSize), hipSuccess);
+        }
+        ASSERT_EQ(hipMemcpy(pA, a.data(), a.size(), hipMemcpyHostToDevice), hipSuccess);
+        Stream stream;
+        Scalar alpha, beta;
+        alpha.re              = 1.0;
+        beta.re               = 0.0;
+        auto const scalarType = c.type == HIPTENSOR_R_64F ? HIPTENSOR_R_64F : HIPTENSOR_R_32F;
+        auto const status     = hiptensorReduce(api.handle,
+                                            plan,
+                                            alpha.as(scalarType),
+                                            pA,
+                                            beta.as(scalarType),
+                                            pC,
+                                            pD,
+                                            ws,
+                                            workspaceSize,
+                                            stream.s);
+        EXPECT_EQ(status, HIPTENSOR_STATUS_SUCCESS) << log.all();
+        EXPECT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
+        std::vector<uint8_t> d(size_t(nD) * eb);
+        EXPECT_EQ(hipMemcpy(d.data(), pD, d.size(), hipMemcpyDeviceToHost), hipSuccess);
+        for(void* p : {pA, pC, pD, ws})
+        {
+            static_cast<void>(hipFree(p));
+        }
+        // reference: one pass over A's storage, the D offset kept with an odometer
+        std::vector<double>  r(size_t(nD), reduceIdentity(c.op));
+        std::vector<int64_t> idx(c.modesA.size(), 0);
+        int64_t              off = 0;
+        for(int64_t i = 0; i < nA; i++)
+        {
+            double const x = getRaw(a.data() + size_t(i) * eb, c.type);
+            r[size_t(off)] = reduceRef(c.op, r[size_t(off)], x);
+            for(size_t m = 0; m < idx.size(); m++)
+            {
+                if(++idx[m] < c.extents[m])
+                {
+                    off += dOfA[m];
+                    break;
+                }
+                off -= dOfA[m] * (c.extents[m] - 1);
+                idx[m] = 0;
+            }
+        }
+        int64_t bad = 0;
+        for(int64_t o = 0; o < nD; o++)
+        {
+            double const want = roundTo(r[size_t(o)], c.type);
+            double const got  = getRaw(d.data() + size_t(o) * eb, c.type);
+            if(got != want && bad++ < 5)
+            {
+                ADD_FAILURE() << "output " << o << " got " << got << " want " << want;
+            }
+        }
+        EXPECT_EQ(bad, 0) << sel.pick;
+    }
+
+    std::vector<TableReductionCase> tableReductionCases()
+    {
+        // the reduction doc rows (hipTensor's benchmark descriptors: packed column-major)
+        struct Shape
+        {
+            std::string          a, d;
+            std::vector<int64_t> ext;
+        };
+        Shape const                     r1{"a", "", {16777216}};
+        Shape const                     r2{"ab", "a", {16384, 16384}};
+        Shape const                     r3{"abc", "ac", {512, 1024, 1024}};
+        Shape const                     r4{"abcd", "abd", {128, 128, 128, 128}};
+        Shape const                     r5{"abcde", "ace", {64, 64, 64, 32, 32}};
+        Shape const                     r6{"abcdef", "ace", {32, 32, 32, 32, 16, 16}};
+        std::vector<TableReductionCase> out;
+        auto add = [&](hiptensorDataType_t t, hiptensorOperator_t op, Shape const& s) {
+            out.push_back({t, op, s.a, s.d, s.ext});
+        };
+        for(auto t : {HIPTENSOR_R_16F, HIPTENSOR_R_16BF, HIPTENSOR_R_32F, HIPTENSOR_R_64F})
+        {
+            for(auto op : {HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL, HIPTENSOR_OP_MAX, HIPTENSOR_OP_MIN})
+            {
+                add(t, op, r1);
+            }
+        }
+        add(HIPTENSOR_R_16F, HIPTENSOR_OP_ADD, r2);
+        add(HIPTENSOR_R_64F, HIPTENSOR_OP_MAX, r2);
+        add(HIPTENSOR_R_32F, HIPTENSOR_OP_MIN, r3);
+        add(HIPTENSOR_R_16BF, HIPTENSOR_OP_MUL, r4);
+        add(HIPTENSOR_R_16F, HIPTENSOR_OP_MAX, r5);
+        add(HIPTENSOR_R_32F, HIPTENSOR_OP_ADD, r6);
+        return out;
+    }
+
+    INSTANTIATE_TEST_SUITE_P(Rocke,
+                             RockeTableReduction,
+                             ::testing::ValuesIn(tableReductionCases()));
+
     // ---------------------------------------------------------------------- selection
 
     // Every candidate the selector ranks for a problem (KERNEL_RANK 0, 1, ...) is a different
@@ -2578,14 +3399,31 @@ namespace
         }
         EXPECT_EQ(st.candidates, a.candidates);
 
-        // reductions have models too
+        // reductions: the tuned reduction rule picks a tuned reduction class when one serves the
+        // problem (the rule applies to the static selection too); otherwise their models decide
         ReductionCase const r{HIPTENSOR_R_32F, HIPTENSOR_COMPUTE_DESC_32F, HIPTENSOR_OP_ADD, 1502};
-        SelectionLog        red;
+        SelectionLog        red, redStatic;
         runReduction(r, {}, &red);
-        EXPECT_TRUE(red.source == "MODEL" || red.source == "STATIC") << red.source;
-        if(deviceArch() == "gfx950" && red.candidates > 1)
         {
-            EXPECT_EQ(red.source, "MODEL");
+            ScopedEnv env("HIPTENSOR_ROCKE_SELECT", "static");
+            runReduction(r, {}, &redStatic);
+        }
+        EXPECT_TRUE(red.source == "MODEL" || red.source == "STATIC" || red.source == "RULE")
+            << red.source;
+        if(red.source == "RULE")
+        {
+            EXPECT_EQ(red.reason, "the tuned reduction rule");
+            EXPECT_EQ(red.pick.rfind("rreduce:", 0), 0u) << red.pick;
+            EXPECT_EQ(redStatic.source, "RULE");
+            EXPECT_EQ(redStatic.pick, red.pick);
+        }
+        else
+        {
+            EXPECT_EQ(redStatic.source, "STATIC");
+            if(deviceArch() == "gfx950" && red.candidates > 1)
+            {
+                EXPECT_EQ(red.source, "MODEL");
+            }
         }
     }
 

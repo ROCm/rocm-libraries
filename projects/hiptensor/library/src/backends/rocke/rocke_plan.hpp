@@ -67,6 +67,9 @@ namespace hiptensor
             // contraction: the f64 strided GEMM with f32 / complex f32 words (f32 MFMA products,
             // f32 accumulation): the native route of f32 data with the 32F / C32F compute type
             Gett32 = 9,
+            // reduction: a tuned class of rocKE's native strided reduction (the geometry as
+            // kernel arguments), with its split finalize
+            TunedReduction = 10,
         };
 
         // How contractions of f32 / complex f32 (and mixed real) data with the 32F / C32F compute

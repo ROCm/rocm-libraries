@@ -29,6 +29,11 @@ Kernel families (attribute "family"):
              operand packing and epilogue); attribute math=1: the rows that also implement the
              trigonometric and hyperbolic operators, their inverses, ceil and floor
     reduce   strided reduction kernels (row, col) and the split finalize kernel (math as for ew)
+    rreduce  the tuned reduction classes (kernels.common.hiptensor_aot.rreduce: rocKE's native
+             strided reduction bodies with the geometry as kernel arguments) of the target's
+             palette and tuned problems (rocke/dispatch/families/hiptensor_rreduce.json)
+    rreduce_final
+             the split finalize of the tuned reduction classes
     gemm     universal GEMM bodies with an f32 output (routes h16: f16 / bf16 operands;
              x3 / x4 / x6 / x9: f32 operands split into bf16 parts, the recipes of
              rocke.instances.common.gemm_prologue; cf32 (x6) and cf32x3 / cf32x4 / cf32x9:
@@ -56,9 +61,11 @@ The backend's JIT (HIPTENSOR_ENABLE_ROCKE_JIT) needs nothing from this script: h
 the problem-specialized kernels (kernels.common.hiptensor_aot.jit_ew) at run time with their C++
 twins, which it links.
 
-The route table carries the tuning constants of rocKE's body rules and, per problem of the
-tuned and AOT GETT route tables, ``gett.tuned.<hash>`` (the launch record) and
-``gett.tuned.<hash>.key`` (the canonical problem, see :func:`gett_problem_key`). With --select-models, it also carries the kernel selection models
+The route table carries the tuning constants of rocKE's body rules, per problem of the tuned
+and AOT GETT route tables ``gett.tuned.<hash>`` (the launch record) and ``gett.tuned.<hash>.key``
+(the canonical problem, see :func:`gett_problem_key`), and per tuned reduction problem
+``reduce.tuned.<hash>`` (the knobs) and ``reduce.tuned.<hash>.key`` (the canonical problem,
+``rreduce_host.problem_key``). With --select-models, it also carries the kernel selection models
 of the target, ``select.model.<cell>`` (``<dir>/<arch>/<cell>.model``, written by the selection
 training flow; see rocke_select.hpp for the format).
 
@@ -323,6 +330,22 @@ def rocke_features():
         out["jit"] = ""
     except (ImportError, AttributeError) as e:
         out["jit"] = f"no vector classes of the elementwise kernel ({e})"
+    try:
+        from kernels.common.hiptensor_aot import rreduce, rreduce_host
+
+        for name in (
+            "RreduceSpec",
+            "build_rreduce",
+            "build_rreduce_final",
+            "RREDUCE_ABI",
+        ):
+            getattr(rreduce, name)
+        for name in ("pack_classes", "final_classes", "routes"):
+            getattr(rreduce_host, name)
+        rreduce_host.load_table()
+        out["rreduce"] = ""
+    except (ImportError, AttributeError, OSError, ValueError) as e:
+        out["rreduce"] = f"no tuned reduction classes ({e})"
     return out
 
 
@@ -361,6 +384,17 @@ def kernel_descriptors(arch, num_cus):
                     if math:
                         p["math"] = True
                     out.append(("reduce", p))
+    if not features["rreduce"]:
+        # the tuned reduction classes of the target (its palette, then the classes of its tuned
+        # problems) and the finalize classes
+        from dataclasses import asdict
+
+        from kernels.common.hiptensor_aot import rreduce_host
+
+        out.extend(("rreduce", asdict(s)) for s in rreduce_host.pack_classes(arch))
+        out.extend(
+            ("rreduce_final", asdict(f)) for f in rreduce_host.final_classes(arch)
+        )
     if not features["ewt"]:
         # the real rows of the API's elementwise operations (32-bit offsets, no math operators)
         for p in ew_params(False, mixed=False):
@@ -774,6 +808,53 @@ def build_kernel(family, params, arch, num_cus):
             limit_index=(1 << 31) - 1,
         )
         return build_reduce(spec), attrs
+    if family == "rreduce":
+        from kernels.common.hiptensor_aot.rreduce import (
+            RREDUCE_ABI,
+            RreduceSpec,
+            build_rreduce,
+        )
+
+        spec = RreduceSpec(**params)
+        attrs = dict(
+            family="rreduce",
+            abi=RREDUCE_ABI,
+            mode=spec.mode,
+            a=spec.a,
+            d=spec.d,
+            op=spec.op,
+            nr=spec.nr,
+            block=spec.block,
+            vec=spec.vec,
+            lanes=spec.lanes,
+            unroll=spec.unroll,
+            rows=spec.rows,
+            nt=int(spec.nt),
+            una=int(spec.una),
+            idx64=int(spec.idx64),
+            max_rank=8,
+        )
+        return build_rreduce(spec), attrs
+    if family == "rreduce_final":
+        from kernels.common.hiptensor_aot.rreduce import (
+            RREDUCE_ABI,
+            RreduceFinalSpec,
+            build_rreduce_final,
+        )
+
+        spec = RreduceFinalSpec(**params)
+        attrs = dict(
+            family="rreduce_final",
+            abi=RREDUCE_ABI,
+            a=spec.a,
+            d=spec.d,
+            op=spec.op,
+            lanes=spec.lanes,
+            idx64=int(spec.idx64),
+            block=spec.block,
+            max_rank=8,
+        )
+        return build_rreduce_final(spec), attrs
     if family == "gemm":
         from rocke.instances.common.gemm_universal import (
             DTL_BUFFER_NUM_RECORDS,
@@ -1379,22 +1460,26 @@ def routes_for(arch, num_cus):
         from rocke.instances.common import gett_f64 as g
 
         r["gett64.k_block_min_k"] = str(g.K_BLOCK_MIN_K)
+    if not features["rreduce"]:
+        # the tuned reduction problems of the target: reduce.tuned.<hash> (knobs) and .key
+        from kernels.common.hiptensor_aot import rreduce_host
+
+        r.update(rreduce_host.routes(arch))
     return r
 
 
 def hiptensor_jit_classes():
     """The kernel names of the classes hipTensor's JIT specializes (its rule:
     ``jitClassAdmitted`` of hipTensor's rocke_ew_rows.hpp): every class of :func:`jit_classes`
-    of the rows of the API's operations (no mixed-type rows), without the 64-bit-offset math
-    rows."""
+    of every row of the pack's generic elementwise kernel (32- and 64-bit offsets, the
+    mixed-type rows of contractions, the math rows), so every launch of that kernel has one.
+    """
     from kernels.common.hiptensor_aot.ew import EwSpec
     from kernels.common.hiptensor_aot.jit_ew import jit_classes
 
     names = set()
     for idx64 in (False, True):
-        for p in ew_params(idx64, mixed=False):
-            if p.get("math") and idx64:
-                continue
+        for p in ew_params(idx64):
             names.update(c.kernel_name() for c in jit_classes([EwSpec(**p)]))
     return sorted(names)
 

@@ -484,10 +484,11 @@ namespace hiptensor
                 return sel;
             }
             // 1b. the routes the selection models were not trained on (the ring GETT, the direct
-            // GETT) keep the static order after the others; a preferred one goes first
+            // GETT, the tuned reduction classes) keep the static order after the others; a
+            // preferred one goes first
             auto modelRoute = [&candidates](int i) {
                 auto r = candidates[i].facts.route;
-                return r != Route::RingGett && r != Route::DirectGett;
+                return r != Route::RingGett && r != Route::DirectGett && r != Route::TunedReduction;
             };
             std::stable_partition(sel.order.begin(), sel.order.end(), modelRoute);
             auto preferred = std::find_if(sel.order.begin(), sel.order.end(), [&candidates](int i) {
@@ -495,10 +496,12 @@ namespace hiptensor
             });
             if(preferred != sel.order.end())
             {
-                bool const ring = candidates[*preferred].facts.route == Route::RingGett;
+                auto const route = candidates[*preferred].facts.route;
                 std::rotate(sel.order.begin(), preferred, preferred + 1);
                 sel.source = SelectSource::Rule;
-                sel.model  = ring ? "the ring GETT rule" : "the direct GETT rule";
+                sel.model  = route == Route::RingGett         ? "the ring GETT rule"
+                             : route == Route::TunedReduction ? "the tuned reduction rule"
+                                                              : "the direct GETT rule";
                 return sel;
             }
 

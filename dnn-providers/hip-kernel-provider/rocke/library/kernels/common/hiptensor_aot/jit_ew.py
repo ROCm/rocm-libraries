@@ -29,9 +29,9 @@ Geometry (the class's axes) has the argument names of :mod:`.ew`: ``opA [opB] [o
 thread space counts vectors: ``n_in``, ``e0`` and its magic pair ``m0, s0`` are those of
 ``e0 / vec``, the other values are unchanged.
 
-``vec > 1`` (real kernels; the ``math`` rows only with every input a vector, the only class of
-them hipTensor's JIT takes, each input's math programs applied in a loop over the ``vec``
-values): D's stride of mode 0 is 1; a tensor marked in ``unit`` has stride 1 in
+``vec > 1`` (real kernels; the ``math`` rows only with every input a vector, each input's math
+programs applied in a loop over the ``vec`` values; their other layouts take the ``vec`` 1
+class): D's stride of mode 0 is 1; a tensor marked in ``unit`` has stride 1 in
 mode 0 and is accessed with vector loads, the others with ``vec`` scalar loads ``s<T>0`` apart.
 The caller guarantees ``e0 % vec == 0``, ``lim0 % vec == 0`` (arity 1), that the strides of modes
 ``1..7`` of the vector tensors (and D) are multiples of ``vec`` and that their pointers are aligned
@@ -346,17 +346,20 @@ def jit_vec(d: str) -> int:
 def jit_classes(bases: Sequence[EwSpec]) -> List[EwJitSpec]:
     """The kernel classes of the generic rows ``bases``: each row with ``vec`` 1 and, for real
     rows, with the output's vector width and every combination of vector / gathered inputs (rows
-    with 64-bit offsets: only every input a vector, the layout of tensors that large in practice).
+    with 64-bit offsets and math rows: only every input a vector; for 64-bit offsets the layout
+    of tensors that large in practice). Every launch of a row has a class (:func:`jit_class_of`
+    falls back to ``vec`` 1).
     """
     out = []
     for base in bases:
+        out.append(EwJitSpec(base))
         if base.math:
-            # the math rows: only the class of every input a vector (the class the JIT takes
-            # by default; their kernels carry the math programs, so they are kept few)
+            # the math rows: vec 1 and the class of every input a vector (their kernels carry
+            # the math programs; a vector class with gathered inputs would add a math program
+            # per gathered load)
             n_in = len(base.tensors()) - 1
             out.append(EwJitSpec(base, jit_vec(base.d), (True,) * n_in))
             continue
-        out.append(EwJitSpec(base))
         if base.cplx:
             continue
         n_in = len(base.tensors()) - 1

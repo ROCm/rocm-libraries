@@ -42,7 +42,8 @@
 // (library/tests/test_hiptensor_pack_cross_check.py); hipTensor's build never runs Python.
 //
 // Every kernel family is built with rocKE's C++ builders (the descriptor tables of the Python
-// reference): ew, reduce, ewt, ewv, dgett and rgett (rocke/instance_hiptensor_aot.h),
+// reference): ew, reduce, rreduce (the tuned reduction classes of rocKE's reduction route
+// table), ewt, ewv, dgett and rgett (rocke/instance_hiptensor_aot.h),
 // gemm (the emulated-f32 GEMM bodies with their operand prologue: rocke_gemm_cf32_body,
 // rocke_build_universal_gemm), gett (the launches of the tuned and AOT GETT route tables the
 // engine carries: the tensor pack and GETT kernels of rocke/instance_tensor_gett.h) and gett64 /
@@ -635,49 +636,9 @@ namespace
     std::vector<Row2> const kReduceRows
         = {{"f16", "f16"}, {"bf16", "bf16"}, {"f32", "f32"}, {"f64", "f64"}};
 
-    template <typename R>
-    bool hasRow(std::vector<R> const& rows, R const& r)
-    {
-        return hiptensor::rockebackend::hasEwRow(rows, r);
-    }
-
-    // EW_ROWS_1_MIXED / EW_ROWS_2_MIXED / EW_ROWS_C2_MIXED
-    std::vector<Row2> ewRows1Mixed()
-    {
-        std::vector<Row2> out;
-        for(char const* d : {"f16", "bf16"})
-        {
-            for(char const* a : kReal)
-            {
-                if(!hasRow(kEwRows1, Row2{a, d}))
-                {
-                    out.push_back({a, d});
-                }
-            }
-        }
-        return out;
-    }
-
-    std::vector<Row3> ewRows2Mixed(bool cplx)
-    {
-        std::vector<Row3>        out;
-        std::vector<char const*> types = cplx ? std::vector<char const*>{"f32", "f64"}
-                                              : std::vector<char const*>(kReal, kReal + 4);
-        for(char const* t : {"f32", "f64"})
-        {
-            for(char const* c : types)
-            {
-                for(char const* d : types)
-                {
-                    if(!hasRow(cplx ? kEwRowsC2 : kEwRows2, Row3{t, c, d}))
-                    {
-                        out.push_back({t, c, d});
-                    }
-                }
-            }
-        }
-        return out;
-    }
+    // EW_ROWS_1_MIXED / EW_ROWS_2_MIXED / EW_ROWS_C2_MIXED (rocke_ew_rows.hpp, shared with the JIT)
+    using hiptensor::rockebackend::ewRows1Mixed;
+    using hiptensor::rockebackend::ewRows2Mixed;
 
     // the Python reference's ew_params(idx64, mixed): the rows of the generic elementwise kernel
     std::vector<rocke_htaot_ew_spec_t> ewParams(bool idx64, bool mixed)
@@ -849,6 +810,83 @@ namespace
                     }
                 }
             }
+        }
+    }
+
+    // ---- rreduce / rreduce_final: the tuned reduction classes of the target (its palette, then
+    // the classes of its tuned problems: rocKE's reduction route table) and the finalize classes
+    // (rocke/instance_hiptensor_aot.h rocke_htaot_rreduce_pack_classes / _final_classes) ----
+    void rreduceDescriptors(Context const& ctx, std::vector<Descriptor>& out)
+    {
+        char err[512] = {0};
+        int  n = rocke_htaot_rreduce_pack_classes(ctx.arch.c_str(), nullptr, 0, err, sizeof err);
+        if(n < 0)
+        {
+            throw std::runtime_error(std::string("rreduce: ") + err);
+        }
+        std::vector<rocke_htaot_rreduce_spec_t> classes(std::max(n, 1));
+        rocke_htaot_rreduce_pack_classes(ctx.arch.c_str(), classes.data(), n, err, sizeof err);
+        for(int i = 0; i < n; ++i)
+        {
+            auto const& s = classes[i];
+            Descriptor  d;
+            d.family       = "rreduce";
+            char name[256] = {0};
+            rocke_htaot_rreduce_kernel_name(&s, name, sizeof name);
+            d.label = name;
+            Builder b;
+            addKernel(ctx,
+                      d,
+                      b,
+                      rocke_build_htaot_rreduce(&b.b, &s),
+                      {
+                          {"family", std::string("rreduce")},
+                          {"abi", std::string(ROCKE_HTAOT_RREDUCE_ABI)},
+                          {"mode", str(s.mode)},
+                          {"a", str(s.a)},
+                          {"d", str(s.d)},
+                          {"op", str(s.op)},
+                          {"nr", int64_t(s.nr)},
+                          {"block", int64_t(s.block)},
+                          {"vec", int64_t(s.vec)},
+                          {"lanes", int64_t(s.lanes)},
+                          {"unroll", int64_t(s.unroll)},
+                          {"rows", int64_t(s.rows)},
+                          {"nt", int64_t(s.nt)},
+                          {"una", int64_t(s.una)},
+                          {"idx64", int64_t(s.idx64)},
+                          {"max_rank", int64_t(ROCKE_HTAOT_MAX_RANK)},
+                      });
+            out.push_back(std::move(d));
+        }
+        int const nf = rocke_htaot_rreduce_final_classes(nullptr, 0);
+        std::vector<rocke_htaot_rreduce_final_spec_t> finals(std::max(nf, 1));
+        rocke_htaot_rreduce_final_classes(finals.data(), nf);
+        for(int i = 0; i < nf; ++i)
+        {
+            auto const& f = finals[i];
+            Descriptor  d;
+            d.family       = "rreduce_final";
+            char name[256] = {0};
+            rocke_htaot_rreduce_final_kernel_name(&f, name, sizeof name);
+            d.label = name;
+            Builder b;
+            addKernel(ctx,
+                      d,
+                      b,
+                      rocke_build_htaot_rreduce_final(&b.b, &f),
+                      {
+                          {"family", std::string("rreduce_final")},
+                          {"abi", std::string(ROCKE_HTAOT_RREDUCE_ABI)},
+                          {"a", str(f.a)},
+                          {"d", str(f.d)},
+                          {"op", str(f.op)},
+                          {"lanes", int64_t(f.lanes)},
+                          {"idx64", int64_t(f.idx64)},
+                          {"block", int64_t(f.block)},
+                          {"max_rank", int64_t(ROCKE_HTAOT_MAX_RANK)},
+                      });
+            out.push_back(std::move(d));
         }
     }
 
@@ -1526,6 +1564,23 @@ namespace
         {
             r["gett64.k_block_min_k"] = std::to_string(ROCKE_GETT_F64_K_BLOCK_MIN_K);
         }
+        // the tuned reduction problems of the target: reduce.tuned.<hash> (knobs) and .key
+        char      err[512] = {0};
+        int const n        = rocke_htaot_rreduce_route_count(arch.c_str(), err, sizeof err);
+        if(n < 0)
+        {
+            throw std::runtime_error(std::string("rreduce routes: ") + err);
+        }
+        for(int i = 0; i < n; ++i)
+        {
+            std::vector<char> name(256), value(4096);
+            if(!rocke_htaot_rreduce_route(
+                   arch.c_str(), i, name.data(), name.size(), value.data(), value.size()))
+            {
+                throw std::runtime_error("rreduce route " + std::to_string(i) + " of " + arch);
+            }
+            r[name.data()] = value.data();
+        }
         return r;
     }
 
@@ -1592,6 +1647,7 @@ namespace
     void collectDescriptors(Context const& ctx, std::vector<Descriptor>& descs)
     {
         ewReduceDescriptors(ctx, descs);
+        rreduceDescriptors(ctx, descs);
         ewtDescriptors(ctx, descs);
         ewvDescriptors(ctx, descs);
         gemmDescriptors(ctx, descs);

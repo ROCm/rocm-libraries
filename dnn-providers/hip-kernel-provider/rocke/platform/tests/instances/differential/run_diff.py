@@ -105,8 +105,9 @@ FAMILY_MAX_CFG = {
     "gett_f64_pack": 1024,
     "hiptensor_aot_dgett": 512,
     "hiptensor_aot_ew": 512,
-    "hiptensor_aot_jit_ew": 1024,
+    "hiptensor_aot_jit_ew": 2048,
     "hiptensor_aot_rgett": 512,
+    "hiptensor_aot_rreduce": 4096,
     "tensor_gett_aot": 512,
 }
 # Families whose every config must be compared: the kernel sets of hipTensor's kernel pack and
@@ -122,6 +123,7 @@ EXHAUSTIVE_FAMILIES = frozenset(
         "hiptensor_aot_jit_ew",
         "hiptensor_aot_reduce",
         "hiptensor_aot_rgett",
+        "hiptensor_aot_rreduce",
         "tensor_gett_aot",
         "tensor_pack",
     }

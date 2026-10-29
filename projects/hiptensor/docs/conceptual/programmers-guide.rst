@@ -128,16 +128,23 @@ The selected backend and kernel of every plan are logged at the ``HIPTENSOR_LOG_
 The rocKE backend selects kernels when the plan is created. It lists the candidates of the problem, the
 programs that its kernel pack can run the problem with within the plan's workspace limit (for a contraction, the
 ring GETT, the universal GEMM bodies of the data type's route, the f64 strided GEMM classes and the direct GETT;
-for a reduction, the row and column kernels with several splits of the reduced modes; for a permutation or an
-elementwise operation, the tiled kernel and the generic kernel), checking every capability on the host without
-launching anything. It then orders them:
+for a reduction, the tuned reduction kernels of the pack and the generic row and column kernels with several
+splits of the reduced modes; for a permutation or an elementwise operation, the tiled kernel and the generic
+kernel), checking every capability on the host without launching anything. It then orders them:
 
 1. A contraction of rocKE's tuned or AOT route table (f16 and bf16 on gfx950) takes the launches of that
    table: a GETT on one of rocKE's GEMM bodies reading the operands in place, optionally after packing one or
    both operands into the workspace, or a GETT on K-contiguous copies of both operands made in the workspace.
-2. Otherwise, a contraction the ring GETT serves takes it (with the operands whose fastest free run is not a
-   multiple of 8 elements first packed into the workspace when the limit allows, else read in place), and on a
-   target without the GEMM routes (gfx90a, gfx942) the direct GETT of a 16-bit or f32 compute class takes it.
+   A reduction of rocKE's reduction route table (gfx950) takes the launch of that table: a tuned reduction
+   kernel with the knobs measured for the problem.
+2. Otherwise, a reduction takes the knobs of the nearest of the measured reductions that the pack carries
+   (same kind and element size; distance over the sizes of the output, the reduced elements, the fastest run and
+   the mode counts), on the tuned reduction kernel of the pack with those knobs, and a split of the reduced modes
+   that gives the launch as many wavefronts per compute unit as the measured one had; the next two nearest follow
+   it, then the generic kernels. A contraction the
+   ring GETT serves takes it (with the operands whose fastest free run is not a multiple of 8 elements first
+   packed into the workspace when the limit allows, else read in place), and on a target without the GEMM
+   routes (gfx90a, gfx942) the direct GETT of a 16-bit or f32 compute class takes it.
 3. Otherwise, the selection model of the kernel pack for the problem's class (gradient-boosted trees over
    integer features of the problem and the candidate, trained on measured timings of every candidate) ranks
    the candidates of the routes it was trained on; the direct GETT follows them. Selection takes no timing, no
@@ -199,6 +206,16 @@ kernel runs). Otherwise, when an input is contiguous along the output's fastest 
 kernel handles 16 bytes of the output per thread, with vector loads of those inputs (the classes of the JIT's
 vector kernels, with the sizes and strides as kernel arguments). When the output's two tiled modes span less
 than half a tile, one workgroup of the tiled kernel computes the planes of several consecutive batch indices.
+
+A reduction runs on rocKE's tuned reduction kernels: A is read in its own layout (no permutation), with the
+kept and reduced modes merged where they are contiguous. When A's fastest mode is reduced, several threads
+reduce one output with vector loads along that mode; when it is kept, a thread computes several consecutive
+outputs with vector loads and the block's other threads split the reduced elements. Large reductions over few
+outputs split the reduced elements over several workgroups, which write f32 (f64 for f64 data) partial results
+to the workspace; a second kernel combines them. ``HIPTENSOR_OP_MAX`` and ``HIPTENSOR_OP_MIN`` propagate NaN,
+``alpha`` of zero doesn't read A and ``beta`` of zero doesn't read C, and D is rounded once. When A, C, D or the
+workspace is not aligned to the kernel's vector accesses, for an elementary-function operator, or when a count
+of elements exceeds the kernels' 32-bit indices, the generic reduction kernels run.
 
 The launches that pack a contraction's operands into the workspace and the epilogue that writes D from the GEMM
 result (real data) use the tiled kernel when they transpose a tensor, and also when the generic kernel would need
@@ -353,11 +370,13 @@ broadcast along the output's fastest mode, for example a permutation that moves 
 kernel-pack kernel (``HIPTENSOR_ROCKE_JIT=all`` specializes it too). The choice is made when the plan is created
 and is kept by the plans the plan cache restores. The library builds the kernels with rocKE's C++ kernel builders
 (the same builders that wrote the kernel pack) and compiles them with COMGR, without Python and without any data
-file besides the kernel pack. The operand packing and epilogue launches of mixed-type contractions keep their
-kernel-pack kernels, and so do launches with the operators ``HIPTENSOR_OP_SIN`` to ``HIPTENSOR_OP_FLOOR`` unless
-the output and every input are contiguous in the output's fastest mode and addressed with 32-bit offsets. A
-specialized launch keeps its kernel-pack launch, which execution takes when a buffer is not aligned to the vector
-width or the plan runs on another device than the one it was created on.
+file besides the kernel pack. Every elementwise launch the kernel pack serves has a JIT kernel, including the
+operand packing and epilogue launches of mixed-type contractions, launches with 64-bit offsets, and launches with
+the operators ``HIPTENSOR_OP_SIN`` to ``HIPTENSOR_OP_FLOOR``. Launches with 64-bit offsets or with those operators
+use vector accesses only when the output and every input are contiguous in the output's fastest mode, and constant
+geometry without vector accesses otherwise (by default only the former are specialized; ``HIPTENSOR_ROCKE_JIT=all``
+specializes both). A specialized launch keeps its kernel-pack launch, which execution takes when a buffer is not
+aligned to the vector width or the plan runs on another device than the one it was created on.
 
 Plans created with ``HIPTENSOR_JIT_MODE_NONE`` (the default) never compile and never use JIT kernels; every
 problem the rocKE backend serves runs without JIT. Plan creation with ``HIPTENSOR_JIT_MODE_DEFAULT`` can take as

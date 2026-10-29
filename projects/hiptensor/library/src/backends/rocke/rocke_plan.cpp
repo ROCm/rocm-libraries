@@ -33,7 +33,9 @@
 #include <cstring>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <numeric>
+#include <set>
 #include <string>
 #include <tuple>
 
@@ -160,6 +162,17 @@ namespace hiptensor
             int64_t ceilDiv(int64_t a, int64_t b)
             {
                 return (a + b - 1) / b;
+            }
+
+            // FNV-1a 64 of a route key (the pack builder hashes the same keys)
+            uint64_t fnv1a64(std::string const& text)
+            {
+                uint64_t hash = 0xCBF29CE484222325ull;
+                for(unsigned char c : text)
+                {
+                    hash = (hash ^ c) * 0x100000001B3ull;
+                }
+                return hash;
             }
 
             // One mode of a canonical problem: its extent and its stride in each tensor.
@@ -646,6 +659,8 @@ namespace hiptensor
                 return "rgett";
             case Route::DirectGett:
                 return "dgett";
+            case Route::TunedReduction:
+                return "tuned-reduction";
             case Route::Gett32:
                 return "gett32";
             }
@@ -1534,17 +1549,15 @@ namespace hiptensor
                 return walk(dims, std::vector<int64_t>(tensors, 0));
             }
 
-            // `mode` is kRuleMode (row when the innermost reduced mode is the innermost mode of A),
-            // kRowMode or kColMode. The split of the reduced elements targets `splitWaves` times the
-            // waves (row) or blocks (col) that fill the device; 0 does not split.
-            hiptensorStatus_t planReduction(Problem const&  problem,
-                                            Pack const&     pack,
-                                            uint64_t        workspaceLimit,
-                                            int             mode,
-                                            int             splitWaves,
-                                            Program&        program,
-                                            CandidateFacts& facts,
-                                            std::string&    reason)
+            // The API checks of a reduction and its canonical kept and reduced modes (strides 0 A,
+            // 1 C, 2 D; innermost first): A's and D's data type names in `a` / `d`. A decline is
+            // HIPTENSOR_STATUS_NOT_SUPPORTED with `reason`; an API error another status.
+            hiptensorStatus_t reductionForm(Problem const&    problem,
+                                            std::string&      a,
+                                            std::string&      d,
+                                            std::vector<Dim>& kept,
+                                            std::vector<Dim>& red,
+                                            std::string&      reason)
             {
                 auto const& A = problem.t[0];
                 auto const& C = problem.t[2];
@@ -1570,8 +1583,8 @@ namespace hiptensor
                     reason = "unary operator not supported by the rocKE kernels";
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
-                auto a = dtypeName(A.type);
-                auto d = dtypeName(D.type);
+                a = dtypeName(A.type);
+                d = dtypeName(D.type);
                 if(a.empty() || d.empty() || isComplex(A.type) || isComplex(D.type)
                    || (C.present && C.type != D.type))
                 {
@@ -1611,7 +1624,8 @@ namespace hiptensor
                     }
                 }
                 // Strides: 0 A, 1 C, 2 D.
-                std::vector<Dim> kept, red;
+                kept.clear();
+                red.clear();
                 for(int i = 0; i < A.numModes(); i++)
                 {
                     Dim     dim;
@@ -1651,6 +1665,31 @@ namespace hiptensor
                 }
                 canonicalize(kept, 3, 0);
                 canonicalize(red, 1, 0);
+                return HIPTENSOR_STATUS_SUCCESS;
+            }
+
+            // `mode` is kRuleMode (row when the innermost reduced mode is the innermost mode of A),
+            // kRowMode or kColMode. The split of the reduced elements targets `splitWaves` times the
+            // waves (row) or blocks (col) that fill the device; 0 does not split.
+            hiptensorStatus_t planReduction(Problem const&  problem,
+                                            Pack const&     pack,
+                                            uint64_t        workspaceLimit,
+                                            int             mode,
+                                            int             splitWaves,
+                                            Program&        program,
+                                            CandidateFacts& facts,
+                                            std::string&    reason)
+            {
+                auto const&      A   = problem.t[0];
+                auto const&      C   = problem.t[2];
+                auto const       opC = C.present ? C.unaryOp : HIPTENSOR_OP_IDENTITY;
+                std::string      a, d;
+                std::vector<Dim> kept, red;
+                if(auto status = reductionForm(problem, a, d, kept, red, reason);
+                   status != HIPTENSOR_STATUS_SUCCESS)
+                {
+                    return status;
+                }
                 int64_t const nOutAll = product(kept, 0, kept.size());
                 int64_t const nRedAll = product(red, 0, red.size());
                 Dim const     kept0   = kept.empty() ? Dim{} : kept[0];
@@ -2016,6 +2055,1228 @@ namespace hiptensor
                 facts.bilinear  = C.present;
                 facts.bytes     = uint64_t(nOutAll) * uint64_t(nRedAll) * aBytes
                               + uint64_t(nOutAll) * dBytes * (C.present ? 2 : 1) + 2 * workspace;
+                return HIPTENSOR_STATUS_SUCCESS;
+            }
+
+            // ------------------------------------------- tuned reduction classes (rreduce)
+            //
+            // rocKE's native strided reduction bodies with the geometry as kernel arguments
+            // (library/kernels/common/hiptensor_aot/rreduce.py; the host rules of
+            // rreduce_host.py). A class fixes the operator, the data types, the mode and the knobs
+            // (block, vector width, threads per output / along the kept run, unroll, thread rows,
+            // streaming loads); the split is a launch argument. A problem of rocKE's reduction
+            // route table runs with its tuned knobs (pack routes reduce.tuned.<hash>); any other
+            // problem with the pack class the cost model ranks first.
+
+            constexpr char    kRreduce[]           = "rreduce";
+            constexpr char    kRreduceFinal[]      = "rreduce_final";
+            constexpr int64_t kRreduceFinalLanes[] = {1, 4, 16, 64};
+            constexpr int64_t kRreduceFinalTarget  = int64_t(1) << 20;
+            constexpr int64_t kRreduceSlotCounts[] = {1, 2, 3, 4, 8};
+            constexpr int64_t kI32Limit            = int64_t(1) << 31;
+            constexpr int64_t kMaxGridThreads      = (int64_t(1) << 32) - 1;
+            // heuristic candidates offered per problem (the first is the rule's choice)
+            constexpr size_t kRreduceCandidates = 3;
+            // the knobs (block, vec, lanes, unroll, rows) that run every problem of a mode (row:
+            // one thread per output; col: one thread per kept element and one reduction row per
+            // thread), and the wave count (of a 256-CU device) their split aims for
+            constexpr int64_t kRreduceUniversalRow[5] = {256, 1, 1, 4, 0};
+            constexpr int64_t kRreduceUniversalCol[5] = {256, 1, 1, 4, 1};
+            constexpr int64_t kRreduceUniversalWaves  = 4096;
+
+            // A launch's knobs (rreduce_host.Knobs)
+            struct RKnobs
+            {
+                bool    row    = true;
+                int64_t block  = 256;
+                int64_t vec    = 1;
+                int64_t lanes  = 64;
+                int64_t unroll = 1;
+                int64_t split  = 1;
+                int64_t rows   = 0;
+                bool    nt     = false;
+            };
+
+            // A reduction in the canonical form of the classes: kept modes (extent, A stride,
+            // D stride) and reduced modes (extent, A stride), innermost first; C has D's strides.
+            struct RProblem
+            {
+                std::vector<std::array<int64_t, 3>> kept;
+                std::vector<std::array<int64_t, 2>> red;
+                std::string                         a, d, op;
+                int64_t                             eb = 2; // A's element bytes
+            };
+
+            template <typename T>
+            int64_t rExtents(std::vector<T> const& dims)
+            {
+                int64_t n = 1;
+                for(auto const& x : dims)
+                {
+                    n *= x[0];
+                }
+                return n;
+            }
+
+            // rreduce_host.mode_of: row when A's innermost mode is reduced
+            bool rRow(RProblem const& p)
+            {
+                if(rExtents(p.red) <= 1)
+                {
+                    return false;
+                }
+                if(rExtents(p.kept) == 1)
+                {
+                    return true;
+                }
+                return std::llabs(p.red[0][1]) < std::llabs(p.kept[0][1]);
+            }
+
+            // rreduce_host.col_group: kept modes contiguous in A from the innermost one on
+            size_t rColGroup(RProblem const& p)
+            {
+                if(p.kept.empty())
+                {
+                    return 0;
+                }
+                size_t n = 1;
+                while(n < p.kept.size() && p.kept[n][1] == p.kept[n - 1][1] * p.kept[n - 1][0])
+                {
+                    n++;
+                }
+                return n;
+            }
+
+            // rreduce_host.chunk_dims: the reduced slots of a row class in `vec` chunks
+            std::vector<std::array<int64_t, 2>> rChunkDims(RProblem const& p, int64_t vec)
+            {
+                std::vector<std::array<int64_t, 2>> dims;
+                std::array<int64_t, 2> const        first{p.red[0][0] / vec, p.red[0][1] * vec};
+                if(first[0] != 1)
+                {
+                    dims.push_back(first);
+                }
+                for(size_t i = 1; i < p.red.size(); i++)
+                {
+                    if(p.red[i][0] != 1)
+                    {
+                        dims.push_back(p.red[i]);
+                    }
+                }
+                if(dims.empty())
+                {
+                    dims.push_back({1, 0});
+                }
+                return dims;
+            }
+
+            int64_t rSlotCount(size_t n)
+            {
+                for(int64_t c : kRreduceSlotCounts)
+                {
+                    if(int64_t(n) <= c)
+                    {
+                        return c;
+                    }
+                }
+                return -1;
+            }
+
+            bool rLoadVec(std::string const& a, int64_t v)
+            {
+                if(a == "f64")
+                {
+                    return v == 1 || v == 2;
+                }
+                if(a == "f32")
+                {
+                    return v == 1 || v == 2 || v == 4;
+                }
+                return v == 1 || v == 2 || v == 4 || v == 8;
+            }
+
+            // rreduce_host.max_vec
+            int64_t rMaxVec(RProblem const& p, bool row)
+            {
+                int64_t n = 0, s = 0;
+                if(row)
+                {
+                    n = p.red[0][0];
+                    s = p.red[0][1];
+                }
+                else
+                {
+                    if(p.kept.empty())
+                    {
+                        return 1;
+                    }
+                    n = p.kept[0][0];
+                    s = p.kept[0][1];
+                }
+                if(s != 1)
+                {
+                    return 1;
+                }
+                int64_t best = 1;
+                for(int64_t v : {1, 2, 4, 8})
+                {
+                    if(rLoadVec(p.a, v) && n % v == 0)
+                    {
+                        best = std::max(best, v);
+                    }
+                }
+                return best;
+            }
+
+            int64_t rRowThreads(RKnobs const& k)
+            {
+                return k.rows != 0 ? k.rows : k.block / k.lanes;
+            }
+
+            // rreduce_host.loop_geometry
+            void rLoop(RProblem const& p,
+                       RKnobs const&   k,
+                       int64_t&        nIdx,
+                       int64_t&        step,
+                       int64_t&        per,
+                       int64_t&        nIt)
+            {
+                if(k.row)
+                {
+                    nIdx = rExtents(rChunkDims(p, k.vec));
+                    step = k.lanes;
+                }
+                else
+                {
+                    nIdx = p.red.empty() ? 1 : rExtents(p.red);
+                    step = rRowThreads(k);
+                }
+                per = ceilDiv(nIdx, k.split);
+                nIt = ceilDiv(ceilDiv(per, step), k.unroll);
+            }
+
+            // rreduce_host.grid_x
+            int64_t rGridX(RProblem const& p, RKnobs const& k)
+            {
+                int64_t const nOut = rExtents(p.kept);
+                if(k.row)
+                {
+                    return ceilDiv(nOut, k.block / k.lanes);
+                }
+                size_t const ng = rColGroup(p);
+                int64_t      m  = 1;
+                for(size_t i = 0; i < ng; i++)
+                {
+                    m *= p.kept[i][0];
+                }
+                int64_t const tiles = ceilDiv(m, k.lanes * k.vec);
+                int64_t const items = k.block / (k.lanes * rRowThreads(k));
+                return ceilDiv((nOut / m) * tiles, items);
+            }
+
+            bool rPow2(int64_t x)
+            {
+                return x > 0 && (x & (x - 1)) == 0;
+            }
+
+            // rreduce_host.check_knobs: why `k` cannot run the problem ("" when it can)
+            std::string rCheck(RProblem const& p, RKnobs const& k, bool streaming)
+            {
+                for(auto const& x : p.kept)
+                {
+                    if(x[1] < 0 || x[2] < 0)
+                    {
+                        return "negative strides";
+                    }
+                }
+                for(auto const& x : p.red)
+                {
+                    if(x[1] < 0)
+                    {
+                        return "negative strides";
+                    }
+                }
+                if(p.kept.size() > size_t(kMaxRank) || p.red.size() > size_t(kMaxRank))
+                {
+                    return "more than 8 kept or reduced modes";
+                }
+                if(k.row != rRow(p))
+                {
+                    return "mode differs from the problem's";
+                }
+                if(k.nt && !streaming)
+                {
+                    return "streaming loads need gfx942 / gfx950";
+                }
+                if(!rPow2(k.block) || k.block < kWave || k.block > 1024)
+                {
+                    return "block";
+                }
+                if(!rPow2(k.lanes) || k.lanes > k.block)
+                {
+                    return "lanes";
+                }
+                if(!rLoadVec(p.a, k.vec) || (k.vec > 1 && k.vec > rMaxVec(p, k.row)))
+                {
+                    return "vec";
+                }
+                if(k.unroll != 1 && k.unroll != 2 && k.unroll != 4 && k.unroll != 8)
+                {
+                    return "unroll";
+                }
+                if(k.split < 1 || k.split > kGridYZMax)
+                {
+                    return "split";
+                }
+                int64_t const nOut = rExtents(p.kept);
+                if(!k.row)
+                {
+                    if(k.rows != 0 && (!rPow2(k.rows) || k.lanes * k.rows > k.block))
+                    {
+                        return "rows";
+                    }
+                    if(p.kept.empty())
+                    {
+                        return "col mode needs a kept mode";
+                    }
+                    size_t const ng = rColGroup(p);
+                    int64_t      m  = 1;
+                    for(size_t i = 0; i < ng; i++)
+                    {
+                        m *= p.kept[i][0];
+                    }
+                    if(k.lanes > 1 && (k.lanes / 2) * k.vec >= m)
+                    {
+                        return "lanes x vec exceed the run";
+                    }
+                    int64_t const rt    = rRowThreads(k);
+                    int64_t const nRows = p.red.empty() ? 1 : rExtents(p.red);
+                    if(rt > 1 && rt / 2 >= nRows)
+                    {
+                        return "more than half the thread rows idle";
+                    }
+                    if(k.split > std::max<int64_t>(1, ceilDiv(nRows, rt)))
+                    {
+                        return "split exceeds the reduction rows per thread row";
+                    }
+                    int64_t const items = k.block / (k.lanes * rt);
+                    int64_t const tiles = ceilDiv(m, k.lanes * k.vec);
+                    if((nOut / m) * tiles + items >= kI32Limit)
+                    {
+                        return "work items >= 2^31";
+                    }
+                }
+                else
+                {
+                    if(k.rows != 0)
+                    {
+                        return "rows is a col knob";
+                    }
+                    if(p.red.empty())
+                    {
+                        return "row mode needs a reduced mode";
+                    }
+                    auto const    dims   = rChunkDims(p, k.vec);
+                    int64_t const chunks = rExtents(dims);
+                    if(k.split > std::max<int64_t>(1, ceilDiv(chunks, k.lanes)))
+                    {
+                        return "split exceeds the chunks per lane";
+                    }
+                    if(k.lanes > 1 && (k.lanes / 2) >= chunks)
+                    {
+                        return "lanes exceed the chunks";
+                    }
+                    if(dims.size() > size_t(kMaxRank))
+                    {
+                        return "more than 8 reduced slots";
+                    }
+                }
+                if(nOut + k.block * k.vec >= kI32Limit)
+                {
+                    return "outputs >= 2^31";
+                }
+                int64_t nIdx = 0, step = 0, per = 0, nIt = 0;
+                rLoop(p, k, nIdx, step, per, nIt);
+                int64_t const last = (k.split - 1) * per + (step - 1) + (nIt * k.unroll - 1) * step;
+                if(std::max(last, k.split * per) >= kI32Limit)
+                {
+                    return "reduction indices >= 2^31";
+                }
+                if(rGridX(p, k) * k.block > kMaxGridThreads)
+                {
+                    return "launch grid exceeds the HIP limit";
+                }
+                return "";
+            }
+
+            // rreduce_host.needs_idx64
+            bool rIdx64(RProblem const& p, RKnobs const& k)
+            {
+                int64_t aSpan = 0, dSpan = 0;
+                for(auto const& x : p.kept)
+                {
+                    aSpan += (x[0] - 1) * x[1];
+                    dSpan += (x[0] - 1) * x[2];
+                }
+                for(auto const& x : p.red)
+                {
+                    aSpan += (x[0] - 1) * x[1];
+                }
+                int64_t const nOut  = rExtents(p.kept);
+                int64_t const wSpan = k.split > 1 ? (nOut + k.block * k.vec) * k.split : 0;
+                return std::max({aSpan, dSpan, wSpan}) >= kI32Limit;
+            }
+
+            // rreduce_host.final_lanes
+            int64_t rFinalLanes(int64_t nOut, int64_t split)
+            {
+                int64_t lanes = 1;
+                while(lanes * 2 <= std::min<int64_t>(kWave, split)
+                      && nOut * lanes * 2 <= kRreduceFinalTarget)
+                {
+                    lanes *= 2;
+                }
+                int64_t out = 1;
+                for(int64_t l : kRreduceFinalLanes)
+                {
+                    if(l <= lanes)
+                    {
+                        out = l;
+                    }
+                }
+                return out;
+            }
+
+            // The canonical problem of a tuned route record (rreduce_host.problem_key)
+            std::string rKey(RProblem const& p)
+            {
+                std::string k, r;
+                for(size_t i = 0; i < p.kept.size(); i++)
+                {
+                    k += (i ? "," : "") + std::to_string(p.kept[i][0]) + ":"
+                         + std::to_string(p.kept[i][1]) + ":" + std::to_string(p.kept[i][2]);
+                }
+                for(size_t i = 0; i < p.red.size(); i++)
+                {
+                    r += (i ? "," : "") + std::to_string(p.red[i][0]) + ":"
+                         + std::to_string(p.red[i][1]);
+                }
+                return "a=" + p.a + ";d=" + p.d + ";op=" + p.op + ";k=" + k + ";r=" + r;
+            }
+
+            // Fills a slot set of a class launch (rreduce_host._slots): `dims` innermost first,
+            // padded to `n` slots with extent 1, magic (0, 0) and stride 0.
+            bool rSlots(ArgWriter&                               w,
+                        std::string const&                       prefix,
+                        std::vector<std::vector<int64_t>> const& dims,
+                        int64_t                                  n,
+                        std::vector<std::string> const&          tensors)
+            {
+                bool ok = int64_t(dims.size()) <= n;
+                for(int64_t i = 0; ok && i < n; i++)
+                {
+                    std::vector<int64_t> x(tensors.size() + 1, 0);
+                    x[0] = 1;
+                    if(i < int64_t(dims.size()))
+                    {
+                        x = dims[i];
+                    }
+                    auto const s = std::to_string(i);
+                    ok           = ok && w.set(prefix + "e" + s, x[0]);
+                    for(size_t t = 0; ok && t < tensors.size(); t++)
+                    {
+                        ok = w.set(prefix + tensors[t] + s, x[0] == 1 ? 0 : x[1 + t]);
+                    }
+                    if(ok && i < n - 1)
+                    {
+                        ok = setMagic(
+                            w, (prefix + "m" + s).c_str(), (prefix + "s" + s).c_str(), x[0]);
+                    }
+                }
+                return ok;
+            }
+
+            // A tuned route record (rreduce_host.route_record): "v1;mode=...;block=...;..."
+            bool rParseRecord(std::string const& text, RKnobs& k)
+            {
+                size_t start = 0;
+                bool   head  = true;
+                int    seen  = 0;
+                while(start <= text.size())
+                {
+                    size_t      end   = text.find(';', start);
+                    std::string field = text.substr(
+                        start, end == std::string::npos ? std::string::npos : end - start);
+                    if(head)
+                    {
+                        if(field != "v1")
+                        {
+                            return false;
+                        }
+                        head = false;
+                    }
+                    else
+                    {
+                        auto const eq = field.find('=');
+                        if(eq == std::string::npos)
+                        {
+                            return false;
+                        }
+                        auto const name  = field.substr(0, eq);
+                        auto const value = field.substr(eq + 1);
+                        int64_t    v     = 0;
+                        if(name != "mode")
+                        {
+                            char* stop = nullptr;
+                            v          = std::strtoll(value.c_str(), &stop, 10);
+                            if(stop == value.c_str() || *stop != '\0')
+                            {
+                                return false;
+                            }
+                        }
+                        if(name == "mode")
+                        {
+                            if(value != "row" && value != "col")
+                            {
+                                return false;
+                            }
+                            k.row = value == "row";
+                        }
+                        else if(name == "block")
+                            k.block = v;
+                        else if(name == "vec")
+                            k.vec = v;
+                        else if(name == "lanes")
+                            k.lanes = v;
+                        else if(name == "unroll")
+                            k.unroll = v;
+                        else if(name == "split")
+                            k.split = v;
+                        else if(name == "rows")
+                            k.rows = v;
+                        else if(name == "nt")
+                            k.nt = v != 0;
+                        else if(name != "nr" && name != "idx64")
+                            return false;
+                        seen++;
+                    }
+                    if(end == std::string::npos)
+                    {
+                        break;
+                    }
+                    start = end + 1;
+                }
+                return seen == 10;
+            }
+
+            // The pack class of knobs `k` (nullptr when the pack has none).
+            PackKernel const*
+                rClass(Pack const& pack, RProblem const& p, RKnobs const& k, bool una, bool idx64)
+            {
+                int64_t const nr = rSlotCount(k.row ? rChunkDims(p, k.vec).size()
+                                                    : std::max<size_t>(1, p.red.size()));
+                if(nr < 0)
+                {
+                    return nullptr;
+                }
+                return pack.find(
+                    kRreduce,
+                    {{"nr", nr},
+                     {"block", k.block},
+                     {"vec", k.vec},
+                     {"lanes", k.lanes},
+                     {"unroll", k.unroll},
+                     {"rows", k.row ? 0 : k.rows},
+                     {"nt", k.nt ? 1 : 0},
+                     {"una", una ? 1 : 0},
+                     {"idx64", idx64 ? 1 : 0}},
+                    {{"mode", k.row ? "row" : "col"}, {"a", p.a}, {"d", p.d}, {"op", p.op}});
+            }
+
+            // rreduce_host.plan: the launches of `k` (main class kernel, then the finalize when
+            // split > 1) with A, C, D, W of the problem.
+            hiptensorStatus_t planRreduce(Problem const&    problem,
+                                          Pack const&       pack,
+                                          RProblem const&   p,
+                                          RKnobs const&     k,
+                                          PackKernel const* kernel,
+                                          bool              idx64,
+                                          Program&          program,
+                                          std::string&      reason)
+            {
+                auto const&   A    = problem.t[0];
+                auto const&   C    = problem.t[2];
+                auto const    opC  = C.present ? C.unaryOp : HIPTENSOR_OP_IDENTITY;
+                bool const    una  = kernel->attr("una", 0) != 0;
+                int64_t const nOut = rExtents(p.kept);
+                int64_t       nIdx = 0, step = 0, per = 0, nIt = 0;
+                rLoop(p, k, nIdx, step, per, nIt);
+
+                program                 = Program{};
+                program.pack            = &pack;
+                program.scalarType      = problem.scalarType;
+                program.description     = kernel->name;
+                program.nullStatus      = HIPTENSOR_STATUS_NOT_INITIALIZED;
+                program.requiredScalars = {0, 1};
+                program.requiredBuffers
+                    = {{BufferRole::A, 0}, {BufferRole::C, 1}, {BufferRole::Out, -1}};
+
+                auto common = [&](ArgWriter& w) {
+                    return w.pointer("C", C.present ? BufferRole::C : BufferRole::None)
+                           && w.pointer("D", BufferRole::Out)
+                           && w.pointer("W", BufferRole::Workspace)
+                           && w.scalar("alpha", ScalarRole::Alpha)
+                           && w.scalar("beta", C.present ? ScalarRole::Beta : ScalarRole::Zero)
+                           && w.set("opC", static_cast<int>(opC)) && w.set("n_out", nOut);
+                };
+                LaunchStep step0;
+                step0.kernel = kernel;
+                ArgWriter w(step0);
+                bool      ok = w.pointer("A", BufferRole::A) && common(w)
+                          && (!una || w.set("opA", static_cast<int>(A.unaryOp)))
+                          && w.set("n_idx", nIdx) && w.set("per", per) && w.set("n_it", nIt)
+                          && w.set("split", k.split);
+                std::vector<std::vector<int64_t>> finalKept;
+                int64_t const                     nr = kernel->attr("nr", 0);
+                if(k.row)
+                {
+                    std::vector<std::vector<int64_t>> kd, rd;
+                    for(auto const& x : p.kept)
+                    {
+                        kd.push_back({x[0], x[1], x[2]});
+                        finalKept.push_back({x[0], x[2]});
+                    }
+                    for(auto const& x : rChunkDims(p, k.vec))
+                    {
+                        rd.push_back({x[0], x[1]});
+                    }
+                    ok = ok && rSlots(w, "k", kd, kMaxRank, {"A", "D"})
+                         && rSlots(w, "r", rd, nr, {"A"});
+                }
+                else
+                {
+                    size_t const                      ng = rColGroup(p);
+                    std::vector<std::vector<int64_t>> gd, xd, rd;
+                    int64_t                           m = 1;
+                    for(size_t i = 0; i < p.kept.size(); i++)
+                    {
+                        auto const& x = p.kept[i];
+                        if(i < ng)
+                        {
+                            gd.push_back({x[0], x[2]});
+                            m *= x[0];
+                        }
+                        else
+                        {
+                            xd.push_back({x[0], x[1], x[2]});
+                        }
+                    }
+                    for(auto const& x : gd)
+                    {
+                        finalKept.push_back(x);
+                    }
+                    for(auto const& x : xd)
+                    {
+                        finalKept.push_back({x[0], x[2]});
+                    }
+                    for(auto const& x : p.red)
+                    {
+                        rd.push_back({x[0], x[1]});
+                    }
+                    if(rd.empty())
+                    {
+                        rd.push_back({1, 0});
+                    }
+                    int64_t const tiles = ceilDiv(m, k.lanes * k.vec);
+                    ok = ok && w.set("m", m) && w.set("ka", p.kept[0][1]) && w.set("tiles", tiles)
+                         && setMagic(w, "tm", "ts", tiles) && w.set("n_items", (nOut / m) * tiles)
+                         && rSlots(w, "g", gd, kMaxRank, {"D"})
+                         && rSlots(w, "x", xd, kMaxRank, {"A", "D"})
+                         && rSlots(w, "r", rd, nr, {"A"});
+                }
+                step0.grid
+                    = dim3(static_cast<uint32_t>(rGridX(p, k)), static_cast<uint32_t>(k.split), 1);
+                step0.block = dim3(static_cast<uint32_t>(k.block), 1, 1);
+                if(!ok)
+                {
+                    reason = "tuned reduction arguments do not fit the kernel arguments";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                if(auto status = finishStep(step0, w, reason); status != HIPTENSOR_STATUS_SUCCESS)
+                {
+                    return status;
+                }
+                program.steps.push_back(std::move(step0));
+                uint64_t const cb = p.a == "f64" || p.d == "f64" ? 8 : 4;
+                if(k.split > 1)
+                {
+                    int64_t const lanes = rFinalLanes(nOut, k.split);
+                    auto const*   fin   = pack.find(kRreduceFinal,
+                                                    {{"lanes", lanes}, {"idx64", idx64 ? 1 : 0}},
+                                                    {{"a", p.a}, {"d", p.d}, {"op", p.op}});
+                    if(fin == nullptr)
+                    {
+                        reason = "the pack has no finalize class for this reduction";
+                        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                    }
+                    LaunchStep step1;
+                    step1.kernel = fin;
+                    ArgWriter fw(step1);
+                    bool      fok = common(fw) && fw.set("split", k.split)
+                               && rSlots(fw, "k", finalKept, kMaxRank, {"D"});
+                    // `W` of the finalize is readonly; common() set it like the main step's
+                    int64_t const fblock = fin->attr("block", 256);
+                    step1.grid  = dim3(static_cast<uint32_t>(ceilDiv(nOut, fblock / lanes)), 1, 1);
+                    step1.block = dim3(static_cast<uint32_t>(fblock), 1, 1);
+                    if(!fok)
+                    {
+                        reason = "tuned reduction finalize arguments do not fit";
+                        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                    }
+                    if(auto status = finishStep(step1, fw, reason);
+                       status != HIPTENSOR_STATUS_SUCCESS)
+                    {
+                        return status;
+                    }
+                    program.steps.push_back(std::move(step1));
+                    program.description += "+" + fin->name;
+                    program.workspaceBytes
+                        = alignUp(uint64_t(nOut) * uint64_t(k.split) * cb, kWorkspaceAlign);
+                }
+                // vector accesses: A's loads; col classes store D (unit stride) and the
+                // partials as vectors
+                uint64_t const eb = elementBytes(p.a);
+                if(k.vec > 1)
+                {
+                    program.fallbackAlign.emplace_back(BufferRole::A, uint32_t(k.vec * eb));
+                    if(!k.row)
+                    {
+                        program.fallbackAlign.emplace_back(BufferRole::Out,
+                                                           uint32_t(k.vec * elementBytes(p.d)));
+                        if(k.split > 1)
+                        {
+                            program.fallbackAlign.emplace_back(BufferRole::Workspace,
+                                                               uint32_t(k.vec * cb));
+                        }
+                    }
+                }
+                return HIPTENSOR_STATUS_SUCCESS;
+            }
+
+            // rreduce_host.log_q: `x` on a quarter-octave scale (integers only)
+            int64_t rLogQ(int64_t x)
+            {
+                if(x <= 1)
+                {
+                    return 0;
+                }
+                int64_t const e    = 63 - __builtin_clzll(static_cast<unsigned long long>(x));
+                int64_t const frac = e >= 2 ? (x >> (e - 2)) & 3 : (x << (2 - e)) & 3;
+                return 4 * e + frac;
+            }
+
+            // rreduce_host.features
+            std::array<int64_t, 5> rFeatures(RProblem const& p)
+            {
+                int64_t const nOut  = rExtents(p.kept);
+                int64_t const nRed  = p.red.empty() ? 1 : rExtents(p.red);
+                int64_t       inner = 1;
+                if(rRow(p))
+                {
+                    inner = p.red[0][1] == 1 ? p.red[0][0] : 1;
+                }
+                else
+                {
+                    size_t const ng = rColGroup(p);
+                    int64_t      m  = 1;
+                    for(size_t i = 0; i < ng; i++)
+                    {
+                        m *= p.kept[i][0];
+                    }
+                    inner = p.kept[0][1] == 1 ? m : 1;
+                }
+                return {rLogQ(nOut),
+                        rLogQ(nRed),
+                        rLogQ(inner),
+                        int64_t(p.red.size()),
+                        int64_t(p.kept.size())};
+            }
+
+            // rreduce_host.feature_distance
+            int64_t rDistance(std::array<int64_t, 5> const& f, std::array<int64_t, 5> const& g)
+            {
+                return 2 * std::llabs(f[0] - g[0]) + 2 * std::llabs(f[1] - g[1])
+                       + std::llabs(f[2] - g[2]) + 2 * std::llabs(f[3] - g[3])
+                       + 2 * std::llabs(f[4] - g[4]);
+            }
+
+            // rreduce_host.Prototype: a measured problem of the untuned choice (pack routes
+            // reduce.proto.<i>, reduce.proto.count)
+            struct RProto
+            {
+                bool                   row    = true;
+                int64_t                eb     = 0;
+                bool                   maxmin = false;
+                std::array<int64_t, 5> f{};
+                RKnobs                 knobs;
+                int64_t                waves = 0;
+                int64_t                cus   = 1;
+            };
+
+            // A prototype record (rreduce_host.proto_record): "v1;mode=row;eb=2;mm=0;f=a,b,c,d,e;
+            // block=..;vec=..;lanes=..;unroll=..;rows=..;nt=..;waves=..;cus=.."
+            bool rParseProto(std::string const& text, RProto& out)
+            {
+                size_t                start = 0;
+                int                   seen  = 0;
+                bool                  head  = true;
+                std::set<std::string> names;
+                while(start <= text.size())
+                {
+                    size_t const      end   = text.find(';', start);
+                    std::string const field = text.substr(
+                        start, end == std::string::npos ? std::string::npos : end - start);
+                    if(head)
+                    {
+                        if(field != "v1")
+                        {
+                            return false;
+                        }
+                        head = false;
+                    }
+                    else
+                    {
+                        auto const eq = field.find('=');
+                        if(eq == std::string::npos)
+                        {
+                            return false;
+                        }
+                        auto const name  = field.substr(0, eq);
+                        auto const value = field.substr(eq + 1);
+                        if(!names.insert(name).second)
+                        {
+                            return false; // a field twice
+                        }
+                        if(name == "mode")
+                        {
+                            if(value != "row" && value != "col")
+                            {
+                                return false;
+                            }
+                            out.row = value == "row";
+                        }
+                        else if(name == "f")
+                        {
+                            size_t s = 0;
+                            for(int i = 0; i < 5; i++)
+                            {
+                                size_t const e = value.find(',', s);
+                                if((i < 4) == (e == std::string::npos))
+                                {
+                                    return false;
+                                }
+                                std::string const part = value.substr(
+                                    s, e == std::string::npos ? std::string::npos : e - s);
+                                char*         stop = nullptr;
+                                int64_t const v    = std::strtoll(part.c_str(), &stop, 10);
+                                if(part.empty() || *stop != '\0')
+                                {
+                                    return false;
+                                }
+                                out.f[i] = v;
+                                s        = e + 1;
+                            }
+                        }
+                        else
+                        {
+                            char*         stop = nullptr;
+                            int64_t const v    = std::strtoll(value.c_str(), &stop, 10);
+                            if(value.empty() || *stop != '\0')
+                            {
+                                return false;
+                            }
+                            if(name == "eb")
+                                out.eb = v;
+                            else if(name == "mm")
+                                out.maxmin = v != 0;
+                            else if(name == "block")
+                                out.knobs.block = v;
+                            else if(name == "vec")
+                                out.knobs.vec = v;
+                            else if(name == "lanes")
+                                out.knobs.lanes = v;
+                            else if(name == "unroll")
+                                out.knobs.unroll = v;
+                            else if(name == "rows")
+                                out.knobs.rows = v;
+                            else if(name == "nt")
+                                out.knobs.nt = v != 0;
+                            else if(name == "waves")
+                                out.waves = v;
+                            else if(name == "cus")
+                                out.cus = v;
+                            else
+                                return false;
+                        }
+                        seen++;
+                    }
+                    if(end == std::string::npos)
+                    {
+                        break;
+                    }
+                    start = end + 1;
+                }
+                out.knobs.row = out.row;
+                // mode, eb, mm, f, block, vec, lanes, unroll, rows, nt, waves, cus: each once
+                return seen == 12 && out.cus > 0;
+            }
+
+            // The prototypes of a pack, parsed once per pack (a malformed record ends the list).
+            std::vector<RProto> const& rProtos(Pack const& pack)
+            {
+                static std::mutex                                 lock;
+                static std::map<Pack const*, std::vector<RProto>> cache;
+                std::lock_guard<std::mutex>                       guard(lock);
+                auto                                              it = cache.find(&pack);
+                if(it != cache.end())
+                {
+                    return it->second;
+                }
+                std::vector<RProto> out;
+                int64_t const       n
+                    = std::strtoll(pack.route("reduce.proto.count", "0").c_str(), nullptr, 10);
+                for(int64_t i = 0; i < n; i++)
+                {
+                    RProto r;
+                    if(!rParseProto(pack.route("reduce.proto." + std::to_string(i)), r))
+                    {
+                        break;
+                    }
+                    out.push_back(r);
+                }
+                return cache.emplace(&pack, std::move(out)).first->second;
+            }
+
+            int64_t rWaves(RProblem const& p, RKnobs const& k)
+            {
+                return rGridX(p, k) * k.split * k.block / kWave;
+            }
+
+            // The tuned reduction candidates of a problem: its tuned route (table problems), else
+            // up to kRreduceCandidates class launches of the untuned choice. Every program falls
+            // back to the generic no-split program when a buffer misses the alignment of its vector
+            // accesses.
+            hiptensorStatus_t enumerateTunedReduction(Problem const&          problem,
+                                                      Pack const&             pack,
+                                                      uint64_t                workspaceLimit,
+                                                      std::vector<Candidate>& out)
+            {
+                std::string      a, d, why;
+                std::vector<Dim> kept, red;
+                if(reductionForm(problem, a, d, kept, red, why) != HIPTENSOR_STATUS_SUCCESS)
+                {
+                    return HIPTENSOR_STATUS_SUCCESS; // the generic candidates report it
+                }
+                auto const& A   = problem.t[0];
+                auto const& C   = problem.t[2];
+                auto const  opA = A.unaryOp;
+                auto const  opC = C.present ? C.unaryOp : HIPTENSOR_OP_IDENTITY;
+                if(mathUnary(opA) || mathUnary(opC) || a != d)
+                {
+                    return HIPTENSOR_STATUS_SUCCESS;
+                }
+                bool const una = opA != HIPTENSOR_OP_IDENTITY && opA != HIPTENSOR_OP_CONJ;
+                RProblem   p;
+                p.a  = a;
+                p.d  = d;
+                p.eb = int64_t(elementBytes(a));
+                switch(problem.opReduce)
+                {
+                case HIPTENSOR_OP_ADD:
+                    p.op = "add";
+                    break;
+                case HIPTENSOR_OP_MUL:
+                    p.op = "mul";
+                    break;
+                case HIPTENSOR_OP_MAX:
+                    p.op = "max";
+                    break;
+                case HIPTENSOR_OP_MIN:
+                    p.op = "min";
+                    break;
+                default:
+                    return HIPTENSOR_STATUS_SUCCESS;
+                }
+                for(auto const& x : kept)
+                {
+                    p.kept.push_back({x.extent, x.stride[0], x.stride[2]});
+                }
+                for(auto const& x : red)
+                {
+                    p.red.push_back({x.extent, x.stride[0]});
+                }
+                bool const    streaming = pack.arch() == "gfx942" || pack.arch() == "gfx950";
+                int64_t const cus       = std::max(1, problem.device.cuCount);
+
+                // the generic no-split program: the fallback of a misaligned buffer
+                Program        generic;
+                CandidateFacts gfacts;
+                std::string    gwhy;
+                if(planReduction(problem, pack, workspaceLimit, kRuleMode, 0, generic, gfacts, gwhy)
+                   != HIPTENSOR_STATUS_SUCCESS)
+                {
+                    return HIPTENSOR_STATUS_SUCCESS;
+                }
+                auto fallback = std::make_shared<Program>(std::move(generic));
+
+                // `kernel`: the class to run `k` with (nullptr: the class of exactly the problem's
+                // slots and offset width)
+                auto make
+                    = [&](RKnobs const& k, bool tuned, PackKernel const* kernel, Candidate& c) {
+                          if(!rCheck(p, k, streaming).empty())
+                          {
+                              return false;
+                          }
+                          if(kernel == nullptr)
+                          {
+                              kernel = rClass(pack, p, k, una, rIdx64(p, k));
+                          }
+                          if(kernel == nullptr)
+                          {
+                              return false;
+                          }
+                          bool const  idx64 = kernel->attr("idx64", 0) != 0;
+                          std::string reason;
+                          if(planRreduce(problem, pack, p, k, kernel, idx64, c.program, reason)
+                             != HIPTENSOR_STATUS_SUCCESS)
+                          {
+                              return false;
+                          }
+                          if(!c.program.fallbackAlign.empty())
+                          {
+                              c.program.fallback = fallback;
+                              c.program.workspaceBytes
+                                  = std::max(c.program.workspaceBytes, fallback->workspaceBytes);
+                          }
+                          if(c.program.workspaceBytes > workspaceLimit)
+                          {
+                              return false;
+                          }
+                          auto& f     = c.facts;
+                          f.route     = Route::TunedReduction;
+                          f.body      = k.row ? kRowMode : kColMode;
+                          f.M         = rExtents(p.kept);
+                          f.K         = p.red.empty() ? 1 : rExtents(p.red);
+                          f.modesM    = static_cast<int>(p.kept.size());
+                          f.modesK    = static_cast<int>(p.red.size());
+                          f.inner     = p.red.empty() ? 1 : p.red[0][0];
+                          f.innerKept = p.kept.empty() ? 1 : p.kept[0][0];
+                          f.split     = k.split;
+                          f.block     = k.block;
+                          f.ctas      = rGridX(p, k) * k.split;
+                          f.main      = kernel;
+                          f.operandOp = una;
+                          f.bilinear  = C.present;
+                          f.bytes     = uint64_t(f.M) * uint64_t(f.K) * uint64_t(p.eb)
+                                    + uint64_t(f.M) * elementBytes(p.d) * (C.present ? 2 : 1)
+                                    + 2 * c.program.workspaceBytes;
+                          c.key = std::string("rreduce:") + (tuned ? "tuned:" : "") + kernel->name
+                                  + ":split" + std::to_string(k.split);
+                          c.tuned = tuned;
+                          return true;
+                      };
+
+                // 1. rocKE's reduction route table (problems with opA IDENTITY)
+                if(!una)
+                {
+                    auto const key = rKey(p);
+                    char       hex[17];
+                    snprintf(
+                        hex, sizeof(hex), "%016llx", static_cast<unsigned long long>(fnv1a64(key)));
+                    std::string const route = std::string("reduce.tuned.") + hex;
+                    RKnobs            k;
+                    if(pack.route(route + ".key") == key && rParseRecord(pack.route(route), k))
+                    {
+                        Candidate c;
+                        if(make(k, true, nullptr, c))
+                        {
+                            c.staticRank = static_cast<int>(out.size());
+                            out.push_back(std::move(c));
+                            return HIPTENSOR_STATUS_SUCCESS;
+                        }
+                    }
+                }
+
+                // 2. the untuned choice (rreduce_host.untuned_choices): the prototypes of the
+                // problem's mode and element size nearest to it (same MAX / MIN class first, then
+                // by feature distance, then pack order), each with its knobs, the pack class that
+                // runs them (the fewest reduced slots the problem allows, 32-bit offsets when they
+                // fit) and the smallest power-of-two split that reaches its wave count (scaled to
+                // the device's compute units)
+                bool const row = rRow(p);
+                bool const mm  = p.op == "max" || p.op == "min";
+                if((row && p.red.empty()) || (!row && p.kept.empty()))
+                {
+                    // one element in all (every mode of extent 1): no class has work for it
+                    return HIPTENSOR_STATUS_SUCCESS;
+                }
+                std::vector<PackKernel const*> pool;
+                for(auto const& kernel : pack.kernels())
+                {
+                    if(kernel.family == kRreduce && kernel.attrStr("a") == p.a
+                       && kernel.attrStr("d") == p.d && kernel.attrStr("op") == p.op
+                       && (kernel.attrStr("mode") == "row") == row
+                       && (kernel.attr("una", 0) != 0) == una)
+                    {
+                        pool.push_back(&kernel);
+                    }
+                }
+                auto const&                                    protos = rProtos(pack);
+                auto const                                     f      = rFeatures(p);
+                std::vector<std::tuple<bool, int64_t, size_t>> order;
+                for(size_t i = 0; i < protos.size(); i++)
+                {
+                    if(protos[i].row == row && protos[i].eb == p.eb)
+                    {
+                        order.emplace_back(protos[i].maxmin != mm, rDistance(f, protos[i].f), i);
+                    }
+                }
+                std::sort(order.begin(), order.end());
+                std::set<std::pair<std::string, int64_t>> seen;
+                size_t                                    made = 0;
+                for(auto const& o : order)
+                {
+                    if(made == kRreduceCandidates)
+                    {
+                        break;
+                    }
+                    auto const& proto = protos[std::get<2>(o)];
+                    RKnobs      k     = proto.knobs;
+                    k.row             = row;
+                    k.split           = 1;
+                    k.nt              = k.nt && streaming;
+                    if(!rCheck(p, k, streaming).empty())
+                    {
+                        continue;
+                    }
+                    int64_t const need = rSlotCount(k.row ? rChunkDims(p, k.vec).size()
+                                                          : std::max<size_t>(1, p.red.size()));
+                    std::vector<PackKernel const*> fit;
+                    for(auto const* kernel : pool)
+                    {
+                        if(kernel->attr("block", 0) == k.block && kernel->attr("vec", 0) == k.vec
+                           && kernel->attr("lanes", 0) == k.lanes
+                           && kernel->attr("unroll", 0) == k.unroll
+                           && kernel->attr("rows", 0) == k.rows
+                           && (kernel->attr("nt", 0) != 0) == k.nt && need > 0
+                           && kernel->attr("nr", 0) >= need)
+                        {
+                            fit.push_back(kernel);
+                        }
+                    }
+                    if(fit.empty())
+                    {
+                        continue;
+                    }
+                    int64_t const target = proto.waves * cus / proto.cus;
+                    while(rWaves(p, k) < target)
+                    {
+                        RKnobs next = k;
+                        next.split  = k.split * 2;
+                        if(!rCheck(p, next, streaming).empty())
+                        {
+                            break;
+                        }
+                        k = next;
+                    }
+                    bool const        need64 = rIdx64(p, k);
+                    PackKernel const* kernel = nullptr;
+                    for(auto const* x : fit)
+                    {
+                        bool const wide = x->attr("idx64", 0) != 0;
+                        if(need64 && !wide)
+                        {
+                            continue;
+                        }
+                        if(kernel == nullptr
+                           || std::make_pair(x->attr("nr", 0), wide) < std::make_pair(
+                                  kernel->attr("nr", 0), kernel->attr("idx64", 0) != 0))
+                        {
+                            kernel = x;
+                        }
+                    }
+                    if(kernel == nullptr || !seen.emplace(kernel->name, k.split).second)
+                    {
+                        continue;
+                    }
+                    Candidate c;
+                    if(!make(k, false, kernel, c))
+                    {
+                        continue;
+                    }
+                    c.preferred  = made == 0;
+                    c.staticRank = static_cast<int>(out.size());
+                    out.push_back(std::move(c));
+                    made++;
+                }
+                if(made == 0)
+                {
+                    // no prototype's knobs run the problem: the universal knobs of the mode (one
+                    // thread per output or per kept element, scalar loads), which run every
+                    // problem (rreduce_host.UNIVERSAL_KNOBS / UNIVERSAL_WAVES)
+                    int64_t const* u = row ? kRreduceUniversalRow : kRreduceUniversalCol;
+                    RKnobs         k;
+                    k.row              = row;
+                    k.block            = u[0];
+                    k.vec              = u[1];
+                    k.lanes            = u[2];
+                    k.unroll           = u[3];
+                    k.rows             = row ? 0 : u[4];
+                    k.split            = 1;
+                    k.nt               = streaming;
+                    int64_t const need = rSlotCount(k.row ? rChunkDims(p, k.vec).size()
+                                                          : std::max<size_t>(1, p.red.size()));
+                    if(need > 0 && rCheck(p, k, streaming).empty())
+                    {
+                        int64_t const target = kRreduceUniversalWaves * cus / 256;
+                        while(rWaves(p, k) < target)
+                        {
+                            RKnobs next = k;
+                            next.split  = k.split * 2;
+                            if(!rCheck(p, next, streaming).empty())
+                            {
+                                break;
+                            }
+                            k = next;
+                        }
+                        bool const        need64 = rIdx64(p, k);
+                        PackKernel const* kernel = nullptr;
+                        for(auto const* x : pool)
+                        {
+                            bool const wide = x->attr("idx64", 0) != 0;
+                            if(x->attr("block", 0) != k.block || x->attr("vec", 0) != k.vec
+                               || x->attr("lanes", 0) != k.lanes || x->attr("unroll", 0) != k.unroll
+                               || x->attr("rows", 0) != k.rows || (x->attr("nt", 0) != 0) != k.nt
+                               || x->attr("nr", 0) < need || (need64 && !wide))
+                            {
+                                continue;
+                            }
+                            if(kernel == nullptr
+                               || std::make_pair(x->attr("nr", 0), wide) < std::make_pair(
+                                      kernel->attr("nr", 0), kernel->attr("idx64", 0) != 0))
+                            {
+                                kernel = x;
+                            }
+                        }
+                        Candidate c;
+                        if(kernel != nullptr && make(k, false, kernel, c))
+                        {
+                            c.preferred  = true;
+                            c.staticRank = static_cast<int>(out.size());
+                            out.push_back(std::move(c));
+                        }
+                    }
+                }
                 return HIPTENSOR_STATUS_SUCCESS;
             }
         } // namespace
@@ -3210,15 +4471,6 @@ namespace hiptensor
                               + 2 * (aBytes + bBytes) + 2 * tBytes + 2 * pBytes + outIo;
                 program = std::move(prog);
                 return HIPTENSOR_STATUS_SUCCESS;
-            }
-            uint64_t fnv1a64(std::string const& text)
-            {
-                uint64_t hash = 0xCBF29CE484222325ull;
-                for(unsigned char c : text)
-                {
-                    hash = (hash ^ c) * 0x100000001B3ull;
-                }
-                return hash;
             }
 
             // The canonical key of a contraction for rocKE's GETT route tables, as the pack
@@ -5546,8 +6798,15 @@ namespace hiptensor
             }
             case OpKind::Reduction:
             {
-                // The rule's mode and split first, then fewer and more partial ranges, then the
+                // rocKE's tuned reduction classes first (the tuned route of a table problem, or
+                // the classes of the nearest measured prototypes), then the generic kernels: the
+                // rule's mode and split first, then fewer and more partial ranges, then the
                 // other mode. Two choices that plan the same launches are one candidate.
+                if(auto status = enumerateTunedReduction(problem, pack, workspaceLimit, out);
+                   status != HIPTENSOR_STATUS_SUCCESS)
+                {
+                    return status;
+                }
                 struct Choice
                 {
                     int mode;

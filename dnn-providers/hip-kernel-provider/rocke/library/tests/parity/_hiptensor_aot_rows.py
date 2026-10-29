@@ -133,14 +133,14 @@ def ewv_rows():
 
 
 def jit_rows():
-    """(base, vec, unit) of every JIT class of the generic rows (32- and 64-bit offsets, math
-    rows included)."""
+    """(base, vec, unit) of every JIT class of the generic rows (32- and 64-bit offsets, the
+    mixed-type rows and the math rows included: the class set of hipTensor's JIT)."""
     from kernels.common.hiptensor_aot.ew import EwSpec
     from kernels.common.hiptensor_aot.jit_ew import jit_classes
 
     out = []
     for idx64 in (False, True):
-        for p in ew_params(idx64, mixed=False):
+        for p in ew_params(idx64):
             for c in jit_classes([EwSpec(**p)]):
                 out.append((p, c.vec, tuple(c.unit)))
     return out
@@ -187,4 +187,95 @@ def geometry_point(axes, seed, point):
             out[n] = (1 << 31) + drawn[n] if is64 else -drawn[n]
         else:
             out[n] = (_I64_EDGES if is64 else _I32_EDGES)[j % 6]
+    return out
+
+
+# The tuned reduction classes (kernels.common.hiptensor_aot.rreduce): a fixed set covering the
+# builder's paths (both modes, every operator and data-type row, slot counts, lanes below / at /
+# above the wave, thread rows, tiles per block, vector widths, unroll, streaming loads, opA,
+# 64-bit offsets, wave32, mixed compute / output types), then every class of the packs of
+# hipTensor's targets (rreduce_host.pack_classes), then the finalize classes. Fields: mode, a, d,
+# op, nr, block, vec, lanes, unroll, rows, nt, una, idx64, wave.
+RREDUCE_FIXED = [
+    ("row", "f32", "f32", "add", 1, 256, 4, 64, 2, 0, 0, 0, 0, 64),
+    ("row", "f16", "f16", "max", 1, 512, 8, 512, 1, 0, 1, 0, 0, 64),
+    ("row", "bf16", "bf16", "min", 2, 256, 8, 8, 8, 0, 1, 0, 0, 64),
+    ("row", "f64", "f64", "mul", 3, 256, 2, 64, 4, 0, 1, 0, 0, 64),
+    ("row", "f32", "f32", "max", 4, 128, 1, 1, 1, 0, 0, 0, 0, 64),
+    ("row", "f16", "f16", "add", 8, 1024, 2, 16, 4, 0, 0, 1, 0, 64),
+    ("row", "f32", "f32", "add", 1, 256, 4, 256, 2, 0, 0, 0, 1, 64),
+    ("row", "f64", "f64", "max", 2, 64, 2, 32, 2, 0, 0, 1, 1, 64),
+    ("row", "f16", "f16", "min", 1, 64, 8, 4, 2, 0, 0, 0, 0, 32),
+    ("row", "bf16", "bf16", "mul", 2, 128, 4, 64, 1, 0, 0, 0, 0, 32),
+    ("row", "f16", "f64", "max", 1, 256, 8, 64, 2, 0, 0, 0, 0, 64),
+    ("col", "f32", "f32", "add", 1, 256, 4, 32, 2, 0, 0, 0, 0, 64),
+    ("col", "f16", "f16", "max", 1, 1024, 4, 32, 2, 8, 1, 0, 0, 64),
+    ("col", "bf16", "bf16", "min", 2, 1024, 8, 8, 1, 16, 1, 0, 0, 64),
+    ("col", "f64", "f64", "mul", 3, 256, 2, 2, 4, 8, 1, 0, 0, 64),
+    ("col", "f32", "f32", "max", 2, 512, 2, 16, 1, 0, 0, 0, 0, 64),
+    ("col", "f16", "f16", "add", 4, 64, 1, 64, 1, 0, 0, 0, 0, 64),
+    ("col", "f64", "f64", "add", 8, 128, 1, 1, 8, 0, 0, 1, 0, 64),
+    ("col", "f32", "f32", "min", 1, 256, 4, 64, 2, 1, 0, 0, 1, 64),
+    ("col", "bf16", "bf16", "max", 1, 256, 2, 16, 2, 4, 0, 1, 1, 64),
+    ("col", "f16", "f16", "mul", 2, 128, 8, 8, 2, 0, 0, 0, 0, 32),
+    ("col", "f32", "f32", "add", 1, 256, 4, 128, 2, 0, 0, 0, 0, 64),
+    ("col", "f64", "f16", "add", 1, 256, 2, 32, 2, 0, 0, 0, 0, 64),
+]
+RREDUCE_FINAL_FIXED = [
+    # a, d, op, lanes, idx64, block, wave
+    ("f16", "f64", "max", 8, 0, 128, 64),
+    ("f32", "f32", "min", 16, 0, 64, 32),
+    ("f64", "f16", "add", 2, 1, 256, 64),
+]
+RREDUCE_FIELDS = (
+    "mode",
+    "a",
+    "d",
+    "op",
+    "nr",
+    "block",
+    "vec",
+    "lanes",
+    "unroll",
+    "rows",
+    "nt",
+    "una",
+    "idx64",
+    "wave",
+)
+#: the targets whose packs carry the classes (hipTensor's HIPTENSOR_ROCKE_SUPPORTED_TARGETS)
+RREDUCE_PACK_ARCHES = ("gfx90a", "gfx942", "gfx950")
+
+
+def rreduce_rows():
+    """``(kind, fields, arch)``: kind "class" (RreduceSpec fields) or "final"
+    (RreduceFinalSpec fields); the arch the config is lowered for. A spec already listed (the
+    fixed set, or another target's pack) is not listed again."""
+    from dataclasses import asdict
+
+    from kernels.common.hiptensor_aot import rreduce_host
+
+    out = []
+    for r in RREDUCE_FIXED:
+        f = dict(zip(RREDUCE_FIELDS, r))
+        for k in ("nt", "una", "idx64"):
+            f[k] = bool(f[k])
+        out.append(("class", f, "gfx950" if f["wave"] == 64 else "gfx1151"))
+    seen = {tuple(sorted(f.items())) for k, f, _ in out if k == "class"}
+    for arch in RREDUCE_PACK_ARCHES:
+        # a class several targets share (the same spec) is one config, lowered for the first
+        for s in rreduce_host.pack_classes(arch):
+            f = asdict(s)
+            key = tuple(sorted(f.items()))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(("class", f, arch))
+    for a, d, op, lanes, idx64, block, wave in RREDUCE_FINAL_FIXED:
+        f = dict(
+            a=a, d=d, op=op, lanes=lanes, idx64=bool(idx64), block=block, wave=wave
+        )
+        out.append(("final", f, "gfx950" if wave == 64 else "gfx1151"))
+    for s in rreduce_host.final_classes("gfx950"):
+        out.append(("final", asdict(s), "gfx950"))
     return out

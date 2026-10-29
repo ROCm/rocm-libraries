@@ -89,8 +89,7 @@ std::string spec_check(const rocke_htaot_rreduce_spec_t* s)
         return "vec " + std::to_string(s->vec);
     if(s->unroll != 1 && s->unroll != 2 && s->unroll != 4 && s->unroll != 8)
         return "unroll " + std::to_string(s->unroll);
-    if(s->rows
-       && (!streq(s->mode, "col") || !pow2(s->rows) || s->lanes * s->rows > s->block))
+    if(s->rows && (!streq(s->mode, "col") || !pow2(s->rows) || s->lanes * s->rows > s->block))
         return "rows " + std::to_string(s->rows);
     return "";
 }
@@ -134,7 +133,8 @@ std::string final_name(const rocke_htaot_rreduce_final_spec_t* f)
 /* rreduce._RedEmit: Emit with the offset helpers of these kernels */
 struct RedEmit : Emit
 {
-    RedEmit(rocke_ir_builder_t* b_, bool idx64_, const char* cdt) : Emit(b_, idx64_, cdt, false)
+    RedEmit(rocke_ir_builder_t* b_, bool idx64_, const char* cdt)
+        : Emit(b_, idx64_, cdt, false)
     {
     }
     V* widen(V* v)
@@ -237,7 +237,8 @@ struct Slots
     std::vector<std::pair<V*, V*>> mag;
     std::map<std::string, std::vector<V*>> strides;
 
-    Slots(RedEmit& e, const char* prefix, int n_, const std::vector<const char*>& tensors) : n(n_)
+    Slots(RedEmit& e, const char* prefix, int n_, const std::vector<const char*>& tensors)
+        : n(n_)
     {
         rocke_ir_builder_t* b = e.b;
         std::string p(prefix);
@@ -646,9 +647,8 @@ void row(RedEmit& e, const rocke_htaot_rreduce_spec_t* s, Params& P)
         V* off = rocke_b_add(b, a_base, ro);
         return load_vec(e, P["A"], off, s->a, s->vec, s->nt);
     };
-    ReduceVals reduce_vals = [&](const std::vector<V*>& vals) {
-        return std::vector<V*>{tree(e, s->op, vals, true)};
-    };
+    ReduceVals reduce_vals
+        = [&](const std::vector<V*>& vals) { return std::vector<V*>{tree(e, s->op, vals, true)}; };
     V* z = e.cf(0.0);
     V* anz = rocke_b_fcmp(b, "one", P["alpha"], z);
     V* ident = identity(e, s->op);

@@ -26,12 +26,12 @@
 
 // The data type rows of the rocKE backend's generic elementwise kernel (rocKE's
 // library/kernels/common/hiptensor_aot/ew.py): the rows of the API's elementwise operations and
-// of the contractions' operand packing and epilogues. The kernel pack builder
-// (pack/rocke_pack_builder.cpp) adds the rows of mixed-type contractions to them; the JIT
-// (rocke_jit.cpp) specializes the launches of these rows only, the mixed-type rows keep their
-// kernel-pack kernels. jitClassAdmitted() is the JIT's class rule; the pack builder lists the
-// classes it admits in its manifest (--list), which rocKE's manifest pins to the classes of
-// rocKE's jit_ew.jit_classes().
+// of the contractions' operand packing and epilogues, and the rows of mixed-type contractions
+// (ewRows1Mixed / ewRows2Mixed), each also with the math operators and with 64-bit offsets. The
+// kernel pack builder (pack/rocke_pack_builder.cpp) builds every row; the JIT (rocke_jit.cpp)
+// specializes the launches of every row. jitClassAdmitted() is the JIT's class rule; the pack
+// builder lists the classes it admits in its manifest (--list), which rocKE's manifest pins to
+// the classes of rocKE's jit_ew.jit_classes() of every pack row.
 
 #ifndef HIPTENSOR_BACKENDS_ROCKE_ROCKE_EW_ROWS_HPP
 #define HIPTENSOR_BACKENDS_ROCKE_ROCKE_EW_ROWS_HPP
@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <vector>
 
 #include "rocke/instance_hiptensor_aot.h"
 
@@ -108,29 +109,79 @@ namespace hiptensor
             return false;
         }
 
-        // The rows the JIT specializes: the rows above with the default block size, the math
-        // rows with 32-bit offsets only. The rows of mixed-type contractions and the
-        // 64-bit-offset math rows keep their pack kernels.
+        // The rows of mixed-type contractions (rocKE's make_rocke_pack.py EW_ROWS_1_MIXED /
+        // EW_ROWS_2_MIXED / EW_ROWS_C2_MIXED, in its order): packs of any real type to f16 /
+        // bf16, epilogues of an f32 / f64 result with any C and D type (complex: f32 / f64
+        // components).
+        inline std::vector<EwRow2> ewRows1Mixed()
+        {
+            std::vector<EwRow2> out;
+            for(char const* d : {"f16", "bf16"})
+            {
+                for(char const* a : {"f16", "bf16", "f32", "f64"})
+                {
+                    if(!hasEwRow(kEwRows1, EwRow2{a, d}))
+                    {
+                        out.push_back({a, d});
+                    }
+                }
+            }
+            return out;
+        }
+
+        inline std::vector<EwRow3> ewRows2Mixed(bool cplx)
+        {
+            std::vector<EwRow3>      out;
+            std::vector<char const*> types
+                = cplx ? std::vector<char const*>{"f32", "f64"}
+                       : std::vector<char const*>{"f16", "bf16", "f32", "f64"};
+            for(char const* t : {"f32", "f64"})
+            {
+                for(char const* c : types)
+                {
+                    for(char const* d : types)
+                    {
+                        if(!(cplx ? hasEwRow(kEwRowsC2, EwRow3{t, c, d})
+                                  : hasEwRow(kEwRows2, EwRow3{t, c, d})))
+                        {
+                            out.push_back({t, c, d});
+                        }
+                    }
+                }
+            }
+            return out;
+        }
+
+        // The rows the JIT specializes: every row of the pack's generic elementwise kernel (the
+        // rows above and the mixed-type rows, 32- and 64-bit offsets, the real ones also with the
+        // math operators) with the default block size.
         inline bool jitRow(rocke_htaot_ew_spec_t const& s)
         {
             auto const name = [](char const* dt) { return dt != nullptr ? dt : ""; };
-            if((s.math && s.idx64) || s.block != rocke_htaot_ew_spec_default().block)
+            if(s.block != rocke_htaot_ew_spec_default().block || (s.math && s.cplx))
             {
                 return false;
             }
             if(s.cplx)
             {
+                EwRow3 const r{name(s.a), name(s.c), name(s.d)};
                 return s.arity == 1
                            ? hasEwRow(kEwRowsC1, EwRow2{name(s.a), name(s.d)})
                            : s.arity == 2
-                                 && hasEwRow(kEwRowsC2, EwRow3{name(s.a), name(s.c), name(s.d)});
+                                 && (hasEwRow(kEwRowsC2, r) || hasEwRow(ewRows2Mixed(true), r));
             }
             switch(s.arity)
             {
             case 1:
-                return hasEwRow(kEwRows1, EwRow2{name(s.a), name(s.d)});
+            {
+                EwRow2 const r{name(s.a), name(s.d)};
+                return hasEwRow(kEwRows1, r) || hasEwRow(ewRows1Mixed(), r);
+            }
             case 2:
-                return hasEwRow(kEwRows2, EwRow3{name(s.a), name(s.c), name(s.d)});
+            {
+                EwRow3 const r{name(s.a), name(s.c), name(s.d)};
+                return hasEwRow(kEwRows2, r) || hasEwRow(ewRows2Mixed(false), r);
+            }
             case 3:
                 return hasEwRow(kEwRows3, EwRow4{name(s.a), name(s.b), name(s.c), name(s.d)});
             default:
@@ -138,9 +189,12 @@ namespace hiptensor
             }
         }
 
-        // The JIT's kernel classes: a class of a row of jitRow() that rocKE's builder accepts;
-        // vec 1 (no vector access) except for the math rows, or the output's vector width
-        // (16-byte accesses), every input a vector for the 64-bit-offset and the math rows.
+        // The JIT's kernel classes (rocKE's jit_ew.jit_classes): a class of a row of jitRow()
+        // that rocKE's builder accepts; vec 1 (no vector access), or the output's vector width
+        // (16-byte accesses) with every combination of vector / gathered inputs for the real
+        // 32-bit-offset rows and every input a vector for the 64-bit-offset and the math rows.
+        // Every launch of the generic kernel has a class: classify() takes vec 1 when the
+        // layout has no admitted vector class.
         inline bool jitClassAdmitted(rocke_htaot_ew_jit_spec_t const& s)
         {
             char why[160] = {0};
@@ -150,7 +204,7 @@ namespace hiptensor
             }
             if(s.vec == 1)
             {
-                return !s.base.math;
+                return true;
             }
             if(s.vec != rocke_htaot_ew_jit_vec(s.base.d))
             {

@@ -159,6 +159,8 @@ def test_writer_descriptor_families():
     assert families == {
         "ew",
         "reduce",
+        "rreduce",
+        "rreduce_final",
         "ewt",
         "ewv",
         "gemm",
@@ -231,25 +233,68 @@ def test_manifests_cover_the_pack_targets():
 
 
 def test_jit_classes_are_the_jit_rows_classes():
-    """The JIT classes of the manifests: every class of jit_classes() of the rows of the API's
-    operations, 64-bit-offset math rows excluded (the rule hipTensor's jitClassAdmitted encodes;
-    its C++ builder lists the classes that rule admits)."""
+    """The JIT classes of the manifests: every class of jit_classes() of every row of the pack's
+    generic elementwise kernel (32- and 64-bit offsets, mixed-type rows, math rows; the rule
+    hipTensor's jitClassAdmitted encodes, whose C++ builder lists the classes that rule admits),
+    and every launch of that kernel classifies (jit_class_of, the rule of hipTensor's classify)
+    to one of them: packed, gathered and odd layouts of every row."""
     mod = _load_writer()
+    from kernels.common.hiptensor_aot import common as C
     from kernels.common.hiptensor_aot.ew import EwSpec
-    from kernels.common.hiptensor_aot.jit_ew import jit_classes
+    from kernels.common.hiptensor_aot.host import canonicalize, ew_args
+    from kernels.common.hiptensor_aot.jit_ew import jit_class_of, jit_classes
 
     names = mod.hiptensor_jit_classes()
     assert len(names) == len(set(names)) and names == sorted(names)
-    every = {
-        c.kernel_name()
-        for idx64 in (False, True)
-        for p in mod.ew_params(idx64)
-        for c in jit_classes([EwSpec(**p)])
+    rows = [p for idx64 in (False, True) for p in mod.ew_params(idx64)]
+    every = {c.kernel_name() for p in rows for c in jit_classes([EwSpec(**p)])}
+    assert set(names) == every
+    # the widened kinds are in: mixed-type rows, math rows with vec 1, 64-bit-offset math rows
+    mixed = [p for p in rows if p not in mod.ew_params(p["idx64"], mixed=False)]
+    assert mixed and all(
+        EwSpec(**p).kernel_name().replace("hiptensor_aot_ew", "hiptensor_jit_ew", 1)
+        + "_v1"
+        in names
+        for p in mixed
+    )
+    for p in rows:
+        if p.get("math"):
+            # vec 1 and the all-vector class, also with 64-bit offsets
+            assert {c.vec for c in jit_classes([EwSpec(**p)])} == {
+                1,
+                16 // C.DTYPES[p["d"]][1],
+            }
+            assert all(c.kernel_name() in names for c in jit_classes([EwSpec(**p)])), p
+    layouts = {
+        "packed": [(64, None), (9, None), (3, None)],
+        "gathered": [(64, 0), (9, None), (3, None)],
+        "odd": [(13, None), (9, None), (3, None)],
     }
-    assert set(names) < every
-    for p in mod.ew_params(True, mixed=False):
-        for c in jit_classes([EwSpec(**p)]):
-            assert (c.kernel_name() in names) == (not p.get("math")), c.kernel_name()
+    for p in rows:
+        base = EwSpec(**p)
+        tensors = base.tensors()
+        for kind, modes in layouts.items():
+            # column-major packed tensors; "gathered": the first input's mode 0 is its slowest
+            dims = []
+            for m, (ext, gather) in enumerate(modes):
+                strides = []
+                for t in tensors:
+                    order = (
+                        [1, 2, 0]
+                        if gather is not None and t == tensors[0]
+                        else [0, 1, 2]
+                    )
+                    st = 1
+                    for q in order[: order.index(m)]:
+                        st *= modes[q][0]
+                    strides.append(st)
+                dims.append((ext, strides))
+            vals, _, _ = ew_args(canonicalize(dims, len(tensors) - 1), tensors)
+            for n in tensors[:-1]:
+                vals["op" + n] = C.OP_IDENTITY
+            vals["opAB"] = vals["opABC"] = C.OP_ADD
+            spec, _, _ = jit_class_of(base, vals)
+            assert spec.kernel_name() in names, (p, kind, spec.kernel_name())
     for arch in _PACK_TARGETS:
         lines = (_MANIFESTS / f"{arch}.manifest").read_text().splitlines()
         assert [line[4:] for line in lines if line.startswith("jit ")] == names
@@ -257,7 +302,15 @@ def test_jit_classes_are_the_jit_rows_classes():
 
 def test_kernel_abi_names_match_the_c_header():
     """rocke/instance_hiptensor_aot.h's ROCKE_HTAOT_*_ABI names are the Python ABI constants."""
-    from kernels.common.hiptensor_aot import dgett, ew, ewt, jit_ew, reduce, rgett
+    from kernels.common.hiptensor_aot import (
+        dgett,
+        ew,
+        ewt,
+        jit_ew,
+        reduce,
+        rgett,
+        rreduce,
+    )
 
     header = (
         _LIBROOT.parent
@@ -271,6 +324,7 @@ def test_kernel_abi_names_match_the_c_header():
     assert macros == {
         "EW": ew.EW_ABI,
         "REDUCE": reduce.REDUCE_ABI,
+        "RREDUCE": rreduce.RREDUCE_ABI,
         "EW_JIT": jit_ew.EW_JIT_ABI,
         "EWV": jit_ew.EWV_ABI,
         "EWT": ewt.EWT_ABI,

@@ -57,14 +57,15 @@ def test_math_rows():
     assert C.MATH_OPS[C.OP_SIN] == "sin" and C.MATH_OPS[C.OP_FLOOR] == "floor"
 
 
-def test_math_classes_are_the_all_vector_ones():
-    """A math row ships one JIT class, every input a vector (the class the JIT takes by
-    default); other layouts classify to vec 1 (no recipe: the launch keeps the pack kernel).
+def test_math_classes_are_vec1_and_all_vector():
+    """A math row has two JIT classes: vec 1 and every input a vector (the class the JIT takes
+    by default); layouts with a gathered input classify to vec 1 (HIPTENSOR_ROCKE_JIT=all).
     """
     base = EwSpec(arity=2, a="f16", c="f16", d="f16", math=True)
     classes = jit_classes([base])
-    assert [(c.vec, c.unit) for c in classes] == [(8, (True, True))]
-    assert classes[0].key().endswith("_m_v8_uu")
+    assert [(c.vec, c.unit) for c in classes] == [(1, ()), (8, (True, True))]
+    assert classes[0].key().endswith("_m_v1")
+    assert classes[1].key().endswith("_m_v8_uu")
     ops = dict(opA=C.OP_SIN, opC=C.OP_IDENTITY, opAB=C.OP_ADD)
     packed, _, _ = ew_args(
         canonicalize([(64, [1, 1, 1]), (9, [64, 64, 64])], 2), ["A", "C", "D"]
@@ -91,9 +92,9 @@ def test_math_classes_are_the_all_vector_ones():
     ids=lambda s: s.kernel_name(),
 )
 def test_math_class_rolls(base):
-    spec = jit_classes([base])[0]
-    recipe = roll_jit_ew(spec, verify=2)
-    assert recipe["kernel_name_fmt"] == spec.kernel_name()
+    for spec in jit_classes([base]):
+        recipe = roll_jit_ew(spec, verify=2)
+        assert recipe["kernel_name_fmt"] == spec.kernel_name()
 
 
 def _wide_integers(o, out: set) -> set:
@@ -142,7 +143,10 @@ def test_math_recipe_replay_lowers_like_the_builder(a, d):
 
     try:
         lib = online.resolve_library_path(build=False)
-    except (FileNotFoundError, RuntimeError) as err:  # pragma: no cover - depends on the host
+    except (
+        FileNotFoundError,
+        RuntimeError,
+    ) as err:  # pragma: no cover - depends on the host
         pytest.skip(f"portable engine library: {err}")
     if lib is None:
         pytest.skip("the portable engine library is not built")
@@ -160,7 +164,9 @@ def _ssa_free(ll: str) -> str:
     """``ll`` with its local value and label names numbered in order of appearance."""
     names: dict = {}
     return re.sub(
-        r"%[A-Za-z_.0-9]+", lambda m: names.setdefault(m.group(0), f"%v{len(names)}"), ll
+        r"%[A-Za-z_.0-9]+",
+        lambda m: names.setdefault(m.group(0), f"%v{len(names)}"),
+        ll,
     )
 
 
@@ -346,6 +352,9 @@ ROWS1 = [
     ("f32", "f16"),
     ("f32", "f64"),
     ("bf16", "f64"),
+    # mixed-type rows of contractions (JIT classes since the JIT takes every pack row)
+    ("bf16", "f16"),
+    ("f64", "bf16"),
 ]
 
 

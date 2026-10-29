@@ -1173,8 +1173,8 @@ namespace hiptensor
                         }
                     }
                     // 64-bit offset rows and the rows with the math operators have vector
-                    // classes only with every input a vector (the math rows have no other
-                    // class: their other launches keep the pack kernel)
+                    // classes only with every input a vector (their other layouts take the
+                    // vec 1 class)
                     if(ok && (base.idx64 || base.math))
                     {
                         ok = std::all_of(vector.begin(), vector.end(), [](bool v) { return v; });
@@ -1331,8 +1331,8 @@ namespace hiptensor
                                  : "no input is read with vector loads (gathered or broadcast)";
                     return false;
                 }
-                // the JIT's kernel classes (rocke_ew_rows.hpp): the rows of jitRow; a math row
-                // only with every input a vector
+                // the JIT's kernel classes (rocke_ew_rows.hpp): every row of the pack's generic
+                // kernel; this fails only for a pack of another rocKE version
                 if(!jitClassAdmitted(cls.spec))
                 {
                     reason = "no JIT class " + cls.key;

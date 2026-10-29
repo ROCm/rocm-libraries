@@ -173,17 +173,18 @@ std::vector<rocke_htaot_ew_jit_spec_t> jit_classes(const Row& base)
     j.base = to_spec(base);
     int n_in = base.arity;
     int v = rocke_htaot_ew_jit_vec(base.d);
-    if(base.math)
-    {
-        j.vec = v;
-        j.n_unit = n_in;
-        for(int i = 0; i < n_in; ++i)
-            j.unit[i] = true;
-        out.push_back(j);
-        return out;
-    }
     j.vec = 1;
     out.push_back(j);
+    if(base.math)
+    {
+        rocke_htaot_ew_jit_spec_t k = j;
+        k.vec = v;
+        k.n_unit = n_in;
+        for(int i = 0; i < n_in; ++i)
+            k.unit[i] = true;
+        out.push_back(k);
+        return out;
+    }
     if(base.cplx)
         return out;
     std::vector<int> masks;

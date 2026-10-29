@@ -19,7 +19,13 @@ from dataclasses import asdict, dataclass, replace
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .common import MAX_RANK, as_i32_bits, magic_u31
-from .rreduce import LOAD_VECS, SLOT_COUNTS, STREAMING_ARCHS, RreduceFinalSpec, RreduceSpec
+from .rreduce import (
+    LOAD_VECS,
+    SLOT_COUNTS,
+    STREAMING_ARCHS,
+    RreduceFinalSpec,
+    RreduceSpec,
+)
 
 I32_LIMIT = 1 << 31
 GRID_YZ_MAX = 65535
@@ -38,6 +44,8 @@ def table_path() -> str:
     import rocke.dispatch.families as fam
 
     return os.path.join(os.path.dirname(os.path.abspath(fam.__file__)), TABLE_NAME)
+
+
 #: Data-type rows of the API's reductions (A = C = D).
 ROWS = ("f16", "bf16", "f32", "f64")
 ELEM_BYTES = {"f16": 2, "bf16": 2, "f32": 4, "f64": 8}
@@ -190,6 +198,8 @@ def check_knobs(
             return "lanes x vec exceed the run"
         rt = k.rows if k.rows else k.block // k.lanes
         n_rows = math.prod(e for e, _ in red) if red else 1
+        if rt > 1 and rt // 2 >= n_rows:
+            return "more than half the thread rows idle"
         if k.split > max(1, _ceil(n_rows, rt)):
             return "split exceeds the reduction rows per thread row"
         if len(red) > MAX_RANK:
@@ -240,7 +250,9 @@ def needs_idx64(kept, red, k: Knobs) -> bool:
     return max(a_span, d_span, w_span) >= I32_LIMIT
 
 
-def _slots(vals: Dict[str, int], prefix: str, dims, n: int, tensors: Sequence[str]) -> None:
+def _slots(
+    vals: Dict[str, int], prefix: str, dims, n: int, tensors: Sequence[str]
+) -> None:
     """Fill a slot set: ``dims`` = (extent, stride per tensor...) innermost first, padded to ``n``
     with extent 1, magic (0, 0) and stride 0."""
     dims = list(dims) + [(1,) + (0,) * len(tensors)] * (n - len(dims))
@@ -277,25 +289,35 @@ def plan(
     una: bool = False,
     wave: int = 64,
     arch: str = "gfx950",
+    nr: Optional[int] = None,
+    idx64: Optional[bool] = None,
 ) -> Plan:
-    """The launches of the problem with knobs ``k`` (ValueError when they do not apply)."""
+    """The launches of the problem with knobs ``k`` (ValueError when they do not apply).
+    ``nr`` / ``idx64``: run it with a class of more reduced slots (padded) or with 64-bit
+    offsets although they fit 32 bits (the untuned choice may pick such a class)."""
     why = check_knobs(kept, red, a, k, wave=wave, arch=arch)
     if why is not None:
         raise ValueError(why)
     kept = [tuple(x) for x in kept]
     red = [tuple(x) for x in red]
-    idx64 = needs_idx64(kept, red, k)
+    need64 = needs_idx64(kept, red, k)
+    if idx64 is None:
+        idx64 = need64
+    elif need64 and not idx64:
+        raise ValueError("the problem needs 64-bit offsets")
     n_out = math.prod(x[0] for x in kept)
     n_idx, step, per, n_it = loop_geometry(kept, red, k)
-    vals: Dict[str, int] = dict(n_out=n_out, n_idx=n_idx, per=per, n_it=n_it, split=k.split)
+    vals: Dict[str, int] = dict(
+        n_out=n_out, n_idx=n_idx, per=per, n_it=n_it, split=k.split
+    )
     if k.mode == "row":
         rdims = chunk_dims(red, k.vec)
-        nr = slot_count(len(rdims))
+        nr = _slots_for(len(rdims), nr)
         _slots(vals, "k", [(e, sa, sd) for e, sa, sd in kept], MAX_RANK, ("A", "D"))
         final_kept = kept
     else:
         rdims = list(red) if red else [(1, 0)]
-        nr = slot_count(len(rdims))
+        nr = _slots_for(len(rdims), nr)
         ng = col_group(kept)
         grp, rest = kept[:ng], kept[ng:]
         m = math.prod(x[0] for x in grp)
@@ -344,6 +366,217 @@ def plan(
         _slots(final_args, "k", [(e, sd) for e, _, sd in final_kept], MAX_RANK, ("D",))
         final_grid = (_ceil(n_out, final.block // lanes), 1, 1)
     return Plan(spec, vals, grid, (k.block, 1, 1), final, final_args, final_grid, ws)
+
+
+def _slots_for(n: int, nr: Optional[int]) -> int:
+    need = slot_count(n)
+    if need is None:
+        raise ValueError("more than 8 reduced slots")
+    if nr is None:
+        return need
+    if nr < need or nr not in SLOT_COUNTS:
+        raise ValueError(f"a class of {nr} reduced slots cannot run {n} slots")
+    return nr
+
+
+def needed_slots(kept, red, k: Knobs) -> Optional[int]:
+    """The reduced-slot count a class needs for the problem with knobs ``k``."""
+    n = len(chunk_dims(red, k.vec)) if k.mode == "row" else max(1, len(red))
+    return slot_count(n)
+
+
+def log_q(x: int) -> int:
+    """``x`` on a quarter-octave scale (integers only): ``4 * floor(log2 x)`` plus the next two
+    bits of ``x``; 0 for ``x <= 1``."""
+    if x <= 1:
+        return 0
+    e = x.bit_length() - 1
+    frac = (x >> (e - 2)) & 3 if e >= 2 else (x << (2 - e)) & 3
+    return 4 * e + frac
+
+
+def features(kept, red) -> Tuple[int, int, int, int, int]:
+    """The features the untuned choice compares problems by: outputs, reduced elements and the
+    contiguous run of A's innermost mode (reduced mode in row mode, the kept run in col mode) on
+    the quarter-octave scale, and the numbers of reduced and kept modes."""
+    n_out = math.prod(x[0] for x in kept) if kept else 1
+    n_red = math.prod(r[0] for r in red) if red else 1
+    if mode_of(kept, red) == "row":
+        inner = red[0][0] if red[0][1] == 1 else 1
+    else:
+        ng = col_group(kept)
+        m = math.prod(x[0] for x in kept[:ng])
+        inner = m if kept[0][1] == 1 else 1
+    return (log_q(n_out), log_q(n_red), log_q(inner), len(red), len(kept))
+
+
+def feature_distance(f, g) -> int:
+    return (
+        2 * abs(f[0] - g[0])
+        + 2 * abs(f[1] - g[1])
+        + abs(f[2] - g[2])
+        + 2 * abs(f[3] - g[3])
+        + 2 * abs(f[4] - g[4])
+    )
+
+
+@dataclass(frozen=True)
+class Prototype:
+    """A measured problem of the untuned choice: its group (mode, element bytes, MAX / MIN), its
+    features, the palette knobs that ran it fastest and the wave count of its tuned launch on a
+    device of ``cus`` compute units."""
+
+    mode: str
+    eb: int
+    maxmin: bool
+    f: Tuple[int, int, int, int, int]
+    block: int
+    vec: int
+    lanes: int
+    unroll: int
+    rows: int
+    nt: bool
+    waves: int
+    cus: int
+
+
+def prototypes(table: Optional[dict] = None) -> List[Prototype]:
+    table = load_table() if table is None else table
+    out = []
+    for p in table.get("prototypes", []):
+        k = p["knobs"]
+        out.append(
+            Prototype(
+                p["mode"],
+                int(p["eb"]),
+                bool(p["maxmin"]),
+                tuple(int(x) for x in p["f"]),
+                int(k["block"]),
+                int(k["vec"]),
+                int(k["lanes"]),
+                int(k["unroll"]),
+                int(k.get("rows", 0)),
+                bool(k.get("nt", 0)),
+                int(p["waves"]),
+                int(p["cus"]),
+            )
+        )
+    return out
+
+
+#: The knobs (block, vec, lanes, unroll, rows) that run every problem of a mode (row: one thread
+#: per output; col: one thread per kept element and one reduction row per thread), and the wave
+#: count (of a 256-CU device) their split aims for.
+UNIVERSAL_KNOBS = {"row": (256, 1, 1, 4, 0), "col": (256, 1, 1, 4, 1)}
+UNIVERSAL_WAVES = 4096
+
+
+def launch_waves(kept, red, k: Knobs) -> int:
+    return grid_x(kept, red, k) * k.split * k.block // 64
+
+
+def untuned_choices(
+    kept,
+    red,
+    a: str,
+    d: str,
+    op: str,
+    classes,
+    protos,
+    *,
+    una: bool = False,
+    cus: int = 256,
+    arch: str = "gfx950",
+    n: int = 3,
+):
+    """The untuned choice (hipTensor's rule): the prototypes of the problem's mode and element size
+    nearest to it (same MAX / MIN class first, then by :func:`feature_distance`, then table
+    order); each gives its knobs with the class of the pack that runs them (the fewest reduced
+    slots at least the problem needs, 32-bit offsets when they fit) and the smallest power-of-two
+    split that reaches the prototype's wave count (scaled to ``cus``). Up to ``n`` distinct
+    ``(knobs, class)`` pairs, the first the rule's choice."""
+    mode = mode_of(kept, red)
+    if (mode == "row" and not red) or (mode == "col" and not kept):
+        # one element in all (every mode of extent 1): no class has work for it
+        return []
+    eb = ELEM_BYTES[a]
+    mm = op in ("max", "min")
+    streaming = arch in STREAMING_ARCHS
+    f = features(kept, red)
+    order = [
+        (p.maxmin != mm, feature_distance(f, p.f), i)
+        for i, p in enumerate(protos)
+        if p.mode == mode and p.eb == eb
+    ]
+    order.sort()
+    pool = [
+        s for s in classes if (s.mode, s.a, s.d, s.op, s.una) == (mode, a, d, op, una)
+    ]
+    out, seen = [], set()
+    for _, _, i in order:
+        p = protos[i]
+        nt = p.nt and streaming
+        k = Knobs(mode, p.block, p.vec, p.lanes, p.unroll, 1, p.rows, nt)
+        if check_knobs(kept, red, a, k, arch=arch) is not None:
+            continue
+        need = needed_slots(kept, red, k)
+        cands = [
+            s
+            for s in pool
+            if (s.block, s.vec, s.lanes, s.unroll, s.rows, s.nt)
+            == (k.block, k.vec, k.lanes, k.unroll, k.rows, k.nt)
+            and need is not None
+            and s.nr >= need
+        ]
+        if not cands:
+            continue
+        target = p.waves * cus // p.cus
+        split = 1
+        while launch_waves(kept, red, replace(k, split=split)) < target:
+            nxt = replace(k, split=split * 2)
+            if check_knobs(kept, red, a, nxt, arch=arch) is not None:
+                break
+            split *= 2
+        k = replace(k, split=split)
+        need64 = needs_idx64(kept, red, k)
+        cands = [s for s in cands if s.idx64 or not need64]
+        if not cands:
+            continue
+        cands.sort(key=lambda s: (s.nr, s.idx64))
+        s = cands[0]
+        key = (s.kernel_name(), split)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((k, s))
+        if len(out) == n:
+            break
+    if not out:
+        # no prototype's knobs run the problem: the universal knobs of the mode (one thread per
+        # output or per kept element, scalar loads), which run every problem
+        block, vec, lanes, unroll, rows = UNIVERSAL_KNOBS[mode]
+        k = Knobs(mode, block, vec, lanes, unroll, 1, rows, streaming)
+        need = needed_slots(kept, red, k)
+        if need is not None and check_knobs(kept, red, a, k, arch=arch) is None:
+            target = UNIVERSAL_WAVES * cus // 256
+            while launch_waves(kept, red, k) < target:
+                nxt = replace(k, split=k.split * 2)
+                if check_knobs(kept, red, a, nxt, arch=arch) is not None:
+                    break
+                k = nxt
+            need64 = needs_idx64(kept, red, k)
+            cands = [
+                s
+                for s in pool
+                if (s.block, s.vec, s.lanes, s.unroll, s.rows, s.nt)
+                == (k.block, k.vec, k.lanes, k.unroll, k.rows, k.nt)
+                and s.nr >= need
+                and (s.idx64 or not need64)
+            ]
+            cands.sort(key=lambda s: (s.nr, s.idx64))
+            if cands:
+                out.append((k, cands[0]))
+    return out
 
 
 def with_split(k: Knobs, split: int) -> Knobs:
@@ -460,8 +693,22 @@ def route_record(e: dict) -> str:
     )
 
 
+def proto_record(p: dict) -> str:
+    """A prototype of the untuned choice as the pack's route value."""
+    k = p["knobs"]
+    f = ",".join(str(int(x)) for x in p["f"])
+    return (
+        f"v1;mode={p['mode']};eb={int(p['eb'])};mm={int(bool(p['maxmin']))};f={f};"
+        f"block={k['block']};vec={k['vec']};lanes={k['lanes']};unroll={k['unroll']};"
+        f"rows={k.get('rows', 0)};nt={int(bool(k.get('nt', 0)))};waves={int(p['waves'])};"
+        f"cus={int(p['cus'])}"
+    )
+
+
 def routes(arch: str, table: Optional[dict] = None) -> Dict[str, str]:
-    """The pack routes of the target's tuned problems."""
+    """The pack routes of the target's tuned problems (``reduce.tuned.<hash>`` and its ``.key``),
+    then the prototypes of the untuned choice (``reduce.proto.<i>``, ``reduce.proto.count``; the
+    same for every target, measured on the target the table names per prototype)."""
     table = load_table() if table is None else table
     out: Dict[str, str] = {}
     for e in table["entries"]:
@@ -471,6 +718,10 @@ def routes(arch: str, table: Optional[dict] = None) -> Dict[str, str]:
         name = f"reduce.tuned.{fnv1a64(key):016x}"
         out[name] = route_record(e)
         out[name + ".key"] = key
+    protos = table.get("prototypes", [])
+    for i, p in enumerate(protos):
+        out[f"reduce.proto.{i}"] = proto_record(p)
+    out["reduce.proto.count"] = str(len(protos))
     return out
 
 

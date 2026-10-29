@@ -33,6 +33,8 @@
 //    not aligned for the specialized kernels' vector accesses;
 //  - a second plan of a problem takes the kernel cache, concurrent plans compile a kernel once;
 //  - the JIT needs no file besides the kernel pack (it builds with rocKE's C++ kernel builders);
+//  - the launch kinds of every pack row are specialized (math rows with gathered inputs and their
+//    vector classes, mixed-type contraction epilogues) and match the pack kernels bit for bit;
 //  - hiptensorWriteKernelCacheToFile / hiptensorReadKernelCacheFromFile: a fresh process that may
 //    not compile serves the plans from the file; files of another format version, device class
 //    or kernel ABI are refused with HIPTENSOR_STATUS_INVALID_VALUE, unreadable, damaged or
@@ -54,6 +56,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iterator>
+#include <memory>
 #include <mutex>
 #include <numeric>
 #include <optional>
@@ -782,6 +786,280 @@ TEST(RockeJit, PromotionKnobs)
         ScopedEnvironmentVariable off("HIPTENSOR_ROCKE_JIT", "0");
         auto                      j = runCase(cases().front(), HIPTENSOR_JIT_MODE_DEFAULT, rng);
         EXPECT_EQ(j.specialized, 0);
+    }
+}
+
+namespace
+{
+    // Values for the bit-for-bit comparisons of JIT and kernel-pack launches: integers, halves,
+    // signed zeros, NaN, infinities, f32 subnormals, values that overflow f16 and tiny ones.
+    void fillSpecial(Tensor& t, std::mt19937& rng)
+    {
+        static double const                special[] = {std::nan(""),
+                                                        HUGE_VAL,
+                                                        -HUGE_VAL,
+                                                        -0.0,
+                                                        0.0,
+                                                        0.5,
+                                                        -2.75,
+                                                        7.0e4,
+                                                        -3.0e38,
+                                                        1.0e-41,
+                                                        1.0e-6,
+                                                        0.999};
+        std::uniform_int_distribution<int> pick(0, 3 * int(std::size(special)) - 1);
+        std::uniform_int_distribution<int> small(-8, 8);
+        for(auto& v : t.values)
+        {
+            int const k = pick(rng);
+            v           = k < int(std::size(special)) ? special[k] : small(rng);
+        }
+        t.upload();
+    }
+
+    // Whether the f16 (2 bytes) or f32 (4 bytes) element at `p` is a NaN.
+    bool isNanBits(uint8_t const* p, size_t bytes)
+    {
+        if(bytes == 2)
+        {
+            uint16_t v;
+            std::memcpy(&v, p, 2);
+            return (v & 0x7C00u) == 0x7C00u && (v & 0x03FFu) != 0;
+        }
+        uint32_t v;
+        std::memcpy(&v, p, 4);
+        return (v & 0x7F800000u) == 0x7F800000u && (v & 0x007FFFFFu) != 0;
+    }
+
+    std::vector<uint8_t> tensorBytes(Tensor const& t)
+    {
+        std::vector<uint8_t> host(t.values.size() * bytesOf(t.type));
+        EXPECT_EQ(hipMemcpy(host.data(), t.data(), host.size(), hipMemcpyDeviceToHost), hipSuccess);
+        return host;
+    }
+
+    // One problem of the launch kinds the JIT gained, planned with `jit` (KERNEL_RANK `rank`),
+    // run on special values (the same values for every call of a `kind`); D's bytes, the plan's
+    // JIT line and the number of candidates.
+    struct WidenedRun
+    {
+        std::vector<uint8_t> d;
+        size_t               elem = 4; // bytes per element of D
+        JitLine              jit;
+        int                  candidates = 0;
+        bool                 planned    = false;
+    };
+
+    WidenedRun runWidened(int kind, hiptensorJitMode_t jit, int32_t rank)
+    {
+        WidenedRun                               out;
+        ApiObjects                               api;
+        LogCapture                               log;
+        std::mt19937                             rng(9100 + kind);
+        hiptensorOperationDescriptor_t           op = nullptr;
+        std::vector<std::unique_ptr<Tensor>>     in;
+        std::vector<hiptensorTensorDescriptor_t> desc;
+        auto                                     input = [&](Type t, std::vector<int64_t> lens) {
+            in.push_back(std::make_unique<Tensor>(t, std::move(lens)));
+            fillSpecial(*in.back(), rng);
+            desc.push_back(api.tensor(in.back()->lens, {}, dataType(in.back()->type)));
+        };
+        std::unique_ptr<Tensor> d;
+        if(kind == 0 || kind == 1)
+        {
+            // permutation with a math operator: kind 0 f32, the input fastest along D's mode 1
+            // (gathered: the vec 1 class of the math row); kind 1 f16 packed (its vector class)
+            Type const                 t = kind == 0 ? Type::F32 : Type::F16;
+            std::vector<int64_t> const lens
+                = kind == 0 ? std::vector<int64_t>{33, 20, 3} : std::vector<int64_t>{64, 9, 5};
+            std::vector<int32_t> const ma
+                = kind == 0 ? std::vector<int32_t>{1, 0, 2} : std::vector<int32_t>{0, 1, 2};
+            std::vector<int64_t> la;
+            for(auto m : ma)
+            {
+                la.push_back(lens[m]);
+            }
+            input(t, la);
+            d             = std::make_unique<Tensor>(t, lens);
+            auto const md = iota32(3);
+            EXPECT_EQ(hiptensorCreatePermutation(api.handle,
+                                                 &op,
+                                                 desc[0],
+                                                 ma.data(),
+                                                 kind == 0 ? HIPTENSOR_OP_SIN : HIPTENSOR_OP_COS,
+                                                 api.tensor(lens, {}, dataType(t)),
+                                                 md.data(),
+                                                 HIPTENSOR_COMPUTE_DESC_32F),
+                      HIPTENSOR_STATUS_SUCCESS);
+        }
+        else if(kind == 2)
+        {
+            // binary f32 with math operators, C gathered: the vec 1 class of the math row
+            std::vector<int64_t> const lens = {32, 24, 7};
+            std::vector<int32_t> const mc   = {2, 0, 1};
+            input(Type::F32, lens);
+            input(Type::F32, {7, 32, 24});
+            d             = std::make_unique<Tensor>(Type::F32, lens);
+            auto const md = iota32(3);
+            EXPECT_EQ(hiptensorCreateElementwiseBinary(api.handle,
+                                                       &op,
+                                                       desc[0],
+                                                       md.data(),
+                                                       HIPTENSOR_OP_ATAN,
+                                                       desc[1],
+                                                       mc.data(),
+                                                       HIPTENSOR_OP_FLOOR,
+                                                       api.tensor(lens, {}, HIPTENSOR_R_32F),
+                                                       md.data(),
+                                                       HIPTENSOR_OP_MAX,
+                                                       HIPTENSOR_COMPUTE_DESC_32F),
+                      HIPTENSOR_STATUS_SUCCESS);
+        }
+        else
+        {
+            // contraction of f16 A, B and C into f32 D: its epilogue (f32 result, f16 C, f32 D)
+            // is a mixed-type row. D[m0, n0, m1] = A[k0, m0, k1, m1] B[n0, k1, k0] + C
+            std::vector<int64_t> const ext = {24, 40, 6, 5, 3};
+            std::vector<int32_t> const ma = {3, 0, 4, 2}, mb = {1, 4, 3}, md = {0, 1, 2};
+            auto                       lensOf = [&](std::vector<int32_t> const& m) {
+                std::vector<int64_t> l;
+                for(auto x : m)
+                {
+                    l.push_back(ext[x]);
+                }
+                return l;
+            };
+            input(Type::F16, lensOf(ma));
+            input(Type::F16, lensOf(mb));
+            input(Type::F16, lensOf(md));
+            d = std::make_unique<Tensor>(Type::F32, lensOf(md));
+            EXPECT_EQ(hiptensorCreateContraction(api.handle,
+                                                 &op,
+                                                 desc[0],
+                                                 ma.data(),
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 desc[1],
+                                                 mb.data(),
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 desc[2],
+                                                 md.data(),
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 api.tensor(d->lens, {}, HIPTENSOR_R_32F),
+                                                 md.data(),
+                                                 HIPTENSOR_COMPUTE_DESC_32F),
+                      HIPTENSOR_STATUS_SUCCESS);
+        }
+        api.keep(op);
+        d->poison();
+        uint64_t ws   = 0;
+        auto     plan = makePlan(api, op, jit, &ws, rank);
+        if(plan == nullptr)
+        {
+            return out;
+        }
+        out.planned = true;
+        for(auto const& l : log.lines())
+        {
+            auto at = l.find("Candidates: ");
+            if(at != std::string::npos)
+            {
+                out.candidates = std::atoi(l.c_str() + at + 12);
+            }
+        }
+        void* work = nullptr;
+        if(ws > 0)
+        {
+            EXPECT_EQ(hipMalloc(&work, ws), hipSuccess);
+        }
+        float const       alpha = 1.5f, beta = -1.0f, gamma = 2.0f;
+        hiptensorStatus_t status;
+        if(kind <= 1)
+        {
+            status = hiptensorPermute(api.handle, plan, &alpha, in[0]->data(), d->data(), nullptr);
+        }
+        else if(kind == 2)
+        {
+            status = hiptensorElementwiseBinaryExecute(
+                api.handle, plan, &alpha, in[0]->data(), &gamma, in[1]->data(), d->data(), nullptr);
+        }
+        else
+        {
+            status = hiptensorContract(api.handle,
+                                       plan,
+                                       &alpha,
+                                       in[0]->data(),
+                                       in[1]->data(),
+                                       &beta,
+                                       in[2]->data(),
+                                       d->data(),
+                                       work,
+                                       ws,
+                                       nullptr);
+        }
+        EXPECT_EQ(status, HIPTENSOR_STATUS_SUCCESS) << "kind " << kind;
+        EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+        if(work != nullptr)
+        {
+            static_cast<void>(hipFree(work));
+        }
+        out.d    = tensorBytes(*d);
+        out.elem = bytesOf(d->type);
+        out.jit  = jitOf(log);
+        return out;
+    }
+} // namespace
+
+// The launch kinds the JIT gained with HIPTENSOR_ROCKE_JIT=all (the math rows with a gathered
+// input: their vec 1 class; the math rows' vector classes; the epilogue of a mixed-type
+// contraction, every candidate) are specialized, and write the same bits as the kernel-pack
+// kernels they replace (a NaN equals a NaN of any sign and payload), on data with NaN,
+// infinities, signed zeros, subnormals and values that overflow the output type.
+TEST(RockeJit, WidenedClassesMatchThePackKernels)
+{
+    ScopedEnvironmentVariable all("HIPTENSOR_ROCKE_JIT", "all");
+    for(int kind = 0; kind < 4; kind++)
+    {
+        int  withLaunches = 0;
+        int  candidates   = 1;
+        auto ranks        = kind == 3 ? 64 : 1;
+        for(int32_t rank = 0; rank < std::min(candidates, ranks); rank++)
+        {
+            auto const pack = runWidened(kind, HIPTENSOR_JIT_MODE_NONE, kind == 3 ? rank : -1);
+            auto const jit  = runWidened(kind, HIPTENSOR_JIT_MODE_DEFAULT, kind == 3 ? rank : -1);
+            ASSERT_TRUE(pack.planned && jit.planned) << "kind " << kind << " rank " << rank;
+            candidates = kind == 3 ? pack.candidates : 1;
+            // a candidate whose own results vary between runs (a split reduction in another
+            // order) is no reference for a bit-for-bit comparison
+            if(kind == 3 && runWidened(kind, HIPTENSOR_JIT_MODE_NONE, rank).d != pack.d)
+            {
+                continue;
+            }
+            EXPECT_FALSE(pack.jit.found) << "kind " << kind;
+            if(!jit.jit.found)
+            {
+                EXPECT_EQ(kind, 3) << "kind " << kind << ": no elementwise launch";
+                continue;
+            }
+            withLaunches++;
+            EXPECT_GE(jit.jit.launches, 1) << "kind " << kind << " rank " << rank;
+            EXPECT_EQ(jit.jit.specialized, jit.jit.launches) << "kind " << kind << " rank " << rank;
+            ASSERT_EQ(pack.d.size(), jit.d.size());
+            // a NaN equals a NaN: which operand's NaN an operation of two NaN returns (sign and
+            // payload) is unspecified, and the compiler may commute the operands
+            size_t bad = 0;
+            for(size_t i = 0; i + pack.elem <= pack.d.size(); i += pack.elem)
+            {
+                bool const differ = std::memcmp(&pack.d[i], &jit.d[i], pack.elem) != 0;
+                bad += differ
+                               && !(isNanBits(&pack.d[i], pack.elem)
+                                    && isNanBits(&jit.d[i], pack.elem))
+                           ? 1
+                           : 0;
+            }
+            EXPECT_EQ(bad, 0u) << "kind " << kind << " rank " << rank
+                               << ": elements that differ between the JIT and the pack kernel";
+        }
+        EXPECT_GE(withLaunches, 1) << "kind " << kind << ": no plan with an elementwise launch";
     }
 }
 

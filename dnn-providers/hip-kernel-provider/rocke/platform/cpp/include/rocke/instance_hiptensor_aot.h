@@ -154,23 +154,17 @@ const char* rocke_htaot_rreduce_table_json(void);
 /* pack_classes(arch): the classes of the target's pack (its palette, then the classes of its
  * tuned problems, no duplicates). Writes up to `cap` specs (their strings are static) and
  * returns the count; -1 with the reason in `err` when the table is malformed. */
-int rocke_htaot_rreduce_pack_classes(const char* arch,
-                                     rocke_htaot_rreduce_spec_t* out,
-                                     int cap,
-                                     char* err,
-                                     size_t err_cap);
+int rocke_htaot_rreduce_pack_classes(
+    const char* arch, rocke_htaot_rreduce_spec_t* out, int cap, char* err, size_t err_cap);
 /* final_classes(): the finalize classes of every pack. Writes up to `cap`, returns the count. */
 int rocke_htaot_rreduce_final_classes(rocke_htaot_rreduce_final_spec_t* out, int cap);
 /* routes(arch): the pack routes of the target's tuned problems, in the table's order
  * ("reduce.tuned.<hash>" = the launch knobs, "reduce.tuned.<hash>.key" = the canonical
- * problem). The count (-1: malformed table), then route i's name and value. */
+ * problem), then the prototypes of the untuned choice ("reduce.proto.<i>",
+ * "reduce.proto.count"). The count (-1: malformed table), then route i's name and value. */
 int rocke_htaot_rreduce_route_count(const char* arch, char* err, size_t err_cap);
-bool rocke_htaot_rreduce_route(const char* arch,
-                               int i,
-                               char* name,
-                               size_t name_cap,
-                               char* value,
-                               size_t value_cap);
+bool rocke_htaot_rreduce_route(
+    const char* arch, int i, char* name, size_t name_cap, char* value, size_t value_cap);
 
 /* -------------------------------------------------------------- jit_ew */
 

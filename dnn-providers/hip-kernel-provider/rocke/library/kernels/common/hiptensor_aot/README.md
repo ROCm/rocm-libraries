@@ -12,6 +12,8 @@ arguments, so one compiled kernel serves every problem of its data-type row.
 |---|---|---|
 | `ew.py` | `D = opABC(opAB(alpha*opA(A), beta*opB(B)), gamma*opC(C))`, arity 1 to 3, real or complex (pack / epilogue) | `hiptensor-aot-ew/v1` |
 | `reduce.py` | `D = alpha*reduce(opA(A)) + beta*opC(C)`, `row` (innermost mode reduced, one wave per output), `col` (innermost mode kept, one thread per output), split partials + `final` | `hiptensor-aot-reduce/v1` |
+| `rreduce.py` | the tuned reductions `D = alpha*reduce(opA(A)) + beta*opC(C)` with the canonical geometry as kernel arguments: `row` (lanes per output, vector loads, unrolled loops) and `col` (vector of kept outputs per thread, optional row tiles), the reduced-slot count `nr` (1, 2, 3, 4, 8) and the knobs block / vec / lanes / unroll / rows / non-temporal loads as the class, the split a launch argument (f32 / f64 partials + `final` classes); MAX / MIN propagate NaN; `una` classes apply the basic unary opA | `hiptensor-aot-rreduce/v1` |
+| `rreduce_host.py` | Python statement of the tuned reductions' host rules that hipTensor's `rocke_plan.cpp` implements: knob validity, plan (arguments, grids, workspace), the untuned choice (nearest measured prototype), the route table `rocke/dispatch/families/hiptensor_rreduce.json` (palette, tuned problems, prototypes; `builders/hiptensor/gen_rreduce_table.py`) and its pack routes | - |
 | `host.py` | Python statement of the launch-argument rules (canonical modes, slots, magic numbers, grids, splits) that hipTensor's `rocke_plan.cpp` implements | - |
 | `dgett.py` | the direct GETT: `D = alpha * sum_K opA(A) opB(B) + beta * opC(C)` read and written in place (every data type, compute type, operator and layout; no workspace), register-staged MFMA tiles; the host plan in `gett_host.py` | `hiptensor-aot-dgett/v1` |
 | `rgett.py` | rocKE's ring GETT body (`rocke.instances.common.tensor.gett`, f16 / bf16, gfx950) with its index maps as kernel arguments (one kernel per lane-width / D-vector class and digit-slot bucket: classes for problems of at most 2 or 4 digits per digit space skip the division of the unused slots), or as constants for a problem (the JIT form); the host plan in `gett_host.py` | `hiptensor-aot-rgett/v1` |
@@ -45,7 +47,10 @@ Tests of the contraction and tiled kernels: `library/tests/test_hiptensor_aot_dg
 layouts, mixed types, operators, complex, zero scales with NaN / Inf, in-place C, batch modes, 64-bit offsets, K
 padding; CPU: the K plans walk exactly the K space), `library/tests/test_hiptensor_aot_rgett.py` (the classes and the
 JIT form bit for bit against float64 references; CPU: the plans against rocKE's GETT planner),
-`library/tests/test_hiptensor_aot_ewt.py`.
+`library/tests/test_hiptensor_aot_ewt.py`. Tuned reductions: `library/tests/test_hiptensor_aot_rreduce.py` (GPU, exact against float64 /
+integer references: every mode, data type and operator, NaN / Inf, zero scales, opA, split partials, 64-bit
+offsets) and `library/tests/test_hiptensor_aot_rreduce_table.py` (CPU: the route table, routes, untuned
+choices, plans against the kernels' parameters).
 
 Tests: `library/tests/test_hiptensor_aot_math_ops.py` (GPU: the math operators of every row,
 generic and JIT forms, several inputs, reductions, specials, all exact against the host model of

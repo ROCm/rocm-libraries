@@ -95,7 +95,9 @@ class RreduceSpec:
     unroll: int = 1  # independent loads (and accumulators) per thread per loop trip
     rows: int = 0  # col: reduction-row threads per tile (0: block // lanes)
     nt: bool = False  # streaming A loads (gfx942 / gfx950)
-    una: bool = False  # opA other than IDENTITY (the basic operators, a uniform branch per trip)
+    una: bool = (
+        False  # opA other than IDENTITY (the basic operators, a uniform branch per trip)
+    )
     idx64: bool = False
     wave: int = 64
 
@@ -132,7 +134,9 @@ class RreduceSpec:
         if self.unroll not in (1, 2, 4, 8):
             return f"unroll {self.unroll}"
         if self.rows and (
-            self.mode != "col" or not _pow2(self.rows) or self.lanes * self.rows > self.block
+            self.mode != "col"
+            or not _pow2(self.rows)
+            or self.lanes * self.rows > self.block
         ):
             return f"rows {self.rows}"
         return None
@@ -298,7 +302,9 @@ class _Slots:
         return o
 
 
-def _load_vec(e: Emit, ptr_: Value, off: Value, dt: str, vec: int, nt: bool) -> List[Value]:
+def _load_vec(
+    e: Emit, ptr_: Value, off: Value, dt: str, vec: int, nt: bool
+) -> List[Value]:
     """``vec`` elements of dtype ``dt`` at element offset ``off``, in the compute type."""
     b = e.b
     ty, nb = DTYPES[dt]
@@ -771,7 +777,11 @@ class _RedEmit(Emit):
         return next(self._uid)
 
 
-def build_rreduce(s: RreduceSpec) -> KernelDef:
+def build_rreduce(spec: RreduceSpec, *, arch: str = "gfx950") -> KernelDef:
+    """The class kernel (the IR does not depend on the target; ``arch`` names it for the
+    builder contract)."""
+    del arch
+    s = spec
     why = s.check()
     if why is not None:
         raise ValueError(why)
@@ -786,9 +796,11 @@ def build_rreduce(s: RreduceSpec) -> KernelDef:
     return b.kernel
 
 
-def build_rreduce_final(f: RreduceFinalSpec) -> KernelDef:
+def build_rreduce_final(spec: RreduceFinalSpec, *, arch: str = "gfx950") -> KernelDef:
     """``D[o] = alpha * combine_s W[s * n_out + o] (+ beta * opC(C[o]))``: ``lanes`` threads per
     output (lane ``l`` combines partials ``l, l + lanes, ...``, then an XOR combine)."""
+    del arch
+    f = spec
     why = f.check()
     if why is not None:
         raise ValueError(why)
@@ -828,7 +840,9 @@ def build_rreduce_final(f: RreduceFinalSpec) -> KernelDef:
     else:
         trips = split
     k = e.next_uid()
-    loop = b.scf_for_iter(e.c32(0), trips, e.c32(1), [(f"facc{k}", ident)], iv_name=f"fit{k}")
+    loop = b.scf_for_iter(
+        e.c32(0), trips, e.c32(1), [(f"facc{k}", ident)], iv_name=f"fit{k}"
+    )
     with loop as (j, cur):
         jl = b.mul(j, e.c32(L))
         si = b.add(jl, lane)

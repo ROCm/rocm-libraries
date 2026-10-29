@@ -43,7 +43,8 @@ struct Arena
 /* the static spellings the specs point at */
 const char* intern(const char* s)
 {
-    static const char* const k[] = {"row", "col", "f16", "bf16", "f32", "f64", "add", "mul", "max", "min"};
+    static const char* const k[]
+        = {"row", "col", "f16", "bf16", "f32", "f64", "add", "mul", "max", "min"};
     for(const char* x : k)
         if(s != nullptr && strcmp(s, x) == 0)
             return x;
@@ -59,10 +60,20 @@ struct Entry
     rocke_htaot_rreduce_spec_t cls;
 };
 
+/* a prototype of the untuned choice (rreduce_host.Prototype) */
+struct Proto
+{
+    std::string mode;
+    int64_t eb = 0, maxmin = 0;
+    int64_t f[5] = {0, 0, 0, 0, 0};
+    int64_t block = 0, vec = 0, lanes = 0, unroll = 0, rows = 0, nt = 0, waves = 0, cus = 0;
+};
+
 struct Table
 {
     bool ok = false;
     std::string why;
+    std::vector<Proto> protos;
     std::vector<std::pair<std::string, rocke_htaot_rreduce_spec_t>> palette; /* (arch, class) */
     std::vector<Entry> entries;
 };
@@ -200,6 +211,37 @@ Table load()
         x.mode = mode;
         t.entries.push_back(std::move(x));
     }
+    const jd_val_t* pro = rocke_jget(root, "prototypes");
+    if(pro != nullptr && pro->kind != JD_ARR)
+    {
+        t.why = "rreduce table: prototypes is not a list";
+        return t;
+    }
+    for(int i = 0; pro != nullptr && i < pro->arr_len; ++i)
+    {
+        const jd_val_t* e = pro->arr[i];
+        const jd_val_t* k = rocke_jget(e, "knobs");
+        const jd_val_t* f = rocke_jget(e, "f");
+        const char* mode = intern(rocke_jstr(rocke_jget(e, "mode")));
+        Proto x;
+        bool ok = mode != nullptr && (strcmp(mode, "row") == 0 || strcmp(mode, "col") == 0)
+                  && k != nullptr && f != nullptr && f->kind == JD_ARR && f->arr_len == 5
+                  && num(rocke_jget(e, "eb"), &x.eb) && opt_int(e, "maxmin", 0, &x.maxmin)
+                  && num(rocke_jget(k, "block"), &x.block) && num(rocke_jget(k, "vec"), &x.vec)
+                  && num(rocke_jget(k, "lanes"), &x.lanes)
+                  && num(rocke_jget(k, "unroll"), &x.unroll) && opt_int(k, "rows", 0, &x.rows)
+                  && opt_int(k, "nt", 0, &x.nt) && num(rocke_jget(e, "waves"), &x.waves)
+                  && num(rocke_jget(e, "cus"), &x.cus);
+        for(int j = 0; ok && j < 5; ++j)
+            ok = num(f->arr[j], &x.f[j]);
+        if(!ok)
+        {
+            t.why = "rreduce table: malformed prototype " + std::to_string(i);
+            return t;
+        }
+        x.mode = mode;
+        t.protos.push_back(x);
+    }
     t.ok = true;
     return t;
 }
@@ -282,6 +324,22 @@ std::vector<std::pair<std::string, std::string>> routes_of(const std::string& ar
         out.push_back({name, route_record(e)});
         out.push_back({name + ".key", key});
     }
+    /* rreduce_host.proto_record */
+    const auto& protos = table().protos;
+    for(size_t i = 0; i < protos.size(); ++i)
+    {
+        const Proto& p = protos[i];
+        std::string v = "v1;mode=" + p.mode + ";eb=" + std::to_string(p.eb)
+                        + ";mm=" + std::to_string(p.maxmin ? 1 : 0) + ";f=";
+        for(int j = 0; j < 5; ++j)
+            v += (j ? "," : "") + std::to_string(p.f[j]);
+        v += ";block=" + std::to_string(p.block) + ";vec=" + std::to_string(p.vec)
+             + ";lanes=" + std::to_string(p.lanes) + ";unroll=" + std::to_string(p.unroll)
+             + ";rows=" + std::to_string(p.rows) + ";nt=" + std::to_string(p.nt ? 1 : 0)
+             + ";waves=" + std::to_string(p.waves) + ";cus=" + std::to_string(p.cus);
+        out.push_back({"reduce.proto." + std::to_string(i), v});
+    }
+    out.push_back({"reduce.proto.count", std::to_string(protos.size())});
     return out;
 }
 
@@ -297,11 +355,8 @@ bool copy_str(const std::string& s, char* out, size_t cap)
 
 extern "C" {
 
-int rocke_htaot_rreduce_pack_classes(const char* arch,
-                                     rocke_htaot_rreduce_spec_t* out,
-                                     int cap,
-                                     char* err,
-                                     size_t err_cap)
+int rocke_htaot_rreduce_pack_classes(
+    const char* arch, rocke_htaot_rreduce_spec_t* out, int cap, char* err, size_t err_cap)
 {
     const Table& t = table();
     if(!t.ok)
@@ -344,7 +399,8 @@ int rocke_htaot_rreduce_final_classes(rocke_htaot_rreduce_final_spec_t* out, int
                 {
                     if(out != nullptr && n < cap)
                     {
-                        rocke_htaot_rreduce_final_spec_t f = rocke_htaot_rreduce_final_spec_default();
+                        rocke_htaot_rreduce_final_spec_t f
+                            = rocke_htaot_rreduce_final_spec_default();
                         f.a = a;
                         f.d = a;
                         f.op = op;
@@ -368,12 +424,8 @@ int rocke_htaot_rreduce_route_count(const char* arch, char* err, size_t err_cap)
     return (int)routes_of(arch != nullptr ? arch : "").size();
 }
 
-bool rocke_htaot_rreduce_route(const char* arch,
-                               int i,
-                               char* name,
-                               size_t name_cap,
-                               char* value,
-                               size_t value_cap)
+bool rocke_htaot_rreduce_route(
+    const char* arch, int i, char* name, size_t name_cap, char* value, size_t value_cap)
 {
     if(!table().ok)
         return false;

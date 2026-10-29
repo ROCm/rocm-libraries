@@ -73,7 +73,10 @@ def _run(kernel, vals, grid, block):
     from rocke.runtime.launcher import LaunchConfig
 
     L, k = _launcher(kernel)
-    L({p.name: vals[p.name] for p in k.params}, config=LaunchConfig(grid=grid, block=block))
+    L(
+        {p.name: vals[p.name] for p in k.params},
+        config=LaunchConfig(grid=grid, block=block),
+    )
     torch.cuda.synchronize()
 
 
@@ -143,7 +146,12 @@ def _launch(plan, A, Cd, Dd, alpha, beta, opa, opc, W=None):
     if plan.final is not None:
         fv = dict(plan.final_args)
         fv.update(W=W, C=Cd, D=Dd, alpha=alpha, beta=beta, opC=opc)
-        _run(build_rreduce_final(plan.final), fv, plan.final_grid, (plan.final.block, 1, 1))
+        _run(
+            build_rreduce_final(plan.final),
+            fv,
+            plan.final_grid,
+            (plan.final.block, 1, 1),
+        )
 
 
 def _knob_sets(kept, red, a, wave, rng):
@@ -217,7 +225,11 @@ def test_rreduce_exact(a, d, op, seed):
         Dd.fill_(float("nan"))
         _launch(p, Ad, Cd, Dd, alpha, beta, C.OP_IDENTITY, C.OP_IDENTITY)
         got = Dd.cpu()
-        assert torch.equal(got, want), (p.spec.kernel_name(), k, (got.double() - want.double()).abs().max())
+        assert torch.equal(got, want), (
+            p.spec.kernel_name(),
+            k,
+            (got.double() - want.double()).abs().max(),
+        )
 
 
 @pytest.mark.parametrize(
@@ -285,7 +297,9 @@ def test_rreduce_zero_scales(dt, mode):
             assert torch.equal(Dd.cpu().double(), 2.0 * Cd.cpu().double()), k
             Dd.fill_(float("nan"))
             _launch(p, Ad, Cd, Dd, 0.0, 0.0, C.OP_IDENTITY, C.OP_IDENTITY)
-            assert torch.equal(Dd.cpu().double(), torch.zeros(dshape, dtype=torch.float64)), k
+            assert torch.equal(
+                Dd.cpu().double(), torch.zeros(dshape, dtype=torch.float64)
+            ), k
     # beta == 0 with a NaN C, finite A
     A2 = (torch.arange(math.prod(shape), dtype=torch.float64) % 5 - 2).reshape(shape)
     A2d = A2.to(TD[dt]).cuda()
@@ -306,13 +320,22 @@ def test_rreduce_unary_a(opa, op):
     wave = _wave()
     for shape, kept in (([96, 17], [1]), ([64, 30], [0]), ([8, 12, 20], [0, 2])):
         A, Ad, sa = _strided(
-            shape, "f32", rng, list(range(len(shape))), 0, [float(v) for v in range(-3, 4)]
+            shape,
+            "f32",
+            rng,
+            list(range(len(shape))),
+            0,
+            [float(v) for v in range(-3, 4)],
         )
         dshape = [shape[k] for k in kept]
-        Cm, Cd, sc = _strided(dshape, "f32", rng, list(range(len(dshape))), 0, [1.0, -2.0])
+        Cm, Cd, sc = _strided(
+            dshape, "f32", rng, list(range(len(dshape))), 0, [1.0, -2.0]
+        )
         kd, rd = _problem(shape, kept, sa, sc)
         red = [i for i in range(len(shape)) if i not in kept]
-        ref = _reduce_ref(_unary_ref(A.double(), opa), red, op) - _unary_ref(Cm.double(), C.OP_NEG)
+        ref = _reduce_ref(_unary_ref(A.double(), opa), red, op) - _unary_ref(
+            Cm.double(), C.OP_NEG
+        )
         for k in _knob_sets(kd, rd, "f32", wave, rng)[:3]:
             p = H.plan(kd, rd, "f32", "f32", op, k, una=True, wave=wave, arch=_arch())
             Dd = torch.full(dshape, float("nan"), device="cuda")
@@ -350,7 +373,9 @@ def test_rreduce_forced_idx64():
     wave = _wave()
     shape = [24, 40, 16]
     for kept in ([1], [0, 2], [2]):
-        A, Ad, sa = _strided(shape, "f32", rng, [2, 0, 1], 2, [float(v) for v in range(-3, 4)])
+        A, Ad, sa = _strided(
+            shape, "f32", rng, [2, 0, 1], 2, [float(v) for v in range(-3, 4)]
+        )
         dshape = [shape[k] for k in kept]
         Dd = torch.zeros(dshape, device="cuda")
         kd, rd = _problem(shape, kept, sa, list(Dd.stride()))

@@ -5,7 +5,7 @@
 # tests/parity/hiptensor_aot_jit_ew_emit.py -- Python reference emitter for the
 # problem-specialized elementwise kernels of hipTensor's JIT
 # (jit_ew.build_ew_jit with the geometry as constants): every JIT class of
-# the generic rows (32- / 64-bit offsets, complex, math) at three geometry
+# the generic rows (32- / 64-bit offsets, mixed types, complex, math) at three geometry
 # points (_hiptensor_aot_rows.geometry_point: values drawn from a 64-bit LCG
 # seeded by the class index; 0 / 1 / 2; the edges of the i32 / i64 constants
 # with negative magic numbers and offsets past 2^31), each lowered for its

@@ -8,7 +8,8 @@ is the documented one, and the vector-class rule (:func:`jit_class_of`) follows 
 
 GPU: the specialized kernels against independent float64 torch references, integer-valued data
 (exact): vector classes with vector and gathered inputs, every arity, mixed types, zero scales,
-64-bit offset rows, and padding limits of the permute form.
+64-bit offset rows, and padding limits of the permute form. Every class of the mixed-type and
+math rows (the classes hipTensor's JIT gained) against the pack's generic kernel, bit for bit.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ import random
 import pytest
 
 from kernels.common.hiptensor_aot import common as C
-from kernels.common.hiptensor_aot.ew import EwSpec
+from kernels.common.hiptensor_aot.ew import EwSpec, build_ew
 from kernels.common.hiptensor_aot.host import canonicalize, ew_args
 from kernels.common.hiptensor_aot.jit_ew import (
     EwJitSpec,
@@ -315,3 +316,231 @@ def test_jit_f64_to_16bit_rounds_once(d):
         ):
             bad.append((v, g, want))
     assert not bad, bad[:8]
+
+
+# ---------------------------------------------------------------- the widened JIT classes
+
+
+def _pack_rows():
+    """Every row of the pack's generic elementwise kernel (make_rocke_pack.ew_params)."""
+    import importlib.util
+    from pathlib import Path
+
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "builders"
+        / "hiptensor"
+        / "make_rocke_pack.py"
+    )
+    spec = importlib.util.spec_from_file_location("_f3_make_rocke_pack", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    rows = [p for idx64 in (False, True) for p in mod.ew_params(idx64)]
+    plain = [p for idx64 in (False, True) for p in mod.ew_params(idx64, mixed=False)]
+    return rows, plain
+
+
+def _widened_classes():
+    """The classes of the rows hipTensor's JIT gained: the mixed-type rows of contractions and
+    the math rows (vec 1, every input a vector; 32- and 64-bit offsets)."""
+    rows, plain = _pack_rows()
+    out = []
+    for p in rows:
+        if p.get("math") or p not in plain:
+            out.extend(jit_classes([EwSpec(**p)]))
+    return out
+
+
+WIDENED = _widened_classes()
+_BITS = {
+    "f16": torch.int16,
+    "bf16": torch.int16,
+    "f32": torch.int32,
+    "f64": torch.int64,
+}
+_SPECIALS = [math.nan, math.inf, -math.inf, -0.0, 0.0, 7.0e4, -3.0e38, 1.0e-30, 0.75]
+_LAUNCHERS = {}
+
+
+def _launch(kernel, key, vals, grid):
+    """Compile ``kernel`` once per ``key`` and launch it (block 256)."""
+    from rocke.helpers.compile import compile_kernel
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    if key not in _LAUNCHERS:
+        art = compile_kernel(
+            kernel, arch=_gpu(), backend="python", capture_ir_text=False
+        )
+        sig = [
+            {"name": p.name, "type": getattr(p.type, "name", "")} for p in kernel.params
+        ]
+        _LAUNCHERS[key] = (
+            KernelLauncher(hsaco=art.hsaco, kernel_name=kernel.name, signature=sig),
+            [p.name for p in kernel.params],
+        )
+    launcher, names = _LAUNCHERS[key]
+    launcher(
+        {n: vals[n] for n in names}, config=LaunchConfig(grid=grid, block=(256, 1, 1))
+    )
+    torch.cuda.synchronize()
+
+
+def _bits(t, dt, cplx):
+    """``t`` (on the host) as integers of its storage, bit for bit, and its NaN mask (per
+    component)."""
+    t = t.cpu().contiguous()
+    if cplx:
+        t = torch.view_as_real(t).contiguous()
+    return t.view(_BITS[dt]), torch.isnan(t)
+
+
+@pytest.mark.parametrize("spec", WIDENED, ids=lambda s: s.kernel_name())
+def test_widened_class_matches_pack_kernel(spec):
+    """Every class of the rows the JIT gained (mixed-type rows, math rows with vec 1, math rows
+    with 64-bit offsets): a launch of the pack's generic kernel classifies to the class
+    (jit_class_of, hipTensor's rule), and the specialized kernel writes the same bits as the
+    generic kernel (1) on integer data with the basic operators, where both also equal an
+    independent float64 reference, and (2) on data with NaN, infinities, signed zeros,
+    overflowing and tiny values, with every operator of the row (math operators on the math
+    rows) and a zero scale (the input and its operator are skipped). A NaN equals a NaN of any
+    sign and payload."""
+    _gpu()
+    base = spec.base
+    names = base.tensors()
+    ins = names[:-1]
+    rng = random.Random(sum(map(ord, spec.kernel_name())))
+    vec = spec.vec
+    # D column-major; vector classes: the fastest extent a multiple of the vector width and
+    # the inputs not in `unit` gathered (their mode 0 is their slowest); vec 1: odd extents
+    # (no vector form, also when the modes merge), often with a gathered first input
+    if vec > 1:
+        shape = [vec * rng.choice([2, 3, 5]), rng.choice([3, 5]), rng.choice([2, 3])]
+    else:
+        shape = [rng.choice([13, 21]), rng.choice([3, 5]), rng.choice([3, 5])]
+    gathered = {
+        n: (not spec.unit[i]) if vec > 1 else (i == 0 and rng.random() < 0.7)
+        for i, n in enumerate(ins)
+    }
+    dts = {"A": base.a, "B": base.b, "C": base.c, "D": base.d}
+    ctype = {"f32": torch.complex64, "f64": torch.complex128}
+
+    def alloc(n, values):
+        """Device tensor of `n` holding `values` (float64 / complex128, logical shape)."""
+        dt = dts[n]
+        td = ctype[dt] if base.cplx else TD[dt]
+        perm = [1, 2, 0] if gathered.get(n) else [0, 1, 2]
+        # storage: the modes in `perm` order, fastest first
+        stor = values.permute(perm[::-1]).contiguous().to(td)
+        return stor.cuda().permute([perm[::-1].index(i) for i in range(3)])
+
+    def make_values(special):
+        g = torch.Generator().manual_seed(rng.randrange(1 << 30))
+        v = torch.randint(-6, 7, shape, generator=g).double()
+        if special:
+            flat = v.view(-1)
+            idx = torch.randperm(flat.numel(), generator=g)[: flat.numel() // 3]
+            for k, j in enumerate(idx.tolist()):
+                flat[j] = _SPECIALS[k % len(_SPECIALS)]
+        if base.cplx:
+            w = torch.randint(-6, 7, shape, generator=g).double()
+            return torch.complex(v, w)
+        return v
+
+    if base.cplx:
+        ops_ref = [C.OP_IDENTITY, C.OP_CONJ]
+        ops_all = ops_ref
+        bops = [C.OP_ADD]
+    else:
+        ops_ref = [C.OP_IDENTITY, C.OP_NEG, C.OP_ABS, C.OP_RELU]
+        ops_all = list(C.BASIC_UNARY_OPS) + (list(C.MATH_OPS) * 2 if base.math else [])
+        bops = list(C.BINARY_OPS)
+
+    for case in ("reference", "special", "zero_scale"):
+        special = case != "reference"
+        values = {n: make_values(special) for n in ins}
+        dev = {n: alloc(n, values[n]) for n in ins}
+        td = ctype[base.d] if base.cplx else TD[base.d]
+        out_j = torch.full(shape[::-1], 5.0, dtype=td, device="cuda").permute(2, 1, 0)
+        out_g = out_j.clone()
+        assert out_g.stride() == out_j.stride()
+        dims = [
+            (shape[i], [dev[n].stride()[i] for n in ins] + [out_j.stride()[i]])
+            for i in range(3)
+        ]
+        vals, grid, _ = ew_args(canonicalize(dims, len(ins)), names, cplx=base.cplx)
+        ops = {n: rng.choice(ops_ref if case == "reference" else ops_all) for n in ins}
+        for n in ins:
+            vals["op" + n] = ops[n]
+        vals["opAB"] = rng.choice(bops)
+        vals["opABC"] = rng.choice(bops)
+        scal = {n: rng.choice([1.0, 2.0, -1.0, 0.5]) for n in ins}
+        if case == "zero_scale":
+            scal[rng.choice(ins)] = 0.0
+        got_spec, geom, n_in = jit_class_of(base, vals)
+        assert (got_spec.vec, got_spec.unit) == (spec.vec, spec.unit), (
+            case,
+            got_spec.kernel_name(),
+        )
+        sn = {"A": "alpha", "B": "beta", "C": "gamma"}
+        run = {}
+        for n in ins:
+            run[n] = dev[n]
+            if base.cplx:
+                im = rng.choice([0.0, 1.0, -2.0]) if scal[n] != 0.0 else 0.0
+                run[sn[n] + "_re"], run[sn[n] + "_im"] = scal[n], im
+                scal[n] = complex(scal[n], im)
+            else:
+                run[sn[n]] = scal[n]
+        gkey = ("generic", base.kernel_name())
+        gk = build_ew(base) if gkey not in _LAUNCHERS else None
+        _launch(gk, gkey, dict(vals, D=out_g, **run), grid)
+        jk = build_ew_jit(spec, geom)
+        _launch(
+            jk,
+            ("jit", jk.name, tuple(sorted(geom.items()))),
+            dict(run, D=out_j),
+            (-(-n_in // 256), geom["ystep"], 1),
+        )
+        (gb, gnan), (jb, jnan) = (
+            _bits(out_g, base.d, base.cplx),
+            _bits(out_j, base.d, base.cplx),
+        )
+        # a NaN is a NaN: which operand's NaN an operation of two NaN returns (its sign and
+        # payload) is unspecified, and the compiler may commute the operands
+        diff = ((gb != jb) & ~(gnan & jnan)).nonzero()
+        where = [tuple(i) for i in diff[:4].tolist()]
+        assert diff.numel() == 0, (
+            case,
+            ops,
+            vals["opAB"],
+            vals["opABC"],
+            scal,
+            [
+                (i, out_g.cpu()[i].item(), out_j.cpu()[i].item())
+                + tuple(values[n][i].item() for n in ins)
+                for i in where
+            ],
+        )
+        if case != "reference":
+            continue
+
+        def term(n):
+            if scal[n] == 0:
+                return torch.zeros(shape, dtype=values[n].dtype)
+            x = values[n]
+            if base.cplx:
+                x = x.to(torch.complex128)
+                x = torch.conj(x) if ops[n] == C.OP_CONJ else x
+                return scal[n] * x
+            return scal[n] * _unary(x.double(), ops[n])
+
+        if base.arity == 1:
+            ref = term("A")
+        elif base.arity == 2:
+            ref = _binary(term("A"), term("C"), vals["opAB"])
+        else:
+            ref = _binary(
+                _binary(term("A"), term("B"), vals["opAB"]), term("C"), vals["opABC"]
+            )
+        want = ref.to(td)
+        assert torch.equal(out_j.cpu(), want), (spec.kernel_name(), ops)
