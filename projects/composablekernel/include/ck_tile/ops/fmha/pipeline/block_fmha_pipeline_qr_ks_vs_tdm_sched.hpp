@@ -445,12 +445,6 @@ struct BlockFmhaPipelineQRKSVSTdmSched
             Policy::template MakeKLdsBlockDescriptor<Problem, true>().get_lengths(),
             {0, 0});
 
-        auto k_lds_read_window =
-            make_tile_window(k_lds_read_view,
-                             make_tuple(number<kN0>{}, number<kK0>{}),
-                             {0, 0},
-                             Policy::template MakeKRegTileDistribution<Problem>());
-
         // V tile in LDS (sink-aware start)
         auto v_dram_window =
             make_tile_window(v_dram_block_window_tmp,

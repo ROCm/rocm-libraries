@@ -1665,6 +1665,15 @@ class TestGfx125V128Codegen(unittest.TestCase):
         "ROCm clang and HIP headers are required for generated TU host syntax",
     )
     def test_sched_generated_occupancy_contract(self):
+        resource_dir = subprocess.run(
+            [str(_HIP_HOST_CXX), "-print-resource-dir"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout.strip()
+        hip_wrapper = Path(resource_dir) / "include" / "__clang_hip_runtime_wrapper.h"
+        self.assertTrue(hip_wrapper.is_file(), str(hip_wrapper))
         _, kernels = get_fwd_blobs(["gfx1250"], "*", 200, [-1], "simplified")
         candidates = {}
         diagnostic = "qr_tdm_sched codegen occupancy must match policy tuning"
@@ -1730,7 +1739,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                                 "-nogpuinc",
                                 "-nogpulib",
                                 "-include",
-                                "__clang_hip_runtime_wrapper.h",
+                                str(hip_wrapper),
                                 "-std=c++20",
                                 "-DUSE_NEW_UNIFIED_FRAMEWORK=0",
                                 "-DCK_TILE_FMHA_FWD_FAST_EXP2=1",
