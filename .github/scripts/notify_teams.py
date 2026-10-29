@@ -540,7 +540,10 @@ LOG_TIMESTAMP_PATTERN = re.compile(
 )
 # Runner step header: the step's command, shell and env, up to "##[endgroup]".
 STEP_HEADER_GROUP = "##[group]Run "
-JOBS_PER_PAGE = 100
+# GitHub's default page size. An uncached page of 100 jobs of a full
+# multi-arch run (~150 jobs with their steps) takes ~10 s to render and hits
+# the API's 10 s limit as "HTTP 502"; 30 jobs take ~2 s.
+JOBS_PER_PAGE = 30
 # gh >= 2.97.0 refuses to print API responses containing terminal escape
 # sequences (GHSA-3m3g-3wcr-px46) unless this flag is passed, and job logs
 # carry ANSI colors. Older gh neither knows nor needs the flag.
