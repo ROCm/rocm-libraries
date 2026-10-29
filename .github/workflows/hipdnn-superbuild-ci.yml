@@ -115,7 +115,6 @@ jobs:
             projects/hipdnn
             projects/miopen
             test
-            shared/ctest
 
       # Shared CI constants, kpack-ref among them, defined in one place.
       - name: Load CI environment
@@ -307,19 +306,6 @@ jobs:
       - name: Run tests
         run: ctest --test-dir build --output-on-failure --no-tests=error --parallel 16
 
-      # TEMPORARY (this PR only, remove before merge): see the Linux lane.
-      - name: Report ctest selection
-        if: ${{ !cancelled() }}
-        run: |
-          tmp=$(mktemp -d)
-          ctest --test-dir build -N | sed -n 's/.*Test *#[0-9]*: //p' | sort > "$tmp/all.txt"
-          ctest --test-dir build -N -L '^full$' | sed -n 's/.*Test *#[0-9]*: //p' | sort > "$tmp/full.txt"
-          echo "registered: $(wc -l < "$tmp/all.txt")  with label full: $(wc -l < "$tmp/full.txt")"
-          echo "--- without label full:"
-          comm -23 "$tmp/all.txt" "$tmp/full.txt"
-          echo "--- identical command lines (count, command):"
-          ctest --test-dir build -N -V | grep -E "Test command:" | sed -E 's/^[0-9]+: //' | sort | uniq -c | awk '$1>1' | cut -c1-220
-
       - name: Patch ROCm SDK with superbuild outputs
         shell: pwsh
         run: |
@@ -389,7 +375,6 @@ jobs:
             projects/hipdnn
             projects/miopen
             test
-            shared/ctest
 
       # Shared CI constants, kpack-ref among them, defined in one place.
       - name: Load CI environment
@@ -596,20 +581,6 @@ jobs:
           # Native rocKE AUTO detection must see the wheel COMGR used by packaging.
           ROCKE_COMGR_LIB: ${{ env.HKP_ROCKE_COMGR_LIB }}
         run: ctest --test-dir build --output-on-failure --no-tests=error --parallel 16
-
-      # TEMPORARY (this PR only, remove before merge): show which tests carry the `full` label
-      # and which entries run an identical command line, now that shared/ctest is checked out.
-      - name: Report ctest selection
-        if: ${{ !cancelled() }}
-        run: |
-          tmp=$(mktemp -d)
-          ctest --test-dir build -N | sed -n 's/.*Test *#[0-9]*: //p' | sort > "$tmp/all.txt"
-          ctest --test-dir build -N -L '^full$' | sed -n 's/.*Test *#[0-9]*: //p' | sort > "$tmp/full.txt"
-          echo "registered: $(wc -l < "$tmp/all.txt")  with label full: $(wc -l < "$tmp/full.txt")"
-          echo "--- without label full:"
-          comm -23 "$tmp/all.txt" "$tmp/full.txt"
-          echo "--- identical command lines (count, command):"
-          ctest --test-dir build -N -V | grep -E "Test command:" | sed -E 's/^[0-9]+: //' | sort | uniq -c | awk '$1>1' | cut -c1-220
 
       # The full support matrix is too large to commit (only its overview is,
       # in dnn-providers/integration-tests/), so publish it from every run.
