@@ -57,13 +57,15 @@ auto GetDeterministicConvCase()
     return GetConvTestForGroupXdlops<miopenHalf>(miopenTensorNHWC, std::move(test_case));
 }
 
-// Chain-length test case: 1x1 filter, so the split-K = 1 chain length is L = N*H*W.
+// Chain-length test case: 1x1 filter, no padding, so the split-K = 1 chain length is
+// L = N*Ho*Wo with Ho = (H - 1) / stride + 1 and Wo = (W - 1) / stride + 1.
 template <miopenDataType_t datatype>
-auto GetChainLengthConvCase(size_t n, size_t h, size_t w, bool deterministic)
+auto GetChainLengthConvCase(size_t n, size_t h, size_t w, bool deterministic, int stride = 1)
 {
     return GetConvTestForGroupXdlops<datatype>(
         miopenTensorNHWC,
-        TestCase{{n, 64, h, w}, {96, 64, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 1, deterministic});
+        TestCase{
+            {n, 64, h, w}, {96, 64, 1, 1}, {0, 0}, {stride, stride}, {1, 1}, 1, deterministic});
 }
 
 template <TestDataType type>
@@ -239,7 +241,7 @@ INSTANTIATE_TEST_SUITE_P(
                      testing::Values(GetDeterministicConvCase())));
 
 // Deterministic mode forces split-K = 1. The chain length limit is 16384 for FP32 output and
-// 2^21 for FP16 output. Non-deterministic mode has no limit.
+// 2^21 for FP16 and BF16 output. Non-deterministic mode has no limit.
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDeterministicChainLength_NONE,
@@ -252,6 +254,9 @@ INSTANTIATE_TEST_SUITE_P(
                         GetChainLengthConvCase<miopenFloat>(1, 128, 130, true)),
         std::make_tuple(GetTestParams<TestDataType::FP32>(),
                         GetChainLengthConvCase<miopenFloat>(1, 128, 130, false)),
+        // FP32, stride 2: L = 1*128*128 = 16384 is at the limit. N*H*W = 65536 is over it.
+        std::make_tuple(GetTestParams<TestDataType::FP32>(),
+                        GetChainLengthConvCase<miopenFloat>(1, 256, 256, true, 2)),
         // FP16, L = 2^21: at the limit
         std::make_tuple(GetTestParams<TestDataType::FP16>(),
                         GetChainLengthConvCase<miopenHalf>(128, 128, 128, true)),
@@ -259,4 +264,7 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple(GetNotApplicableParams(),
                         GetChainLengthConvCase<miopenHalf>(128, 128, 130, true)),
         std::make_tuple(GetTestParams<TestDataType::FP16>(),
-                        GetChainLengthConvCase<miopenHalf>(128, 128, 130, false))));
+                        GetChainLengthConvCase<miopenHalf>(128, 128, 130, false)),
+        // BF16, L = 2^21 + 32768: over the limit
+        std::make_tuple(GetNotApplicableParams(),
+                        GetChainLengthConvCase<miopenBFloat16>(128, 128, 130, true))));
