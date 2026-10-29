@@ -313,7 +313,7 @@ Each lane YAML also defines an `ffm-quick` category (labels `ffm-quick`,
 `ffm-full`). This is the fast-feedback tier. It is not a superset of `quick`.
 It differs for each lane:
 
-- miopen lists one sweep case per op by exact name.
+- miopen selects `quick_*`, `Smoke/*` and `Quick/*`, the same as its quick tier.
 - HIP_MLOPS selects `quick_*`, `Smoke/*` and `Quick/*`.
 - ASM_SDPA selects the `*Sdpa*` subset of those.
 - hipBLASLt selects only `Smoke/*`, `Quick/*` and `TestCpu*GoldenReference*`,
