@@ -24,32 +24,38 @@ multi-sequence batches.
 The epilogue stores 0 only for a row whose softmax sum is exactly 0 (no visible
 key); ``test_nan_query_row_reaches_output`` pins that a NaN sum still reaches O
 in every branch.
+
+The kernels run on ``rocke.runtime`` device buffers filled from numpy, and the
+FP32 reference is numpy over the fp16/bf16-rounded inputs, so the tests run in
+GPU lanes without torch. ``test_attention_unified_masked_tile_ir.py`` pins the
+running-max carry and the epilogue guard of every branch on the emitted IR
+without a GPU.
 """
 
 import math
 
+import numpy as np
 import pytest
 
-torch = pytest.importorskip("torch")
-
-from kernels.common.attention_unified import (  # noqa: E402
+from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
     _gfx942_4warp_route,
     _tiled_spec_from_problem,
     run_unified_attention_torch,
 )
+from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
+from rocke.runtime.hip_module import get_device_arch
 
+from ._attention_device_array import DeviceArray
 
-def _arch():
-    if not torch.cuda.is_available():
-        return None
-    name = torch.cuda.get_device_properties(0).gcnArchName.lower()
-    return next((a for a in ("gfx942", "gfx950") if a in name), None)
-
-
-requires_cdna3_or_4 = pytest.mark.skipif(
-    _arch() is None, reason="needs a gfx942 or gfx950 GPU with ROCm torch"
-)
+_ARCH = get_device_arch()
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.skipif(
+        _ARCH not in ("gfx942", "gfx950"),
+        reason=f"needs a gfx942 or gfx950 GPU, found {_ARCH}",
+    ),
+]
 
 # One dispatcher geometry per epilogue branch of build_unified_attention_2d_tiled,
 # keyed by (arch, KV page size). On gfx942 the 2x-block tiles of the 32-row
@@ -77,6 +83,7 @@ _BRANCH_VARIANT = {
         "striped16": "narrow_nw1_mw16_t1xb_llvm",
     },
 }
+_BRANCHES = ["transposed32", "transposed32_s1", "mfma32", "striped16"]
 
 # (dtype, natural-log score of every visible key), below the P underflow point
 # when m is pinned at 0: about -17 for fp16 and -93 for bf16.
@@ -85,6 +92,23 @@ _WINDOW = 64
 _HQ, _HKV = 32, 8
 _HEAD_SIZES = [64, 128, 256]
 _PAGE_SIZES = [16, 64]
+
+
+@pytest.fixture(scope="module")
+def rt():
+    from rocke.runtime.hip_module import Runtime
+
+    return Runtime()
+
+
+def _encode(x, dtype):
+    """fp32 values as the kernel's fp16 or bf16 (raw uint16) host array."""
+    x = np.asarray(x, dtype=np.float32)
+    return x.astype(np.float16) if dtype == "fp16" else f32_to_bf16(x)
+
+
+def _decode(x, dtype):
+    return x.astype(np.float32) if dtype == "fp16" else bf16_to_f32(x)
 
 
 def _problem(dtype, q_len, kv_len, num_blocks, bs, head_size):
@@ -103,10 +127,10 @@ def _problem(dtype, q_len, kv_len, num_blocks, bs, head_size):
     )
 
 
-def _branch_spec(problem, branch, bs):
+def _branch_spec(problem, branch, bs, arch):
+    """The tuning spec that pins ``branch`` of the epilogue on ``arch``."""
     from dispatch.attention.unified_rules import canonicalize_tuning_spec
 
-    arch = _arch()
     if arch == "gfx942":
         from dispatch.attention.gfx942_unified import (
             GFX942_TUNING_VARIANTS as variants,
@@ -150,123 +174,145 @@ def _rows_with_masked_leading_tile(kernel_spec, q_len):
 
 
 def _reference(q, k_cache, v_cache, kv_len, block_table, scale, bs):
-    """FP32 O for one sequence, bottom-right causal + sliding window."""
+    """FP32 O for one sequence, bottom-right causal + sliding window, from
+    float32 arrays of the uploaded values."""
     q_len, _, d = q.shape
     nblk = (kv_len + bs - 1) // bs
-    blocks = block_table[0, :nblk].long()
-    k = k_cache[blocks].reshape(-1, _HKV, d)[:kv_len].float()
-    v = v_cache[blocks].reshape(-1, _HKV, d)[:kv_len].float()
-    k = k.transpose(0, 1).repeat_interleave(_HQ // _HKV, dim=0)
-    v = v.transpose(0, 1).repeat_interleave(_HQ // _HKV, dim=0)
-    s = torch.matmul(q.float().transpose(0, 1), k.transpose(-1, -2)) * scale
-    p = torch.arange(q_len, device=q.device).view(-1, 1)
-    kk = torch.arange(kv_len, device=q.device).view(1, -1)
+    blocks = block_table[0, :nblk]
+    k = k_cache[blocks].reshape(-1, _HKV, d)[:kv_len]
+    v = v_cache[blocks].reshape(-1, _HKV, d)[:kv_len]
+    k = np.repeat(k.transpose(1, 0, 2), _HQ // _HKV, axis=0)
+    v = np.repeat(v.transpose(1, 0, 2), _HQ // _HKV, axis=0)
+    s = np.matmul(q.transpose(1, 0, 2), k.transpose(0, 2, 1)) * np.float32(scale)
+    p = np.arange(q_len).reshape(-1, 1)
+    kk = np.arange(kv_len).reshape(1, -1)
     diag = p + (kv_len - q_len)
     visible = (kk <= diag) & (diag - kk < _WINDOW)
-    s = s.masked_fill(~visible, float("-inf"))
-    return torch.matmul(torch.softmax(s, dim=-1), v).transpose(0, 1)
+    # Every row sees at least its diagonal key, so no row is all -inf.
+    s = np.where(visible, s, -np.inf)
+    e = np.exp(s - s.max(axis=-1, keepdims=True))
+    probs = e / e.sum(axis=-1, keepdims=True)
+    return np.matmul(probs, v).transpose(1, 0, 2)
 
 
-def _run_and_check(dtype, score, bs, head_size, spec_for):
+def _launch(rt, problem, spec, q, k_cache, v_cache, block_table, scale, dtype):
+    """Run the tiled 2D path on one sequence; ``q``/``k_cache``/``v_cache`` are
+    float32 arrays of values exact in ``dtype``. Returns O as float32."""
+    q_len, kv_len = problem.total_q, problem.max_seqlen_k
+    host_q = _encode(q, dtype)
+    # Every byte 0xFF is NaN in fp16 and bf16: an element the kernel skips
+    # fails the checks instead of passing on stale memory.
+    out_host = np.empty_like(host_q)
+    out_host.view(np.uint8)[...] = 0xFF
+    out = DeviceArray(rt, out_host)
+    run_unified_attention_torch(
+        problem=problem,
+        q=DeviceArray(rt, host_q),
+        k=DeviceArray(rt, _encode(k_cache, dtype)),
+        v=DeviceArray(rt, _encode(v_cache, dtype)),
+        out=out,
+        cu_seqlens_q=DeviceArray(rt, np.array([0, q_len], dtype=np.int32)),
+        seqused_k=DeviceArray(rt, np.array([kv_len], dtype=np.int32)),
+        softmax_scale=scale,
+        block_table=DeviceArray(rt, block_table),
+        softcap=0.0,
+        backend="tiled",
+        tuning_spec=spec,
+    )
+    return _decode(out.read(), dtype)
+
+
+def _paged_cache(rng, kv_len, bs, head_size, dtype, k_value=None):
+    """K/V caches (float32 values exact in ``dtype``) with three spare pages and
+    a shuffled block table. K is ``k_value`` everywhere, or randn if None."""
+    max_blocks = (kv_len + bs - 1) // bs
+    num_blocks = max_blocks + 3
+    shape = (num_blocks, bs, _HKV, head_size)
+    if k_value is None:
+        k_cache = _decode(_encode(rng.standard_normal(shape), dtype), dtype)
+    else:
+        k_cache = np.full(shape, k_value, dtype=np.float32)
+    v_cache = _decode(_encode(rng.standard_normal(shape), dtype), dtype)
+    perm = rng.permutation(num_blocks)[:max_blocks]
+    block_table = perm.reshape(1, max_blocks).astype(np.int32)
+    return k_cache, v_cache, block_table, num_blocks
+
+
+def _run_and_check(rt, dtype, score, bs, head_size, spec_for):
     """Run one sequence where every visible score is ``score`` and check O.
 
     ``spec_for(problem)`` returns the tuning spec to pin, or ``None`` for the
     production auto route.
     """
     q_len = kv_len = 256
-    tdt = torch.float16 if dtype == "fp16" else torch.bfloat16
-    g = torch.Generator(device="cuda").manual_seed(0)
-    max_blocks = (kv_len + bs - 1) // bs
-    num_blocks = max_blocks + 3
+    rng = np.random.default_rng(0)
     scale = 1.0 / math.sqrt(head_size)
     # Every visible score equals `score`: q = a, k = b with a * b * D * scale = score.
     a = 1.0 if dtype == "fp16" else 4.0
-    b = score / (a * head_size * scale)
-    q = torch.full((q_len, _HQ, head_size), a, device="cuda", dtype=tdt)
-    k_cache = torch.full((num_blocks, bs, _HKV, head_size), b, device="cuda", dtype=tdt)
-    v_cache = torch.randn(
-        num_blocks, bs, _HKV, head_size, device="cuda", dtype=tdt, generator=g
+    # Rounded to ``dtype``, the value the kernel reads.
+    b = _decode(_encode([score / (a * head_size * scale)], dtype), dtype)[0]
+    q = np.full((q_len, _HQ, head_size), a, dtype=np.float32)
+    k_cache, v_cache, block_table, num_blocks = _paged_cache(
+        rng, kv_len, bs, head_size, dtype, k_value=b
     )
-    perm = torch.randperm(num_blocks, device="cuda", generator=g)[:max_blocks]
-    block_table = perm.view(1, max_blocks).to(torch.int32).contiguous()
-    cu = torch.tensor([0, q_len], dtype=torch.int32, device="cuda")
-    seqused = torch.tensor([kv_len], dtype=torch.int32, device="cuda")
 
     problem = _problem(dtype, q_len, kv_len, num_blocks, bs, head_size)
     spec = spec_for(problem)
     kernel_spec = (
         spec.kernel_spec
         if spec is not None
-        else _tiled_spec_from_problem(problem, _arch())
+        else _tiled_spec_from_problem(problem, _ARCH)
     )
     assert _rows_with_masked_leading_tile(
         kernel_spec, q_len
     ), "geometry no longer gives any row a fully masked leading tile"
-    out = torch.empty_like(q)
-    run_unified_attention_torch(
-        problem=problem,
-        q=q,
-        k=k_cache,
-        v=v_cache,
-        out=out,
-        cu_seqlens_q=cu,
-        seqused_k=seqused,
-        softmax_scale=scale,
-        block_table=block_table,
-        softcap=0.0,
-        backend="tiled",
-        tuning_spec=spec,
-    )
-    torch.cuda.synchronize()
+    out = _launch(rt, problem, spec, q, k_cache, v_cache, block_table, scale, dtype)
     o_ref = _reference(q, k_cache, v_cache, kv_len, block_table, scale, bs)
 
-    assert torch.isfinite(out).all(), "non-finite O"
-    err = (out.float() - o_ref).abs()
+    assert np.isfinite(out).all(), "non-finite O"
     # Every row sees at least one key, so a collapsed row has |O| ~ 0 while the
     # reference is the mean of V over its window (|mean| ~ 0.1 for randn V).
-    worst = err.amax(dim=(1, 2))
+    worst = np.abs(out - o_ref).max(axis=(1, 2))
     tol = 2e-2 if dtype == "fp16" else 4e-2
-    assert worst.max().item() < tol, (
-        f"{(worst >= tol).sum().item()} of {q_len} query rows wrong; first bad "
-        f"row {int((worst >= tol).nonzero()[0])}"
+    assert worst.max() < tol, (
+        f"{int((worst >= tol).sum())} of {q_len} query rows wrong; first bad "
+        f"row {int(np.flatnonzero(worst >= tol)[0])}"
     )
 
 
-@requires_cdna3_or_4
-@pytest.mark.gpu
 @pytest.mark.parametrize("head_size", _HEAD_SIZES)
 @pytest.mark.parametrize("bs", _PAGE_SIZES)
 @pytest.mark.parametrize("dtype,score", _SCORES)
-@pytest.mark.parametrize(
-    "branch", ["transposed32", "transposed32_s1", "mfma32", "striped16"]
-)
-def test_masked_leading_tile_keeps_rows_with_keys(branch, dtype, score, bs, head_size):
-    _run_and_check(dtype, score, bs, head_size, lambda p: _branch_spec(p, branch, bs))
+@pytest.mark.parametrize("branch", _BRANCHES)
+def test_masked_leading_tile_keeps_rows_with_keys(
+    rt, branch, dtype, score, bs, head_size
+):
+    _run_and_check(
+        rt,
+        dtype,
+        score,
+        bs,
+        head_size,
+        lambda p: _branch_spec(p, branch, bs, _ARCH),
+    )
 
 
-@requires_cdna3_or_4
-@pytest.mark.gpu
-def test_masked_leading_tile_auto_route_d64_bf16():
+def test_masked_leading_tile_auto_route_d64_bf16(rt):
     # No tuning spec: the production route. At D64 bf16 with a sliding window it
     # is the default builder with several warps per CTA (gfx942: 4 warps, tile
     # 16; gfx950: 2 warps, tile 64), not the gfx942 4-warp GQA kernel.
-    arch = _arch()
     problem = _problem("bf16", 256, 256, 256 // 16 + 3, 16, 64)
-    assert _gfx942_4warp_route(problem, arch) is None
-    assert _tiled_spec_from_problem(problem, arch).num_warps > 1
-    _run_and_check("bf16", -200.0, 16, 64, lambda p: None)
+    assert _gfx942_4warp_route(problem, _ARCH) is None
+    assert _tiled_spec_from_problem(problem, _ARCH).num_warps > 1
+    _run_and_check(rt, "bf16", -200.0, 16, 64, lambda p: None)
 
 
 _NAN_ROW, _NAN_HEAD = 100, 5
 
 
-@requires_cdna3_or_4
-@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-@pytest.mark.parametrize(
-    "branch", ["transposed32", "transposed32_s1", "mfma32", "striped16"]
-)
-def test_nan_query_row_reaches_output(branch, dtype):
+@pytest.mark.parametrize("branch", _BRANCHES)
+def test_nan_query_row_reaches_output(rt, branch, dtype):
     """A NaN in one query row must give NaN O for that (row, head) only.
 
     The NaN scores make the row's softmax sum ``l`` NaN. The epilogue's keyless
@@ -275,45 +321,23 @@ def test_nan_query_row_reaches_output(branch, dtype):
     """
     bs, head_size = 16, 128
     q_len = kv_len = 256
-    tdt = torch.float16 if dtype == "fp16" else torch.bfloat16
-    g = torch.Generator(device="cuda").manual_seed(0)
-    max_blocks = (kv_len + bs - 1) // bs
-    num_blocks = max_blocks + 3
+    rng = np.random.default_rng(0)
     scale = 1.0 / math.sqrt(head_size)
-    shape = (num_blocks, bs, _HKV, head_size)
-    q = torch.randn(q_len, _HQ, head_size, device="cuda", dtype=tdt, generator=g)
-    q[_NAN_ROW, _NAN_HEAD] = float("nan")
-    k_cache = torch.randn(shape, device="cuda", dtype=tdt, generator=g)
-    v_cache = torch.randn(shape, device="cuda", dtype=tdt, generator=g)
-    perm = torch.randperm(num_blocks, device="cuda", generator=g)[:max_blocks]
-    block_table = perm.view(1, max_blocks).to(torch.int32).contiguous()
-    cu = torch.tensor([0, q_len], dtype=torch.int32, device="cuda")
-    seqused = torch.tensor([kv_len], dtype=torch.int32, device="cuda")
+    q = _decode(_encode(rng.standard_normal((q_len, _HQ, head_size)), dtype), dtype)
+    q[_NAN_ROW, _NAN_HEAD] = np.nan
+    k_cache, v_cache, block_table, num_blocks = _paged_cache(
+        rng, kv_len, bs, head_size, dtype
+    )
 
     problem = _problem(dtype, q_len, kv_len, num_blocks, bs, head_size)
-    spec = _branch_spec(problem, branch, bs)
-    out = torch.empty_like(q)
-    run_unified_attention_torch(
-        problem=problem,
-        q=q,
-        k=k_cache,
-        v=v_cache,
-        out=out,
-        cu_seqlens_q=cu,
-        seqused_k=seqused,
-        softmax_scale=scale,
-        block_table=block_table,
-        softcap=0.0,
-        backend="tiled",
-        tuning_spec=spec,
-    )
-    torch.cuda.synchronize()
+    spec = _branch_spec(problem, branch, bs, _ARCH)
+    out = _launch(rt, problem, spec, q, k_cache, v_cache, block_table, scale, dtype)
     o_ref = _reference(q, k_cache, v_cache, kv_len, block_table, scale, bs)
 
-    assert torch.isnan(out[_NAN_ROW, _NAN_HEAD]).all(), "NaN row was hidden"
-    nan_slot = torch.zeros(q_len, _HQ, dtype=torch.bool, device="cuda")
+    assert np.isnan(out[_NAN_ROW, _NAN_HEAD]).all(), "NaN row was hidden"
+    nan_slot = np.zeros((q_len, _HQ), dtype=bool)
     nan_slot[_NAN_ROW, _NAN_HEAD] = True
-    rest, rest_ref = out[~nan_slot].float(), o_ref[~nan_slot]
-    assert torch.isfinite(rest).all(), "NaN leaked into another (row, head)"
+    rest, rest_ref = out[~nan_slot], o_ref[~nan_slot]
+    assert np.isfinite(rest).all(), "NaN leaked into another (row, head)"
     tol = 2e-2 if dtype == "fp16" else 4e-2
-    assert (rest - rest_ref).abs().max().item() < tol
+    assert np.abs(rest - rest_ref).max() < tol
