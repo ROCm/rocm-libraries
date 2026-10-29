@@ -509,7 +509,10 @@ def test_wgrad_fallback_moves_a_16bit_atomic_past_its_limit_to_the_workspace(
     assert (r.split_k, r.two_stage) == (r.requested, True)
 
 
-@pytest.mark.parametrize("arch", ["gfx942", "gfx90a"])
+# gfx942 wgrad resolves through its provisional cost model
+# (conv_split_k._WGRAD_COST_MODELS), not the CK formula, so the fixed-atomic
+# fallback is checked on gfx90a; the gfx942 model is held to the same limit.
+@pytest.mark.parametrize("arch", ["gfx90a"])
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
 def test_wgrad_fallback_holds_a_fixed_16bit_atomic_to_its_limit(arch, dtype):
     r = _wgrad(FALLBACK_WGRAD, arch, dtype, reduction="atomic")
@@ -518,11 +521,18 @@ def test_wgrad_fallback_holds_a_fixed_16bit_atomic_to_its_limit(arch, dtype):
 
 
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+def test_wgrad_gfx942_cost_model_holds_a_fixed_16bit_atomic_to_its_limit(dtype):
+    r = _wgrad(FALLBACK_WGRAD, "gfx942", dtype, reduction="atomic")
+    assert r.reason.startswith("cost model")
+    assert r.split_k <= ATOMIC_16BIT_MAX_SPLIT_K and not r.two_stage
+
+
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
 def test_wgrad_fallback_holds_the_atomic_when_the_workspace_does_not_fit(dtype):
     # 4096 bytes per replica: 1 << 20 replicas overflow the i32 ws_bytes
     # kernarg, so auto has no workspace to move to and holds the atomic.
     assert wgrad_workspace_nbytes(FALLBACK_WGRAD, 1 << 20) > MAX_WGRAD_WS_BYTES
-    r = _wgrad(FALLBACK_WGRAD, "gfx942", dtype, reduction="auto", ws_replicas=1 << 20)
+    r = _wgrad(FALLBACK_WGRAD, "gfx90a", dtype, reduction="auto", ws_replicas=1 << 20)
     assert r.requested > ATOMIC_16BIT_MAX_SPLIT_K
     assert (r.split_k, r.two_stage) == (ATOMIC_16BIT_MAX_SPLIT_K, False)
 

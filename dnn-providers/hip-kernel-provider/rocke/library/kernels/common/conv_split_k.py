@@ -13,8 +13,10 @@ dispatcher serves registered instance lists and registers no wgrad instances,
 so it does not resolve a wgrad degree.)
 
 An auto degree comes from the split-K cost model
-(:mod:`kernels.conv.split_k_planner`) on arches that have one. This module
-contributes what is conv-specific:
+(:mod:`kernels.conv.split_k_planner`) on arches that have one -- and, for
+wgrad on gfx942, from a provisional conv-local model (``_WGRAD_COST_MODELS``)
+the GEMM planner does not share. This module contributes what is
+conv-specific:
 
 * the GEMM each direction launches: ``kpg x Z*Y*X*cpg x N*[Do*]Ho*Wo`` for
   wgrad, widened by ``group_merge`` (a merged tile covers that many groups'
@@ -37,7 +39,7 @@ contributes what is conv-specific:
   atomics, so no accuracy cap applies.
 
 An explicit degree, an override, and an auto degree on an arch without a cost
-model (gfx942 included: it has not been fitted) all go through the
+model (gfx942 dgrad included: it has not been fitted) all go through the
 long-standing dispatcher rule instead: the CK formula
 (:func:`select_split_k_wgrad`) for auto, then the packed
 atomic whenever it can be built, else the workspace, else no split. The kernel
@@ -62,7 +64,7 @@ from __future__ import annotations
 
 import functools
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from rocke.core.arch.target import ArchTarget, base_arch_from_target_id
 from rocke.helpers.spec import ceil_div
@@ -294,6 +296,37 @@ FWD_SPLIT_K_MAX = 32
 # * a reduction shallower than TARGET_SLICE_K elements is latency-bound as a
 #   whole: the Stage 2 launch costs more than splitting it saves.
 FWD_SPLIT_K_MIN_GEMM_K = TARGET_SLICE_K
+# Provisional gfx942 constants for the implicit-GEMM wgrad split-K choice
+# only (the GEMM planner keeps gfx942 unfitted): the gfx950 fit with the
+# per-CU MFMA rate halved -- gfx942 issues half the 16-bit MFMA FLOPs per CU
+# per clock -- on gfx942's own CU and XCD counts. Checked against split-K
+# degree sweeps of 3-D wgrad shapes on a gfx942 part, with the caller passing
+# the device's CU count; replace with a split_k_cost_fit.py fit when a gfx942
+# wgrad corpus is swept.
+_WGRAD_COST_MODELS = {
+    "gfx942": replace(
+        split_k_cost_model("gfx950"),
+        num_cus=304,
+        num_xcds=8,
+        flops_per_latency=split_k_cost_model("gfx950").flops_per_latency / 2,
+    ),
+}
+
+
+def _wgrad_cost_model(arch: str, num_cus: int | None, num_xcds: int | None):
+    """The planner's model for ``arch``, else the provisional wgrad one."""
+    cost = split_k_cost_model(arch, num_cus, num_xcds)
+    if cost is not None:
+        return cost
+    cost = _WGRAD_COST_MODELS.get(arch.split(":", 1)[0])
+    if cost is None:
+        return None
+    return replace(
+        cost,
+        num_cus=cost.num_cus if num_cus is None else num_cus,
+        num_xcds=cost.num_xcds if num_xcds is None else num_xcds,
+    )
+
 
 _DIRECTIONS = ("fwd", "wgrad", "dgrad")
 _REDUCTIONS = ("auto", "atomic", "workspace")
@@ -715,7 +748,7 @@ def _resolve_wgrad(
 
     # The launched GEMM: a merged tile covers gm groups' channels at once.
     m, n, k = _wg_M(p) * gm, _wg_N(p) * gm, _wg_K(p)
-    cost = split_k_cost_model(arch, num_cus, num_xcds)
+    cost = _wgrad_cost_model(arch, num_cus, num_xcds)
     if cost is None:
         legacy = select_split_k_wgrad(
             wg_M=m,
