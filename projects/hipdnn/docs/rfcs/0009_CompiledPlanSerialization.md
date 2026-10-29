@@ -3,7 +3,7 @@
 - Contributors: hipDNN maintainers
 - **Status**: Implemented
 - **Status notes**: Plan-only serialization shipped in #6970. The envelope later gained `is_override_shape_enabled` (#7279) and `tensor_alignments` (#8728), and #7975 added a graph-and-plan container. The hip-kernel-provider exports the plugin hooks for its kernel ingestor engines (#13315), and the hipDNN test plugins also implement them.
-- **Last verified**: 2026-10-22 against `develop` (0bb1c36e8f7) with #13315 applied
+- **Last verified**: 2026-10-29 against `develop` (49a6d20f102)
 - Scope: frontend, backend, engine plugin API, test plugin implementation, hip-kernel-provider
   ingestor implementation
 
@@ -48,6 +48,12 @@ restored.execute(handle, variantPack, workspace);
 The restored `Graph` contains only an execution plan descriptor. APIs that depend on source graph
 nodes, engine configs, or graph mutation should not be assumed to work after compiled-plan
 deserialization.
+
+A deserialized plan is bound to the device of the handle passed to
+`deserialize_compiled_plan()` and executes only on handles whose stream is on that device
+(`hipdnnBackendExecute()` returns `HIPDNN_STATUS_BAD_PARAM` otherwise). Serialization is the
+supported way to move a plan to another device: deserialize the same bytes once per target
+device, each with a handle on that device.
 
 ## Frontend API
 
@@ -335,8 +341,11 @@ The load hook then does these checks in this order. The first check that fails s
 16. The driver loads the code object on the device of the handle and finds the kernel symbol
     (`NOT_APPLICABLE`).
 
-The load hook loads the code object. As a result, a code object that the driver refuses fails the
-load, not the first execute. Another device loads its own module from the stored bytes at its first use.
+The load hook loads the code object on the device of the handle, so a code object that the driver
+refuses fails the load, not the first execute. The restored plan keeps the code object bytes and can
+load a separate module for another compatible device at its first use there. hipDNN does not use
+this today: the backend binds the plan to the load handle's device and rejects execution on any
+other device.
 
 ### Statuses and Messages
 
