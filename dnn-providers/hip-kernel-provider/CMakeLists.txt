@@ -596,6 +596,7 @@ install(TARGETS hip_kernel_provider EXPORT hip-kernel-provider
         LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
 
 # .kpack archives are installed by src/engines/asm_sdpa_engine/CMakeLists.txt.
 
