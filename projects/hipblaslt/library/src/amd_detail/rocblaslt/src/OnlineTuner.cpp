@@ -137,6 +137,7 @@ namespace rocblaslt
         m_problems.clear();
         m_resolutionPool.clear();
         m_winnerPool.clear();
+        m_misses.store(0, std::memory_order_relaxed);
 
         applyConfig();
     }
@@ -520,7 +521,9 @@ namespace rocblaslt
             {
                 // A key the selection hook never registered. The two hooks
                 // disagreeing is otherwise indistinguishable from the feature
-                // being switched off, so it gets its own event.
+                // being switched off, so it gets its own event and a count.
+                m_misses.fetch_add(1, std::memory_order_relaxed);
+
                 if(m_verbose)
                 {
                     std::ostringstream msg = traceLine("miss", problemKey);

@@ -279,6 +279,20 @@ namespace rocblaslt
         }
 
         /**
+         * @brief Launches the measurement hook asked about under a key the
+         * selection hook never registered.
+         *
+         * The two hooks derive the key separately, so this is how a
+         * disagreement between them shows, rather than as a problem that is
+         * quietly never measured. Counted since construction or the last
+         * reloadForTest().
+         */
+        uint64_t misses() const
+        {
+            return m_misses.load(std::memory_order_relaxed);
+        }
+
+        /**
      * @brief The pinned winner for a problem, or nullptr while it is still
      * being explored.
      *
@@ -663,6 +677,8 @@ namespace rocblaslt
         // point -- an offer a test's earlier problem left on some thread must
         // not match the problem that replaces it.
         size_t m_registrations = 0;
+
+        std::atomic<uint64_t> m_misses{0};
 
         // Keyed by device, because a HIP event belongs to the device that
         // created it: hipEventRecord onto another device's stream is refused

@@ -108,35 +108,39 @@ namespace
      * The library's tallies, in the order hipblaslt_tuning_stats_for_test
      * documents. The counters count lookups; attempts counts searches that
      * reached tuning-start; shapes, matched, fellback and tunedShapes count
-     * distinct shapes, the way the summary line does.
+     * distinct shapes, the way the summary line does. onlineMisses counts
+     * dispatches online tuning's measurement hook could not find a
+     * registration for.
      */
     struct Counters
     {
         uint64_t loaded = 0, hits = 0, misses = 0, invalidated = 0;
         uint64_t shapes = 0, matched = 0, fellback = 0;
         uint64_t tuned = 0, skipped = 0, attempts = 0, tunedShapes = 0;
-        uint64_t unrecorded = 0;
+        uint64_t unrecorded = 0, rejected = 0, onlineMisses = 0;
     };
 
     Counters counters()
     {
-        uint64_t     v[12] = {};
-        const size_t known = hipblaslt_tuning_stats_for_test(v, 12);
-        EXPECT_GE(known, 12u) << "the library reports fewer tallies than this reads";
+        uint64_t     v[14] = {};
+        const size_t known = hipblaslt_tuning_stats_for_test(v, 14);
+        EXPECT_GE(known, 14u) << "the library reports fewer tallies than this reads";
 
         Counters c;
-        c.loaded      = v[0];
-        c.hits        = v[1];
-        c.misses      = v[2];
-        c.invalidated = v[3];
-        c.shapes      = v[4];
-        c.matched     = v[5];
-        c.fellback    = v[6];
-        c.tuned       = v[7];
-        c.skipped     = v[8];
-        c.attempts    = v[9];
-        c.tunedShapes = v[10];
-        c.unrecorded  = v[11];
+        c.loaded       = v[0];
+        c.hits         = v[1];
+        c.misses       = v[2];
+        c.invalidated  = v[3];
+        c.shapes       = v[4];
+        c.matched      = v[5];
+        c.fellback     = v[6];
+        c.tuned        = v[7];
+        c.skipped      = v[8];
+        c.attempts     = v[9];
+        c.tunedShapes  = v[10];
+        c.unrecorded   = v[11];
+        c.rejected     = v[12];
+        c.onlineMisses = v[13];
         return c;
     }
 
@@ -3302,6 +3306,169 @@ namespace
 
         EXPECT_EQ(valueRowCount(m_path), 1u) << "online recorded no winner";
         EXPECT_EQ(counters().tuned, 1u);
+    }
+
+    /**
+     * One fp32 NN matmul with a GELU_AUX epilogue, dispatched with no algo.
+     *
+     * The epilogue is what makes it interesting for an xf32 compute type: on
+     * gfx950 the Aux and Grad epilogues have fp32 kernels only, so an xf32
+     * request finds nothing and getBestSolutions falls back to fp32. A
+     * single batch and nothing else, since only the fallback is under test.
+     */
+    class GeluAuxProblem
+    {
+    public:
+        explicit GeluAuxProblem(hipblasComputeType_t computeType)
+            : m_computeType(computeType)
+        {
+        }
+
+        ~GeluAuxProblem()
+        {
+            if(m_desc)
+                hipblasLtMatmulDescDestroy(m_desc);
+            for(hipblasLtMatrixLayout_t layout : {m_layoutA, m_layoutB, m_layoutC})
+                if(layout)
+                    hipblasLtMatrixLayoutDestroy(layout);
+            for(void* p : {m_ws, m_a, m_b, m_c, m_d, m_aux})
+                static_cast<void>(hipFree(p));
+            if(m_handle)
+                hipblasLtDestroy(m_handle);
+        }
+
+        GeluAuxProblem(const GeluAuxProblem&)            = delete;
+        GeluAuxProblem& operator=(const GeluAuxProblem&) = delete;
+
+        bool create()
+        {
+            const size_t bytesA = static_cast<size_t>(kOnlineM * kOnlineK) * sizeof(float);
+            const size_t bytesB = static_cast<size_t>(kOnlineK * kOnlineN) * sizeof(float);
+            const size_t bytesC = static_cast<size_t>(kOnlineM * kOnlineN) * sizeof(float);
+
+            if(hipblasLtCreate(&m_handle) != HIPBLAS_STATUS_SUCCESS)
+                return false;
+
+            for(auto [out, bytes] : {std::pair<void**, size_t>{&m_a, bytesA},
+                                     {&m_b, bytesB},
+                                     {&m_c, bytesC},
+                                     {&m_d, bytesC},
+                                     {&m_aux, bytesC}})
+                if(hipMalloc(out, bytes) != hipSuccess || hipMemset(*out, 0, bytes) != hipSuccess)
+                    return false;
+
+            if(hipMalloc(&m_ws, kOnlineWorkspace) != hipSuccess)
+                return false;
+
+            const hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_GELU_AUX;
+            const int64_t             auxLd    = kOnlineM;
+
+            return hipblasLtMatrixLayoutCreate(&m_layoutA, HIP_R_32F, kOnlineM, kOnlineK, kOnlineM)
+                       == HIPBLAS_STATUS_SUCCESS
+                   && hipblasLtMatrixLayoutCreate(&m_layoutB, HIP_R_32F, kOnlineK, kOnlineN, kOnlineK)
+                          == HIPBLAS_STATUS_SUCCESS
+                   && hipblasLtMatrixLayoutCreate(&m_layoutC, HIP_R_32F, kOnlineM, kOnlineN, kOnlineM)
+                          == HIPBLAS_STATUS_SUCCESS
+                   && hipblasLtMatmulDescCreate(&m_desc, m_computeType, HIP_R_32F)
+                          == HIPBLAS_STATUS_SUCCESS
+                   && hipblasLtMatmulDescSetAttribute(
+                          m_desc, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue))
+                          == HIPBLAS_STATUS_SUCCESS
+                   && hipblasLtMatmulDescSetAttribute(
+                          m_desc, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER, &m_aux, sizeof(m_aux))
+                          == HIPBLAS_STATUS_SUCCESS
+                   && hipblasLtMatmulDescSetAttribute(
+                          m_desc, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD, &auxLd, sizeof(auxLd))
+                          == HIPBLAS_STATUS_SUCCESS;
+        }
+
+        /** One matmul with no algo, reporting the solution the library launched. */
+        bool dispatch(int* launched)
+        {
+            const float alpha = 1.0f;
+            const float beta  = 0.0f;
+
+            if(hipblasLtMatmul(m_handle,
+                               m_desc,
+                               &alpha,
+                               m_a,
+                               m_layoutA,
+                               m_b,
+                               m_layoutB,
+                               &beta,
+                               m_c,
+                               m_layoutC,
+                               m_d,
+                               m_layoutC,
+                               nullptr,
+                               m_ws,
+                               kOnlineWorkspace,
+                               nullptr)
+                   != HIPBLAS_STATUS_SUCCESS
+               || hipDeviceSynchronize() != hipSuccess)
+                return false;
+
+            *launched = hipblaslt_tuning_last_launch_for_test();
+            return true;
+        }
+
+    private:
+        hipblasComputeType_t    m_computeType;
+        hipblasLtHandle_t       m_handle  = nullptr;
+        hipblasLtMatmulDesc_t   m_desc    = nullptr;
+        hipblasLtMatrixLayout_t m_layoutA = nullptr;
+        hipblasLtMatrixLayout_t m_layoutB = nullptr;
+        hipblasLtMatrixLayout_t m_layoutC = nullptr;
+        void*                   m_a       = nullptr;
+        void*                   m_b       = nullptr;
+        void*                   m_c       = nullptr;
+        void*                   m_d       = nullptr;
+        void*                   m_aux     = nullptr;
+        void*                   m_ws      = nullptr;
+    };
+
+    // Online's two hooks have to agree on the key they file a problem under,
+    // and for an xf32 problem the library has to fall back to fp32 for, they
+    // did not. Selection ranks the problem again after setting the fp32 math
+    // op, and registers it under that key; the measurement hook re-derived the
+    // key after updateTensileProblem() had put the xf32 math op back. Nothing
+    // was ever registered under the key it asked with, so no launch could be
+    // sampled, nothing resolved there, and every dispatch paid a locked lookup
+    // to be told so -- for the life of the process.
+    //
+    // On gfx950 such a problem has a single candidate, so there is no winner to
+    // look for. What the defect leaves behind is a measurement hook that misses
+    // on every dispatch, and that is what is counted here.
+    TEST_F(TuningOnline_pre_checkin, AnXf32ProblemThatFallsBackIsMeasuredUnderTheKeyItRegistered)
+    {
+        constexpr int kDispatches = 20;
+
+        enterOnline(m_path);
+
+        GeluAuxProblem fp32(HIPBLAS_COMPUTE_32F);
+        ASSERT_TRUE(fp32.create());
+
+        int fp32Kernel = -1;
+        ASSERT_TRUE(fp32.dispatch(&fp32Kernel));
+
+        // The control: the same problem asked for in fp32 is not a fallback,
+        // so its two hooks agree whether or not the fix is there.
+        EXPECT_EQ(counters().onlineMisses, 0u) << "an fp32 problem's measurement hook missed";
+
+        GeluAuxProblem xf32(HIPBLAS_COMPUTE_32F_FAST_TF32);
+        ASSERT_TRUE(xf32.create());
+
+        for(int i = 0; i < kDispatches; ++i)
+        {
+            int launched = -1;
+            ASSERT_TRUE(xf32.dispatch(&launched)) << "dispatch " << i << " failed";
+
+            if(launched != fp32Kernel)
+                GTEST_SKIP() << "this device has an xf32 kernel for GELU_AUX, so nothing falls back";
+        }
+
+        EXPECT_EQ(counters().onlineMisses, 0u)
+            << "the measurement hook asked under a key selection never registered";
     }
 
     // The defect this case exists for: online used to decide whether to explore

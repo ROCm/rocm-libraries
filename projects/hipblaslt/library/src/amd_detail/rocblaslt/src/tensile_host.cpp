@@ -3536,6 +3536,14 @@ struct TensileDataGemm
     // by the same builder the C API uses, so both APIs look up the same key.
     // Only set while a tuning file is in play.
     TensileLite::ProblemOverride tuningKey;
+
+    // The key online tuning's selection hook ranked the returned solutions
+    // under, set by getBestSolutions once its xf32 fallback has run, so that
+    // runContractionProblem's measurement hook asks under the same one rather
+    // than deriving its own from a problem updateTensileProblem() has since
+    // put the xf32 math op back on. Cleared by runContractionProblem before
+    // the call that sets it; empty means selection did not run in this call.
+    std::optional<size_t> onlineTuningKey;
 };
 
 struct TensileDataGroupedGemm
@@ -5745,6 +5753,10 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         }
         const bool replayed = !callerSuppliedAlgo && algo != nullptr;
 
+        // Set below only where this call selects the kernel itself; see
+        // TensileDataGemm::onlineTuningKey.
+        data->onlineTuningKey.reset();
+
         if(algo == nullptr)
         {
             int returnAlgoCount = 0;
@@ -5771,9 +5783,13 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         int* solutionIndex = (int*)algo->data;
 
-        // Online tuning's measurement half, keyed on the same problem identity
-        // the selection hook in getSolutions() used -- the same data->problem,
-        // rewritten from the same prob, so the two meet.
+        // Online tuning's measurement half, keyed on the key the selection hook
+        // in getSolutions() used. Where selection ran in this call that key is
+        // handed over rather than derived again: getBestSolutions can fall back
+        // from xf32 to fp32, which changes the key, and updateTensileProblem()
+        // above has put the xf32 math op back, so a key derived here would be
+        // one nothing was registered under. A caller-supplied or replayed algo
+        // ran no selection here, and derives it from the problem as before.
         //
         // tuningCacheKeyable is the same test the cache's own `keyed` makes
         // below, and the selection hook makes it too: a problem class the cache
@@ -5786,7 +5802,10 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // beginMeasurement() hands out a pair for this launch and reads nothing.
         auto&        onlineTuner  = rocblaslt::OnlineTuner::getInstance();
         const bool   onlineTuning = onlineTuner.enabled() && tuningCacheKeyable(prob);
-        const size_t onlineKey    = onlineTuning ? onlineTuningProblemKey(data->problem) : 0;
+        const size_t onlineKey
+            = !onlineTuning           ? 0
+              : data->onlineTuningKey ? *data->onlineTuningKey
+                                      : onlineTuningProblemKey(data->problem);
 
         if(onlineTuning)
             onlineTuner.harvestPending(onlineKey);
@@ -8025,6 +8044,12 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                  &prob,
                                  lookup);
     }
+
+    // Derived after the fallback, from the problem the returned ranking was
+    // taken under, which is the key getSolutions() registered it with. See
+    // TensileDataGemm::onlineTuningKey.
+    if(rocblaslt::OnlineTuner::getInstance().enabled())
+        data->onlineTuningKey = onlineTuningProblemKey(data->problem);
 
     auto algoCount = min(static_cast<size_t>(requestedAlgoCount), solutions.size());
     memset(heuristicResultsArray, 0, sizeof(rocblaslt_matmul_heuristic_result) * algoCount);

@@ -3899,6 +3899,10 @@ extern "C" HIPBLASLT_EXPORT int hipblaslt_tuning_last_launch_for_test()
 //       Winners measured but not written, because recording threw.
 //   12 rejected
 //       Rows a tuning file held that could not be read at all.
+//   13 online misses
+//       Dispatches online tuning's measurement hook asked about under a key
+//       its selection hook never registered. Nonzero means the two hooks
+//       disagree on the key.
 //
 // Fills up to count values in that order and returns how many there are, so a
 // test expecting a different list notices instead of misreading it. New values
@@ -3921,7 +3925,8 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_stats_for_test(uint64_t* val
                             c.attempts.load(),
                             tunedShapes,
                             c.unrecorded.load(),
-                            c.rejected.load()};
+                            c.rejected.load(),
+                            rocblaslt::OnlineTuner::getInstance().misses()};
 
     constexpr size_t known = sizeof(all) / sizeof(all[0]);
     for(size_t i = 0; values && i < count && i < known; i++)
