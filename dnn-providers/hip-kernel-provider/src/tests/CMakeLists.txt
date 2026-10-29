@@ -443,6 +443,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOneSlottedEngineWithANativeGraphMatchAndAKernelMatcherPerSlot
                 ShipsEverySplitRowOnceAndNoKernelInTwoSlots
                 EveryKernelDeclaresItsSlotsSignature
+                EveryVerdictRowIsServedOrDeclinedAsTheTableSays
+                EveryServedRowsSlotCatalogsHaveUniqueEnrolledKnobTuples
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna_decode)
