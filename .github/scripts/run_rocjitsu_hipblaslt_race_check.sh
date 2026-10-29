@@ -266,7 +266,6 @@ run_timed "configure rocjitsu" cmake "${cmake_args[@]}"
 # LD_PRELOAD runtime, and the separately loaded race and logging plugins.
 run_timed "build rocjitsu" \
   cmake --build "${ROCJITSU_BUILD_DIR}" \
-  --parallel "${RANDOM_GEMM_THREADS}" \
   --target \
     rocjitsu_bin \
     rocjitsu_shared \
