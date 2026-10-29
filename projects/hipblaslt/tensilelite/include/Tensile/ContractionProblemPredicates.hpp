@@ -37,7 +37,7 @@
 
 #include <algorithm>
 #include <array>
-#include <optional>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -3048,10 +3048,12 @@ namespace TensileLite
                 };
                 // value = [XCC, XCCG]
                 std::array<int, 2> value;
-                // Target device CU count and processor; queried lazily (queryDevice()) so
-                // deserialization needs no live GPU.
-                mutable std::optional<size_t>            cuCountCache;
-                mutable std::optional<AMDGPU::Processor> processorCache;
+                // Target device CU count and processor, queried on first use (queryDevice()) so
+                // deserialization needs no live GPU. Atomic: solution selection can evaluate one
+                // predicate from several threads; racing first calls store the same values.
+                // cuCountCache 0 = not queried yet (no device has 0 CUs).
+                mutable std::atomic<size_t>            cuCountCache{0};
+                mutable std::atomic<AMDGPU::Processor> processorCache{};
 
                 /// Generic gfx942 solutions are CU-fallbacks on MI300A (228 CUs, vs 304 for
                 /// MI300X) and always launch at WGMXCC=1, but this runs before
@@ -3087,29 +3089,34 @@ namespace TensileLite
                 {
                 }
 
-                // Query the device once, at eval time (always on a GPU). Keeping it
-                // out of the ctor lets solutions deserialize GPU-free.
+                // Query the device at eval time (always on a GPU). Keeping it out of the
+                // ctor lets solutions deserialize GPU-free. The processor is stored before the
+                // count, so a reader that sees a non-zero count also sees the processor.
                 void queryDevice() const
                 {
                     auto pHardware = hip::GetCurrentDevice();
                     assert(pHardware != nullptr);
                     AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(pHardware.get());
-                    cuCountCache          = pAMDGPU->computeUnitCount;
-                    processorCache        = pAMDGPU->processor;
+                    processorCache.store(pAMDGPU->processor, std::memory_order_relaxed);
+                    cuCountCache.store(pAMDGPU->computeUnitCount, std::memory_order_release);
                 }
 
                 size_t cuCount() const
                 {
-                    if(!cuCountCache)
+                    size_t count = cuCountCache.load(std::memory_order_acquire);
+                    if(count == 0)
+                    {
                         queryDevice();
-                    return *cuCountCache;
+                        count = cuCountCache.load(std::memory_order_acquire);
+                    }
+                    return count;
                 }
 
                 AMDGPU::Processor processor() const
                 {
-                    if(!processorCache)
+                    if(cuCountCache.load(std::memory_order_acquire) == 0)
                         queryDevice();
-                    return *processorCache;
+                    return processorCache.load(std::memory_order_relaxed);
                 }
 
                 static std::string Type()

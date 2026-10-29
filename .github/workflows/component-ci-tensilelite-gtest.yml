@@ -106,6 +106,7 @@ jobs:
       # install hits the unbuilt rocisa target; run ctest from the build tree.
       - name: Run tensilelite gtest (host-only, CPU)
         run: |
-          # Exclude cases needing a real HIP device (hard-assert deviceCount>0); no GPU here.
+          # Exclude cases needing a real HIP device (hard-assert deviceCount>0, or a HIP
+          # memcpy such as CopyTensorVoid); no GPU here.
           ctest --test-dir build/tensilelite/tests --output-on-failure \
-            -E 'QueryDeviceChipId|HipHardwarePopulatesPciChipId|PciChipIdEqualPredicate|HardwareSelectionWithPciChipId|FindAllSolutionsWithPciChipId|DataInitializationReferenceRecompute'
+            -E 'QueryDeviceChipId|HipHardwarePopulatesPciChipId|PciChipIdEqualPredicate|HardwareSelectionWithPciChipId|FindAllSolutionsWithPciChipId|DataInitializationReferenceRecompute|CopyTensorVoid'
