@@ -1745,6 +1745,225 @@ TEST(TestFlydslSdpaBwdSplitLaunch, DropoutWithUnequalAndUnalignedLengthsLaunches
     }
 }
 
+// ---------------------------------------------------------------------------
+// Rows shaped like gfx11-generic's
+// ---------------------------------------------------------------------------
+
+/// The gfx11-generic head-dim rungs. Every row is a padded object.
+const std::array<int64_t, 11> GFX11_RUNGS{16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256};
+const std::array<const char*, 3> GFX11_DTYPES{"f16", "bf16", "fp32"};
+
+/// The rows of a gfx11-generic catalog for @p slot, as the generator writes them: prep rows
+/// carry the rung below the tile as a numeric floor ("0" for the lowest), dkdv and dq rows the
+/// padded "g1" floor; dropout is baked ("bk") in both states; dq rows never stage the bias
+/// (`bias_stage` "none") and store dB only for bias; dkdv packs nothing.
+std::vector<RowSpec> gfx11Rows(Slot slot)
+{
+    std::vector<RowSpec> rows;
+    for(const char* dtype : GFX11_DTYPES)
+    {
+        for(size_t rung = 0; rung < GFX11_RUNGS.size(); ++rung)
+        {
+            RowSpec row;
+            row.dtype = dtype;
+            row.tile = GFX11_RUNGS[rung];
+            row.padded = 1;
+            row.dform = "bk";
+            if(slot == Slot::PREP)
+            {
+                row.floorValue = rung == 0 ? "0" : std::to_string(GFX11_RUNGS[rung - 1]);
+                row.sink = 0;
+                rows.push_back(row);
+                continue;
+            }
+            row.floorValue = "g1";
+            row.grid = slot == Slot::DKDV ? GRID_DKDV_BLOCKS_FIRST : GRID_DQ;
+            row.gqaPack = slot == Slot::DKDV ? 0 : -1;
+            row.biasStage = "none";
+            for(const int64_t dropout : {int64_t{0}, int64_t{1}})
+            {
+                for(const char cls : {'p', 'c', 'b'})
+                {
+                    row.dropout = dropout;
+                    row.causal = cls == 'c' ? 1 : 0;
+                    row.hasBias = cls == 'b' ? 1 : 0;
+                    row.storeDb = row.hasBias != 0 ? 1 : -1;
+                    row.reduceSymbol = row.hasBias != 0 ? REDUCE_SYMBOL : "";
+                    rows.push_back(row);
+                }
+            }
+        }
+    }
+    return rows;
+}
+
+/// The rows of @p catalog that serve the graph of @p spec in @p slot; the graph itself must be
+/// served.
+std::vector<RowSpec>
+    servingRows(Slot slot, const SdpaBwdSpec& spec, const std::vector<RowSpec>& catalog)
+{
+    std::vector<RowSpec> served;
+    for(const auto& row : catalog)
+    {
+        if(serves(slot, spec, row))
+        {
+            served.push_back(row);
+        }
+    }
+    return served;
+}
+
+SdpaBwdSpec withDtype(SdpaBwdSpec spec, DataType dtype)
+{
+    spec.dtype = dtype;
+    return spec;
+}
+
+TEST(TestFlydslSdpaBwdSplitGfx11Rows, TheNumericPrepFloorServesEveryHeadDimWithExactlyOneRow)
+{
+    const auto catalog = gfx11Rows(Slot::PREP);
+    const std::array<std::pair<DataType, const char*>, 3> dtypes{
+        {{DataType::HALF, "f16"}, {DataType::BFLOAT16, "bf16"}, {DataType::FLOAT, "fp32"}}};
+    for(const auto& [dtype, name] : dtypes)
+    {
+        for(int64_t headDim = 1; headDim <= 256; ++headDim)
+        {
+            SCOPED_TRACE(std::string(name) + " D=" + std::to_string(headDim));
+            // prep reads the value width only: the key width does not change the verdict.
+            const auto spec = withDtype(withHeadDims(baseSpec(), 257 - headDim, headDim), dtype);
+            const auto served = servingRows(Slot::PREP, spec, catalog);
+            ASSERT_EQ(served.size(), 1U);
+            EXPECT_EQ(served.front().dtype, name);
+            const auto rung = std::find_if(
+                GFX11_RUNGS.begin(), GFX11_RUNGS.end(), [&](auto tile) { return tile >= headDim; });
+            EXPECT_EQ(served.front().tile, *rung);
+        }
+    }
+}
+
+TEST(TestFlydslSdpaBwdSplitGfx11Rows, ADropoutGraphNeverMatchesABakedOffRowAndViceVersa)
+{
+    const std::array<SdpaBwdSpec, 3> classes{
+        baseSpec(), withCausal(baseSpec()), withBias(baseSpec(), true)};
+    for(const Slot slot : {Slot::DKDV, Slot::DQ})
+    {
+        const auto catalog = gfx11Rows(slot);
+        for(const auto& spec : classes)
+        {
+            SCOPED_TRACE(static_cast<int>(slot));
+            const auto runtime = servingRows(slot, withDropout(spec), catalog);
+            ASSERT_FALSE(runtime.empty());
+            for(const auto& row : runtime)
+            {
+                EXPECT_EQ(row.dropout, 1);
+                EXPECT_EQ(row.dform, "bk");
+            }
+            const auto off = servingRows(slot, spec, catalog);
+            ASSERT_FALSE(off.empty());
+            for(const auto& row : off)
+            {
+                EXPECT_EQ(row.dropout, 0);
+            }
+        }
+    }
+}
+
+TEST(TestFlydslSdpaBwdSplitGfx11Rows,
+     OnlyRowsThatStageTheBiasDeclineALayoutOutsideTheStagingContract)
+{
+    const auto unstaged = unstagedBiasSpec();
+    // The same layout in FLOAT: 17 elements apart is outside a 16-byte vector for both.
+    const auto unstagedFp32 = fp32Spec().withEdit([](SdpaBwdGraph& g) {
+        auto& bias = addBias(g);
+        bias.strides = {int64_t{8} * 16 * 17, int64_t{16} * 17, 17, 1};
+    });
+    ASSERT_TRUE(graphMatch(unstaged).has_value());
+    ASSERT_TRUE(graphMatch(unstagedFp32).has_value());
+
+    // gfx11 rows load the bias directly: every bias row of the dtype serves the layout.
+    auto catalog = gfx11Rows(Slot::DQ);
+    const auto f16Rows = servingRows(Slot::DQ, unstaged, catalog);
+    ASSERT_FALSE(f16Rows.empty());
+    for(const auto& row : f16Rows)
+    {
+        EXPECT_EQ(row.dtype, "f16");
+        EXPECT_EQ(row.biasStage, "none");
+        EXPECT_EQ(row.hasBias, 1);
+    }
+    const auto fp32Rows = servingRows(Slot::DQ, unstagedFp32, catalog);
+    ASSERT_FALSE(fp32Rows.empty());
+    for(const auto& row : fp32Rows)
+    {
+        EXPECT_EQ(row.dtype, "fp32");
+        EXPECT_EQ(row.biasStage, "none");
+    }
+
+    // A staging 16-bit row beside them declines the 16-bit layout; the same row at fp32, which
+    // never stages, serves it.
+    RowSpec staging = biasRow(64);
+    staging.padded = 1;
+    staging.floorValue = "g1";
+    staging.dform = "bk";
+    staging.biasStage = "auto";
+    staging.grid = GRID_DQ;
+    RowSpec staging32 = staging;
+    staging32.dtype = "fp32";
+    catalog.push_back(staging);
+    catalog.push_back(staging32);
+    for(const auto& row : servingRows(Slot::DQ, unstaged, catalog))
+    {
+        EXPECT_EQ(row.biasStage, "none");
+    }
+    EXPECT_FALSE(serves(Slot::DQ, unstaged, staging));
+    EXPECT_TRUE(serves(Slot::DQ, unstagedFp32, staging32));
+    // Inside the contract the staging row serves too: the decline is the layout's.
+    EXPECT_TRUE(serves(Slot::DQ, withBias(baseSpec(), false), staging));
+}
+
+TEST(TestFlydslSdpaBwdSplitGfx11Rows, AHeadDimAboveTheLadderIsDeclinedWithANamedCause)
+{
+    // Above the shared matcher's bound the graph is declined [head_size] (DT-4), whichever of
+    // Dqk and Dv is larger.
+    for(const auto& dims :
+        {std::pair<int64_t, int64_t>{513, 513}, {600, 64}, {64, 600}, {512, 1024}})
+    {
+        SCOPED_TRACE(std::to_string(dims.first) + "/" + std::to_string(dims.second));
+        const auto spec = withHeadDims(baseSpec(), dims.first, dims.second);
+        const auto matched = matchSdpaBwdSpec(spec, flydsl_sdpa_bwd::MatchOptions{true});
+        const auto* decline = std::get_if<flydsl_sdpa_bwd::Decline>(&matched);
+        ASSERT_NE(decline, nullptr);
+        EXPECT_EQ(decline->cause, "head_size");
+        EXPECT_FALSE(graphMatch(spec).has_value());
+    }
+}
+
+TEST(TestFlydslSdpaBwdSplitGfx11Rows,
+     AHeadDimBetweenTheLadderAnd512PassesTheGraphButHasNoDkdvOrDqRow)
+{
+    // 257..512 passes graph_match (the shared bound is 512); the gfx11 catalog ends at 256.
+    const std::array<std::pair<int64_t, int64_t>, 6> dims{
+        {{257, 257}, {384, 384}, {512, 512}, {96, 300}, {300, 96}, {256, 257}}};
+    for(const auto& [qk, v] : dims)
+    {
+        SCOPED_TRACE(std::to_string(qk) + "/" + std::to_string(v));
+        const auto spec = withHeadDims(baseSpec(), qk, v);
+        ASSERT_TRUE(graphMatch(spec).has_value());
+        // prep reads the value width only, so a wide key with a narrow value still has a prep
+        // row; dkdv and dq have none, and the graph is served by no complete plan.
+        for(const Slot slot : SLOTS)
+        {
+            const bool unserved = slot == Slot::PREP ? v > 256 : true;
+            EXPECT_EQ(servingRows(slot, spec, gfx11Rows(slot)).empty(), unserved);
+        }
+    }
+    // The ladder's own top rung still serves.
+    const auto top = withHeadDims(baseSpec(), 256, 256);
+    for(const Slot slot : SLOTS)
+    {
+        EXPECT_FALSE(servingRows(slot, top, gfx11Rows(slot)).empty());
+    }
+}
+
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 
