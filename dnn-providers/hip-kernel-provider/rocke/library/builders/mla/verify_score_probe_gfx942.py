@@ -1251,6 +1251,12 @@ def main(argv=None) -> int:
     else:
         s = SCENARIOS[args.scenario]
         cases = [(args.scenario, s.heads, s.q_lens, s.k_lens)]
+    if args.absorbed_query and args.scenario == "all":
+        # Dispatch does not take absorbed_query at an odd head count yet.
+        odd = [c[0] for c in cases if c[1] % 2]
+        if odd:
+            print(f"absorbed_query: leaving out odd head counts {odd}")
+        cases = [c for c in cases if c[1] % 2 == 0]
 
     print(f"arch={arch} mode={args.mode} scenario={args.scenario} cases={len(cases)}")
     results = []

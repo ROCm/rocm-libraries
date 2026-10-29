@@ -66,9 +66,10 @@ _ALL_SCENARIOS = [
     "many_seqs_h64",
 ]
 
-# agpr_acc forced on: masked rows + page tails, a long single sequence, and the
-# ragged long batch -- shapes dispatch runs on the 16-row layout.
-_AGPR_FORCED = ["mixed_varlen_h64", "sk512_h64", "ragged_long_h64"]
+# agpr_acc forced on: masked rows + page tails, a long single sequence, the
+# ragged long batch -- shapes dispatch runs on the 16-row layout -- and an odd
+# head count, which the rule never gives agpr_acc (the pinned layout does).
+_AGPR_FORCED = ["mixed_varlen_h64", "sk512_h64", "ragged_long_h64", "odd_heads_h5"]
 
 # NaN in every pool row the sequences do not own (page tails, spare pages):
 # (scenario, absorbed_query, agpr) over the register-staged, odd-head,
@@ -79,6 +80,7 @@ _POISONED = [
     ("odd_heads_h5", False, None),
     ("page_tail_h64", True, None),
     ("ragged_long_h64", False, True),
+    ("odd_heads_h5", False, True),
 ]
 
 # absorbed_query: one short, one masked/ragged, the long cases, H=6, and the

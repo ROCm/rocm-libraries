@@ -230,7 +230,8 @@ def _spec_for(
 
     if layout is not None:
         return admitted(layout == "agpr_acc")
-    if not odd and _use_agpr_layout(req, num_cus):
+    # The rule is fitted to even head counts; the test hook still forces it.
+    if (not odd or _AGPR_FORCE is not None) and _use_agpr_layout(req, num_cus):
         spec, verdict = admitted(True)
         # llvm20 refuses agpr_acc; fall back to 16 rows per wave.
         if verdict[0]:
