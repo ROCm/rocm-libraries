@@ -5788,8 +5788,18 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // handed over rather than derived again: getBestSolutions can fall back
         // from xf32 to fp32, which changes the key, and updateTensileProblem()
         // above has put the xf32 math op back, so a key derived here would be
-        // one nothing was registered under. A caller-supplied or replayed algo
-        // ran no selection here, and derives it from the problem as before.
+        // one nothing was registered under. A replayed algo ran no selection
+        // here, and derives it from the problem as before.
+        //
+        // A caller-supplied algo is left alone entirely: no harvest and no
+        // measurement. Nothing pairs its launch with the selection visit that
+        // produced it -- the algo is a public type, and the thread may have
+        // made other visits since -- so a sample of it could be filed under a
+        // different problem's candidate. The heuristic query that handed it
+        // out was offered nothing for the same reason; see
+        // OnlineTuner::selectCandidateImpl(). Leaving the harvest to the
+        // dispatches online does measure also keeps such a launch free of the
+        // tuner's lock, for a shape that may never be dispatched any other way.
         //
         // tuningCacheKeyable is the same test the cache's own `keyed` makes
         // below, and the selection hook makes it too: a problem class the cache
@@ -5801,7 +5811,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // launches that have already retired and leaves the rest outstanding;
         // beginMeasurement() hands out a pair for this launch and reads nothing.
         auto&        onlineTuner  = rocblaslt::OnlineTuner::getInstance();
-        const bool   onlineTuning = onlineTuner.enabled() && tuningCacheKeyable(prob);
+        const bool   onlineTuning
+            = onlineTuner.enabled() && !callerSuppliedAlgo && tuningCacheKeyable(prob);
         const size_t onlineKey
             = !onlineTuning           ? 0
               : data->onlineTuningKey ? *data->onlineTuningKey
@@ -6312,7 +6323,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             // a multi-kernel solution is bracketed as a whole, and the pair is
             // read back on a later visit to this problem rather than here.
             //
-            // Only a dispatch online itself chose is sampled. A launchIndex
+            // Only a dispatch online itself chose is sampled; a caller-supplied
+            // algo has already turned onlineTuning off above. A launchIndex
             // means the tuner named the kernel and replayed means the cache
             // did, so what ran is not the candidate the rotation asked for, and
             // timing it would credit one candidate with another's number. The
@@ -7499,8 +7511,9 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&         
 // of the same rule, and the half that decides what the graph keeps. See
 // OnlineTuner::selectCandidateImpl().
 //
-// A caller that fetched this answer from the heuristic is told so for the same
-// reason, since it keeps the algo and dispatches it itself. See
+// A caller that fetched this answer from the heuristic is told so too, and is
+// likewise offered nothing but a measured winner: it keeps the algo and
+// dispatches it itself, and a caller-supplied algo is never measured. See
 // SolutionLookup.
 inline void promoteOnlineTuningCandidate(
     std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
@@ -7722,7 +7735,7 @@ inline bool promoteResolvedOnlineTuningWinner(
 // lookup says which contract the caller holds this answer under, which decides
 // whether a probe may be promoted into it at all. It is read only where
 // onlineTuningProb is non-null, so the default is the one that promotes
-// nothing on first sight.
+// nothing.
 template <typename T>
 inline auto getSolutions(
     const T& inputs,
@@ -8023,10 +8036,12 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
     // The one lookup online tuning acts on. Both callers leave the choice of
     // kernel to the library -- hipblasLtMatmul with no algo, which dispatches
     // the answer below immediately, and hipblasLtMatmulAlgoGetHeuristic, whose
-    // answer the caller hands back to hipblasLtMatmul -- and both therefore
-    // reach the measurement hook in runContractionProblem with the same problem
-    // this ranked. What separates them is how long the answer is good for,
-    // which only the caller knows and which lookup carries down.
+    // answer the caller hands back to hipblasLtMatmul. Only the first is
+    // explored: its dispatch reaches the measurement hook in
+    // runContractionProblem as the launch this ranking chose, while the
+    // second comes back as a caller-supplied algo, which is never measured.
+    // lookup carries which of the two this is; a heuristic query is served a
+    // measured winner once there is one and otherwise its own ranking.
     auto solutions = getSolutions(
         prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount, &prob, lookup);
 

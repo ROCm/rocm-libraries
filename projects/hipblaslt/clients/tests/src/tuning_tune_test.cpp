@@ -3037,8 +3037,11 @@ namespace
                    == HIPBLAS_STATUS_SUCCESS;
         }
 
-        /** One matmul with no algo, reporting the solution the library launched. */
-        bool dispatch(int* launched)
+        /**
+         * One matmul, reporting the solution the library launched. algo is the
+         * caller's own, or null to leave the choice to the library.
+         */
+        bool dispatch(int* launched, const hipblasLtMatmulAlgo_t* algo = nullptr)
         {
             const float alpha = 1.0f;
             const float beta  = 0.0f;
@@ -3055,7 +3058,7 @@ namespace
                                m_layoutC,
                                operandD(),
                                m_layoutD,
-                               nullptr,
+                               algo,
                                m_ws,
                                kOnlineWorkspace,
                                nullptr)
@@ -3067,6 +3070,29 @@ namespace
 
             if(launched)
                 *launched = hipblaslt_tuning_last_launch_for_test();
+            return true;
+        }
+
+        /** The heuristic's first answer, as an application holding it would. */
+        bool firstHeuristicAlgo(hipblasLtMatmulAlgo_t* algo)
+        {
+            hipblasLtMatmulHeuristicResult_t result{};
+            int                              returned = 0;
+            if(hipblasLtMatmulAlgoGetHeuristic(m_handle,
+                                               m_desc,
+                                               m_layoutA,
+                                               m_layoutB,
+                                               m_layoutC,
+                                               m_layoutD,
+                                               m_pref,
+                                               1,
+                                               &result,
+                                               &returned)
+                   != HIPBLAS_STATUS_SUCCESS
+               || returned < 1)
+                return false;
+
+            *algo = result.algo;
             return true;
         }
 
@@ -3274,6 +3300,40 @@ namespace
         EXPECT_EQ(columnValues(m_path, "tuning_mode"), std::vector<std::string>{"online"});
     }
 
+    // An application that asks the heuristic before every call and dispatches
+    // the algo it is handed. Online used to take the second query of a shape
+    // as an ordinary visit and promote a probe into its answer, and then time
+    // the caller-supplied launch of it -- a pairing the library cannot keep
+    // exact, since all it can see is that this thread was offered a candidate
+    // under this key. Such a caller is now handed its own ranking, or a
+    // measured winner once there is one, and never a probe; with no null-algo
+    // dispatch to measure one, nothing is recorded either.
+    TEST_F(TuningOnline_pre_checkin, AHeuristicQueryPerCallIsNeverHandedAProbe)
+    {
+        OnlineProblem problem(/*pointerArray=*/false);
+        ASSERT_TRUE(problem.create());
+
+        if(problem.distinctCandidates(kOnlineTopK) < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        enterOnline(m_path);
+
+        std::set<int> answered;
+        for(int visit = 0; visit < kOnlineVisits; visit++)
+        {
+            hipblasLtMatmulAlgo_t algo{};
+            ASSERT_TRUE(problem.firstHeuristicAlgo(&algo)) << "query " << visit << " failed";
+            answered.insert(hipblaslt_ext::getIndexFromAlgo(algo));
+
+            int launched = -1;
+            ASSERT_TRUE(problem.dispatch(&launched, &algo)) << "dispatch " << visit << " failed";
+        }
+
+        EXPECT_EQ(answered.size(), 1u) << "online promoted probes into heuristic answers";
+        EXPECT_EQ(valueRowCount(m_path), 0u)
+            << "a winner was recorded from launches of caller-supplied algos";
+    }
+
     // The same problem, with a heuristic query made while online is on.
     //
     // The case above queries the heuristic before switching the mode on, so the
@@ -3382,8 +3442,11 @@ namespace
                           == HIPBLAS_STATUS_SUCCESS;
         }
 
-        /** One matmul with no algo, reporting the solution the library launched. */
-        bool dispatch(int* launched)
+        /**
+         * One matmul, reporting the solution the library launched. algo is the
+         * caller's own, or null to leave the choice to the library.
+         */
+        bool dispatch(int* launched, const hipblasLtMatmulAlgo_t* algo = nullptr)
         {
             const float alpha = 1.0f;
             const float beta  = 0.0f;

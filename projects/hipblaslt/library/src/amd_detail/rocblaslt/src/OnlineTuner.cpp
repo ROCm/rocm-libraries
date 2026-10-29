@@ -61,11 +61,10 @@ namespace rocblaslt
          * and beginMeasurement() are the same hipblasLtMatmul call on this
          * thread with nothing of this tuner's in between, so the offer the
          * launch claims is the one this call's own visit made, and no caller on
-         * any thread can take it. On the heuristic path the application holds
-         * the algo and dispatches it when and where it likes, so the library
-         * can only say that this thread was offered this candidate for this
-         * registration -- see the offer paragraph on ProblemState for the one
-         * case that leaves open.
+         * any thread can take it. That is the only path there is: a launch of
+         * an algo the caller supplied, which is what a heuristic query hands
+         * out, goes past both measurement hooks, and a heuristic query is never
+         * offered anything to begin with.
          */
         struct ThreadOffer
         {
@@ -157,12 +156,12 @@ namespace rocblaslt
     /**
      * @brief The rule this function keeps, stated once.
      *
-     * Five guards turn a visit away here -- resolved, capturing, cold,
-     * retained-on-first-sight, merged sibling -- and each is argued where it
-     * stands. What none of them says, and what two earlier defects
-     * were, is how they relate to the state this function
-     * mutates. Both were a mutation sitting above a guard that should have
-     * refused it: the give-up counter reset above the merged-sibling guard, so
+     * Four guards turn a visit away here -- resolved, capturing or retained,
+     * cold, merged sibling -- and each is argued where it stands. What none of
+     * them says, and what two earlier defects were, is how they relate to the
+     * state this function mutates. Both were a mutation sitting above a guard
+     * that should have refused it: the give-up counter reset above the
+     * merged-sibling guard, so
      * a sibling exempt from spending the budget still cleared the counter
      * exploration needs in order to end; and the offer dropped above the same
      * guard, so a sibling cancelled an offer the registrant had not consumed.
@@ -180,21 +179,19 @@ namespace rocblaslt
      *    library is still being asked about this shape, and so always resets
      *    the abandonment counter. Only an own visit that goes on to be answered
      *    with a candidate spends a visit of the budget and carries an offer. A
-     *    cold visit and a retained caller's first sight are own visits that do
-     *    neither: they are the library being asked, which is what the counter
-     *    measures, without a probe going out, which is what the budget pays
-     *    for. That is why the two answers are not the same answer.
+     *    cold visit is an own visit that does neither: it is the library being
+     *    asked, which is what the counter measures, without a probe going out,
+     *    which is what the budget pays for. That is why the two answers are not
+     *    the same answer.
      *
      * The code below is laid out in exactly those two steps, with a marked line
      * for each and no write to this problem's state above either of them --
      * except registerProblem(), which creates the registrant rather than
-     * spending anything of its, including where a dispatch takes over a
-     * registration only heuristic queries have held and nothing has been
-     * measured for. The one write that is above both is the drop of
+     * spending anything of its. The one write that is above both is the drop of
      * THIS THREAD's offer, which belongs to no problem and is explained where
      * it stands.
      *
-     * A SIXTH GUARD GOES ABOVE MARKER A IF IT SAYS "NOT THIS EXPLORATION'S",
+     * A FIFTH GUARD GOES ABOVE MARKER A IF IT SAYS "NOT THIS EXPLORATION'S",
      * AND BETWEEN A AND B IF IT SAYS "NOT A ROTATION VISIT". There is nowhere
      * else to put it, which is the property both defects above lacked.
      */
@@ -234,7 +231,19 @@ namespace rocblaslt
         // here buys no sample. Returning before the visit is counted is what
         // stops a captured shape spending a budget it can never pay for -- the
         // same reason a merged sibling spends none below.
-        if(capturing)
+        //
+        // A heuristic query is refused for both reasons too, and so returns
+        // here with nothing registered, counted or offered. Its answer is an
+        // algo the caller keeps and dispatches itself, as often and for as long
+        // as it likes, so a probe promoted into it can be just as permanent.
+        // And it can never be measured: the launch of an algo the caller
+        // supplied goes past both measurement hooks in runContractionProblem,
+        // because nothing the library can see pairs that launch with the visit
+        // that produced it -- the algo is a public type and carries no offer,
+        // and the thread that dispatches it may have made any number of other
+        // visits in between. A query is still served a measured winner, by the
+        // resolved branch above, once dispatches of the problem have found one.
+        if(capturing || retained)
             return -1;
 
         // Dropped before anything else can hand out a new one. An offer is good
@@ -271,50 +280,13 @@ namespace rocblaslt
         // and this visit is its own.
         const bool cold = state.m_candidates.empty() && state.m_coldCalls < m_coldCalls;
 
-        // The first sight of a problem by a caller that keeps the answer. Read
-        // before registerProblem() runs, because registering is precisely what
-        // stops the NEXT such query being a first sight.
-        const bool deferred = state.m_candidates.empty() && !cold && retained;
-
         if(cold)
             ++state.m_coldCalls;
         else if(state.m_candidates.empty())
         {
-            // The first sight of a problem by a caller that keeps the answer.
-            //
-            // A probe is a kernel the rotation does not believe is best,
-            // dispatched because the next visit reconsiders it. A caller
-            // holding the answer decides for itself whether there is a next
-            // visit, and the one that fetches a heuristic once and dispatches
-            // the algo for the life of the process never comes back -- so the
-            // probe it was handed is permanent, exactly as a captured graph's
-            // is, and there is no later visit to correct it.
-            //
-            // Which kind of caller this is cannot be known on the first query
-            // and does not have to be: asking again for the same problem is
-            // the evidence, and it is evidence the caller supplies by its own
-            // behaviour. So the first query registers the problem and is
-            // answered by the ranking it brought, and a second one is an
-            // ordinary visit. A caller that queries per call therefore still
-            // drives a full exploration, one visit later than before; a caller
-            // that queries once is never offered anything it cannot take back.
-            //
-            // Registering here rather than returning before it is what makes
-            // the second query an ordinary visit instead of another first one,
-            // and it is also what gives the shape a state the measurement hook
-            // can bring to an end if the second query never comes.
-            //
-            // Deliberately not a blanket refusal of every heuristic query, the
-            // way a capture is refused. A capture is known not to come back; a
-            // heuristic query is not, and refusing all of them would withdraw
-            // online tuning from every application that asks the library for a
-            // kernel per call -- which is half of what the feature is for.
-            //
-            // The refusal itself is the `deferred` branch past marker A, not a
-            // return from here: a first sight is still the library being
-            // asked, so it still says the shape has not been abandoned.
+            // First sight past the cold visits. Whoever registers owns the
+            // exploration; see registerProblem().
             registerProblem(problemKey, problem, state, rankedSolutionIndices);
-            state.m_queriedOnly = retained;
         }
         // A problem the key merges with the one being explored. Its launches
         // are not this exploration's to sample, so it is offered nothing -- and
@@ -327,31 +299,8 @@ namespace rocblaslt
         // is not this exploration's writes none of this exploration's state.
         // Reached only when there is a registrant to compare against -- the two
         // branches above are the cases where there is not.
-        //
-        // The one exception is a registration nothing but heuristic queries
-        // has touched, and that nothing has been measured for. The identity is
-        // the solution library's own, and a query and a dispatch of the same
-        // problem do not share it: the query ranks under a dummy beta and the
-        // preference's workspace ceiling, the dispatch under the caller's beta
-        // and allocation. So the first dispatch of a problem whose first sight
-        // was a query arrives as a stranger to its own registration. Turned
-        // away, it is offered nothing and sampled by nothing for as long as
-        // the abandonment ceiling allows, and the shape ends with no winner.
-        // Taking the registration over instead loses nothing, because there is
-        // nothing to lose -- no sample and no launch outstanding -- and it is
-        // the same rule as before seen from the other side: the first problem
-        // to DISPATCH owns the exploration, and a query only holds it until
-        // one does. Once a dispatch has visited as the registrant, or anything
-        // has been measured, the registration is settled and a later stranger
-        // is a sibling as it always was.
         else if(!state.m_resolved && state.m_problem != problem)
-        {
-            if(!state.m_queriedOnly || retained || !unmeasured(state))
-                return -1;
-
-            registerProblem(problemKey, problem, state, rankedSolutionIndices);
-            state.m_queriedOnly = false;
-        }
+            return -1;
 
         // ------------------------------------------------------------------
         // MARKER A. Past here the visit is this exploration's own.
@@ -362,15 +311,10 @@ namespace rocblaslt
         // stopped being asked by the one caller whose visits can finish this.
         state.m_dispatchesSinceSelection.store(0, std::memory_order_relaxed);
 
-        // A dispatch visiting as the registrant settles who owns this; see the
-        // merged-sibling guard above.
-        if(!retained)
-            state.m_queriedOnly = false;
-
-        // Own visits that do not advance the rotation: still the library being
-        // asked, which is all marker A's counter measures, but no probe goes
-        // out so no visit of the budget is spent and no offer is carried.
-        if(cold || deferred)
+        // An own visit that does not advance the rotation: still the library
+        // being asked, which is all marker A's counter measures, but no probe
+        // goes out so no visit of the budget is spent and no offer is carried.
+        if(cold)
             return -1;
 
         // ------------------------------------------------------------------
@@ -613,15 +557,8 @@ namespace rocblaslt
 
         state.m_candidates.assign(rankedSolutionIndices.begin(),
                                   rankedSolutionIndices.begin() + count);
-        state.m_samples.assign(count, {});
+        state.m_samples.resize(count);
         state.m_issued.assign(count, 0);
-
-        // Fresh for a first sight, and reset for a registration a dispatch
-        // takes over from a heuristic query: that query's visits spent budget
-        // on a candidate list this one replaces.
-        state.m_calls    = 0;
-        state.m_declined = 0;
-        state.m_gaveUp   = false;
 
         // Nothing to compare against, so the problem is born resolved with no
         // winner and every later call takes the read-only path.
@@ -644,16 +581,6 @@ namespace rocblaslt
             msg << "\n";
             std::cerr << msg.str();
         }
-    }
-
-    // Nothing taken and nothing outstanding: replacing the candidate list
-    // throws no measurement away.
-    bool OnlineTuner::unmeasured(const ProblemState& state)
-    {
-        return state.m_pending.empty()
-               && std::all_of(state.m_samples.begin(),
-                              state.m_samples.end(),
-                              [](const std::vector<float>& samples) { return samples.empty(); });
     }
 
     int OnlineTuner::nextCandidate(const ProblemState& state) const

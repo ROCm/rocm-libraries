@@ -402,11 +402,11 @@ namespace rocblaslt
      *
      * retained says the caller keeps this answer and dispatches it itself,
      * rather than being asked again on its next dispatch -- a heuristic query.
-     * Such a caller is never the one a problem's first probe is offered to,
-     * because nothing here can know whether it will ever ask again. Asking a
-     * second time is what says it will, and from then on it is an ordinary
-     * visit. See selectCandidateImpl() for why that, and not a blanket
-     * refusal.
+     * It is treated as a capture is: served a measured winner if there is
+     * one, and otherwise left its own ordering, with nothing registered,
+     * counted or offered. The algo it is handed is launched as a caller-supplied
+     * one, which is never measured, so a probe promoted into it could only be
+     * kept unmeasured. See selectCandidateImpl().
      */
         int selectCandidate(size_t                  problemKey,
                             size_t                  problem,
@@ -551,33 +551,26 @@ namespace rocblaslt
         // -- see t_offer in OnlineTuner.cpp -- and m_registration below is what
         // ties it to one registration of one problem.
         //
-        // What that delivers, exactly, because the previous version of this
-        // comment claimed a pairing the code did not keep. On the dispatch path
-        // (hipblasLtMatmul with algo == nullptr) selection and launch are the
-        // same library call on the same thread with nothing of this tuner's in
-        // between, and every selection visit a thread makes drops the offer it
-        // was holding, so the offer a launch claims is the one that call's own
-        // visit made and no caller on any thread can take it. That is exact.
+        // What that delivers, exactly. On the dispatch path (hipblasLtMatmul
+        // with algo == nullptr) selection and launch are the same library call
+        // on the same thread with nothing of this tuner's in between, and every
+        // selection visit a thread makes drops the offer it was holding, so the
+        // offer a launch claims is the one that call's own visit made and no
+        // caller on any thread can take it. That is exact.
         //
-        // On the heuristic path it is not. The application holds the algo and
-        // dispatches it when and where it likes, so a launch can arrive with no
-        // selection visit of that thread in between, and the library has
-        // nothing to pair with beyond "this thread was offered this candidate
-        // for this registration". A merged sibling dispatched from that same
-        // thread, with a caller-supplied algo, can still claim the offer. It
-        // takes one thread holding two heuristic answers under one resolution
-        // key and dispatching the older of them, and it costs one sample of one
-        // candidate. Closing it needs the offer carried ON the algo, which is a
-        // public type and so a decision and not a fix.
-        //
-        // m_queriedOnly says nothing but heuristic queries has visited this
-        // registration as its owner. The identity is the solution library's,
-        // and a query and a dispatch of one problem do not share it -- the
-        // query ranks under a dummy beta and the preference's workspace
-        // ceiling -- so while it holds, the first dispatch to arrive with no
-        // sample taken takes the registration over rather than being turned
-        // away as a merged sibling. See the merged-sibling guard in
-        // selectCandidateImpl().
+        // It is also the only path that is measured. A launch of an algo the
+        // caller supplied -- what hipblasLtMatmulAlgoGetHeuristic hands out --
+        // reaches neither measurement hook, and a heuristic query is offered
+        // nothing. The application holds such an algo and dispatches it when
+        // and where it likes, so a launch of it can arrive with no selection
+        // visit of that thread in between, and all the library could pair it
+        // with is "this thread was offered this candidate for this
+        // registration": a merged sibling dispatching an older answer from the
+        // same thread would claim a sample of a launch that was not the one
+        // offered. Pairing them exactly would need the offer carried on the
+        // algo, which is a public type. Instead online tuning explores only
+        // what the library dispatches itself, and a heuristic query is served
+        // the winner those dispatches measure.
         //
         // m_registration is a process-wide serial taken at registerProblem(),
         // so an offer names one registration and not merely one key. Without it
@@ -588,24 +581,23 @@ namespace rocblaslt
         // m_dispatchesSinceSelection is how a problem the library is never
         // asked about again still comes to an end.
         //
-        // m_calls only moves where selection visits, and selection is only
-        // reached while the library is the one choosing the kernel. A caller
-        // dispatching an algo it fetched once goes straight past it -- so such
-        // a problem sits one visit short of its budget for the life of the
-        // process: m_gaveUp never becomes true, nextCandidate() keeps naming a
-        // candidate nothing will ever issue, and neither resolve condition
-        // fires. Nothing is wrong with the answers it gives, but resolution()
-        // returns null for ever, and that is what the two entry points check
-        // before taking the lock. Every one of those dispatches therefore pays
-        // two shared acquisitions and two map lookups to be told there is
-        // nothing to do, for a shape that can never be tuned.
+        // m_calls only moves where the registrant visits selection. A problem
+        // whose registrant stops dispatching -- the application has moved on
+        // from the shape, while merged siblings under the same key go on
+        // dispatching -- sits short of its budget for the life of the process:
+        // m_gaveUp never becomes true, nextCandidate() keeps naming a candidate
+        // nothing will ever issue, and neither resolve condition fires. Nothing
+        // is wrong with the answers it gives, but resolution() returns null for
+        // ever, and that is what the two entry points check before taking the
+        // lock. Every one of the siblings' dispatches therefore pays two shared
+        // acquisitions and two map lookups to be told there is nothing to do.
         //
-        // Counted at the measurement hook, which is the one every dispatch
-        // reaches, and reset by a visit of the problem that owns the
-        // exploration -- so it measures the run of dispatches THE REGISTRANT
-        // has not made, not the run nobody has made. The distinction is the
-        // whole mechanism: a merged sibling is exempt from spending the visit
-        // budget, so letting its visits reset this counter let it hold an
+        // Counted at the measurement hook, which every dispatch whose kernel
+        // the library chose reaches, and reset by a visit of the problem that
+        // owns the exploration -- so it measures the run of dispatches THE
+        // REGISTRANT has not made, not the run nobody has made. The distinction
+        // is the whole mechanism: a merged sibling is exempt from spending the
+        // visit budget, so letting its visits reset this counter let it hold an
         // exploration the registrant had abandoned open for ever, taking the
         // exclusive lock on every dispatch -- the very failure this counter was
         // added to end.
@@ -626,14 +618,11 @@ namespace rocblaslt
         // lock; the exclusive lock excludes that, so the reset needs nothing
         // further.
         //
-        // Deliberately not a second identity check at the measurement hook:
-        // that hook holds the same Tensile problem with a different
-        // workspaceSize, the caller's own allocation rather than the ceiling
-        // the heuristic ranked under, which is the whole reason the resolution
-        // key exists (see onlineTuningProblemKey). A hash taken there would
-        // disagree with the registered one for every caller whose preference
-        // and allocation differ, and nothing of that caller's would ever be
-        // measured. The offer costs one compare and does not care.
+        // Deliberately not a second identity check at the measurement hook.
+        // The offer already ties a launch to the selection visit that asked for
+        // it, and on the only path that is measured that visit is the same
+        // call's, so a hash of the problem there would cost a pass over the
+        // problem to learn nothing the offer does not say for one compare.
         struct ProblemState
         {
             std::vector<int>                m_candidates;
@@ -649,7 +638,6 @@ namespace rocblaslt
             float                           m_winnerUs     = 0.0f;
             bool                            m_gaveUp       = false;
             bool                            m_resolved     = false;
-            bool                            m_queriedOnly  = false;
             std::atomic<int>                m_dispatchesSinceSelection{0};
         };
 
@@ -677,8 +665,7 @@ namespace rocblaslt
                              size_t                  problem,
                              ProblemState&           state,
                              const std::vector<int>& rankedSolutionIndices);
-        static bool unmeasured(const ProblemState& state);
-        int         nextCandidate(const ProblemState& state) const;
+        int  nextCandidate(const ProblemState& state) const;
         int  measurableCandidate(const ProblemState& state,
                                  size_t              problemKey,
                                  int                 solutionIndex) const;

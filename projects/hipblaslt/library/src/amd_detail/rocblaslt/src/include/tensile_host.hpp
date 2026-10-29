@@ -239,7 +239,9 @@ enum class SolutionLookup
 
     /// hipblasLtMatmulAlgoGetHeuristic. The caller is handed an algo and
     /// dispatches it itself, as often and for as long as it likes. Whether it
-    /// ever asks again is not knowable here.
+    /// ever asks again is not knowable here, and that dispatch is a
+    /// caller-supplied algo, which online tuning never measures, so it is
+    /// served a measured winner if there is one and never a probe.
     Heuristic,
 };
 
