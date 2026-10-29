@@ -4,6 +4,7 @@
 #pragma once
 
 #include <ostream>
+#include <type_traits>
 #include <variant>
 
 #include "GpuBatchnormFwdInfSignatureKey.hpp"
@@ -51,23 +52,19 @@ struct GpuPlanRegistrySignatureKeyHash
 
 struct GpuPlanRegistrySignatureKeyEqual
 {
-    template <typename T, typename U>
-    bool operator()([[maybe_unused]] const T& a, [[maybe_unused]] const U& b) const
-    {
-        return false;
-    }
-
-    template <typename T>
-    bool operator()(const T& a, const T& b) const
-    {
-        return a == b;
-    }
-
-    // NOLINTNEXTLINE(readability-redundant-casting)
+    // Compare the active alternatives' indices first, then visit only `a` and fetch the matching
+    // alternative from `b`. Visiting both variants would instantiate one visitor call per pair of
+    // alternatives (N*N) instead of N.
     bool operator()(const GpuPlanRegistrySignatureKey& a,
                     const GpuPlanRegistrySignatureKey& b) const
     {
-        return std::visit(*this, a, b);
+        if(a.index() != b.index())
+        {
+            return false;
+        }
+
+        return std::visit(
+            [&b](const auto& x) { return x == std::get<std::decay_t<decltype(x)>>(b); }, a);
     }
 };
 
