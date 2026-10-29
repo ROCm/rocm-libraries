@@ -617,6 +617,18 @@ namespace TensileLite
                               << ") for kernel: " << kernel.kernelName << std::endl;
                     return hipErrorInvalidValue;
                 }
+
+                // The kernel receives its cluster-launch workgroup id in y and z
+                // as 16-bit values, so a larger grid would silently wrap.
+                if(kernel.numWorkGroups.y > KernelInvocation::MaxClusterGridDimYZ
+                   || kernel.numWorkGroups.z > KernelInvocation::MaxClusterGridDimYZ)
+                {
+                    std::cerr << "hipDrvLaunchKernelEx: workgroup grid y/z exceeds the cluster "
+                              << "launch limit of " << KernelInvocation::MaxClusterGridDimYZ
+                              << " (numWorkGroups " << kernel.numWorkGroups
+                              << ") for kernel: " << kernel.kernelName << std::endl;
+                    return hipErrorInvalidValue;
+                }
             }
             else
             {
