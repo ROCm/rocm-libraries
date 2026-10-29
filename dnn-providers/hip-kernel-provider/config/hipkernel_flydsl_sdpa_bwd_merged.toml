@@ -1,0 +1,30 @@
+# Integration test configuration for hipkernel:flydsl_sdpa_bwd_merged
+# Filters use GTest-style globs: * matches any sequence of characters
+# Later entries take precedence over earlier ones when multiple filters match
+
+[meta]
+version = 1
+
+# -- Tolerance Overrides --
+# Each entry requires:
+#   filters: array of glob patterns matched against the full GTest name
+#   atol: absolute tolerance
+#   rtol: relative tolerance
+#
+# The common suite's ToleranceResolver maps both SdpaAttributes and
+# SdpaBackwardAttributes to tol::sdpa::getToleranceFwd<T>() (tight, tuned for
+# forward), so SDPA backward gradients (dQ/dK/dV) get their own entries here.
+# Calibrated on gfx1100: bf16 backward outputs differ from the reference by 1-2
+# bf16 ulp from fp32 accumulation order. To be re-checked against the post-#14312
+# bundles, which derive O and the LSE from the forward.
+# Filters key on the SdpaBackward bundle case ids' dtype token; the leading "_"
+# in "_fp16_" keeps it from also matching "bfp16_".
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_fp16_*"]
+atol = 1e-2
+rtol = 1e-2
+
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_bfp16_*"]
+atol = 2e-2
+rtol = 2e-2
