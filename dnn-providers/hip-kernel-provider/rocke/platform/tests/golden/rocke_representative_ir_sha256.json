@@ -2141,6 +2141,22 @@
           "sha256": "cac01baf9cf21bf33f1f7f4edc1bd1f516238209d836e6808fdf8c1d46a497de",
           "status": "ok"
         },
+        "gemm/gfx942/f64_t64x64x16": {
+          "arch": "gfx942",
+          "bytes": 53392,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_942_f64_fp64_t64x64x16_w2x2x1_wt16x16x4_compv4_intrawave_default_pad",
+          "sha256": "d76890f90460042b8545ba88725aaee3b653effb83cd4789638c3f55d115953c",
+          "status": "ok"
+        },
+        "gemm/gfx942/f64_t64x64x16/dtl_prefetch_swizzle": {
+          "arch": "gfx942",
+          "bytes": 72522,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_942_f64_dtl_fp64_t64x64x16_w2x2x1_wt16x16x4_compv4_intrawave_default_pad_dtl_pref",
+          "sha256": "ee051c197329850f0c9a9db7277479bcdf5f7b0e99a39e8824d1429107360520",
+          "status": "ok"
+        },
         "gemm/gfx942/t128x128x16": {
           "arch": "gfx942",
           "bytes": 89303,
@@ -2632,7 +2648,7 @@
           "gfx1201": 8,
           "gfx1250": 29,
           "gfx90a": 5,
-          "gfx942": 61,
+          "gfx942": 63,
           "gfx950": 200
         },
         "expected_failures": 24,
@@ -2657,7 +2673,7 @@
           "conv_winograd_gen": 7,
           "crosslane": 5,
           "deep_fused_conv": 10,
-          "gemm": 13,
+          "gemm": 15,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
           "lightning_indexer": 10,
@@ -2665,7 +2681,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 315
+        "ok_cases": 317
       }
     },
     "llvm22": {
@@ -4806,6 +4822,22 @@
           "sha256": "69fec3cfc86a995eaf97aaa0c459d5762b58f1f75a67a229de638f6a6c52f1a8",
           "status": "ok"
         },
+        "gemm/gfx942/f64_t64x64x16": {
+          "arch": "gfx942",
+          "bytes": 53399,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_942_f64_fp64_t64x64x16_w2x2x1_wt16x16x4_compv4_intrawave_default_pad",
+          "sha256": "a921237a63c6531a52c521815daaab474cc11ea8689b5ebc47734c73dc032c1d",
+          "status": "ok"
+        },
+        "gemm/gfx942/f64_t64x64x16/dtl_prefetch_swizzle": {
+          "arch": "gfx942",
+          "bytes": 72618,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_942_f64_dtl_fp64_t64x64x16_w2x2x1_wt16x16x4_compv4_intrawave_default_pad_dtl_pref",
+          "sha256": "846b4d34dc734e6a963b8c6a55e10a96af160b337aa8871d51abacab87c64224",
+          "status": "ok"
+        },
         "gemm/gfx942/t128x128x16": {
           "arch": "gfx942",
           "bytes": 89310,
@@ -5297,7 +5329,7 @@
           "gfx1201": 8,
           "gfx1250": 29,
           "gfx90a": 5,
-          "gfx942": 61,
+          "gfx942": 63,
           "gfx950": 200
         },
         "expected_failures": 24,
@@ -5322,7 +5354,7 @@
           "conv_winograd_gen": 7,
           "crosslane": 5,
           "deep_fused_conv": 10,
-          "gemm": 13,
+          "gemm": 15,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
           "lightning_indexer": 10,
@@ -5330,7 +5362,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 315
+        "ok_cases": 317
       }
     },
     "llvm23": {
@@ -7663,6 +7695,22 @@
           "sha256": "cb8799a561ac525f3d10e0387e806bf1ee78d2e254f9c895894eb4036d119bd8",
           "status": "ok"
         },
+        "gemm/gfx942/f64_t64x64x16": {
+          "arch": "gfx942",
+          "bytes": 53463,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_942_f64_fp64_t64x64x16_w2x2x1_wt16x16x4_compv4_intrawave_default_pad",
+          "sha256": "e977b43a00edd38459518cdd590c256691256b5792f28acb6a267ab127cd114d",
+          "status": "ok"
+        },
+        "gemm/gfx942/f64_t64x64x16/dtl_prefetch_swizzle": {
+          "arch": "gfx942",
+          "bytes": 72682,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_942_f64_dtl_fp64_t64x64x16_w2x2x1_wt16x16x4_compv4_intrawave_default_pad_dtl_pref",
+          "sha256": "1f409a70cf37f72a6ef044f4c4ad56ec5a2e7c84d1cde1c9750cf45bddfe8a86",
+          "status": "ok"
+        },
         "gemm/gfx942/t128x128x16": {
           "arch": "gfx942",
           "bytes": 89374,
@@ -8057,7 +8105,7 @@
           "gfx1201": 8,
           "gfx1250": 53,
           "gfx90a": 5,
-          "gfx942": 61,
+          "gfx942": 63,
           "gfx950": 200
         },
         "expected_failures": 0,
@@ -8086,7 +8134,7 @@
           "conv_winograd_gen": 7,
           "crosslane": 5,
           "deep_fused_conv": 10,
-          "gemm": 17,
+          "gemm": 19,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
           "lightning_indexer": 10,
@@ -8094,7 +8142,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 339
+        "ok_cases": 341
       }
     }
   },

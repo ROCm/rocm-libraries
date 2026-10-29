@@ -202,6 +202,9 @@ def _run_scalar_3d(rt, problem, data, between=None):
     q_len = problem.total_q
 
     def launcher(kernel, signature):
+        # A param the signature misses is not packed, and the kernel reads past
+        # the argument buffer; with one sequence that can go unnoticed.
+        assert [p.name for p in kernel.params] == [s["name"] for s in signature]
         art = compile_kernel(kernel, arch=arch, capture_ir_text=False)
         return KernelLauncher(
             hsaco=art.hsaco, kernel_name=art.kernel_name, signature=signature
@@ -226,6 +229,7 @@ def _run_scalar_3d(rt, problem, data, between=None):
         .scalar("v_scale", "f32")
         .scalar("softcap", "f32")
         .scalar("num_seqs", "i32")
+        .scalar("block_table_stride", "i32")
         .build()
     )
     red_sig = (
@@ -280,6 +284,7 @@ def _run_scalar_3d(rt, problem, data, between=None):
             "v_scale": 1.0,
             "softcap": 0.0,
             "num_seqs": 1,
+            "block_table_stride": int(data["block_table"].shape[1]),
         },
         config=LaunchConfig(grid=(q_len, _HQ, _NUM_SEGMENTS * _D), block=(64, 1, 1)),
     )
