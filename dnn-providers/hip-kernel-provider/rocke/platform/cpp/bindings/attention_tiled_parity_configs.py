@@ -5,8 +5,9 @@ index (the C emitter is what the binding compares against). The 3D tables set
 ``emit_lse`` on the configs whose reduce the emitter builds with LSE
 (``_REDUCE_LSE``). The platform layer keeps its own copy: it must not import
 ``library`` (one-way dependency, library -> platform). prove_parity_binding
-fails a family whose emitter still emits a config past the end of its table,
-and a row that drifts from the emitter shows up as a DIFF.
+fails a family unless its C emitter reports "unknown config index N" for the
+first index N past the table, and a row that drifts from the emitter shows up
+as a DIFF.
 """
 
 GFX942_ATTENTION_TILED_2D = [

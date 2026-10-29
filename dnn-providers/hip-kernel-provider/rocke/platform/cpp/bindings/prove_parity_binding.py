@@ -45,8 +45,8 @@ import rocke_engine  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import attention_tiled_parity_configs as atp  # noqa: E402
 
-# Families whose table must cover every emitter config: the emitter must
-# reject the first index past the table, or the table has fallen behind.
+# Families whose table must cover every emitter config: the emitter must report
+# "unknown config index N" for the first index N past the table.
 _COMPLETE_TABLES = frozenset(
     {
         "gfx942_attention_tiled_2d",
@@ -2001,12 +2001,17 @@ def main():
                     f"(len {len(got)} vs {len(std)})"
                 )
         if fam in _COMPLETE_TABLES:
-            past, _ = run_emitter(fam, len(cfgs))
-            if past:
+            # The first index past the table must be unknown to the emitter. A
+            # build (the table is short), a reject or an exec error all fail.
+            end = len(cfgs)
+            past, past_err = run_emitter(fam, end)
+            if past != "" or f"unknown config index {end}" not in (past_err or ""):
                 n_mismatch += 1
+                why = "builds it" if past else f"says {past_err!r}"
                 details.append(
-                    f"  cfg{len(cfgs)}: the emitter builds it but the table ends at "
-                    f"{len(cfgs) - 1}; update attention_tiled_parity_configs.py"
+                    f"  cfg{end}: the emitter {why}, not 'unknown config index "
+                    f"{end}'; attention_tiled_parity_configs.py must cover every "
+                    "emitter config"
                 )
         total_match += n_match
         total_mismatch += n_mismatch
