@@ -36,6 +36,8 @@ from codegen.ops.fmha_fwd import (
 )
 
 
+SPLITKV_PIPELINES_TAG = ["qr", "qr_nwarp_sshuffle", "qr_tdm"]
+
 FMHA_FWD_SPLITKV_PIPELINE_MAP = {
     "qr": "ck_tile::BlockFmhaFwdSplitKVPipelineQRKSVS",
     "qr_nwarp_sshuffle": "ck_tile::BlockFmhaFwdSplitKVPipelineNWarpSShuffleQRKSVS",
@@ -361,7 +363,7 @@ class FmhaFwdSplitKVApiTrait:
                 return "true"  # always support
             else:
                 return "true"
-        elif self.pipeline_tag in FMHA_FWD_SPLITKV_PIPELINE_MAP:
+        elif self.pipeline_tag in SPLITKV_PIPELINES_TAG:
             if self.spad == "t":
                 return f"true /*a.seqlen_q % {self.bm0} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
             else:
@@ -386,7 +388,7 @@ class FmhaFwdSplitKVApiTrait:
                 return f"a.seqlen_k == 0 || a.seqlen_k % {self.bn0} != 0"
             else:
                 return f"a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0"
-        elif self.pipeline_tag in FMHA_FWD_SPLITKV_PIPELINE_MAP:
+        elif self.pipeline_tag in SPLITKV_PIPELINES_TAG:
             if self.skpad == "t":
                 return f"true /*a.seqlen_k_ptr != nullptr || a.seqlen_k % {self.bn0} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
             else:
@@ -406,7 +408,7 @@ class FmhaFwdSplitKVApiTrait:
             if self.dpad == "t":
                 return "a.hdim_q % 8 == 0"
             return f"a.hdim_q % {TDM_K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
-        elif self.pipeline_tag in FMHA_FWD_SPLITKV_PIPELINE_MAP:
+        elif self.pipeline_tag in SPLITKV_PIPELINES_TAG:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dpad == "t":
                 return f"true /*a.hdim_q % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
@@ -427,7 +429,7 @@ class FmhaFwdSplitKVApiTrait:
             if self.dvpad == "t":
                 return "a.hdim_v % 8 == 0"
             return f"a.hdim_v % {TDM_K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
-        elif self.pipeline_tag in FMHA_FWD_SPLITKV_PIPELINE_MAP:
+        elif self.pipeline_tag in SPLITKV_PIPELINES_TAG:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dvpad == "t":
                 return f"true /*a.hdim_v % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
