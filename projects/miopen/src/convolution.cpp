@@ -415,9 +415,8 @@ std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,
             ctx.use_dynamic_solutions_only = findMode.IsDynamicHybrid(ctx);
             break; // Fall down to Normal Find.
         }
-        const auto id             = solver::Id{solutions.front().solution_id};
-        const auto& s             = id.GetSolver();
-        const auto workspace_size = s.GetWorkspaceSize(ctx, problem);
+        // With perf-db access disabled, GetSolutions() reports the solver's GetWorkspaceSize().
+        const auto workspace_size = solutions.front().workspace_size;
 
         MIOPEN_LOG_I(workspace_size);
         return workspace_size;

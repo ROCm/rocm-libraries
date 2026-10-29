@@ -30,6 +30,15 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   the 2 GiB bound are restored where the tuned config passes the new check. This restores
   ResNet-50/101 FP32 batch-1024 backward-weights speed. FP16/BF16 keep the 2 GiB bound, and so
   does the weight tensor in every case.
+* [Conv] Fixed convolution solution queries trusting the workspace size stored in the find-db.
+  `miopenConvolution*GetSolution`, Hybrid and Fast Find, and TrustVerify now use the size the
+  solver requires: Find checks the buffer against the workspace of the configuration that runs
+  and reports the maximum, as `miopenConvolution*GetWorkSpaceSize` does. A stored size that was
+  too small could make `miopenConvolution*Immediate` run with too little workspace. A stored size
+  that was too large could make Find skip the best solver, and TrustVerify copied the wrong size
+  into the user find-db.
+* [Conv] Fixed wrong workspace sizes in the gfx950 and gfx942 system find-dbs, mostly for
+  `GemmWrwUniversal`, the CK grouped backward-weights solvers and `TransposedConvBinWinoRxS`.
 
 ### Added
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
@@ -91,13 +100,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * Fixed a `uint64_t` typedef conflict between `miopen_cstdint.hpp` and the system `<stdint.h>`
   that broke runtime kernel compilation on LP64 Linux.
 * [Conv] Fixed `TransposedConvWinoRageRxS<2,3>` being unreachable: it was registered in the solver registry and explicitly instantiated but missing from both Find solver lists, so it could never be enumerated or selected for NHWC convolutions.
-* [Conv] Fixed convolution solution queries trusting the workspace size stored in the find-db.
-  `miopenConvolution*GetSolution`, Hybrid and Fast Find, and TrustVerify now use the size the
-  solver requires. A stored size that was too small could make `miopenConvolution*Immediate` run
-  with too little workspace. A stored size that was too large could make Find skip the best
-  solver, and TrustVerify copied the wrong size into the user find-db.
-* [Conv] Fixed 22,220 wrong workspace sizes in the gfx950 system find-db, mostly for
-  `GemmWrwUniversal`, the CK grouped backward-weights solvers and `TransposedConvBinWinoRxS`.
 
 ### Added
 * [Conv] Added gfx950 depthwise backward-weights (fp16/bf16) and gfx1250 depthwise

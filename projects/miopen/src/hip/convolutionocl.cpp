@@ -123,29 +123,34 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     ///
     /// The workspace size recorded in find-db is not trusted: shipped find-dbs have been found
     /// with wrong values, and the record may come from another library version. The solver's own
-    /// requirement is used instead, both for the IsEnoughWorkspace() check and for the value
-    /// returned to the caller:
-    /// - In Find (non-zero InvokeParams), the solver's GetWorkspaceSize(), i.e. the maximum over
-    ///   its configurations, which is also what GWSS returns.
-    /// - Otherwise (immediate mode), the workspace of the configuration that Immediate will run.
-    ///   For tunable solvers this is the perf-db (or default) configuration resolved the same way
-    ///   as in CompileSolution(). This avoids GetWorkspaceSize() walking every configuration,
-    ///   which takes milliseconds for some CK solvers.
+    /// requirement is used instead:
+    /// - IsEnoughWorkspace() checks the workspace of the configuration that would run. For a
+    ///   tunable solver that is the perf-db (or default) configuration, resolved the same way as
+    ///   in CompileSolution(). Checking the maximum over configurations instead would drop a
+    ///   solver whose tuned configuration fits the buffer.
+    /// - The reported size is the same, except in Find (non-zero InvokeParams), which reports
+    ///   the solver's GetWorkspaceSize(), i.e. the maximum over its configurations, like GWSS.
+    /// - GWSS disables perf-db access and only uses the solver id, so the configuration is not
+    ///   resolved there and GetWorkspaceSize() is used.
     ///
     /// The loop below does all the above at once.
     std::sort(begin(interim), end(interim), SolutionTimeComparator{});
     auto out = std::vector<miopenConvSolution_t>{};
     out.reserve(maxSolutionCount);
-    auto n_copied                        = 0;
-    auto immediate_ctx                   = ctx;
-    immediate_ctx.disable_search_enforce = true;
-    auto db                              = MakeConvDbGetter(immediate_ctx);
-    const auto required_workspace        = [&](const solver::AnySolver& solver) -> std::size_t {
+    auto n_copied                  = 0;
+    auto run_ctx                   = ctx;
+    run_ctx.do_search              = false;
+    run_ctx.disable_search_enforce = true;
+    auto db                        = MakeConvDbGetter(run_ctx);
+    const auto resolves_config     = [&](const solver::AnySolver& solver) {
+        return solver.IsTunable() && !ctx.disable_perfdb_access;
+    };
+    const auto run_workspace = [&](const solver::AnySolver& solver) -> std::size_t {
         if(!solver.MayNeedWorkspace())
             return 0;
-        if(invokeParams == nullptr && solver.IsTunable())
+        if(resolves_config(solver))
         {
-            const auto solution = solver.FindSolution(immediate_ctx, problem, db, {});
+            const auto solution = solver.FindSolution(run_ctx, problem, db, {});
             if(solution.Succeeded())
                 return solution.workspace_sz;
         }
@@ -157,16 +162,20 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
         const auto& solver   = solver_id.GetSolver();
         if(!solver.IsApplicable(ctx, problem))
             continue;
-        const auto workspace_size = required_workspace(solver);
-        if(workspace_size != s.workspace_size)
+        const auto required = run_workspace(solver);
+        if(!conv::IsEnoughWorkspace("GetSolutions", solver_id, required, invokeParams))
+            continue;
+        const auto reported =
+            (invokeParams != nullptr && solver.MayNeedWorkspace() && resolves_config(solver))
+                ? solver.GetWorkspaceSize(ctx, problem)
+                : required;
+        if(reported != s.workspace_size)
         {
             MIOPEN_LOG_I2(solver_id.ToString()
                           << ": find-db workspace " << s.workspace_size << " differs from required "
-                          << workspace_size << ", using the latter");
-            s.workspace_size = workspace_size;
+                          << reported << ", using the latter");
+            s.workspace_size = reported;
         }
-        if(!conv::IsEnoughWorkspace("GetSolutions", solver_id, s.workspace_size, invokeParams))
-            continue;
         out.push_back(s);
         if(++n_copied >= maxSolutionCount)
             break;
@@ -520,10 +529,10 @@ std::vector<Solution> FindConvolution(const ExecutionContext& ctx,
         {
             /// It is possible to measure actual execution time and return it to the caller.
             /// \todo Consider if we need (and want to spend time) for this.
-            const auto id      = solver::Id{sol->solution_id};
-            const auto& solver = id.GetSolver();
+            const auto id = solver::Id{sol->solution_id};
             CompileSolution(id, ctx, problem);
-            results.push_back({id, sol->time, solver.GetWorkspaceSize(ctx, problem)});
+            // GetSolutions() and the fallback already report GetWorkspaceSize() in Find.
+            results.push_back({id, sol->time, sol->workspace_size});
         }
     }
     else
