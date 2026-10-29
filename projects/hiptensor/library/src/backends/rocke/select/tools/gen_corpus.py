@@ -31,7 +31,9 @@ with random mode splits and random storage orders; --aligned makes a share of th
 multiples of 8 (the GEMM bodies' K tiles divide them, so rocKE's tensor GETT planner serves more of
 them), --padded pads a share of the tensors' strides. A refinement round adds jittered neighbours of
 problems where the selector lost (refine); `pick` writes the lines of chosen problem ids (the
-problems train_select.py propose chose from a pool).
+problems train_select.py propose chose from a pool). --big draws large problems instead: GEMM-view
+extents from 2^9 up to 2^2 past the row's range, the flop cap raised by 2^7 and tensors up to
+1 GiB (the sizes of the requirements' large rows, past the default design's caps).
 
 Spec lines (one problem each, read by sweep_driver.cpp):
   C <id> <dtype> <compute> <bilinear> <nA> <nB> <nD> modesA.. extA.. strA.. modesB.. extB.. strB..
@@ -40,7 +42,7 @@ Spec lines (one problem each, read by sweep_driver.cpp):
 
 usage:
   gen_corpus.py contraction --seed S --per-row N --out FILE [--rows h16f,h16b,s,c,d,z]
-                            [--aligned 0.6] [--padded 0.15] [--first-id I]
+                            [--aligned 0.6] [--padded 0.15] [--first-id I] [--big]
   gen_corpus.py reduction   --seed S --per-row N --out FILE
   gen_corpus.py refine      --from SPECS --worst IDS --seed S --per 3 --out FILE
   gen_corpus.py pick        --from SPECS --worst IDS --out FILE
@@ -139,15 +141,17 @@ def tensor_fields(modes, ext, strides):
     )
 
 
-def contraction_spec(pid, row, lgm, lgn, lgk, rng, aligned=0.0, padded=0.0):
+def contraction_spec(pid, row, lgm, lgn, lgk, rng, aligned=0.0, padded=0.0, big=False):
     dtype, compute, es, cap, (lo, hi) = CROWS[row]
+    max_bytes = MAX_TENSOR_BYTES
+    if big:
+        cap += 7
+        max_bytes = 1 << 30
     M = round_extent(2**lgm, rng)
     N = round_extent(2**lgn, rng)
     K = round_extent(2**lgk, rng)
     # flop cap and tensor size cap: shrink the largest extent
-    while (
-        math.log2(M * N * K) > cap or max(M * K, N * K, M * N) * es > MAX_TENSOR_BYTES
-    ):
+    while math.log2(M * N * K) > cap or max(M * K, N * K, M * N) * es > max_bytes:
         if M >= N and M >= K:
             M = max(1, M * 3 // 4)
         elif N >= K:
@@ -237,6 +241,7 @@ def main():
     ap.add_argument("--per", type=int, default=3)
     ap.add_argument("--aligned", type=float, default=0.0)
     ap.add_argument("--padded", type=float, default=0.0)
+    ap.add_argument("--big", action="store_true")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     rng = random.Random(a.seed)
@@ -246,12 +251,14 @@ def main():
         rows = a.rows.split(",") if a.rows else list(CROWS)
         for row in rows:
             lo, hi = CROWS[row][4]
+            if a.big:
+                lo, hi = 9, hi + 2
             shift = [rng.random() for _ in range(3)]
             for i in range(a.per_row):
                 u = [(halton(i + 1, PRIMES[d]) + shift[d]) % 1.0 for d in range(3)]
                 lg = [lo + (hi - lo) * x for x in u]
                 lines.append(
-                    contraction_spec(pid, row, *lg, rng, a.aligned, a.padded)
+                    contraction_spec(pid, row, *lg, rng, a.aligned, a.padded, a.big)
                 )
                 pid += 1
     elif a.kind == "reduction":
@@ -313,7 +320,10 @@ def main():
                 lines.append(" ".join(g))
     with open(a.out, "w", newline="\n") as fh:
         fh.write("\n".join(lines) + "\n")
-    print(f"{a.out}: {len(lines)} problems, ids {a.first_id}..{pid - 1}")
+    if a.kind == "pick":
+        print(f"{a.out}: {len(lines)} problems (their ids kept)")
+    else:
+        print(f"{a.out}: {len(lines)} problems, ids {a.first_id}..{pid - 1}")
 
 
 if __name__ == "__main__":

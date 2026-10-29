@@ -193,10 +193,10 @@ namespace
 
     // sums of (x - r)^2 and r^2 over the elements finite in r, and the count of those not
     // finite in x
-    __global__ void
-        compare(void const* x, void const* r, size_t n, int kind, double* sums, unsigned long long* bad)
+    __global__ void compare(
+        void const* x, void const* r, size_t n, int kind, double* sums, unsigned long long* bad)
     {
-        double d2 = 0.0, r2 = 0.0;
+        double             d2 = 0.0, r2 = 0.0;
         unsigned long long b = 0;
         for(size_t i = blockIdx.x * size_t(blockDim.x) + threadIdx.x; i < n;
             i += size_t(gridDim.x) * blockDim.x)
@@ -328,26 +328,26 @@ namespace
         return s;
     }
 
-#define CHECK_HIP(x)                                                                      \
-    do                                                                                    \
-    {                                                                                     \
-        if((x) != hipSuccess)                                                             \
-        {                                                                                 \
-            std::fprintf(stderr, "HIP error %s at line %d\n", #x, __LINE__);            \
-            std::exit(4);                                                                 \
-        }                                                                                 \
+#define CHECK_HIP(x)                                                         \
+    do                                                                       \
+    {                                                                        \
+        if((x) != hipSuccess)                                                \
+        {                                                                    \
+            std::fprintf(stderr, "HIP error %s at line %d\n", #x, __LINE__); \
+            std::exit(4);                                                    \
+        }                                                                    \
     } while(0)
 
     struct Cold
     {
-        int         reps   = 0;
-        size_t      flushB = size_t(1024) << 20;
-        bool        jit    = false;
-        FILE*       out    = nullptr;
-        void*       flush  = nullptr;
-        uint32_t*   sink   = nullptr;
-        double*     sums   = nullptr;
-        unsigned long long* bad = nullptr;
+        int                 reps   = 0;
+        size_t              flushB = size_t(1024) << 20;
+        bool                jit    = false;
+        FILE*               out    = nullptr;
+        void*               flush  = nullptr;
+        uint32_t*           sink   = nullptr;
+        double*             sums   = nullptr;
+        unsigned long long* bad    = nullptr;
     };
 
     // Plans every candidate of a contraction (KERNEL_RANK 0, 1, ...) and times it cold; see the
@@ -428,10 +428,10 @@ namespace
         {
             return;
         }
-        int const kind  = kindOf(type);
-        int const reals = realsOf(type);
+        int const    kind  = kindOf(type);
+        int const    reals = realsOf(type);
         size_t const ea = A.span() * reals, eb = B.span() * reals, ed = D.span() * reals;
-        size_t const eb_ = realBytes(kind);
+        size_t const eb_   = realBytes(kind);
         uint64_t     wsMax = 0;
         for(auto const& c : cands)
             wsMax = std::max(wsMax, c.ws);
@@ -463,17 +463,8 @@ namespace
         CHECK_HIP(hipDeviceSynchronize());
         auto const sc  = scalarsFor(compute);
         auto       run = [&](Cand const& c, void* out) {
-            return hiptensorContract(h,
-                                     c.plan,
-                                     sc.alpha,
-                                     dA,
-                                     dB,
-                                     sc.beta,
-                                     bilinear ? dC : nullptr,
-                                     out,
-                                     dW,
-                                     c.ws,
-                                     0);
+            return hiptensorContract(
+                h, c.plan, sc.alpha, dA, dB, sc.beta, bilinear ? dC : nullptr, out, dW, c.ws, 0);
         };
         // the reference output: the f64 route when the problem has it
         size_t refIdx = 0;
@@ -565,21 +556,22 @@ namespace
                                   : 0.5 * (double(t[m / 2 - 1]) + double(t[m / 2])));
                 best = 1000.0 * double(t[0]);
             }
-            std::fprintf(cold.out,
-                         "{\"tag\":\"%s\",\"rank\":%d,\"key\":\"%s\",\"status\":\"%s\",\"us\":%.4f,"
-                         "\"us_min\":%.4f,\"reps\":%zu,\"rel_dev\":%.6g,\"bad\":%llu,\"ref\":\"%s\","
-                         "\"ws\":%llu}\n",
-                         tag.c_str(),
-                         c.rank,
-                         c.key.c_str(),
-                         hiptensorGetErrorString(status[i]),
-                         median,
-                         best,
-                         t.size(),
-                         relDev[i],
-                         nbad[i],
-                         cands[refIdx].key.c_str(),
-                         static_cast<unsigned long long>(c.ws));
+            std::fprintf(
+                cold.out,
+                "{\"tag\":\"%s\",\"rank\":%d,\"key\":\"%s\",\"status\":\"%s\",\"us\":%.4f,"
+                "\"us_min\":%.4f,\"reps\":%zu,\"rel_dev\":%.6g,\"bad\":%llu,\"ref\":\"%s\","
+                "\"ws\":%llu}\n",
+                tag.c_str(),
+                c.rank,
+                c.key.c_str(),
+                hiptensorGetErrorString(status[i]),
+                median,
+                best,
+                t.size(),
+                relDev[i],
+                nbad[i],
+                cands[refIdx].key.c_str(),
+                static_cast<unsigned long long>(c.ws));
         }
         std::fflush(cold.out);
         CHECK_HIP(hipEventDestroy(e0));
@@ -721,8 +713,8 @@ int main(int argc, char** argv)
             A       = readTensor(ss, na);
             D       = readTensor(ss, nd);
             auto dA = describe(h, A, type), dC = describe(h, D, type), dD = describe(h, D, type);
-            descs   = {dA, dC, dD};
-            st      = hiptensorCreateReduction(h,
+            descs = {dA, dC, dD};
+            st    = hiptensorCreateReduction(h,
                                           &desc,
                                           dA,
                                           A.modes.data(),
@@ -742,20 +734,18 @@ int main(int argc, char** argv)
             if(!dumpPath.empty())
                 setenv("HIPTENSOR_ROCKE_SELECT_DUMP", dumpPath.c_str(), 1);
             hiptensorPlanPreference_t pref = nullptr;
-            hiptensorCreatePlanPreference(h,
-                                          &pref,
-                                          defaultRun ? HIPTENSOR_ALGO_DEFAULT
-                                                     : HIPTENSOR_ALGO_DEFAULT_PATIENT,
-                                          cold.jit ? HIPTENSOR_JIT_MODE_DEFAULT
-                                                   : HIPTENSOR_JIT_MODE_NONE);
+            hiptensorCreatePlanPreference(
+                h,
+                &pref,
+                defaultRun ? HIPTENSOR_ALGO_DEFAULT : HIPTENSOR_ALGO_DEFAULT_PATIENT,
+                cold.jit ? HIPTENSOR_JIT_MODE_DEFAULT : HIPTENSOR_JIT_MODE_NONE);
             hiptensorCacheMode_t none = HIPTENSOR_CACHE_MODE_NONE;
             hiptensorPlanPreferenceSetAttribute(
                 h, pref, HIPTENSOR_PLAN_PREFERENCE_CACHE_MODE, &none, sizeof(none));
             // the workspace every candidate runs with: the dump lists every candidate (a plan
             // with the DEFAULT estimate selects the same candidate among fewer)
-            uint64_t ws          = 0;
-            st                   = hiptensorEstimateWorkspaceSize(
-                h, desc, pref, HIPTENSOR_WORKSPACE_MAX, &ws);
+            uint64_t ws = 0;
+            st = hiptensorEstimateWorkspaceSize(h, desc, pref, HIPTENSOR_WORKSPACE_MAX, &ws);
             hiptensorPlan_t plan = nullptr;
             lastSelection.clear();
             double planUs = 0;

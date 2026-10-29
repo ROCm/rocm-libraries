@@ -629,9 +629,8 @@ namespace
         }
         api->keep(desc);
         hiptensorPlanPreference_t pref = nullptr;
-        EXPECT_EQ(
-            hiptensorCreatePlanPreference(api->handle, &pref, opt.algo, opt.jit),
-            HIPTENSOR_STATUS_SUCCESS);
+        EXPECT_EQ(hiptensorCreatePlanPreference(api->handle, &pref, opt.algo, opt.jit),
+                  HIPTENSOR_STATUS_SUCCESS);
         uint64_t estimate = 0;
         EXPECT_EQ(hiptensorEstimateWorkspaceSize(
                       api->handle, desc, pref, HIPTENSOR_WORKSPACE_DEFAULT, &estimate),
@@ -1603,9 +1602,8 @@ namespace
 {
     // A selection model file <dir>/<target>/<cell>.model for HIPTENSOR_ROCKE_SELECT_MODELS (a
     // new directory per name: the library reads a model once per process and source).
-    std::string writeSelectModel(std::string const& name,
-                                 std::string const& cell,
-                                 std::string const& text)
+    std::string
+        writeSelectModel(std::string const& name, std::string const& cell, std::string const& text)
     {
         std::string const dir = tempPath("select_models_" + name);
         std::string const sub = dir + "/" + deviceArch();
@@ -1619,11 +1617,7 @@ namespace
     std::string favourRoute(int route)
     {
         char tree[96];
-        std::snprintf(tree,
-                      sizeof(tree),
-                      "3;0 0;%d.5 %d.5;-1 -2;1 -3;1 0 1",
-                      route - 1,
-                      route);
+        std::snprintf(tree, sizeof(tree), "3;0 0;%d.5 %d.5;-1 -2;1 -3;1 0 1", route - 1, route);
         return tree;
     }
 
@@ -1661,9 +1655,8 @@ TEST(RockeGettJitSelection, ModelScoresTheJitRoute)
     RunOptions                opt;
     opt.variants = {{"plain", 1.0, -2.0, false, false, 0, 0}};
     auto with    = [&](std::string const& name, std::string const& text) {
-        ScopedEnvironmentVariable models(
-            "HIPTENSOR_ROCKE_SELECT_MODELS",
-            writeSelectModel(name, "contraction.h", text).c_str());
+        ScopedEnvironmentVariable models("HIPTENSOR_ROCKE_SELECT_MODELS",
+                                         writeSelectModel(name, "contraction.h", text).c_str());
         return runProblem(p, opt);
     };
     auto const head = std::string("v2;schema=2;routes=3,6,7,8,11;margin=0;features=route;trees=1|");
@@ -1678,7 +1671,8 @@ TEST(RockeGettJitSelection, ModelScoresTheJitRoute)
     EXPECT_TRUE(direct.exact);
     // no compile for a JIT candidate the selection did not pick
     EXPECT_EQ(direct.kernels, 0);
-    auto rule = with("rule", "v2;schema=2;routes=3,6,7,8;margin=0;features=route;trees=1|" + favourRoute(8));
+    auto rule = with(
+        "rule", "v2;schema=2;routes=3,6,7,8;margin=0;features=route;trees=1|" + favourRoute(8));
     EXPECT_TRUE(rule.jit) << rule.pick;
     EXPECT_EQ(rule.source, "TUNED");
     EXPECT_EQ(rule.reason, "rocKE's tensor GETT planner (JIT)");
@@ -1731,13 +1725,13 @@ TEST(RockeGettJitSelection, FeaturesBeforeAndAfterTheBuild)
         GTEST_SKIP() << "the planner serves gfx950";
     }
     // a problem no other test plans: its kernels are not in this process's kernel cache
-    Problem const p{"features_f16",
+    Problem const     p{"features_f16",
                     HIPTENSOR_R_16F,
                     true,
-                    {"K0", "M0"},
-                    {"K0", "N0"},
-                    {"N0", "M0"},
-                    {{"K0", 320}, {"M0", 208}, {"N0", 176}}};
+                        {"K0", "M0"},
+                        {"K0", "N0"},
+                        {"N0", "M0"},
+                        {{"K0", 320}, {"M0", 208}, {"N0", 176}}};
     std::string const dump = tempPath("features_dump.jsonl");
     std::remove(dump.c_str());
     ScopedEnvironmentVariable out("HIPTENSOR_ROCKE_SELECT_DUMP", dump.c_str());
@@ -1769,6 +1763,63 @@ TEST(RockeGettJitSelection, FeaturesBeforeAndAfterTheBuild)
     // the planned launches and the planner's route are features of the candidate
     EXPECT_EQ(features(pending[0]).find("\"gett_kind\":0"), std::string::npos) << pending[0];
     EXPECT_EQ(features(pending[0]).find("\"steps\":0"), std::string::npos) << pending[0];
+    EXPECT_EQ(features(pending[0]).find("\"lg_pred_ns\":0"), std::string::npos) << pending[0];
+    std::remove(dump.c_str());
+}
+
+// The JIT candidate's route feature (gett_kind) names the route rocKE's planner chose: 1 MN-layout
+// GETT, 2 MN-layout GETT after tensor_pack copies, 3 K-contiguous GETT after copies, 4 ring body,
+// 5 K-contiguous GETT on the operands in place.
+TEST(RockeGettJitSelection, RouteFeatureNamesThePlannersRoute)
+{
+    if(!plannerTarget())
+    {
+        GTEST_SKIP() << "the planner serves gfx950";
+    }
+    std::string const dump = tempPath("route_dump.jsonl");
+    std::remove(dump.c_str());
+    ScopedEnvironmentVariable        out("HIPTENSOR_ROCKE_SELECT_DUMP", dump.c_str());
+    std::map<std::string, int> const kinds = {{"single/tensor_gett_mn", 1},
+                                              {"pack_hybrid/tensor_gett_mn", 2},
+                                              {"pack_hybrid/tensor_gett_kc", 3},
+                                              {"single/tensor_gett_t32s3", 4},
+                                              {"pack_hybrid/tensor_gett_t32s3", 4},
+                                              {"single/tensor_gett_kc", 5}};
+    std::set<int>                    seen;
+    RunOptions                       opt;
+    opt.variants = {{"plain", 1.0, -2.0, false, false, 0, 0}};
+    // the fixed problems, and long contractions with both operands K-contiguous (the K-contiguous
+    // route on the operands in place)
+    auto problems = fixedProblems();
+    for(auto type : {HIPTENSOR_R_16F, HIPTENSOR_R_16BF})
+    {
+        problems.push_back({type == HIPTENSOR_R_16F ? "kc_in_place_f16" : "kc_in_place_bf16",
+                            type,
+                            false,
+                            {"M0", "K0"},
+                            {"N0", "K0"},
+                            {"M0", "N0"},
+                            {{"K0", 8192}, {"M0", 256}, {"N0", 384}}});
+    }
+    for(auto const& p : problems)
+    {
+        ScopedEnvironmentVariable tag("HIPTENSOR_ROCKE_SELECT_DUMP_TAG", p.name.c_str());
+        auto                      o = runProblem(p, opt);
+        if(!o.jit)
+        {
+            continue;
+        }
+        auto const lines = dumpLines(dump, p.name, "jit:");
+        ASSERT_EQ(lines.size(), 1u) << p.name;
+        auto const it = kinds.find(o.route);
+        ASSERT_NE(it, kinds.end()) << o.route;
+        EXPECT_NE(lines[0].find("\"gett_kind\":" + std::to_string(it->second) + ","),
+                  std::string::npos)
+            << o.route << ": " << lines[0];
+        seen.insert(it->second);
+    }
+    // the fixed problems take MN-layout, pack hybrid, K-contiguous and ring-body routes
+    EXPECT_GE(seen.size(), 3u);
     std::remove(dump.c_str());
 }
 

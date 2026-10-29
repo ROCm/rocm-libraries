@@ -90,7 +90,7 @@ namespace hiptensor
             Model,
             Tuned,
             Rule, // a candidate the rules put first (the ring GETT, the direct GETT, the tuned
-                  // reduction classes) because the model does not score its route
+            // reduction classes) because the model does not score its route
         };
 
         char const* sourceName(SelectSource source);

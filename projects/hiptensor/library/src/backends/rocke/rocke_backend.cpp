@@ -287,8 +287,7 @@ namespace hiptensor
                     if(result != nullptr)
                     {
                         snprintf(num, sizeof(num), "%.4f", result->medianUs[i]);
-                        line += std::string(",\"us\":") + num
-                                + ",\"reps\":" + std::to_string(reps);
+                        line += std::string(",\"us\":") + num + ",\"reps\":" + std::to_string(reps);
                     }
                     line += ",\"f\":{";
                     for(size_t k = 0; k < names.size(); k++)

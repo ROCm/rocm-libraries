@@ -32,7 +32,8 @@
 //  - hiptensorCreatePlan accepts a null preference, and a preference shared by several plans
 //    is not modified by any of them;
 //  - a contraction kernel's workspace size can be queried after it reported insufficient
-//    workspace and after it ran.
+//    workspace and after it ran;
+//  - complex scalars need no alignment beyond their bytes (alpha / beta at any byte offset).
 // The kernels' expected outputs come from plain loops with 64-bit offsets, not from the CPU
 // reference. The data are small integers, so every result is exact and compared bit for bit.
 
@@ -40,9 +41,12 @@
 #include <hip/hip_runtime.h>
 #include <hiptensor/hiptensor.h>
 
+#include <complex>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "contraction/contraction_solution.hpp"
@@ -1035,3 +1039,287 @@ TEST(ContractionSolutionWorkspaceTest, SizeAfterRunIsZero)
     EXPECT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
     EXPECT_EQ(solution.workspaceSize(), 0u);
 }
+
+// The scalars of hiptensorContract are host pointers without an alignment requirement beyond the
+// element bytes: a complex-double alpha stored as double[2] (8-byte aligned) or at any byte offset
+// of a buffer. Reading them as hipDoubleComplex (16-byte aligned type) used to fault in readVal
+// (SIGSEGV on every complex-double contraction with such scalars, Composable Kernel backend).
+// Complex f64 and f32 contractions, scale and bilinear, with alpha and beta 0, 4 and 8 bytes past a
+// 16-byte boundary, on each backend built into the library, against an exact loop reference.
+namespace
+{
+    // Sets an environment variable for the life of the object.
+    struct ScopedEnvironment
+    {
+        ScopedEnvironment(char const* name, char const* value)
+            : mName(name)
+        {
+            if(char const* old = std::getenv(name))
+            {
+                mOld     = old;
+                mHadOld  = true;
+            }
+            set(value);
+        }
+        ~ScopedEnvironment()
+        {
+            set(mHadOld ? mOld.c_str() : nullptr);
+        }
+        void set(char const* value)
+        {
+#ifdef _WIN32
+            _putenv_s(mName, value == nullptr ? "" : value);
+#else
+            if(value == nullptr)
+            {
+                unsetenv(mName);
+            }
+            else
+            {
+                setenv(mName, value, 1);
+            }
+#endif
+        }
+        char const* mName;
+        std::string mOld;
+        bool        mHadOld = false;
+    };
+
+    struct ScalarAlignmentCase
+    {
+        char const*         backend;
+        hiptensorDataType_t type; // HIPTENSOR_C_32F or HIPTENSOR_C_64F
+        bool                bilinear;
+        std::size_t         offset; // bytes past a 16-byte boundary
+    };
+
+    std::string scalarAlignmentName(::testing::TestParamInfo<ScalarAlignmentCase> const& info)
+    {
+        auto const& c = info.param;
+        return std::string(c.backend) + (c.type == HIPTENSOR_C_64F ? "_c64" : "_c32")
+               + (c.bilinear ? "_bilinear" : "_scale") + "_offset" + std::to_string(c.offset);
+    }
+
+    class ScalarAlignmentTest : public ::testing::TestWithParam<ScalarAlignmentCase>
+    {
+    };
+
+    // Stores complex value v as element i of `bytes` (complex f32 or f64).
+    void putComplex(std::vector<uint8_t>& bytes, std::size_t i, bool f64, double re, double im)
+    {
+        if(f64)
+        {
+            double const v[2] = {re, im};
+            std::memcpy(bytes.data() + i * 16, v, 16);
+        }
+        else
+        {
+            float const v[2] = {static_cast<float>(re), static_cast<float>(im)};
+            std::memcpy(bytes.data() + i * 8, v, 8);
+        }
+    }
+
+    std::complex<double> getComplex(std::vector<uint8_t> const& bytes, std::size_t i, bool f64)
+    {
+        if(f64)
+        {
+            double v[2];
+            std::memcpy(v, bytes.data() + i * 16, 16);
+            return {v[0], v[1]};
+        }
+        float v[2];
+        std::memcpy(v, bytes.data() + i * 8, 8);
+        return {v[0], v[1]};
+    }
+} // namespace
+
+TEST_P(ScalarAlignmentTest, ComplexContractionWithUnalignedScalars)
+{
+    auto const        c   = GetParam();
+    bool const        f64 = c.type == HIPTENSOR_C_64F;
+    std::size_t const es  = f64 ? 16 : 8;
+    ScopedEnvironment backend("HIPTENSOR_BACKEND", c.backend);
+    ScopedEnvironment fallback("HIPTENSOR_BACKEND_FALLBACK", "0");
+
+    HandleGuard handle;
+    ASSERT_EQ(hiptensorCreate(&handle.handle), HIPTENSOR_STATUS_SUCCESS);
+
+    // D[c,d,e,f] = alpha * A[c,d,a,b] * B[e,f,a,b] (+ beta * C[c,d,e,f]), packed column-major
+    int64_t const        a = 3, b = 2, cc = 4, d = 3, e = 5, f = 2;
+    std::vector<int64_t> lA = {cc, d, a, b}, lB = {e, f, a, b}, lD = {cc, d, e, f};
+    std::vector<int32_t> mA = {'c', 'd', 'a', 'b'}, mB = {'e', 'f', 'a', 'b'},
+                         mD = {'c', 'd', 'e', 'f'};
+    std::size_t const    nA = cc * d * a * b, nB = e * f * a * b, nD = cc * d * e * f;
+    auto                 make = [&](TensorDescGuard& g, std::vector<int64_t> const& l) {
+        auto s = colMajorStrides(l);
+        return hiptensorCreateTensorDescriptor(handle.handle,
+                                               &g.desc,
+                                               static_cast<uint32_t>(l.size()),
+                                               l.data(),
+                                               s.data(),
+                                               c.type,
+                                               alignment);
+    };
+    TensorDescGuard dA, dB, dC, dD;
+    ASSERT_EQ(make(dA, lA), HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_EQ(make(dB, lB), HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_EQ(make(dC, lD), HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_EQ(make(dD, lD), HIPTENSOR_STATUS_SUCCESS);
+
+    OpDescGuard op;
+    auto const  compute = f64 ? HIPTENSOR_COMPUTE_DESC_C64F : HIPTENSOR_COMPUTE_DESC_C32F;
+    auto        status  = hiptensorCreateContraction(handle.handle,
+                                             &op.desc,
+                                             dA.desc,
+                                             mA.data(),
+                                             HIPTENSOR_OP_IDENTITY,
+                                             dB.desc,
+                                             mB.data(),
+                                             HIPTENSOR_OP_IDENTITY,
+                                             c.bilinear ? dC.desc : nullptr,
+                                             c.bilinear ? mD.data() : nullptr,
+                                             HIPTENSOR_OP_IDENTITY,
+                                             dD.desc,
+                                             mD.data(),
+                                             compute);
+    if(status == HIPTENSOR_STATUS_ARCH_MISMATCH)
+    {
+        GTEST_SKIP() << "no complex contraction on this device";
+    }
+    ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
+
+    PlanPrefGuard pref;
+    ASSERT_EQ(hiptensorCreatePlanPreference(
+                  handle.handle, &pref.pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE),
+              HIPTENSOR_STATUS_SUCCESS);
+    uint64_t workspaceSize = 0;
+    status                 = hiptensorEstimateWorkspaceSize(
+        handle.handle, op.desc, pref.pref, HIPTENSOR_WORKSPACE_DEFAULT, &workspaceSize);
+    PlanGuard plan;
+    if(status == HIPTENSOR_STATUS_SUCCESS)
+    {
+        status = hiptensorCreatePlan(handle.handle, &plan.plan, op.desc, pref.pref, workspaceSize);
+    }
+    if(status == HIPTENSOR_STATUS_NOT_SUPPORTED || status == HIPTENSOR_STATUS_ARCH_MISMATCH)
+    {
+        GTEST_SKIP() << "backend " << c.backend << " is not built into this library or has no "
+                     << "kernels for this device (" << hiptensorGetErrorString(status) << ")";
+    }
+    ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
+    uint64_t required = 0;
+    ASSERT_EQ(hiptensorPlanGetAttribute(handle.handle,
+                                        plan.plan,
+                                        HIPTENSOR_PLAN_REQUIRED_WORKSPACE,
+                                        &required,
+                                        sizeof(required)),
+              HIPTENSOR_STATUS_SUCCESS);
+
+    // small complex integers: every product and sum is exact in f32
+    std::vector<uint8_t> hA(nA * es), hB(nB * es), hC(nD * es);
+    auto                 value = [](std::size_t i, int seed) {
+        return static_cast<double>(static_cast<int>((i * 5 + seed) % 7) - 3);
+    };
+    for(std::size_t i = 0; i < nA; i++)
+    {
+        putComplex(hA, i, f64, value(i, 1), value(i, 2));
+    }
+    for(std::size_t i = 0; i < nB; i++)
+    {
+        putComplex(hB, i, f64, value(i, 3), value(i, 4));
+    }
+    for(std::size_t i = 0; i < nD; i++)
+    {
+        putComplex(hC, i, f64, value(i, 5), value(i, 6));
+    }
+    DeviceBuffer pA, pB, pC, pD, ws;
+    ASSERT_EQ(hipMalloc(&pA.ptr, hA.size()), hipSuccess);
+    ASSERT_EQ(hipMalloc(&pB.ptr, hB.size()), hipSuccess);
+    ASSERT_EQ(hipMalloc(&pC.ptr, hC.size()), hipSuccess);
+    ASSERT_EQ(hipMalloc(&pD.ptr, hC.size()), hipSuccess);
+    ASSERT_EQ(hipMemcpy(pA.ptr, hA.data(), hA.size(), hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipMemcpy(pB.ptr, hB.data(), hB.size(), hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipMemcpy(pC.ptr, hC.data(), hC.size(), hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipMemset(pD.ptr, 0xFF, hC.size()), hipSuccess); // NaN until written
+    if(required > 0)
+    {
+        ASSERT_EQ(hipMalloc(&ws.ptr, required), hipSuccess);
+    }
+
+    // alpha = 2 - i, beta = -1 + 3i, `offset` bytes past 16-byte boundaries
+    std::complex<double> const alpha(2.0, -1.0), beta(c.bilinear ? -1.0 : 0.0, c.bilinear ? 3.0 : 0.0);
+    alignas(16) uint8_t        scalars[64] = {};
+    std::vector<uint8_t>       sa(es), sb(es);
+    putComplex(sa, 0, f64, alpha.real(), alpha.imag());
+    putComplex(sb, 0, f64, beta.real(), beta.imag());
+    std::memcpy(scalars + c.offset, sa.data(), es);
+    std::memcpy(scalars + 32 + c.offset, sb.data(), es);
+
+    ASSERT_EQ(hiptensorContract(handle.handle,
+                                plan.plan,
+                                scalars + c.offset,
+                                pA.ptr,
+                                pB.ptr,
+                                scalars + 32 + c.offset,
+                                c.bilinear ? pC.ptr : nullptr,
+                                pD.ptr,
+                                ws.ptr,
+                                required,
+                                nullptr),
+              HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    std::vector<uint8_t> got(hC.size());
+    ASSERT_EQ(hipMemcpy(got.data(), pD.ptr, got.size(), hipMemcpyDeviceToHost), hipSuccess);
+
+    int bad = 0;
+    for(int64_t fi = 0; fi < f; fi++)
+    {
+        for(int64_t ei = 0; ei < e; ei++)
+        {
+            for(int64_t di = 0; di < d; di++)
+            {
+                for(int64_t ci = 0; ci < cc; ci++)
+                {
+                    std::complex<double> sum = 0;
+                    for(int64_t bi = 0; bi < b; bi++)
+                    {
+                        for(int64_t ai = 0; ai < a; ai++)
+                        {
+                            sum += getComplex(hA, ci + cc * (di + d * (ai + a * bi)), f64)
+                                   * getComplex(hB, ei + e * (fi + f * (ai + a * bi)), f64);
+                        }
+                    }
+                    std::size_t const i    = ci + cc * (di + d * (ei + e * fi));
+                    auto const        want = alpha * sum + beta * getComplex(hC, i, f64);
+                    if(getComplex(got, i, f64) != want && bad++ < 5)
+                    {
+                        ADD_FAILURE() << "element " << i << " got " << getComplex(got, i, f64)
+                                      << " want " << want;
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_EQ(bad, 0);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Backends,
+    ScalarAlignmentTest,
+    ::testing::ValuesIn([] {
+        std::vector<ScalarAlignmentCase> cases;
+        for(char const* backend : {"ck", "rocke"})
+        {
+            for(auto type : {HIPTENSOR_C_64F, HIPTENSOR_C_32F})
+            {
+                for(bool bilinear : {false, true})
+                {
+                    for(std::size_t offset : {std::size_t(0), std::size_t(4), std::size_t(8)})
+                    {
+                        cases.push_back({backend, type, bilinear, offset});
+                    }
+                }
+            }
+        }
+        return cases;
+    }()),
+    scalarAlignmentName);

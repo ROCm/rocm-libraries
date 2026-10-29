@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <cstring>
 #include <iostream>
 
 #include "data_types.hpp"
@@ -124,64 +125,81 @@ namespace hiptensor
         static constexpr auto value = NONE_TYPE;
     };
 
+    // Host scalars come from user pointers that carry no alignment guarantee (a complex double
+    // passed as double[2] is only 8-byte aligned), so they are copied byte-wise, never
+    // dereferenced as the wider type.
+    template <typename T>
+    T loadUnaligned(void const* p)
+    {
+        T v;
+        std::memcpy(&v, p, sizeof(T));
+        return v;
+    }
+
+    template <typename T>
+    void storeUnaligned(void* p, T const& v)
+    {
+        std::memcpy(p, &v, sizeof(T));
+    }
+
     template <typename T>
     T readVal(void const* value, hiptensorDataType_t id)
     {
         if(id == HIPTENSOR_R_16BF)
         {
-            return static_cast<T>(*(hip_bfloat16*)value);
+            return static_cast<T>(loadUnaligned<hip_bfloat16>(value));
         }
         else if(id == HIPTENSOR_R_16F)
         {
-            return static_cast<T>(*(_Float16*)value);
+            return static_cast<T>(loadUnaligned<_Float16>(value));
         }
         else if(id == HIPTENSOR_R_32F)
         {
-            return static_cast<T>(*(float*)value);
+            return static_cast<T>(loadUnaligned<float>(value));
         }
         else if(id == HIPTENSOR_R_64F)
         {
-            return static_cast<T>(*(double*)value);
+            return static_cast<T>(loadUnaligned<double>(value));
         }
         else if(id == HIPTENSOR_R_8I)
         {
-            return static_cast<T>(*(int8_t*)value);
+            return static_cast<T>(loadUnaligned<int8_t>(value));
         }
         else if(id == HIPTENSOR_R_8U)
         {
-            return static_cast<T>(*(uint8_t*)value);
+            return static_cast<T>(loadUnaligned<uint8_t>(value));
         }
         else if(id == HIPTENSOR_R_16I)
         {
-            return static_cast<T>(*(int16_t*)value);
+            return static_cast<T>(loadUnaligned<int16_t>(value));
         }
         else if(id == HIPTENSOR_R_16U)
         {
-            return static_cast<T>(*(uint16_t*)value);
+            return static_cast<T>(loadUnaligned<uint16_t>(value));
         }
         else if(id == HIPTENSOR_R_32I)
         {
-            return static_cast<T>(*(int32_t*)value);
+            return static_cast<T>(loadUnaligned<int32_t>(value));
         }
         else if(id == HIPTENSOR_R_32U)
         {
-            return static_cast<T>(*(uint32_t*)value);
+            return static_cast<T>(loadUnaligned<uint32_t>(value));
         }
         else if(id == HIPTENSOR_R_64I)
         {
-            return static_cast<T>(*(int64_t*)value);
+            return static_cast<T>(loadUnaligned<int64_t>(value));
         }
         else if(id == HIPTENSOR_R_64U)
         {
-            return static_cast<T>(*(uint64_t*)value);
+            return static_cast<T>(loadUnaligned<uint64_t>(value));
         }
         else if constexpr(std::is_same_v<T, hipFloatComplex> && id == HIPTENSOR_C_32F)
         {
-            return static_cast<T>(*(hipFloatComplex*)value);
+            return static_cast<T>(loadUnaligned<hipFloatComplex>(value));
         }
         else if constexpr(std::is_same_v<T, hipDoubleComplex> && id == HIPTENSOR_C_64F)
         {
-            return static_cast<T>(*(hipDoubleComplex*)value);
+            return static_cast<T>(loadUnaligned<hipDoubleComplex>(value));
         }
         else
         {
@@ -197,19 +215,19 @@ namespace hiptensor
     {
         if(id == HIPTENSOR_COMPUTE_DESC_16BF)
         {
-            return static_cast<T>(*(hip_bfloat16*)value);
+            return static_cast<T>(loadUnaligned<hip_bfloat16>(value));
         }
         else if(id == HIPTENSOR_COMPUTE_DESC_16F)
         {
-            return static_cast<T>(*(_Float16*)value);
+            return static_cast<T>(loadUnaligned<_Float16>(value));
         }
         else if(id == HIPTENSOR_COMPUTE_DESC_32F)
         {
-            return static_cast<T>(*(float*)value);
+            return static_cast<T>(loadUnaligned<float>(value));
         }
         else if(id == HIPTENSOR_COMPUTE_DESC_64F)
         {
-            return static_cast<T>(*(double*)value);
+            return static_cast<T>(loadUnaligned<double>(value));
         }
         else
         {

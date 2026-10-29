@@ -52,17 +52,56 @@ namespace hiptensor
 
             // The feature schema (version kSelectSchema). Append only; a change of meaning is a
             // new schema version.
-            std::vector<char const*> const kFeatureNames = {
-                "op",           "dtype",         "out_dtype", "compute16",  "bilinear", "opnd_op",
-                "lg_m",         "lg_n",          "lg_k",      "lg_l",       "lg_mnk",   "modes_m",
-                "modes_n",      "modes_k",       "modes_l",   "unit_a",     "unit_b",   "unit_d",
-                "lg_inner",     "lg_inner_kept", "route",     "f64route",   "body",     "tile_m",
-                "tile_n",       "tile_k",        "block",     "persistent", "streamk",  "kblock",
-                "direct",       "steps",         "memsets",   "lg_ws",      "lg_bytes", "lg_flops",
-                "intensity_q8", "ctas",          "waves_q8",  "tiles_q8",   "tail_q8",  "pad_q8",
-                "split",        "lg_chunk",      "lds",       "scratch",    "cus",
-                // schema 2
-                "gett_kind", "lg_pred_ns"};
+            std::vector<char const*> const kFeatureNames = {"op",
+                                                            "dtype",
+                                                            "out_dtype",
+                                                            "compute16",
+                                                            "bilinear",
+                                                            "opnd_op",
+                                                            "lg_m",
+                                                            "lg_n",
+                                                            "lg_k",
+                                                            "lg_l",
+                                                            "lg_mnk",
+                                                            "modes_m",
+                                                            "modes_n",
+                                                            "modes_k",
+                                                            "modes_l",
+                                                            "unit_a",
+                                                            "unit_b",
+                                                            "unit_d",
+                                                            "lg_inner",
+                                                            "lg_inner_kept",
+                                                            "route",
+                                                            "f64route",
+                                                            "body",
+                                                            "tile_m",
+                                                            "tile_n",
+                                                            "tile_k",
+                                                            "block",
+                                                            "persistent",
+                                                            "streamk",
+                                                            "kblock",
+                                                            "direct",
+                                                            "steps",
+                                                            "memsets",
+                                                            "lg_ws",
+                                                            "lg_bytes",
+                                                            "lg_flops",
+                                                            "intensity_q8",
+                                                            "ctas",
+                                                            "waves_q8",
+                                                            "tiles_q8",
+                                                            "tail_q8",
+                                                            "pad_q8",
+                                                            "split",
+                                                            "lg_chunk",
+                                                            "lds",
+                                                            "scratch",
+                                                            "cus",
+                                                            // schema 2
+                                                            "gett_kind",
+                                                            "lg_pred_ns"};
 
             // The routes a model of format v1 scores (the routes of the schema-1 corpus); a
             // model of format v2 names its routes.
@@ -263,8 +302,7 @@ namespace hiptensor
                     if(valid)
                     {
                         model.margin = std::strtod(head[3].c_str() + 7, &end);
-                        valid        = *end == '\0' && std::isfinite(model.margin)
-                                && model.margin >= 0.0;
+                        valid = *end == '\0' && std::isfinite(model.margin) && model.margin >= 0.0;
                     }
                     if(!valid)
                     {
@@ -355,8 +393,7 @@ namespace hiptensor
                 {
                     return pack.route("select.model." + cell);
                 }
-                std::ifstream in(dir + "/" + pack.arch() + "/" + cell + ".model",
-                                 std::ios::binary);
+                std::ifstream in(dir + "/" + pack.arch() + "/" + cell + ".model", std::ios::binary);
                 if(!in)
                 {
                     return {};

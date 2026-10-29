@@ -67,7 +67,8 @@ with the target GPU and a hipTensor build with `-DHIPTENSOR_ENABLE_ROCKE_BACKEND
    --padded 0.15 --out c.txt` (and `reduction`). It draws the GEMM-view extents of each data type
    from a space-filling sequence, splits them into modes and draws storage orders; `--aligned`
    makes a share of the extents multiples of 8 (rocKE's tensor GETT planner serves more of those),
-   `--padded` pads a share of the strides.
+   `--padded` pads a share of the strides; `--big` draws large problems (past the default design's
+   flop and tensor caps), which the models need for the large rows of hipTensor's benchmarks.
 2. Build the driver against the library (`tools/sweep_driver.cpp` uses the public API only) and time
    every candidate of every problem cold (a cache-evicting read before each timed call):
    `HIPTENSOR_BACKEND=rocke HIPTENSOR_BACKEND_FALLBACK=0 HIPTENSOR_ROCKE_SELECT_DUMP=dump.jsonl
@@ -76,7 +77,10 @@ with the target GPU and a hipTensor build with `-DHIPTENSOR_ENABLE_ROCKE_BACKEND
    output agrees with the f64 route's. (Without `--cold`, `HIPTENSOR_ALGO_DEFAULT_PATIENT` plans
    with `HIPTENSOR_ROCKE_AUTOTUNE_TOPK=all` time the candidates in the library, back to back.)
 3. Train and export: `python tools/train_select.py train --dumps 'dump*.jsonl' --cold
-   'cold*.jsonl' --arch <target> --models . --report report.json`. It drops candidates whose
+   'cold*.jsonl' --calib 'dump_round1*.jsonl' --arch <target> --models . --report report.json`.
+   The model size, objective and margin are chosen on the held-out folds of the space-filling
+   round's problems (`--calib`; the model-guided rounds oversample decision boundaries). It drops
+   candidates whose
    output disagrees, reports the selection efficiency of the model on problems held out by group
    k-fold next to rocKE's rules, and checks that the exported trees reproduce LightGBM's
    predictions exactly.

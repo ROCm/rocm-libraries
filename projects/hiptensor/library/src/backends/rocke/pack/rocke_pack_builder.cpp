@@ -1690,8 +1690,8 @@ namespace
             {
                 ++b;
             }
-            text       = text.substr(b);
-            bool ascii = std::all_of(text.begin(), text.end(), [](char c) {
+            text             = text.substr(b);
+            bool       ascii = std::all_of(text.begin(), text.end(), [](char c) {
                 return static_cast<unsigned char>(c) < 0x80;
             });
             bool const format

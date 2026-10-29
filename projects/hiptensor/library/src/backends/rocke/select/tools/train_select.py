@@ -47,6 +47,16 @@ efficiency = best time / time of the pick, per problem) from GRID: rank (LambdaR
 rank the candidates of a problem (relevance levels of 1/REL_STEPS log2 slowdown below the best
 candidate, the problems as query groups), l2 regresses the slowdown; --objective fixes one.
 A ranking model's scores are exported negated, so that the lowest prediction wins in either case.
+A problem whose candidates include the route of rocKE's tensor GETT planner (JIT) also trains as a
+problem of its own without that candidate (tag "<tag>#none"): the candidates a plan created with
+HIPTENSOR_JIT_MODE_NONE ranks (their features do not depend on the JIT candidate's presence), so the
+models order the other routes among themselves too (--no-none-copies turns it off).
+
+--config objective:TREESxLEAVES (with --margin) trains that configuration without the search and
+the cross-validation (a retraining whose configuration was chosen before; judge it on held-out
+problems). --ensemble K averages K models of the chosen configuration, each trained on a bootstrap sample of the
+problems (their trees concatenated, leaf values divided by K): a lower-variance ranking where routes
+trade places near the decision boundary.
 
 --calib names the dumps of the problems that stand for the problems the library will see (a
 space-filling round): the model size, the objective and the margin are chosen on the held-out
@@ -158,7 +168,11 @@ def load(pattern, cold=None, max_dev=0.05, report=None, timed=True):
             if c.get("status") != "HIPTENSOR_STATUS_SUCCESS" or c["us"] <= 0:
                 dropped["did not run"] += 1
                 continue
-            if c.get("bad", 0) > 0 or c.get("rel_dev", -1) < 0 or c["rel_dev"] > max_dev:
+            if (
+                c.get("bad", 0) > 0
+                or c.get("rel_dev", -1) < 0
+                or c["rel_dev"] > max_dev
+            ):
                 dropped["output disagrees with the reference"] += 1
                 if report is not None:
                     report.setdefault("disagreeing", []).append(
@@ -180,6 +194,21 @@ def load(pattern, cold=None, max_dev=0.05, report=None, timed=True):
             for k, v in sorted(devs.items())
         }
     return out
+
+
+JIT_ROUTE = 11
+
+
+def with_none_copies(rows):
+    """`rows` plus, for every problem with a JIT candidate, its other candidates as problem
+    "<tag>#none" (the selection of a plan without the JIT)."""
+    jit = set(r["tag"] for r in rows if r["f"]["route"] == JIT_ROUTE)
+    extra = [
+        dict(r, tag=r["tag"] + "#none")
+        for r in rows
+        if r["tag"] in jit and r["f"]["route"] != JIT_ROUTE
+    ]
+    return rows + extra
 
 
 def by_problem(rows):
@@ -252,8 +281,8 @@ class Ranked:
 
 
 def fit(X, y, trees, leaves, seed=7, groups=None, objective=None):
-    """groups: the problem of every row (the ranking objective's query groups); objective:
-    rank or l2 (default OBJECTIVE)."""
+    """groups: the problem of every row (the ranking objectives' query groups); objective:
+    rank, xendcg or l2 (default OBJECTIVE)."""
     import lightgbm as lgb
 
     objective = objective or OBJECTIVE
@@ -306,9 +335,51 @@ def fit(X, y, trees, leaves, seed=7, groups=None, objective=None):
     return m
 
 
+class Bagged:
+    """The mean of several models' predictions."""
+
+    def __init__(self, models):
+        self.models = models
+        self.boosters = [m.booster_ for m in models]
+
+    def predict(self, X):
+        return np.mean([m.predict(X) for m in self.models], axis=0)
+
+
+def fit_bagged(X, y, trees, leaves, groups, objective, bags, seed=7):
+    """`bags` models, each on a bootstrap sample of the problems (a copy of a problem is a group
+    of its own)."""
+    if bags <= 1:
+        return fit(X, y, trees, leaves, seed=seed, groups=groups, objective=objective)
+    tags = sorted(set(groups))
+    index = defaultdict(list)
+    for i, t in enumerate(groups):
+        index[t].append(i)
+    models = []
+    for b in range(bags):
+        rng = random.Random(seed * 1000 + b)
+        idx, bgroups = [], []
+        for c, t in enumerate(tags[rng.randrange(len(tags))] for _ in tags):
+            idx += index[t]
+            bgroups += ["%s#%d" % (t, c)] * len(index[t])
+        models.append(
+            fit(
+                X[idx],
+                y[idx],
+                trees,
+                leaves,
+                seed=seed + b,
+                groups=np.array(bgroups),
+                objective=objective,
+            )
+        )
+    return Bagged(models)
+
+
 def pick_by(scores, margin=0.0):
     """The library's pick (rocke_select.cpp): the lowest prediction, or the first candidate of the
-    static order when the lowest prediction does not beat its own by more than `margin`."""
+    static order when the lowest prediction does not beat its own by more than `margin`.
+    """
 
     def pick(rs):
         best = min(rs, key=lambda r: (scores[id(r)], r["static_rank"]))
@@ -331,7 +402,9 @@ def choose_margin(probs, scores):
     pos = np.array([g for g in gaps if g > 0])
     options = [0.0]
     if len(pos):
-        options += sorted(set(float("%.6g" % np.percentile(pos, q)) for q in range(5, 100, 5)))
+        options += sorted(
+            set(float("%.6g" % np.percentile(pos, q)) for q in range(5, 100, 5))
+        )
     best = None
     for m in options:
         eff = efficiencies(probs, pick_by(scores, m))
@@ -341,7 +414,7 @@ def choose_margin(probs, scores):
     return best[1], best[2]
 
 
-def cv(rows, probs, names, trees, leaves, folds=5, objective=None):
+def cv(rows, probs, names, trees, leaves, folds=5, objective=None, bags=1):
     from sklearn.model_selection import GroupKFold
 
     X = matrix(rows, names)
@@ -349,7 +422,7 @@ def cv(rows, probs, names, trees, leaves, folds=5, objective=None):
     groups = np.array([r["tag"] for r in rows])
     pred = np.zeros(len(rows))
     for tr, te in GroupKFold(n_splits=folds).split(X, y, groups):
-        m = fit(X[tr], y[tr], trees, leaves, groups=groups[tr], objective=objective)
+        m = fit_bagged(X[tr], y[tr], trees, leaves, groups[tr], objective, bags)
         pred[te] = m.predict(X[te])
     scores = {id(r): p for r, p in zip(rows, pred)}
     return efficiencies(probs, pick_by(scores)), scores
@@ -378,11 +451,16 @@ def export(booster, names, routes, compact=True, sign=1.0, margin=0.0):
     leaf values keep 9 significant digits; the exported text is then the model (the C++ walker and
     predict() below agree with it exactly), and train checks that it picks what LightGBM picks.
     """
-    dump = booster.dump_model()
-    # split_feature indices are columns of the training matrix, in the order of `names`
-    assert len(dump["feature_names"]) == len(names), "feature count"
+    boosters = booster if isinstance(booster, list) else [booster]
+    sign = sign / len(boosters)
+    infos = []
+    for b in boosters:
+        dump = b.dump_model()
+        # split_feature indices are columns of the training matrix, in the order of `names`
+        assert len(dump["feature_names"]) == len(names), "feature count"
+        infos += dump["tree_info"]
     trees = []
-    for t in dump["tree_info"]:
+    for t in infos:
         nodes = {}
         leaves = {}
 
@@ -503,6 +581,44 @@ def cells_of(rows):
     return cells
 
 
+def search(a, entry, crow, probs, cprobs, names):
+    """The configuration (objective, size) of GRID that selects best on the held-out folds of the
+    calibration problems, and its margin; the cross-validated results go to `entry`."""
+    best = None
+    for objective, trees, leaves in GRID:
+        if a.objective != "auto" and objective != a.objective:
+            continue
+        eff, scores = cv(crow, probs, names, trees, leaves, objective=objective)
+        s = summary(eff)
+        sc = summary(efficiencies(cprobs, pick_by(scores)))
+        entry["grid"]["%s:%dx%d" % (objective, trees, leaves)] = {
+            "all": s,
+            "calib": sc,
+        }
+        key = (round(sc["geomean"], 4), round(sc["p10"], 4))
+        if best is None or key > best[0]:
+            best = (key, objective, trees, leaves, s, scores)
+    _, objective, trees, leaves, s, cv_scores = best
+    entry["chosen"] = "%s:%dx%d" % (objective, trees, leaves)
+    entry["model_cv_no_margin"] = s
+    if a.ensemble > 1:
+        # the ensemble of the chosen configuration, its margin on its own held-out folds
+        eff, cv_scores = cv(
+            crow, probs, names, trees, leaves, objective=objective, bags=a.ensemble
+        )
+        entry["bags"] = a.ensemble
+        entry["model_cv_single_no_margin"] = s
+        s = summary(eff)
+        entry["model_cv_no_margin"] = s
+    margin, _ = choose_margin(cprobs, cv_scores)
+    s = summary(efficiencies(probs, pick_by(cv_scores, margin)))
+    entry["margin"] = margin
+    entry["calib_model_cv"] = summary(efficiencies(cprobs, pick_by(cv_scores, margin)))
+    entry["model_cv"] = s
+    entry["model_cv_routes"] = route_shares(probs, pick_by(cv_scores, margin))
+    return objective, trees, leaves, margin
+
+
 def cmd_train(a):
     report = {"dumps": a.dumps, "cold": a.cold, "cells": {}}
     rows = load(a.dumps, a.cold, a.max_dev, report)
@@ -517,6 +633,12 @@ def cmd_train(a):
     for cell, crow in sorted(cells_of(rows).items()):
         if only is not None and cell not in only:
             continue
+        if a.none_copies:
+            n0 = len(set(r["tag"] for r in crow))
+            crow = with_none_copies(crow)
+            report.setdefault("none_copies", {})[cell] = (
+                len(set(r["tag"] for r in crow)) - n0
+            )
         probs = by_problem(crow)
         crow = [r for r in crow if r["tag"] in probs]
         names = feature_names(crow)
@@ -537,47 +659,50 @@ def cmd_train(a):
             print(cell, entry)
             continue
         # the problems the choices are made on (--calib), and their static order's selection
-        cprobs = probs if calib is None else {t: rs for t, rs in probs.items() if t in calib}
+        cprobs = (
+            probs
+            if calib is None
+            else {t: rs for t, rs in probs.items() if t.split("#")[0] in calib}
+        )
         if len(cprobs) < a.min_problems:
             cprobs = probs
         entry["calib_problems"] = len(cprobs)
         entry["calib_static"] = summary(efficiencies(cprobs, static_pick))
-        best = None
-        for objective, trees, leaves in GRID:
-            if a.objective != "auto" and objective != a.objective:
-                continue
-            eff, scores = cv(crow, probs, names, trees, leaves, objective=objective)
-            s = summary(eff)
-            sc = summary(efficiencies(cprobs, pick_by(scores)))
-            entry["grid"]["%s:%dx%d" % (objective, trees, leaves)] = {"all": s, "calib": sc}
-            key = (round(sc["geomean"], 4), round(sc["p10"], 4))
-            if best is None or key > best[0]:
-                best = (key, objective, trees, leaves, s, scores)
-        _, objective, trees, leaves, s, cv_scores = best
-        entry["chosen"] = "%s:%dx%d" % (objective, trees, leaves)
-        entry["model_cv_no_margin"] = s
-        margin, _ = choose_margin(cprobs, cv_scores)
-        s = summary(efficiencies(probs, pick_by(cv_scores, margin)))
-        entry["margin"] = margin
-        entry["calib_model_cv"] = summary(efficiencies(cprobs, pick_by(cv_scores, margin)))
-        entry["model_cv"] = s
-        entry["model_cv_routes"] = route_shares(probs, pick_by(cv_scores, margin))
+        if a.config:
+            objective, size = a.config.split(":")
+            trees, leaves = (int(x) for x in size.split("x"))
+            margin = a.margin
+            entry["chosen"] = a.config + " (given: no search, no cross-validation)"
+            entry["margin"] = margin
+            if a.ensemble > 1:
+                entry["bags"] = a.ensemble
+        else:
+            objective, trees, leaves, margin = search(
+                a, entry, crow, probs, cprobs, names
+            )
         X = matrix(crow, names)
         y = target(crow, probs)
         groups = np.array([r["tag"] for r in crow])
-        m = fit(X, y, trees, leaves, groups=groups, objective=objective)
+        m = fit_bagged(X, y, trees, leaves, groups, objective, a.ensemble)
+        boosters = m.boosters if isinstance(m, Bagged) else m.booster_
         sign = -1.0 if objective in ("rank", "xendcg") else 1.0
         entry["objective"] = objective
         assert np.array_equal(X, np.floor(X)), "features must be integers"
         ref = m.predict(X)
-        # the full-precision export reproduces LightGBM bit for bit
-        full = parse(export(m.booster_, names, routes, compact=False, sign=sign, margin=margin))
+        # the full-precision export reproduces LightGBM bit for bit (an ensemble: up to the
+        # order of the sums)
+        full = parse(
+            export(boosters, names, routes, compact=False, sign=sign, margin=margin)
+        )
         mine = np.array([predict(full, r["f"]) for r in crow])
         exact = bool(np.array_equal(ref, mine))
         entry["export_exact"] = exact
-        assert exact, float(np.max(np.abs(ref - mine)))
+        entry["export_max_abs_diff"] = float(np.max(np.abs(ref - mine)))
+        assert exact or (a.ensemble > 1 and entry["export_max_abs_diff"] < 1e-9), entry[
+            "export_max_abs_diff"
+        ]
         # the compact export (the shipped model) picks what LightGBM picks
-        text = export(m.booster_, names, routes, sign=sign, margin=margin)
+        text = export(boosters, names, routes, sign=sign, margin=margin)
         model = parse(text)
         small = np.array([predict(model, r["f"]) for r in crow])
         entry["compact_max_abs_diff"] = float(np.max(np.abs(ref - small)))
@@ -601,7 +726,7 @@ def cmd_train(a):
             cell,
             json.dumps(
                 {
-                    k: entry[k]
+                    k: entry.get(k)
                     for k in (
                         "problems",
                         "routes",
@@ -633,8 +758,11 @@ def cmd_eval(a):
     for cell, crow in sorted(cells_of(rows).items()):
         probs = by_problem(crow)
         # problems whose picked candidate has a time (it may have been dropped)
-        probs = {t: rs for t, rs in probs.items() if any(r.get("pick") == 1 for r in rs)
-                 or not any("pick" in r for r in rs)}
+        probs = {
+            t: rs
+            for t, rs in probs.items()
+            if any(r.get("pick") == 1 for r in rs) or not any("pick" in r for r in rs)
+        }
         sel = summary(efficiencies(probs, lib_pick))
         st = summary(efficiencies(probs, static_pick))
         entry = {
@@ -649,12 +777,20 @@ def cmd_eval(a):
             sources[lib_pick(rs)["source"]] += 1
         entry["sources"] = dict(sources)
         worst = sorted(
-            ((lib_pick(rs)["us"] / min(r["us"] for r in rs), t, lib_pick(rs)["key"],
-              best_pick(rs)["key"]) for t, rs in probs.items()),
+            (
+                (
+                    lib_pick(rs)["us"] / min(r["us"] for r in rs),
+                    t,
+                    lib_pick(rs)["key"],
+                    best_pick(rs)["key"],
+                )
+                for t, rs in probs.items()
+            ),
             reverse=True,
         )[:10]
         entry["worst"] = [
-            {"slow": round(w[0], 4), "tag": w[1], "pick": w[2], "best": w[3]} for w in worst
+            {"slow": round(w[0], 4), "tag": w[1], "pick": w[2], "best": w[3]}
+            for w in worst
         ]
         path = os.path.join(a.models, cell + ".model")
         if os.path.exists(path):
@@ -663,8 +799,21 @@ def cmd_eval(a):
             same = sum(1 for r in scored if predict(model, r["f"]) == r["score"])
             entry["score_parity"] = "%d/%d" % (same, len(scored))
         report["cells"][cell] = entry
-        print(cell, json.dumps({k: entry[k] for k in ("problems", "selector", "static",
-                                                       "pick_routes", "oracle_routes")}))
+        print(
+            cell,
+            json.dumps(
+                {
+                    k: entry[k]
+                    for k in (
+                        "problems",
+                        "selector",
+                        "static",
+                        "pick_routes",
+                        "oracle_routes",
+                    )
+                }
+            ),
+        )
     with open(a.report, "w") as f:
         json.dump(report, f, indent=1)
 
@@ -722,8 +871,15 @@ def cmd_propose(a):
                         copy[t] += 1
                         last = t
                     bgroups.append("%s#%d" % (t, copy[t]))
-                m = fit(X[idx], y[idx], 150, 15, seed=7 + b, groups=np.array(bgroups),
-                        objective="rank")
+                m = fit(
+                    X[idx],
+                    y[idx],
+                    150,
+                    15,
+                    seed=7 + b,
+                    groups=np.array(bgroups),
+                    objective="rank",
+                )
                 for t, rs in pprobs.items():
                     pred = m.predict(matrix(rs, names))
                     for r, p in zip(rs, pred):
@@ -739,7 +895,9 @@ def cmd_propose(a):
                 ranked.append((agree, margin, t))
             ranked.sort()
             entry["disagreeing"] = sum(1 for x in ranked if x[0] < 1.0)
-            entry["margin_p10"] = float(np.percentile([x[1] for x in ranked], 10)) if ranked else None
+            entry["margin_p10"] = (
+                float(np.percentile([x[1] for x in ranked], 10)) if ranked else None
+            )
             if a.prev_models:
                 path = os.path.join(a.prev_models, cell + ".model")
                 if os.path.exists(path):
@@ -756,7 +914,9 @@ def cmd_propose(a):
                         old = int(np.argmin([predict(prev, r["f"]) for r in rs]))
                         new = int(np.argmin(pred))
                         changed += pred[old] - pred[new] > math.log2(1.02)
-                    entry["picks_changed_vs_prev"] = round(changed / max(1, len(pprobs)), 4)
+                    entry["picks_changed_vs_prev"] = round(
+                        changed / max(1, len(pprobs)), 4
+                    )
         else:
             entry["note"] = "too few trained problems: random pool problems"
             entry["disagreeing"] = len(pprobs)
@@ -791,7 +951,9 @@ def main():
     ap.add_argument("cmd", choices=("train", "eval", "propose"))
     ap.add_argument("--dumps", required=True)
     ap.add_argument("--cold", default=None, help="sweep_driver --cold output (glob)")
-    ap.add_argument("--calib", default="", help="train: dumps of the calibration problems (glob)")
+    ap.add_argument(
+        "--calib", default="", help="train: dumps of the calibration problems (glob)"
+    )
     ap.add_argument("--max-dev", type=float, default=0.05)
     ap.add_argument("--arch", default="gfx950")
     ap.add_argument("--models", default="")
@@ -805,7 +967,22 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--out", default="")
     ap.add_argument("--prev-models", default="")
-    ap.add_argument("--objective", choices=("auto", "rank", "xendcg", "l2"), default="auto")
+    ap.add_argument(
+        "--objective", choices=("auto", "rank", "xendcg", "l2"), default="auto"
+    )
+    ap.add_argument(
+        "--ensemble", type=int, default=1, help="train: models averaged per cell"
+    )
+    ap.add_argument(
+        "--config", default="", help="train: objective:TREESxLEAVES, no search"
+    )
+    ap.add_argument("--margin", type=float, default=0.0, help="train: with --config")
+    ap.add_argument(
+        "--no-none-copies",
+        dest="none_copies",
+        action="store_false",
+        help="train: no copies of the JIT problems without the JIT candidate",
+    )
     a = ap.parse_args()
     {"train": cmd_train, "eval": cmd_eval, "propose": cmd_propose}[a.cmd](a)
 

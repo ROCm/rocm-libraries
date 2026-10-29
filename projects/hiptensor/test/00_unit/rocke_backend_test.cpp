@@ -3805,9 +3805,8 @@ namespace
 
     // A selection model file <dir>/<target>/<cell>.model for HIPTENSOR_ROCKE_SELECT_MODELS (a new
     // directory per name: the library reads a model once per process and source).
-    std::string writeSelectModel(std::string const& name,
-                                 std::string const& cell,
-                                 std::string const& text)
+    std::string
+        writeSelectModel(std::string const& name, std::string const& cell, std::string const& text)
     {
         std::string const dir = ::testing::TempDir() + "rocke_select_models_" + name;
         std::string const sub = dir + "/" + deviceArch();
@@ -3826,11 +3825,7 @@ namespace
     std::string favourRoute(int route)
     {
         char tree[96];
-        std::snprintf(tree,
-                      sizeof(tree),
-                      "3;0 0;%d.5 %d.5;-1 -2;1 -3;1 0 1",
-                      route - 1,
-                      route);
+        std::snprintf(tree, sizeof(tree), "3;0 0;%d.5 %d.5;-1 -2;1 -3;1 0 1", route - 1, route);
         return tree;
     }
 
@@ -3841,18 +3836,29 @@ namespace
     // HIPTENSOR_ROCKE_SELECT_MODELS replaces the pack's models.
     TEST(RockeSelection, ModelScoresItsRoutes)
     {
-        ContractionCase const c{
-            HIPTENSOR_R_16F, HIPTENSOR_COMPUTE_DESC_32F, 1503, true, true, false};
-        Choice all;
+        // on gfx950 a problem the ring GETT serves (its rule is then the rules' selection)
+        ContractionCase c{HIPTENSOR_R_16F, HIPTENSOR_COMPUTE_DESC_32F, 1503, true, true, false};
+        Choice          all;
         all.workspace = HIPTENSOR_WORKSPACE_MAX;
         SelectionLog rules;
+        for(int seed = 1503; seed < 1563; seed++)
         {
+            c.seed = seed;
             ScopedEnv env("HIPTENSOR_ROCKE_SELECT", "static");
             runContraction(c, all, &rules);
+            if(HasFatalFailure() || IsSkipped() || deviceArch() != "gfx950"
+               || rules.reason == "the ring GETT rule")
+            {
+                break;
+            }
         }
         if(HasFatalFailure() || IsSkipped())
         {
             return;
+        }
+        if(deviceArch() == "gfx950")
+        {
+            ASSERT_EQ(rules.reason, "the ring GETT rule") << "no problem the ring GETT serves";
         }
         ASSERT_GE(rules.candidates, 2);
         auto const cell = std::string("contraction.h");
@@ -3866,12 +3872,14 @@ namespace
         };
         auto const tree = favourRoute(8);
         // every route scored: the direct GETT (every contraction has it) wins
-        auto v2 = with("v2_all", "v2;schema=2;routes=3,6,7,8,9;margin=0;features=route;trees=1|" + tree);
+        auto v2 = with("v2_all",
+                       "v2;schema=2;routes=3,6,7,8,9;margin=0;features=route;trees=1|" + tree);
         EXPECT_EQ(v2.source, "MODEL") << v2.reason;
         EXPECT_EQ(v2.reason.rfind(cell + "@", 0), 0u) << v2.reason;
         EXPECT_EQ(v2.pick.rfind("dgett:", 0), 0u) << v2.pick;
         // schema 1 features with the v2 format: the same
-        auto s1 = with("v2_schema1", "v2;schema=1;routes=3,6,7,8,9;margin=0;features=route;trees=1|" + tree);
+        auto s1 = with("v2_schema1",
+                       "v2;schema=1;routes=3,6,7,8,9;margin=0;features=route;trees=1|" + tree);
         EXPECT_EQ(s1.source, "MODEL") << s1.reason;
         EXPECT_EQ(s1.pick, v2.pick);
         // a margin: the model's best (the direct GETT, predicted 1 better than every other route)
@@ -3881,21 +3889,28 @@ namespace
                          "v2;schema=2;routes=3,6,7,8,9;margin=1.5;features=route;trees=1|" + tree);
         EXPECT_EQ(keep.source, "MODEL") << keep.reason;
         EXPECT_NE(keep.pick.rfind("dgett:", 0), 0u) << keep.pick;
+        // a gap equal to the margin keeps the static order's candidate too
+        auto equal = with("v2_margin_equal",
+                          "v2;schema=2;routes=3,6,7,8,9;margin=1;features=route;trees=1|" + tree);
+        EXPECT_EQ(equal.source, "MODEL") << equal.reason;
+        EXPECT_EQ(equal.pick, keep.pick);
         auto take = with("v2_margin_take",
                          "v2;schema=2;routes=3,6,7,8,9;margin=0.5;features=route;trees=1|" + tree);
         EXPECT_EQ(take.source, "MODEL") << take.reason;
         EXPECT_EQ(take.pick.rfind("dgett:", 0), 0u) << take.pick;
         // the ring GETT not scored: its rule applies when it is a candidate
-        bool const ring = rules.pick.rfind("rgett:", 0) == 0;
-        auto       noRing = with("v2_no_ring", "v2;schema=2;routes=3,6,8,9;margin=0;features=route;trees=1|" + tree);
+        bool const ring   = rules.pick.rfind("rgett:", 0) == 0;
+        auto       noRing = with("v2_no_ring",
+                           "v2;schema=2;routes=3,6,8,9;margin=0;features=route;trees=1|" + tree);
         if(ring)
         {
             EXPECT_EQ(noRing.source, "RULE") << noRing.reason;
             EXPECT_EQ(noRing.reason, "the ring GETT rule");
             EXPECT_EQ(noRing.pick, rules.pick);
             // a model that scores the ring GETT picks it when it predicts it fastest
-            auto r = with("v2_ring", "v2;schema=2;routes=3,6,7,8,9;margin=0;features=route;trees=1|"
-                                         + favourRoute(7));
+            auto r = with("v2_ring",
+                          "v2;schema=2;routes=3,6,7,8,9;margin=0;features=route;trees=1|"
+                              + favourRoute(7));
             EXPECT_EQ(r.source, "MODEL") << r.reason;
             EXPECT_EQ(r.pick.rfind("rgett:", 0), 0u) << r.pick;
         }
@@ -3918,19 +3933,22 @@ namespace
         }
         // models the library does not use: the rules' selection
         for(auto const& [name, text] :
-            {std::pair<std::string, std::string>{"bad_routes",
-                                                 "v2;schema=2;routes=3,x;margin=0;features=route;trees=1|"
-                                                     + tree},
+            {std::pair<std::string, std::string>{
+                 "bad_routes", "v2;schema=2;routes=3,x;margin=0;features=route;trees=1|" + tree},
              {"bad_route_id", "v2;schema=2;routes=3,99;margin=0;features=route;trees=1|" + tree},
-             {"later_schema", "v2;schema=3;routes=3,6,7,8,9;margin=0;features=route;trees=1|" + tree},
-             {"unknown_feature", "v2;schema=2;routes=3,6,7,8,9;margin=0;features=nosuch;trees=1|" + tree},
+             {"later_schema",
+              "v2;schema=3;routes=3,6,7,8,9;margin=0;features=route;trees=1|" + tree},
+             {"unknown_feature",
+              "v2;schema=2;routes=3,6,7,8,9;margin=0;features=nosuch;trees=1|" + tree},
              {"no_routes_field", "v2;schema=2;features=route;trees=1|" + tree},
              {"no_margin_field", "v2;schema=2;routes=3,6,7,8,9;features=route;trees=1|" + tree},
              {"bad_margin", "v2;schema=2;routes=3,6,7,8,9;margin=x;features=route;trees=1|" + tree},
              {"negative_margin",
               "v2;schema=2;routes=3,6,7,8,9;margin=-1;features=route;trees=1|" + tree},
-             {"empty_margin", "v2;schema=2;routes=3,6,7,8,9;margin=;features=route;trees=1|" + tree},
-             {"bad_tree", "v2;schema=2;routes=3,6,7,8,9;margin=0;features=route;trees=1|3;0 0;7.5"}})
+             {"empty_margin",
+              "v2;schema=2;routes=3,6,7,8,9;margin=;features=route;trees=1|" + tree},
+             {"bad_tree",
+              "v2;schema=2;routes=3,6,7,8,9;margin=0;features=route;trees=1|3;0 0;7.5"}})
         {
             auto bad = with(name, text);
             EXPECT_EQ(bad.pick, rules.pick) << name;

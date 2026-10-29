@@ -468,9 +468,9 @@ namespace hiptensor
                 info.kernel = plan.gettName;
                 bool const packed = !route.packs.empty();
                 info.kind         = route.candidate == "tensor_gett_t32s3" ? 4
-                                    : route.candidate == "tensor_gett_kc"   ? (packed ? 3 : 5)
-                                    : packed                                ? 2
-                                                                            : 1;
+                                    : route.candidate == "tensor_gett_kc"  ? (packed ? 3 : 5)
+                                    : packed                               ? 2
+                                                                           : 1;
                 return true;
             }
 
