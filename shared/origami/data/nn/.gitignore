@@ -4,6 +4,3 @@
 # TWREC manifests and sidecars are fetched externally (see data/nn/README.md).
 *.tilewright.yaml
 *.tilewright.wts.yaml
-
-# Origami Boost models (ORIBOOST .orr) are released separately (see data/nn/README.md).
-*.orr

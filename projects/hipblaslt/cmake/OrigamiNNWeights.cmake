@@ -4,8 +4,10 @@
 # Colocate origami NN model files and origami_nn_index next to per-arch Tensile
 # libraries so ProblemPredictionLibrary can resolve models at deserialize.
 #
-# Weight files are not tracked in git; use the external fetch script (post-PR) or
-# set ORIGAMI_NN_WEIGHTS_DIR when building.
+# TWREC (tilewright) weights are not tracked in git; use the external fetch script (post-PR) or
+# set ORIGAMI_NN_WEIGHTS_DIR when building. The boost models (data/nn/boost/<arch>/*.orr) are
+# tracked. The library directory is installed as a whole (hipBLASLt's runtime component), so the
+# colocated files are installed next to the kernel library too.
 #
 # The library directory gets one origami_nn_index: the index of each backend present,
 # concatenated. tilewright (TWREC YAML) needs ORIGAMI_ENABLE_NN; boost (Origami Boost,

@@ -382,7 +382,7 @@ With `ORIGAMI_ENABLE_NN=ON`, Origami can load TWREC YAML manifests/sidecars from
 cmake -S projects/hipblaslt -B build/ -DORIGAMI_ENABLE_NN=ON
 ```
 
-After a hipBLASLt build, YAML weights (with `ORIGAMI_ENABLE_NN=ON`) and boost models are copied next to each arch's Tensile library under `Tensile/library/<arch>/`, with one `origami_nn_index` holding both backends' entries.
+After a hipBLASLt build, YAML weights (with `ORIGAMI_ENABLE_NN=ON`) and boost models are copied next to each arch's Tensile library under `Tensile/library/<arch>/`, with one `origami_nn_index` holding both backends' entries, and installed with the library (`lib/hipblaslt/library/<arch>/` on Linux).
 
 Check whether NN was built:
 
@@ -419,7 +419,7 @@ auto models = origami::nn::load_models_for_logic(logic_stem, library_dir);
 
 For tests, override the manifest path with `ORIGAMI_NN_WEIGHTS` when tilewright integration tests are added.
 
-Boost models live under `shared/origami/data/nn/boost/<arch>/` (`origami_nn_index` tracked, `origami_boost_<arch>_<dtype>.orr` released separately) with index lines
+Boost models live under `shared/origami/data/nn/boost/<arch>/` (`origami_nn_index` and the `origami_boost_<arch>_<dtype>.orr` models, all tracked) with index lines
 
 ```
 <logic_stem>  boost  origami_boost_<arch>_<dtype>.orr
