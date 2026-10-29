@@ -6816,18 +6816,14 @@ def build_unified_attention_3d(
         if band_ok is not None:
             score = b.select(band_ok, score, neg_inf)
         new_m_raw = b.fmax(m_val, score)
-        new_m = new_m_raw
-        if not p.default_mask:
-            # Non-default masks can leave whole segments or a segment's leading
-            # keys masked (top-left decode sees only key 0; a window or right bound
-            # skips others). Use 0 as the exponent reference there so alpha/prob
-            # are 0 rather than NaN, but carry and store the raw max: it stays -inf
-            # until a key is seen, so the reduce ignores an empty segment and a
-            # masked prefix cannot pin m at 0. The default mask keeps its pinned IR
-            # without this guard, although it can reach the case: a default-mask
-            # prefill row whose causal limit ends before a trailing segment sees
-            # only masked keys there, so that segment's alpha is exp2(-inf - -inf).
-            new_m = b.select(b.fcmp("ogt", new_m_raw, neg_inf), new_m_raw, zero_f)
+        # A segment, or a segment's leading keys, can be fully masked for a row:
+        # a default-mask prefill row whose causal limit ends before a trailing
+        # segment, top-left decode (only key 0 visible), a window or right bound.
+        # Use 0 as the exponent reference there so alpha/prob are 0 rather than
+        # exp2(-inf - -inf) = NaN, but carry and store the raw max: it stays -inf
+        # until a key is seen, so the reduce ignores an empty segment and a
+        # masked prefix cannot pin m at 0.
+        new_m = b.select(b.fcmp("ogt", new_m_raw, neg_inf), new_m_raw, zero_f)
         alpha = b.exp2(b.fsub(m_val, new_m))
         prob = b.exp2(b.fsub(score, new_m))
         new_l = b.fadd(b.fmul(l_val, alpha), prob)

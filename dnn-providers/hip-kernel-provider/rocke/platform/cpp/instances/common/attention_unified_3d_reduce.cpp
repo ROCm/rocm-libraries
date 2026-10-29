@@ -103,13 +103,14 @@ static rocke_value_t* rocke__q_offset(rocke_attn_unified_build_ctx_t* ctx,
  *       score = _emit_qk_score(...)
  *       causal_ok = cmp_le(kpos, context_len + query_pos)
  *       score = select(causal_ok, score, neg_inf)
- *       new_m = fmax(m_val, score)
+ *       new_m_raw = fmax(m_val, score)
+ *       new_m = select(fcmp("ogt", new_m_raw, neg_inf), new_m_raw, zero_f)
  *       alpha = exp2(m_val - new_m)
  *       prob  = exp2(score - new_m)
  *       new_l = fadd(fmul(l_val, alpha), prob)
  *       vv    = _emit_v_load(...)
  *       new_acc = fadd(fmul(acc_val, alpha), fmul(prob, vv))
- *       scf_yield(new_m, new_l, new_acc)
+ *       scf_yield(new_m_raw, new_l, new_acc)
  *
  * Stashes loop.results[0..2] in ctx->loop_m / loop_l / loop_acc.
  * ============================================================ */
@@ -119,7 +120,7 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
     rocke_iter_arg_t iter_args[3];
     rocke_for_t loop;
     rocke_value_t *kpos, *m_val, *l_val, *acc_val;
-    rocke_value_t *score, *causal_ok, *new_m, *alpha, *prob, *new_l, *vv, *new_acc;
+    rocke_value_t *score, *causal_ok, *new_m_raw, *new_m, *alpha, *prob, *new_l, *vv, *new_acc;
     rocke_value_t* yields[3];
 
     iter_args[0].name = "m";
@@ -164,7 +165,13 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
     causal_ok = rocke_b_cmp_le(b, kpos, rocke_b_add(b, ctx->context_len, ctx->query_pos));
     score = rocke_b_select(b, causal_ok, score, ctx->neg_inf);
 
-    new_m = rocke_b_fmax(b, m_val, score);
+    /* A fully masked segment (or masked leading keys) keeps m at -inf: use 0 as
+     * the exponent reference so alpha/prob are 0, not exp2(-inf - -inf) = NaN,
+     * but yield the raw max so the reduce still sees an empty segment.
+     * Python evaluates select's operands left to right: fcmp first. */
+    new_m_raw = rocke_b_fmax(b, m_val, score);
+    new_m = rocke_b_select(
+        b, rocke_b_fcmp(b, "ogt", new_m_raw, ctx->neg_inf), new_m_raw, ctx->zero_f);
     alpha = rocke_b_exp2(b, rocke_b_fsub(b, m_val, new_m));
     prob = rocke_b_exp2(b, rocke_b_fsub(b, score, new_m));
     new_l = rocke_b_fadd(b, rocke_b_fmul(b, l_val, alpha), prob);
@@ -181,7 +188,7 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
 
     new_acc = rocke_b_fadd(b, rocke_b_fmul(b, acc_val, alpha), rocke_b_fmul(b, prob, vv));
 
-    yields[0] = new_m;
+    yields[0] = new_m_raw;
     yields[1] = new_l;
     yields[2] = new_acc;
     rocke_b_scf_yield(b, yields, 3);

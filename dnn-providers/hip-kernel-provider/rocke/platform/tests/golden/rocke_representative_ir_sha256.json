@@ -292,10 +292,10 @@
         },
         "attention/gfx950/scalar3d_fp16_d128_q40_kv8": {
           "arch": "gfx950",
-          "bytes": 48783,
+          "bytes": 48913,
           "family": "attention",
           "kernel_name": "rocke_unified_attention_3d_scalar_q64_h40_kv8_d128_b16_seg8_fp16",
-          "sha256": "9804fc433bba54dffb78e7f36f8f303d185a9401dc93b05d1da75e9b304077d1",
+          "sha256": "83069a84ef50b325cc881fe1db5e0aa2d63a3ea176e5a8591c02d44e410f3e30",
           "status": "ok"
         },
         "attention/gfx950/scalar3d_fp16_d128_sw16_rb8": {
@@ -2697,10 +2697,10 @@
         },
         "attention/gfx950/scalar3d_fp16_d128_q40_kv8": {
           "arch": "gfx950",
-          "bytes": 48790,
+          "bytes": 48920,
           "family": "attention",
           "kernel_name": "rocke_unified_attention_3d_scalar_q64_h40_kv8_d128_b16_seg8_fp16",
-          "sha256": "188f9394d8d01d0f00aea78d2172ea2836bac7612e7f6a338d6ccd04f73a0151",
+          "sha256": "2d63e8845ec447feded03f82aa7d5b9c6208a57888f4fe5b5ff766f068d566f0",
           "status": "ok"
         },
         "attention/gfx950/scalar3d_fp16_d128_sw16_rb8": {
@@ -5102,10 +5102,10 @@
         },
         "attention/gfx950/scalar3d_fp16_d128_q40_kv8": {
           "arch": "gfx950",
-          "bytes": 48854,
+          "bytes": 48984,
           "family": "attention",
           "kernel_name": "rocke_unified_attention_3d_scalar_q64_h40_kv8_d128_b16_seg8_fp16",
-          "sha256": "f2041465d5d9e8128b2ab20a34dc1baaaad76b9b818b6c69c3f64c590b1e0a37",
+          "sha256": "d2146807131d5de433a932d491a0c42ddfbfeb767586aa2b2edeab0cd3be844c",
           "status": "ok"
         },
         "attention/gfx950/scalar3d_fp16_d128_sw16_rb8": {
