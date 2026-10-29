@@ -388,19 +388,18 @@ static __host__ void prepDeviceForWork() {
     };
 
     bool isFirstTime = false;
-    // This bit serves 2 purposes: The lambda is a trick to run a code snippet once, then, since we have to allocate a
-    // variable for the trick anyways, we'll also use temp as the -1U value written to cpuWorkQueue.pushCount.
-    static uint32_t temp = ([&isFirstTime]() {
-        // TODO: investigate using hipExtStreamCreateWithCUMask for this
-        __LIBHIPTHREADS_HIP_CHECK__(hipExtStreamCreateWithCUMask(&mainStream, sizeof(cuMask)/sizeof(cuMask[0]), cuMask));
-        isFirstTime = true;
-    }(), -1U);
+    [[maybe_unused]] static const bool initialized = [&isFirstTime]() {
+          __LIBHIPTHREADS_HIP_CHECK__(hipExtStreamCreateWithCUMask(&mainStream, sizeof(cuMask)/sizeof(cuMask[0]), cuMask));
 
-    if (isFirstTime) {
-        // Initalize numVcores, so device code can call hip::wthread::hardware_concurrency
-        static uint32_t temp2 = hip::wthread::hardware_concurrency();
-        __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(numVcores), &temp2, sizeof(temp2), 0, hipMemcpyHostToDevice, getEnqueingStream()));
-    } else {
+          void *numVcoresAddr;
+          __LIBHIPTHREADS_HIP_CHECK__(hipGetSymbolAddress(&numVcoresAddr, HIP_SYMBOL(numVcores)));
+          __LIBHIPTHREADS_HIP_CHECK__(hipStreamWriteValue32(getEnqueingStream(), static_cast<uint32_t *>(numVcoresAddr), hip::wthread::hardware_concurrency(), 0));
+
+          isFirstTime = true;
+          return true;
+    }();
+
+    if (!isFirstTime){
         // Tell the device there's work coming, so threading_main doesn't immediately return. This has to happen on the
         // EnqueingStream because notifyDeviceThereMightNotBeAnyMoreWork does its write in that stream, and we need to make
         // sure the change made by the last wthread's destructor doesn't get over-written.
