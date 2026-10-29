@@ -321,10 +321,14 @@ namespace TensileLite
                 if(solutions.size() != 0)
                 {
                     // A shorter list must not replace a longer one for this problem.
+                    // For equal-length lists, keep the incoming one only if it upgrades
+                    // alreadyRetAll from false to true to avoid repeated top-up rescans.
                     m_caches.addIfPreferred(
                         TopSolutionsEntry{solutions, sub.alreadyRetAll},
                         [](TopSolutionsEntry const& existing, TopSolutionsEntry const& incoming) {
-                            return incoming.solutions.size() > existing.solutions.size();
+                            return incoming.solutions.size() > existing.solutions.size()
+                                   || (incoming.solutions.size() == existing.solutions.size()
+                                       && incoming.alreadyRetAll && !existing.alreadyRetAll);
                         },
                         problem,
                         amdgpu);

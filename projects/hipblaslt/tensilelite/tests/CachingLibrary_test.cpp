@@ -465,3 +465,92 @@ TEST(CachingLibraryTest, ConcurrentFindTopSolutionsSameProblemKeepsSolutionsAndF
     EXPECT_EQ(finalMismatches.load(), 0)
         << "a later request for all solutions was answered with a truncated cached list";
 }
+
+namespace
+{
+    // Holds N solutions and reports alreadyRetAll only when asked for more than N.
+    // This mirrors the cache-upgrade scenario: N then N+1 both return N solutions,
+    // but the second result has a stronger alreadyRetAll=true answer.
+    class ExactNThenTopUpSubLibrary : public ContractionLibrary
+    {
+    public:
+        static constexpr int available = 5;
+
+        std::shared_ptr<ContractionSolution> getSolutionByIndex(ContractionProblemGemm const&,
+                                                                 Hardware const&,
+                                                                 int) const override
+        {
+            return {};
+        }
+        std::shared_ptr<ContractionSolution>
+            findBestSolution(ContractionProblemGemm const&, Hardware const&, double*) const override
+        {
+            return {};
+        }
+        SolutionSet<ContractionSolution>
+            findAllSolutions(ContractionProblemGemm const&,
+                             Hardware const&,
+                             SolutionLibrarySearchType = SolutionLibrarySearchType::DEFAULT) const override
+        {
+            return {};
+        }
+        SolutionSet<ContractionSolution>
+            findAllSolutionsGroupedGemm(std::vector<ContractionProblemGemm> const&,
+                                        Hardware const&,
+                                        SolutionLibrarySearchType
+                                        = SolutionLibrarySearchType::DEFAULT) const override
+        {
+            return {};
+        }
+        std::string type() const override
+        {
+            return "ExactNThenTopUpSub";
+        }
+        std::string description() const override
+        {
+            return "ExactNThenTopUpSub";
+        }
+
+        mutable std::atomic<int> calls{0};
+
+        TopSolutionsResult<ContractionSolution>
+            findTopSolutions(ContractionProblemGemm const&, Hardware const&, int numSolutions) const override
+        {
+            calls.fetch_add(1, std::memory_order_relaxed);
+            const int                           n = std::min(available, numSolutions);
+            SolutionVector<ContractionSolution> out;
+            for(int i = 0; i < n; i++)
+                out.push_back(makeSolution("sol_" + std::to_string(i), i));
+
+            const bool alreadyRetAll = (numSolutions > available);
+            return {std::move(out), alreadyRetAll};
+        }
+    };
+} // namespace
+
+// If two same-size results differ only by alreadyRetAll=false->true, cache
+// should keep the upgraded entry. Otherwise repeated top-up requests rescan.
+TEST(CachingLibraryTest, TopUpUpgradesAlreadyRetAllForEqualSizedResult)
+{
+    const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    auto         problem = problemWithSmCountTarget(64);
+
+    auto sub     = std::make_shared<ExactNThenTopUpSubLibrary>();
+    auto caching = std::make_shared<CachingLibrary<ContractionProblemGemm>>(sub);
+
+    auto exact = caching->findTopSolutions(problem, device, ExactNThenTopUpSubLibrary::available);
+    EXPECT_EQ(exact.solutions.size(), static_cast<size_t>(ExactNThenTopUpSubLibrary::available));
+    EXPECT_FALSE(exact.alreadyRetAll);
+
+    auto topUp = caching->findTopSolutions(problem, device, ExactNThenTopUpSubLibrary::available + 1);
+    EXPECT_EQ(topUp.solutions.size(), static_cast<size_t>(ExactNThenTopUpSubLibrary::available));
+    EXPECT_TRUE(topUp.alreadyRetAll);
+
+    const int callsAfterTopUp = sub->calls.load();
+    auto repeatTopUp
+        = caching->findTopSolutions(problem, device, ExactNThenTopUpSubLibrary::available + 1);
+    EXPECT_EQ(repeatTopUp.solutions.size(), static_cast<size_t>(ExactNThenTopUpSubLibrary::available));
+    EXPECT_TRUE(repeatTopUp.alreadyRetAll);
+    EXPECT_EQ(sub->calls.load(), callsAfterTopUp)
+        << "repeating N+1 should reuse upgraded cache entry instead of rescanning sub-library";
+}
