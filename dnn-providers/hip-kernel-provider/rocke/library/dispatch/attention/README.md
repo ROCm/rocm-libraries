@@ -307,8 +307,12 @@ Selection pins a spec the same way for dense and unified:
   The d256 decode, strided decode and route-only `attention_gfx942_dense_pipe`
   / `attention_gfx950_d256` candidates do not. Each path's own support check
   (split-KV or tiled 2D) refuses LSE on arches other than gfx942/gfx950 and with
-  sinks. The scalar fallback writes no LSE, so it refuses it. An LSE request that
-  cannot be served is refused instead of reaching a kernel without the output.
+  sinks. The scalar fallback writes no LSE, so it refuses it. When the tiled 2D
+  check declines an LSE request that `select_path()` sends to tiled 2D (gfx942
+  D256 prefill at block size 32 exceeds its LDS budget),
+  `attention_unified_3d` serves it with split-KV, as the runner's `auto` backend
+  does (`select_auto_path`). An LSE request that cannot be served is refused
+  instead of reaching a kernel without the output.
 
   To launch unified LSE through `bind_torch`, pin a tuning spec
   (`algorithm="unified_tuning"`, `spec_id="<arch>_u2d_..."` or `"<arch>_u3d_..."`).

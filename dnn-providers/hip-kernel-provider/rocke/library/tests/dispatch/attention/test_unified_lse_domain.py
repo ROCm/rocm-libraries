@@ -33,11 +33,14 @@ _GOLDEN = (
 _ARCHES = ("gfx942", "gfx950", "gfx90a", "gfx1250")
 _LSE_ARCHES = ("gfx942", "gfx950")
 _CUS = {"gfx942": 304, "gfx950": 256}
-_SHAPES = {  # name: (seqlen_q, seqlen_k, mask_type, sliding_window)
-    "decode_long": (1, 4096, 2, 0),
-    "decode_short": (1, 256, 2, 0),
-    "decode_swa": (1, 4096, 2, 128),
-    "prefill": (2048, 2048, 1, 0),
+_SHAPES = {  # name: (seqlen_q, seqlen_k, mask_type, sliding_window, kv_block_size)
+    "decode_long": (1, 4096, 2, 0, 16),
+    "decode_short": (1, 256, 2, 0, 16),
+    "decode_swa": (1, 4096, 2, 128, 16),
+    "prefill": (2048, 2048, 1, 0, 16),
+    # Block size 32: gfx942 D256 bf16 LSE no longer fits the tiled 2D LDS
+    # budget, so auto hands it to split-KV.
+    "prefill_bs32": (2048, 2048, 1, 0, 32),
 }
 # Pinned unified tuning specs: the shape that pins each, and its id per arch.
 _PINS = {
@@ -58,6 +61,12 @@ _SINKS = (
 _LABEL = {"3d": "split-KV", "2d": "tiled 2D"}
 _UNIFIED = re.compile(r"attention_(unified_(2d|3d)|gfx9\d\d_u(2d|3d)_\w+)$")
 _NO_FEATURES = "capability: cannot serve features "
+# LSE requests that tiled 2D declines (LDS budget) and auto hands to split-KV.
+# LSE off, bf16 runs the 4-warp builder and fp16 the scalar kernel; neither
+# writes LSE.
+_HANDOVER = frozenset(
+    f"gfx942|prefill_bs32|d256|{dt}|sinks=0|paged|auto" for dt in ("bf16", "fp16")
+)
 
 
 def _sha(text):
@@ -79,12 +88,12 @@ def _domain():
             _PINS[pin][0] != shape or arch not in _PINS[pin][1] or kv != "paged"
         ):
             continue
-        sq, sk, mask_type, window = _SHAPES[shape]
+        sq, sk, mask_type, window, block = _SHAPES[shape]
         fields = dict(
             batch=4, nhead_q=32, nhead_k=8, seqlen_q=sq, seqlen_k=sk,
             hdim_q=hd, hdim_v=hd, arch=arch, mask_type=mask_type,
             sliding_window=window, dtype=dt, use_sinks=sinks, emit_lse=lse,
-            kv_layout=kv, num_cus=_CUS.get(arch, 128),
+            kv_layout=kv, num_cus=_CUS.get(arch, 128), kv_block_size=block,
         )  # fmt: skip
         if pin != "auto":
             fields.update(algorithm="unified_tuning", spec_id=_PINS[pin][1][arch])
@@ -184,7 +193,9 @@ def test_lse_on_refusals_use_the_exact_per_path_wording(table):
     """Per unified candidate: LSE on may only add the per-path LSE refusal.
     A candidate that refuses with LSE off must give the same reason with it
     on, or that LSE reason; one that serves with LSE off must serve with it on
-    unless the per-path rule says why not."""
+    unless the per-path rule says why not. The one exception is the split-KV
+    handover (``_HANDOVER``): there the generic tiled 2D candidate refuses
+    with its LDS budget and the generic split-KV candidate serves instead."""
     on, off = table
     bad = []
     for key, (request, _, _, verdicts) in on.items():
@@ -194,7 +205,11 @@ def test_lse_on_refusals_use_the_exact_per_path_wording(table):
             expected = _expected_lse_refusal(
                 candidate, request.arch, request.use_sinks, off_why
             )
-            if not off_ok:
+            if key in _HANDOVER and candidate == "attention_unified_2d":
+                good = off_ok and not ok and "LDS budget" in why
+            elif key in _HANDOVER and candidate == "attention_unified_3d":
+                good = not off_ok and ok
+            elif not off_ok:
                 good = not ok and why in (off_why, expected)
             elif expected is None:
                 good = ok
@@ -203,3 +218,18 @@ def test_lse_on_refusals_use_the_exact_per_path_wording(table):
             if not good:
                 bad.append((key, candidate, (ok, why), expected, (off_ok, off_why)))
     assert not bad, bad[:10]
+
+
+@pytest.mark.parametrize("key", sorted(_HANDOVER))
+def test_gfx942_d256_bs32_lse_prefill_takes_split_kv(table, key):
+    """The tiled 2D LDS gate declines this LSE problem, so auto serves it
+    with split-KV and the spec's reduce writes LSE. LSE off is unchanged."""
+    on, off = table
+    assert (off[key][1]["candidate"], off[key][1]["path"]) == (
+        "attention_unified_2d",
+        "2d",
+    )
+    row, result = on[key][1], on[key][2]
+    assert row["ok"], row
+    assert (row["candidate"], row["path"]) == ("attention_unified_3d", "3d")
+    assert result.spec.emit_lse and _writes_lse(result)

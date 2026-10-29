@@ -516,6 +516,46 @@ def test_runner_reports_why_split_kv_declined_an_lse_request(runner):
     assert runner.red_vals is None
 
 
+def _gfx942_d256_bs32_prefill(**overrides):
+    """gfx942 D256 bf16 prefill at block size 32: ``select_path()`` is 2D.
+    LSE off, the 4-warp builder serves it; LSE on, the default tiled 2D spec
+    exceeds the LDS budget."""
+    problem = _problem(
+        total_q=2048,
+        num_seqs=1,
+        head_size=256,
+        block_size=32,
+        max_seqlen_q=2048,
+        max_seqlen_k=2048,
+        **overrides,
+    )
+    assert problem.select_path() == "2d"
+    return problem
+
+
+def test_auto_hands_an_lse_request_tiled_2d_declines_to_split_kv(runner):
+    problem = _gfx942_d256_bs32_prefill(emit_lse=True)
+    ok, why = au.supports_native_unified_attention_tiled(problem, "gfx942")
+    assert not ok and "LDS budget" in why
+    lse = object()
+    _run(problem, lse=lse)
+    assert runner.red_vals["lse_ptr"] is lse
+    assert runner.vals2d is None and runner.graphed == 0
+
+
+def test_auto_without_lse_keeps_tiled_2d_for_that_shape(runner):
+    assert _run(_gfx942_d256_bs32_prefill(), backend="auto") == "graphed"
+    assert runner.red_vals is None
+
+
+def test_tiled_backend_still_refuses_an_lse_request_its_gate_declines(runner):
+    """Only ``auto`` may hand the request to split-KV; ``tiled`` was asked for
+    the 2D kernel and refuses with its gate's reason."""
+    with pytest.raises(NotImplementedError, match="LDS budget"):
+        _run(_gfx942_d256_bs32_prefill(emit_lse=True), lse=object(), backend="tiled")
+    assert runner.red_vals is None and runner.vals2d is None
+
+
 def test_runner_refuses_lse_for_strided_kv(runner):
     with pytest.raises(NotImplementedError, match="strided"):
         _run(_problem(emit_lse=True), lse=object(), kv_layout="strided")

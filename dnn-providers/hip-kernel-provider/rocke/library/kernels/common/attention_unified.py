@@ -5019,6 +5019,26 @@ def _explicit_path_supported(
     raise ValueError(f"unknown attention path kind {kind!r}")
 
 
+def select_auto_path(problem: UnifiedAttentionProblem, arch: str) -> str:
+    """The path ``auto`` tries for ``problem`` on ``arch``: ``select_path()``,
+    except an LSE request the tiled 2D gate declines goes to split-KV.
+
+    Only split-KV and tiled 2D write LSE (the scalar fallback writes none), so
+    when tiled 2D cannot take a 2D-routed LSE request, split-KV is the one path
+    left that can. Example: gfx942 D256 bf16 prefill at block size 32, whose
+    LSE-off form runs on the 4-warp builder (no LSE store) and whose default
+    tiled spec exceeds the LDS budget. LSE off, this is ``select_path()``.
+    """
+    path = problem.select_path()
+    if (
+        path == "2d"
+        and problem.emit_lse
+        and not _explicit_path_supported(problem, None, "2d", arch)[0]
+    ):
+        return "3d"
+    return path
+
+
 def _recommend_graph_replay(problem: UnifiedAttentionProblem) -> bool:
     """Graph-vs-ungraph heuristic.
 
@@ -6220,8 +6240,15 @@ def run_unified_attention_torch(
     # buckets (where our old auto picked 3D for chunked prefill at 30-
     # 150× the right path's cost) while keeping the decode-shape 3D
     # wins on the parity harness (those shapes still satisfy the "3D
-    # is fine" branch of ``use_2d_kernel``).
-    prefer_2d = backend == "auto" and problem.select_path() == "2d"
+    # is fine" branch of ``use_2d_kernel``). An LSE request the tiled 2D gate
+    # declines goes to split-KV, the only other path that writes LSE
+    # (``select_auto_path``); an explicit spec keeps ``select_path()``.
+    auto_path = (
+        problem.select_path()
+        if tuning_spec is not None
+        else select_auto_path(problem, _launch_arch)
+    )
+    prefer_2d = backend == "auto" and auto_path == "2d"
     reason_3d = None  # split-KV verdict, named by the auto LSE refusal below
     if backend == "3d" or (backend == "auto" and not prefer_2d):
         ok_3d, reason_3d = _explicit_path_supported(

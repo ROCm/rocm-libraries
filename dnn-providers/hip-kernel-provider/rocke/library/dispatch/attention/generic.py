@@ -15,6 +15,7 @@ import dataclasses
 from typing import Tuple
 
 from kernels.common.attention_unified import (
+    select_auto_path,
     supports_native_unified_attention,
     supports_native_unified_attention_3d_tiled,
     supports_native_unified_attention_tiled,
@@ -95,7 +96,12 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         ok, why = supports_native_unified_attention(coverage, arch=req.arch)
         if not ok:
             return False, why
-        if problem.select_path() != path:
+        # Split-KV also takes the LSE requests that ``select_path()`` sends to
+        # tiled 2D but whose tiled 2D gate declines, as auto does
+        # (``select_auto_path``); the tiled 2D candidate keeps its gate's reason.
+        if problem.select_path() != path and not (
+            path == "3d" and select_auto_path(problem, req.arch) == "3d"
+        ):
             return False, (
                 f"problem routes to {problem.select_path()!r} path, not {path!r}"
             )

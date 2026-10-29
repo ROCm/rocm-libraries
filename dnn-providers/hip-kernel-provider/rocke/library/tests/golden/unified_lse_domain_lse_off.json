@@ -311,6 +311,110 @@
   "msg": "9cb984e92cfbc0e6",
   "ok": false
  },
+ "gfx1250|prefill_bs32|d128|bf16|sinks=0|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_bf16_hd128_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "056e0bd1e7fe6256",
+  "tuning_id": ""
+ },
+ "gfx1250|prefill_bs32|d128|bf16|sinks=0|strided|auto": {
+  "msg": "91e72ddcd9b358c8",
+  "ok": false
+ },
+ "gfx1250|prefill_bs32|d128|bf16|sinks=1|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_bf16_hd128_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "056e0bd1e7fe6256",
+  "tuning_id": ""
+ },
+ "gfx1250|prefill_bs32|d128|bf16|sinks=1|strided|auto": {
+  "msg": "91e72ddcd9b358c8",
+  "ok": false
+ },
+ "gfx1250|prefill_bs32|d128|fp16|sinks=0|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_fp16_hd128_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "d138ee0efb010340",
+  "tuning_id": ""
+ },
+ "gfx1250|prefill_bs32|d128|fp16|sinks=0|strided|auto": {
+  "msg": "10c7162cb80551d6",
+  "ok": false
+ },
+ "gfx1250|prefill_bs32|d128|fp16|sinks=1|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_fp16_hd128_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "d138ee0efb010340",
+  "tuning_id": ""
+ },
+ "gfx1250|prefill_bs32|d128|fp16|sinks=1|strided|auto": {
+  "msg": "bb6ec56840dcf8bc",
+  "ok": false
+ },
+ "gfx1250|prefill_bs32|d256|bf16|sinks=0|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_bf16_hd256_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "9a33ccc63d32508e",
+  "tuning_id": ""
+ },
+ "gfx1250|prefill_bs32|d256|bf16|sinks=0|strided|auto": {
+  "msg": "91e72ddcd9b358c8",
+  "ok": false
+ },
+ "gfx1250|prefill_bs32|d256|bf16|sinks=1|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_bf16_hd256_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "9a33ccc63d32508e",
+  "tuning_id": ""
+ },
+ "gfx1250|prefill_bs32|d256|bf16|sinks=1|strided|auto": {
+  "msg": "91e72ddcd9b358c8",
+  "ok": false
+ },
+ "gfx1250|prefill_bs32|d256|fp16|sinks=0|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_fp16_hd256_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "5c26d4a67de04c0a",
+  "tuning_id": ""
+ },
+ "gfx1250|prefill_bs32|d256|fp16|sinks=0|strided|auto": {
+  "msg": "10c7162cb80551d6",
+  "ok": false
+ },
+ "gfx1250|prefill_bs32|d256|fp16|sinks=1|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_fp16_hd256_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "5c26d4a67de04c0a",
+  "tuning_id": ""
+ },
+ "gfx1250|prefill_bs32|d256|fp16|sinks=1|strided|auto": {
+  "msg": "bb6ec56840dcf8bc",
+  "ok": false
+ },
  "gfx1250|prefill|d128|bf16|sinks=0|paged|auto": {
   "cache_key": null,
   "candidate": "attention_unified_2d",
@@ -724,6 +828,110 @@
   "tuning_id": ""
  },
  "gfx90a|decode_swa|d256|fp16|sinks=1|strided|auto": {
+  "msg": "3d2f3a4d8b63fc97",
+  "ok": false
+ },
+ "gfx90a|prefill_bs32|d128|bf16|sinks=0|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_bf16_hd128_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "056e0bd1e7fe6256",
+  "tuning_id": ""
+ },
+ "gfx90a|prefill_bs32|d128|bf16|sinks=0|strided|auto": {
+  "msg": "3d2f3a4d8b63fc97",
+  "ok": false
+ },
+ "gfx90a|prefill_bs32|d128|bf16|sinks=1|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_bf16_hd128_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "056e0bd1e7fe6256",
+  "tuning_id": ""
+ },
+ "gfx90a|prefill_bs32|d128|bf16|sinks=1|strided|auto": {
+  "msg": "3d2f3a4d8b63fc97",
+  "ok": false
+ },
+ "gfx90a|prefill_bs32|d128|fp16|sinks=0|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_fp16_hd128_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "d138ee0efb010340",
+  "tuning_id": ""
+ },
+ "gfx90a|prefill_bs32|d128|fp16|sinks=0|strided|auto": {
+  "msg": "3d2f3a4d8b63fc97",
+  "ok": false
+ },
+ "gfx90a|prefill_bs32|d128|fp16|sinks=1|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_fp16_hd128_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "d138ee0efb010340",
+  "tuning_id": ""
+ },
+ "gfx90a|prefill_bs32|d128|fp16|sinks=1|strided|auto": {
+  "msg": "3d2f3a4d8b63fc97",
+  "ok": false
+ },
+ "gfx90a|prefill_bs32|d256|bf16|sinks=0|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_bf16_hd256_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "9a33ccc63d32508e",
+  "tuning_id": ""
+ },
+ "gfx90a|prefill_bs32|d256|bf16|sinks=0|strided|auto": {
+  "msg": "3d2f3a4d8b63fc97",
+  "ok": false
+ },
+ "gfx90a|prefill_bs32|d256|bf16|sinks=1|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_bf16_hd256_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "9a33ccc63d32508e",
+  "tuning_id": ""
+ },
+ "gfx90a|prefill_bs32|d256|bf16|sinks=1|strided|auto": {
+  "msg": "3d2f3a4d8b63fc97",
+  "ok": false
+ },
+ "gfx90a|prefill_bs32|d256|fp16|sinks=0|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_fp16_hd256_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "5c26d4a67de04c0a",
+  "tuning_id": ""
+ },
+ "gfx90a|prefill_bs32|d256|fp16|sinks=0|strided|auto": {
+  "msg": "3d2f3a4d8b63fc97",
+  "ok": false
+ },
+ "gfx90a|prefill_bs32|d256|fp16|sinks=1|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_fp16_hd256_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "5c26d4a67de04c0a",
+  "tuning_id": ""
+ },
+ "gfx90a|prefill_bs32|d256|fp16|sinks=1|strided|auto": {
   "msg": "3d2f3a4d8b63fc97",
   "ok": false
  },
@@ -1273,6 +1481,110 @@
  },
  "gfx942|decode_swa|d256|fp16|sinks=1|strided|auto": {
   "msg": "ac4668a596ec7555",
+  "ok": false
+ },
+ "gfx942|prefill_bs32|d128|bf16|sinks=0|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_bf16_hd128_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "056e0bd1e7fe6256",
+  "tuning_id": ""
+ },
+ "gfx942|prefill_bs32|d128|bf16|sinks=0|strided|auto": {
+  "msg": "16905101eed4c594",
+  "ok": false
+ },
+ "gfx942|prefill_bs32|d128|bf16|sinks=1|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_bf16_hd128_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "056e0bd1e7fe6256",
+  "tuning_id": ""
+ },
+ "gfx942|prefill_bs32|d128|bf16|sinks=1|strided|auto": {
+  "msg": "16905101eed4c594",
+  "ok": false
+ },
+ "gfx942|prefill_bs32|d128|fp16|sinks=0|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_gfx942_dense_pipe",
+  "name": "rocke_attention_gfx942_dense_pipe_2d_fp16_hd128_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "e27962bca854519f",
+  "tuning_id": ""
+ },
+ "gfx942|prefill_bs32|d128|fp16|sinks=0|strided|auto": {
+  "msg": "a674787c17455630",
+  "ok": false
+ },
+ "gfx942|prefill_bs32|d128|fp16|sinks=1|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_fp16_hd128_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "d138ee0efb010340",
+  "tuning_id": ""
+ },
+ "gfx942|prefill_bs32|d128|fp16|sinks=1|strided|auto": {
+  "msg": "a674787c17455630",
+  "ok": false
+ },
+ "gfx942|prefill_bs32|d256|bf16|sinks=0|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_bf16_hd256_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "9a33ccc63d32508e",
+  "tuning_id": ""
+ },
+ "gfx942|prefill_bs32|d256|bf16|sinks=0|strided|auto": {
+  "msg": "24e3060fa8f5e8ab",
+  "ok": false
+ },
+ "gfx942|prefill_bs32|d256|bf16|sinks=1|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_bf16_hd256_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "9a33ccc63d32508e",
+  "tuning_id": ""
+ },
+ "gfx942|prefill_bs32|d256|bf16|sinks=1|strided|auto": {
+  "msg": "01ae2acb21b289a1",
+  "ok": false
+ },
+ "gfx942|prefill_bs32|d256|fp16|sinks=0|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_fp16_hd256_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "5c26d4a67de04c0a",
+  "tuning_id": ""
+ },
+ "gfx942|prefill_bs32|d256|fp16|sinks=0|strided|auto": {
+  "msg": "a674787c17455630",
+  "ok": false
+ },
+ "gfx942|prefill_bs32|d256|fp16|sinks=1|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_fp16_hd256_bs32_gqa32x8",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "5c26d4a67de04c0a",
+  "tuning_id": ""
+ },
+ "gfx942|prefill_bs32|d256|fp16|sinks=1|strided|auto": {
+  "msg": "a674787c17455630",
   "ok": false
  },
  "gfx942|prefill|d128|bf16|sinks=0|paged|auto": {
@@ -1955,6 +2267,110 @@
  },
  "gfx950|decode_swa|d256|fp16|sinks=1|strided|auto": {
   "msg": "abb973772690f4e3",
+  "ok": false
+ },
+ "gfx950|prefill_bs32|d128|bf16|sinks=0|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_bf16_hd128_bs32_gqa32x8_tl",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "2f7dc78c160fda75",
+  "tuning_id": ""
+ },
+ "gfx950|prefill_bs32|d128|bf16|sinks=0|strided|auto": {
+  "msg": "3b34b70eaa7933c3",
+  "ok": false
+ },
+ "gfx950|prefill_bs32|d128|bf16|sinks=1|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_bf16_hd128_bs32_gqa32x8_tl",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "2f7dc78c160fda75",
+  "tuning_id": ""
+ },
+ "gfx950|prefill_bs32|d128|bf16|sinks=1|strided|auto": {
+  "msg": "3b34b70eaa7933c3",
+  "ok": false
+ },
+ "gfx950|prefill_bs32|d128|fp16|sinks=0|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_fp16_hd128_bs32_gqa32x8_tl",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "1ef3b16a577e76b7",
+  "tuning_id": ""
+ },
+ "gfx950|prefill_bs32|d128|fp16|sinks=0|strided|auto": {
+  "msg": "9864057bbaba19d4",
+  "ok": false
+ },
+ "gfx950|prefill_bs32|d128|fp16|sinks=1|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_fp16_hd128_bs32_gqa32x8_tl",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "1ef3b16a577e76b7",
+  "tuning_id": ""
+ },
+ "gfx950|prefill_bs32|d128|fp16|sinks=1|strided|auto": {
+  "msg": "9864057bbaba19d4",
+  "ok": false
+ },
+ "gfx950|prefill_bs32|d256|bf16|sinks=0|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_gfx950_d256",
+  "name": "rocke_attention_gfx950_d256_2d_bf16_hd256_bs32_gqa32x8_tl",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "caa15c3c42ef7aa6",
+  "tuning_id": ""
+ },
+ "gfx950|prefill_bs32|d256|bf16|sinks=0|strided|auto": {
+  "msg": "027f305876a60ea6",
+  "ok": false
+ },
+ "gfx950|prefill_bs32|d256|bf16|sinks=1|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_bf16_hd256_bs32_gqa32x8_tl",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "e53905d8c2ef14f6",
+  "tuning_id": ""
+ },
+ "gfx950|prefill_bs32|d256|bf16|sinks=1|strided|auto": {
+  "msg": "79c87968e619bc53",
+  "ok": false
+ },
+ "gfx950|prefill_bs32|d256|fp16|sinks=0|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_fp16_hd256_bs32_gqa32x8_tl",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "72bcbf487c75e6ba",
+  "tuning_id": ""
+ },
+ "gfx950|prefill_bs32|d256|fp16|sinks=0|strided|auto": {
+  "msg": "9864057bbaba19d4",
+  "ok": false
+ },
+ "gfx950|prefill_bs32|d256|fp16|sinks=1|paged|auto": {
+  "cache_key": null,
+  "candidate": "attention_unified_2d",
+  "name": "rocke_attention_unified_2d_fp16_hd256_bs32_gqa32x8_tl",
+  "ok": true,
+  "path": "2d",
+  "spec_hash": "72bcbf487c75e6ba",
+  "tuning_id": ""
+ },
+ "gfx950|prefill_bs32|d256|fp16|sinks=1|strided|auto": {
+  "msg": "9864057bbaba19d4",
   "ok": false
  },
  "gfx950|prefill|d128|bf16|sinks=0|paged|auto": {

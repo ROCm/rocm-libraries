@@ -569,6 +569,48 @@ def test_auto_backend_writes_lse_on_a_2d_routed_shape():
     _assert_2d_result(out, off, lse, o_ref, lse_ref, "bf16")
 
 
+def _forbid_tiled_2d(*_args, **_kwargs):
+    raise AssertionError("an LSE request the tiled 2D gate declines reached it")
+
+
+@requires_cdna3_or_4
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "q_lens,kv_lens",
+    [([2048], [2048]), ([37, 300, 1], [37, 812, 900])],
+)
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+def test_auto_hands_lse_to_split_kv_when_tiled_2d_declines(dtype, q_lens, kv_lens):
+    """gfx942 D256 prefill at block size 32 routes to 2D, but the tiled 2D
+    gate declines it with LSE on (LDS budget). backend='auto' runs split-KV,
+    which writes LSE (the tiled 2D launcher is patched to fail)."""
+    if _arch() != "gfx942":
+        pytest.skip("the tiled 2D LDS gate declines this shape on gfx942 only")
+    problem, q, kc, vc, cu, su, bt = _case(q_lens, kv_lens, d=256, dtype=dtype, bs=32)
+    assert problem.select_path() == "2d"
+    ok, why = au.supports_native_unified_attention_tiled(problem, "gfx942")
+    assert not ok and "LDS budget" in why
+    lse = _nan_lse(problem)
+    with mock.patch.object(au, "_get_2d_launcher", _forbid_tiled_2d):
+        out = _run(problem, q, kc, vc, cu, su, bt, lse=lse, softcap=0.0, backend="auto")
+    off = _run(
+        dataclasses.replace(problem, emit_lse=False),
+        q,
+        kc,
+        vc,
+        cu,
+        su,
+        bt,
+        lse=None,
+        softcap=0.0,
+    )
+    o_ref, lse_ref = _paged_reference(
+        q, kc, vc, q_lens, kv_lens, bt, 1.0 / math.sqrt(256), 0.0
+    )
+    assert torch.equal(out, off), "LSE-on changed the split-KV O"
+    _assert_matches_reference(out, lse, o_ref, lse_ref, _tolerance(dtype))
+
+
 @requires_cdna3_or_4
 @pytest.mark.gpu
 def test_cached_lse_off_2d_graph_never_serves_an_lse_request():
