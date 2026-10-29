@@ -763,25 +763,28 @@ inline std::unique_ptr<StateManager>
 /// disables the disk cache, so every test that does not opt in stays in-memory only.
 /// @param winnerCacheCapacity Lets a test reach the eviction bound without recording the
 ///        thousands of rankings the production default holds.
-inline std::unique_ptr<StateManager> makeIdentifiedStateManager(
-    EngineIdentity engine, size_t winnerCacheCapacity = StateManager::DEFAULT_WINNER_CACHE_CAPACITY)
+/// @param pack The engine's one pack; the fixture's kernel-scoped pack by default.
+inline std::unique_ptr<StateManager>
+    makeIdentifiedStateManager(EngineIdentity engine,
+                               size_t winnerCacheCapacity
+                               = StateManager::DEFAULT_WINNER_CACHE_CAPACITY,
+                               KernelDescriptorPack pack = makePack({KERNEL_MATCHER_ID}))
 {
     std::vector<MatchDescriptor> matchers{
         {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
     ensureNoopDispatchRegistered<TestHandle>();
     std::vector<DispatchDescriptor> dispatches{{DISPATCH_ID, "test dispatch", "test.dispatch"}};
 
-    return std::make_unique<StateManager>(
-        makeSchema(),
-        std::move(matchers),
-        std::move(dispatches),
-        std::vector<KernelDescriptorPack>{makePack({KERNEL_MATCHER_ID})},
-        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-        "test.graph",
-        "engine 'test fixture'",
-        StateManager::DEFAULT_CATALOG_CACHE_CAPACITY,
-        std::move(engine),
-        winnerCacheCapacity);
+    return std::make_unique<StateManager>(makeSchema(),
+                                          std::move(matchers),
+                                          std::move(dispatches),
+                                          std::vector<KernelDescriptorPack>{std::move(pack)},
+                                          std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                                          "test.graph",
+                                          "engine 'test fixture'",
+                                          StateManager::DEFAULT_CATALOG_CACHE_CAPACITY,
+                                          std::move(engine),
+                                          winnerCacheCapacity);
 }
 
 /// An engine identified by name alone: no revision, no UHD, no model hash. Pairs with
@@ -789,6 +792,14 @@ inline std::unique_ptr<StateManager> makeIdentifiedStateManager(
 inline std::unique_ptr<StateManager> makeNamedStateManager(const std::string& engineName)
 {
     return makeIdentifiedStateManager(EngineIdentity{engineName});
+}
+
+/// As above, with @p pack in place of the fixture's pack.
+inline std::unique_ptr<StateManager> makeNamedStateManager(const std::string& engineName,
+                                                           KernelDescriptorPack pack)
+{
+    return makeIdentifiedStateManager(
+        EngineIdentity{engineName}, StateManager::DEFAULT_WINNER_CACHE_CAPACITY, std::move(pack));
 }
 
 /// Installs @p handler under @p symbol for the object's lifetime, replacing

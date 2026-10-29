@@ -1257,7 +1257,7 @@ TEST(TestKernelIngestorStateManager, APackAdmittingSomeKernelsStillReportsTheCou
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
-    const auto manager = makeStateManager();
+    const auto manager = makeNamedStateManager(ENGINE_NAME);
     const TestGraph graph(makeGraphId(0x5F));
     const auto properties = testDeviceProperties();
 
@@ -1265,7 +1265,50 @@ TEST(TestKernelIngestorStateManager, APackAdmittingSomeKernelsStillReportsTheCou
 
     EXPECT_TRUE(recorder.hasLogContaining(
         HIPDNN_SEV_INFO,
-        toString(PACK_ID) + " admitted 2 of 3 kernel(s) after kernel-scoped matching"))
+        "engine '" + std::string(ENGINE_NAME) + "' pack " + toString(PACK_ID)
+            + " admitted 2 of 3 kernel(s) after kernel-scoped matching"))
+        << recorder.getRecordedLogsAsString();
+}
+
+// Several engines share one process log, so every applicability decline names its engine.
+TEST(TestKernelIngestorStateManager, AGraphMatchDeclineNamesTheEngine)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const ScopedSymbols symbols("test.graph", rejectGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeNamedStateManager(ENGINE_NAME);
+    const TestGraph graph(makeGraphId(0x61));
+    const auto properties = testDeviceProperties();
+
+    EXPECT_TRUE(manager->unsortedDefinitions(MatchContext{graph, 0, properties}).empty());
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO,
+                                          "engine '" + std::string(ENGINE_NAME)
+                                              + "' declined graph_match for device 0"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestKernelIngestorStateManager, AKernelForAnotherArchIsDeclinedUnderTheEngineName)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    auto pack = makePack({KERNEL_MATCHER_ID});
+    auto foreign = makeKernel(testId(0x9A), "foreign_arch", 64, "FLOAT");
+    foreign.arch = {"gfx942"};
+    pack.kernels = {foreign};
+    const auto manager = makeNamedStateManager(ENGINE_NAME, std::move(pack));
+    const TestGraph graph(makeGraphId(0x62));
+    const auto properties = testDeviceProperties();
+
+    EXPECT_TRUE(manager->unsortedDefinitions(MatchContext{graph, 0, properties}).empty());
+
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_INFO,
+        "engine '" + std::string(ENGINE_NAME) + "' kernel " + toString(testId(0x9A))
+            + " does not support device arch '" + properties.gcnArchName + "'"))
         << recorder.getRecordedLogsAsString();
 }
 
