@@ -9,6 +9,8 @@
 # build_unified_attention_2d_tiled(spec, arch="gfx942") and prints
 # lower_kernel_to_llvm(kernel, arch="gfx942") to stdout so it can be
 # byte-compared with the C emitter gfx942_attention_tiled_2d_emit.c.
+# prove_parity_binding keeps a copy of _CONFIGS in
+# platform/cpp/bindings/attention_tiled_parity_configs.py; update it in step.
 from kernels.gfx942.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec,
     build_unified_attention_2d_tiled,

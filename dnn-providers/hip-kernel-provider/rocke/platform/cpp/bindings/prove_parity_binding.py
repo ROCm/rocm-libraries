@@ -42,6 +42,20 @@ EMIT = os.environ.get("ROCKE_PARITY_EMIT", "/tmp/rocke_parity/emit")
 sys.path.insert(0, BUILD)
 import rocke_engine  # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import attention_tiled_parity_configs as atp  # noqa: E402
+
+# Families whose table must cover every emitter config: the emitter must
+# reject the first index past the table, or the table has fallen behind.
+_COMPLETE_TABLES = frozenset(
+    {
+        "gfx942_attention_tiled_2d",
+        "gfx950_attention_tiled_2d",
+        "gfx942_attention_tiled_3d",
+        "gfx950_attention_tiled_3d",
+    }
+)
+
 
 def _assert_build_id_match():
     """Cross-check the loaded .so's build-id against the emit dir's BUILD_ID.
@@ -1407,46 +1421,12 @@ def cfgs_fused_moe_e2e():
     ]
 
 
-def _emitter_configs(module):
-    """The Python parity emitter's own per-index spec kwargs, in index order.
-
-    The tiled 2D emitters (``library/tests/parity/<fam>_emit.py``) keep their
-    configs in ``_CONFIGS``; the C emitters mirror them index for index and
-    check_byte_identity proves the pair agrees. Reading them here keeps this
-    table complete (including the LSE-on configs) instead of a hand-copied,
-    drifting subset."""
-    import importlib
-
-    here = os.path.dirname(os.path.abspath(__file__))
-    parity = os.path.normpath(
-        os.path.join(here, "..", "..", "..", "library", "tests", "parity")
-    )
-    library = os.path.dirname(os.path.dirname(parity))
-    for p in (parity, library):
-        if p not in sys.path:
-            sys.path.insert(0, p)
-    configs = importlib.import_module(module)._CONFIGS
-    assert sorted(configs) == list(range(len(configs))), module
-    return [dict(configs[i]) for i in range(len(configs))]
-
-
-def _emitter_3d_configs(module):
-    """3D configs from the emitter; the reduce of each ``_REDUCE_LSE`` index is
-    built with ``emit_lse`` (the binding reads it for the derived reduce)."""
-    import importlib
-
-    cfgs = _emitter_configs(module)
-    for idx in importlib.import_module(module)._REDUCE_LSE:
-        cfgs[idx]["emit_lse"] = True
-    return cfgs
-
-
 def cfgs_gfx942_attention_tiled_2d():
-    return _emitter_configs("gfx942_attention_tiled_2d_emit")
+    return [dict(c) for c in atp.GFX942_ATTENTION_TILED_2D]
 
 
 def cfgs_gfx950_attention_tiled_2d():
-    return _emitter_configs("gfx950_attention_tiled_2d_emit")
+    return [dict(c) for c in atp.GFX950_ATTENTION_TILED_2D]
 
 
 def cfgs_gfx950_attention_tiled_2d_fastkv_regp():
@@ -1773,11 +1753,11 @@ def run_selector_parity(arch, problems):
 
 
 def cfgs_gfx942_attention_tiled_3d():
-    return _emitter_3d_configs("gfx942_attention_tiled_3d_emit")
+    return [dict(c) for c in atp.GFX942_ATTENTION_TILED_3D]
 
 
 def cfgs_gfx950_attention_tiled_3d():
-    return _emitter_3d_configs("gfx950_attention_tiled_3d_emit")
+    return [dict(c) for c in atp.GFX950_ATTENTION_TILED_3D]
 
 
 def cfgs_deep_fused_conv_pool():
@@ -2019,6 +1999,14 @@ def main():
                 details.append(
                     f"  cfg{idx}: DIFF cpp={sha(got)} std={sha(std)} "
                     f"(len {len(got)} vs {len(std)})"
+                )
+        if fam in _COMPLETE_TABLES:
+            past, _ = run_emitter(fam, len(cfgs))
+            if past:
+                n_mismatch += 1
+                details.append(
+                    f"  cfg{len(cfgs)}: the emitter builds it but the table ends at "
+                    f"{len(cfgs) - 1}; update attention_tiled_parity_configs.py"
                 )
         total_match += n_match
         total_mismatch += n_mismatch

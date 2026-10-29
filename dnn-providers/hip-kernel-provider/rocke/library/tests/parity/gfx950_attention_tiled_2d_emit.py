@@ -10,6 +10,8 @@
 # build_unified_attention_2d_tiled(spec, arch="gfx950") and prints
 # lower_kernel_to_llvm(kernel, arch="gfx950") to stdout so it can be
 # byte-compared with the C emitter gfx950_attention_tiled_2d_emit.c.
+# prove_parity_binding keeps a copy of _CONFIGS in
+# platform/cpp/bindings/attention_tiled_parity_configs.py; update it in step.
 #
 # The config table is kept IN LOCKSTEP with the C make_spec() switch (same index
 # -> same UnifiedAttention2DTiledSpec). This is the "edge / feature-flag" cluster:

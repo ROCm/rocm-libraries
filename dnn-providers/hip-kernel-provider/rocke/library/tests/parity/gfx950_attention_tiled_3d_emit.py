@@ -17,6 +17,9 @@
 # Each kernel is lowered with _native_lower(kernel, arch="gfx950") and
 # the two .ll texts are concatenated (segment first, then reduce) to stdout so
 # they can be byte-compared with the C emitter gfx950_attention_tiled_3d_emit.c.
+# prove_parity_binding keeps a copy of _CONFIGS (with emit_lse set for the
+# _REDUCE_LSE configs) in platform/cpp/bindings/attention_tiled_parity_configs.py;
+# update it in step.
 import sys
 
 from kernels.gfx950.attention_tiled_3d import (
