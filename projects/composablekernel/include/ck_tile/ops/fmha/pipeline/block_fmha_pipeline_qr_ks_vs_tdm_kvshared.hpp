@@ -145,7 +145,9 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
 
     // The same operand from the columns of row-major rows: each 8-lane group reads the 8
     // rows its lanes address, lane j getting their element j; the halves are 16 rows apart.
-    CK_TILE_DEVICE static RawX16 LoadOperandTransposed(const LdsChar* p, index_t row_bytes)
+    // Without second_half the second half is zero.
+    CK_TILE_DEVICE static RawX16
+    LoadOperandTransposed(const LdsChar* p, index_t row_bytes, bool second_half)
     {
 #if defined(__gfx125__)
         using Ptr     = __attribute__((address_space(3))) RawX8*;
@@ -158,11 +160,14 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
                     reinterpret_cast<Ptr>(const_cast<LdsChar*>(q)));
         };
         const RawX8 a = lo(p);
-        const RawX8 b = lo(p + 16 * row_bytes);
+        RawX8 b{};
+        if(second_half)
+            b = lo(p + 16 * row_bytes);
         return __builtin_shufflevector(a, b, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
 #else
         ignore = p;
         ignore = row_bytes;
+        ignore = second_half;
         return RawX16{};
 #endif
     }
@@ -395,20 +400,34 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
                kv_tile_start + i_warp * kKeyBlock * 16 >= physical_seqlen_k_end)
                 continue;
 
+            // One warp with at most 16 keys left (on the last tile) computes S^T for its
+            // first 16-key block only and reads half of V^T: the other block's P is 0. (With
+            // two warps, whose second one skips such a trip, this costs the first more in
+            // registers than it saves.)
+            const bool all_blocks = kNWarp > 1 || i_total_loops < num_sink_loop ||
+                                    kv_tile_start + kKeyBlock * 16 / 2 < physical_seqlen_k_end;
+
             // STAGE 1, S^T = K Q^T over this warp's keys, K read row-wise
             const LdsChar* const k_rows =
                 kv + (i_warp * kKeyBlock * 16 + i_q) * kKVRowBytes + i_half * 8 * sizeof(KDataType);
             RawX16 k_operand[kKeyBlock][kQKSteps];
             static_for<0, kKeyBlock, 1>{}([&](auto i_kb) {
-                static_for<0, kQKSteps, 1>{}([&](auto i_k) {
-                    k_operand[i_kb][i_k] = LoadOperand(k_rows + i_kb * 16 * kKVRowBytes +
-                                                       i_k * 32 * sizeof(KDataType));
-                });
+                if(i_kb == 0 || all_blocks)
+                {
+                    static_for<0, kQKSteps, 1>{}([&](auto i_k) {
+                        k_operand[i_kb][i_k] = LoadOperand(k_rows + i_kb * 16 * kKVRowBytes +
+                                                           i_k * 32 * sizeof(KDataType));
+                    });
+                }
             });
             static_for<0, kKeyBlock, 1>{}([&](auto i_kb) {
-                F32x8 s_t{0};
-                static_for<0, kQKSteps, 1>{}(
-                    [&](auto i_k) { s_t = Wmma(k_operand[i_kb][i_k], q_operand[i_k], s_t); });
+                F32x8 s_t{-numeric<float>::infinity()};
+                if(i_kb == 0 || all_blocks)
+                {
+                    s_t = F32x8{0};
+                    static_for<0, kQKSteps, 1>{}(
+                        [&](auto i_k) { s_t = Wmma(k_operand[i_kb][i_k], q_operand[i_k], s_t); });
+                }
                 static_for<0, 8, 1>{}([&](auto i) {
                     s_acc.get_thread_buffer()[i_kb.value * 8 + i.value] = s_t[i.value];
                 });
@@ -419,8 +438,8 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
                 (lane / 8) % 2 * 8 * sizeof(KDataType);
             RawX16 v_operand[kOBlocks];
             static_for<0, kOBlocks, 1>{}([&](auto i_d) {
-                v_operand[i_d] =
-                    LoadOperandTransposed(v_cols + i_d * 16 * sizeof(KDataType), kKVRowBytes);
+                v_operand[i_d] = LoadOperandTransposed(
+                    v_cols + i_d * 16 * sizeof(KDataType), kKVRowBytes, all_blocks);
             });
 
             // STAGE 2: scale_s, add bias, mask
