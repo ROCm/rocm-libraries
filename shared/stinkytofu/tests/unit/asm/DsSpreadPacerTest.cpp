@@ -158,6 +158,21 @@ TEST(DsSpreadPacer, AStageEndsWithItsLastBatch) {
     EXPECT_TRUE(pending.empty());
 }
 
+TEST(DsSpreadPacer, ALoadUsesTheDrainItsBarrierWasPlannedWith) {
+    // 12 loads feeding a barrier at WMMA 20. The barrier planned a drain of 4 (N = last ds + 4), so
+    // the stage ends at 16: 4 batches of 3. With the default drain of 8 it would end at 12: 3 of 4.
+    for (int drain : {-1, 4}) {
+        Loads v;
+        add(v, 12, 0, 0, 20);
+        for (auto& l : v) l.drain = drain;
+        DsSpreadPacer p;
+        p.plan(v, 64, 4, 0, /*drainWindows=*/8);
+        auto pending = ids(v);
+        const int perBatch = drain == 4 ? 3 : 4;
+        for (int w = 0; w < 12; w += 4) EXPECT_EQ(issueBatch(p, w, pending), perBatch) << "w=" << w;
+    }
+}
+
 TEST(DsSpreadPacer, TheRegionEndNeedsNoDrain) {
     // 16 loads to the region end (the loop returns to its start), 32 WMMAs, 8 of them the drain.
     // Without a drain at the region end the stage has all 8 batches: 2 loads in each, the last
