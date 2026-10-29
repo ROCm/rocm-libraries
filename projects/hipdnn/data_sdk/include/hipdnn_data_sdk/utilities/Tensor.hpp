@@ -837,6 +837,15 @@ protected:
     bool computeIsPacked(const std::vector<int64_t>& dims,
                          const std::vector<int64_t>& strides) const
     {
+        // A zero stride on an axis of extent > 1 maps several indices to one element.
+        // Its element space can still equal the item count, so check the strides first.
+        for(size_t axis = 0; axis < dims.size(); ++axis)
+        {
+            if(dims[axis] > 1 && strides[axis] == 0)
+            {
+                return false;
+            }
+        }
         // Item count = largest stride * item count in that dimension
         return (calculateItemCount(dims) == calculateElementSpace(dims, strides));
     }
@@ -878,7 +887,7 @@ public:
     {
         validateDimsAndStridesSameSize();
         validateAllPositive(_dims, "dimension");
-        validateAllPositive(_strides, "stride");
+        validateAllNonNegative(_strides, "stride");
 
         // Set packed flag after validations since it can be incorrect if dims/strides are invalid.
         _packed = TensorBase<T>::computeIsPacked(dims, strides);
@@ -987,6 +996,21 @@ private:
             {
                 std::ostringstream oss;
                 oss << "All " << valueName << "s must be positive. " << valueName << " " << i
+                    << " is " << values[i];
+                throw std::invalid_argument(oss.str());
+            }
+        }
+    }
+
+    void validateAllNonNegative(const std::vector<int64_t>& values,
+                                const std::string& valueName) const
+    {
+        for(size_t i = 0; i < values.size(); ++i)
+        {
+            if(values[i] < 0)
+            {
+                std::ostringstream oss;
+                oss << "All " << valueName << "s must be non-negative. " << valueName << " " << i
                     << " is " << values[i];
                 throw std::invalid_argument(oss.str());
             }

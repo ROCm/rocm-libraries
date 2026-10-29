@@ -306,6 +306,16 @@ inline bool isTensorPacked(const std::vector<int64_t>& dims, const std::vector<i
         return true;
     }
 
+    // A zero stride on an axis of extent > 1 maps several indices to one element, and the
+    // span check below can still pass when other axes leave matching gaps.
+    for(size_t axis = 0; axis < dims.size(); ++axis)
+    {
+        if(dims[axis] > 1 && strides[axis] == 0)
+        {
+            return false;
+        }
+    }
+
     // Calculate total element count
     const auto count
         = std::accumulate(dims.begin(), dims.end(), static_cast<int64_t>(1), std::multiplies<>());
