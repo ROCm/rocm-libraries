@@ -20,6 +20,31 @@ from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.ValidParameters import validParameters
 from tensilelite.Components import DecouplePGR as DP
 from tensilelite.Components import TDMFuse as TF
+
+def _waveMask(state, tc):
+    """Bit w set for every wave that issues `tc`. Derived from the partition the writer reads."""
+    return sum(1 << w for w in TF.tdmWavePartition(state, tc)[1])
+
+
+def _waveMasks(state):
+    """{tensor: _waveMask} over every live member of the resolved grouping."""
+    return {tc: _waveMask(state, tc) for group in TF.liveGroups(state) for tc in group}
+
+
+def _soleWave(state, tc):
+    """The one wave carrying `tc`; raises when the share is not a single wave."""
+    _, waves = TF.tdmWavePartition(state, tc)
+    if len(waves) != 1:
+        raise TF.TdmArrangementNotEmittable(
+            "the shared-set increment selects one wave per member; %s rides waves %s"
+            % (tc, waves))
+    return waves[0]
+
+
+def _groupingAccepted(state):
+    """True when the requested grouping is the one tdmGrouping resolves to."""
+    return TF.tdmGrouping(state).name == TF.tdmGroupingName(state)
+
 from tensilelite.Components.DecouplePGR import decouplePGRBlocks
 from tensilelite.Components.TDMFuse import (TDM_FUSE_GROUPING, tdmBothTensors,
                                         tdmFusePaired, tdmGrouping,
@@ -357,7 +382,7 @@ def test_b_mx_takes_pap_with_scales_on_both_tensors():
 @pytest.mark.parametrize("numWaves", [1, 3, 5, 8, 12, 16])
 def test_b_mx_is_declined_away_from_two_and_four_waves(numWaves):
     """With both scales B_MX takes the 2/1/1 split on 2 or 4 waves; every other wave count declines."""
-    assert TF.tdmGroupingAccepted(ks(NumWaves=numWaves)) is False
+    assert _groupingAccepted(ks(NumWaves=numWaves)) is False
     assert TF.tdmGrouping(ks(NumWaves=numWaves)).name == TF.TDM_GROUPING_DEFAULT
 
 
@@ -366,7 +391,7 @@ def test_b_mx_is_declined_away_from_two_and_four_waves(numWaves):
 def test_one_wave_declines_rows_one_to_three(fuse, mx):
     """Rows 1-3 split their sets over the waves, so one wave declines them to TDMFuse=0's row."""
     state = _maskState(fuse, mx, numWaves=1)
-    assert TF.tdmGroupingAccepted(state) is False
+    assert _groupingAccepted(state) is False
     assert TF.tdmGrouping(state).name == TF.TDM_GROUPING_DEFAULT
     assert TF.tdmWavePartition(state, "A") == TF.tdmWavePartition(_maskState(0, mx, numWaves=1), "A")
 
@@ -375,7 +400,7 @@ def test_one_wave_declines_rows_one_to_three(fuse, mx):
 def test_one_wave_tdmfuse0_shares_no_set_and_stashes_nothing(mx):
     """One wave keeps a descriptor per tensor: no set is shared over waves and no member is stashed."""
     state = _maskState(0, mx, numWaves=1)
-    assert TF.tdmGroupingAccepted(state) is True
+    assert _groupingAccepted(state) is True
     assert TF.tdmGrouping(state).name == TF.TDM_GROUPING_DEFAULT
     assert TF.tdmWaveSeparated(state) is False
     assert TF.tdmSeparateABDescriptors(state) is False
@@ -395,7 +420,7 @@ def test_one_wave_subtile_keeps_a_descriptor_per_tensor(fuse, mx):
     """Subtile keeps a descriptor per tensor; rows 1-3 decline there as on every one-wave kernel."""
     state = dict(_maskState(fuse, mx, numWaves=1), UseSubtileImpl=True)
     default = dict(_maskState(0, mx, numWaves=1), UseSubtileImpl=True)
-    assert TF.tdmGroupingAccepted(state) is (fuse == 0)
+    assert _groupingAccepted(state) is (fuse == 0)
     assert TF.tdmGrouping(state).name == TF.TDM_GROUPING_DEFAULT
     assert TF.tdmStashedMembers(state) == ()
     for tc in TDM_TENSORS:
@@ -406,7 +431,7 @@ def test_one_wave_subtile_keeps_a_descriptor_per_tensor(fuse, mx):
 def test_two_waves_put_both_scales_on_wave_1_and_stash_mxsb(fuse, owner, other):
     """Owner on wave 0, MXSA and MXSB on wave 1 through its set, MXSB stashed; the other on both."""
     state = _maskState(fuse, "mx", numWaves=2)
-    assert TF.tdmGroupingAccepted(state) is True
+    assert _groupingAccepted(state) is True
     assert TF.tdmGrouping(state).name == TDM_FUSE_GROUPING[fuse]
     assert TF.tdmWavePartition(state, owner) == (1, (0,))
     assert TF.tdmWavePartition(state, "MXSA") == (1, (1,))
@@ -439,7 +464,7 @@ def test_a_three_member_block_gives_the_owner_half_and_each_scale_a_quarter(numW
 
 
 def test_four_waves_is_accepted_and_shares_a_mx_entry():
-    assert TF.tdmGroupingAccepted(ks()) is True
+    assert _groupingAccepted(ks()) is True
     assert TF._GROUPING_ACCEPTED["B_MX"] is TF._GROUPING_ACCEPTED["A_MX"]
 
 
@@ -447,8 +472,8 @@ def test_four_waves_is_accepted_and_shares_a_mx_entry():
     {"TDMInst": 1}, {"TDMSplit": True}, {"UseSubtileImpl": True},
 ])
 def test_b_mx_inherits_every_a_mx_precondition(overrides):
-    assert TF.tdmGroupingAccepted(ks(**overrides)) is False
-    assert TF.tdmGroupingAccepted(ks(fuse=2, **overrides)) is False
+    assert _groupingAccepted(ks(**overrides)) is False
+    assert _groupingAccepted(ks(fuse=2, **overrides)) is False
 
 
 @pytest.mark.parametrize("name, expected", [
@@ -608,14 +633,14 @@ def test_a_dead_set_member_contributes_no_token(monkeypatch):
 
 
 def test_shipped_increment_literals_match_the_partition():
-    """Increment literals are not routed through the partition; pin them to tdmSoleWave."""
+    """Increment literals are not routed through the partition; pin them to the single wave the partition gives each scale."""
     state = _ksOwner()
-    assert TF.tdmSoleWave(state, "MXSA") == 2
-    assert TF.tdmSoleWave(state, "MXSB") == 3
+    assert _soleWave(state, "MXSA") == 2
+    assert _soleWave(state, "MXSB") == 3
     assert TF.tdmWaveRangeText(state, "A") == "waves 0-1"
     text = _incrementText(state)
-    assert "wave %d carries MXSA" % TF.tdmSoleWave(state, "MXSA") in text, text
-    assert "wave %d carries MXSB" % TF.tdmSoleWave(state, "MXSB") in text, text
+    assert "wave %d carries MXSA" % _soleWave(state, "MXSA") in text, text
+    assert "wave %d carries MXSB" % _soleWave(state, "MXSB") in text, text
     assert "%s carry A" % TF.tdmWaveRangeText(state, "A") in text, text
 
 
@@ -623,7 +648,7 @@ def test_sole_wave_refuses_a_scale_spread_over_two_waves(monkeypatch):
     """One compare cannot select two waves."""
     monkeypatch.setattr(TF, "tdmWavePartition", lambda _k, _tc: (2, (2, 3)))
     with pytest.raises(TF.TdmArrangementNotEmittable, match="one wave per member"):
-        TF.tdmSoleWave(_ksOwner(), "MXSA")
+        _soleWave(_ksOwner(), "MXSA")
 
 
 def test_wave_components_encode_each_shape(monkeypatch):
@@ -859,7 +884,7 @@ def test_solution_on_one_mx_scale_for_every_grouping_and_wave_count(
     assert state["NumWaves"] == numWaves
     assert TF.tdmLiveScales(state) == (("MXSA",) if mx == "mx_a" else ("MXSB",))
     assert tdmGrouping(state).name == TDM_FUSE_GROUPING[fuse]
-    assert TF.tdmWaveMasks(state) == _expectedMasks(fuse, mx, numWaves)
+    assert _waveMasks(state) == _expectedMasks(fuse, mx, numWaves)
 
 
 @pytest.mark.parametrize("overrides, found", [
@@ -1611,7 +1636,7 @@ def _acceptedMaskStates(waveCounts=(1, 2, 4, 8, 16)):
     for fuse, numWaves, mx in itertools.product(sorted(TDM_FUSE_GROUPING), waveCounts,
                                                 sorted(_MX_STATES)):
         state = _maskState(fuse, mx, numWaves)
-        if fuse == 0 or TF.tdmGroupingAccepted(state):
+        if fuse == 0 or _groupingAccepted(state):
             yield state
 
 
@@ -1626,7 +1651,7 @@ def _acceptedMaskStates(waveCounts=(1, 2, 4, 8, 16)):
     (3, "no_mx", {"A": 0b1111, "B": 0b1111}),
 ])
 def test_wave_masks_on_four_waves(fuse, mx, masks):
-    assert TF.tdmWaveMasks(_maskState(fuse, mx)) == masks
+    assert _waveMasks(_maskState(fuse, mx)) == masks
 
 
 # With one MX scale each set still splits its waves over its live members, so no wave
@@ -1642,7 +1667,7 @@ def test_wave_masks_on_four_waves(fuse, mx, masks):
     (3, "mx_b", {"B": 0b0011, "MXSB": 0b1100, "A": 0b1111}),
 ])
 def test_wave_masks_with_one_scale_on_four_waves(fuse, mx, masks):
-    assert TF.tdmWaveMasks(_maskState(fuse, mx)) == masks
+    assert _waveMasks(_maskState(fuse, mx)) == masks
 
 
 @pytest.mark.parametrize("numWaves", [2, 4, 8])
@@ -1651,10 +1676,10 @@ def test_rows_one_to_three_reduce_to_a_and_b_on_every_wave_without_scales(fuse, 
     """Each data tensor is left alone in its set and takes every wave, the same in all three rows."""
     state, paired = _maskState(fuse, "no_mx", numWaves), _maskState(1, "no_mx", numWaves)
     every = (1 << numWaves) - 1
-    assert TF.tdmGroupingAccepted(state) is True
+    assert _groupingAccepted(state) is True
     assert TF.tdmGrouping(state).name == TDM_FUSE_GROUPING[fuse]
     assert sorted(TF.liveGroups(state)) == [("A",), ("B",)]
-    assert TF.tdmWaveMasks(state) == TF.tdmWaveMasks(paired) == {"A": every, "B": every}
+    assert _waveMasks(state) == _waveMasks(paired) == {"A": every, "B": every}
     for tc in ("A", "B"):
         assert TF.tdmWavePartition(state, tc) == TF.tdmWavePartition(paired, tc) \
                == (numWaves, tuple(range(numWaves))), tc
@@ -1679,7 +1704,7 @@ def test_rows_one_to_three_reduce_to_a_and_b_on_every_wave_without_scales(fuse, 
 @pytest.mark.parametrize("fuse", [1, 2, 3])
 def test_rows_one_to_three_without_scales_decline_outside_their_limits(fuse, over):
     state = dict(_maskState(fuse, "no_mx"), **over)
-    assert TF.tdmGroupingAccepted(state) is False
+    assert _groupingAccepted(state) is False
     assert TF.tdmGrouping(state).name == TF.TDM_GROUPING_DEFAULT
 
 
@@ -1689,7 +1714,7 @@ def test_rows_one_to_three_without_scales_decline_outside_their_limits(fuse, ove
 def test_a_lone_scale_keeps_rows_one_to_three_accepted(fuse, mx, numWaves):
     """The lone scale rides its data tensor's set; the other data tensor rides every wave of its own."""
     state = _maskState(fuse, mx, numWaves)
-    assert TF.tdmGroupingAccepted(state) is True
+    assert _groupingAccepted(state) is True
     assert TF.tdmGrouping(state).name == TDM_FUSE_GROUPING[fuse]
     # The paired arms program both scales; one scale takes the shared-scale arms.
     assert tdmFusePaired(state) is False
@@ -1702,10 +1727,10 @@ def test_a_lone_scale_keeps_rows_one_to_three_accepted(fuse, mx, numWaves):
 @pytest.mark.parametrize("mx, live, dead", [("mx_a", "MXSA", "MXSB"), ("mx_b", "MXSB", "MXSA")])
 def test_a_scale_only_set_gives_its_lone_live_scale_every_wave(mx, live, dead):
     state = _maskState(0, mx)
-    assert TF.tdmWaveMasks(state) == {"A": 0b0101, "B": 0b1010, live: 0b1111}
+    assert _waveMasks(state) == {"A": 0b0101, "B": 0b1010, live: 0b1111}
     assert TF.tdmWavePartition(state, live) == (4, (0, 1, 2, 3))
     assert TF.tdmWavePartition(state, dead) == (0, ())
-    assert TF.tdmWaveMask(state, dead) == 0
+    assert _waveMask(state, dead) == 0
 
 
 def test_live_members_split_their_set_without_overlap_or_idle_waves():
@@ -1717,7 +1742,7 @@ def test_live_members_split_their_set_without_overlap_or_idle_waves():
         own = TF.tdmStashedMembers(state)
         for group in TF.liveGroups(state):
             # A member on a set of its own shares a wave; the others split the set's waves.
-            masks = [TF.tdmWaveMask(state, tc) for tc in group if tc not in own]
+            masks = [_waveMask(state, tc) for tc in group if tc not in own]
             assert all(a & b == 0 for a, b in itertools.combinations(masks, 2)), (state, group)
             assert sum(masks) == every, (state, group, masks)
 
@@ -1771,7 +1796,7 @@ def test_a_lone_scale_on_a_block_set_rides_an_offset_run(fuse, mx, scale):
     assert TF.tdmWaveRangeText(state, scale) == "waves 2-3"
     # The shared-set increment still selects one wave per member.
     with pytest.raises(TF.TdmArrangementNotEmittable, match=r"rides waves \(2, 3\)"):
-        TF.tdmSoleWave(state, scale)
+        _soleWave(state, scale)
 
 
 def test_wave_shares_with_every_member_live_split_each_full_set():
@@ -1816,7 +1841,7 @@ def test_wave_shares_split_each_set_over_its_live_members():
 def test_wave_masks_leave_the_kernel_state_alone():
     state = _maskState(2, "no_mx")
     before = copy.deepcopy(state)
-    TF.tdmWaveMasks(state)
+    _waveMasks(state)
     assert state == before
 
 
@@ -1868,7 +1893,7 @@ _ALLOCATION = {
     (3, "mx", 4):    ("B_MX",   False,    (0, 1, 2, 3), (2,),         (3,),         (0, 1)),
 }
 
-# What a wave share means at its NumWaves: (numComp, tdmWaveMask, tdmWaveComponents,
+# What a wave share means at its NumWaves: (numComp, wave mask, tdmWaveComponents,
 # tdmWaveGuard). A wave's component is (WaveIdx - offset) >> shift; a None shift is one component.
 _SHARE = {
     (2, (0,)):         (1, 0b01,   (1, None, 0), ("wave", 0)),
@@ -1905,31 +1930,31 @@ def test_wave_allocation_matrix(fuse, mx, numWaves):
     row, declined = _ALLOCATION[fuse, mx, numWaves][:2]
     state = _maskState(fuse, mx, numWaves)
     assert TF.tdmGrouping(state).name == row
-    assert TF.tdmGroupingAccepted(state) is (not declined)
+    assert _groupingAccepted(state) is (not declined)
     for tc, waves in zip(TDM_TENSORS, _ALLOCATION[fuse, mx, numWaves][2:]):
         if not waves:
             assert TF.tdmWavePartition(state, tc) == (0, ()), tc
-            assert TF.tdmWaveMask(state, tc) == 0, tc
+            assert _waveMask(state, tc) == 0, tc
             assert TF.tdmWaveGuard(state, tc) == ("none",), tc
             assert TF.tdmWaveComponents(state, tc)[0] == 0, tc
             continue
         numComp, mask, components, guard = _SHARE[numWaves, waves]
         assert TF.tdmWavePartition(state, tc) == (numComp, waves), tc
-        assert TF.tdmWaveMask(state, tc) == mask, tc
+        assert _waveMask(state, tc) == mask, tc
         assert TF.tdmWaveComponents(state, tc) == components, tc
         assert TF.tdmWaveGuard(state, tc) == guard, tc
-    assert TF.tdmWaveMasks(state) == _expectedMasks(fuse, mx, numWaves)
+    assert _waveMasks(state) == _expectedMasks(fuse, mx, numWaves)
     every = (1 << numWaves) - 1
     own = TF.tdmStashedMembers(state)
     assert own == (("MXSB",) if fuse in (2, 3) and mx == "mx" and numWaves == 2 else ())
     for group in TF.liveGroups(state):
         # Members on the set's registers split its waves; one on its own set shares a wave.
-        masks = [TF.tdmWaveMask(state, tc) for tc in group if tc not in own]
+        masks = [_waveMask(state, tc) for tc in group if tc not in own]
         assert all(a & b == 0 for a, b in itertools.combinations(masks, 2)), group
         assert sum(masks) == every, (group, masks)
         for tc in own:
             if tc in group:
-                assert TF.tdmWaveMask(state, tc) & sum(masks), tc
+                assert _waveMask(state, tc) & sum(masks), tc
 
 
 def test_a_tensor_no_wave_issues_has_the_dead_member_components():
@@ -1991,7 +2016,7 @@ def test_halfplr_masks_the_own_increment_of_every_set_without_a_shadow(fuse, mx,
     elif numWaves == 1:
         # One wave takes TDMFuse=0 only, declining rows 1-3 to its row: a Group0 per tensor,
         # and the mask zeroes each one's own increment.
-        assert TF.tdmGroupingAccepted(state) is (fuse == 0)
+        assert _groupingAccepted(state) is (fuse == 0)
         want = ("A", "B") + ("MXSA",) * mxA + ("MXSB",) * mxB
     elif fuse in (2, 3) and mxA and mxB and numWaves == 2:
         want += ("MXSB",)  # MXSB shares wave 1 with MXSA on a set of its own
@@ -2157,7 +2182,7 @@ def test_every_layer_decline_is_rejected_by_an_earlier_named_rule(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, name, fuse):
     _, overrides, rule = _LAYER_DECLINES[name]
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, **overrides)
-    assert TF.tdmGroupingAccepted(sol._state) is False, name
+    assert _groupingAccepted(sol._state) is False, name
     assert sol.get("Valid") is False
     assert rule in out, out
 
@@ -2184,7 +2209,7 @@ def test_one_sided_subtile_gets_tdmfuse0s_verdict(
     overrides = dict(_SUBTILE, ProblemType=_MXSA_ONLY)
     sol0, out0 = _derive(gfx1250_iim, assembler, capsys, TDMFuse=0, **overrides)
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, **overrides)
-    assert TF.tdmGroupingAccepted(sol._state) is False
+    assert _groupingAccepted(sol._state) is False
     assert "needs more than one wave" not in out, out
     assert sol.get("Valid") == sol0.get("Valid"), (out0, out)
     refusal = "are not implemented with UseSubtileImpl:"

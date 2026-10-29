@@ -1278,7 +1278,8 @@ validParameters = { # we need to make sure this matches develop
     #      its own) on wave 1, B on both.
     #   3  {B,MXSA,MXSB} + {A}, the mirror of 2 with A and B exchanged.
     #   Without MX scales 1-3 reduce to {A} + {B}: A and B each on every wave,
-    #   so every wave issues a slice of both.
+    #   so every wave issues a slice of both. The three then issue the same
+    #   loads and differ only in the name, so a sweep need carry just one.
     #   With MX scales on one tensor only, the scale takes every wave of the
     #   0 scale set; on 1-3 it shares its data tensor's set, splitting that
     #   set's waves with it, and the other data tensor rides every wave of
@@ -1289,7 +1290,11 @@ validParameters = { # we need to make sure this matches develop
     #     with UseSubtileImpl;
     #   - 2 and 3 with both scales on other than 2 or 4 waves, or at a
     #     divergent decoupled pair;
-    #   - 1-3 with both scales and PrefetchAcrossPersistent;
+    #   - one-sided MX with PrefetchAcrossPersistent on 1-3, where the one
+    #     live scale shares a data tensor's set and PAP refreshes the scale
+    #     descriptors only as a pair;
+    #   - ReuseAcrossPersistent on 1-3 with MX scales, whose null silences
+    #     one tensor by wave parity;
     #   - one-sided MX off gfx1250 TDM kernels (MXLoadInst=TDM), with
     #     UseSubtileImpl, with PrefetchAcrossPersistent or
     #     ReuseAcrossPersistent on a persistent kernel, or at a divergent
