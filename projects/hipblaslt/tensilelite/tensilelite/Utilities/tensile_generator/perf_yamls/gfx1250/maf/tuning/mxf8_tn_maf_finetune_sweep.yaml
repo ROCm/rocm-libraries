@@ -21,8 +21,8 @@ GlobalParameters:
   DataInitTypeMXSB: 3
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
-  NumWarmups: 160
-  EnqueuesPerSync: 1600
+  NumWarmups: 50
+  EnqueuesPerSync: 200
   PrintWinnersOnly: True
   Architecture: gfx1250
   KeepBuildTmp: True
