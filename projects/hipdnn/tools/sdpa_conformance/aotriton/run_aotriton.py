@@ -5,7 +5,8 @@
 """Run AOTriton's SDPA suite against hipDNN and record one CSV row per case.
 
     run_aotriton.py [--suite default|forward] [--release N] [--shard I/N] [--fake always-decline]
-                    [--packed-gpu] [--out DIR | --arch ARCH --run NAME] [--workers N] [-- PYTEST...]
+                    [--packed-gpu] [--out DIR | --arch ARCH --run NAME] [--workers N]
+                    [--hipdnn-prefix DIR] [-- PYTEST...]
 
 Per pass the runner (1) collects with the same options and writes the node ids to
 ``<out>/collected.txt``, then (2) runs under ``-n`` with ``--max-worker-restart`` equal to the
@@ -16,10 +17,15 @@ flushed per row; ``reconcile.py`` adds ``not-run`` rows for whatever never finis
 ``test_forward.py``, named explicitly because the vendored conftest excludes it from directory
 collection. ``--packed-gpu`` adds a second pass over the ``gpu``-marked cases of
 ``sdpa_conformance/tests``. The default ``--out`` is
-``Results/aotriton-hipdnn-test-port/<arch>/<run>/shard-<I>of<N>/`` in the workspace.
+``./sdpa_conformance_results/<arch>/<run>/shard-<I>of<N>/`` under the working directory.
+
+Every pytest process checks that the ``libhipdnn_backend`` mapped into it is the one under
+``--hipdnn-prefix`` (default ``$ROCM_PATH``, which dnn-benchmarking's ``setup_env.py``
+activation sets); the runner refuses to start without a prefix.
 """
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -27,13 +33,7 @@ from pathlib import Path
 import aotriton_layout as layout
 import reconcile
 
-WORKSPACE_RESULTS = (
-    Path.home()
-    / "Source"
-    / "claude-workspace"
-    / "Results"
-    / "aotriton-hipdnn-test-port"
-)
+DEFAULT_RESULTS = Path.cwd() / "sdpa_conformance_results"
 
 
 def parse_args(argv):
@@ -52,6 +52,11 @@ def parse_args(argv):
     parser.add_argument("--run", help="run name for the default --out")
     parser.add_argument(
         "--workers", type=int, help="xdist workers (default: one per GPU)"
+    )
+    parser.add_argument(
+        "--hipdnn-prefix",
+        default=os.environ.get("ROCM_PATH"),
+        help="hipDNN install prefix whose libhipdnn_backend must be loaded (default: $ROCM_PATH)",
     )
     parser.add_argument(
         "pytest_args", nargs="*", help="passed to every pytest invocation"
@@ -76,7 +81,7 @@ def resolve_out(args, detected_arch):
     if not (arch and args.run):
         raise SystemExit("pass --out, or --run (and --arch where no GPU is visible)")
     shard = args.shard.replace("/", "of") if args.shard else "1of1"
-    return WORKSPACE_RESULTS / arch / args.run / f"shard-{shard}"
+    return DEFAULT_RESULTS / arch / args.run / f"shard-{shard}"
 
 
 def passes(args):
@@ -111,11 +116,17 @@ def pytest_cmd(args, selection, out=None):
         cmd.append(f"--shard={args.shard}")
     if args.fake:
         cmd.append(f"--fake={args.fake}")
+    cmd.append(f"--hipdnn-prefix={args.hipdnn_prefix}")
     return cmd + args.pytest_args + selection
 
 
 def main(argv=None):
     args = parse_args(argv)
+    if not args.hipdnn_prefix:
+        raise SystemExit(
+            "no hipDNN prefix: activate the setup_env.py venv (it sets ROCM_PATH) or pass "
+            "--hipdnn-prefix; every run checks that this prefix's libhipdnn_backend is loaded"
+        )
     gpus, arch = (0, None)
     if args.workers is None or not (args.out or (args.arch and args.run)):
         gpus, arch = detect_gpus()

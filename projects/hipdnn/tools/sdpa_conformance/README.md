@@ -28,7 +28,13 @@ python aotriton/sync.py --check          # plus collection counts per FOR_RELEAS
 
 ## GPU run
 
-Needs a ROCm torch with hipDNN's Python bindings and SDPA engines installed.
+Needs ROCm torch with hipDNN, its providers and Python bindings installed into torch's ROCm SDK
+prefix. Use dnn-benchmarking's `setup_env.py` (`--torch-mode rocm`) with its `rocm-libraries`
+checkout at the commit under test, then activate its venv, which sets `ROCM_PATH`. Every pytest
+process imports `hipdnn_frontend` first and fails unless the `libhipdnn_backend` mapped into it
+(`/proc/self/maps`) is under `--hipdnn-prefix` (default `$ROCM_PATH`): the ROCm devel wheel
+ships an older copy of that library (dnn-benchmarking `docs/troubleshooting.md`, "Mixed ROCm torch
+and hipDNN prefixes").
 
 ```
 python aotriton/run_aotriton.py --arch gfx950 --run <name>                 # test_backward + test_varlen
@@ -43,9 +49,9 @@ AOTriton's calibration and backend knobs (`USE_ADIFFS_TXT`, `RECORD_ADIFFS_TO`, 
 `FWD_IMPL`, `BWD_IMPL`, ...) are refused; `FOR_RELEASE`, `SMALL_VRAM` and
 `AOTRITON_REF_DEVICE_OPTION` pass through.
 
-Outputs, in `<out>/` (default `Results/aotriton-hipdnn-test-port/<arch>/<run>/shard-<I>of<N>/`):
+Outputs, in `<out>/` (default `./sdpa_conformance_results/<arch>/<run>/shard-<I>of<N>/`):
 `collected.txt` (every collected node id) and `results.csv` (`nodeid,outcome,mode,fwd,bwd,reason`,
-flushed per row). After a run, or a killed one, on the login node:
+flushed per row). After a run, or a killed one:
 
 ```
 python aotriton/reconcile.py <arch>/<run> --out <arch>/<run>/reconciled.csv
