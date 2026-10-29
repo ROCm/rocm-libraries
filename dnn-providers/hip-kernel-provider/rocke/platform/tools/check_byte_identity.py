@@ -41,6 +41,8 @@ TARGET_OP_PROFILE_FAMILIES = (
     "conv_dgrad_patch_wmma",
     "conv_dgrad_smallc_wmma",
     "conv_direct_dgrad_wmma",
+    "conv_direct_fwd_wmma",
+    "conv_fwd_small_wmma",
 )
 
 

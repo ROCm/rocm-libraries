@@ -32,6 +32,9 @@ from kernels.conv.direct_variants import (
     DIRECT_DGRAD_PATCH_WMMA,
     DIRECT_DGRAD_SMALLC_WMMA,
     DIRECT_DGRAD_WMMA,
+    DIRECT_FWD_SMALLC_WMMA,
+    DIRECT_FWD_SMALLK_WMMA,
+    DIRECT_FWD_WMMA,
 )
 from kernels.conv.kernel_identity import KernelIdentity
 from rocke.core.arch import ArchTarget
@@ -67,6 +70,9 @@ _WAVE32_ONLY = {
     DIRECT_DGRAD_WMMA: "gfx1250",
     DIRECT_DGRAD_PATCH_WMMA: "gfx1250",
     DIRECT_DGRAD_SMALLC_WMMA: "gfx1250",
+    DIRECT_FWD_WMMA: "gfx1250",
+    DIRECT_FWD_SMALLC_WMMA: "gfx1250",
+    DIRECT_FWD_SMALLK_WMMA: "gfx1250",
 }
 
 
