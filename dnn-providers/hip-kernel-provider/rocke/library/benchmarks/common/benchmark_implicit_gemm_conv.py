@@ -2591,7 +2591,10 @@ def _build_dgrad_one(args_tuple):
         # vector_size_c with it.
         vector_size_c=1 if epilogue == "default" else vec_c,
         # Per-combo, from the same policy the AOT cache generator uses.
-        uniform_k_decode=DgradConvSpec.default_uniform_k_decode(
+        # 3-D runs the plain K loop (or the tap-outer one); the uniform
+        # decode loop is 2-D only.
+        uniform_k_decode=not problem.is_3d
+        and DgradConvSpec.default_uniform_k_decode(
             arch=arch, wave_size=target.wave_size, pipeline=pipeline
         ),
     )
@@ -4335,9 +4338,15 @@ def _run_dgrad_sweep(
             else torch.empty(*shape).uniform_(-1.0, 1.0)
         )
 
-    _dY_f32 = _make(p.N, p.Ho, p.Wo, p.K)
-    _W_f32 = _make(p.K, p.Y, p.X, p.cpg)
-    dX_t = torch.empty(p.N, p.Hi, p.Wi, p.C, dtype=_torch_dtype)
+    if p.is_3d:
+        # NDHWK / KZYXC / NDHWC.
+        _dY_f32 = _make(p.N, p.Do, p.Ho, p.Wo, p.K)
+        _W_f32 = _make(p.K, p.Z, p.Y, p.X, p.cpg)
+        dX_t = torch.empty(p.N, p.Di, p.Hi, p.Wi, p.C, dtype=_torch_dtype)
+    else:
+        _dY_f32 = _make(p.N, p.Ho, p.Wo, p.K)
+        _W_f32 = _make(p.K, p.Y, p.X, p.cpg)
+        dX_t = torch.empty(p.N, p.Hi, p.Wi, p.C, dtype=_torch_dtype)
 
     dY_t = _dY_f32.to(_torch_dtype)
     W_t = _W_f32.to(_torch_dtype)
@@ -4349,7 +4358,7 @@ def _run_dgrad_sweep(
     # AOT: dgrad signature with runtime dims + sub_gemm tilde buffer.
     # The dgrad ABI already carries the tilde record buffer; there is no
     # separate "extended" form.
-    base_sig = conv_args_signature(dtype, direction="dgrad")
+    base_sig = conv_args_signature(dtype, direction="dgrad", is_3d=p.is_3d)
     ext_sig = base_sig
 
     # Pre-compute dgrad AOT args.

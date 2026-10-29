@@ -144,6 +144,17 @@ class KernelIdentity:
     # Serves only problems whose kpg is a multiple of tile_k (see
     # identity_supports_problem). Left out of the hash while False.
     tap_outer_k: bool = False
+    # dgrad only (DgradConvSpec.tapk_prefetch): the software-pipelined form of
+    # the tap-outer K loop (1: register prefetch, 2: LDS ping-pong). Serves
+    # the same problems as its tap_outer_k binary. Left out of the hash at 0.
+    tapk_prefetch: int = 0
+    # dgrad only (DgradConvSpec.tapk_xhalo): dY reuse across the x taps of the
+    # tap-outer K loop. Bakes the filter width (filter_w) and serves pW == 0
+    # only (see identity_supports_problem). Left out of the hash while False.
+    tapk_xhalo: bool = False
+    # dgrad only (DgradConvSpec.b_kpack): k values per B LDS write. Left out
+    # of the hash at 0.
+    b_kpack: int = 0
     # dgrad only (DgradConvSpec.dy_halo / dy_halo_setprio /
     # dy_halo_kouter_pad): the dY halo mode of the tap-outer K loop and its
     # knobs. A halo binary also bakes its filter (filter_h/w) and the widest
@@ -233,6 +244,12 @@ class KernelIdentity:
             del fields["patch"]
         if not fields["tap_outer_k"]:
             del fields["tap_outer_k"]
+        if not fields["tapk_prefetch"]:
+            del fields["tapk_prefetch"]
+        if not fields["tapk_xhalo"]:
+            del fields["tapk_xhalo"]
+        if not fields["b_kpack"]:
+            del fields["b_kpack"]
         for name in ("dy_halo", "dy_halo_setprio", "dy_halo_kouter_pad", "halo_max_wo"):
             if not fields[name]:
                 del fields[name]
@@ -621,6 +638,11 @@ def identity_supports_problem(
                     f"tap_outer_k needs kpg % tile_k == 0; kpg={kpg}, "
                     f"tile_k={identity.tile_k}"
                 )
+        # The x-halo stage holds tap x = 0 of every pixel; a pixel with
+        # wi < x reads zero, which is right only without a W pad. The
+        # filter width it unrolls is baked (filter_w, matched above).
+        if identity.tapk_xhalo and int(getattr(problem, "pW", 0)) != 0:
+            return False, "tapk_xhalo serves pW == 0 only"
         # The dY halo loop shifts the linear pixel index by whole output
         # rows, so the output must be the input's size, and its LDS tile
         # is sized for halo_max_wo. The filter (filter_h/w, baked) is
@@ -706,6 +728,7 @@ IDENTITY_CAPABILITY_FIELDS = (
     "async_chunk_b",
     "max_sub_gemms",
     "tap_outer_k",
+    "tapk_xhalo",
     "dy_halo",
     "halo_max_wo",
 )

@@ -282,27 +282,35 @@ def test_fwd_launch_values_reject_a_reduction_past_the_mul24_bound():
     ).to_launch_values(1, 2, 3, 4, 5, 6)
 
 
-def test_dgrad_3d_abi_exists_but_the_spec_refuses_to_build_it():
-    """The 3-D dgrad ABI is declared; only the spec validator says no.
+def test_dgrad_3d_kernel_follows_the_declared_abi():
+    """The 3-D dgrad kernel takes exactly the declared 3-D ABI.
 
-    Keeping the refusal in exactly one place matters: if the argument builder
-    also refused, a future 3-D dgrad kernel would land and silently have no
-    way to be launched, and the second refusal would be found by debugging
-    rather than by reading the validator.
+    The host fills the 3-D block, and a stride-1 3-D kernel (the folded
+    record, the only 3-D path) declares its parameters in the same order.
+    A strided 3-D problem is still refused by the spec validator, which says
+    why.
     """
-    from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec
+    from dataclasses import replace
 
-    # The host can fill the 3-D block, and it matches the declared ABI.
+    from kernels.common.conv_implicit_gemm_dgrad import (
+        DgradConvSpec,
+        build_implicit_gemm_conv_dgrad,
+    )
+
     values = ConvArgs.from_problem(
         _P3D, direction="dgrad", tile_m=64, tile_n=64
     ).to_launch_values(1, 2, 3, 4, 5, 6, sub_gemm_buf=7, num_sub_gemms=1)
-    assert sorted(values) == sorted(
-        n for n, _ in conv_arg_names(direction="dgrad", is_3d=True)
-    )
+    abi = conv_arg_names(direction="dgrad", is_3d=True)
+    assert sorted(values) == sorted(n for n, _ in abi)
 
-    # Building a kernel for it is what fails, and it says why.
+    for tapk in (False, True):
+        spec = DgradConvSpec(problem=_P3D, data=_DATA, tap_outer_k=tapk, **_TILE)
+        kernel = build_implicit_gemm_conv_dgrad(spec, arch="gfx942")
+        assert [p.name for p in kernel.params] == [n for n, _ in abi]
+
+    strided = replace(_P3D, sD=2)
     with pytest.raises(ValueError, match="3-D"):
-        DgradConvSpec(problem=_P3D, data=_DATA, **_TILE).validate()
+        DgradConvSpec(problem=strided, data=_DATA, **_TILE).validate()
 
 
 # ---------------------------------------------------------------------
