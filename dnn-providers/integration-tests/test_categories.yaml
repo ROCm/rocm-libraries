@@ -86,7 +86,7 @@ test_categories:
       - "slow"
 
   ffm-quick:
-    description: "Fast-feedback mechanism (FFM) quick tier - currently mirrors the quick tier"
+    description: "Fast-feedback mechanism (FFM) quick tier - mirrors the quick tier minus the quick-tier SDPA golden-data GPU-reference cases"
     test_patterns:
       - "*"
     exclude:
@@ -97,6 +97,15 @@ test_categories:
       - "comprehensive_*"
       - "Full*"
       - "full_*"
+      # The GPU SDPA reference recomputes QK^T per output element, so cost tracks
+      # B*H*Sq*Skv*D. On the FFM simulator even the smallest quick-tier bundle
+      # (1x8x256x128, 36 ms on MI300X) took 329 s, hd192 took 484 s, and the
+      # 2x32x2048x128 bundle had not finished after 40 minutes.
+      # referenceShapeIsAffordable() gates only the CPU reference, on the
+      # assumption that the GPU reference runs these shapes in milliseconds;
+      # that holds on hardware, not on FFM. Real-GPU lanes still run these
+      # cases and the CpuRef lane still validates the same bundles on the host.
+      - "quick_SdpaFwd_*_GpuRef.*"
     labels:
       - "ffm-quick"
       - "ffm-full"
