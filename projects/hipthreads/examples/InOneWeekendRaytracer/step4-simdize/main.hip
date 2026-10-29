@@ -139,7 +139,7 @@ int main() {
     auto image_d = thrust::make_unique<uint8_t[]>(nx * ny * 3);
 
     {
-        hip::wthread world_constructor([=] __device__ () { new (world) hittable_list(random_scene()); });
+        hip::wthread world_constructor{[=] __device__ () { new (world) hittable_list(random_scene()); }};
         world_constructor.join();
 
         const int k_threads = 4096;
