@@ -146,8 +146,10 @@ class KernelIdentity:
     # wgrad only (WgradConvSpec.prefetch_global_regs): the register-prefetch K loop.
     # Left out of the hash while False, like prefetch_addr.
     prefetch_global_regs: bool = False
-    # wgrad only (WgradConvSpec.prefetch_regs): the register-prefetch K loop
-    # (1: one LDS tile, 2: two). Left out of the hash at 0, like prefetch_addr.
+    # The register-prefetch K loop. wgrad: WgradConvSpec.prefetch_regs
+    # (1: one LDS tile, 2: two, 3: two tiles ahead); fwd: the bool
+    # ImplicitGemmConvSpec.prefetch_regs, recorded as 1. Left out of the hash
+    # at 0, like prefetch_addr.
     prefetch_regs: int = 0
     # wgrad only (WgradConvSpec.lds_kpack): K steps packed per LDS store on
     # the M-outer transpose-on-store. Left out of the hash at 1.
@@ -188,6 +190,11 @@ class KernelIdentity:
     # dgrad only (DgradConvSpec.b_kpack): k values per B LDS write. Left out
     # of the hash at 0.
     b_kpack: int = 0
+    # fwd only (ImplicitGemmConvSpec.split_addr_k_decode): the per-tile
+    # reduction decode of the 3-D split-addressing path. Serves only problems
+    # whose cpg is a multiple of tile_k (see identity_supports_problem). Left
+    # out of the hash while False.
+    split_addr_k_decode: bool = False
     # dgrad only (DgradConvSpec.dy_halo / dy_halo_setprio /
     # dy_halo_kouter_pad): the dY halo mode of the tap-outer K loop and its
     # knobs. A halo binary also bakes its filter (filter_h/w) and the widest
@@ -310,6 +317,8 @@ class KernelIdentity:
             del fields["tapk_xhalo"]
         if not fields["b_kpack"]:
             del fields["b_kpack"]
+        if not fields["split_addr_k_decode"]:
+            del fields["split_addr_k_decode"]
         for name in ("dy_halo", "dy_halo_setprio", "dy_halo_kouter_pad", "halo_max_wo"):
             if not fields[name]:
                 del fields[name]
@@ -642,6 +651,35 @@ def identity_supports_problem(
         )
         if not ok:
             return False, why
+    # Atomic split-K fwd (no workspace, ``two_stage`` unset: the MFMA
+    # binary) atomic-adds into D with a packed <2 x dtype> atomic for a
+    # 16-bit D, which pairs adjacent output channels of one group: kpg must
+    # be even (ImplicitGemmConvSpec's fwd_split_k_conflict).
+    if (
+        identity.direction == "fwd"
+        and not identity.is_direct
+        and identity.split_k > 1
+        and not identity.two_stage
+        and identity.dtype_d != "fp32"
+        and hasattr(problem, "kpg")
+        and int(problem.kpg) % 2
+    ):
+        return False, f"fwd split-K with a 16-bit D needs even kpg (kpg={problem.kpg})"
+
+    # The split-addressing per-tile reduction decode has no fallback: a K
+    # tile must lie inside one filter tap, i.e. cpg % tile_k == 0. (The
+    # uniform_k_decode loop keeps the plain loop for the rest.)
+    if (
+        identity.direction == "fwd"
+        and not identity.is_direct
+        and identity.split_addr_k_decode
+        and hasattr(problem, "cpg")
+        and int(problem.cpg) % max(1, identity.tile_k)
+    ):
+        return False, (
+            f"fwd split_addr_k_decode needs cpg % tile_k == 0; cpg={problem.cpg}, "
+            f"tile_k={identity.tile_k}"
+        )
 
     # Baked filter geometry (direct conv), and the stride/dilation older
     # implicit-GEMM dgrad caches recorded per binary (current ones record
@@ -831,6 +869,7 @@ IDENTITY_CAPABILITY_FIELDS = (
     "tapk_xhalo",
     "dy_halo",
     "halo_max_wo",
+    "split_addr_k_decode",
 )
 
 #: Problem attributes the predicate reads when the identity is a *direct* one.

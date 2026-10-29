@@ -719,6 +719,7 @@ class CShuffleEpilogue:
         wg_N: Optional[Value] = None,
         bounds: Optional[Tuple[Value, Value]] = None,
         addr_fn=None,
+        col_offset: Optional[Value] = None,
     ) -> None:
         """Split-K variant: cshuffle scatter + barrier, then atomic-adds into dW.
 
@@ -744,6 +745,9 @@ class CShuffleEpilogue:
         output that is not a flat ``m * wg_N + n`` matrix (dgrad's dX); ``valid``
         (or None) is folded into the guard. A pair's partner is ``offset + 1``,
         so ``n`` must be contiguous in memory over the store vector.
+        ``col_offset`` — optional i32 added to every destination offset after
+        the bounds check (e.g. a conv group's output-channel slab base when
+        ``wg_N`` is the full row stride). ``None`` emits nothing.
 
         The caller must zero-initialise dW before launch (atomic-adds only,
         no unconditional store).
@@ -931,6 +935,8 @@ class CShuffleEpilogue:
                             )
                             if addr_fn is None:
                                 c_off = b.add(b.mul(m_val, wg_N), n_val)
+                            if col_offset is not None:
+                                c_off = b.add(c_off, col_offset)
                             b.global_atomic_add(dw_ptr, c_off, v_f32)
                     else:
                         c_smem_col = b.add(col, b.const_i32(s))
@@ -940,6 +946,8 @@ class CShuffleEpilogue:
                         )
                         if addr_fn is None:
                             c_off = b.add(b.mul(m_val, wg_N), n_val)
+                        if col_offset is not None:
+                            c_off = b.add(c_off, col_offset)
                         b.global_atomic_add(dw_ptr, c_off, v_f32)
             else:
                 # Paired pk_atomic for bf16/fp16: sv/2 pairs per thread.
@@ -964,6 +972,8 @@ class CShuffleEpilogue:
                     else:
                         c_off_even, a_ok = _addr(m_val, n_even)
                         ok = _and(ok, a_ok)
+                    if col_offset is not None:
+                        c_off_even = b.add(c_off_even, col_offset)
 
                     def _emit_pair(
                         _cs=c_smem,

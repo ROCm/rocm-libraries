@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import collections
 import ctypes
+import dataclasses
 import importlib.util
 import os
 import unittest
@@ -131,6 +132,34 @@ class TestSplitKGate(unittest.TestCase):
         ok, why = is_valid_spec(_mfma_spec(split_k=2, async_dma=True), "gfx950")
         self.assertFalse(ok)
         self.assertIn("async_dma", why)
+
+    def test_mfma_split_atomic_is_the_atomic_split(self):
+        # split_atomic selects the atomic split-K forward on a 2-D wave64 MFMA
+        # problem (the slices add into the zeroed D; fwd_split_k_conflict)
+        # instead of this workspace split: the cshuffle spec is valid, the
+        # default epilogue is not, and it is refused off a 2-D split.
+        spec = _spec(
+            split_k=2,
+            wave_size=64,
+            pipeline="mem",
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            tile_m=64,
+            tile_n=64,
+            split_atomic=True,
+        )
+        ok, why = is_valid_spec(spec, "gfx950")
+        self.assertTrue(ok, why)
+        self.assertIn("satom", spec.kernel_name())
+        ok, why = is_valid_spec(
+            dataclasses.replace(spec, epilogue="default", vector_size_c=1), "gfx950"
+        )
+        self.assertFalse(ok)
+        self.assertIn("cshuffle epilogue", why)
+        ok, why = is_valid_spec(dataclasses.replace(spec, split_k=1), "gfx950")
+        self.assertFalse(ok)
+        self.assertIn("split_atomic", why)
 
     def test_fp32_output_two_stage_is_rejected(self):
         # Stage 2 casts to fp16 / bf16 only, on every family, so fp32 storage
