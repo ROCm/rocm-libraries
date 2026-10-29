@@ -1199,6 +1199,8 @@ class _Lowerer:
         # 4-byte types (f32, i32) → __builtin_amdgcn_raw_buffer_load_b32.
         rsrc, voffset, soffset = op.operands
         elem_type = op.attrs["elem_type"]
+        if elem_type not in ("f16", "bf16", "f32", "i32"):
+            raise ValueError(f"tile.buffer_load: unsupported elem_type {elem_type!r}")
         hip_t = _hip_scalar_type(elem_type)
         tmp = f"_bl_{_name(op.result).lstrip('%')}"
         if elem_type in ("f16", "bf16"):

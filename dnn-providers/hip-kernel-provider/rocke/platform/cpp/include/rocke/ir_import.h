@@ -10,7 +10,7 @@
  * (dsl_docs/architecture/portable_ir_schema.md): the offline Python exporter
  * serializes a built KernelDef graph to JSON; this importer re-drives it
  * through the C IRBuilder (rocke_b_*), reconstructing SSA values by id, region
- * bodies (scf.for / scf.if) via the real control-flow builders, and typed
+ * bodies (scf.for / scf.if / scf.if_else) via the real control-flow builders, and typed
  * attributes. The resulting kernel lowers byte-identically to the same kernel
  * built natively in C (verified by the portable_ir parity harness).
  *
