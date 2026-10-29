@@ -210,6 +210,11 @@ jobs:
           "pr_number": ${{ github.event.pull_request.number || 'null' }},
           "event_name": "${{ github.event_name }}",
           "skip_ci_config": ".github/skip-ci-config.toml",
+          "family_overrides": ${{
+            github.event_name == 'pull_request' &&
+            '{"gfx950":{"linux":{"tests_on_trigger":["presubmit"],"test_labels_for_family":["test:hipblaslt"],"test_type_for_family":"quick"}}}' ||
+            '{}'
+          }},
           "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
         }
 
