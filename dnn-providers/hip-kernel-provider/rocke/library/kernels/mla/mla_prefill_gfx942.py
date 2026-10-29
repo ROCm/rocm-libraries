@@ -93,10 +93,36 @@ from kernels.common.attention_arch import attention_lds_capacity_bytes
 from kernels.common.attention_dense_spec import INT32_LIMIT
 from kernels.mla._mla_body import (
     C_PER_LANE,
+    C_STAGE_W,
     MFMA_K,
     MFMA_M,
     MFMA_N,
+    V8_PAD,
     WAVE_SIZE,
+    WT_PAD,
+    KernelArg,
+    acc_iter_args,
+    kernel_signature,
+    key_mask,
+    lane_ids,
+    mfma_16x16x16,
+    on_wave,
+    online_softmax_row,
+    open_kernel,
+    pack_p,
+    pick4,
+    rescale_if_any,
+    run_k_loops,
+    scale_frag,
+    shift,
+    softmax_consts,
+    softmax_iter_args,
+    split_softmax_state,
+    tail_args,
+    wave_tile_row,
+    zero_tiles,
+)
+from kernels.mla._mla_prefill_gfx942_body import (
     AgprAcc,
     KvRegStager,
     KvSharedStager,
@@ -105,7 +131,6 @@ from kernels.mla._mla_body import (
     ScorePartials,
     absorb_query,
     absorb_query_t,
-    acc_iter_args,
     causal_k_tiles,
     causal_keys,
     clamp_tile,
@@ -113,40 +138,22 @@ from kernels.mla._mla_body import (
     epilogue_lane_row,
     expand_latent,
     full_k_tiles,
-    fwd_kernel_args,
     gather_keys_t,
     in_window,
-    kernel_signature,
-    key_mask,
-    lane_ids,
     lds_gemm_tile,
     load_q_frags,
     load_q_nope_rope,
-    mfma_16x16x16,
-    on_wave,
-    online_softmax_row,
-    open_kernel,
-    pack_p,
     park_q_rope,
-    pick4,
-    probe_kernel_args,
     project_wuv_heads,
     query_rows,
     read_k_rope_swizzled,
     read_kv_rows,
     read_pv_group,
     read_q_rope,
-    rescale_if_any,
     reversed_q_block,
     row_of,
-    run_k_loops,
-    scale_frag,
     seq_len_k,
-    shift,
-    softmax_consts,
-    softmax_iter_args,
     split_k_scores,
-    split_softmax_state,
     stage_q_cols,
     store_acc_t,
     store_c_frag,
@@ -162,9 +169,7 @@ from kernels.mla._mla_body import (
     wave_head,
     wave_k_col,
     wave_q_start,
-    wave_tile_row,
     window_rank,
-    zero_tiles,
 )
 
 __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
@@ -182,49 +187,6 @@ __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
     "mla_prefill_fwd_signature",
     "build_mla_prefill_fwd",
 ]
-
-# Unused trailing columns on an LDS buffer, in bf16 elements. Purely an LDS-layout
-# knob: it shifts the row stride off the 32-dword bank width so that a strided
-# walk down the row index spreads across banks instead of serialising on one.
-# Must stay even -- ``smem_load_vN(..., n=4)`` reads 8 B and an odd element pad
-# would misalign every row. 0 restores the natural (bank-conflicting) layout.
-WT_PAD = 4
-
-# Same idea as ``WT_PAD``, for buffers that are *written* with 8-wide (16 B) bf16
-# vector stores. ``smem_store_vN`` declares ``align = n * elem_bytes``, so an
-# 8-wide bf16 store promises 16 B alignment; a pad of 4 would leave odd rows only
-# 8 B-aligned and the promise would be a lie. 8 keeps every row start at 16 B.
-V8_PAD = 8
-
-# Width, in bf16 elements, of one lane's slice when staging ``c_kv`` into
-# ``kv_lds``. This is 4, not 8, and the narrower store is what lets ``kv_lds``
-# carry ``WT_PAD`` instead of ``V8_PAD`` -- which is the whole point.
-#
-# ``kv_lds`` is the B operand of the score GEMM, and that read is the hottest
-# LDS access in the kernel (``SCORE_K_ITERS * K_TILES`` of them per k-tile).
-# Lane ``l`` of a 16-lane group reads row ``a = l % 16``, so the bank it lands
-# on is ``(stride_dwords * a + const) % 32``. With ``V8_PAD`` the stride is 292
-# dwords == 4 mod 32, whose period over ``a`` is only 8: lanes ``a`` and
-# ``a + 8`` collide on every read, 2-way, for the whole loop. ``WT_PAD`` puts
-# the stride at 290 == 2 mod 32, period 16, so all sixteen lanes land on
-# distinct banks and the read goes conflict-free.
-#
-# The pad cannot simply be lowered on its own: a 4-element pad leaves odd rows
-# at 8 mod 16 B, and an 8-wide store's ``align = 16`` declaration would become
-# a lie -- a silent miscompile, not an assert. So the store width has to come
-# down with it. An XOR swizzle was considered instead and is structurally
-# blocked: a column bit XORed at bit ``k`` displaces the bank by ``2**(k-1)``
-# dwords, and only a displacement of 2 mod 4 breaks a stride of 4 mod 32, which
-# pins ``k == 2`` -- exactly the column bit an 8-wide store must preserve.
-# Either route therefore requires the narrower store, and given that, the pad
-# is the simpler of the two and costs no swizzle arithmetic.
-#
-# Narrowing is not a concession on either side of the copy. The global load
-# stays fully coalesced (lanes read 8 B at an 8 B stride == contiguous), and
-# the ``kv_lds`` *store* improves too: at width 8 its column term is ``4a``,
-# the same 2-way pattern as the read, while at width 4 it is ``2a`` and goes
-# conflict-free as well.
-C_STAGE_W = 4
 
 # k-steps per scheduler-ordered block in the score GEMM.
 #
@@ -381,8 +343,8 @@ class MlaPrefillSpec:
     num_xcds: int = 0
     # Latent accumulator in AGPRs (one-wave-per-head layout). It lets a wave
     # own 32 query rows -- two M tiles, a 256-register accumulator -- at one
-    # workgroup per CU; see ``_mla_body.AgprAcc``. Needs the llvm22 or llvm23
-    # flavor.
+    # workgroup per CU; see ``_mla_prefill_gfx942_body.AgprAcc``. Needs the
+    # llvm22 or llvm23 flavor.
     agpr_acc: bool = False
     # Unfused head projections. False (the default) is the fused kernel: it
     # takes the projected query and ``W_UK`` and applies both head projections
@@ -881,6 +843,39 @@ def check_mla_prefill_extents(
     return True, ""
 
 
+def fwd_kernel_args(spec) -> tuple[KernelArg, ...]:
+    """The forward kernel's arguments, in declaration order.
+
+    ``max_k`` is unused by the forward kernel but stays declared so it shares
+    one argument pack with the score probe. With ``absorbed_query`` the query
+    is the absorbed ``qa_ptr`` and there is no ``w_uk_ptr``.
+    """
+    io = "bf16" if spec.dtype == "bf16" else "f16"
+    args = [
+        KernelArg("out", "out_ptr", io, "out"),
+        KernelArg("lse", "lse_ptr", "f32", "out"),
+        KernelArg("q", "qa_ptr" if spec.absorbed_query else "q_ptr", io, "in"),
+        KernelArg("c_kv", "c_kv_ptr", io, "in"),
+        KernelArg("k_rope", "k_rope_ptr", io, "in"),
+    ]
+    if not spec.absorbed_query:
+        args.append(KernelArg("w_uk", "w_uk_ptr", io, "in"))
+    return (*args, *tail_args())
+
+
+def probe_kernel_args(spec) -> tuple[KernelArg, ...]:
+    """The score probe's arguments, in declaration order."""
+    io = "bf16" if spec.dtype == "bf16" else "f16"
+    return (
+        KernelArg("scores", "scores_ptr", "f32", "out"),
+        KernelArg("q", "q_ptr", io, "in"),
+        KernelArg("c_kv", "c_kv_ptr", io, "in"),
+        KernelArg("k_rope", "k_rope_ptr", io, "in"),
+        KernelArg("w_uk", "w_uk_ptr", io, "in"),
+        *tail_args(),
+    )
+
+
 def mla_prefill_block(spec: MlaPrefillSpec) -> Tuple[int, int, int]:
     """Workgroup shape: one flat dimension of ``64 * num_warps`` threads."""
     return (spec.threads, 1, 1)
@@ -947,7 +942,6 @@ def build_mla_prefill_score_probe(
             f"d_nope/{MFMA_N} = {spec.d_nope // MFMA_N} n-tiles must divide "
             f"evenly across num_warps={spec.num_warps}"
         )
-
     dtype = BF16
     BQ = spec.block_q
     BK = spec.block_k
@@ -1572,7 +1566,11 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
         s_acc = partials.combine(s_acc)
 
         # ---- online softmax, one query per lane ----------------------------
-        mask = key_mask(b, kb_start, lane_kq, keys, k_tiles=K_TILES) if masked else None
+        mask = (
+            key_mask(b, kb_start, lane_kq, keys.s_k, keys.context_off, k_tiles=K_TILES)
+            if masked
+            else None
+        )
         new_ms = []
         new_ls = []
         p_frags = []
@@ -2049,7 +2047,11 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
         )
 
         # ---- online softmax, one query per lane (as in the one-head kernel) ---
-        mask = key_mask(b, kb_start, lane_kq, keys, k_tiles=K_TILES) if masked else None
+        mask = (
+            key_mask(b, kb_start, lane_kq, keys.s_k, keys.context_off, k_tiles=K_TILES)
+            if masked
+            else None
+        )
         new_ms = []
         new_ls = []
         p_frags = []
