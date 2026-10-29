@@ -182,20 +182,24 @@ def test_gfx950_source_adapter_preserves_dispatch_and_replay_abi(case, causal):
     )
     assert spec.causal is case.causal
     assert not spec.use_sinks and not spec.sliding_window
-    assert spec.runtime_shape is (not case.persistent), (
-        f"{case.id} selected runtime_shape={spec.runtime_shape}. Dense replay "
-        "binds shape scalars only for runtime-shape grid kernels; persistent "
-        "kernels bake the shape. Use a sequence length the aligned (non-ragged) "
-        "grid kernel accepts, or extend the dense replay ABI first."
+    assert spec.runtime_shape, (
+        f"{case.id} selected a baked-shape kernel. Every member of this cohort "
+        "(grid and persistent) is on the runtime-shape path; use a sequence length "
+        "the aligned (non-ragged) kernels accept."
     )
-    # Replay supplies shape and head scalars only for the runtime-shape members of
-    # this cohort: the grid body reads both head counts from kernargs there.
+    # Replay supplies the shape and head scalars for the whole cohort, and the
+    # persistent members' work-decode fast-division pairs after them.
     signature = attention_dense_signature(spec)
     names = [arg["name"] for arg in signature]
     expected = ["q_ptr", "k_ptr", "v_ptr", "o_ptr", "scale"]
-    scalars = []
-    if not case.persistent:
-        scalars = ["batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads"]
+    scalars = ["batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads"]
+    if case.persistent:
+        assert spec.fastdiv_divisors, f"{case.id}: persistent decode has no divisors"
+        scalars += [
+            f"{d}_{part}" for d in spec.fastdiv_divisors for part in ("magic", "shift")
+        ]
+    else:
+        assert spec.fastdiv_divisors == ()
     assert names == expected + scalars
     # The export binds exactly these scalars (dense-v2 replay), from the same
     # single source the launcher uses, so a replayed kernel gets every kernarg.
@@ -932,8 +936,11 @@ def test_dense_export_uses_selected_production_launcher(architecture, monkeypatc
             scalars = module.attention_dense_runtime_args(spec)
         else:
             # Spelled out from the case, not via attention_dense_runtime_args, so a
-            # wrong binding there cannot satisfy this check: the runtime-shape grid
-            # body reads the shape and both head counts from kernargs.
+            # wrong binding there cannot satisfy this check: every runtime-shape body
+            # reads the shape and both head counts from kernargs, and the persistent
+            # one also its work decode's fast-division pairs.
+            from rocke.helpers.magic_division import calculate_magic_numbers
+
             scalars = (
                 dict(
                     batch=case.batch,
@@ -945,6 +952,16 @@ def test_dense_export_uses_selected_production_launcher(architecture, monkeypatc
                 if spec.runtime_shape
                 else {}
             )
+            divisor = dict(
+                batch=case.batch,
+                num_query_heads=case.query_heads,
+                gqa=case.query_heads // case.kv_heads,
+                nqb=case.sequence_length // spec.block_m,
+            )
+            for d in spec.fastdiv_divisors:
+                magic, shift = calculate_magic_numbers(divisor[d])
+                scalars[f"{d}_magic"] = magic - (1 << 32) if magic >= 1 << 31 else magic
+                scalars[f"{d}_shift"] = shift
         assert metadata == {
             "abi": "dense-v2",
             "name": launcher.kernel_name,

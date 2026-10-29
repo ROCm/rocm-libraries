@@ -863,7 +863,7 @@ def build_attention_dense(
     # alternative. Declared right after scale to fix their ABI position (mirrored in
     # attention_dense_signature, gated there by _has_shape_params because that
     # function also serves the persistent body, which returned above and declares
-    # none of these).
+    # them only on the runtime-shape path).
     #
     # Taking the shape as params is an ABI fact and is NOT the same as
     # ``spec.runtime_shape``, which is the narrower claim that the body bakes the
@@ -2192,21 +2192,41 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                     buf_off, b.zext(b.mul(row0, b.const_i32(group_bytes)), I64)
                 )
                 gcol = b.mul(lane, b.const_i32(2))
-                voff = b.add(
-                    b.add(
-                        k_base,
-                        b.mul(b.add(tile_key0, row0), _stride_k()),
-                    ),
-                    gcol,
-                )
-                for r in range(ROWS_PER_WAVE):
-                    row_base = b.smem_ptr_add(lds_base, row_lds_off)
-                    b.async_buffer_load_lds_addr(
-                        rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                if RT:
+                    # Runtime stride: the per-row step is no longer an immediate, and
+                    # LLVM would hoist each row's loop-invariant lane offset out of the
+                    # KV loop as its own VGPR, spilling the D128 causal body. So the
+                    # lane part (one VGPR) is kept apart from the wave-uniform row part,
+                    # which goes through readfirstlane to stay opaque to reassociation.
+                    # Exact: k_base (from the work index) and tile_key0 (from the KV
+                    # loop index) are uniform; row0 stays in the lane part.
+                    lane_off = b.add(b.mul(row0, _stride_k()), gcol)
+                    row_u = b.to_sgpr_u32(b.add(k_base, b.mul(tile_key0, _stride_k())))
+                    for r in range(ROWS_PER_WAVE):
+                        row_base = b.smem_ptr_add(lds_base, row_lds_off)
+                        voff = b.add(lane_off, row_u)
+                        b.async_buffer_load_lds_addr(
+                            rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                        )
+                        if r + 1 < ROWS_PER_WAVE:
+                            row_lds_off = b.add(row_lds_off, b.const_i64(group_bytes))
+                            row_u = b.to_sgpr_u32(b.add(row_u, _stride_k()))
+                else:
+                    voff = b.add(
+                        b.add(
+                            k_base,
+                            b.mul(b.add(tile_key0, row0), _stride_k()),
+                        ),
+                        gcol,
                     )
-                    if r + 1 < ROWS_PER_WAVE:
-                        row_lds_off = b.add(row_lds_off, b.const_i64(group_bytes))
-                        voff = b.add(voff, _stride_k())
+                    for r in range(ROWS_PER_WAVE):
+                        row_base = b.smem_ptr_add(lds_base, row_lds_off)
+                        b.async_buffer_load_lds_addr(
+                            rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                        )
+                        if r + 1 < ROWS_PER_WAVE:
+                            row_lds_off = b.add(row_lds_off, b.const_i64(group_bytes))
+                            voff = b.add(voff, _stride_k())
             else:
                 lanes_per_row = D // 2
                 sub_row = b.div(lane, b.const_i32(lanes_per_row))
@@ -2230,6 +2250,26 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                         rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
                     )
 
+        def _wide_src(row, tile_key0, n_in_wave, line_id, d_bucket):
+            """Element offset of a wide-DMA lane's first K/V element. On the runtime
+            path the wave-uniform part goes through readfirstlane, as in
+            ``_async_load``, so the lane part stays one VGPR."""
+            if RT:
+                lane_part = b.add(
+                    b.mul(
+                        b.add(b.mul(n_in_wave, b.const_i32(8)), line_id), _stride_k()
+                    ),
+                    b.mul(d_bucket, b.const_i32(8)),
+                )
+                return b.add(
+                    lane_part,
+                    b.to_sgpr_u32(b.add(k_base, b.mul(tile_key0, _stride_k()))),
+                )
+            return b.add(
+                b.add(k_base, b.mul(row, _stride_k())),
+                b.mul(d_bucket, b.const_i32(8)),
+            )
+
         def _async_load_k_wide(lds_base, buf_val, tile_key0):
             """Two 128-bit-per-lane DMAs fill one slab-padded K tile per wave."""
             buf_off = b.mul(
@@ -2244,10 +2284,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                     tile_key0,
                     b.add(b.mul(n_in_wave, b.const_i32(8)), line_id),
                 )
-                src_base = b.add(
-                    b.add(k_base, b.mul(krow, _stride_k())),
-                    b.mul(d_bucket, b.const_i32(8)),
-                )
+                src_base = _wide_src(krow, tile_key0, n_in_wave, line_id, d_bucket)
                 for d_rpt in range(K_D_RPT):
                     line = b.add(
                         b.mul(line_id, b.const_i32(K_LINE_STRIDE * 2)),
@@ -2280,10 +2317,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                     tile_key0,
                     b.add(b.mul(n_in_wave, b.const_i32(8)), line_id),
                 )
-                src_base = b.add(
-                    b.add(k_base, b.mul(vrow, _stride_k())),
-                    b.mul(d_bucket, b.const_i32(8)),
-                )
+                src_base = _wide_src(vrow, tile_key0, n_in_wave, line_id, d_bucket)
                 for d_rpt in range(V_D_RPT):
                     line = b.add(
                         b.mul(line_id, b.const_i32(V_LINE_STRIDE * 2)),

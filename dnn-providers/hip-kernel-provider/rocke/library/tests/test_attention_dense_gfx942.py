@@ -727,10 +727,12 @@ def test_ir_body_probe_detects_a_baked_shape_on_the_gfx950_control():
     gfx942 no longer bakes the shape anywhere, so no gfx942 spec can show that
     :func:`_ir_body_sha` would SEE a baked batch / seqlen / head count -- a probe
     that normalised them away would make all those assertions pass vacuously. The
-    gfx950 persistent grid still bakes the whole shape (``runtime_param_fields`` is
-    empty there), so the same probe, lowered the same way, must move on each of the
-    gfx942 runtime fields. If gfx950 persistent goes runtime-shape too, this control
-    has to move to whichever builder still bakes.
+    gfx950 ragged persistent body still bakes the whole shape
+    (``runtime_param_fields`` is empty there), so the same probe, lowered the same
+    way, must move on each of the gfx942 runtime fields. Non-causal, because gfx950
+    ragged accepts seqlen_q != seqlen_kv only without a causal mask, and each field
+    is varied on its own. If that body goes runtime-shape too, this control has to
+    move to whichever builder still bakes.
     """
     from kernels.gfx950.attention_dense import (
         Gfx950AttentionDenseSpec,
@@ -744,16 +746,17 @@ def test_ir_body_probe_detects_a_baked_shape_on_the_gfx950_control():
         num_query_heads=32,
         num_kv_heads=8,
         head_size=128,
-        causal=True,
+        causal=False,
         dtype="fp16",
         block_n=64,
         persistent=True,
+        ragged=True,
         num_persistent=256,
         persist_decode="qb_major",  # pinned: auto would flip with the shape
     )
     assert (
         base.runtime_param_fields == ()
-    ), "the gfx950 persistent control no longer bakes the shape -- move the control"
+    ), "the gfx950 ragged persistent control no longer bakes the shape -- move it"
     control = dict(
         batch=4, seqlen_q=2048, seqlen_kv=2048, num_query_heads=40, num_kv_heads=4
     )
