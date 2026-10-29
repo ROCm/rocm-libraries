@@ -139,6 +139,13 @@ void register_fused_moe_e2e(py::module_& m);
  * transforms rocke_tensor_descriptor tag clash note above). */
 void register_moe_gemm_fused(py::module_& m);
 
+/* Defined in rocke_engine_winograd_{fwd,gemm,gen,fused1d}.cpp: the Winograd
+ * forward families, one translation unit each (see winograd_glue.hpp). */
+void register_winograd_fwd(py::module_& m);
+void register_winograd_gemm(py::module_& m);
+void register_winograd_gen(py::module_& m);
+void register_winograd_fused1d(py::module_& m);
+
 namespace
 {
 
@@ -4070,7 +4077,7 @@ std::vector<std::string> gfx1201_wmma_gemm_verify(const py::dict& d, const std::
  * the engine's extern "C" boundary never aborts/terminates.
  * ------------------------------------------------------------------------ */
 
-/* "'llvm20', 'llvm22', 'llvm23'" -- built from the engine's flavor ladder so
+/* Canonical concrete flavor names -- built from the engine's ladder so
  * the message cannot drift from what from_name() actually accepts. */
 static std::string rocke_engine_flavor_list()
 {
@@ -4138,7 +4145,7 @@ std::string lower_serialized_ir(const std::string& ir_text,
         fl = rocke_llvm_flavor_from_name(flavor.c_str());
         if(fl == ROCKE_LLVM_FLAVOR_AUTO)
         {
-            throw std::runtime_error(
+            throw pybind11::value_error(
                 std::string("rocke_engine.lower_serialized_ir: unknown LLVM flavor '") + flavor
                 + "' (expected one of " + rocke_engine_flavor_list() + ")");
         }
@@ -4444,6 +4451,10 @@ PYBIND11_MODULE(rocke_engine, m)
           py::arg("spec"),
           py::arg("arch"));
     register_img2col(m); /* separate TU; see note at top of file */
+    register_winograd_fwd(m); /* separate TUs; see winograd_glue.hpp */
+    register_winograd_gemm(m);
+    register_winograd_gen(m);
+    register_winograd_fused1d(m);
     reg3("deep_fused_conv_pool",
          &deep_fused_conv_pool_lower_llvm,
          &deep_fused_conv_pool_serialize_ir,
