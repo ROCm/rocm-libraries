@@ -61,6 +61,7 @@
 #endif
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/PlaceholderLibrary.hpp>
+#include <Tensile/ScaleAlphaVec.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/Utils.hpp>
@@ -2345,8 +2346,10 @@ namespace
         setTensileScaleAB(prob, tensileProblem);
 
         tensileProblem.setUseScaleCD(prob.scaleC != nullptr || prob.scaleD != nullptr);
-        tensileProblem.setUseScaleAlphaVec(prob.scaleAlphaVec != nullptr);
-        tensileProblem.setScaleAlphaVec(compute_type, d.sizes()[0]);
+        tensileProblem.setUseScaleAlphaVec(prob.deviceScalarAlpha ? TensileLite::ScaleAlphaVecDeviceScalarBit
+                                                                : prob.scaleAlphaVec != nullptr);
+        tensileProblem.setParams().setDeviceScalarAlpha(prob.deviceScalarAlpha);
+        tensileProblem.setScaleAlphaVec(compute_type, prob.deviceScalarAlpha ? 1 : d.sizes()[0]);
         tensileProblem.setScaleA(compute_type, 1);
         tensileProblem.setScaleB(compute_type, 1);
         tensileProblem.setScaleC(compute_type);
@@ -2643,8 +2646,10 @@ namespace
         setTensileScaleAB(prob, tensileProblem);
 
         tensileProblem.setUseScaleCD(prob.scaleC != nullptr || prob.scaleD != nullptr);
-        tensileProblem.setUseScaleAlphaVec(prob.scaleAlphaVec != nullptr);
-        tensileProblem.setScaleAlphaVec(compute_type, d.sizes()[0]);
+        tensileProblem.setUseScaleAlphaVec(prob.deviceScalarAlpha ? TensileLite::ScaleAlphaVecDeviceScalarBit
+                                                                : prob.scaleAlphaVec != nullptr);
+        tensileProblem.setParams().setDeviceScalarAlpha(prob.deviceScalarAlpha);
+        tensileProblem.setScaleAlphaVec(compute_type, prob.deviceScalarAlpha ? 1 : d.sizes()[0]);
         tensileProblem.setScaleA(compute_type, 1);
         tensileProblem.setScaleB(compute_type, 1);
         tensileProblem.setScaleC(compute_type);
@@ -6380,7 +6385,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             data->algoIndex = *solutionIndex;
             auto solution
                 = library->getSolutionByIndex(data->problem.gemms[0], *hardware, *solutionIndex);
-            if(!solution)
+            if(!solution || !solution->deviceScalarAlphaSupported(data->problem.gemms))
             {
                 log_error(__func__, "No solution for index", *solutionIndex);
                 return rocblaslt_status_invalid_value;
@@ -6452,6 +6457,20 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 data->problem.gemms[i].setWorkspaceSizeGroupedGemm(workspaceSizeInBytes);
                 data->problem.gemms[i].setWorkspaceSize(workspaceSizeInBytes);
             }
+            if(useUserArgs && data->problem.gemms[0].getParams().deviceScalarAlpha())
+            {
+                const auto& first = data->problem.gemms[0];
+                const auto  gsu   = first.getParams().gsu() > 0
+                                        ? first.getParams().gsu()
+                                        : solution->calculateAutoGSU(first, hardware.get());
+                if(gsu > 1)
+                {
+                    log_error(__func__,
+                              "Device scalar alpha with device user args requires GSU=1.");
+                    return rocblaslt_status_invalid_value;
+                }
+            }
+
             // User-args workspace holds no host args, only per-problem workspaces.
             size_t requiredWorkspace = 0;
             if(useUserArgs)
@@ -7666,7 +7685,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         // Under USO, the same predicate findTopSolutions uses: problem, task,
         // StreamK dynamic-queue, uniform summation order (Synchronizer pointer
         // is checked only at launch, which throws if it is missing). With USO
-        // off, selection must not widen: problemPredicate && taskPredicate only.
+        // off, retain the original filters and independently require device-scalar capability.
         bool swMatch;
         if(tensile_prob.getParams().uniformSummationOrder() == 1)
         {
@@ -7679,7 +7698,8 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         else
         {
             swMatch = (*solution->problemPredicate)(tensile_prob)
-                      && (*solution->taskPredicate)(task);
+                      && (*solution->taskPredicate)(task)
+                      && solution->deviceScalarAlphaSupported(tensile_prob);
         }
         if(!swMatch)
         {
@@ -7709,6 +7729,11 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
                 << " (solution missing from library map; check Tensile packaging or version "
                    "skew)";
             log_error(__func__, msg.str());
+            return rocblaslt_status_invalid_value;
+        }
+        if(!solution->deviceScalarAlphaSupported(tensile_prob.gemms))
+        {
+            log_error(__func__, "Unsupported or mixed grouped device scalar alpha modes.");
             return rocblaslt_status_invalid_value;
         }
 

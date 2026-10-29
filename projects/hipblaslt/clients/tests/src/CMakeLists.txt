@@ -13,6 +13,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/adaptive_sm_count_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/efficiency_monitor_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matmul_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/device_scalar_alpha_ext_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/math_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/scale_buffer_size_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/auxiliary_gtest.cpp

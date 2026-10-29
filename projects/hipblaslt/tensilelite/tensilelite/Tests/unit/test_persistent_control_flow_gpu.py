@@ -85,6 +85,7 @@ def test_ordinary_srd_routes_general_batch_and_gsu(
 
     writer = SimpleNamespace(
         states=SimpleNamespace(kernel=kernel), allocTmpSgpr=alloc_tmp,
+        gsuMaskHex=lambda kernel: "0x3fff",
         shiftSrd=lambda ch: Module("gfx950 requires no SRD shift"),
         cmpNamedArgTypeEq=lambda module, value, comment: module.add(
             SCmpEQU32(src0=sgpr("ArgType"), src1=value, comment=comment)),

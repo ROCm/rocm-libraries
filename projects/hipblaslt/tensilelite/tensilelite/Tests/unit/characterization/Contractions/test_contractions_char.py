@@ -8,6 +8,7 @@ and the ``ProblemType`` / predicate / ``SizeMapping`` / ``Solution`` builders,
 driven from the vendored LibraryIO logic fixture's original-state dicts."""
 
 import importlib
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -91,9 +92,19 @@ def test_size_mapping(solution_state, snapshot):
     assert isinstance(state(sm), dict)
 
 
-def test_internal_args_support(solution_state):
-    ias = C.InternalArgsSupport.FromOriginalState(solution_state)
-    assert ias is not None
+@pytest.mark.parametrize("mode", [0, 1, 2, 3, 5, 6, 7])
+def test_internal_args_support_does_not_duplicate_alpha_capability(solution_state, mode):
+    from tensilelite.Common.Utilities import state
+
+    source = deepcopy(solution_state)
+    source["ProblemType"]["UseScaleAlphaVec"] = mode
+    serialized = state(C.InternalArgsSupport.FromOriginalState(source))
+    assert set(serialized) == {
+        "version", "persistentLoopArgsVersion", "gsu", "wgm", "staggerU",
+        "perTileExtraIters", "useUniversalArgs", "useSFC",
+    }
+    problem = C.ProblemType.FromOriginalState(source["ProblemType"])
+    assert problem.useScaleAlphaVec == mode
 
 
 def test_problem_predicate_compound(problem_type, solution_state, snapshot):
