@@ -473,6 +473,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                 PLUGIN_TARGET  hip_kernel_provider
                 ENGINE_NAME    "hipkernel:flydsl_sdpa_bwd_${_hkp_bwd_engine}"
                 INSTALL_SUBDIR hip_kernel_provider
+                TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_flydsl_sdpa_bwd_${_hkp_bwd_engine}.toml
                 ${_hkp_bwd_shard_args}
                 GTEST_FILTER   "quick_SdpaBackward_Default.*:standard_SdpaBackward_Default.*:comprehensive_SdpaBackward_Default.*:full_SdpaBackward_Default.*"
                 ENVIRONMENT    ${TEST_ENVIRONMENT}

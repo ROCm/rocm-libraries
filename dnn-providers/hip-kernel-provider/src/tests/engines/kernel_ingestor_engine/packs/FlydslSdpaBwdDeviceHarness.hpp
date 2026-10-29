@@ -151,7 +151,8 @@ struct BwdCase
     int64_t headDimV = 0;
     BwdMask mask = BwdMask::NONE;
     /// cuDNN-convention bounds: key j is seen from query row r when
-    /// r + off - left <= j <= r + off + right, off being Skv - Sq at a bottom-right diagonal.
+    /// r + off - left < j <= r + off + right, off being Skv - Sq at a bottom-right diagonal;
+    /// left L keeps the L keys ending at the diagonal, the diagonal included.
     /// -1 is unbounded, except that a causal mask without a right bound has right 0.
     int64_t windowLeft = -1;
     int64_t windowRight = -1;
@@ -567,7 +568,7 @@ inline bool visible(const BwdCase& c, int64_t batchIndex, int64_t row, int64_t c
         right = 0;
     }
     const int64_t diagonal = row + (c.mask == BwdMask::BOTTOM_RIGHT ? c.seqKv - c.seqQ : 0);
-    if(left >= 0 && column < diagonal - left)
+    if(left >= 0 && column <= diagonal - left)
     {
         return false;
     }
