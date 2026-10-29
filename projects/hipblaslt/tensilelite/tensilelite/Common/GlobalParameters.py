@@ -269,6 +269,8 @@ globalParameters["PrintTensorBias"] = 0  # Print TensorBias after initialization
 globalParameters["PrintTensorGate"] = 0
 globalParameters["PrintTensorScaleAlphaVec"] = 0  # Print TensorScaleAlphaVec after initialization
 globalParameters["PrintTensorAmaxD"] = 0  # Print AmaxD after validation
+# Print final matrix-staging LDS addresses and the gfx1250 segment map during kernel generation.
+globalParameters["PrintLDSLayout"] = False
 globalParameters["PrintWinnersOnly"] = False  # Only print the solutions which become the fastest
 globalParameters["PrintCodeCommands"] = (
     False  # print the commands used to generate the code objects (asm,link,hip-clang, etc)
