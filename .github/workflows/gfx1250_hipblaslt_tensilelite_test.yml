@@ -31,6 +31,10 @@ on:
     - cron: "0 3 * * *"
   workflow_dispatch:
     inputs:
+      yaml_split_benchmark:
+        description: "Run the bounded, paired PR 14597 scheduling experiment instead of the full suites"
+        type: boolean
+        default: false
       run_hipblaslt:
         description: "Run the hipBLASLt gtest suite"
         type: boolean
@@ -114,7 +118,7 @@ jobs:
       group: ${{ github.workflow }}-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.ref) }}
       cancel-in-progress: true
     runs-on: blas-rocm-mi455-sandbox
-    timeout-minutes: 600
+    timeout-minutes: ${{ inputs.yaml_split_benchmark && 150 || 600 }}
     permissions:
       contents: read
       actions: read  # test report: the previous nightly's results
@@ -187,7 +191,8 @@ jobs:
         id: checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 1
+          fetch-depth: ${{ inputs.yaml_split_benchmark && 10 || 1 }}
+          persist-credentials: false
           submodules: recursive
           sparse-checkout: |
             projects/hipblaslt
@@ -324,6 +329,7 @@ jobs:
 
       - name: Build hipBLASLt from source
         id: build
+        if: ${{ !inputs.yaml_split_benchmark }}
         run: |
           set -euo pipefail
           export CC="$ROCM_PATH/lib/llvm/bin/amdclang" CXX="$ROCM_PATH/lib/llvm/bin/amdclang++"
@@ -339,7 +345,7 @@ jobs:
       - name: Run hipBLASLt tests
         id: hipblaslt
         timeout-minutes: 120
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_hipblaslt }}
+        if: ${{ !inputs.yaml_split_benchmark && (github.event_name != 'workflow_dispatch' || inputs.run_hipblaslt) }}
         env:
           GTEST_FILTER_ARG: ${{ inputs.hipblaslt_gtest_filter }}
           # StreamKMultiStream.ConcurrentStreamsDoNotDeadlock fails without it.
@@ -485,7 +491,7 @@ jobs:
         id: tensilelite
         timeout-minutes: 350
         # Runs even if the hipBLASLt build or tests failed, but not if setup did.
-        if: ${{ !cancelled() && steps.strict.outcome == 'success' && (github.event_name != 'workflow_dispatch' || inputs.run_tensilelite) }}
+        if: ${{ !inputs.yaml_split_benchmark && !cancelled() && steps.strict.outcome == 'success' && (github.event_name != 'workflow_dispatch' || inputs.run_tensilelite) }}
         env:
           TL_PYTEST_K: ${{ inputs.tensilelite_pytest_k }}
         run: |
@@ -512,6 +518,93 @@ jobs:
                 -e 's/ \([0-9][^()]* seconds\)//g' -e 's/ \([0-9]+(\.[0-9]+)? secs elapsed\)//g' \
                 -e 's/(End -|_Final) [0-9]+(\.[0-9]+)?s\b/\1/g' -e 's/ done \([0-9]+(\.[0-9]+)?s\)/ done/g' \
             | awk -F, -v OFS=, "$HW_SCRUB" | tee "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"
+      - name: Prepare paired YAML benchmark
+        if: ${{ inputs.yaml_split_benchmark }}
+        timeout-minutes: 30
+        run: |
+          set -euo pipefail
+          export CC="$ROCM_PATH/bin/amdclang" CXX="$ROCM_PATH/bin/amdclang++"
+          export CMAKE_GENERATOR=Ninja CMAKE_BUILD_PARALLEL_LEVEL=16
+          cd projects/hipblaslt/tensilelite
+          {
+            pip install -r requirements.txt -r requirements-dev.txt invoke "cmake==3.31.10" nanobind scikit-build-core
+            invoke rocisa --stinkytofu on --no-rebuild-on-import
+            invoke build-client --no-rebuild-rocisa --build-dir "$RUNNER_TEMP/split-bench-client" --rocm-path "$ROCM_PATH" --gpu-targets gfx1250-strict
+          } 2>&1 | awk -F, -v OFS=, "$HW_SCRUB"
+          cd "$GITHUB_WORKSPACE"
+          export ROCISA_BACKEND=stinkytofu
+          export PYTHONPATH="$GITHUB_WORKSPACE/projects/hipblaslt/tensilelite"
+          python3 .github/scripts/benchmark_yaml_split.py --root "$RUNNER_TEMP/yaml-split-benchmark" prepare --cohort native
+          mkdir -p tensilelite_test_results
+          {
+            echo "BENCH_ROOT=$RUNNER_TEMP/yaml-split-benchmark"
+            echo "BENCH_CLIENT=$RUNNER_TEMP/split-bench-client/tensilelite/client/tensilelite-client"
+            echo "ROCISA_BACKEND=stinkytofu"
+            echo "PYTHONPATH=$PYTHONPATH"
+            echo "LD_LIBRARY_PATH=$RUNNER_TEMP/split-bench-client/tensilelite:$LD_LIBRARY_PATH"
+          } >> "$GITHUB_ENV"
+
+      # Separate steps expose elapsed durations through the Actions API while
+      # retaining the existing redaction of all hardware benchmark output.
+      - name: "YAML benchmark r1 base w1"
+        if: ${{ inputs.yaml_split_benchmark }}
+        timeout-minutes: 12
+        run: bash .github/scripts/run_yaml_split_trial.sh base 1 r1-base-w1
+
+      - name: "YAML benchmark r1 split w1"
+        if: ${{ inputs.yaml_split_benchmark }}
+        timeout-minutes: 12
+        run: bash .github/scripts/run_yaml_split_trial.sh split 1 r1-split-w1
+
+      - name: "YAML benchmark r1 split w4"
+        if: ${{ inputs.yaml_split_benchmark }}
+        timeout-minutes: 12
+        run: bash .github/scripts/run_yaml_split_trial.sh split 4 r1-split-w4
+
+      - name: "YAML benchmark r1 base w4"
+        if: ${{ inputs.yaml_split_benchmark }}
+        timeout-minutes: 12
+        run: bash .github/scripts/run_yaml_split_trial.sh base 4 r1-base-w4
+
+      - name: "YAML benchmark r2 split w1"
+        if: ${{ inputs.yaml_split_benchmark }}
+        timeout-minutes: 12
+        run: bash .github/scripts/run_yaml_split_trial.sh split 1 r2-split-w1
+
+      - name: "YAML benchmark r2 base w1"
+        if: ${{ inputs.yaml_split_benchmark }}
+        timeout-minutes: 12
+        run: bash .github/scripts/run_yaml_split_trial.sh base 1 r2-base-w1
+
+      - name: "YAML benchmark r2 base w4"
+        if: ${{ inputs.yaml_split_benchmark }}
+        timeout-minutes: 12
+        run: bash .github/scripts/run_yaml_split_trial.sh base 4 r2-base-w4
+
+      - name: "YAML benchmark r2 split w4"
+        if: ${{ inputs.yaml_split_benchmark }}
+        timeout-minutes: 12
+        run: bash .github/scripts/run_yaml_split_trial.sh split 4 r2-split-w4
+
+      - name: "YAML benchmark r3 base w1"
+        if: ${{ inputs.yaml_split_benchmark }}
+        timeout-minutes: 12
+        run: bash .github/scripts/run_yaml_split_trial.sh base 1 r3-base-w1
+
+      - name: "YAML benchmark r3 split w1"
+        if: ${{ inputs.yaml_split_benchmark }}
+        timeout-minutes: 12
+        run: bash .github/scripts/run_yaml_split_trial.sh split 1 r3-split-w1
+
+      - name: "YAML benchmark r3 split w4"
+        if: ${{ inputs.yaml_split_benchmark }}
+        timeout-minutes: 12
+        run: bash .github/scripts/run_yaml_split_trial.sh split 4 r3-split-w4
+
+      - name: "YAML benchmark r3 base w4"
+        if: ${{ inputs.yaml_split_benchmark }}
+        timeout-minutes: 12
+        run: bash .github/scripts/run_yaml_split_trial.sh base 4 r3-base-w4
 
       - name: Upload test results
         id: upload
@@ -522,6 +615,9 @@ jobs:
           path: |
             test_results/
             tensilelite_test_results/
+            ${{ runner.temp }}/yaml-split-benchmark/manifest.json
+            ${{ runner.temp }}/yaml-split-benchmark/*/result.json
+            ${{ runner.temp }}/yaml-split-benchmark/*/verdicts.json
           if-no-files-found: warn
 
       # Before the hand-back, which also covers the previous results it downloads.

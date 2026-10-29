@@ -459,6 +459,12 @@ assignment is tracked in AIHPBLAS-3575.
 
 ## Pre-submit / CI Gates
 
+The experimental `users/newling/pr14597-split-benchmark` branch adds an opt-in
+`yaml_split_benchmark` manual input to the gfx1250 hardware workflow. It runs a
+bounded, paired scheduling comparison instead of the normal suites; it is not
+a merge gate or full-suite qualification. See the
+[experiment protocol](../../../.github/scripts/benchmark_yaml_split.md).
+
 TensileLite is exercised by both of hipBLASLt's CI systems (see
 [Pre-submit / CI Gates](../TESTING.md#pre-submit--ci-gates) in the hipBLASLt doc for the two-system
 overview). The Math CI job that matters most for TensileLite is **`preliminary`**, the functional gate
