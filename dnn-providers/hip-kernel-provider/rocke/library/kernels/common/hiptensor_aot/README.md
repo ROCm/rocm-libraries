@@ -32,8 +32,8 @@ programs of `rocke.helpers.elementary` (f32 compute: evaluated in f64 and rounde
 one wave-uniform branch per program group, constants anchored on an opaque zero so that the
 kernels' loops do not hoist them into VGPRs (the anchored bit patterns are built from 32-bit
 halves: recipes carry integers as doubles, exact to 2^53). The plain rows keep their code and
-registers; a math row has one JIT class, every input a vector (its other layouts classify to vec 1,
-which is no JIT class: those launches keep the pack kernel). SIGMOID is `1 / (1 + t)` for x >= 0 and `t / (1 + t)`
+registers; a math row has two JIT classes, vec 1 and every input a vector (its layouts with a
+gathered input classify to vec 1). SIGMOID is `1 / (1 + t)` for x >= 0 and `t / (1 + t)`
 below, `t = e^-|x|` (no overflow of `e^-x`, so large negative arguments keep their small
 results). A tensor whose scale is zero is not read and its operator's result is dropped.
 

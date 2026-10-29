@@ -350,7 +350,8 @@ namespace
                              hiptensorOperationDescriptor_t desc,
                              hiptensorJitMode_t             jit,
                              uint64_t*                      workspace = nullptr,
-                             int32_t                        rank      = -1)
+                             int32_t                        rank      = -1,
+                             hiptensorWorksizePreference_t  wsPref    = HIPTENSOR_WORKSPACE_DEFAULT)
     {
         hiptensorPlanPreference_t pref = nullptr;
         EXPECT_EQ(hiptensorCreatePlanPreference(api.handle, &pref, HIPTENSOR_ALGO_DEFAULT, jit),
@@ -363,8 +364,7 @@ namespace
                 HIPTENSOR_STATUS_SUCCESS);
         }
         uint64_t ws = 0;
-        EXPECT_EQ(hiptensorEstimateWorkspaceSize(
-                      api.handle, desc, pref, HIPTENSOR_WORKSPACE_DEFAULT, &ws),
+        EXPECT_EQ(hiptensorEstimateWorkspaceSize(api.handle, desc, pref, wsPref, &ws),
                   HIPTENSOR_STATUS_SUCCESS);
         hiptensorPlan_t plan   = nullptr;
         auto            status = hiptensorCreatePlan(api.handle, &plan, desc, pref, ws);
@@ -951,8 +951,10 @@ namespace
         }
         api.keep(op);
         d->poison();
-        uint64_t ws   = 0;
-        auto     plan = makePlan(api, op, jit, &ws, rank);
+        uint64_t ws = 0;
+        // the largest workspace: every candidate, also those that pack the operands (on
+        // gfx90a and gfx942 the default estimate admits the direct GETT only)
+        auto plan = makePlan(api, op, jit, &ws, rank, HIPTENSOR_WORKSPACE_MAX);
         if(plan == nullptr)
         {
             return out;
