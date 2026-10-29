@@ -1165,7 +1165,7 @@ CALIBRATION_FILE = Path(__file__).with_name("sdpa_bwd_calibration.json")
 def load_calibration(path=CALIBRATION_FILE):
     if not Path(path).exists():
         return {}
-    return json.loads(Path(path).read_text())["estimates"]
+    return json.loads(Path(path).read_text(encoding="utf-8"))["estimates"]
 
 
 def save_calibration(entries, path=CALIBRATION_FILE):
@@ -1177,7 +1177,7 @@ def save_calibration(entries, path=CALIBRATION_FILE):
         ),
         "estimates": OrderedDict(sorted(entries.items())),
     }
-    Path(path).write_text(json.dumps(doc, indent=1) + "\n")
+    Path(path).write_text(json.dumps(doc, indent=1) + "\n", encoding="utf-8", newline="\n")
 
 
 def estimate(params, seed=1234):
