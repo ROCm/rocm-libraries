@@ -750,9 +750,11 @@ reports `unclaimed_support`, the value moves to `claim` in `sdpa_bwd_plan.py`, a
 regenerated.
 
 **Rejection probes** have a verdict before #14346 only when a wrong accept reaches a failing check:
-PRB-M01, PRB-M01n, PRB-M02, PRB-M02f, PRB-B15, PRB-B15n, PRB-T02, PRB-T03. The other 15 report SKIP
-whatever the engine does and are not counted as executed cover; a wrong accept of PRB-U05 passes
-silently. PRB-T04, PRB-T04n (O dtype ≠ Q dtype) and PRB-R05 (`dropout_scale_inv` without a mask) are
+PRB-M01, PRB-M01n, PRB-M02, PRB-M02f, PRB-B15, PRB-B15n, PRB-T02, PRB-T03, and PRB-U01, PRB-U03 and
+PRB-U13 (the CPU reference throws on the shape, or the aliased dQ fails the comparison). The other 12
+report SKIP whatever the engine does and are not counted as executed cover; a wrong accept of PRB-U05
+passes silently. ASM_SDPA_ENGINE accepts PRB-U01, PRB-U03 and PRB-U13 today, so its TOML skips them
+with their tickets (ALMIOPEN-3039, ALMIOPEN-3038) until the declines land. PRB-T04, PRB-T04n (O dtype ≠ Q dtype) and PRB-R05 (`dropout_scale_inv` without a mask) are
 accepted today and hidden by the fill; they get `expected_rejection` only after an engine declines them.
 
 **Regressions** sit in the lowest level that affords them, shrunk only when the defect does not
