@@ -144,6 +144,10 @@ struct PassFeatureConfig {
         /// released that many WMMAs earlier. Applies with dsSpread (or when set > 0) and the
         /// queue model; < 0 = automatic (72 cycles, at most a full queue), 0 = off.
         int wmmaBarrierCoverCycles = -1;
+        /// The WMMAs the barrier cover counts on (the last wmmaBarrierCoverCycles of WMMA work
+        /// before a pending barrier's threshold) issue back to back: a ready WMMA there goes
+        /// ahead of the fillers and ds_loads. Needs the barrier cover on. false = off.
+        bool barrierTailBackToBack = false;
         /// In the region that ends at a loop's back-edge branch, the last loopTailWmmaRun WMMAs
         /// issue back to back, and the non-WMMA work queued before them (the next iteration's
         /// ds_loads) goes first, also when it has to wait for a ds credit; the ds spread paces
@@ -195,6 +199,10 @@ struct PassFeatureConfig {
         /// InsertWaitAlu would put an s_wait_alu of count <= this before (WaitAluTracker
         /// query) is held until just before the next s_barrier_wait; < 0 = off.
         int waitAluHoldStrictCount = -1;
+        /// The wait-alu hold above holds a filler only for the first s_barrier_wait after it
+        /// became ready; once past that wait it stays free. Off: it is held again for every
+        /// later wait it has not reached, so one that missed its run-up keeps moving down.
+        bool waitAluHoldFirstWaitOnly = false;
         /// Mirrors ModuleOptions::PrefetchLeadWmmas. A global prefetch is held until
         /// this many WMMA windows before the tensor_load it precedes, staggered over its
         /// group; below 8 marks a single-stage loop (whole group at the load's window,

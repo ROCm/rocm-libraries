@@ -206,6 +206,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.dsSpread = moduleOptions.DsSpread;
                 passFeatureConfig.dagFeatures.wmmaBarrierCoverCycles =
                     moduleOptions.WmmaBarrierCoverCycles;
+                passFeatureConfig.dagFeatures.barrierTailBackToBack =
+                    moduleOptions.BarrierTailBackToBack;
                 passFeatureConfig.dagFeatures.loopTailWmmaRun = moduleOptions.LoopTailWmmaRun;
                 passFeatureConfig.dagFeatures.dsCatchUpPace = moduleOptions.DsCatchUpPace;
                 passFeatureConfig.dagFeatures.dsBatchWmmas = moduleOptions.DsBatchWmmas;
@@ -214,6 +216,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 // The hold mirrors InsertWaitAlu, which only runs with ESM2.
                 passFeatureConfig.dagFeatures.waitAluHoldStrictCount =
                     moduleOptions.EnableESM2 ? moduleOptions.WaitAluHoldStrictCount : -1;
+                passFeatureConfig.dagFeatures.waitAluHoldFirstWaitOnly =
+                    moduleOptions.WaitAluHoldFirstWaitOnly;
                 passFeatureConfig.dagFeatures.prefetchLeadWmmas = moduleOptions.PrefetchLeadWmmas;
                 passFeatureConfig.dagFeatures.prefetchLeadMinStageWmmas =
                     moduleOptions.PrefetchLeadMinStageWmmas;

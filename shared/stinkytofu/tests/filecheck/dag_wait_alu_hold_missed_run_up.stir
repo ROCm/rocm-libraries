@@ -1,10 +1,11 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --wait-alu-hold-strict-count=2 --wmma-queue-depth=8 --wmma-queue-cover-cycles=16 --ds-spread --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --wait-alu-hold-strict-count=2 --wait-alu-hold-first-wait-only --barrier-tail-back-to-back --wmma-queue-depth=8 --wmma-queue-cover-cycles=16 --ds-spread --print-output
 #
-# WaitAluHoldStrictCount, a filler that misses its run-up: the v_add overwriting v400, which
-# a ds_load just read, needs a strict s_wait_alu vm_vsrc. It is ready at the top, so it is
-# held for the two windows before the first s_barrier_wait (LDS0). The WMMAs before that wait
-# run back to back (WmmaBarrierCoverCycles), so it misses them; it then stays free and issues
-# right after the wait instead of being held again for the LDS1 wait's run-up.
+# WaitAluHoldStrictCount with WaitAluHoldFirstWaitOnly, a filler that misses its run-up: the
+# v_add overwriting v400, which a ds_load just read, needs a strict s_wait_alu vm_vsrc. It is
+# ready at the top, so it is held for the two windows before the first s_barrier_wait (LDS0).
+# The WMMAs before that wait run back to back (BarrierTailBackToBack), so it misses them; it then
+# stays free and issues right after the wait instead of being held again for the LDS1 wait's
+# run-up.
 
 # CHECK-LABEL: @wait_alu_hold_missed_run_up
 # CHECK-NOT: v400 = "st.v_add_nc_u32"

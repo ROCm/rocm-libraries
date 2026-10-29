@@ -2400,18 +2400,20 @@ std::string wdShape(const std::vector<std::string>& seq) {
 }
 }  // namespace
 
-// WmmaBarrierCoverCycles: the barrier's threshold counts on its last WMMAs (4 at -1, 16 / 8 = 2
-// at 16) issuing back to back, so their shadow takes no other work; the VALU fillers that could
-// go there go before or after them. 0 (off) leaves those WMMAs to the fillers.
+// BarrierTailBackToBack: the barrier's threshold counts on its last WMMAs (WmmaBarrierCoverCycles:
+// 4 at -1, 16 / 8 = 2 at 16) issuing back to back, so their shadow takes no other work; the VALU
+// fillers that could go there go before or after them. A cover of 0, or the option off, leaves
+// those WMMAs to the fillers.
 TEST_F(DAGSchedulerPassTest, WmmaBarrierCover_WmmasBeforeBarrierRunBackToBack) {
     struct Variant {
         int cover;
         size_t run;
+        bool backToBack;
     };
-    const Variant variants[3] = {{-1, 4}, {16, 2}, {0, 0}};
-    size_t runs[3];
-    std::string orders[3];
-    for (int v = 0; v < 3; ++v) {
+    const Variant variants[4] = {{-1, 4, true}, {16, 2, true}, {0, 0, true}, {-1, 4, false}};
+    size_t runs[4];
+    std::string orders[4];
+    for (int v = 0; v < 4; ++v) {
         SetUp();
         bb->addSuccessor(bb);
         for (int i = 0; i < 16; ++i) createMovableDsLoad(600 + i * 4, 80, /*ldsToken=*/0);
@@ -2429,6 +2431,7 @@ TEST_F(DAGSchedulerPassTest, WmmaBarrierCover_WmmasBeforeBarrierRunBackToBack) {
         pfc.dagFeatures.wmmaQueueDepth = 8;
         pfc.dagFeatures.wmmaQueueCoverCycles = 16;
         pfc.dagFeatures.wmmaBarrierCoverCycles = variants[v].cover;
+        pfc.dagFeatures.barrierTailBackToBack = variants[v].backToBack;
         ctx.setPassFeatureConfig(pfc);
         pass->run(*func, ctx, am);
         EXPECT_EQ(countStinkyInstructions(*bb), beforeCount) << scheduleOrder(*bb);
@@ -2447,6 +2450,7 @@ TEST_F(DAGSchedulerPassTest, WmmaBarrierCover_WmmasBeforeBarrierRunBackToBack) {
     EXPECT_GE(runs[0], variants[0].run) << orders[0];
     EXPECT_GE(runs[1], variants[1].run) << orders[1];
     EXPECT_LT(runs[2], variants[0].run) << orders[2];
+    EXPECT_LT(runs[3], variants[0].run) << orders[3];
 }
 
 // The queue model needs depth > 1 and a cover > 0. With either one off the schedule is the

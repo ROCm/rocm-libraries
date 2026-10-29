@@ -127,11 +127,14 @@
 #define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                                                       \
     X(LockDsReadOrder, bool, true)                                                                 \
     X(EvenSpreadFillers, bool, true)                                                               \
-    X(WaitAluHoldStrictCount, int, 2)     /* hold s_wait_alu count <= N to next barrier wait */    \
-    X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */    \
+    X(WaitAluHoldStrictCount, int, 2) /* hold s_wait_alu count <= N to next barrier wait */        \
+    X(WaitAluHoldFirstWaitOnly, bool,                                                              \
+      false)                 /* hold only for the first barrier wait after the filler is ready */  \
+    X(WarGateWmmas, int, -1) /* WMMA src -> ds_load overwrite gap; -1 = derived */                 \
     X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                     \
     X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                    \
     X(WmmaBarrierCoverCycles, int, -1)    /* cover kept for a barrier; < 0 = automatic */          \
+    X(BarrierTailBackToBack, bool, false) /* WMMAs the barrier cover counts on, back to back */    \
     X(LoopTailWmmaRun, int, 0)            /* last WMMAs before the back edge, back to back */      \
     X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */                 \
     X(DsBatchWmmas, int, 4)               /* WMMAs per ds_load pacing batch */                     \

@@ -494,8 +494,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return std::min(want, fullQueue);
     }
     // The WMMAs right before a pending barrier: computeBarrierAfterThresholds counts on them
-    // issuing back to back, so their shadow takes no other work.
+    // issuing back to back, so with barrierTailBackToBack their shadow takes no other work.
     bool inPreBarrierRun(int wmmaLatency) const {
+        if (!getPassContext().getPassFeatureConfig().dagFeatures.barrierTailBackToBack)
+            return false;
         const int cover = wmmaBarrierCover(wmmaLatency);
         if (cover <= 0) return false;
         const int lat = std::max(1, wmmaLatency);
@@ -943,10 +945,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
     std::unique_ptr<WaitAluTracker> waitAlu_;
     // A filler InsertWaitAlu would put a strict s_wait_alu before (count <=
     // waitAluHoldStrictCount; in multi-stage loops any vm_vsrc count) is held until the two
-    // windows before the first s_barrier_wait after it became ready, where the wave stalls
-    // anyway. Once that wait is passed it stays free, so a filler that missed its run-up is
-    // not pushed to a later wait. Not held when it is the last pending predecessor of real
-    // work, feeds a prefetch's address, or no barrier wait is ahead.
+    // windows before the next s_barrier_wait, where the wave stalls anyway. With
+    // waitAluHoldFirstWaitOnly that is the first wait after it became ready, and once past it
+    // the filler stays free, so one that missed its run-up is not pushed to a later wait. Not
+    // held when it is the last pending predecessor of real work, feeds a prefetch's address,
+    // or no barrier wait is ahead.
     bool needsWaitAlu(const DAGNode* node) const {
         if (!waitAlu_) return false;
         const WaitAluNeed need = waitAlu_->query(*node->inst);
@@ -959,10 +962,15 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const bool strictWait = (need.vmVsrc >= 0 && (vsrcAlways || need.vmVsrc <= strict)) ||
                                 (need.vaVdst >= 0 && need.vaVdst <= strict);
         if (!strictWait || unblocksWork(node, 3) || feedsPrefetch(node, 2)) return false;
-        auto ready = readyWmmaCount_.find(node->inst);
-        const int readyAt = ready != readyWmmaCount_.end() ? ready->second : 0;
+        // The wait it is held for: the first one it has not passed yet, or with
+        // waitAluHoldFirstWaitOnly the first one after it became ready.
+        int since = wmmaIssuedCountThisRegion_;
+        if (getPassContext().getPassFeatureConfig().dagFeatures.waitAluHoldFirstWaitOnly) {
+            auto ready = readyWmmaCount_.find(node->inst);
+            since = ready != readyWmmaCount_.end() ? ready->second : 0;
+        }
         for (int w : barrierWaitWindows_) {
-            if (readyAt > w) continue;  // became ready past this wait
+            if (since > w) continue;                    // already past this wait
             return wmmaIssuedCountThisRegion_ < w - 2;  // hold until its two-window run-up
         }
         return false;

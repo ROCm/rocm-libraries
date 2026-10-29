@@ -206,6 +206,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--barrier-half-slack=") ||
                 arg.starts_with("--wmma-barrier-cover-cycles=") ||
                 arg.starts_with("--loop-tail-wmma-run=") || arg == "--wmma-refill-on-queue-drain" ||
+                arg == "--barrier-tail-back-to-back" || arg == "--wait-alu-hold-first-wait-only" ||
                 arg.starts_with("--ds-catch-up-pace=") || arg.starts_with("--ds-batch-wmmas=") ||
                 arg.starts_with("--ds-read-cycles-per-load=") ||
                 arg.starts_with("--wmma-refill-to-cycles=") ||
@@ -563,6 +564,10 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--wmma-barrier-cover-cycles=")) {
             passFeatureConfig.dagFeatures.wmmaBarrierCoverCycles =
                 std::stoi(a.substr(std::string("--wmma-barrier-cover-cycles=").size()));
+        } else if (a == "--barrier-tail-back-to-back") {
+            passFeatureConfig.dagFeatures.barrierTailBackToBack = true;
+        } else if (a == "--wait-alu-hold-first-wait-only") {
+            passFeatureConfig.dagFeatures.waitAluHoldFirstWaitOnly = true;
         } else if (a.starts_with("--loop-tail-wmma-run=")) {
             passFeatureConfig.dagFeatures.loopTailWmmaRun =
                 std::stoi(a.substr(std::string("--loop-tail-wmma-run=").size()));
