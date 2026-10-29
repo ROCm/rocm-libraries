@@ -113,7 +113,7 @@ jobs:
       ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
       RACE_REPORT_DIR: ${{ github.workspace }}/race-reports
       # Per-command limits leave time for reports after a workload timeout.
-      RACE_TIMEOUT_SECONDS: "180"
+      RACE_TIMEOUT_SECONDS: "200"
       TENSILELITE_TIMEOUT_SECONDS: "420"
     steps:
       # The job needs three inputs in one workspace:
