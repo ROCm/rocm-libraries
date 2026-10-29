@@ -239,9 +239,10 @@ def parse_miopen_cmd_direct(cmd: str):
         )
 
     dilated = miopen_args.dH != 1 or miopen_args.dW != 1
-    if dilated and (miopen_args.forw != 1 or groups != 1):
+    # Dilated: the non-grouped forward kernel and the WMMA dgrad.
+    if dilated and (miopen_args.forw not in (1, 2) or groups != 1):
         raise ValueError(
-            f"direct conv computes a dilated convolution only forward and "
+            f"direct conv computes a dilated convolution only forward / dgrad and "
             f"ungrouped (got -l {miopen_args.dH} -j {miopen_args.dW}, "
             f"-F {miopen_args.forw}, -g {groups})"
         )
@@ -2813,11 +2814,11 @@ def main() -> int:
             return 2
 
         if (args.dH != 1 or args.dW != 1) and (
-            args.direction != "fwd" or args.groups != 1
+            args.direction not in ("fwd", "dgrad") or args.groups != 1
         ):
             print(
-                f"error: direct conv computes a dilated convolution only forward "
-                f"and ungrouped (got dH={args.dH}, dW={args.dW})",
+                f"error: direct conv computes a dilated convolution only forward / "
+                f"dgrad and ungrouped (got dH={args.dH}, dW={args.dW})",
                 file=sys.stderr,
             )
             return 2
