@@ -1099,7 +1099,7 @@ gated by `library/tests/parity/conv_dgrad_{patch,smallc}_wmma_emit.{c,py}`
 
 `library/kernels/common/conv_direct_dgrad_wmma.py`, spec `DirectDgradWmmaSpec`,
 builder `build_direct_dgrad_wmma` (C++ twin `instance_conv_direct_dgrad_wmma.h`).
-A stride-1 dgrad for gfx1250 (wave32, WMMA 16x16x32, TDM), dense and grouped:
+A direct dgrad for gfx1250 (wave32, WMMA 16x16x32, TDM), dense and grouped:
 
     dX[n, h, w, c] = sum_{r, s, k} dY[n, h + PAD - r, w + PAD - s, k] * W[k, r, s, c]
 
@@ -1119,12 +1119,44 @@ A wave holds `tiles_c x tiles_p` 16x16 accumulators. The epilogue stages the
 dX tile in LDS and stores it with one TDM transfer per image, clipped to the
 image and the group's channels. `prefetch` reads the next tap's fragments
 before the current tap's WMMAs; `sched` sets the machine-scheduler strategy.
+`tile_w` need not be a power of two (a tile can hold whole rows of a 24-, 28-,
+40- or 56-wide map); it must divide the block's pixel count.
+
+- **Stride 2** runs as a phase decomposition: output row `2 * i + a` collects
+  filter row `r` from dY row `i + delta(r)` for the one phase `a` with
+  `(a + PAD - r * dil) % 2 == 0`. A block tiles the phase grid, keeps one dY
+  halo for all four phases and one accumulator set per phase (four times the
+  accumulators of a stride-1 tile); taps that share a halo shift share their B
+  fragments, so the 2x2 / stride-2 patch merge reads one B fragment for all
+  four phases. The epilogue interleaves the phases in LDS and stores the dense
+  `2 * tile_h x 2 * tile_w` dX tile.
+- **Dilation** (per axis, stride 1) only moves each tap's halo shift; the halo
+  grows to `tile + (K - 1) * dil`.
+- **`pack_groups = G`** treats `G` consecutive groups as one super-group of
+  `G * cpg` dX and `G * kpg` dY channels (contiguous in NHWC). Its weights are
+  staged once, before the loop, as a block-diagonal matrix with zeros off the
+  diagonal; `cpg` and `kpg` are then baked into the binary.
+- **`split_barrier`** splits the per-chunk barrier into `s_barrier_signal` /
+  `s_barrier_wait`: a wave signals once it has read the chunk's last fragments
+  (and its next transfer has landed) and waits at the top of the next chunk.
+- **`wave_epilogue`** stages each wave's tiles in a private LDS region and
+  stores them with the wave's own TDM transfer, with no block barrier between
+  the staging and the store (each wave must own whole rows of one image).
 
 Runtime (kernargs): batch, extents, the group count and both channel counts.
-Build-time: filter, padding, dtype and the tile geometry. Constraints: stride
-1, no dilation, `PAD` in 0..K-1, every tensor below 2 GiB (i32 byte offsets), `cpg` and `kpg` multiples of 8, and the ring and the staged dX
-tile within the 320 KB LDS. The AOT grid is `DGRAD_WMMA_KNOBS`
-(`kernels/conv/direct_aot_jobs.py`, variant `direct_dgrad_wmma`).
+Build-time: filter, padding, stride, dilation, dtype and the tile geometry
+(plus `cpg` / `kpg` with `pack_groups > 1`). Constraints: stride 1 or 2, no
+dilation with stride 2, `PAD` in 0..(K-1)*dil, every tensor below 2 GiB (i32
+byte offsets), `pack_groups * cpg` and `pack_groups * kpg` multiples of 8
+(`pack_groups > 1` needs `cpg`, `kpg` in 2/4/8/16, `pack_groups * kpg <= ck`
+and `pack_groups * cpg <= block_c`), `split_barrier` / `wave_epilogue` on
+stride-1 unpacked tiles only, and the ring and the staged dX tile within the
+320 KB LDS. The AOT grid is `DGRAD_WMMA_KNOBS` plus `DGRAD_WMMA_SB_KNOBS`
+(split barrier), `DGRAD_WMMA_PACKED_KNOBS`, `DGRAD_WMMA_STRIDED_KNOBS`,
+`DGRAD_WMMA_PATCH2_KNOBS` and `DGRAD_WMMA_DILATED_KNOBS`
+(`kernels/conv/direct_aot_jobs.py`, variant `direct_dgrad_wmma`). The C++ twin
+covers every knob; the byte-identity gate is
+`library/tests/parity/conv_direct_dgrad_wmma_emit.{c,py}` (llvm23 lane).
 
 ## Direct Forward on WMMA (gfx1250)
 
