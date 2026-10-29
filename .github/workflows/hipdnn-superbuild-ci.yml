@@ -114,6 +114,7 @@ jobs:
             dnn-providers
             projects/hipdnn
             projects/miopen
+            shared/ctest
             test
 
       # Shared CI constants, kpack-ref among them, defined in one place.
@@ -302,9 +303,19 @@ jobs:
       - name: Add ROCm bin to PATH
         run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
 
-      # Parallel: see the Linux lane. Serial this step was 14-20 min on Windows.
+      # See the Linux lane for why there are two ctest calls. Serial this step was 14-20 min
+      # on Windows.
       - name: Run tests
-        run: ctest --test-dir build --output-on-failure --no-tests=error --parallel 16
+        env:
+          # shared_ctest_optional_args_scope configures a nested CMake project whose
+          # find_package(Python3) must find the venv with PyYAML, not the runner's tool-cache
+          # Python.
+          VIRTUAL_ENV: ${{ env.VENV_PATH }}
+        run: |
+          rc=0
+          ctest --test-dir build --output-on-failure --no-tests=error --parallel 16 -L '^full$' || rc=$?
+          ctest --test-dir build --output-on-failure --no-tests=error --parallel 16 -LE '^(quick|standard|comprehensive|ffm-quick|full)$' || rc=$?
+          exit $rc
 
       - name: Patch ROCm SDK with superbuild outputs
         shell: pwsh
@@ -374,6 +385,7 @@ jobs:
             dnn-providers
             projects/hipdnn
             projects/miopen
+            shared/ctest
             test
 
       # Shared CI constants, kpack-ref among them, defined in one place.
@@ -573,14 +585,27 @@ jobs:
           test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
           printf '%s\n' "${kpacks[@]}"
 
-      # Parallel: the suites are independent processes, and the ones that share state are
-      # marked RUN_SERIAL / FIXTURES_* in CMake, which ctest honors. Serial this step was
-      # 7.7-11.3 min, dominated by a few long Python suites running back to back.
+      # ctest runs in parallel: the suites are independent processes, and the ones that share
+      # state are marked RUN_SERIAL / FIXTURES_* in CMake, which ctest honors. Serial this step
+      # was 7.7-11.3 min, dominated by a few long Python suites running back to back.
+      #
+      # shared/ctest registers each gtest binary once per tier (quick, standard, comprehensive,
+      # ffm-quick, full) with the same or a narrower filter, and `full` runs a superset, so the
+      # `full` label selects each binary once. Entries with no tier label (rocke_*, hkp-probe-*,
+      # shared_ctest_*, ...) are selected by the second call. Both calls always run.
       - name: Run tests
         env:
           # Native rocKE AUTO detection must see the wheel COMGR used by packaging.
           ROCKE_COMGR_LIB: ${{ env.HKP_ROCKE_COMGR_LIB }}
-        run: ctest --test-dir build --output-on-failure --no-tests=error --parallel 16
+          # The shared_ctest_* tests configure a nested CMake project: give it Ninja (the
+          # runner has no make) and let its find_package(Python3) find the venv with PyYAML.
+          CMAKE_GENERATOR: Ninja
+          VIRTUAL_ENV: ${{ env.VENV_PATH }}
+        run: |
+          rc=0
+          ctest --test-dir build --output-on-failure --no-tests=error --parallel 16 -L '^full$' || rc=$?
+          ctest --test-dir build --output-on-failure --no-tests=error --parallel 16 -LE '^(quick|standard|comprehensive|ffm-quick|full)$' || rc=$?
+          exit $rc
 
       # The full support matrix is too large to commit (only its overview is,
       # in dnn-providers/integration-tests/), so publish it from every run.
