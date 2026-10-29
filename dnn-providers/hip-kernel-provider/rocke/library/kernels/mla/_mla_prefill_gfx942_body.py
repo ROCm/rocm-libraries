@@ -38,6 +38,7 @@ from kernels.mla._mla_body import (
     MFMA_M,
     MFMA_N,
     KernelArgs,
+    KeyMask,
     Lanes,
     half4,
     mfma_16x16_c_row,
@@ -942,6 +943,19 @@ def read_pv_group(
         )
         for i in range(4)
     ]
+
+
+def zero_past_keys(
+    b: IRBuilder, xs: Sequence[Value], mask: KeyMask, kt: int, zero: Value
+) -> list[Value]:
+    """The PV group's key-row reads, with keys at or past ``S_k`` zeroed.
+
+    Read ``i`` of :func:`read_pv_group` for key tile ``kt`` is key
+    ``kb_start + 16 kt + lane_kq + i``, the key ``mask.in_k[kt][i]`` bounds.
+    Rows past ``S_k`` in the last page are not the kernel's to trust: one NaN
+    there would turn ``0 x NaN`` into a NaN latent for every query.
+    """
+    return [b.select(mask.in_k[kt][i], x, zero) for i, x in enumerate(xs)]
 
 
 def tile_pairs(b: IRBuilder, n_full: Value, n_k_tiles: Value) -> tuple[Value, Value]:

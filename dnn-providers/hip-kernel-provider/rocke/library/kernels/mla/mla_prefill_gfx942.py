@@ -151,6 +151,7 @@ from kernels.mla._mla_prefill_gfx942_body import (
     w_head_base,
     wave_head,
     wave_q_start,
+    zero_past_keys,
 )
 
 __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
@@ -915,9 +916,9 @@ def build_mla_prefill_score_probe(
     # ---- stage the paged latent tile and its head-shared RoPE half ------
     # page_block_size == block_k, so a k-tile is exactly one page and the
     # in-page row offset is the in-tile row offset. Rows past S_k inside the
-    # final page hold whatever the allocator left there. They are finite bf16,
-    # they only pollute their own key column, and that column is dropped by
-    # the store predicate -- no cross-contamination.
+    # final page hold whatever the pool holds there, NaN included. In the probe
+    # a key row only reaches its own score column, and the store predicate
+    # drops that column -- no cross-contamination.
     page = PageTable(b, args.block_table, tile.seq_idx, args.bt_stride).load(k_tile)
     copy_rows_to_lds(
         b,
@@ -1428,8 +1429,14 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
             p_frags.append(pack_p(b, row.p, K_TILES))
 
         # ---- accᵀ += Cᵀ · Pᵀ over every latent tile -------------------------
+        # Keys past S_k in the last page hold whatever the pool holds there. P
+        # is exactly 0 for them, but 0 x NaN is NaN, so in the masked tail their
+        # C rows are zeroed before the PV MFMA rather than trusted to be finite.
+        zero_c = b.zero_vec(dtype, 4) if masked else None
         for gi, (kt, w) in enumerate(pv_groups):
             xs = take_pv(gi)
+            if masked:
+                xs = zero_past_keys(b, xs, mask, kt, zero_c)
             for e in range(4):
                 c_t = pick4(b, xs, e, dtype)
                 for mt in range(M_TILES):

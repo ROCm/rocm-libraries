@@ -70,6 +70,17 @@ _ALL_SCENARIOS = [
 # ragged long batch -- shapes dispatch runs on the 16-row layout.
 _AGPR_FORCED = ["mixed_varlen_h64", "sk512_h64", "ragged_long_h64"]
 
+# NaN in every pool row the sequences do not own (page tails, spare pages):
+# (scenario, absorbed_query, agpr) over the register-staged, odd-head,
+# absorbed and DMA'd (agpr_acc) key-tile paths. Every scenario has page tails.
+_POISONED = [
+    ("page_tail_h64", False, None),
+    ("ragged_long_h64", False, None),
+    ("odd_heads_h5", False, None),
+    ("page_tail_h64", True, None),
+    ("ragged_long_h64", False, True),
+]
+
 # absorbed_query: one short, one masked/ragged, the long cases, H=6, and the
 # 300-sequence batch. Dispatch does not take absorbed_query at an odd head count
 # yet, so H=5 is not listed.
@@ -96,7 +107,7 @@ def _arch() -> str:
     return get_device_arch() or "gfx942"
 
 
-def _run(name: str, *, absorbed_query: bool = False, agpr=None):
+def _run(name: str, *, absorbed_query: bool = False, agpr=None, poison=False):
     probe = _probe()
     sc = probe.SCENARIOS[name]
     return probe.run_case(
@@ -111,6 +122,7 @@ def _run(name: str, *, absorbed_query: bool = False, agpr=None):
         dry_run=False,
         absorbed_query=absorbed_query,
         agpr=agpr,
+        poison=poison,
     )
 
 
@@ -125,6 +137,7 @@ def test_scenario_lists_match_probe_table():
     probe = _probe()
     assert sorted(_ALL_SCENARIOS) == sorted(probe.SCENARIOS)
     assert set(_AGPR_FORCED) <= set(probe.SCENARIOS)
+    assert {name for name, _, _ in _POISONED} <= set(probe.SCENARIOS)
     assert set(_ABSORBED) <= set(probe.SCENARIOS)
 
 
@@ -142,6 +155,18 @@ def test_mla_prefill_numeric_agpr_forced(name):
     if not _agpr_flavor_ok():
         pytest.skip("agpr_acc needs the llvm22/llvm23 flavor")
     assert _run(name, agpr=True) is True, f"{name} agpr_acc: see captured stdout"
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("name, absorbed_query, agpr", _POISONED)
+def test_mla_prefill_numeric_poisoned_pool(name, absorbed_query, agpr):
+    """Rows past S_k are caller memory: NaN there must not reach the output."""
+    if agpr and not _agpr_flavor_ok():
+        pytest.skip("agpr_acc needs the llvm22/llvm23 flavor")
+    assert (
+        _run(name, absorbed_query=absorbed_query, agpr=agpr, poison=True) is True
+    ), f"{name} poisoned pool: see captured stdout"
 
 
 @requires_gfx942_gpu

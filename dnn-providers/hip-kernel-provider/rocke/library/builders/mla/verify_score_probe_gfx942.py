@@ -872,6 +872,26 @@ def corrupt_page(p: Problem, seq: int, page: int) -> Problem:
     return p._replace(c_kv=c_kv, k_rope=k_rope)
 
 
+def poison_unused(p: Problem) -> Problem:
+    """``p`` with every pool row no sequence owns set to NaN in ``c_kv`` and
+    ``k_rope``: the tail rows of each sequence's last page and any page past
+    its keys.
+
+    The pool is caller memory the kernel only partly owns (a ``torch.empty``
+    pool holds a NaN or Inf bit pattern in most 16 x 512 tails), so a correct
+    kernel must not let those rows reach a live output. The oracle reads ``p``.
+    """
+    page = p.c_kv.shape[1]
+    c_kv, k_rope = p.c_kv.copy(), p.k_rope.copy()
+    k_lens = np.diff(p.cu_seqlens_k)
+    for seq, k in enumerate(k_lens):
+        for lp, phys in enumerate(p.block_table[seq]):
+            first_dead = max(0, int(k) - lp * page)
+            c_kv[phys, first_dead:] = np.nan
+            k_rope[phys, first_dead:] = np.nan
+    return p._replace(c_kv=c_kv, k_rope=k_rope)
+
+
 def verify_full(
     spec: MlaPrefillSpec,
     p: Problem,
@@ -1056,6 +1076,7 @@ def run_case(
     rel_tol: float = OUT_REL_PEAK_TOL,
     lse_tol: float = LSE_ATOL,
     corrupt: tuple[int, int] | None = None,
+    poison: bool = False,
 ) -> bool:
     """One (shape, heads) case end to end.
 
@@ -1064,6 +1085,8 @@ def run_case(
     ``corrupt=(seq, page)`` is the negative control (``--mode full`` only):
     that page is zeroed in the kernel's inputs but not the oracle's (see
     :func:`corrupt_page`), so a passing verdict means the bars are too loose.
+    ``poison`` (``--mode full`` only) hands the kernel :func:`poison_unused`
+    inputs: NaN in every pool row the sequences do not own.
     """
     # The score probe is single-tile (block_q == 16); the forward kernel runs
     # the spec dispatch ships for this case, so parity covers the shipped
@@ -1110,7 +1133,11 @@ def run_case(
             tol=tol,
             rel_tol=rel_tol,
             lse_tol=lse_tol,
-            device_problem=None if corrupt is None else corrupt_page(p, *corrupt),
+            device_problem=(
+                corrupt_page(p, *corrupt)
+                if corrupt is not None
+                else poison_unused(p) if poison else None
+            ),
         )
     print(f"[{name}] {'PASS' if passed else 'FAIL'}")
     return passed
@@ -1177,12 +1204,19 @@ def main(argv=None) -> int:
         "--list-scenarios", action="store_true", help="print the table and exit"
     )
     ap.add_argument(
+        "--poison-unused",
+        action="store_true",
+        help="--mode full only: NaN in every pool row the sequences do not own",
+    )
+    ap.add_argument(
         "--absorbed-query",
         action="store_true",
         help="--mode full only: verify the unfused path -- torch.bmm absorb, the "
         "absorbed_query kernel, torch.bmm W_UV -- against the same oracle",
     )
     args = ap.parse_args(argv)
+    if args.poison_unused and args.mode != "full":
+        ap.error("--poison-unused needs --mode full")
     if args.absorbed_query and not args.dry_run:
         if args.mode != "full":
             ap.error("--absorbed-query needs --mode full")
@@ -1238,6 +1272,7 @@ def main(argv=None) -> int:
                     agpr={"auto": None, "on": True, "off": False}[args.agpr],
                     rel_tol=args.rel_tol,
                     lse_tol=args.lse_tol,
+                    poison=args.poison_unused,
                 ),
             )
         )
