@@ -261,6 +261,10 @@ struct FmhaFwdKernel
     static constexpr bool kUseTrLoad    = detail::is_using_trload_v<FmhaPipeline>;
     static constexpr bool kIsTdmSchedD128 =
         kPipelineName == "qr_tdm_sched" && FmhaPipeline::BlockFmhaShape::kQKHeaddim == 128;
+    // Sched D128 stages O in padded LDS (the K0 slot) and writes it back with async LDS->global
+    // stores instead of the epilogue's per-lane buffer stores.
+    static constexpr bool kUseAsyncLdsOStore =
+        kIsTdmSchedD128 && kUsesFixedSegmentedLdsArena && sizeof(ODataType) == 2;
     // Match qr_tdm plus the validated sched D64/D128 variants. Sched D192 keeps
     // the existing head-major remap. GetTileIndex additionally requires batch
     // BHSD, square causal attention, one V tile, and no dropout for this order.
@@ -1537,6 +1541,27 @@ struct FmhaFwdKernel
                 if(kargs.sink_ptr != nullptr)
                     return false;
             }
+            // The async O store writes whole kN1-wide rows without a column bounds check, as 16-byte
+            // chunks at a 32-bit offset from the tile's first row.
+            if constexpr(kUseAsyncLdsOStore)
+            {
+                if(kargs.hdim_v != FmhaPipeline::kN1)
+                    return false;
+                constexpr index_t kVec = 16 / sizeof(ODataType);
+                if(reinterpret_cast<uintptr_t>(kargs.o_ptr) % 16 != 0 || kargs.stride_o < 0 ||
+                   kargs.stride_o % kVec != 0 || kargs.nhead_stride_o % kVec != 0)
+                    return false;
+                if constexpr(!kIsGroupMode)
+                {
+                    if(kargs.batch_stride_o % kVec != 0)
+                        return false;
+                }
+                const uint64_t tile_span_bytes =
+                    (FmhaPipeline::kM0 - 1) * static_cast<uint64_t>(kargs.stride_o) * sizeof(ODataType) +
+                    FmhaPipeline::kN1 * sizeof(ODataType);
+                if(tile_span_bytes > (uint64_t{1} << 32))
+                    return false;
+            }
         }
 
         if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
@@ -1950,6 +1975,94 @@ struct FmhaFwdKernel
         {
             return kargs.scale_s;
         }
+    }
+
+    // Stages the O tile in padded LDS, then each wave copies the rows it staged to global memory
+    // with global_store_async_from_lds_b128, so the copy-out needs no cross-wave barrier. The async
+    // store has no bounds check: rows at or past num_valid_rows are redirected to the wave's last
+    // valid row, which rewrites bytes that row already receives.
+    template <typename OAccTile>
+    CK_TILE_DEVICE static void StoreOTileAsyncFromLds(void* o_lds,
+                                                      ODataType* o_tile_ptr,
+                                                      index_t stride_o,
+                                                      index_t num_valid_rows,
+                                                      const OAccTile& o_acc_tile)
+    {
+        constexpr index_t kM   = FmhaPipeline::kM0;
+        constexpr index_t kN   = FmhaPipeline::kN1;
+        constexpr index_t kVec = 16 / sizeof(ODataType);
+        // A 16-byte pad per row keeps the lanes of one ds_store_b128 on distinct banks.
+        constexpr index_t kLdsRowElems = kN + kVec;
+        static_assert(kM * kLdsRowElems * sizeof(ODataType) <=
+                          FmhaPipeline::Policy::kKFootprintBytes,
+                      "O staging must fit in the K0 slot");
+
+        // Wave w holds rows m * kMWarp * kWarpM + w * kWarpM + [0, kWarpM), m < kMIter.
+        using OEncoding                 = typename OAccTile::StaticTileDistribution::DstrEncode;
+        using OBlockWarps               = typename FmhaPipeline::BlockFmhaShape::Gemm1BlockWarps;
+        constexpr index_t kMIter        = OEncoding::hs_lengthss_[number<0>{}][number<0>{}];
+        constexpr index_t kMWarp        = OEncoding::hs_lengthss_[number<0>{}][number<1>{}];
+        constexpr index_t kWarpM        = kM / (kMIter * kMWarp);
+        constexpr index_t kLanes        = kBlockSize / kMWarp;
+        constexpr index_t kChunks       = kN / kVec;
+        constexpr index_t kRowsPerStore = kLanes / kChunks;
+        static_assert(kMWarp == OBlockWarps::at(number<0>{}) && OBlockWarps::at(number<1>{}) == 1 &&
+                          OEncoding::ps_to_rhss_major_[number<0>{}][number<0>{}] == 1 &&
+                          OEncoding::ps_to_rhss_minor_[number<0>{}][number<0>{}] == 1,
+                      "the wave index must select the M warp of the O tile");
+        static_assert(kLanes % kChunks == 0 && kWarpM % kRowsPerStore == 0);
+
+        // K0 is reused: every wave's TDM writes and LDS reads of it must be done.
+        s_wait_tensorcnt<0>();
+        block_sync_lds<0>();
+
+        auto o_lds_view = make_tensor_view<address_space_enum::lds>(
+            static_cast<ODataType*>(o_lds),
+            make_naive_tensor_descriptor(make_tuple(number<kM>{}, number<kN>{}),
+                                         make_tuple(number<kLdsRowElems>{}, number<1>{}),
+                                         number<kVec>{},
+                                         number<1>{}));
+        auto o_lds_window = make_tile_window(o_lds_view,
+                                             make_tuple(number<kM>{}, number<kN>{}),
+                                             {0, 0},
+                                             o_acc_tile.get_tile_distribution());
+        store_tile(o_lds_window, cast_tile<ODataType>(o_acc_tile));
+        s_wait_dscnt<0>();
+
+        const index_t i_wave = get_warp_id();
+        const index_t i_lane = get_lane_id();
+        index_t last_row     = -1;
+        static_for<0, kMIter, 1>{}([&](auto i_m) {
+            const index_t first_row = decltype(i_m)::value * kMWarp * kWarpM + i_wave * kWarpM;
+            if(num_valid_rows > first_row)
+                last_row = min(num_valid_rows - 1, first_row + kWarpM - 1);
+        });
+        if(last_row >= 0)
+        {
+            constexpr index_t kStores = kMIter * kWarpM / kRowsPerStore;
+            static_assert(kStores % 8 == 0);
+            const index_t lane_row  = i_wave * kWarpM + i_lane / kChunks;
+            const index_t col       = i_lane % kChunks * kVec;
+            const uint32_t lds_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(o_lds));
+            static_for<0, kStores / 8, 1>{}([&](auto i_group) {
+                uint32_t global_offset[8];
+                uint32_t lds_addr[8];
+                static_for<0, 8, 1>{}([&](auto i_store) {
+                    constexpr index_t wave_row =
+                        (decltype(i_group)::value * 8 + decltype(i_store)::value) * kRowsPerStore;
+                    constexpr index_t tile_row =
+                        wave_row / kWarpM * kMWarp * kWarpM + wave_row % kWarpM;
+                    const index_t row = min(tile_row + lane_row, last_row);
+                    global_offset[i_store] =
+                        static_cast<uint32_t>(row) * static_cast<uint32_t>(stride_o * sizeof(ODataType)) +
+                        static_cast<uint32_t>(col * sizeof(ODataType));
+                    lds_addr[i_store] =
+                        lds_base + static_cast<uint32_t>((row * kLdsRowElems + col) * sizeof(ODataType));
+                });
+                amd_async_global_store_from_lds_b128_x8(o_tile_ptr, global_offset, lds_addr);
+            });
+        }
+        s_wait_asynccnt<0>();
     }
 
     CK_TILE_DEVICE void operator()(Kargs kargs) const
@@ -3595,6 +3708,7 @@ struct FmhaFwdKernel
                 alignas(256) __shared__ char smem[GetSmemSize()];
                 smem_ptr = smem;
             }
+            [[maybe_unused]] void* o_lds_staging = nullptr;
 
             auto o_acc_tile = [&]() {
                 if constexpr(PrefillCase)
@@ -3604,6 +3718,7 @@ struct FmhaFwdKernel
                         using Policy = typename FmhaPipeline::Policy;
                         static_assert(FmhaPipeline::GetSmemSize() == Policy::GetLdsArenaSize());
                         __shared__ char smem_arena[Policy::GetLdsArenaSize()];
+                        o_lds_staging = smem_arena + Policy::GetLdsOffsetK0();
                         return invoke_fmha_pipeline(q_dram_window,
                                                     k_dram_window,
                                                     v_dram_window,
@@ -3702,7 +3817,14 @@ struct FmhaFwdKernel
                 make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN1>{}),
                 {i_m0, i_n1});
 
-            if constexpr(detail::epilogue_uses_smem_v<EpiloguePipeline>)
+            if constexpr(kUseAsyncLdsOStore && PrefillCase)
+                StoreOTileAsyncFromLds(o_lds_staging,
+                                       o_ptr + static_cast<long_index_t>(i_m0) * kargs.stride_o +
+                                           i_n1,
+                                       kargs.stride_o,
+                                       kargs.seqlen_q - i_m0,
+                                       o_acc_tile);
+            else if constexpr(detail::epilogue_uses_smem_v<EpiloguePipeline>)
             {
                 // The pipeline is done with its LDS; pipelines that declare
                 // their own arrays leave none to the epilogue (direct store).
