@@ -1091,6 +1091,63 @@ def conv_direct_grouped_spec_to_dict(spec: Any, kind: str) -> Dict[str, Any]:
     return d
 
 
+def _fwd_small_problem_dict(p: Any) -> Dict[str, Any]:
+    return dict(
+        N=p.N,
+        H=p.H,
+        W=p.W,
+        groups=p.groups,
+        cpg=p.cpg,
+        kpg=p.kpg,
+        KH=p.KH,
+        KW=p.KW,
+        PAD=p.PAD,
+        stride=p.stride,
+        dil_h=p.dil_h,
+        dil_w=p.dil_w,
+        dtype=p.dtype,
+    )
+
+
+def conv_direct_fwd_smallc_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`FwdSmallcWmmaSpec` -> flat dict (problem nested, dtype included).
+    ``sched`` is forwarded as-is; ``None`` means the backend default."""
+    return dict(
+        problem=_fwd_small_problem_dict(spec.problem),
+        name=spec.name,
+        waves_k=spec.waves_k,
+        waves_p=spec.waves_p,
+        tiles_k=spec.tiles_k,
+        tiles_p=spec.tiles_p,
+        out_h=spec.out_h,
+        out_w=spec.out_w,
+        tiles_per_block=spec.tiles_per_block,
+        tdm_store=spec.tdm_store,
+        sched=spec.sched,
+        wave_size=spec.wave_size,
+    )
+
+
+def conv_direct_fwd_smallk_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`FwdSmallkWmmaSpec` -> flat dict (problem nested, dtype included).
+    ``sched`` is forwarded as-is; ``None`` means the backend default."""
+    return dict(
+        problem=_fwd_small_problem_dict(spec.problem),
+        name=spec.name,
+        waves_c=spec.waves_c,
+        waves_p=spec.waves_p,
+        tiles_c=spec.tiles_c,
+        tiles_p=spec.tiles_p,
+        out_h=spec.out_h,
+        out_w=spec.out_w,
+        ck=spec.ck,
+        stages=spec.stages,
+        prefetch=spec.prefetch,
+        sched=spec.sched,
+        wave_size=spec.wave_size,
+    )
+
+
 def conv_direct_dgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`DirectDgradWmmaSpec` -> flat dict (problem nested, dtype included).
     ``sched`` is forwarded as-is; ``None`` means the backend default."""
@@ -1123,6 +1180,51 @@ def conv_direct_dgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         prefetch=spec.prefetch,
         sched=spec.sched,
         wave_size=spec.wave_size,
+    )
+
+
+def conv_direct_fwd_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`DirectFwdWmmaSpec` -> flat dict (problem nested, dtype included).
+    ``sched`` is forwarded as-is; ``None`` means the backend default."""
+    p = spec.problem
+    return dict(
+        problem=dict(
+            N=p.N,
+            H=p.H,
+            W=p.W,
+            groups=p.groups,
+            cpg=p.cpg,
+            kpg=p.kpg,
+            KH=p.KH,
+            KW=p.KW,
+            PAD=p.PAD,
+            stride=p.stride,
+            dil_h=p.dil_h,
+            dil_w=p.dil_w,
+            dtype=p.dtype,
+        ),
+        name=spec.name,
+        waves_k=spec.waves_k,
+        waves_p=spec.waves_p,
+        tiles_k=spec.tiles_k,
+        tiles_p=spec.tiles_p,
+        tile_w=spec.tile_w,
+        tile_n=spec.tile_n,
+        ck=spec.ck,
+        stages=spec.stages,
+        prefetch=spec.prefetch,
+        sched=spec.sched,
+        wave_size=spec.wave_size,
+        pack_groups=spec.pack_groups,
+        split_barrier=spec.split_barrier,
+        wave_epilogue=spec.wave_epilogue,
+        phase_split=spec.phase_split,
+        row_ring=spec.row_ring,
+        tap_ring=spec.tap_ring,
+        pingpong=spec.pingpong,
+        pp_group=spec.pp_group,
+        tap_reuse=spec.tap_reuse,
+        tap_shift=spec.tap_shift,
     )
 
 
@@ -1792,6 +1894,80 @@ def lower_conv_direct_nongrouped(
     )
 
 
+def lower_conv_direct_fwd_smallc_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`FwdSmallcWmmaSpec` (the gfx1250 WMMA small-C forward)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_fwd_small_wmma import build_fwd_smallc_wmma
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_fwd_smallc_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_direct_fwd_smallc_wmma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_direct_fwd_smallc_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_direct_fwd_smallc_wmma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_direct_fwd_smallc_wmma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_conv_direct_fwd_smallk_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`FwdSmallkWmmaSpec` (the gfx1250 WMMA small-K forward)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_fwd_small_wmma import build_fwd_smallk_wmma
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_fwd_smallk_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_direct_fwd_smallk_wmma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_direct_fwd_smallk_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_direct_fwd_smallk_wmma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_direct_fwd_smallk_wmma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
 def lower_conv_direct_dgrad_wmma(
     spec: Any,
     *,
@@ -1825,6 +2001,43 @@ def lower_conv_direct_dgrad_wmma(
         py_fn,
         lambda: eng.conv_direct_dgrad_wmma_lower_llvm(sd, arch=arch),
         lambda: eng.conv_direct_dgrad_wmma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_conv_direct_fwd_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`DirectFwdWmmaSpec` (the gfx1250 WMMA direct forward)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_fwd_wmma import build_direct_fwd_wmma
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_direct_fwd_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_direct_fwd_wmma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_direct_fwd_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_direct_fwd_wmma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_direct_fwd_wmma_serialize_ir(sd, arch=arch),
         _name_of(spec),
     )
 
