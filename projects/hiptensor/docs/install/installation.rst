@@ -346,16 +346,16 @@ Executable name                                  Description
 ``rank4_elementwise_permute_test``               Permutation test with half, bfloat16, single and double precision datatypes of rank 4
 ``rank5_elementwise_permute_test``               Permutation test with half, bfloat16, single and double precision datatypes of rank 5
 ``rank6_elementwise_permute_test``               Permutation test with half, bfloat16, single and double precision datatypes of rank 6
-``rank2_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 2
-``rank3_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 3
-``rank4_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 4
-``rank5_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 5
-``rank6_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 6
-``rank2_elementwise_trinary_op_test``            Element-wise trinary operation test with half, single, and double precision datatypes of rank 2
-``rank3_elementwise_trinary_op_test``            Element-wise trinary operation test with half, single, and double precision datatypes of rank 3
-``rank4_elementwise_trinary_op_test``            Element-wise trinary operation test with half, single, and double precision datatypes of rank 4
-``rank5_elementwise_trinary_op_test``            Element-wise trinary operation test with half, single, and double precision datatypes of rank 5
-``rank6_elementwise_trinary_op_test``            Element-wise trinary operation test with half, single, and double precision datatypes of rank 6
+``rank2_elementwise_binary_op_test``             Element-wise binary operation test with half, bfloat16, single, and double precision datatypes of rank 2
+``rank3_elementwise_binary_op_test``             Element-wise binary operation test with half, bfloat16, single, and double precision datatypes of rank 3
+``rank4_elementwise_binary_op_test``             Element-wise binary operation test with half, bfloat16, single, and double precision datatypes of rank 4
+``rank5_elementwise_binary_op_test``             Element-wise binary operation test with half, bfloat16, single, and double precision datatypes of rank 5
+``rank6_elementwise_binary_op_test``             Element-wise binary operation test with half, bfloat16, single, and double precision datatypes of rank 6
+``rank2_elementwise_trinary_op_test``            Element-wise trinary operation test with half, bfloat16, single, and double precision datatypes of rank 2
+``rank3_elementwise_trinary_op_test``            Element-wise trinary operation test with half, bfloat16, single, and double precision datatypes of rank 3
+``rank4_elementwise_trinary_op_test``            Element-wise trinary operation test with half, bfloat16, single, and double precision datatypes of rank 4
+``rank5_elementwise_trinary_op_test``            Element-wise trinary operation test with half, bfloat16, single, and double precision datatypes of rank 5
+``rank6_elementwise_trinary_op_test``            Element-wise trinary operation test with half, bfloat16, single, and double precision datatypes of rank 6
 ``rank1_reduction_test``                         Reduction test with half, single, and double precision datatypes of rank 1
 ``rank2_reduction_test``                         Reduction test with half, single, and double precision datatypes of rank 2
 ``rank3_reduction_test``                         Reduction test with half, single, and double precision datatypes of rank 3
