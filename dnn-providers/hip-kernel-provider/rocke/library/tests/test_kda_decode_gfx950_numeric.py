@@ -33,7 +33,12 @@ torch = pytest.importorskip("torch", reason="ROCm torch required")
 pytestmark = pytest.mark.gpu
 
 
-from dispatch.gdn.gfx950 import _TUNED_TILES_KDA  # noqa: E402
+from dispatch.gdn.axes import AUTO_DEFAULTS  # noqa: E402
+
+# Every KDA auto tile (plain and fused cases), each built here on the plain path.
+_KDA_AUTO_TILES = sorted(
+    {d.tile for (gate, _, _), d in AUTO_DEFAULTS.items() if gate == "kda"}
+)
 
 
 def _device_is_gfx950() -> bool:
@@ -121,11 +126,11 @@ def test_kda_warp_tiled_matches_reference(harness, batch, state_dtype):
 
 @requires_gfx950
 @pytest.mark.parametrize("state_dtype", ["bf16", "f32"])
-@pytest.mark.parametrize("max_work,tile", _TUNED_TILES_KDA)
-def test_every_kda_tuned_tile_is_correct(harness, max_work, tile, state_dtype):
-    """Every tile in the KDA table agrees with the independent reference, for
-    each state width. f32 doubles the state bytes each lane moves, so it
-    exercises a different load/store split."""
+@pytest.mark.parametrize("tile", _KDA_AUTO_TILES)
+def test_every_kda_auto_tile_is_correct(harness, tile, state_dtype):
+    """Every KDA auto tile's base configuration agrees with the independent
+    reference, for each state width. f32 doubles the state bytes each lane
+    moves, so it exercises a different load/store split."""
     num_warps, warp_threads_k, blocks_per_v_dim = tile
     spec = _kda(
         num_warps=num_warps,
@@ -135,29 +140,28 @@ def test_every_kda_tuned_tile_is_correct(harness, max_work, tile, state_dtype):
     )
     out_err, state_err = harness["check"](spec, batch=16)
 
-    assert out_err <= harness["TOL"], (
-        f"KDA tile {tile} (max_work={max_work}, state {state_dtype}) "
-        f"output error {out_err:.3e}"
-    )
-    assert state_err <= harness["TOL"], (
-        f"KDA tile {tile} (max_work={max_work}, state {state_dtype}) "
-        f"state error {state_err:.3e}"
-    )
+    assert (
+        out_err <= harness["TOL"]
+    ), f"KDA tile {tile} (state {state_dtype}) output error {out_err:.3e}"
+    assert (
+        state_err <= harness["TOL"]
+    ), f"KDA tile {tile} (state {state_dtype}) state error {state_err:.3e}"
 
 
 @requires_gfx950
 @pytest.mark.parametrize(
-    "batch,expected_spec_id,expected_tile",
+    "state_dtype,expected_spec_id,expected_tile",
     [
-        (1, "kda_nw4_wtk16_bpv4", (4, 16, 4)),
-        (8, "kda_nw1_wtk16_bpv4", (1, 16, 4)),
-        (32, "kda_nw2_wtk16_bpv1", (2, 16, 1)),
+        ("bf16", "kda_nw1_wtk16_bpv8", (1, 16, 8)),
+        ("f32", "kda_nw1_wtk16_bpv16", (1, 16, 16)),
     ],
 )
-def test_kda_dispatch_band_launches_selected_kernel(
-    harness, batch, expected_spec_id, expected_tile
+@pytest.mark.parametrize("batch", [1, 8, 32])
+def test_kda_dispatch_launches_the_auto_kernel(
+    harness, batch, state_dtype, expected_spec_id, expected_tile
 ):
-    """Exercise request → dispatch → selected tile → compile → launch → oracle."""
+    """Exercise request → dispatch → selected tile → compile → launch → oracle.
+    The tile is the case's at every batch."""
     from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
@@ -169,6 +173,7 @@ def test_kda_dispatch_band_launches_selected_kernel(
             gate_kind="kda",
             num_k_heads=32,
             num_v_heads=32,
+            state_dtype=state_dtype,
         )
     )
     spec = result.spec.kernel_spec

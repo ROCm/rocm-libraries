@@ -54,6 +54,13 @@ def _run_default(runner, monkeypatch, failing_label=""):
     return runner.main(), calls
 
 
+def test_runner_uses_every_qualified_compiler_lane(runner):
+    from rocke.core.llvm_profile import LLVM_FLAVORS
+
+    assert runner.FLAVORS is LLVM_FLAVORS
+    assert "llvm24" in runner.FLAVORS
+
+
 def test_default_runs_every_host_validation_gate_once(runner, monkeypatch):
     rc, calls = _run_default(runner, monkeypatch)
     assert rc == 0

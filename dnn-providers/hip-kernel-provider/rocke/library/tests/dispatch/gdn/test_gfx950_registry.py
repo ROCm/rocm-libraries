@@ -15,7 +15,7 @@ from dispatch.gdn import (
     dispatch_gdn_decode_bases,
     gdn_candidates,
 )
-from dispatch.gdn.gfx950 import ARCH, CONFIGURED_TILES, DEFAULT_TILE, make_spec
+from dispatch.gdn.gfx950 import ARCH, CONFIGURED_TILES, auto_tile, make_spec
 from kernels.gfx950.gdn_decode import is_valid_spec
 from rocke.dispatch.core import stable_json_hash
 
@@ -119,23 +119,13 @@ def test_every_legal_pin_round_trips_and_illegal_pin_fails_loudly():
         dispatch_gdn_decode(_req(algorithm="warp_tiled", spec_id="does_not_exist"))
 
 
-def test_auto_is_static_default_independent_of_batch():
-    outcomes = []
-    for batch in (1, 16, 64, 256):
-        repeated = [dispatch_gdn_decode(_req(batch)) for _ in range(20)]
-        assert {_tile(result.spec) for result in repeated} == {DEFAULT_TILE}
-        assert len({result.candidate.spec_id for result in repeated}) == 1
-        outcomes.append(repeated[0].candidate.spec_id)
-    assert len(set(outcomes)) == 1
-
-
 def test_gdn_auto_ignores_custom_rankers_when_default_is_legal():
     def reverse(request, candidates):
         return tuple(reversed(candidates))
 
     result = dispatch_gdn_decode(_req(), ranker=reverse)
 
-    assert _tile(result.spec) == DEFAULT_TILE
+    assert _tile(result.spec) == auto_tile(_req())
 
 
 def test_d64_auto_falls_back_to_a_validator_approved_candidate():

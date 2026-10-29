@@ -7,8 +7,8 @@
 resolution, id uniqueness, replay and portability for representative tiles in
 every mode. The rest pins what is specific to this family: the knob space each
 mode exposes, that it holds one kernel per configuration, that ``auto`` is
-each tile's base configuration, and that out-of-scope knobs are dropped while
-illegal ones are refused.
+one configuration of that space (its case's knob stack on the case's tile),
+and that out-of-scope knobs are dropped while illegal ones are refused.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from dispatch.gdn import (
     request_errors,
 )
 from dispatch.gdn import gfx950, rules
-from dispatch.gdn.gfx950 import ARCH
+from dispatch.gdn.gfx950 import ARCH, auto_default, spec_id_for
 from rocke.dispatch.core import PinRefused
 from rocke.dispatch.tuning import sweep_level
 from rocke.dispatch.tuning.testing import assert_tuning_contract, representative
@@ -175,29 +175,52 @@ def test_every_canonical_configuration_is_registered_once(req):
 
 
 @pytest.mark.parametrize("req", _MODES)
-def test_auto_is_the_auto_tile_base_configuration(req):
+def test_auto_is_its_case_stack_on_the_case_tile(req):
+    """``auto`` is a registered configuration, not a new one: the case's
+    knobs pinned on the case's tile give the same spec, and the knobs it
+    records are the stack less the knobs this request cannot read."""
     auto = dispatch_gdn_decode(req)
-    assert auto.spec.knobs == ()
-    assert auto.spec.tuning_id.startswith(f"{auto.candidate.spec_id}_wpe0@")
+    default = auto_default(req)
+    spec_id = spec_id_for(default.tile, req.gate_kind)
+    assert auto.candidate.spec_id == spec_id
+    wpe = default.knobs.get("waves_per_eu", 0)
+    assert auto.spec.tuning_id.startswith(f"{spec_id}_wpe{wpe}@")
+    assert dict(auto.spec.knobs).items() <= dict(default.knobs).items()
     kernel = auto.spec.kernel_spec
-    for name in ("state_load_hint", "state_store_hint"):
-        assert getattr(kernel, name) == "default"
-    for name in (
-        "dpp_reduce",
-        "xcd_remap",
-        "stream_rows",
-        "interleave_cols",
-        "conv_once",
-        "norm_gate_once",
-        "out_lds",
-    ):
-        assert getattr(kernel, name) is False, name
-    assert kernel.waves_per_eu == 0
+    for name, value in auto.spec.knobs:
+        assert getattr(kernel, name) == value, name
+    stack_pin = replace(req, spec_id=spec_id, tuning_knobs=dict(default.knobs))
+    assert dispatch_gdn_decode(stack_pin).spec == auto.spec
+    # One of the tile's enumerated configurations.
+    assert auto.spec in {
+        r.spec for r in dispatch_gdn_decode_all(req) if r.candidate.spec_id == spec_id
+    }
     # The result's request is pinned to what ran, so it replays it.
     assert (auto.request.spec_id, auto.request.tuning_id) == (
         auto.candidate.spec_id,
         auto.spec.tuning_id,
     )
+    assert auto.request.tuning_knobs == auto.spec.knobs
+    assert dispatch_gdn_decode(auto.request).spec == auto.spec
+
+
+@pytest.mark.parametrize("state_dtype", ("bf16", "f16"))
+def test_norm_only_auto_drops_norm_gate_once_with_conv_once(state_dtype):
+    """The GDN fused bf16 row carries conv_once and norm_gate_once. On a
+    norm-only request conv_once is out of scope, and norm_gate_once without
+    it is refused by the kernel, so auto drops both and runs the rest of
+    the row instead of raising."""
+    req = _req(gate_kind="gdn", state_dtype=state_dtype, heads=16, fuse_out_norm=True)
+    default = auto_default(req)
+    assert default.knobs.get("conv_once") and default.knobs.get("norm_gate_once")
+    auto = dispatch_gdn_decode(req)
+    assert auto.candidate.spec_id == spec_id_for(default.tile, "gdn")
+    expected = {
+        k: v
+        for k, v in default.knobs.items()
+        if k not in ("conv_once", "norm_gate_once")
+    }
+    assert dict(auto.spec.knobs) == expected
     assert dispatch_gdn_decode(auto.request).spec == auto.spec
 
 
