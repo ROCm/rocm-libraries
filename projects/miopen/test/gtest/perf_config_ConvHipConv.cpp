@@ -7,6 +7,10 @@
 
 #if defined(MIOPEN_USE_HIPCONV) && MIOPEN_USE_HIPCONV
 
+#if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
+#include <miopen/conv/heuristics/lgbm_pcfg_metadata.hpp>
+#endif
+
 using Config   = miopen::solver::conv::PerformanceConfigConvHipConv;
 using TestCase = miopen::unit_tests::ConvTestCase;
 
@@ -72,5 +76,56 @@ TEST(GPU_PerfConfig_ConvHipConv_FP16, VersionStamp)
     // Config 0 alone would not catch a record resolving to the default config.
     EXPECT_GE(configs, 2);
 }
+
+#if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
+// The perf-config picker's ConvHipConv candidates for this device carry this build's config
+// version. IsValidPerformanceConfig rejects a record of any other version, so a model left on
+// an older version after a hipconv config bump would run the default config on every problem.
+TEST(GPU_PerfConfig_ConvHipConv_FP16, PickerCatalogVersion)
+{
+    if(!IsTestSupportedByDevice(Gpu::gfx950 | Gpu::gfx125X))
+        GTEST_SKIP();
+
+    const auto& meta  = miopen::ai::lgbm::pcfg::LgbmPcfgMetadata::Get();
+    const auto* model = meta.IsReady() ? meta.Find("ConvHipConv") : nullptr;
+    if(model == nullptr)
+        GTEST_SKIP() << "no ConvHipConv perf-config model installed";
+
+    constexpr auto type   = miopenHalf;
+    constexpr auto layout = miopenTensorNHWC;
+    // clang-format off
+    const auto test_case = TestCase{{type, layout, {7, 64, 8, 8}}, {type, layout, {128, 64, 3, 3}}, type, {{1, 1}, {1, 1}, {1, 1}}};
+    // clang-format on
+    const auto problem = test_case.GetProblemDescription(miopen::conv::Direction::Forward);
+
+    auto&& handle = get_handle();
+    auto ctx      = miopen::ExecutionContext{&handle};
+    problem.SetupFloats(ctx);
+
+    const auto record =
+        miopen::solver::conv::ConvHipConv{}.GetDefaultPerformanceConfig(ctx, problem).ToString();
+    const auto colon = record.find(':');
+    ASSERT_NE(colon, std::string::npos) << record;
+    const auto version = record.substr(0, colon + 1);
+
+    const auto gfx_id = handle.GetDeviceName();
+    int candidates    = 0;
+    for(const auto& [key, bucket] : model->buckets)
+    {
+        if(key.substr(0, key.find('|')) != gfx_id)
+            continue;
+        for(const auto& candidate : bucket)
+        {
+            // An empty desc stands for the solver's default config.
+            if(candidate.desc.empty())
+                continue;
+            EXPECT_TRUE(candidate.desc.starts_with(version)) << key << ": " << candidate.desc;
+            ++candidates;
+        }
+    }
+    if(candidates == 0)
+        GTEST_SKIP() << "no ConvHipConv picker candidates for " << gfx_id;
+}
+#endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
 #endif // MIOPEN_USE_HIPCONV
