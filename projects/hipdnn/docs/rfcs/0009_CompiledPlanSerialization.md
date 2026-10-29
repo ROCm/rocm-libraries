@@ -405,7 +405,8 @@ re-encode the plan inside the provider. The saved bytes were chosen for these re
 
 - It works for every plugin and every payload shape.
 - It adds no contract for plugin authors.
-- A re-save is byte-identical and deterministic.
+- A re-save of the execution plan is byte-identical and deterministic. A re-save of the graph is
+  not guaranteed to be byte-identical.
 - It avoids a defect of re-encoding: a re-save of a version 1 envelope wrote version 2 with empty
   `tensor_alignments`, which the version 2 reader rejects.
 
