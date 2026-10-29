@@ -74,8 +74,7 @@ try
     // extra requirements for calling GELQ2 and LARFB
     size_t size_diag_tmptr;
 
-    I const max_batch_count = 64 * 1024 - 1;
-    I const nsweep = ceildiv(batch_count_arg, max_batch_count);
+    I const nsweep = ceildiv(batch_count_arg, MAX_BATCH_COUNT);
     I const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
     {
