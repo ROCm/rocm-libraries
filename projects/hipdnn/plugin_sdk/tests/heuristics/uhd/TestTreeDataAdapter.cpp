@@ -802,6 +802,41 @@ TEST_F(TestTreeDataAdapter, RealisticBatchScoringMatchesSingle)
     }
 }
 
+TEST_F(TestTreeDataAdapter, BatchScoresAreBitwiseTheSingleRowScoresForEveryRowShape)
+{
+    const std::string realisticHash = "sha256:batch_bitwise_test";
+    auto buffer = GbdtModelBuilder()
+                      .setNumFeatures(5)
+                      .setFeaturesHash(realisticHash)
+                      .setBaseScore(0.1)
+                      .addTree(makeRealisticTree1())
+                      .addTree(makeRealisticTree2())
+                      .addTree(makeRealisticTree3())
+                      .build();
+
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), realisticHash);
+    ASSERT_NE(adapter, nullptr);
+
+    // Full-width, missing-value and short rows mixed, so the batch takes the checked path for
+    // some rows and the unchecked path for others.
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const std::vector<std::vector<double>> batch = {
+        {256.0, 512.0, 128.0, 32.0, 40.0},
+        {1024.0, 2048.0},
+        {nan, 512.0, nan, 64.0, 80.0},
+        {},
+        {800.0, 512.0, 512.0, 64.0, 80.0, 7.0},
+    };
+
+    const auto batchScores = adapter->scoreBatch(batch);
+    ASSERT_EQ(batchScores.size(), batch.size());
+    for(size_t i = 0; i < batch.size(); ++i)
+    {
+        // Exact equality: tree-major batching must keep each row's summation order.
+        EXPECT_EQ(batchScores[i], adapter->score(batch[i])) << "row " << i;
+    }
+}
+
 TEST_F(TestTreeDataAdapter, RealisticRankingOrdersCorrectly)
 {
     const std::string realisticHash = "sha256:ranking_test";

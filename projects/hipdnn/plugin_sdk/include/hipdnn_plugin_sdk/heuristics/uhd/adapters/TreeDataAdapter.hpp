@@ -133,9 +133,19 @@ private:
         std::vector<Node>& nodes,
         std::vector<uint32_t>& roots);
 
+    /// The leaf one tree sends @p features to.
+    template <bool CheckFeatureCount>
+    const Node& leafFor(const std::vector<double>& features, uint32_t root) const;
+
     template <bool CheckFeatureCount>
     double scorePrepared(const std::vector<double>& features,
                          const std::vector<uint32_t>& roots) const;
+
+    /// scoreRoots over every row, tree-major: one tree visits all rows while its nodes are
+    /// cache-resident. Each row still sums trees in model order, so every score is bitwise
+    /// the one scoreRoots returns.
+    std::vector<double> scoreRootsBatch(const std::vector<std::vector<double>>& batch,
+                                        const std::vector<uint32_t>& roots) const;
 
     /// Sum one ensemble over a row, using the same short-row path as `score`.
     double scoreRoots(const std::vector<double>& features, const std::vector<uint32_t>& roots) const
@@ -546,7 +556,7 @@ inline std::vector<double>
 {
     if(_groupFeatureIndex < 0 || _groups.empty())
     {
-        return IUhdAdapter::scoreBatch(batch);
+        return scoreRootsBatch(batch, _roots);
     }
 
     // Layer 1: a group's standing is the best layer-1 score among its rows, best in the
@@ -612,33 +622,75 @@ inline std::vector<double>
 }
 
 template <bool CheckFeatureCount>
+inline const TreeDataAdapter::Node& TreeDataAdapter::leafFor(const std::vector<double>& features,
+                                                             uint32_t root) const
+{
+    const auto* nodes = _nodes.data();
+    const auto* node = nodes + root;
+    while(node->featureIndex >= 0)
+    {
+        const auto feature = static_cast<size_t>(node->featureIndex);
+        bool goLeft = node->defaultLeft;
+        if(!CheckFeatureCount || feature < features.size())
+        {
+            const double value = features[feature];
+            if(!std::isnan(value))
+            {
+                goLeft = node->useLte ? value <= node->value : value < node->value;
+            }
+        }
+        node = nodes + node->children[goLeft ? 0U : 1U];
+    }
+    return *node;
+}
+
+template <bool CheckFeatureCount>
 inline double TreeDataAdapter::scorePrepared(const std::vector<double>& features,
                                              const std::vector<uint32_t>& roots) const
 {
     double sum = 0.0;
-    const auto* nodes = _nodes.data();
     for(const auto root : roots)
     {
-        const auto* node = nodes + root;
-        while(node->featureIndex >= 0)
-        {
-            const auto feature = static_cast<size_t>(node->featureIndex);
-            bool goLeft = node->defaultLeft;
-            if(!CheckFeatureCount || feature < features.size())
-            {
-                const double value = features[feature];
-                if(!std::isnan(value))
-                {
-                    goLeft = node->useLte ? value <= node->value : value < node->value;
-                }
-            }
-            node = nodes + node->children[goLeft ? 0U : 1U];
-        }
-        sum += node->value;
+        sum += leafFor<CheckFeatureCount>(features, root).value;
     }
 
     // Add the bias last. LightGBM leaves already include the learning rate; don't reapply.
     return _baseScore + sum;
+}
+
+inline std::vector<double>
+    TreeDataAdapter::scoreRootsBatch(const std::vector<std::vector<double>>& batch,
+                                     const std::vector<uint32_t>& roots) const
+{
+    if(roots.empty())
+    {
+        return std::vector<double>(batch.size(), _baseScore);
+    }
+
+    // Validated splits are in range for a full-width row; short rows take the checked path.
+    bool anyShortRow = false;
+    for(const auto& row : batch)
+    {
+        anyShortRow = anyShortRow || row.size() < _numFeatures;
+    }
+
+    std::vector<double> sums(batch.size(), 0.0);
+    for(const auto root : roots)
+    {
+        for(size_t i = 0; i < batch.size(); ++i)
+        {
+            sums[i] += anyShortRow && batch[i].size() < _numFeatures
+                           ? leafFor<true>(batch[i], root).value
+                           : leafFor<false>(batch[i], root).value;
+        }
+    }
+
+    // The bias goes last, as in scorePrepared.
+    for(auto& sum : sums)
+    {
+        sum = _baseScore + sum;
+    }
+    return sums;
 }
 
 inline bool TreeDataAdapter::isTrainedForArch(const std::string& arch) const
