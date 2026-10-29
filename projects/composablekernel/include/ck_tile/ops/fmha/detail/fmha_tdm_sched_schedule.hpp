@@ -438,7 +438,7 @@ struct FmhaTdmSchedSequentialTileSchedule
 
 template <typename Geometry>
 using FmhaTdmSchedDefaultScheduleFor = FmhaTdmSchedSequentialTileSchedule<
-    std::conditional_t<Geometry::kHeadDimQK == 64,
+    std::conditional_t<Geometry::kHeadDimQK == 64 && Geometry::kN == 64,
                        FmhaTdmSchedReadFirstPlacement<FmhaTdmSchedScheduleFor<Geometry>>,
                        FmhaTdmSchedWmmaFirstPlacement<FmhaTdmSchedScheduleFor<Geometry>>>>;
 

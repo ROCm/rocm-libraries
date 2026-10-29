@@ -266,10 +266,10 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         static_assert(Policy::OutputFragments::kNumN == PvBlockGemm::NIterPerWarp / 2);
         static_assert(OaccBlockTileType::get_thread_buffer_size() ==
                       Policy::OutputFragments::Mapping::kThreadBufferSize);
-        if constexpr(Geometry::kN == 128)
+        if constexpr(Geometry::kN == Geometry::kDv)
             static_assert(std::is_same_v<typename SaccBlockTileType::StaticTileDistribution,
                                          typename OaccBlockTileType::StaticTileDistribution>,
-                          "N128 score/output distributions must preserve the fragment "
+                          "Equal-width score/output distributions must preserve the fragment "
                           "reconstruction map");
 
         auto o_acc = Policy::OutputFragments::MakeZero();
@@ -277,8 +277,14 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         // infer Sacc, S, P, M, L, Oacc type
         using SBlockTileType = decltype(cast_tile<SMPLComputeDataType>(OaccBlockTileType{}));
 
-        using MLBlockTileType = decltype(block_tile_reduce<SMPLComputeDataType>(
+        using MLBlockTileType      = decltype(block_tile_reduce<SMPLComputeDataType>(
             SBlockTileType{}, sequence<1>{}, f_max, SMPLComputeDataType{0}));
+        using ScoreMLBlockTileType = decltype(block_tile_reduce<SMPLComputeDataType>(
+            SaccBlockTileType{}, sequence<1>{}, f_max, SMPLComputeDataType{0}));
+        static_assert(
+            std::is_same_v<typename ScoreMLBlockTileType::StaticTileDistribution,
+                           typename MLBlockTileType::StaticTileDistribution>,
+            "Score and output must retain identical row ownership after column reduction");
 
         // The shared kernel can supply a sink logit independently of kHasSink,
         // which controls sink tokens in the mask. Preserve this runtime input.
@@ -516,17 +522,17 @@ struct BlockFmhaPipelineQRKSVSTdmSched
             static_cast<KDataType* __restrict__>(smem_ptrk1));
         load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
 
-        constexpr index_t k_lds_insts = k_lds_read_window.get_num_of_access();
-        constexpr index_t v_lds_insts = v_lds_read_window.get_num_of_access();
-        static_assert(k_lds_insts <= Geometry::kKSuLoadCount &&
-                      v_lds_insts == Geometry::kVStageLoadCount);
-
-        s_wait_tensorcnt_barrier<Policy::kKPrefetchTensorCount>();
         auto initial_k_lds_su_read_window =
             make_tile_window(k_lds_read_view,
                              make_tuple(number<Geometry::kQkSuColumns>{}, number<kQKHeaddim>{}),
                              {0, 0},
                              Policy::template MakeKSuRegTileDistribution<Problem>());
+        constexpr index_t k_lds_insts = initial_k_lds_su_read_window.get_num_of_access();
+        constexpr index_t v_lds_insts = v_lds_read_window.get_num_of_access();
+        static_assert(k_lds_insts <= Geometry::kKSuLoadCount &&
+                      v_lds_insts == Geometry::kVStageLoadCount);
+
+        s_wait_tensorcnt_barrier<Policy::kKPrefetchTensorCount>();
         initial_k_lds_su_read_window.set_bottom_tensor_view_data_ptr(
             static_cast<KDataType* __restrict__>(smem_ptrk0));
         auto k_su0_tile = load_tile(initial_k_lds_su_read_window);
