@@ -984,6 +984,42 @@ TEST(TestIngestorGenericEngine, AConfigurationDescriptionNamesTheL2ModelWithoutR
     EXPECT_GT(scoredKernels.load(), 0);
 }
 
+/// A state manager over @p kernels in one pack, ranked by the native calibrated tflops model;
+/// @p manager receives the raw pointer the engine keeps using after taking ownership.
+std::unique_ptr<KernelIngestorStateManager<StubHandle>>
+    makeCalibratedStateManager(std::vector<KernelDescriptor> kernels,
+                               KernelIngestorStateManager<StubHandle>*& manager)
+{
+    MetadataSchema schema;
+    schema.id = SCHEMA_ID;
+    schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+                     {DTYPE, MetadataType::STRING, std::nullopt}};
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.kernels = std::move(kernels);
+    HeuristicDescriptor model;
+    model.id = HEURISTIC_ID;
+    model.adapter = UhdAdapter::NATIVE;
+    model.nativeSymbol = SCORE_SYMBOL;
+    model.score = {"tflops", true, "identity"};
+    auto ranker = UhdKernelHeuristic::tryCreate(model, "calibrated configuration", {BLOCK_SIZE});
+    if(ranker == nullptr)
+    {
+        throw std::runtime_error("the test ranker did not build");
+    }
+    auto owned = std::make_unique<KernelIngestorStateManager<StubHandle>>(
+        std::move(schema),
+        std::vector<MatchDescriptor>{},
+        makeStubDispatches(),
+        std::vector<KernelDescriptorPack>{std::move(pack)},
+        std::move(ranker),
+        GRAPH_MATCH_SYMBOL);
+    manager = owned.get();
+    return owned;
+}
+
 /// An engine over @p kernels that predicts with benchmarking and validation on, as a validating
 /// sweep does: only a validated record may answer, and plan build refuses any other.
 class ValidatingEngineFixture
@@ -991,7 +1027,7 @@ class ValidatingEngineFixture
 public:
     explicit ValidatingEngineFixture(std::vector<KernelDescriptor> kernels)
         : _engine(makeEngineWithKnobs({BLOCK_SIZE}),
-                  makeManager(std::move(kernels), _manager),
+                  makeCalibratedStateManager(std::move(kernels), _manager),
                   _resolver)
     {
     }
@@ -1065,41 +1101,6 @@ public:
     }
 
 private:
-    static std::unique_ptr<KernelIngestorStateManager<StubHandle>>
-        makeManager(std::vector<KernelDescriptor> kernels,
-                    KernelIngestorStateManager<StubHandle>*& manager)
-    {
-        MetadataSchema schema;
-        schema.id = SCHEMA_ID;
-        schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
-                         {DTYPE, MetadataType::STRING, std::nullopt}};
-        KernelDescriptorPack pack;
-        pack.id = PACK_ID;
-        pack.engineId = ENGINE_ID;
-        pack.dispatchId = DISPATCH_ID;
-        pack.kernels = std::move(kernels);
-        HeuristicDescriptor model;
-        model.id = HEURISTIC_ID;
-        model.adapter = UhdAdapter::NATIVE;
-        model.nativeSymbol = SCORE_SYMBOL;
-        model.score = {"tflops", true, "identity"};
-        auto ranker
-            = UhdKernelHeuristic::tryCreate(model, "calibrated configuration", {BLOCK_SIZE});
-        if(ranker == nullptr)
-        {
-            throw std::runtime_error("the test ranker did not build");
-        }
-        auto owned = std::make_unique<KernelIngestorStateManager<StubHandle>>(
-            std::move(schema),
-            std::vector<MatchDescriptor>{},
-            makeStubDispatches(),
-            std::vector<KernelDescriptorPack>{std::move(pack)},
-            std::move(ranker),
-            GRAPH_MATCH_SYMBOL);
-        manager = owned.get();
-        return owned;
-    }
-
     hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _forceBenchmarking{
         hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "1"};
     hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _validateBenchmarking{

@@ -259,6 +259,28 @@ class TestTensorFieldParsing:
         assert config.tensor_array_fields[0].work_data_dependent is True
         assert config.work_data_dependent_fields == ["offsets_tensor_uid"]
 
+    def test_tensor_array_output_tensor(self, tmp_path):
+        config_file = tmp_path / "op.yaml"
+        config_file.write_text(
+            "operation:\n"
+            '  name: "Test"\n'
+            '  class_name: "TestDescriptor"\n'
+            '  fbs_table: "TestTable"\n'
+            '  fbs_generated_header: "test_generated.h"\n'
+            "  has_compute_data_type: false\n"
+            "  tensor_array_fields:\n"
+            '    - name: "outputs"\n'
+            '      fbs_field: "output_tensor_uids"\n'
+            '      attr_name: "HIPDNN_ATTR_TEST_OUTPUTS"\n'
+            "      output_tensor: true\n"
+            '    - name: "inputs"\n'
+            '      fbs_field: "input_tensor_uids"\n'
+            '      attr_name: "HIPDNN_ATTR_TEST_INPUTS"\n'
+        )
+        config = load_config(config_file)
+        flags = {taf.name: taf.output_tensor for taf in config.tensor_array_fields}
+        assert flags == {"outputs": True, "inputs": False}
+
 
 class TestDataFieldParsing:
     """Verify data fields are parsed with correct types and attributes."""
@@ -1336,27 +1358,10 @@ class TestLoadConfigErrors:
         assert "mode_sentinel" in msg
         assert "sometimes" in msg
 
-    def test_non_boolean_output_tensor_is_rejected(self, tmp_path):
-        config_file = tmp_path / "bad_output.yaml"
-        config_file.write_text(
-            "operation:\n"
-            '  name: "Test"\n'
-            '  class_name: "TestDescriptor"\n'
-            '  fbs_table: "TestTable"\n'
-            '  fbs_generated_header: "test_generated.h"\n'
-            "  has_compute_data_type: false\n"
-            "  tensor_fields:\n"
-            '    - name: "x"\n'
-            '      fbs_field: "x_tensor_uid"\n'
-            '      attr_suffix: "X"\n'
-            '      output_tensor: "false"\n'
-        )
-        with pytest.raises(ConfigError, match="output_tensor"):
-            load_config(config_file)
-
-    def test_non_boolean_work_data_dependent_is_rejected(self, tmp_path):
+    @pytest.mark.parametrize("flag", ["output_tensor", "work_data_dependent"])
+    def test_non_boolean_tensor_flag_is_rejected(self, tmp_path, flag):
         """A quoted ``"false"`` is truthy; accepting it would annotate the field."""
-        config_file = tmp_path / "bad_work.yaml"
+        config_file = tmp_path / "bad_flag.yaml"
         config_file.write_text(
             "operation:\n"
             '  name: "Test"\n'
@@ -1368,7 +1373,7 @@ class TestLoadConfigErrors:
             '    - name: "x"\n'
             '      fbs_field: "x_tensor_uid"\n'
             '      attr_suffix: "X"\n'
-            '      work_data_dependent: "false"\n'
+            f'      {flag}: "false"\n'
         )
-        with pytest.raises(ConfigError, match="work_data_dependent"):
+        with pytest.raises(ConfigError, match=flag):
             load_config(config_file)
