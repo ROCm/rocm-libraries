@@ -319,18 +319,18 @@
         },
         "attention/gfx950/scalar_reduce_bf16_d128_seg8": {
           "arch": "gfx950",
-          "bytes": 4708,
+          "bytes": 4710,
           "family": "attention",
           "kernel_name": "rocke_unified_attention_reduce_scalar_h4_d128_seg8_bf16",
-          "sha256": "679292b513d0a5ecac812f237571cf2029e01b9c1dfacfaefc21896970193285",
+          "sha256": "822111ab854c613903d345bd203b7ae20a49319c0acbdc427a7d19a5a50c34dc",
           "status": "ok"
         },
         "attention/gfx950/scalar_reduce_fp16_d128_seg8": {
           "arch": "gfx950",
-          "bytes": 4702,
+          "bytes": 4704,
           "family": "attention",
           "kernel_name": "rocke_unified_attention_reduce_scalar_h4_d128_seg8_fp16",
-          "sha256": "dd5e055cb09d53b880941ebac326d57f60e73485ffb28875feaacb8587a6c6d5",
+          "sha256": "d7c0398e1e18567703c97b8fb75e3b61ac850ddc0ef0c35985427eaaf51b5ace",
           "status": "ok"
         },
         "attention_d128_swa/gfx942/4warp_gqa_fold": {
@@ -2952,18 +2952,18 @@
         },
         "attention/gfx950/scalar_reduce_bf16_d128_seg8": {
           "arch": "gfx950",
-          "bytes": 4715,
+          "bytes": 4717,
           "family": "attention",
           "kernel_name": "rocke_unified_attention_reduce_scalar_h4_d128_seg8_bf16",
-          "sha256": "0db099116cc7a4231a3061b32046a286789f3506bdee2a25d457c46c3fde1b89",
+          "sha256": "9176a3ac61ad311794a3bca57317026c3d4f51e101c4e6aac9797a4b0374733e",
           "status": "ok"
         },
         "attention/gfx950/scalar_reduce_fp16_d128_seg8": {
           "arch": "gfx950",
-          "bytes": 4709,
+          "bytes": 4711,
           "family": "attention",
           "kernel_name": "rocke_unified_attention_reduce_scalar_h4_d128_seg8_fp16",
-          "sha256": "fba5ff57ebf5c2c3c335acb36a6793fa59d0a9bde042d8cedc51f3aaf00868d3",
+          "sha256": "09b4c1393cb629836a60590bbf05733a52edd61f78cd0afca43d0ab04a34ef8b",
           "status": "ok"
         },
         "attention_d128_swa/gfx942/4warp_gqa_fold": {
@@ -5585,18 +5585,18 @@
         },
         "attention/gfx950/scalar_reduce_bf16_d128_seg8": {
           "arch": "gfx950",
-          "bytes": 4779,
+          "bytes": 4781,
           "family": "attention",
           "kernel_name": "rocke_unified_attention_reduce_scalar_h4_d128_seg8_bf16",
-          "sha256": "449dec5b376d1f043a529ac0c2099d0cbc4bdae50300adf341a6389e4531edd3",
+          "sha256": "fec97cee034802f433e1b4a170d139537dc7e7879759eae43b90a53ebe140c7a",
           "status": "ok"
         },
         "attention/gfx950/scalar_reduce_fp16_d128_seg8": {
           "arch": "gfx950",
-          "bytes": 4773,
+          "bytes": 4775,
           "family": "attention",
           "kernel_name": "rocke_unified_attention_reduce_scalar_h4_d128_seg8_fp16",
-          "sha256": "33191eb3eab7df4563031bc299972554328957c436680fcceead4e4ee9e1e215",
+          "sha256": "fa8143bfa41057561a25f9a25dd7f50f9e9359373a5bb3d83503cb79b3c8a83d",
           "status": "ok"
         },
         "attention_d128_swa/gfx942/4warp_gqa_fold": {

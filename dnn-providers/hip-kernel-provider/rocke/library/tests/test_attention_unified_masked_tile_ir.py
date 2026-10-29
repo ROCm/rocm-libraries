@@ -14,9 +14,10 @@ builders emit, so they run in every lane, GPU or not:
   ``fcmp ogt max, -inf``); carrying that 0 pins the max at 0 after fully
   masked leading keys, and P underflows for very negative scores.
 * Keyless guard. A row whose softmax sum ``l`` is exactly 0 saw no key and
-  stores O = 0, and the reduce skips a segment whose sum is exactly 0. The test
-  must be ``fcmp oeq l, 0``: ``fcmp ogt l, 0`` is false for NaN too, so it
-  turned a NaN row (or a NaN segment) into a finite result.
+  stores O = 0. The test must be ``fcmp oeq l, 0``: ``fcmp ogt l, 0`` is false
+  for NaN too, so it turned a NaN row into a finite result. The reduce weights
+  an empty segment (max = -inf) by ``exp2(-inf - ref)`` = 0, with one clamped
+  exponent reference ``ref`` instead of a per-segment test.
 
 Covered: every tiled 2D epilogue branch on gfx942 and gfx950 at KV page sizes
 16 and 64, the scalar 2D kernel under the default mask and under windowed
@@ -244,22 +245,46 @@ def test_scalar_reduce_carries_raw_running_max():
 
 
 def test_scalar_reduce_guards_are_exact_zero():
-    """The combine pass weights a segment by 0 only for an exact-zero sum, and
-    the row stores O = 0 only for an exact-zero total."""
+    """The combine pass uses one exponent reference: the overall max, or 0 when
+    every segment is empty (``select(fcmp ogt overall, -inf; overall; 0)``,
+    once, outside the loops). An empty segment stores max = -inf, so its factor
+    ``exp2(-inf - ref)`` is 0 with no per-segment test. The row stores O = 0
+    only for an exact-zero total."""
     kernel = _scalar_kernel("reduce", "top_left_window")
     _check_keyless_guard(kernel)
+    loops = [op for op in kernel.body.ops if op.name == "scf.for"]
+    max_loops = [loop for loop in loops if _is_const(loop.operands[3], -math.inf)]
+    assert len(loops) == 2 and len(max_loops) == 1, "expected a max and a combine pass"
+    overall = max_loops[0].results[0]
+    combine = next(loop for loop in loops if loop is not max_loops[0])
     in_loops = [
         op
-        for loop in _walk(kernel.body)
-        if loop.name == "scf.for"
+        for loop in loops
         for op in _walk(loop.regions[0])
-        if op.name == "arith.fcmp"
+        if op.name in ("arith.fcmp", "arith.select")
     ]
-    assert in_loops, "no empty-segment guard in the combine pass"
-    for op in in_loops:
-        pred = op.attrs.get("pred")
-        assert pred == "oeq" and _is_const(op.operands[1], 0.0), (
-            f"empty-segment guard is fcmp {pred}, not fcmp oeq sum, 0: a NaN "
-            "segment sum must reach O"
-        )
-    _check_selects_zero(kernel, in_loops)
+    assert not in_loops, (
+        f"the reduce loops test or select per segment ({in_loops[0].name}); "
+        "one exponent reference outside the loops covers an empty segment"
+    )
+    references = [
+        op
+        for op in kernel.body.ops
+        if op.name == "arith.select"
+        and op.operands[1] is overall
+        and _is_const(op.operands[2], 0.0)
+        and op.operands[0].op is not None
+        and op.operands[0].op.name == "arith.fcmp"
+        and op.operands[0].op.attrs.get("pred") == "ogt"
+        and op.operands[0].op.operands[0] is overall
+        and _is_const(op.operands[0].op.operands[1], -math.inf)
+    ]
+    assert len(references) == 1, (
+        "no single select(fcmp ogt overall, -inf; overall; 0) exponent reference "
+        "outside the loops; exp2(-inf - -inf) is NaN when every segment is empty"
+    )
+    ref = references[0].results[0]
+    assert any(
+        op.name == "arith.fsub" and op.operands[1] is ref
+        for op in _walk(combine.regions[0])
+    ), "the combine pass does not subtract the exponent reference"

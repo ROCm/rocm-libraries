@@ -382,26 +382,37 @@ void rocke_attn_unified_emit_reduce_max_loop(rocke_attn_unified_build_ctx_t* ctx
 /* ============================================================ *
  * Reduce combine pass (Python lines 2981-3003).
  *
+ *   ref = select(fcmp("ogt", overall, neg_inf), overall, zero)
  *   red = scf_for_iter(0, num_segments, 1, [("den", zero), ("acc", zero)],
  *                      iv_name="seg2")
  *   with red as (seg, (den, acc)):
  *       idx, _ = ml_desc.offset(b, token=q_tok, head=q_head, seg=seg)
  *       mv = global_load_f32(segm_max, idx)
  *       lv = global_load_f32(segm_expsum, idx)
- *       factor = select(fcmp("oeq", lv, zero), zero, exp2(mv - overall))
+ *       factor = exp2(mv - ref)
  *       den2 = fadd(den, fmul(lv, factor))
  *       out_idx, _ = seg_out_desc.offset(b, token=q_tok, head=q_head, seg=seg, dim=dim)
  *       ov = global_load_f32(segm_output, out_idx)
  *       acc2 = fadd(acc, fmul(ov, factor))
  *       scf_yield(den2, acc2)
+ *
+ * An empty segment stores max = -inf, so its factor exp2(-inf - ref) is 0
+ * whenever ref is finite. ref is the overall max, or 0 when every segment is
+ * empty (overall = -inf): then every factor is 0, den = 0 and the epilogue
+ * stores O = 0 instead of the NaN of exp2(-inf - -inf).
  * ============================================================ */
 void rocke_attn_unified_emit_reduce_combine_loop(rocke_attn_unified_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
     rocke_iter_arg_t iter_args[2];
     rocke_for_t red;
-    rocke_value_t *seg, *den, *acc, *idx, *mv, *lv, *empty, *factor, *den2, *out_idx, *ov, *acc2;
+    rocke_value_t *ref, *seg, *den, *acc, *idx, *mv, *lv, *factor, *den2, *out_idx, *ov, *acc2;
     rocke_value_t* yields[2];
+
+    /* Once, before the loop. Python evaluates select's operands left to right:
+     * fcmp first. */
+    ref = rocke_b_select(
+        b, rocke_b_fcmp(b, "ogt", ctx->overall, ctx->neg_inf), ctx->overall, ctx->zero_f);
 
     iter_args[0].name = "den";
     iter_args[0].init = ctx->zero_f;
@@ -427,10 +438,7 @@ void rocke_attn_unified_emit_reduce_combine_loop(rocke_attn_unified_build_ctx_t*
     idx = rocke__ml_offset(ctx, ctx->q_tok, ctx->q_head, seg);
     mv = rocke_b_global_load_f32(b, ctx->segm_max, idx, 0);
     lv = rocke_b_global_load_f32(b, ctx->segm_expsum, idx, 0);
-    /* Python evaluates select's operands left to right: fcmp before exp2. */
-    empty = rocke_b_fcmp(b, "oeq", lv, ctx->zero_f);
-    factor = rocke_b_exp2(b, rocke_b_fsub(b, mv, ctx->overall));
-    factor = rocke_b_select(b, empty, ctx->zero_f, factor);
+    factor = rocke_b_exp2(b, rocke_b_fsub(b, mv, ref));
     den2 = rocke_b_fadd(b, den, rocke_b_fmul(b, lv, factor));
 
     out_idx = rocke__out_offset(ctx, ctx->q_tok, ctx->q_head, seg, ctx->dim);

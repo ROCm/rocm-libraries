@@ -6912,15 +6912,19 @@ def build_unified_attention_reduce(
         iv_name="seg",
     )
     # A segment that saw no key stores max = -inf with sum = 0: the segment kernel
-    # carries the raw max, so the max pass ignores that segment as is. The combine
-    # pass weights it by 0, and a row with no key at all gets O = 0 instead of NaN
-    # from exp2(-inf - -inf) or acc * rcp(0). Only an exact zero sum counts as
-    # empty, so a NaN sum or denominator still yields NaN.
+    # carries the raw max, so the max pass ignores that segment as is, and the
+    # combine pass weights it by exp2(-inf - ref) = 0 whenever ref is finite. ref
+    # is the overall max, or 0 when every segment is empty (overall = -inf), the
+    # same exponent-reference clamp the segment kernel uses: a row with no key at
+    # all then has den = 0 and gets O = 0 instead of NaN from exp2(-inf - -inf) or
+    # acc * rcp(0). Only an exact zero den counts as empty, so a NaN sum or
+    # denominator still yields NaN.
     with max_loop as (seg, (mx,)):
         idx, _ = ml_desc.offset(b, token=q_tok, head=q_head, seg=seg)
         mv = b.global_load_f32(segm_max, idx)
         b.scf_yield(b.fmax(mx, mv))
     overall = max_loop.results[0]
+    ref = b.select(b.fcmp("ogt", overall, neg_inf), overall, zero)
     red = b.scf_for_iter(
         b.const_i32(0),
         b.const_i32(spec.num_segments),
@@ -6932,8 +6936,7 @@ def build_unified_attention_reduce(
         idx, _ = ml_desc.offset(b, token=q_tok, head=q_head, seg=seg)
         mv = b.global_load_f32(segm_max, idx)
         lv = b.global_load_f32(segm_expsum, idx)
-        empty = b.fcmp("oeq", lv, zero)
-        factor = b.select(empty, zero, b.exp2(b.fsub(mv, overall)))
+        factor = b.exp2(b.fsub(mv, ref))
         den2 = b.fadd(den, b.fmul(lv, factor))
         out_idx, _ = seg_out_desc.offset(
             b,
