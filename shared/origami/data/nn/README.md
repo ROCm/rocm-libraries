@@ -34,6 +34,6 @@ data/nn/olc/<arch>/
   origami_olc_<arch>_<dtype>.orr  # ORIOLC model per dtype class (bf16, tf32, fp8)
 ```
 
-The `.orr` models are released separately and not tracked here; copy them into `olc/<arch>/`
-for a local build. An OLC model loads only through `origami::nn::load_olc_model`, which checks
-it against the build and the kernel library it serves.
+The models are tracked (2.1–2.5 MB each; `*.orr binary` in `shared/origami/.gitattributes`). An
+OLC model loads only through `origami::nn::load_olc_model`, which checks it against the build
+and the kernel library it serves.
