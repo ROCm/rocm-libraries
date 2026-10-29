@@ -6,6 +6,7 @@
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -82,8 +83,9 @@ class FmhaBuildExtension(BuildExtension):
             str(kernel_dir),
             "-G",
             "Ninja",
-            # Discard receipts forced into the cache by earlier Python builds.
+            # Discard receipts and kernel filters cached by earlier Python builds.
             "-UFMHA_*_CODEGEN_RECEIPT",
+            "-UFMHA_*_INSTANCE_FILTER",
             "-DCMAKE_BUILD_TYPE=Release",
             f"-DCMAKE_CXX_COMPILER={compiler}",
             f"-DCMAKE_HIP_COMPILER={compiler}",
@@ -91,7 +93,7 @@ class FmhaBuildExtension(BuildExtension):
             f"-DPython3_EXECUTABLE={sys.executable}",
             f"-DCK_ROOT={root}",
             f"-DTORCH_CXX11_ABI={int(torch._C._GLIBCXX_USE_CXX11_ABI)}",
-        ]
+        ] + shlex.split(os.environ.get("CK_TILE_FMHA_CMAKE_ARGS", ""))
         subprocess.run(cmake_args, check=True)
         jobs = str(self.parallel or os.environ.get("MAX_JOBS", min(8, os.cpu_count() or 1)))
         subprocess.run(
