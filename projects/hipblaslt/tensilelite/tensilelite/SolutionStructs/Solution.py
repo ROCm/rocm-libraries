@@ -57,7 +57,6 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
 from ..Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
                                        tdmGroupingName, tdmPapRejectReason, \
                                        tdmWavePartition, tdmWaveSeparated
-from ..Common.MxScaleLayout import mxTdmTileM
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -68,7 +67,7 @@ from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, g
 from ..Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams, \
                                             globalParameters
-from ..Common.MxScaleLayout import mxFreeTile, mxLdsAlign, mxLdsNumBytes
+from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxLdsAlign, mxLdsNumBytes, mxTdmTileM
 from ..Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
                                             _expectedParamTypes, \
@@ -279,8 +278,11 @@ def _validateMXLocalReadWidth(state, asmCaps, printRejectionReason):
 def _validateMX2DFreeTile(state, printRejectionReason):
   """Reject 2D MX tiles whose scale rows the TDM / LRA codegen misplaces.
 
-  The 2D scale path loads ``ceil(MT/MXBlockFree)`` scale rows from
-  ``(wg*MT)/MXBlockFree`` and picks a row with ``localM >> log2(MXBlockFree)``.
+  The 2D scale path loads ``mxTdmTileM(MT, MXBlockFree)`` scale rows, enough for
+  the worst workgroup phase, from ``(wg*MT)/MXBlockFree`` and picks a row with
+  ``(phase + localM) >> log2(MXBlockFree)``. A MacroTile neither a multiple nor a
+  divisor of MXBlockFree starts WGs partway into a row; _validateMXFreePhase
+  checks the phase fixup can index it.
 
   2D also requires ``MXBlock == MatrixInstK`` (one scale byte per row along K);
   the TDM, LRA and local-read 2D paths do not handle ``mxUnit > 1``.
@@ -289,6 +291,14 @@ def _validateMX2DFreeTile(state, printRejectionReason):
   address has no lane term, so one scale row must cover a wave's whole free
   extent; smaller free blocks read row 0's scale for every row (e.g. ``[32, 128]``
   with VW 8 gets 75% of A rows wrong).
+
+  2D also requires ``MXBlock == MatrixInstK`` (one scale byte per row along K);
+  the TDM, LRA and local-read 2D paths do not handle ``mxUnit > 1``.
+
+  The wave-separated TDM M-split gives each of ``numComp`` components
+  ``scaleRows // numComp`` rows; a remainder is never loaded, and an unaligned
+  MT puts MT/numComp off a row boundary. Fewer rows than components is fine
+  (every component loads the full tile).
   """
   for tc, tile01 in (("A", 0), ("B", 1)):
     mxTile = state["ProblemType"][f"MXBlockFree{tc}"]
@@ -315,8 +325,9 @@ def _validateMX2DTdmMSplit(state, printRejectionReason):
   """Reject a 2D MX wave-separated TDM M-split that drops scale rows.
 
   The M-split gives each of ``numComp`` components ``scaleRows // numComp`` rows;
-  a remainder is never loaded. Fewer rows than components is fine (every component
-  loads the full tile). Whether the TDM splits M or K depends on DepthU, so this
+  a remainder is never loaded, and an unaligned MT puts MT/numComp off a row
+  boundary. Fewer rows than components is fine (every component loads the full
+  tile). Whether the TDM splits M or K depends on DepthU, so this
   runs once DepthU is resolved.
   """
   waveSeparated = tdmWaveSeparated(state) and not state.get("UseSubtileImpl") \
@@ -333,13 +344,94 @@ def _validateMX2DTdmMSplit(state, printRejectionReason):
       continue  # _validateMXLocalReadWidth rejects it
     numMxKGroups = (state["DepthU"] // mxBlock) // mxUnit
     numComp, _ = tdmWavePartition(state, f"MXS{tc}")
-    scaleRows = mxTdmTileM(state[f"MacroTile{tile01}"], mxTile)
-    if numMxKGroups < numComp and scaleRows >= numComp and scaleRows % numComp != 0:
+    mt = state[f"MacroTile{tile01}"]
+    scaleRows = mxTdmTileM(mt, mxTile)
+    if numMxKGroups < numComp and scaleRows >= numComp \
+        and (mt % mxTile != 0 or scaleRows % numComp != 0):
       reject(state, printRejectionReason,
-             f"2D MX TDM M-split for {tc} requires scale rows ({scaleRows}) to be a multiple "
-             f"of TDM components ({numComp}); the remainder rows are never loaded")
+             f"2D MX TDM M-split for {tc} requires MacroTile{tile01} ({mt}) aligned to "
+             f"MXBlockFree{tc} ({mxTile}) and scale rows ({scaleRows}) a multiple of TDM "
+             f"components ({numComp}); otherwise rows are dropped")
       return False
+  return True
 
+
+def _validateMXFreePhase(state, printRejectionReason):
+  """Reject 2D MX tiles whose workgroup phase the kernel cannot index.
+
+  A MacroTile that is neither a multiple nor a divisor of MXBlockFree starts
+  workgroups partway into a scale row (e.g. MT=224 puts WG1 at N=224, 96 into
+  row 1). KernelWriterAssembly.mxPhaseLraFixup adds that phase per tile and
+  gives each WaveTile vector its own LocalReadAddr. It counts free elements,
+  so it needs a one-byte LDS tile-stride (swizzled, MatrixInstK == MXBlock),
+  needs LRA rebuilt by setupNewTile every tile, and keeps one scale per
+  vector, so a vector's MI * VW columns must not straddle a row at any phase.
+
+  The one-scale-per-vector read holds for aligned 2D tiles as well, so a vector
+  wider than ``MXBlockFree`` (e.g. 256-column vectors, MI 16 * VW 16) is
+  rejected there too.
+  """
+  for tc in ("A", "B"):
+    mxTc = "MXS" + tc
+    mxBlock = state["ProblemType"]["MXBlock%s" % tc]
+    mxTile = mxFreeTile(state, mxTc)
+    if not mxBlock or mxTile <= 1:
+      continue
+    mt = state["MacroTile%s" % mxTc]
+    miT = state["MatrixInstM"] * state["MatrixInstBM"] if tc == "A" else state["MatrixInstN"] * state["MatrixInstBN"]
+    vecCols = miT * state["VectorWidth%s" % tc]
+    if not mxFreePhase(state, mxTc):
+      # Aligned tiles read one scale per WaveTile vector too, so a vector wider than a
+      # scale row would take one row's scale for all of them.
+      if math.gcd(mt, mxTile) % vecCols:
+        reject(state, printRejectionReason,
+               "2D MX scale for %s: a WaveTile vector (%u columns) spans more than one "
+               "MXBlockFree%s %u scale row; the 2D local read loads one scale per vector"
+               % (tc, vecCols, tc, mxTile))
+        return False
+      continue
+    why = None
+    if state["MXScaleFormat"] not in ("InMemorySwizzle", "HostPreSwizzle") \
+        or state["MatrixInstK"] // mxBlock != 1:
+      why = "a swizzled scale with MatrixInstK == MXBlock%s" % tc
+    elif state["UseSubtileImpl"] or state["PrefetchAcrossPersistent"] or state["DirectToVgpr%s" % mxTc]:
+      why = "no UseSubtileImpl, PrefetchAcrossPersistent or DirectToVgpr%s" % mxTc
+    else:
+      if math.gcd(mt, mxTile) % vecCols:
+        why = "WaveTile vectors (%u columns) dividing gcd(MT, MXBlockFree) = %u" % (vecCols, math.gcd(mt, mxTile))
+    if why:
+      reject(state, printRejectionReason,
+             "MacroTile%s %u is not aligned to MXBlockFree%s %u; the workgroup phase needs %s"
+             % (tc, mt, tc, mxTile, why))
+      return False
+  return True
+
+
+def _validateMXFreePhaseReadOffset(state, printRejectionReason):
+  """Reject a 2D MX workgroup phase whose scale reads need offsets of 64K or more.
+
+  The per-vector LocalReadAddr of the phase fixup replaces the +64K
+  LocalReadAddr fan-out, so every scale ds_load offset must stay below 64K.
+  The offset is the read position inside one MXS buffer plus, under
+  ExpandPointerSwap without StoreSwapAddr, the buffer swap LdsOffsetA_Blk.
+  """
+  if not state["ExpandPointerSwap"] or state["StoreSwapAddr"]:
+    return True
+  for tc in ("A", "B"):
+    mxTc = "MXS" + tc
+    mxBlock = state["ProblemType"]["MXBlock%s" % tc]
+    if not mxBlock or not mxFreePhase(state, mxTc):
+      continue
+    bufferBytes = mxLdsNumBytes(state["MacroTile%s" % mxTc], state["DepthU"], mxBlock,
+                                mxTile=mxFreeTile(state, mxTc), ldsPad=state["LdsPad%s" % mxTc],
+                                unrollMajor=state["UnrollMajorLDS%s" % mxTc],
+                                padInterval=state["LdsBlockSizePerPad%s" % mxTc])
+    if state["LdsOffsetA_Blk"] + bufferBytes > 65536:
+      reject(state, printRejectionReason,
+             "%s 2D workgroup phase (MacroTile not aligned to MXBlockFree) needs scale read "
+             "offsets below 64K; ExpandPointerSwap without StoreSwapAddr adds LdsOffsetA_Blk (%u)"
+             % (mxTc, state["LdsOffsetA_Blk"]))
+      return False
   return True
 
 
@@ -5020,6 +5112,9 @@ class Solution(collections.abc.Mapping):
           state, isaInfoMap[isa].asmCaps, printRejectionReason):
         return
 
+      if not _validateMXFreePhase(state, printRejectionReason):
+        return
+
       # An explicitly wide local read cannot be reduced by the auto-width
       # derivation above. Reject it before getHalfPLRValuStr indexes beyond the
       # two active rotating groups. MIInputPerThread* is only derived for
@@ -6737,6 +6832,15 @@ class Solution(collections.abc.Mapping):
     else:
       ldsNumBytesAB = state["LdsOffsetB"] + ldsNumBytesB
     state["NumLdsBlk"] = numLdsBlk
+    # 3+ LDS buffers rebuild LocalReadAddr from one LocalReadAddrOrig, which the
+    # per-vector 2D MXS phase addresses do not have.
+    if numLdsBlk >= 3:
+      for mxTc in ("MXSA", "MXSB"):
+        if state["ProblemType"]["MXBlock%s" % mxTc[-1]] and mxFreePhase(state, mxTc):
+          reject(state, printRejectionReason,
+                 "%s 2D workgroup phase (MacroTile not aligned to MXBlockFree) does not support "
+                 "%u LDS buffers" % (mxTc, numLdsBlk))
+          return
 
     # Defer resolving if the oracle only blocked on an unresolved 1LDSBuffer(-1) (resolved later, then re-evaluated).
     _segRequested = state["LDSSegmentInterleave"]
@@ -7459,6 +7563,9 @@ class Solution(collections.abc.Mapping):
 
     if state["ExpandPointerSwap"] == 1 and state["LDSTrInst"]:
       reject(state, printRejectionReason, "LDSTrInst + ExpandPointerSwap not supported")
+
+    if not _validateMXFreePhaseReadOffset(state, printRejectionReason):
+      return
 
     # guard against out of bounds reads
     # None: don't guard against ou

@@ -731,6 +731,60 @@ TEST(DownsampleMXScaleFreeDim, MultiByteElementsAreCopiedWhole)
     EXPECT_EQ(dst[3], 0x22);
 }
 
+// =============================================================================
+//   Section 6 - varyMXScaleFreeTiles
+//
+//   Random data quantizes every block against 0x7F, so the downsampled 2D
+//   scales are all equal and a wrong scale row would still validate. The helper
+//   offsets each tile by -2..2 so neighbouring free tiles always differ.
+// =============================================================================
+
+// kFast: [tiledFree][kBlock]. delta = (g + 2*kb) % 5 - 2.
+TEST(VaryMXScaleFreeTiles, KFastNeighbouringTilesDiffer)
+{
+    std::vector<uint8_t> s(4 * 2, 0x7F); // 4 tiles x 2 K-blocks
+
+    dt::varyMXScaleFreeTiles(s.data(), /*tiledFreeDim=*/4, /*kBlocks=*/2, /*kFast=*/true);
+
+    EXPECT_EQ(s[0], 0x7F - 2); // g0 kb0
+    EXPECT_EQ(s[1], 0x7F + 0); // g0 kb1
+    EXPECT_EQ(s[2], 0x7F - 1); // g1 kb0
+    EXPECT_EQ(s[3], 0x7F + 1); // g1 kb1
+    EXPECT_EQ(s[4], 0x7F + 0); // g2 kb0
+    EXPECT_EQ(s[6], 0x7F + 1); // g3 kb0
+    for(size_t kb = 0; kb < 2; kb++)
+        for(size_t g = 0; g + 1 < 4; g++)
+            EXPECT_NE(s[g * 2 + kb], s[(g + 1) * 2 + kb]) << "g=" << g << " kb=" << kb;
+}
+
+// !kFast: [kBlock][tiledFree] gets the same per-(tile, K-block) offset.
+TEST(VaryMXScaleFreeTiles, KSlowMatchesKFastPerTile)
+{
+    std::vector<uint8_t> fast(3 * 2, 0x7F);
+    std::vector<uint8_t> slow(3 * 2, 0x7F);
+
+    dt::varyMXScaleFreeTiles(fast.data(), 3, 2, /*kFast=*/true);
+    dt::varyMXScaleFreeTiles(slow.data(), 3, 2, /*kFast=*/false);
+
+    for(size_t g = 0; g < 3; g++)
+        for(size_t kb = 0; kb < 2; kb++)
+            EXPECT_EQ(fast[g * 2 + kb], slow[kb * 3 + g]) << "g=" << g << " kb=" << kb;
+}
+
+// Zero and NaN encodings are left alone; the result never reaches either.
+TEST(VaryMXScaleFreeTiles, KeepsZeroNaNAndClampsToFiniteRange)
+{
+    std::vector<uint8_t> s = {0x00, 0xFF, 0x01, 0xFE};
+
+    // kFast, 4 tiles x 1 K-block: deltas -2, -1, 0, +1.
+    dt::varyMXScaleFreeTiles(s.data(), 4, 1, /*kFast=*/true);
+
+    EXPECT_EQ(s[0], 0x00);
+    EXPECT_EQ(s[1], 0xFF);
+    EXPECT_EQ(s[2], 0x01); // 0x01 + 0
+    EXPECT_EQ(s[3], 0xFE); // 0xFE + 1 clamps to 0xFE
+}
+
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
 
 // =============================================================================

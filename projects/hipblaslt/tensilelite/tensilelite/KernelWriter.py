@@ -69,7 +69,7 @@ from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   swizzleGeometry, isMxf4SubtilePath
 from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
-from .Common.MxScaleLayout import mxFreeTile, splatFirst
+from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, splatFirst
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
   parseStinkyTofuRegisterAllocation, SW_INSTRUCTION_PREFETCH_AUTO
 from .SolutionStructs.Naming import getKernelFileBase, getKernelNameMin
@@ -3060,6 +3060,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if not kernel["UseSubtileImpl"]:
         module.add(self.localReadAddresses(kernel, tensorParametersA, tensorParametersB, tPM))
         module.add(self.localWriteAddresses(kernel, tensorParametersA, tensorParametersB, tPM))
+
+    # 2D MXS scale rows depend on this tile's workgroup, final only after
+    # graWorkGroup (and after the persistent LRA rebuild above).
+    if not forceNoTileCode:
+      for tPMX in (tensorParametersA.get("MX"), tensorParametersB.get("MX")):
+        if tPMX is not None and mxFreePhase(kernel, tPMX["tensorChar"]):
+          module.add(self.mxPhaseLraFixup(kernel, tPMX))
 
     if kernel["PrefetchGL2"]:
       module.add(self.gl2PrefetchCalcAddr(kernel, tensorParametersA, tensorParametersB))
@@ -8991,6 +8998,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self.states.mxsb.numVgprLocalWriteAddr *= numVgprMultiplierMXSB
         self.states.mxsb.numVgprLocalWriteAddrTailLoop *= numVgprMultiplierMXSB
 
+      # 2D MXS phase: one LocalReadAddr per WaveTile vector, each holding its
+      # own scale row (mxPhaseLraFixup). They replace the +64K fan-out, so the
+      # local read offsets must stay below 64K (asserted in localReadMX).
+      for mxTc, mxStates in (("MXSA", self.states.mxsa), ("MXSB", self.states.mxsb)):
+        if kernel["ProblemType"]["MXBlock%s" % mxTc[-1]] and mxFreePhase(kernel, mxTc):
+          tile01 = 1 if kernel["ProblemType"]["Index01%s" % mxTc] else 0
+          mxStates.numVgprLocalReadAddr = Component.LocalRead.find(self).getMxNumVectorsPerTile(
+              kernel, mxTc, tile01, self.states.asmCaps)
+
       # do not allocate local read address register if DirectToVgpr is enabled
       if kernel["DirectToVgprA"]:
         self.states.a.numVgprLocalReadAddr = 0
@@ -9029,10 +9045,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           self.states.b.numVgprLocalReadSwapAddr = 1
         if self.states.m.numVgprLocalReadAddr > 0:
           self.states.m.numVgprLocalReadSwapAddr = 1
+        # 2D MXS phase: per-vector LocalReadAddr, so one swap address per vector.
         if kernel["ProblemType"]["MXBlockA"] and (self.states.mxsa.numVgprLocalReadAddr > 0):
-          self.states.mxsa.numVgprLocalReadSwapAddr = 1
+          self.states.mxsa.numVgprLocalReadSwapAddr = \
+            self.states.mxsa.numVgprLocalReadAddr if mxFreePhase(kernel, "MXSA") else 1
         if kernel["ProblemType"]["MXBlockB"] and (self.states.mxsb.numVgprLocalReadAddr > 0):
-          self.states.mxsb.numVgprLocalReadSwapAddr = 1
+          self.states.mxsb.numVgprLocalReadSwapAddr = \
+            self.states.mxsb.numVgprLocalReadAddr if mxFreePhase(kernel, "MXSB") else 1
 
         if not kernel["LocalWriteUseSgprA"] and (self.states.a.numVgprLocalWriteAddr > 0):
           self.states.a.numVgprLocalWriteSwapAddr = 1
@@ -9701,7 +9720,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         vgprIdx += 1
       if self.states.mxsa.numVgprLocalReadSwapAddr > 0:
         self.states.mxsa.startVgprLocalReadSwapAddr = vgprIdx
-        vgprIdx += 1
+        vgprIdx += self.states.mxsa.numVgprLocalReadSwapAddr
       if self.states.m.numVgprLocalReadSwapAddr > 0:
         self.states.m.startVgprLocalReadSwapAddr = vgprIdx
         vgprIdx += 1
@@ -9710,7 +9729,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         vgprIdx += 1
       if self.states.mxsb.numVgprLocalReadSwapAddr > 0:
         self.states.mxsb.startVgprLocalReadSwapAddr = vgprIdx
-        vgprIdx += 1
+        vgprIdx += self.states.mxsb.numVgprLocalReadSwapAddr
       if self.states.a.numVgprLocalWriteSwapAddr > 0:
         self.states.a.startVgprLocalWriteSwapAddr = vgprIdx
         vgprIdx += 1

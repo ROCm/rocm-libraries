@@ -140,6 +140,38 @@ namespace TensileLite
                 }
             }
             // ----------------------------------------------------------------
+            //  varyMXScaleFreeTiles
+            //
+            // Random-like data with a mirrored scale init quantizes every block
+            // against the same exponent, so after downsampleMXScaleFreeDim every
+            // 2D tile holds 0x7F and a kernel that reads the wrong scale row still
+            // validates. Offset each E8 by a small exponent (-2..2) that differs
+            // between neighbouring free tiles and K-blocks. The data bytes are
+            // untouched; kernel and reference read the same scales, so products
+            // only move by a power of two. 0x00 / 0xFF (zero / NaN) are kept.
+            // Layout matches downsampleMXScaleFreeDim's dst (compact K-blocks).
+            // ----------------------------------------------------------------
+            inline void varyMXScaleFreeTiles(uint8_t* scale,
+                                             size_t   tiledFreeDim,
+                                             size_t   kBlocks,
+                                             bool     kFast)
+            {
+                size_t const freeStride = kFast ? kBlocks : 1;
+                size_t const kStride    = kFast ? 1 : tiledFreeDim;
+                for(size_t g = 0; g < tiledFreeDim; g++)
+                {
+                    for(size_t kb = 0; kb < kBlocks; kb++)
+                    {
+                        uint8_t& b = scale[g * freeStride + kb * kStride];
+                        if(b == 0x00 || b == 0xFF)
+                            continue;
+                        // Steps by 1 (mod 5) per free tile, so adjacent rows differ.
+                        int const delta = static_cast<int>((g + 2 * kb) % 5) - 2;
+                        b = static_cast<uint8_t>(std::clamp(static_cast<int>(b) + delta, 1, 254));
+                    }
+                }
+            }
+            // ----------------------------------------------------------------
             //  decodeE8M0  : matches mxScaleElementAsFloat(rocisa::DataType::E8,..)
             //                used by Reference.cpp - keep them in sync.
             //  decodeMXElement : thin dispatch over DGen::toFloatPacked / toFloat

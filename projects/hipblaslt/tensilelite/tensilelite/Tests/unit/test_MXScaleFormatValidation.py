@@ -602,8 +602,22 @@ class TestMX2DFreeTile:
         assert _validateMX2DTdmMSplit(state, True) is False
         assert state["Valid"] is False
         assert capsys.readouterr().out.strip() == (
-            "reject: 2D MX TDM M-split for A requires scale rows (3) to be a multiple "
-            "of TDM components (2); the remainder rows are never loaded"
+            "reject: 2D MX TDM M-split for A requires MacroTile0 (384) aligned to "
+            "MXBlockFreeA (128) and scale rows (3) a multiple of TDM components (2); "
+            "otherwise rows are dropped"
+        )
+
+    def test_rejects_m_split_unaligned_macro_tile(self, capsys):
+        # MT=192 loads two worst-phase rows, which split evenly, but each
+        # component starts MT/2 = 96 elements in, off a scale-row boundary.
+        state = _free_tile_state(mt0=192, depthU=128)
+
+        assert _validateMX2DTdmMSplit(state, True) is False
+        assert state["Valid"] is False
+        assert capsys.readouterr().out.strip() == (
+            "reject: 2D MX TDM M-split for A requires MacroTile0 (192) aligned to "
+            "MXBlockFreeA (128) and scale rows (2) a multiple of TDM components (2); "
+            "otherwise rows are dropped"
         )
 
     @pytest.mark.parametrize(
@@ -611,10 +625,11 @@ class TestMX2DFreeTile:
         [
             dict(),                                         # aligned, K-split
             dict(mt1=64),                                   # MT divides MXBlockFree
+            dict(mt1=224),                                  # unaligned: _validateMXFreePhase owns it
             dict(mt0=384, depthU=256),                      # 3 rows but K-split
             dict(mt0=128, depthU=128),                      # 1 row < 2 comps: comps share the tile
         ],
-        ids=["aligned", "mt-divides-free", "k-split-3-rows", "rows-lt-comps"],
+        ids=["aligned", "mt-divides-free", "unaligned-k-split", "k-split-3-rows", "rows-lt-comps"],
     )
     def test_accepts_supported_shapes(self, kwargs):
         state = _free_tile_state(**kwargs)

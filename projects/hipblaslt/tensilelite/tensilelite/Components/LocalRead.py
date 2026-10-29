@@ -32,7 +32,7 @@ from rocisa.instruction import SMovB32, SWaitCnt, VOrB32, VPermB32, VLShiftLeftO
                             ECvtPkFP8toF32, ECvtF32toF16, DSLoadU8
 
 from ..Component import LocalRead
-from ..Common.MxScaleLayout import mxFreeTile
+from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile
 
 from math import ceil
 
@@ -161,6 +161,14 @@ class LocalReadMFMA(LocalRead):
         offset_val = offset - num * maxLDSConstOffset
         srcAddr = vgpr("LocalReadAddr%s+%u" %(tc, num))
         return offset_val, srcAddr
+
+    @classmethod
+    def getMxNumVectorsPerTile(cls, kernel, tc, tile01, asmCaps):
+        """localReadMX vIdx count: TileSpan groups, else MIWaveTile / VW."""
+        tileSpanInfo = cls.getMxsTileSpanInfo(kernel, tc, tile01, asmCaps)
+        if tileSpanInfo is not None:
+            return tileSpanInfo["numGroups"]
+        return kernel["MIWaveTile"][tile01] // kernel["VectorWidth%s" % tc]
 
     @staticmethod
     def getMxsTileSpanInfo(kernel, tc, tile01, asmCaps):
@@ -680,7 +688,10 @@ class LocalReadMFMA(LocalRead):
             # LRA rotates MXSB by flipping the half-wave select, which covers only one group.
             assert mxsTileSpan and tileSpanInfo["numGroups"] == 1 and kernel["MIWaveGroup"][1] > 1, \
                 "LDSSegmentBRotate: MXSB needs the single-group TileSpan wave-split layout"
-        numVectorsPerTile = tileSpanInfo["numGroups"] if mxsTileSpan else kernel["MIWaveTile"][tile01] // vectorWidth
+        numVectorsPerTile = self.getMxNumVectorsPerTile(kernel, tc, tile01, writer.states.asmCaps)
+        # 2D phase: each vector reads through its own LocalReadAddr+vIdx, which
+        # already holds its scale row (mxPhaseLraFixup); no vIdx immediate.
+        mxPhase = mxFreePhase(kernel, tc)
         numReadsPerVector = int(vectorWidth // tilePerRead)
         numVgpr           = int(ceil(instruction.blockWidth))
         if mx2d:
@@ -739,7 +750,9 @@ class LocalReadMFMA(LocalRead):
                 # wave-split), so the per-group stride is twice the per-vector stride.
                 blockStep = (2 * vIdx) if mxsTileSpan else vIdx
                 mStep = MIWaveGroupShape[tile01]
-                if mx2d:
+                if mxPhase:
+                    pass
+                elif mx2d:
                     offset_val = offset_val + (blockStep * mStep // mxTile) * mxUnit
                 else:
                     offset_val = offset_val + blockStep * mStep * mxUnit
@@ -755,6 +768,9 @@ class LocalReadMFMA(LocalRead):
                 addrIdx = paramList[0] // 65536
                 srcAddr=vgpr("LocalReadAddr%s+%u"%(tc, addrIdx))
                 paramList[0] -= addrIdx * 65536
+                if mxPhase:
+                    assert addrIdx == 0, "MXS 2D phase: LocalReadAddr+vIdx needs offsets below 64K"
+                    srcAddr = vgpr("LocalReadAddr%s+%u"%(tc, vIdx))
 
                 ds = DSModifiers(na=1, offset=paramList[0])
                 self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=readModule, comment=comment)

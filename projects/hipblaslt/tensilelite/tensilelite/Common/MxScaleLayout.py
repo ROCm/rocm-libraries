@@ -11,7 +11,7 @@ scale per row (the 1xK layout); 128 means 128 consecutive rows share one e8.
 A yaml list ``MXBlockA: [free, k]`` is split into this pair by ProblemType.
 """
 
-from math import log2
+from math import gcd, log2
 from typing import Mapping
 
 from rocisa.code import Module
@@ -36,13 +36,35 @@ def mxFreeTile(kernel: Mapping, tc: str) -> int:
 
 
 def mxTdmTileM(mt: int, mxTile: int) -> int:
-    """How many scale-rows one MacroTile intersects.
+    """How many scale-rows one MacroTile can intersect.
 
-    Ceil so an unaligned tile (e.g. MT=224, MXBlockFree=128) still covers
-    the second group. Aligned MT is unchanged (256/128 == 2).
+    Tile wg starts at wg*MT, (wg*MT) % MXBlockFree into a scale row (the
+    phase). Phases are multiples of gcd(MT, MXBlockFree), so the largest is
+    MXBlockFree - gcd and the worst tile spans ceil((maxPhase + MT) / free)
+    rows: MT=224, MXBlockFree=128 starts WG1 at phase 96 and needs 3, not
+    ceil(224/128) = 2. MT a multiple of MXBlockFree has phase 0 and gives
+    MT/MXBlockFree; MT dividing MXBlockFree never crosses a row and gives 1.
     """
+    mt = int(mt)
     mxTile = max(1, int(mxTile))
-    return (int(mt) + mxTile - 1) // mxTile
+    maxPhase = mxTile - gcd(mt, mxTile)
+    return (maxPhase + mt + mxTile - 1) // mxTile
+
+
+def mxFreePhase(kernel: Mapping, tc: str) -> bool:
+    """True when a 2D MXS tile's scale-row split depends on its workgroup.
+
+    The local scale row of free offset m is (phase + m) // MXBlockFree with
+    phase = (wg*MT) % MXBlockFree. That only reduces to the static m //
+    MXBlockFree when MT is a multiple of MXBlockFree (phase 0) or divides it
+    (the tile never crosses a row). Otherwise LRA adds the phase per tile and
+    every WaveTile vector gets its own LocalReadAddr (mxPhaseLraFixup).
+    """
+    mxTile = mxFreeTile(kernel, tc)
+    if mxTile <= 1:
+        return False
+    mt = int(kernel["MacroTile%s" % tc])
+    return mt % mxTile != 0 and mxTile % mt != 0
 
 
 def mxTdmMSplitStride(mt: int, mxTile: int, numComp: int) -> int:
@@ -169,7 +191,8 @@ def mxLdsNumBytes(mt: int, depthU: int, mxBlock: int, mxTile: int = 1,
                   padInterval: int = 0) -> int:
     """MXS LDS bytes for one WG buffer (before alignment).
 
-    1D: MT × (DepthU/MXBlock). 2D: ceil(MT/MXBlockFree) × (DepthU/MXBlock).
+    1D: MT × (DepthU/MXBlock). 2D: mxTdmTileM(MT, MXBlockFree) × (DepthU/MXBlock),
+    the scale rows of the worst workgroup phase.
     ``padInterval`` matches ``calcLdsNumBytesAB``: every block of that many
     bytes grows by ``ldsPad``. A 2D buffer smaller than one interval cannot
     use that formula (integer divide would be 0) and stays compact.
@@ -202,7 +225,7 @@ def mxLdsKStride(mt: int, mxTile: int, mxUnit: int, *, swizzled: bool,
 
     1D (mxTile==1) matches today's localReadInc: swizzled ``MT*mxUnit``,
     K-major ``mxUnit``, M-major ``(MT+pad)*mxUnit``. 2D replaces MT with
-    scale-rows (``MT/MXBlockFree``), matching TDM k-split packing.
+    scale-rows (``mxTdmTileM(MT, MXBlockFree)``), matching TDM k-split packing.
     """
     scaleRows = mxTdmTileM(mt, mxTile)
     if swizzled:

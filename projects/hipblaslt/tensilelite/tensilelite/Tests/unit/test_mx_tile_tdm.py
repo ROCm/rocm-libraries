@@ -10,6 +10,7 @@ import pytest
 
 from tensilelite.Common.MxScaleLayout import (
     MXS_LDS_ALIGN_2D,
+    mxFreePhase,
     mxFreeTile,
     mxLdsAlign,
     mxLdsKStride,
@@ -69,7 +70,8 @@ def test_mx_tdm_tile0_1d_matches_current_mt_times_mxunit():
 def test_mx_tdm_tile0_2d_divides_m_by_128():
     assert mxTdmTile0(256, mxUnit=1, mxTile=128, numComp=2, kSplit=True) == 2
     assert mxTdmTile0(256, mxUnit=1, mxTile=128, numComp=2, kSplit=False) == 1
-    assert mxTdmTile0(224, mxUnit=1, mxTile=128, numComp=2, kSplit=True) == 2
+    # MT=224 tiles can start 96 into a scale row and span 3 rows.
+    assert mxTdmTile0(224, mxUnit=1, mxTile=128, numComp=2, kSplit=True) == 3
     assert mxTdmTile0(512, mxUnit=1, mxTile=128, numComp=2, kSplit=False) == 2
 
 
@@ -149,12 +151,33 @@ def test_mx_tdm_tile0_2d_does_not_floor_to_zero():
     assert mxTdmMSplitStride(256, 1, 2) == 128
 
 
-def test_mx_tdm_tile_m_ceils_unaligned_macro_tile():
+def test_mx_tdm_tile_m_covers_the_worst_workgroup_phase():
+    # Aligned MT: every tile starts on a scale row.
     assert mxTdmTileM(256, 128) == 2
-    assert mxTdmTileM(224, 128) == 2
-    assert mxTdmTileM(192, 128) == 2
     assert mxTdmTileM(128, 128) == 1
+    # MT=224: WG1 starts at N=224, 96 into row 1, and spans rows 1..3.
+    assert mxTdmTileM(224, 128) == 3
+    # MT=192: phases 0/64; [64, 256) still fits in 2 rows.
+    assert mxTdmTileM(192, 128) == 2
+    # MT=96: phase 96 puts [96, 192) across a row boundary.
+    assert mxTdmTileM(96, 128) == 2
+    # MT dividing MXBlockFree never crosses a row.
+    assert mxTdmTileM(64, 128) == 1
     assert mxTdmTileM(129, 128) == 2
+    # 1D is unchanged: one scale per row.
+    assert mxTdmTileM(224, 1) == 224
+
+
+def test_mx_free_phase_only_for_tiles_that_cross_rows_by_phase():
+    def k(mt, free=128):
+        return {"MacroTileMXSB": mt, "ProblemType": {"MXBlockB": 128, "MXBlockFreeB": free}}
+    assert mxFreePhase(k(224), "MXSB")
+    assert mxFreePhase(k(192), "MXSB")
+    assert mxFreePhase(k(96), "MXSB")
+    assert not mxFreePhase(k(256), "MXSB")
+    assert not mxFreePhase(k(128), "MXSB")
+    assert not mxFreePhase(k(64), "MXSB")
+    assert not mxFreePhase(k(224, free=1), "MXSB")
 
 
 def test_mx_lds_num_bytes_1d_is_mt_times_mxdu():
@@ -167,7 +190,7 @@ def test_mx_lds_num_bytes_1d_is_mt_times_mxdu():
 def test_mx_lds_num_bytes_2d_divides_free_dim():
     assert mxLdsNumBytes(128, 256, 128, mxTile=128) == 2
     assert mxLdsNumBytes(256, 256, 128, mxTile=128) == 4
-    assert mxLdsNumBytes(224, 256, 128, mxTile=128) == 4
+    assert mxLdsNumBytes(224, 256, 128, mxTile=128) == 6
     assert mxLdsNumBytes(256, 256, 32, mxTile=128) == 16
     assert MXS_LDS_ALIGN_2D == 64
 
@@ -197,7 +220,7 @@ def test_mx_lds_k_stride_2d_matches_tdm_k_split():
     # MT=128, MXBlockFree=128: one scale-row, kg1 is the next byte.
     assert mxLdsKStride(128, 128, 1, swizzled=True) == 1
     assert mxLdsKStride(256, 128, 1, swizzled=True) == 2
-    assert mxLdsKStride(224, 128, 1, swizzled=True) == 2
+    assert mxLdsKStride(224, 128, 1, swizzled=True) == 3
     assert mxLdsKStride(128, 128, 1, swizzled=False, unrollMajor=True) == 1
     assert mxLdsKStride(128, 128, 1, swizzled=False, unrollMajor=False) == 1
 
