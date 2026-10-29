@@ -893,8 +893,8 @@ struct device_topk_air_impl
     /// - p_global_storage->chosen_bins
     /// - p_global_storage->stopped_at
     template<unsigned int Iteration, unsigned int HistogramSize>
-    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void 
-    chose_pivot_bin(
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void
+    choose_pivot_bin(
         storage_type* __restrict__ p_global_storage,
         histogram_t<bins_per_thread> const& thread_bins,
         histogram_t<HistogramSize> const& block_local_histogram,
@@ -1115,12 +1115,12 @@ struct device_topk_air_impl
             ::rocprim::syncthreads();
 
             // Chose the bin which contains the pivot
-            chose_pivot_bin<Iteration>(p_global_storage,
-                                       thread_bins,
-                                       storage.block_local_histogram,
-                                       N_this_iteration,
-                                       K_this_iteration,
-                                       thread_id);
+            choose_pivot_bin<Iteration>(p_global_storage,
+                                        thread_bins,
+                                        storage.block_local_histogram,
+                                        N_this_iteration,
+                                        K_this_iteration,
+                                        thread_id);
         }
     }
 
