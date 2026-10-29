@@ -229,6 +229,7 @@ def test_an_instance_builds_only_for_its_own_arch():
         (dict(arch="gfx90a"), "arch 'gfx90a'"),
         (dict(arch="gfx942"), "arch 'gfx942'"),
         (dict(arch="gfx1250"), "arch 'gfx1250'"),
+        (dict(arch="gfx1250", llvm_flavor="llvm23"), "arch 'gfx1250'"),
         (dict(direction="wgrad"), "no 'wgrad' instances"),
         (dict(dtype="fp32"), "fp16 or bf16 only"),
         (dict(C=63, G=2), "divisible by G"),
@@ -246,7 +247,15 @@ def test_nothing_outside_the_lists_dispatches(kw, match):
     req = gc.ConvGroupedRequest(**fields)
     with pytest.raises(ValueError, match=match):
         gc.dispatch_conv_grouped(req)
-    assert not gc.dispatch_conv_grouped_all(req)
+    results = gc.dispatch_conv_grouped_all(req)
+    if fields["arch"] == "gfx1250" and kw.get("llvm_flavor") == "llvm23":
+        # Only the opt-in Winograd forward route (its 3x3 plans lower at
+        # llvm23 only); never an auto pick.
+        assert results
+        assert {r.spec.algorithm for r in results} == {"winograd"}
+        assert all(r.candidate.opt_in for r in results)
+    else:
+        assert not results
 
 
 def test_only_wgrad_has_no_candidates():
