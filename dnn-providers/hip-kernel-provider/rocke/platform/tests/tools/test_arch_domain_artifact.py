@@ -123,6 +123,10 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
 
                 self.assertEqual(sorted(tc.get("arches", [])), sorted(wired_arches()))
 
+    def test_llvm24_uses_the_shared_llvm23_declaration_profile(self):
+        self.assertEqual(G._decl_table("llvm24"), G._decl_table("llvm23"))
+        self.assertNotEqual(G._decl_table("llvm24"), G._decl_table("llvm20"))
+
     def test_every_decl_key_is_covered_on_every_wired_arch(self):
         """The drift this file exists to catch: a decl key the artifact has no
         opinion on, in JSON that is still valid and still looks authoritative.
