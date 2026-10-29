@@ -7,10 +7,11 @@
 # and each architecture's installed variants scale its CTest timeout.
 # Each tests/<operation>_reference package with an architecture registry is a
 # reference operation; reference_common/artifact.py discovers the same set.
-# Each file that the wiring checks below glob, read or test with EXISTS is a
-# configure dependency, so a build of an existing build directory reruns them
-# when such a file appears, disappears or changes. Script mode (cmake -P), which
-# platform/tests/test_gpu_references.py uses, rejects CONFIGURE_DEPENDS.
+# Each file that this module globs, reads or tests with EXISTS is a configure
+# dependency, so a build of an existing build directory reruns its checks and
+# restages bundles when such a file appears, disappears or changes. Script mode
+# (cmake -P), which platform/tests/test_gpu_references.py uses, rejects
+# CONFIGURE_DEPENDS.
 set(_configure_depends CONFIGURE_DEPENDS)
 if(CMAKE_SCRIPT_MODE_FILE)
   set(_configure_depends "")
@@ -171,6 +172,8 @@ foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
             "Reference operation ${_operation} has no ${_metadata} recording the "
             "manifest_operation its bundles declare.")
   endif()
+  # Staging checks each bundle's manifest against this metadata.
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_metadata}")
   foreach(_arch IN LISTS ROCKE_PUBLISHED_${_operation_upper}_ARCHITECTURES)
     # A variant's committed lock publishes it, with its own archive and bundle.
     # The architecture's GPU CTest runs every variant installed here.
@@ -195,6 +198,8 @@ foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
                 "${_archive}.dvc or configure with "
                 "ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF.")
       endif()
+      # A requalified lock or a newly fetched archive restages the bundle.
+      set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_lock}" "${_archive}")
       file(SHA256 "${_archive}" _archive_sha256)
       set(_bundle "${CMAKE_CURRENT_BINARY_DIR}/${_operation}-reference/${_arch}/${_variant}/${_archive_sha256}")
       # Unpack authenticates the manifest and payload against the committed lock.

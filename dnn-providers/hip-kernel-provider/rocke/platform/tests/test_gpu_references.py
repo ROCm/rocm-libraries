@@ -346,10 +346,14 @@ def test_shared_code_payloads_install_under_separate_processor_directories(proje
         assert payload.read_bytes() == b"sdpa"
 
 
+@_REBUILD
 @pytest.mark.parametrize(
-    "problem", ["archive", "lock", "integrity", "cohort", "python"]
+    "problem", ["archive", "lock", "integrity", "cohort", "metadata", "python"]
 )
-def test_required_reference_prerequisites_fail_configuration(project, problem):
+def test_required_reference_prerequisites_fail_configuration(project, problem, rebuild):
+    if rebuild and problem == "python":
+        pytest.skip("a build keeps the configured interpreter")
+    prepare(project, rebuild=rebuild)
     library = project / "library/tests"
     variants = library / "conv_reference/architectures/gfx942"
     lock = variants / _VARIANT / "baseline_lock.json"
@@ -367,13 +371,19 @@ def test_required_reference_prerequisites_fail_configuration(project, problem):
         data = json.loads(lock.read_text())
         data[field] = "0" * 64
         lock.write_text(json.dumps(data))
-    result = configure(project, python=problem != "python")
+    elif problem == "metadata":
+        (library / "conv_reference/operation.json").unlink()
+    if problem == "python":
+        result = configure(project, python=False)
+    else:
+        result = check(project, rebuild=rebuild)
     assert result.returncode != 0
     expected = {
         "archive": "reference archive missing",
         "lock": "No qualified conv baseline lock for gfx942",
         "integrity": "does not match the pinned lock",
         "cohort": "pins a cohort that its manifest does not record",
+        "metadata": "recording the manifest_operation its bundles declare",
         "python": "requires a Python3 interpreter",
     }
     output = result.stdout + result.stderr
@@ -436,8 +446,10 @@ def test_artifact_cli_lists_the_variants_that_configuration_installs(project):
     assert listed == installed_variants(project)
 
 
-def test_staging_rejects_a_bundle_qualified_for_another_variant(project):
+@_REBUILD
+def test_staging_rejects_a_bundle_qualified_for_another_variant(project, rebuild):
     """A manifest that declares its variant must declare the lock's variant."""
+    prepare(project, rebuild=rebuild)
     tests = project / "library/tests"
     bundle = project / "conv"
     manifest = json.loads((bundle / "manifest.json").read_text())
@@ -450,7 +462,7 @@ def test_staging_rejects_a_bundle_qualified_for_another_variant(project):
     archive = tests / f"reference_bundles/conv/gfx942/{_VARIANT}.tar.gz"
     archive.unlink()
     pack(project, "conv", lock, archive)
-    result = configure(project)
+    result = check(project, rebuild=rebuild)
     assert result.returncode != 0
     # CMake wraps long messages.
     output = " ".join((result.stdout + result.stderr).split())
