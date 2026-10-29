@@ -173,16 +173,23 @@ def compilerTargetOf(spec: str, compiler: Optional[Union[str, Path]] = None) -> 
     """
     alias = _buildAlias(spec)
     if alias:
-        return alias["target"]
-    if compiler is None or ":" not in spec:
-        return spec
+        # Only the base name is the alias's to replace. Whatever qualified the
+        # request names a driver configuration, which the alias says nothing
+        # about, so it carries over and is then put to the compiler like any
+        # other: gfx1250v0:xnack- asks about gfx1250:xnack-, and falls back to
+        # bare gfx1250 only where that is refused.
+        target = alias["target"] + spec[len(baseArchName(spec)):]
+    else:
+        target = spec
+    if compiler is None or ":" not in target:
+        return target
     compiler = str(compiler)
-    if _targetIdAccepted(compiler, spec):
-        return spec
-    stripped = _withoutXnack(spec)
-    if stripped != spec and _targetIdAccepted(compiler, stripped):
+    if _targetIdAccepted(compiler, target):
+        return target
+    stripped = _withoutXnack(target)
+    if stripped != target and _targetIdAccepted(compiler, stripped):
         return stripped
-    return spec
+    return target
 
 
 def tuningArchOf(spec: str) -> str:
