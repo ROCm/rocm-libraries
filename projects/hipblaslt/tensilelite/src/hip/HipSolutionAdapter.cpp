@@ -571,9 +571,11 @@ namespace TensileLite
         {
             // Record an optional instrumentation event. See
             // SolutionAdapter::launchKernel for why a caller may choose to
-            // carry the failure itself.
-            hipError_t
-                recordLaunchEvent(hipEvent_t event, hipStream_t stream, bool bestEffortEvents)
+            // carry the failure itself. swallowed is set when it does.
+            hipError_t recordLaunchEvent(hipEvent_t  event,
+                                         hipStream_t stream,
+                                         bool        bestEffortEvents,
+                                         bool&       swallowed)
             {
                 if(event == nullptr)
                     return hipSuccess;
@@ -586,7 +588,27 @@ namespace TensileLite
                 // caller's own next hipGetLastError() to find and attribute to
                 // their work instead of ours.
                 static_cast<void>(hipGetLastError());
+                swallowed = true;
                 return hipSuccess;
+            }
+
+            // The stop half of a measured launch. Left unrecorded when the
+            // start record was swallowed, so the pair reads as never recorded
+            // rather than half recorded. A half-recorded pair is not always
+            // detectable afterwards: a pair reused from a pool holds an older
+            // timestamp in its start, and a fresh stop against it reads as a
+            // plausible positive duration -- the time since that older
+            // measurement, not this launch.
+            hipError_t recordStopEvent(hipEvent_t  stopEvent,
+                                       hipStream_t stream,
+                                       bool        bestEffortEvents,
+                                       bool&       startSwallowed)
+            {
+                if(startSwallowed)
+                    return hipSuccess;
+
+                bool stopSwallowed = false;
+                return recordLaunchEvent(stopEvent, stream, bestEffortEvents, stopSwallowed);
             }
         }
 
@@ -606,6 +628,24 @@ namespace TensileLite
                                                  hipEvent_t              stopEvent,
                                                  bool                    isKernelLoaded,
                                                  bool                    bestEffortEvents)
+        {
+            bool startSwallowed = false;
+            return launchKernelMeasured(kernel,
+                                        stream,
+                                        startEvent,
+                                        stopEvent,
+                                        isKernelLoaded,
+                                        bestEffortEvents,
+                                        startSwallowed);
+        }
+
+        hipError_t SolutionAdapter::launchKernelMeasured(KernelInvocation const& kernel,
+                                                         hipStream_t             stream,
+                                                         hipEvent_t              startEvent,
+                                                         hipEvent_t              stopEvent,
+                                                         bool                    isKernelLoaded,
+                                                         bool                    bestEffortEvents,
+                                                         bool&                   startSwallowed)
         {
 #ifdef HIP_HAS_CLUSTER_LAUNCH
             const bool enableCluster = (kernel.clusterDim.x > 1 || kernel.clusterDim.y > 1);
@@ -682,8 +722,10 @@ namespace TensileLite
             if(m_debugSkipLaunch)
             {
                 std::cout << "DEBUG: Skip kernel execution" << std::endl;
-                HIP_CHECK_RETURN(recordLaunchEvent(startEvent, stream, bestEffortEvents));
-                HIP_CHECK_RETURN(recordLaunchEvent(stopEvent, stream, bestEffortEvents));
+                HIP_CHECK_RETURN(
+                    recordLaunchEvent(startEvent, stream, bestEffortEvents, startSwallowed));
+                HIP_CHECK_RETURN(
+                    recordStopEvent(stopEvent, stream, bestEffortEvents, startSwallowed));
                 return hipSuccess;
             }
 
@@ -707,7 +749,8 @@ namespace TensileLite
                                        &argsSize,
                                        HIP_LAUNCH_PARAM_END};
 
-            HIP_CHECK_RETURN(recordLaunchEvent(startEvent, stream, bestEffortEvents));
+            HIP_CHECK_RETURN(
+                recordLaunchEvent(startEvent, stream, bestEffortEvents, startSwallowed));
 
 #ifdef HIP_HAS_CLUSTER_LAUNCH
             if(enableCluster)
@@ -774,7 +817,7 @@ namespace TensileLite
                 );
             }
 
-            HIP_CHECK_RETURN(recordLaunchEvent(stopEvent, stream, bestEffortEvents));
+            HIP_CHECK_RETURN(recordStopEvent(stopEvent, stream, bestEffortEvents, startSwallowed));
             return hipSuccess;
         }
 
@@ -815,6 +858,10 @@ namespace TensileLite
             auto first = kernels.begin();
             auto last  = kernels.end() - 1;
 
+            // Carried from the first kernel's launch, which records the start,
+            // to the last one's, which records the stop.
+            bool startSwallowed = false;
+
             for(auto iter = kernels.begin(); iter != kernels.end(); iter++)
             {
                 hipEvent_t kStart = nullptr;
@@ -825,8 +872,13 @@ namespace TensileLite
                 if(iter == last)
                     kStop = stopEvent;
 
-                HIP_CHECK_RETURN_WITH_LOG(
-                    launchKernel(*iter, stream, kStart, kStop, isKernelLoaded, bestEffortEvents),
+                HIP_CHECK_RETURN_WITH_LOG(launchKernelMeasured(*iter,
+                                                               stream,
+                                                               kStart,
+                                                               kStop,
+                                                               isKernelLoaded,
+                                                               bestEffortEvents,
+                                                               startSwallowed),
                     [&](hipError_t error) {
                         std::cerr << "launchKernel failed: " << iter->kernelName << std::endl
                                 << " with workgroup size: " << iter->workGroupSize << std::endl

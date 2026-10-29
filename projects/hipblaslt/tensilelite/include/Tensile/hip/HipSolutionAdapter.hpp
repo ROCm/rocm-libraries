@@ -109,7 +109,9 @@ namespace TensileLite
             // fails. A tuner that cannot measure has to stop measuring, not
             // break the call it was measuring. Nothing more is needed on the
             // tuner's side: a pair no launch recorded reads back non-positive,
-            // which the harvest already drops and retires.
+            // which the harvest already drops and retires. That holds because
+            // a swallowed start record also skips the stop record, so a
+            // failure leaves the pair unrecorded rather than half recorded.
             //
             // Separate overloads rather than a defaulted parameter because
             // this library is installed with its headers and an exported CMake
@@ -157,6 +159,18 @@ namespace TensileLite
             int numRotationModules();
 
         private:
+            // The bestEffortEvents launchKernel, with startSwallowed carried in
+            // and out so launchKernels can tell the last kernel's launch that
+            // the first one's start record was swallowed, and leave the stop
+            // unrecorded to match.
+            hipError_t launchKernelMeasured(KernelInvocation const& kernel,
+                                            hipStream_t             stream,
+                                            hipEvent_t              startEvent,
+                                            hipEvent_t              stopEvent,
+                                            bool                    isKernelLoaded,
+                                            bool                    bestEffortEvents,
+                                            bool&                   startSwallowed);
+
             hipError_t loadCodeObjectFileOnce(std::string const& path);
             hipError_t getKernel(hipFunction_t& rv, std::string const& name);
 

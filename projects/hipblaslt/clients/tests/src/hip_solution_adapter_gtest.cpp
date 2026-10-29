@@ -348,4 +348,47 @@ namespace
             << "the swallowed event error was left in HIP's last-error state";
     }
 
+    // A swallowed start record must not leave a recorded stop behind it.
+    //
+    // Online tuning reads a pair back on a later visit and keeps it only if the
+    // elapsed time is positive, relying on every unrecorded pair reading
+    // otherwise. A half-recorded pair breaks that when the pair is reused: its
+    // start still holds the timestamp of an older measurement, so a fresh stop
+    // against it reads as the time since then, a plausible positive duration.
+    // So when the start record is swallowed the stop is skipped too, and the
+    // pair reads as never recorded. Asserted for one kernel, where both records
+    // are in one launchKernel, and for a solution of several, where the start
+    // goes with the first kernel and the stop with the last.
+    TEST_F(HipSolutionAdapterEventTest, smoke_ASwallowedStartRecordLeavesTheStopUnrecorded)
+    {
+        TensileLite::hip::SolutionAdapter adapter;
+
+        for(size_t count : {size_t(1), size_t(3)})
+        {
+            // On device one, current since SetUp, so it records on the stream
+            // the launch uses: only the start can fail.
+            hipEvent_t stop = nullptr;
+            ASSERT_EQ(hipEventCreateWithFlags(&stop, hipEventDefault), hipSuccess);
+
+            EXPECT_EQ(adapter.launchKernels(std::vector<TensileLite::KernelInvocation>(count),
+                                            m_streamOnDeviceOne,
+                                            m_onDeviceZero,
+                                            stop,
+                                            /*isKernelLoaded=*/false,
+                                            /*bestEffortEvents=*/true),
+                      hipSuccess)
+                << count << " kernels";
+            EXPECT_EQ(hipStreamSynchronize(m_streamOnDeviceOne), hipSuccess);
+
+            // An event never recorded has no timestamp to read.
+            float milliseconds = 0.0f;
+            EXPECT_NE(hipEventElapsedTime(&milliseconds, stop, stop), hipSuccess)
+                << "with " << count
+                << " kernels the stop was recorded although the start was not";
+            static_cast<void>(hipGetLastError());
+
+            static_cast<void>(hipEventDestroy(stop));
+        }
+    }
+
 } // namespace

@@ -480,6 +480,9 @@ namespace rocblaslt
             // with hipErrorInvalidHandle, a pooled pair is inverted so it reads
             // the negative of its last duration, and a launch that recorded
             // start and then failed reads an older stop against a newer start.
+            // A launch whose start record failed records no stop either --
+            // SolutionAdapter::launchKernel skips it -- so that case is one of
+            // the first two and never a fresh stop against a stale start.
             float      milliseconds = 0.0f;
             const bool timed
                 = hipEventElapsedTime(&milliseconds, pending.m_start, pending.m_stop) == hipSuccess
