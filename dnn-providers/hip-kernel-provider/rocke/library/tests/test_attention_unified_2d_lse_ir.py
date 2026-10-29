@@ -9,6 +9,7 @@ import re
 
 import pytest
 
+from rocke.core.llvm_profile import LLVM_EMISSION_ALIASES
 from rocke.core.lower_llvm import _resolve_llvm_flavor, lower_kernel_to_llvm
 
 _BASE = dict(
@@ -175,7 +176,9 @@ def test_2d_lse_off_ir_is_byte_identical_to_pre_change(arch, branch):
     assert off_ir == default_ir
     assert "lse_ptr" not in off_ir
     assert _lse_store_count(off_ir) == 0
+    # An aliased lane (llvm24) emits its source flavor's text.
     flavor = _resolve_llvm_flavor()
+    flavor = LLVM_EMISSION_ALIASES.get(flavor, flavor)
     digest = hashlib.sha256(off_ir.encode()).hexdigest()
     # A snapshot, not a regenerable golden: emit_lse must never change LSE-off
     # IR. Re-record only when the base kernel changes on purpose: re-bless the
