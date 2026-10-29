@@ -528,6 +528,15 @@ namespace rocblaslt
         // candidate. Closing it needs the offer carried ON the algo, which is a
         // public type and so a decision and not a fix.
         //
+        // m_queriedOnly says nothing but heuristic queries has visited this
+        // registration as its owner. The identity is the solution library's,
+        // and a query and a dispatch of one problem do not share it -- the
+        // query ranks under a dummy beta and the preference's workspace
+        // ceiling -- so while it holds, the first dispatch to arrive with no
+        // sample taken takes the registration over rather than being turned
+        // away as a merged sibling. See the merged-sibling guard in
+        // selectCandidateImpl().
+        //
         // m_registration is a process-wide serial taken at registerProblem(),
         // so an offer names one registration and not merely one key. Without it
         // an offer outstanding across reloadForTest(), or across a problem that
@@ -598,6 +607,7 @@ namespace rocblaslt
             float                           m_winnerUs     = 0.0f;
             bool                            m_gaveUp       = false;
             bool                            m_resolved     = false;
+            bool                            m_queriedOnly  = false;
             std::atomic<int>                m_dispatchesSinceSelection{0};
         };
 
@@ -625,7 +635,8 @@ namespace rocblaslt
                              size_t                  problem,
                              ProblemState&           state,
                              const std::vector<int>& rankedSolutionIndices);
-        int  nextCandidate(const ProblemState& state) const;
+        static bool unmeasured(const ProblemState& state);
+        int         nextCandidate(const ProblemState& state) const;
         int  measurableCandidate(const ProblemState& state,
                                  size_t              problemKey,
                                  int                 solutionIndex) const;

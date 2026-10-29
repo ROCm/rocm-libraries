@@ -575,6 +575,35 @@ namespace
             << "a repeated heuristic query was refused like a capture";
     }
 
+    // A heuristic query and a dispatch of the same problem are not the same
+    // problem to the solution library. The query ranks under a dummy beta and
+    // the preference's workspace ceiling, the dispatch under its own beta and
+    // allocation, so the identity each brings differs while the resolution key
+    // is the same. Whoever registers owns the exploration, and a query that
+    // registered first used to make every such dispatch a merged sibling of it:
+    // offered nothing, sampled by nothing, and holding the exclusive lock on
+    // every visit until the abandonment ceiling gave up with no winner.
+    TEST(OnlineTuner, ADispatchIsNotASiblingOfAQueryThatOnlyAskedFirst)
+    {
+        constexpr size_t key = 0x1020;
+
+        const size_t           asQueried    = identityOf(key, 0);
+        const size_t           asDispatched = identityOf(key, 1);
+        const std::vector<int> ranked{271, 272, 273};
+
+        // First sight, and a visit that comes back, both from the query.
+        ASSERT_EQ(tuner().selectCandidate(key, asQueried, ranked, false, /*retained=*/true), -1);
+        tuner().selectCandidate(key, asQueried, ranked, false, /*retained=*/true);
+
+        EXPECT_EQ(tuner().selectCandidate(key, asDispatched, ranked), 0)
+            << "the problem's own dispatch was treated as a merged sibling of the query";
+
+        const int calls = exploreToResolution(key, asDispatched, ranked);
+        ASSERT_GT(calls, 0) << "exploration never ended";
+        EXPECT_LE(calls, kVisitBudget + 1)
+            << "the dispatch did not drive the exploration, something else ended it";
+    }
+
     // ----------------------------------------------------------------------
     // Problems the library stops being asked about.
     //

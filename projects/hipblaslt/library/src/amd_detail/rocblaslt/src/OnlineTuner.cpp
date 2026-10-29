@@ -181,7 +181,9 @@ namespace rocblaslt
      * The code below is laid out in exactly those two steps, with a marked line
      * for each and no write to this problem's state above either of them --
      * except registerProblem(), which creates the registrant rather than
-     * spending anything of its. The one write that is above both is the drop of
+     * spending anything of its, including where a dispatch takes over a
+     * registration only heuristic queries have held and nothing has been
+     * measured for. The one write that is above both is the drop of
      * THIS THREAD's offer, which belongs to no problem and is explained where
      * it stands.
      *
@@ -305,6 +307,7 @@ namespace rocblaslt
             // return from here: a first sight is still the library being
             // asked, so it still says the shape has not been abandoned.
             registerProblem(problemKey, problem, state, rankedSolutionIndices);
+            state.m_queriedOnly = retained;
         }
         // A problem the key merges with the one being explored. Its launches
         // are not this exploration's to sample, so it is offered nothing -- and
@@ -313,13 +316,35 @@ namespace rocblaslt
         // early on whatever samples had been taken by then. It takes the branch
         // below once there is a winner, like every other caller.
         //
-        // Above marker A, and that placement is the whole rule:
-        // a visit that is not this exploration's writes none
-        // of this exploration's state. Reached only when there is a registrant
-        // to compare against -- the two branches above are the cases where
-        // there is not.
+        // Above marker A, and that placement is the whole rule: a visit that
+        // is not this exploration's writes none of this exploration's state.
+        // Reached only when there is a registrant to compare against -- the two
+        // branches above are the cases where there is not.
+        //
+        // The one exception is a registration nothing but heuristic queries
+        // has touched, and that nothing has been measured for. The identity is
+        // the solution library's own, and a query and a dispatch of the same
+        // problem do not share it: the query ranks under a dummy beta and the
+        // preference's workspace ceiling, the dispatch under the caller's beta
+        // and allocation. So the first dispatch of a problem whose first sight
+        // was a query arrives as a stranger to its own registration. Turned
+        // away, it is offered nothing and sampled by nothing for as long as
+        // the abandonment ceiling allows, and the shape ends with no winner.
+        // Taking the registration over instead loses nothing, because there is
+        // nothing to lose -- no sample and no launch outstanding -- and it is
+        // the same rule as before seen from the other side: the first problem
+        // to DISPATCH owns the exploration, and a query only holds it until
+        // one does. Once a dispatch has visited as the registrant, or anything
+        // has been measured, the registration is settled and a later stranger
+        // is a sibling as it always was.
         else if(!state.m_resolved && state.m_problem != problem)
-            return -1;
+        {
+            if(!state.m_queriedOnly || retained || !unmeasured(state))
+                return -1;
+
+            registerProblem(problemKey, problem, state, rankedSolutionIndices);
+            state.m_queriedOnly = false;
+        }
 
         // ------------------------------------------------------------------
         // MARKER A. Past here the visit is this exploration's own.
@@ -329,6 +354,11 @@ namespace rocblaslt
         // not made ends here. Only an unbroken run of them says the library has
         // stopped being asked by the one caller whose visits can finish this.
         state.m_dispatchesSinceSelection.store(0, std::memory_order_relaxed);
+
+        // A dispatch visiting as the registrant settles who owns this; see the
+        // merged-sibling guard above.
+        if(!retained)
+            state.m_queriedOnly = false;
 
         // Own visits that do not advance the rotation: still the library being
         // asked, which is all marker A's counter measures, but no probe goes
@@ -564,8 +594,15 @@ namespace rocblaslt
 
         state.m_candidates.assign(rankedSolutionIndices.begin(),
                                   rankedSolutionIndices.begin() + count);
-        state.m_samples.resize(count);
+        state.m_samples.assign(count, {});
         state.m_issued.assign(count, 0);
+
+        // Fresh for a first sight, and reset for a registration a dispatch
+        // takes over from a heuristic query: that query's visits spent budget
+        // on a candidate list this one replaces.
+        state.m_calls    = 0;
+        state.m_declined = 0;
+        state.m_gaveUp   = false;
 
         // Nothing to compare against, so the problem is born resolved with no
         // winner and every later call takes the read-only path.
@@ -588,6 +625,16 @@ namespace rocblaslt
             msg << "\n";
             std::cerr << msg.str();
         }
+    }
+
+    // Nothing taken and nothing outstanding: replacing the candidate list
+    // throws no measurement away.
+    bool OnlineTuner::unmeasured(const ProblemState& state)
+    {
+        return state.m_pending.empty()
+               && std::all_of(state.m_samples.begin(),
+                              state.m_samples.end(),
+                              [](const std::vector<float>& samples) { return samples.empty(); });
     }
 
     int OnlineTuner::nextCandidate(const ProblemState& state) const

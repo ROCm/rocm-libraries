@@ -3270,6 +3270,40 @@ namespace
         EXPECT_EQ(columnValues(m_path, "tuning_mode"), std::vector<std::string>{"online"});
     }
 
+    // The same problem, with a heuristic query made while online is on.
+    //
+    // The case above queries the heuristic before switching the mode on, so the
+    // first visit online sees is always a dispatch. An application that queries
+    // first and then dispatches with no algo hands online the same problem
+    // twice, and to the solution library they are two problems: the query ranks
+    // under a dummy beta of one and the preference's workspace ceiling, the
+    // dispatch under its own beta and allocation. The resolution key merges the
+    // two, so whichever registers first owns the exploration and the other is a
+    // merged sibling of it. When the query owned it, every beta == 0 dispatch
+    // was offered nothing and sampled by nothing, and the shape ended with no
+    // winner and no row.
+    TEST_F(TuningOnline_pre_checkin, AHeuristicQueryMadeFirstDoesNotStopItsDispatchesExploring)
+    {
+        OnlineProblem problem(/*pointerArray=*/false);
+        ASSERT_TRUE(problem.create());
+
+        if(problem.distinctCandidates(kOnlineTopK) < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        enterOnline(m_path);
+
+        // Twice, so the query is not only the problem's first sight but also
+        // a visit that comes back.
+        ASSERT_GE(problem.distinctCandidates(kOnlineTopK), 2u);
+        ASSERT_GE(problem.distinctCandidates(kOnlineTopK), 2u);
+
+        EXPECT_GT(runToResolution(problem), 1u)
+            << "online launched one kernel throughout, so the dispatches never probed";
+
+        EXPECT_EQ(valueRowCount(m_path), 1u) << "online recorded no winner";
+        EXPECT_EQ(counters().tuned, 1u);
+    }
+
     // The defect this case exists for: online used to decide whether to explore
     // on its own switch alone, while the cache decided whether a shape is
     // keyable on a predicate online never consulted. Pointer-array batch mode
