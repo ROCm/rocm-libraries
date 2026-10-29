@@ -77,14 +77,18 @@ STINKYTOFU_EXPORT uint32_t absPrefetchEntrySgprBase(const Function& function);
 ///
 /// \p blockGlobalByteOffset  Global layout offset of this BB's first byte.
 /// \p emitXnackWait  Emit `s_wait_xcnt 0` before each prefetch; from
-///                   `AsmCapsConfig::enableXnackReplay`. Not defaulted, so a caller cannot
-///                   forget to ask the caps and silently drop the drain.
+///                   `AsmCapsConfig::enableXnackReplay`.
 /// \p allowSwPrefetchInsertion  If false, identical walk without IR mutation.
+///
+/// Neither boolean is defaulted. One of them defaulted would let a call that
+/// passes a single `true`/`false` keep compiling while meaning the other thing:
+/// which parameter it binds to depends on the order, not on the call site, so
+/// the change would be silent.
 /// \p debugPassTag  Prefix for optional debug lines (e.g. pass name).
 STINKYTOFU_EXPORT void insertSwPrefetchLabels(
     BasicBlock& bb, int64_t blockGlobalByteOffset, GfxArchID archId, std::ostream* dbgOut,
     const std::unordered_map<std::string, int64_t>* asmSetSymbols, bool emitXnackWait,
-    bool allowSwPrefetchInsertion = true,
+    bool allowSwPrefetchInsertion,
     const char* debugPassTag = "SwInstructionPrefetchRelStaticPass");
 
 /// Debug-only: list P(k) grid boundaries that fall in this basic block.
@@ -138,7 +142,7 @@ STINKYTOFU_EXPORT int insertSwPrefetchLabelsDynamic(
     BasicBlock& bb, int64_t blockGlobalByteOffset, int64_t bbEntryAccum, int64_t kNextIn,
     GfxArchID archId, std::ostream* dbgOut,
     const std::unordered_map<std::string, int64_t>* asmSetSymbols, bool emitXnackWait,
-    bool allowSwPrefetchInsertion = true,
+    bool allowSwPrefetchInsertion,
     const char* debugPassTag = "SwInstructionPrefetchRelDynamicPass");
 
 /// Alternate Phase-2 pipeline: same two-condition insert test (with **closed-left** match when
@@ -151,7 +155,7 @@ STINKYTOFU_EXPORT int insertSwPrefetchLabelsDynamicPerBbAnchor(
     BasicBlock& bb, int64_t blockGlobalByteOffset, int64_t bbEntryAccum, int64_t bbGridAnchorGlobal,
     int64_t kLocalNextIn, GfxArchID archId, std::ostream* dbgOut,
     const std::unordered_map<std::string, int64_t>* asmSetSymbols, bool emitXnackWait,
-    bool allowSwPrefetchInsertion = true,
+    bool allowSwPrefetchInsertion,
     const char* debugPassTag = "SwInstructionPrefetchRelDynamicPassPerBbAnchor");
 
 }  // namespace stinkytofu
