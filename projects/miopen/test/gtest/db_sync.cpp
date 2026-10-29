@@ -31,6 +31,7 @@
 #include "../lib_env_var.hpp"
 #include "gtest_common.hpp"
 #include <miopen/readonlyramdb.hpp>
+#include <miopen/config.h>
 #include <miopen/env.hpp>
 #include <miopen/execution_context.hpp>
 
@@ -46,6 +47,10 @@
 #include <cstdlib>
 #include <regex>
 #include <exception>
+#include <fstream>
+#include <map>
+#include <sstream>
+#include <mutex>
 #include <thread>
 #include <unordered_set>
 
@@ -734,11 +739,85 @@ TEST(CPU_DBSync_NONE, DISABLED_DynamicFDBSync)
         << "Multi-threading error, work done is not equal to total work";
 }
 
+/// Workspace corrections found by MIOPEN_DBSYNC_CLEAN, applied after the worker threads finish.
+/// Each RamDb update rewrites the whole file under an exclusive lock, so updating from every
+/// thread makes the others time out on the lock ("Db lock has failed to lock"), and updating
+/// record by record takes tens of minutes for a large find-db. The file is rewritten once instead.
+struct WorkspaceFixes
+{
+    std::mutex mutex;
+    std::map<std::string, std::map<std::string, std::size_t>> by_key;
+
+    void Add(const std::string& key, const std::string& solver, std::size_t workspace)
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        by_key[key][solver] = workspace;
+    }
+
+    /// Rewrites the find-db text file, replacing only the workspace field ("time,workspace,algo")
+    /// of the corrected entries. Runs after the worker threads, so it sees any entries the other
+    /// clean-up steps removed.
+    void Apply(const fs::path& path)
+    {
+        if(by_key.empty())
+            return;
+        auto out_path = path;
+        out_path += ".workspace_fix";
+        std::size_t n_fixed = 0;
+        {
+            std::ifstream in{path};
+            std::ofstream out{out_path};
+            ASSERT_TRUE(in && out) << "Cannot rewrite " << path;
+            std::string line;
+            while(std::getline(in, line))
+            {
+                const auto eq = line.find('=');
+                const auto it =
+                    eq == std::string::npos ? by_key.end() : by_key.find(line.substr(0, eq));
+                if(it == by_key.end())
+                {
+                    out << line << '\n';
+                    continue;
+                }
+                out << line.substr(0, eq + 1);
+                std::stringstream items{line.substr(eq + 1)};
+                std::string item;
+                auto first = true;
+                while(std::getline(items, item, ';'))
+                {
+                    const auto colon = item.find(':');
+                    const auto fix   = colon == std::string::npos
+                                           ? it->second.end()
+                                           : it->second.find(item.substr(0, colon));
+                    out << (first ? "" : ";");
+                    first = false;
+                    const auto ws_begin =
+                        fix == it->second.end() ? std::string::npos : item.find(',', colon);
+                    const auto ws_end =
+                        ws_begin == std::string::npos ? ws_begin : item.find(',', ws_begin + 1);
+                    if(ws_end == std::string::npos)
+                    {
+                        out << item;
+                        continue;
+                    }
+                    out << item.substr(0, ws_begin + 1) << fix->second << item.substr(ws_end);
+                    ++n_fixed;
+                }
+                out << '\n';
+            }
+            ASSERT_TRUE(out.good()) << "Failed to write " << out_path;
+        }
+        fs::rename(out_path, path);
+        MIOPEN_LOG_W("Updated workspace in " << n_fixed << " find-db entries");
+    }
+};
+
 void CheckFDBEntry(size_t thread_index,
                    size_t total_threads,
                    std::vector<FDBLine>& data,
                    miopen::RamDb& find_db_rw,
                    miopen::RamDb& perf_db_rw,
+                   WorkspaceFixes& workspace_fixes,
                    const miopen::ExecutionContext& _ctx,
                    std::atomic<size_t>& counter)
 {
@@ -808,6 +887,12 @@ void CheckFDBEntry(size_t thread_index,
                                   << ", Solver: " << val.solver_id << ":" << val.vals;
                     return;
                 }
+#if !MIOPEN_USE_HIPBLASLT
+                // GemmWrwUniversal needs workspace only in hipBLASLt builds (stream-K
+                // scratch), so a find-db generated with hipBLASLt can't match here.
+                if(val.solver_id == "GemmWrwUniversal")
+                    return;
+#endif
                 if(fdb_data.workspace == solution.workspace_sz)
                     return;
                 if(env::enabled(MIOPEN_DBSYNC_CLEAN))
@@ -816,13 +901,7 @@ void CheckFDBEntry(size_t thread_index,
                                  << kinder.first << ", solver:" << val.solver_id << ", find-db "
                                  << fdb_data.workspace << ", required " << solution.workspace_sz
                                  << ", Updating entry in fdb");
-                    fdb_data.workspace = solution.workspace_sz;
-                    auto record        = miopen::DbRecord(miopen::DbKinds::FindDb, kinder.first);
-                    record.SetValues(id.ToString(), fdb_data);
-                    EXPECT_TRUE(find_db_rw.UpdateRecord(record))
-                        << '[' << (++failures) << "] " //
-                        << "Failed to update fdb-key:" << kinder.first
-                        << ", Solver: " << val.solver_id;
+                    workspace_fixes.Add(kinder.first, id.ToString(), solution.workspace_sz);
                 }
                 else
                 {
@@ -1080,6 +1159,7 @@ void StaticFDBSync(const std::string& arch, const size_t num_cu)
         MIOPEN_DBSYNC_MAX_THREADS
             ? static_cast<int>(env::value(MIOPEN_DBSYNC_MAX_THREADS))
             : std::min(static_cast<int>(std::thread::hardware_concurrency()), 32);
+    WorkspaceFixes workspace_fixes;
     std::vector<std::thread> agents;
     agents.reserve(total_threads);
     for(auto idx = 0; idx < total_threads; ++idx)
@@ -1089,11 +1169,13 @@ void StaticFDBSync(const std::string& arch, const size_t num_cu)
                             std::ref(fdb_data),
                             std::ref(find_db_rw),
                             std::ref(perf_db_rw),
+                            std::ref(workspace_fixes),
                             std::ref(_ctx),
                             std::ref(counter));
 
     for(auto idx = 0; idx < total_threads; ++idx)
         agents.at(idx).join();
+    workspace_fixes.Apply(fdb_file_path);
     EXPECT_TRUE(counter == fdb_data.size())
         << "Multi-threading error, work done is not equal to total work" << counter << " : "
         << fdb_data.size();
