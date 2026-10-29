@@ -336,6 +336,35 @@ _TILED_2D_BUDGET_GEOMETRIES = [
             sliding_window=128,
         ),
     ),
+    # gfx950 D128 bs16 sliding-window single-batch combo (this PR): the
+    # transposed-32x32 online-softmax path, now admitting bf16 alongside
+    # fp16. Distinct geometry from the gfx942 SW rows above (block_size=16,
+    # not the default 64), so those don't exercise this combo's LDS/scratch
+    # budget.
+    (
+        "fp16_d128_bs16_sw_gqa32x8",
+        "gfx950",
+        dict(
+            head_size=128,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="fp16",
+            block_size=16,
+            sliding_window=128,
+        ),
+    ),
+    (
+        "bf16_d128_bs16_sw_gqa32x8",
+        "gfx950",
+        dict(
+            head_size=128,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="bf16",
+            block_size=16,
+            sliding_window=128,
+        ),
+    ),
 ]
 
 
@@ -2864,11 +2893,11 @@ class TestAttentionHelpers(unittest.TestCase):
                         spec = au._tiled_spec_from_problem(p, arch)
                         self.assertIsInstance(spec, au._tiled_2d_impl(arch)[0])
 
-    def test_gfx950_fp16_d128_sw_routing(self):
-        """Regression for the fp16 D128 sliding-window routing.
+    def test_gfx950_d128_sw_routing(self):
+        """Regression for the fp16 & bf16 D128 sliding-window routing.
 
-        fp16 D128 SW takes the single-batch transposed-32x32 combo at every
-        block size. block_size in {32, 64} once raised an uncaught
+        fp16 & bf16 D128 SW take the single-batch transposed-32x32 combo at
+        every block size. block_size in {32, 64} once raised an uncaught
         ``ValueError`` in ``_tiled_spec_from_problem`` (``block_m=128 >
         tile_size=64`` with ``use_k_single_buffer``), so every block_size must
         build without raising and land on the T=64 combo path.
@@ -2877,25 +2906,28 @@ class TestAttentionHelpers(unittest.TestCase):
         from kernels import supports_native_unified_attention_tiled
 
         with _patch_resolved_arch("gfx950"):
-            for bs in (16, 32, 64):
-                with self.subTest(block_size=bs):
-                    p = _budget_problem(
-                        head_size=128,
-                        num_query_heads=32,
-                        num_kv_heads=8,
-                        dtype="fp16",
-                        seq=8192,
-                        block_size=bs,
-                        sliding_window=4096,
-                    )
-                    ok, reason = supports_native_unified_attention_tiled(p, "gfx950")
-                    self.assertTrue(ok, msg=reason)
-                    # Must not raise: block_size 32/64 previously hit an
-                    # uncaught ValueError building the combo spec here.
-                    spec = au._tiled_spec_from_problem(p, "gfx950")
-                    # routed to the transposed-32x32 combo at T=64
-                    self.assertTrue(spec.use_mfma_32x32)
-                    self.assertEqual(spec.tile_size, 64)
+            for dtype in ("fp16", "bf16"):
+                for bs in (16, 32, 64):
+                    with self.subTest(dtype=dtype, block_size=bs):
+                        p = _budget_problem(
+                            head_size=128,
+                            num_query_heads=32,
+                            num_kv_heads=8,
+                            dtype=dtype,
+                            seq=8192,
+                            block_size=bs,
+                            sliding_window=4096,
+                        )
+                        ok, reason = supports_native_unified_attention_tiled(
+                            p, "gfx950"
+                        )
+                        self.assertTrue(ok, msg=reason)
+                        # Must not raise: block_size 32/64 previously hit an
+                        # uncaught ValueError building the combo spec here.
+                        spec = au._tiled_spec_from_problem(p, "gfx950")
+                        # routed to the transposed-32x32 combo at T=64
+                        self.assertTrue(spec.use_mfma_32x32)
+                        self.assertEqual(spec.tile_size, 64)
 
     def test_tiled_3d_support_gate_rejects_unsupported(self):
         """Mirror of ``test_tiled_2d_support_gate_rejects_unsupported`` for the

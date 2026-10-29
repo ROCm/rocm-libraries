@@ -1699,6 +1699,25 @@ def problems_gfx950_attention_tiled_2d():
         ),  # single-batch d128 block_size=64 (d128 small tile path)
         p(512, 1, 32, 32, 64, 32, 512, 4096, use_qq_bias=True),  # single-batch + bias
         p(512, 1, 32, 32, 64, 32, 512, 4096, sliding_window=256),  # single-batch + SW
+        # ---- single-batch d128 b16 SW combo (head_size=128 AND
+        # sliding_window>0 together -- previously absent from this matrix, so
+        # the C++ selector's admission of this cohort into the wide
+        # transposed-32x32 combo (_enable_single_batch_combo /
+        # _select_2d_tile_size) was never compared against Python here).
+        # Mirrors the exact production scenario (gfx950, Hq32/Hkv8, D128,
+        # block_size=16, sliding_window=4096) verified on-silicon, widened to
+        # every block size (the combo admits D128 SW at block_size 16/32/64).
+        p(8192, 1, 32, 8, 128, 16, 8192, 8192, sliding_window=4096),  # bf16
+        p(8192, 1, 32, 8, 128, 32, 8192, 8192, sliding_window=4096),  # bf16
+        p(
+            8192, 1, 32, 8, 128, 16, 8192, 8192, sliding_window=4096, dtype="fp16"
+        ),  # fp16
+        p(
+            8192, 1, 32, 8, 128, 32, 8192, 8192, sliding_window=4096, dtype="fp16"
+        ),  # fp16
+        p(
+            8192, 1, 32, 8, 128, 64, 8192, 8192, sliding_window=4096, dtype="fp16"
+        ),  # fp16
         # ---- transposed_qk_32x32 multi-batch path ----
         p(512, 4, 32, 32, 64, 32, 512, 4096),  # multi-batch d64 long
         p(512, 4, 32, 32, 128, 32, 512, 4096),  # multi-batch d128 long
