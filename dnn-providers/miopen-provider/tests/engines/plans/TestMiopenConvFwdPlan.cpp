@@ -11,6 +11,7 @@
 
 #include "HipdnnMiopenHandle.hpp"
 #include "HipdnnMiopenSettings.hpp"
+#include "common/ConvPlanFindModeCheck.hpp"
 #include "engines/plans/MiopenConvFwdPlan.hpp"
 
 using namespace miopen_plugin;
@@ -345,31 +346,14 @@ TEST_F(TestGpuConvFwdPlan, CreatesPlanWithValidGraph)
 
 TEST_F(TestGpuConvFwdPlan, BenchmarkingSelectsNormalFindMode)
 {
-    // Benchmarking matches PyTorch's cudnn.benchmark=True: Find runs in Normal mode, so
-    // MIOpen neither returns an installed find-db entry unmeasured nor skips non-dynamic
-    // solvers. Without benchmarking MIOpen's default is kept.
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     auto* attrs = graph.getNode(0).attributes_as_ConvolutionFwdAttributes();
     ASSERT_NE(attrs, nullptr);
 
-    for(const bool benchmarking : {false, true})
-    {
-        SCOPED_TRACE(benchmarking ? "benchmarking" : "default");
-        ConvFwdParams params(*attrs, graph.getTensorMap());
-        auto* convDescriptor = params.conv().convDescriptor();
-        miopenConvolutionFindMode_t defaultMode{};
-        ASSERT_EQ(miopenGetConvolutionFindMode(convDescriptor, &defaultMode), miopenStatusSuccess);
-
-        HipdnnMiopenSettings settings;
-        settings.setBenchmarkingEnabled(benchmarking);
-        const ConvFwdPlan plan(*_handle, std::move(params), settings);
-
-        miopenConvolutionFindMode_t mode{};
-        ASSERT_EQ(miopenGetConvolutionFindMode(convDescriptor, &mode), miopenStatusSuccess);
-        EXPECT_EQ(mode, benchmarking ? miopenConvolutionFindModeNormal : defaultMode);
-    }
+    test_conv_common::expectBenchmarkingSelectsNormalFindMode<ConvFwdParams, ConvFwdPlan>(
+        *_handle, graph, *attrs);
 }
 
 TEST_F(TestGpuConvFwdPlan, ThrowsOnInvalidDims)

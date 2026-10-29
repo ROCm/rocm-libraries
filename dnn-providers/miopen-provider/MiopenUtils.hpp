@@ -43,6 +43,16 @@
         }                                                                               \
     } while(0)
 
+namespace miopen_plugin::miopen_utils
+{
+
+/// @brief True when MIOPEN_FIND_ENFORCE names an enforcing action, parsed as MIOpen does:
+/// DB_UPDATE, SEARCH, SEARCH_DB_UPDATE or DB_CLEAN (case-insensitive), or 2-5. Unset, NONE,
+/// 1 and values MIOpen rejects all mean "nothing enforced".
+bool envFindEnforceIsSet();
+
+}
+
 /// @brief RAII guard for setting MIOpen tuning policy on a handle.
 ///
 /// This class saves the current tuning policy, sets a new one based on the
@@ -54,9 +64,8 @@
 /// - Search (3): Uses cached results if available, searches only on cache miss
 /// - SearchDbUpdate (4): Always re-searches, ignoring cached results
 ///
-/// If MIOPEN_FIND_ENFORCE is set in the environment, the guard sets
-/// miopenTuningPolicyNone so MIOpen applies the environment value instead, as it does
-/// for PyTorch.
+/// If MIOPEN_FIND_ENFORCE names an enforcing action, the guard sets miopenTuningPolicyNone
+/// so MIOpen applies the environment value instead, as it does for PyTorch.
 ///
 /// Batchnorm and fused convolution plans use this guard. Plain convolution plans do
 /// not: they request tuning through Find's exhaustiveSearch argument, as PyTorch does,
@@ -67,8 +76,8 @@ class ScopedTuningPolicy
 public:
     /// @brief Construct and set the tuning policy on the handle.
     /// @param handle The MIOpen handle to set the policy on.
-    /// @param benchmarkingEnabled If true and MIOPEN_FIND_ENFORCE is unset, sets policy to
-    ///                           miopenTuningPolicySearch. Otherwise sets miopenTuningPolicyNone.
+    /// @param benchmarkingEnabled If true and MIOPEN_FIND_ENFORCE enforces nothing, sets policy
+    ///                           to miopenTuningPolicySearch. Otherwise sets miopenTuningPolicyNone.
     ScopedTuningPolicy(miopenHandle_t handle, bool benchmarkingEnabled)
         : _handle(handle)
     {
@@ -82,10 +91,9 @@ public:
         }
 
         // Search (3) for benchmarking, None (1) otherwise. None defers to MIOPEN_FIND_ENFORCE.
-        const bool envEnforceSet
-            = !hipdnn_data_sdk::utilities::getEnv("MIOPEN_FIND_ENFORCE").empty();
-        auto policy = benchmarkingEnabled && !envEnforceSet ? miopenTuningPolicySearch
-                                                            : miopenTuningPolicyNone;
+        auto policy = benchmarkingEnabled && !miopen_plugin::miopen_utils::envFindEnforceIsSet()
+                          ? miopenTuningPolicySearch
+                          : miopenTuningPolicyNone;
         status = miopenSetTuningPolicy(_handle, policy);
         if(status != miopenStatusSuccess)
         {

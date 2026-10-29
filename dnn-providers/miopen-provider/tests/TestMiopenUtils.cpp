@@ -572,6 +572,24 @@ TEST(TestMiopenUtils, MapPointwiseModeUnsupported)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
+TEST(TestMiopenUtils, EnvFindEnforceIsSetOnlyForEnforcingValues)
+{
+    // MIOpen reads NONE, 1 and values it rejects as "nothing enforced", so they must not
+    // disable the benchmarking tuning policy.
+    for(const char* value : {"", "NONE", "none", "1", "0", "6", "bogus"})
+    {
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter enforce(
+            "MIOPEN_FIND_ENFORCE", value);
+        EXPECT_FALSE(miopen_utils::envFindEnforceIsSet()) << "MIOPEN_FIND_ENFORCE=" << value;
+    }
+    for(const char* value : {"DB_UPDATE", "search", "SEARCH_DB_UPDATE", "db_clean", "2", "5"})
+    {
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter enforce(
+            "MIOPEN_FIND_ENFORCE", value);
+        EXPECT_TRUE(miopen_utils::envFindEnforceIsSet()) << "MIOPEN_FIND_ENFORCE=" << value;
+    }
+}
+
 // =============================================================================
 // GPU-required tests for ScopedTuningPolicy
 // =============================================================================
