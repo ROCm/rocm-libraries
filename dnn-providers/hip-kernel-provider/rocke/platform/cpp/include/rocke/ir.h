@@ -475,6 +475,9 @@ typedef enum rocke_opcode
     /* arith.fdot2 (appended: keeps every earlier opcode value stable) */
     ROCKE_OP_ARITH_FDOT2,
 
+    /* tile.buffer_load: dtype-generic scalar buffer load (appended). */
+    ROCKE_OP_TILE_BUFFER_LOAD,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -1553,6 +1556,14 @@ rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b,
                                        rocke_value_t* rsrc,
                                        rocke_value_t* voffset,
                                        rocke_value_t* soffset);
+/* Dtype-generic scalar buffer load (one element, out-of-range reads 0): f16 and
+ * bf16 through the i16 intrinsic, f32 and i32 through the i32 one. Port of
+ * Python IRBuilder.buffer_load (op tile.buffer_load, attr elem_type). */
+rocke_value_t* rocke_b_buffer_load(rocke_ir_builder_t* b,
+                                   rocke_value_t* rsrc,
+                                   rocke_value_t* voffset,
+                                   rocke_value_t* soffset,
+                                   const rocke_type_t* dtype);
 /* D16-form scalar half buffer load: raw.ptr.buffer.load.f16 returns `half`
  * directly (no i16 bitcast). Port of Python IRBuilder.buffer_load_f16_d16 /
  * the pinned PR9710 tile.buffer_load_f16_d16 op. */
@@ -1591,6 +1602,37 @@ void rocke_b_buffer_store_vN_bf16(rocke_ir_builder_t* b,
                                   rocke_value_t* soffset,
                                   rocke_value_t* value,
                                   int dwords);
+/* The four f16/bf16 buffer stores above with the raw buffer store's aux
+ * immediate `cachepolicy` (on gfx12: bits[0:2] = th, bits[3:4] = scope; 1 is
+ * th:TH_STORE_NT). 0 records no attribute, i.e. the plain form. Port of the
+ * Python keyword `cachepolicy=` of IRBuilder.buffer_store_{f16,bf16,vN_f16,
+ * vN_bf16}. */
+void rocke_b_buffer_store_vN_f16_ex(rocke_ir_builder_t* b,
+                                    rocke_value_t* rsrc,
+                                    rocke_value_t* voffset,
+                                    rocke_value_t* soffset,
+                                    rocke_value_t* value,
+                                    int dwords,
+                                    int cachepolicy);
+void rocke_b_buffer_store_f16_ex(rocke_ir_builder_t* b,
+                                 rocke_value_t* rsrc,
+                                 rocke_value_t* voffset,
+                                 rocke_value_t* soffset,
+                                 rocke_value_t* value,
+                                 int cachepolicy);
+void rocke_b_buffer_store_bf16_ex(rocke_ir_builder_t* b,
+                                  rocke_value_t* rsrc,
+                                  rocke_value_t* voffset,
+                                  rocke_value_t* soffset,
+                                  rocke_value_t* value,
+                                  int cachepolicy);
+void rocke_b_buffer_store_vN_bf16_ex(rocke_ir_builder_t* b,
+                                     rocke_value_t* rsrc,
+                                     rocke_value_t* voffset,
+                                     rocke_value_t* soffset,
+                                     rocke_value_t* value,
+                                     int dwords,
+                                     int cachepolicy);
 void rocke_b_buffer_store_f32(rocke_ir_builder_t* b,
                               rocke_value_t* rsrc,
                               rocke_value_t* voffset,

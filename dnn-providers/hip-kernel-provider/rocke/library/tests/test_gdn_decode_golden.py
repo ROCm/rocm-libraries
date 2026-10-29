@@ -375,11 +375,15 @@ def _run(flavor):
 
 
 def _build_doc():
-    from rocke.core.ir_golden import GOLDEN_FLAVORS
+    from rocke.core.ir_golden import GOLDEN_ALIASES, GOLDEN_PROFILE_FLAVORS
 
-    doc = {"schema": "gdn_decode_gfx950.ir_golden_sha256/v1", "flavors": {}}
+    doc = {
+        "schema": "gdn_decode_gfx950.ir_golden_sha256/v1",
+        "aliases": GOLDEN_ALIASES,
+        "flavors": {},
+    }
     failures = []
-    for flavor in GOLDEN_FLAVORS:
+    for flavor in GOLDEN_PROFILE_FLAVORS:
         cases = {}
         for cid, build in _cases().items():
             try:
@@ -424,18 +428,21 @@ def test_gdn_decode_ir_matches_golden():
 def test_every_shipped_configuration_is_recorded():
     """A new tuned tile must arrive with a golden entry, not silently uncovered."""
     import pytest
-    from rocke.core.ir_golden import GOLDEN_FLAVORS
+    from rocke.core.ir_golden import GOLDEN_FLAVORS, golden_subdocument
 
     if not _GOLDEN.exists():
         pytest.skip("gdn_decode golden fixture missing; generate with --write")
     golden = json.loads(_GOLDEN.read_text())
-    flavors = golden.get("flavors", {})
-    # A flavor with no sub-document leaves every configuration unrecorded.
+    # A lane with no direct or aliased profile document leaves every
+    # configuration unrecorded.
     missing = sorted(
         f"{flavor}/{cid}"
         for flavor in GOLDEN_FLAVORS
         for cid in _cases()
-        if not flavors.get(flavor, {}).get("cases", {}).get(cid, {}).get("sha256")
+        if not (golden_subdocument(golden, flavor) or {})
+        .get("cases", {})
+        .get(cid, {})
+        .get("sha256")
     )
     assert not missing, f"configurations without a SHA-256: {missing}"
 
