@@ -7,7 +7,6 @@
 #include <miopen/tensor.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/conv/solvers.hpp>
-#include <miopen/solver/ck_impl_lib_loader.hpp>
 
 using Problem = miopen::conv::ProblemDescription;
 using Config  = miopen::solver::conv::PerformanceConfigHipImplicitGemm3DGroupBwdXdlops;
@@ -24,17 +23,6 @@ static Problem MakeSearchProblem(group_conv::GroupConvTestConfig<3u> conv,
     return Problem(y_desc, w_desc, x_desc, conv_desc, miopen::conv::Direction::BackwardData);
 }
 
-// Skip when the solver is inapplicable on this device (CK ships no instances for the dtype/arch);
-// where it is applicable the search must enumerate, so callers still assert SetNextValue().
-template <class Solver>
-static bool SolverApplicable(const Problem& problem)
-{
-    auto& handle = get_handle();
-    auto ctx     = miopen::ExecutionContext{};
-    ctx.SetStream(&handle);
-    return Solver{}.IsApplicable(ctx, problem);
-}
-
 TEST(GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops_FP16, SearchStartsAtKernelZero)
 {
     const auto device_name = miopen::solver::GetCurrentDeviceName();
@@ -46,8 +34,9 @@ TEST(GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops_FP16, SearchStartsAtKernelZe
                           miopenHalf,
                           miopenTensorNDHWC);
 
-    if(!SolverApplicable<miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdXdlops>(problem))
-        GTEST_SKIP() << "solver not applicable for " << device_name;
+    using Solver = miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdXdlops;
+    if(!group_conv::SolverApplicable<Solver>(problem))
+        GTEST_SKIP() << Solver{}.SolverDbId() << " not applicable for " << device_name;
 
     Config cfg(false);
     ASSERT_TRUE(cfg.SetNextValue(problem));

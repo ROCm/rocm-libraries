@@ -11,9 +11,12 @@
 // Two layers of coverage:
 //   * GPU_* : exercise the real CK lazy-init path end-to-end for the 2D Fwd/Bwd/Wrw solvers, so
 //     they require a ROCm device (GTEST_SKIP otherwise) and a canonical group=1, C=K=64, 3x3 shape.
-//     Each test skips where the solver is inapplicable (CK ships no instances for the dtype/arch,
-//     e.g. FP32 grouped bwd-weight on gfx11/gfx12) and otherwise asserts the search starts at
-//     valid_kernels[0]. The 3D Fwd/Bwd equivalents live in
+//     Each test skips where the solver is inapplicable -- CK ships no instance for the dtype/arch
+//     (e.g. FP32 grouped bwd-weight on gfx11/gfx12), the CK library is not loaded, or the solver is
+//     env-disabled -- and otherwise asserts the search starts at valid_kernels[0]. Keying the skip
+//     on the solver's own IsApplicable() (via group_conv::SolverApplicable) is the same CK
+//     predicate the enumeration uses, so a broken enumeration on an applicable shape still fails
+//     the assert loudly. The 3D Fwd/Bwd equivalents live in
 //     perf_config_HipImplicitGemm3DGroup*Xdlops.cpp.
 //   * CPU_* : host-only advance walks for the non-split solvers (2D Fwd, 3D Fwd/Bwd). With
 //     valid_kernels injected directly, SetNextValue() bypasses the CK populate branch and only the
@@ -25,7 +28,6 @@
 #include <miopen/tensor.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/conv/solvers.hpp>
-#include <miopen/solver/ck_impl_lib_loader.hpp>
 
 #include <string>
 
@@ -77,17 +79,6 @@ Problem MakeSearchProblem3D(group_conv::GroupConvTestConfig<3u> conv,
     return Problem(y_desc, w_desc, x_desc, conv_desc, direction);
 }
 
-// Skip when the solver is inapplicable on this device (CK ships no instances for the dtype/arch);
-// where it is applicable the search must enumerate, so callers still assert SetNextValue().
-template <class Solver>
-bool SolverApplicable(const Problem& problem)
-{
-    auto& handle = get_handle();
-    auto ctx     = miopen::ExecutionContext{};
-    ctx.SetStream(&handle);
-    return Solver{}.IsApplicable(ctx, problem);
-}
-
 } // namespace
 
 TEST(GPU_PerfConfig_HipImplicitGemmGroupFwdXdlops_FP16, SearchStartsAtKernelZero)
@@ -102,8 +93,9 @@ TEST(GPU_PerfConfig_HipImplicitGemmGroupFwdXdlops_FP16, SearchStartsAtKernelZero
                           miopenTensorNHWC,
                           Direction::Forward);
 
-    if(!SolverApplicable<miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops>(problem))
-        GTEST_SKIP() << "solver not applicable for " << device_name;
+    using Solver = miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops;
+    if(!group_conv::SolverApplicable<Solver>(problem))
+        GTEST_SKIP() << Solver{}.SolverDbId() << " not applicable for " << device_name;
 
     FwdConfig cfg(false);
     ASSERT_TRUE(cfg.SetNextValue(problem));
@@ -125,8 +117,9 @@ TEST(GPU_PerfConfig_HipImplicitGemmGroupBwdXdlops_FP16, SearchStartsAtKernelZero
                           miopenTensorNHWC,
                           Direction::BackwardData);
 
-    if(!SolverApplicable<miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops>(problem))
-        GTEST_SKIP() << "solver not applicable for " << device_name;
+    using Solver = miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops;
+    if(!group_conv::SolverApplicable<Solver>(problem))
+        GTEST_SKIP() << Solver{}.SolverDbId() << " not applicable for " << device_name;
 
     BwdConfig cfg(false);
     ASSERT_TRUE(cfg.SetNextValue(problem));
@@ -149,8 +142,9 @@ TEST(GPU_PerfConfig_HipImplicitGemmGroupWrwXdlops_FP32, SearchStartsAtKernelZero
                           miopenTensorNHWC,
                           Direction::BackwardWeights);
 
-    if(!SolverApplicable<miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops>(problem))
-        GTEST_SKIP() << "solver not applicable for " << device_name;
+    using Solver = miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops;
+    if(!group_conv::SolverApplicable<Solver>(problem))
+        GTEST_SKIP() << Solver{}.SolverDbId() << " not applicable for " << device_name;
 
     WrwConfig cfg(false);
     ASSERT_TRUE(cfg.SetNextValue(problem));
