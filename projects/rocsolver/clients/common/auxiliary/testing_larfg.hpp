@@ -154,15 +154,17 @@ void larfg_getError(const rocblas_handle handle,
     // (THIS DOES NOT ACCOUNT FOR NUMERICAL REPRODUCIBILITY ISSUES.
     // IT MIGHT BE REVISITED IN THE FUTURE)
 
+    double err_alpha, err_tau;
+#ifdef ROCSOLVER_ENABLE_LARFG_TAU2
     // For "singular" vector, tau = 2 instead of LAPACK's convention that tau = 0.
     // Hence alpha = -alpha_lapack.
-    double err_alpha, err_tau;
     if(singular)
     {
         err_alpha = abs(ha[0][0] + ha_res[0][0]);
         err_tau = abs(htau_res[0][0] - 2);
     }
     else
+#endif
     {
         err_alpha = abs(ha[0][0] - ha_res[0][0]);
         err_tau = abs(htau[0][0] - htau_res[0][0]);
