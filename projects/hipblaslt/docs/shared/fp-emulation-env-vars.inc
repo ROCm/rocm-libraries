@@ -4,7 +4,8 @@
    heading the including page provides and can be included more than once.
 
 The ``HIPBLAS_*`` variables below use the same names as their cuBLAS counterparts,
-with the ``CUBLAS_`` prefix replaced by ``HIPBLAS_``.
+with the ``CUBLAS_`` prefix replaced by ``HIPBLAS_``. hipBLASLt ignores invalid
+values and uses the default instead.
 
 .. list-table::
     :header-rows: 1
@@ -61,6 +62,9 @@ with the ``CUBLAS_`` prefix replaced by ``HIPBLAS_``.
         | Bitmask controlling Inf and NaN detection in the input matrices.
         | Setting it to 0 skips detection, which is faster but silently
           corrupts the output for inputs that contain Inf or NaN.
+        | Ignored for a matmul that has an emulation descriptor attached. The
+          descriptor's ``HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT``
+          attribute applies instead.
         | CUDA equivalent: ``CUBLAS_EMULATION_SPECIAL_VALUES_SUPPORT_MASK``.
       - | Bit 0: Inf detection
         | Bit 1: NaN detection
@@ -77,6 +81,8 @@ with the ``CUBLAS_`` prefix replaced by ``HIPBLAS_``.
     * - | ``HIPBLASLT_EMULATION_PROFILE``
         | Appends per-call emulation profiling rows, in CSV format, to the
           given file.
+        | Synchronizes the stream after each emulated call, so use it for
+          diagnosis only.
         | hipBLASLt-specific; no CUDA equivalent.
       - | Path to a CSV file
         | Default: unset (no profiling output)
