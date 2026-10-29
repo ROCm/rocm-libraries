@@ -978,19 +978,12 @@ def _assemble(
 def _decl_table(flavor: str) -> dict[str, str]:
     """The decls a _Lowerer would resolve for this flavor.
 
-    Mirrors `_Lowerer.__init__` exactly -- base table, then the per-flavor
-    override dict. Duplicating the merge here rather than importing a private
-    helper keeps the tool honest about what it measured, but it is a mirror and
-    must be updated if the resolution rule gains a rung.
+    Uses the lowerer's profile-aware resolver directly so a new compiler lane
+    cannot silently fall back to the LLVM20 declaration shapes.
     """
     from rocke.core import lower_llvm as L
 
-    decls = dict(L._INTRINSIC_DECLS)
-    if flavor == L.LLVM_FLAVOR_LLVM22:
-        decls.update(L._INTRINSIC_DECLS_LLVM22_OVERRIDES)
-    elif flavor == L.LLVM_FLAVOR_LLVM23:
-        decls.update(L._INTRINSIC_DECLS_LLVM23_OVERRIDES)
-    return decls
+    return L._decls_for_flavor(flavor)
 
 
 def _drift(committed: str, fresh: str) -> str | None:
@@ -1361,6 +1354,16 @@ def main() -> int:
         return 2
 
     flavor = L._resolve_llvm_flavor()
+    out = args.out or default_out(flavor)
+    if args.check and args.out is None and not out.is_file():
+        print("rocKE intrinsic arch-domain generator")
+        print(f"   flavor : {flavor}")
+        print(
+            f"\nUNVALIDATED: no committed column for {flavor} "
+            f"({out.name}); nothing to check. Run without --check to add one."
+        )
+        return _unvalidated_exit(args.unvalidated_exit_code, 0)
+
     clang = _llvm_tool("clang")
     opt = _llvm_tool("opt")
 
@@ -1447,7 +1450,6 @@ def main() -> int:
     print(f"   arches : {', '.join(arches)}")
     print(f"   keys   : {len(keys)}")
 
-    out = args.out or default_out(flavor)
     expected_cells: dict[str, dict[str, dict[str, str]]] = {}
     if args.check and out.is_file():
         try:
@@ -1787,8 +1789,8 @@ def main() -> int:
 
     if args.check:
         if not out.is_file():
-            # Not a failure: a host can only measure its own flavor, so
-            # failing here would red every CI machine on a newer ROCm.
+            # A custom --out path still validates toolchain consistency before
+            # reporting that there is no baseline to compare.
             print(
                 f"\nUNVALIDATED: no committed column for {flavor} "
                 f"({out.name}); nothing to check. Run without --check to add one."

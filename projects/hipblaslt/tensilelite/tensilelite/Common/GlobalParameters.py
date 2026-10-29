@@ -221,6 +221,9 @@ globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 # WorkAssignment values.
 globalParameters["StreamKHybridMode"] = [0]
 globalParameters["HybridAssignmentPolicy"] = ["Default"]
+# Runtime steering for USO guarantee
+# -1=use default, 0=off, 1=on
+globalParameters["UniformSummationOrder"] = -1
 # Runtime batch ABI used by the Tensile client: 0=strided, 1=pointer array.
 # This is intentionally independent of ProblemType.StridedBatched so universal
 # strided kernels can exercise their ArgType==3 general-batched path.
@@ -372,6 +375,9 @@ globalParameters["DisableAsmComments"] = False  # Set to True to disable assembl
 # Enable SQTT markers around mainloop iteration (subtile kernels only).
 globalParameters["EmitMainloopTraceMarker"] = False
 
+# Emit the CU-occupancy probe in StreamK hybrid-assignment kernels.
+globalParameters["EmitOccupancyProbe"] = False
+
 globalParameters["RocProfCounter"] = None # No rocprof counter
 
 # StinkyTofu debug level (applies per-PM: outer PM + each ScopeAdaptor inner PM)
@@ -490,6 +496,11 @@ defaultInternalSupportParams = {
     # and ignores bit 29 -- do not claim it; newly generated StreamK 3 / SK5
     # set it True in Solution.py.
     "SupportStreamKPerTileExtraIters": False,
+    # Kernel takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args and, when
+    # ProbeAddr is non-null, stores ProbeEpoch into the slot of the CU each WG
+    # runs on; WGs launched past ProbeGrid then end.
+    # Derived in Solution.py from EmitOccupancyProbe.
+    "SupportOccupancyProbe": False,
     # Use GG as G's backend
     "UseUniversalArgs": True,
     "UseSFC": False,

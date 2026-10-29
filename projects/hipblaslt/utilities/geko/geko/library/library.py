@@ -55,41 +55,6 @@ SUPPORTED_INITIALIZATIONS = ("trig_float", "rand_int", "hpl")
 
 logger = logging.getLogger("GEKO")
 
-def _reorder_dict_solution(state: dict) -> dict:
-    """Lay out one solution dict for dict-format library logic YAML.
-
-    Same order as ``tensilelite.LibraryIO.reorderSolutionDictForDictMerge``.
-    Sorts top-level keys, sorts ``InternalSupportParams`` and drops
-    ``KernArgsVersion``, then moves ``SolutionIndex``, ``SolutionUID``,
-    ``KernelNameMin``, and ``SolutionNameMin`` to the front. ``SolutionUID``
-    is omitted from that lead list when the solution has no such field.
-
-    Args:
-        state: One solution entry. Not mutated.
-
-    Returns:
-        New mapping with reordered keys.
-
-    Raises:
-        None.
-    """
-    out: dict = {}
-    for key in sorted(state.keys()):
-        value = state[key]
-        if key == "InternalSupportParams" and isinstance(value, dict):
-            out[key] = {k: v for k, v in sorted(value.items())
-                        if k != "KernArgsVersion"}
-        else:
-            out[key] = value
-    keys = ["SolutionIndex", "SolutionUID", "KernelNameMin", "SolutionNameMin"]
-    if "SolutionUID" not in out:
-        keys.remove("SolutionUID")
-    vals: dict = {}
-    for key in keys:
-        if key in out:
-            vals[key] = out.pop(key)
-    return {**vals, **out}
-
 
 try:
     DEFAULT_YAML_DUMPER = yaml.CSafeDumper
@@ -623,9 +588,6 @@ class Library:
     def dump(self, output_dir, name: str | None = None) -> None:
         """Write the library data to a YAML file.
 
-        Solutions are stored and written with the naming keys first and the
-        remaining keys alphabetical.
-
         Args:
             output_dir (str | Path): Directory to store the YAML file.
             name (str | None, optional): File name. Defaults to the library's 'name'.
@@ -633,9 +595,7 @@ class Library:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         name = name or self.name
-        self.solutions = [
-            _reorder_dict_solution(solution) for solution in self.solutions
-        ]
+        
         with open(output_dir / name, "w") as f:
             yaml.dump(self.data, f, default_flow_style=None, Dumper=DEFAULT_YAML_DUMPER, sort_keys=False)
 

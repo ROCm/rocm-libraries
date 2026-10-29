@@ -68,7 +68,7 @@ from typing import Any, Dict, List, Optional
 #: cpp/include/rocke/abi.h; a test pins the two together against the built
 #: engine, because a Python generator that believed it was newer than the C
 #: engine would stamp artifacts that engine then refuses.
-RECIPE_ABI = 2
+RECIPE_ABI = 3
 
 #: Binary ABI the ctypes bindings in online.py are written against. MUST equal
 #: ROCKE_ABI_VERSION in cpp/include/rocke/abi.h. Unlike the wire level, this one
@@ -83,10 +83,10 @@ class AbiError(RuntimeError):
     what it just produced."""
 
 
-# Instruction ops, and the ABI level that introduced each. Everything the two
-# engines ship today is level 1. Add an entry in the same change that teaches
-# the VMs a new op; `stamp` fails on an unregistered one, so the list cannot
-# quietly fall behind recipe_expand.py and recipe_vm.cpp.
+# Instruction ops, and the ABI level that introduced each. Add an entry in the
+# same change that teaches the VMs a new op; `stamp` fails on an unregistered
+# one, so the list cannot quietly fall behind recipe_expand.py and
+# recipe_vm.cpp.
 INSTR_OPS: Dict[str, int] = {
     "param": 1,
     "const_i32": 1,
@@ -98,6 +98,11 @@ INSTR_OPS: Dict[str, int] = {
     "static_if": 1,
     "scf_for": 1,
     "scf_if": 1,
+    # Level 3. An older VM rejects the op outright ("unknown instr op"), so this
+    # is self-policing; registering it above the old level just turns that into
+    # "needs a newer engine". It is deliberately NOT spelled as scf_if + "else":
+    # every older VM ignores unknown keys on scf_if and would drop the else arm.
+    "scf_if_else": 3,
     "ret": 1,
 }
 
