@@ -13,7 +13,7 @@
  *                                                   + rocke_attention_dense_spec_default()
  *   AttentionDenseSpec.__post_init__              rocke_attention_dense_spec_validate()
  *   num_waves / num_queries_per_kv                rocke_attention_dense_spec_num_waves() / ...
- *   resolved_persist_decode (base policy)         rocke_attention_dense_spec_resolved_persist_decode()
+ *   resolved_persist_decode / _nonpersist_decode  rocke_attention_dense_spec_resolved_*_decode()
  *   kernel_name() + the _*_name_parts hooks       rocke_attention_dense_kernel_name()
  *                                                   + rocke_attention_dense_name_parts_t
  *   check_dense_spec_preflight(spec)              rocke_attention_dense_spec_preflight()
@@ -21,8 +21,9 @@
  * SUBCLASS HOOKS. The Python base calls overridable methods on the concrete
  * subclass. The C port passes them in explicitly:
  *   - __post_init__ consults _supports_noncausal_window,
- *     _supports_noncausal_cross_length_ragged and supported_persist_decodes:
- *     rocke_attention_dense_traits_t.
+ *     _supports_noncausal_cross_length_ragged, supported_persist_decodes and
+ *     supported_nonpersist_decodes; the auto decode policies consult
+ *     _aligned_causal: rocke_attention_dense_traits_t.
  *   - kernel_name() consults the _*_name_parts methods:
  *     rocke_attention_dense_name_parts_t, which the concrete spec fills.
  *   - check_dense_spec_preflight re-runs the CONCRETE type's validators:
@@ -129,7 +130,8 @@ typedef struct rocke_attention_dense_traits
     /* supported_nonpersist_decodes(), sorted ascending. */
     const char* const* nonpersist_decodes;
     size_t num_nonpersist_decodes;
-    /* Concrete gfx950 context: nonzero right_bound rejects GQA-pair decodes. */
+    /* gfx950's right_bound != 0. Its _aligned_causal override then turns the
+     * aligned auto decode policies off, and the GQA-pair decodes reject. */
     bool has_right_bound;
 } rocke_attention_dense_traits_t;
 
@@ -151,14 +153,15 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* spe
 int rocke_attention_dense_spec_num_waves(const rocke_attention_dense_spec_t* spec);
 /* @property num_queries_per_kv: num_query_heads // num_kv_heads. */
 int rocke_attention_dense_spec_num_queries_per_kv(const rocke_attention_dense_spec_t* spec);
-/* @property resolved_persist_decode: explicit value, or the base auto policy
- * using causal balance, chiplet locality, and persistent work thresholds. */
-const char*
-    rocke_attention_dense_spec_resolved_persist_decode(const rocke_attention_dense_spec_t* spec);
-/* @property resolved_nonpersist_decode: explicit value, or the base auto
- * policy for the one-CTA-per-work-item grid. */
-const char*
-    rocke_attention_dense_spec_resolved_nonpersist_decode(const rocke_attention_dense_spec_t* spec);
+/* @property resolved_persist_decode: explicit value, or the auto policy using
+ * causal balance, chiplet locality, and persistent work thresholds. traits
+ * supplies the concrete type's _aligned_causal (has_right_bound). */
+const char* rocke_attention_dense_spec_resolved_persist_decode(
+    const rocke_attention_dense_spec_t* spec, const rocke_attention_dense_traits_t* traits);
+/* @property resolved_nonpersist_decode: explicit value, or the auto policy for
+ * the one-CTA-per-work-item grid. traits as above. */
+const char* rocke_attention_dense_spec_resolved_nonpersist_decode(
+    const rocke_attention_dense_spec_t* spec, const rocke_attention_dense_traits_t* traits);
 
 /* The _*_name_parts hooks of kernel_name(), filled by the concrete spec. */
 #define ROCKE_ATTENTION_DENSE_MAX_NAME_PARTS 8
@@ -183,9 +186,9 @@ typedef struct rocke_attention_dense_name_parts
 } rocke_attention_dense_name_parts_t;
 
 /* The base-class name parts: head and shape tokens, no layout or band parts,
- * the lazy-rescale algorithm token, and the resolved persistent/non-persistent
- * decode tags. */
+ * the lazy-rescale algorithm token, and the decode tags resolved under traits. */
 void rocke_attention_dense_name_parts_base(const rocke_attention_dense_spec_t* spec,
+                                           const rocke_attention_dense_traits_t* traits,
                                            rocke_attention_dense_name_parts_t* out);
 
 /* AttentionDenseSpec.kernel_name() with the given hooks, NUL-terminated into

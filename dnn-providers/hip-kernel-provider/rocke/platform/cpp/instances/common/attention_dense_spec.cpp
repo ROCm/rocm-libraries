@@ -605,14 +605,15 @@ int rocke_attention_dense_spec_num_queries_per_kv(const rocke_attention_dense_sp
 }
 
 const char*
-    rocke_attention_dense_spec_resolved_persist_decode(const rocke_attention_dense_spec_t* s)
+    rocke_attention_dense_spec_resolved_persist_decode(const rocke_attention_dense_spec_t* s,
+                                                       const rocke_attention_dense_traits_t* t)
 {
     if(!streq(s->persist_decode, "auto"))
         return s->persist_decode;
 
     const int64_t gqa = dense_gqa(s);
     const int64_t nqb = dense_nqb(s);
-    if(aligned_causal(s, false))
+    if(aligned_causal(s, t->has_right_bound))
     {
         if(s->interleave)
             return "qb_major";
@@ -636,11 +637,12 @@ const char*
 }
 
 const char*
-    rocke_attention_dense_spec_resolved_nonpersist_decode(const rocke_attention_dense_spec_t* s)
+    rocke_attention_dense_spec_resolved_nonpersist_decode(const rocke_attention_dense_spec_t* s,
+                                                          const rocke_attention_dense_traits_t* t)
 {
     if(!streq(s->nonpersist_decode, "auto"))
         return s->nonpersist_decode;
-    if(!aligned_causal(s, false))
+    if(!aligned_causal(s, t->has_right_bound))
         return "qb_minor";
 
     const int64_t nqb = dense_nqb(s);
@@ -655,6 +657,7 @@ const char*
 }
 
 void rocke_attention_dense_name_parts_base(const rocke_attention_dense_spec_t* s,
+                                           const rocke_attention_dense_traits_t* t,
                                            rocke_attention_dense_name_parts_t* out)
 {
     memset(out, 0, sizeof(*out));
@@ -666,11 +669,11 @@ void rocke_attention_dense_name_parts_base(const rocke_attention_dense_spec_t* s
     snprintf(out->persist_decode,
              sizeof(out->persist_decode),
              "%s",
-             persist_decode_tag(rocke_attention_dense_spec_resolved_persist_decode(s)));
+             persist_decode_tag(rocke_attention_dense_spec_resolved_persist_decode(s, t)));
     snprintf(out->nonpersist_decode,
              sizeof(out->nonpersist_decode),
              "%s",
-             nonpersist_decode_tag(rocke_attention_dense_spec_resolved_nonpersist_decode(s)));
+             nonpersist_decode_tag(rocke_attention_dense_spec_resolved_nonpersist_decode(s, t)));
 }
 
 rocke_status_t rocke_attention_dense_kernel_name(const rocke_attention_dense_spec_t* s,

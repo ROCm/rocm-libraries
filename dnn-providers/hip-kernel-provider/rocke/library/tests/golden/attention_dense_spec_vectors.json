@@ -4657,7 +4657,9 @@
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_full_swa128_lazyrs",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major",
+    "resolved_nonpersist_decode": "qb_minor"
    }
   },
   {
@@ -4711,7 +4713,9 @@
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq300_sk500_full_ragged_lazyrs",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major",
+    "resolved_nonpersist_decode": "qb_minor"
    }
   },
   {
@@ -4765,7 +4769,9 @@
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_persist4_gqapair",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "gqa_pair",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -4819,7 +4825,9 @@
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_persist8_gqapair2",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "gqa_pair_2phase",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -4956,7 +4964,9 @@
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_krpad16_vpad16_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -5012,7 +5022,9 @@
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_causal_rb64_lazyrs",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major",
+    "resolved_nonpersist_decode": "qb_minor"
    }
   },
   {
@@ -5068,7 +5080,125 @@
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_rb64_swa256_lazyrs",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major",
+    "resolved_nonpersist_decode": "qb_minor"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 4096,
+    "seqlen_kv": 4096,
+    "num_query_heads": 16,
+    "num_kv_heads": 16,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "decode_context": {
+    "right_bound": 2
+   },
+   "name_parts": {
+    "head_parts": true,
+    "shape_parts": false,
+    "layout": [],
+    "band": [
+     "rb2"
+    ],
+    "algorithm": [
+     "lazyrs"
+    ],
+    "persist_decode": "",
+    "nonpersist_decode": ""
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq16_kv16_bn64_bf16_causal_rb2_lazyrs",
+    "num_waves": 8,
+    "num_queries_per_kv": 1,
+    "resolved_persist_decode": "qb_major",
+    "resolved_nonpersist_decode": "qb_minor"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 4096,
+    "seqlen_kv": 4096,
+    "num_query_heads": 16,
+    "num_kv_heads": 16,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "decode_context": {
+    "right_bound": 2
+   },
+   "name_parts": {
+    "head_parts": true,
+    "shape_parts": true,
+    "layout": [],
+    "band": [
+     "rb2"
+    ],
+    "algorithm": [
+     "lazyrs"
+    ],
+    "persist_decode": "",
+    "nonpersist_decode": ""
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq16_kv16_bn64_bf16_sq4096_sk4096_causal_rb2_lazyrs_persist256",
+    "num_waves": 8,
+    "num_queries_per_kv": 1,
+    "resolved_persist_decode": "qb_major",
+    "resolved_nonpersist_decode": "qb_minor"
    }
   },
   {
@@ -5124,7 +5254,9 @@
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_wdma_wpe1_persist256_bthkvmin",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -5180,7 +5312,9 @@
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_causal_lazyrs_cgdb8f8daf_lse_npbthkvmin",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -5234,7 +5368,9 @@
     "preflight_reason": "batch must be positive, got 0",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -5288,7 +5424,9 @@
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   }
  ]

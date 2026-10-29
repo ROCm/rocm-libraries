@@ -300,22 +300,26 @@ void check_case(const char* table,
 
     if(!want_valid)
         return;
-    rocke_attention_dense_name_parts_t parts;
+    rocke_attention_dense_name_parts_t base_parts;
+    rocke_attention_dense_name_parts_base(&s, &case_traits, &base_parts);
+    rocke_attention_dense_name_parts_t parts = base_parts;
     if(hooked)
+    {
         CHECK(json_name_parts(rocke_jget(c, "name_parts"), &parts));
-    else
-        rocke_attention_dense_name_parts_base(&s, &parts);
+        /* The concrete spec reuses the shared decode tags; only _aligned_causal
+         * (has_right_bound) can move them, so the active grid's tag must match. */
+        if(s.persistent)
+            CHECK_STR(base_parts.persist_decode, parts.persist_decode);
+        else
+            CHECK_STR(base_parts.nonpersist_decode, parts.nonpersist_decode);
+    }
     char name[ROCKE_ATTENTION_DENSE_NAME_CAP];
     CHECK(rocke_attention_dense_kernel_name(&s, &parts, name, sizeof(name)) == ROCKE_OK);
     CHECK_STR(name, rocke_jstr(rocke_jget(expect, "kernel_name")));
-    /* The base auto policies; a subclass's overrides are captured in its name parts. */
-    if(!hooked)
-    {
-        CHECK_STR(rocke_attention_dense_spec_resolved_persist_decode(&s),
-                  rocke_jstr(rocke_jget(expect, "resolved_persist_decode")));
-        CHECK_STR(rocke_attention_dense_spec_resolved_nonpersist_decode(&s),
-                  rocke_jstr(rocke_jget(expect, "resolved_nonpersist_decode")));
-    }
+    CHECK_STR(rocke_attention_dense_spec_resolved_persist_decode(&s, &case_traits),
+              rocke_jstr(rocke_jget(expect, "resolved_persist_decode")));
+    CHECK_STR(rocke_attention_dense_spec_resolved_nonpersist_decode(&s, &case_traits),
+              rocke_jstr(rocke_jget(expect, "resolved_nonpersist_decode")));
     int want_waves = -1;
     int want_qpk = -1;
     CHECK(json_int(rocke_jget(expect, "num_waves"), &want_waves));
@@ -420,8 +424,9 @@ void check_name_buffer_too_small()
     s.num_query_heads = 8;
     s.num_kv_heads = 2;
     s.head_size = 128;
+    const rocke_attention_dense_traits_t base = rocke_attention_dense_traits_base();
     rocke_attention_dense_name_parts_t parts;
-    rocke_attention_dense_name_parts_base(&s, &parts);
+    rocke_attention_dense_name_parts_base(&s, &base, &parts);
     char name[8];
     CHECK(rocke_attention_dense_kernel_name(&s, &parts, name, sizeof(name)) == ROCKE_ERR_VALUE);
     CHECK(rocke_attention_dense_kernel_name(NULL, &parts, name, sizeof(name)) == ROCKE_ERR_VALUE);

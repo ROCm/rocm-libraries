@@ -296,6 +296,29 @@ _HOOK_CASES: tuple[tuple[type, dict], ...] = (
     (_G, dict(lds_k_row_pad=16, lds_v_row_pad=16)),  # layout parts; shape parts off
     (_G, dict(right_bound=64)),  # band part
     (_G, dict(sliding_window=256, right_bound=64)),  # band part with shape parts on
+    # right_bound turns gfx950's _aligned_causal off, so the auto decodes fall
+    # back to qb_major / qb_minor where the base hooks pick bt_hkv_minor.
+    (
+        _G,
+        dict(
+            seqlen_q=4096,
+            seqlen_kv=4096,
+            num_query_heads=16,
+            num_kv_heads=16,
+            right_bound=2,
+        ),
+    ),
+    (
+        _G,
+        dict(
+            persistent=True,
+            seqlen_q=4096,
+            seqlen_kv=4096,
+            num_query_heads=16,
+            num_kv_heads=16,
+            right_bound=2,
+        ),
+    ),
     (_G, dict(persistent=True, num_persistent=256, wide_lds_dma=True, waves_per_eu=1)),
     (_G, dict(emit_lse=True, pv_loop_order="k_major", lazy_rescale_threshold=4.0)),
     (_G, dict(batch=0)),  # preflight reason carries the gfx950 type name
@@ -434,6 +457,8 @@ def _evaluate_hook_case(cls: type, overrides: dict) -> dict:
     }
     if expect["valid"]:
         case["name_parts"] = _name_parts(spec)
+        expect["resolved_persist_decode"] = spec.resolved_persist_decode
+        expect["resolved_nonpersist_decode"] = spec.resolved_nonpersist_decode
     case["expect"] = expect
     return case
 
@@ -575,6 +600,18 @@ def test_hook_cases_exercise_every_hook():
         s["ragged"] and not s["causal"] and s["seqlen_q"] != s["seqlen_kv"]
         for s in specs
     )
+    # gfx950's _aligned_causal override must move an auto decode on each grid,
+    # or a port that ignores has_right_bound still passes.
+    for persistent, key in (
+        (True, "resolved_persist_decode"),
+        (False, "resolved_nonpersist_decode"),
+    ):
+        assert any(
+            c["spec"]["persistent"] == persistent
+            and c["expect"][key]
+            != getattr(_unchecked(AttentionDenseSpec, c["spec"]), key)
+            for c in named
+        ), key
 
 
 if __name__ == "__main__":
