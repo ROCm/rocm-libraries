@@ -833,6 +833,12 @@ def collect_sweep_units(
                 "the harness skips it, so it never runs",
             )
             continue
+        # A probe (RFC 0022 §9) exercises a value no engine claims, or an undefined
+        # graph a correct engine rejects: it is in neither the numerator nor the
+        # denominator, and support matrices exclude it. Checked after the defect
+        # checks above, so a broken probe is still reported.
+        if (case.get("metadata") or {}).get("purpose") == "probe":
+            continue
 
         layout = layout_from_name(case_id) or layout_from_strides(graph) or NO_LAYOUT
         unit = ClaimUnit(
