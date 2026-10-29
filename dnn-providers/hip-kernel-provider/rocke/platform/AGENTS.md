@@ -443,13 +443,28 @@ dense square atoms (`InterleavedStyle`); `c_transpose`, sparse, and MX remain re
 
 ## helpers/ placement
 
-**Default: write helpers as you write the kernel.** The `build_*()` body names
-what is special about the op (spec, tile shape, atom, descriptor) and calls
-helpers for the rest. When a block of IR repeats, or hides index math, lane
-maps, layout, masking, or a pipeline stage, make it a named helper in the same
-PR. This holds for a brand-new kernel or family too, even when only that family
-uses the helper today. Raw `IRBuilder` calls in the kernel body are for short,
-one-off glue between helper calls.
+This section is the one home of the helpers rule; other docs point here.
+
+**Default: reuse, write, fix, all in the kernel's PR.** The `build_*()` body
+names what is special about the op (spec, tile shape, atom, descriptor) and
+calls helpers for the rest. Raw `IRBuilder` calls in the kernel body are for
+short, one-off glue between helper calls.
+
+1. **Use what is there.** Check `helpers/` and the family modules
+   (`_<family>_*.py`) before writing new IR. Extend a helper rather than copy it.
+2. **Write what is missing, with a test.** IR that repeats, or hides index
+   math, lane maps, layout, masking, or a pipeline stage, becomes a named
+   helper in the same PR. A brand-new family, a single kernel, or addressing
+   specific to one op's layout is not a reason to stay in raw IR: the helper
+   goes in that family's module even if nothing else uses it yet. A host-only
+   helper gets a unit test (e.g. `tests/test_helpers_spec.py`,
+   `library/tests/test_attention_bwd_shared_helpers.py`); an SSA helper is
+   covered by the parity pair, golden, and numeric test of the kernel that
+   uses it.
+3. **Fix what is broken, with a regression test.** If a helper is wrong or
+   does not fit, fix the helper, not a workaround in the kernel. Add a test
+   that fails without the fix. A fix that changes emission is mirrored in C++
+   and re-blesses the affected goldens (KERNEL_AUTHORING.md Process F).
 
 ### Where a new helper goes
 

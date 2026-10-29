@@ -125,12 +125,9 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
 
 - [ ] Spec-driven `build_*()` builder (no one-off scripts); reuse existing
       helpers/atoms first.
-- [ ] **New helpers for what is missing.** Logic no existing helper covers
-      (repeated IR, index math, lane maps, layout, masking, pipeline stages)
-      becomes a named helper in this change, mirrored in C++ like the kernel.
-      The `build_*()` body reads as a skeleton of helper calls, not long runs
-      of raw `IRBuilder` calls. Placement:
-      [platform/AGENTS.md](platform/AGENTS.md#helpers-placement).
+- [ ] **Helpers: write the missing ones, fix the broken ones, each with a
+      test, in this change.** A new family is not a reason to stay in raw
+      `IRBuilder` code. Rule: [platform/AGENTS.md](platform/AGENTS.md#helpers-placement).
 - [ ] **C engine mirror** in the same change (byte-identity).
 - [ ] `.py`/`.c` parity pair added under `tests/parity/` (auto-picked up by the
       runner).
@@ -262,16 +259,14 @@ scoped to library.
 2. **Reuse first, then write what is missing.** Grep [library/kernels/common/](library/kernels/common/) and
    [platform/python/rocke/helpers/](platform/python/rocke/helpers/) for an existing emitter,
    epilogue, atom, or loader before writing new SSA. Extend, don't duplicate.
-   Logic that nothing covers becomes a new helper in a family module
-   (`library/kernels/common/_<family>_*.py`), even if only this family uses it
-   today. Its C++ mirror lands with the kernel's, so the mirror is not a reason
-   to inline it.
+   What nothing covers becomes a new helper in
+   `library/kernels/common/_<family>_*.py`, with a test; a broken helper is
+   fixed where it lives, with a regression test. Rule:
+   [platform/AGENTS.md](platform/AGENTS.md#helpers-placement).
 3. **Author the spec + `build_*()` emitter** under [library/kernels/](library/kernels/) as a
    spec-driven builder (a dataclass `Spec` with a `__post_init__` validator +
    `build_<family>()` returning a `KernelDef`). No one-off scripts —
    [AGENTS.md](platform/AGENTS.md) requires reusable spec-driven builders.
-   The `build_<family>()` body calls helpers; raw `IRBuilder` calls are for
-   short glue between them.
 4. **Wire dispatch.** Register the candidate in `ATTENTION_ROUTE_REGISTRY` in
    [library/dispatch/attention/](library/dispatch/attention/) and, if it has
    `build` + `bind_torch`, in `ATTENTION_EXECUTION_REGISTRY` too so the sweeps
