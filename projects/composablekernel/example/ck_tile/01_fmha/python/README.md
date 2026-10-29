@@ -5,7 +5,7 @@ It supports FP16/BF16 fixed-length and variable-length attention, packed inputs,
 forward/backward, MHA/GQA/MQA, causal/local masks, ALiBi, dropout, deterministic
 backward, and KV-cache operations, subject to CK backend restrictions.
 
-Validated on **gfx950 and gfx1250**. Nonzero `softcap`, attention sinks, and unequal Q/V
+Validated on **gfx942, gfx950 and gfx1250**. Nonzero `softcap`, attention sinks, and unequal Q/V
 head dimensions are unsupported. The package can coexist with `flash_attn` and
 does not fall back to other backends.
 
@@ -21,7 +21,7 @@ From this directory:
 MAX_JOBS=64 python -m pip install --no-build-isolation '.[test]'
 ```
 
-`GPU_ARCHS` defaults to the detected GPU; set `gfx950` or `gfx1250` for cross-compilation.
+`GPU_ARCHS` defaults to the detected GPU; set `gfx942`, `gfx950` or `gfx1250` for cross-compilation.
 `CK_ROOT` selects an alternate CK checkout. The build uses the C++ example's
 architecture-specific kernels with receipt 5, which generates only the variants
 needed by the current Python API, including bias and deterministic backward.
@@ -87,8 +87,10 @@ Descales are FP32 tensors on the same GPU; dequantization is `input.float() * de
 from ck_tile_fmha import fmha_fp8_func
 
 def quantize_pertensor(x):
-    descale = x.float().abs().amax().clamp_min(1e-12) / 448.0
-    quantized = (x.float() / descale).to(torch.float8_e4m3fn)
+    arch = torch.cuda.get_device_properties(x.device).gcnArchName
+    dtype = torch.float8_e4m3fnuz if arch.startswith("gfx94") else torch.float8_e4m3fn
+    descale = x.float().abs().amax().clamp_min(1e-12) / torch.finfo(dtype).max
+    quantized = (x.float() / descale).to(dtype)
     return quantized, descale
 
 q8, qs = quantize_pertensor(q.detach())
@@ -105,6 +107,8 @@ are not exposed. `return_lse=True` returns `(out, lse)` with FP32 LSE
 - **gfx950:** no-scale, per-tensor and block-scale, head dimensions <= 256.
   LSE requires no-scale/per-tensor, head dimension 128 and no/causal mask.
   Per-head is unsupported.
+- **gfx942:** no-scale, per-tensor and block-scale, head dimensions <= 256.
+  Per-head and LSE are unsupported.
 
 Block sizes default to 128 and must satisfy the kernel's tile alignment. Block
 scales require a contiguous last dimension. On gfx1250, **blockscale V descales

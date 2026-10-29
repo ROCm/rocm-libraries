@@ -64,6 +64,16 @@ foreach(flag IN ITEMS "-fno-offload-uniform-block" "-mllvm --lsr-drop-solution=1
 endforeach()
 
 add_subdirectory("${CK_ROOT}/example/ck_tile/01_fmha" "fmha")
+
+# Match PyTorch and backward's BF16 rounding without changing the C++ example defaults.
+get_target_property(fwd_sources tile_fmha_fwd_instances SOURCES)
+foreach(source IN LISTS fwd_sources)
+  if(source MATCHES "_gfx9[^/]*\\.cpp$")
+    set_property(SOURCE "${source}" TARGET_DIRECTORY tile_fmha_fwd_instances
+      APPEND PROPERTY COMPILE_DEFINITIONS CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3)
+  endif()
+endforeach()
+
 add_library(ck_tile_fmha_kernels STATIC
   $<TARGET_OBJECTS:tile_fmha_fwd_instances>
   $<TARGET_OBJECTS:tile_fmha_bwd_instances>)
