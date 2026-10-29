@@ -82,7 +82,7 @@ try
     // break up large batch_count into multiple invocations, each with
     // batch_count no larger than max_batch_count
     rocblas_int const max_batch_count = 64 * 1024 - 1;
-    rocblas_int const nsweep = ceildiv(batch_count_arg, max_batch_count);
+    rocblas_int const nsweep = ceildiv(batch_count_arg, MAX_BATCH_COUNT);
     rocblas_int const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
     // memory workspace sizes:
