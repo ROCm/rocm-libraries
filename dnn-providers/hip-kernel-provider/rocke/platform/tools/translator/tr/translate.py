@@ -59,6 +59,9 @@ class Result:
         # what tr.abi refused to put in the generated header (--abi only):
         # name -> reason; the header lacks each of them
         self.abi_refused: dict[str, str] = {}
+        # typedef names the source would see defined twice, differently (two
+        # headers it needs define them): name -> why; the source cannot compile
+        self.include_conflicts: dict[str, str] = {}
         self.code = ""
 
 
@@ -95,6 +98,11 @@ def summary(functions: list[dict], abi_refused: dict | None = None) -> str:
 def refusal_line(name: str, why: str) -> str:
     """One ABI refusal's --analyze line."""
     return f"refused    {name} (not exported: {why})"
+
+
+def conflict_line(name: str, why: str) -> str:
+    """One include conflict's --analyze line (Result.include_conflicts)."""
+    return f"conflict   {name} ({why})"
 
 
 def report_line(f: dict) -> str:
@@ -1705,15 +1713,14 @@ def translate(modname: str, rocke: str, abi_dir: str | None = None) -> Result:
     # rocKE headers the code needs, each once: the header of every function it
     # calls and of every type of another header it names (a twin struct held by
     # value in a private struct, rocke_gemm_tile_spec_t); a function several
-    # headers declare (rocke_kernel_name_join) needs only one of them
-    incs = set()
+    # headers declare (rocke_kernel_name_join) needs only one of them. A type
+    # several headers define (rocke_tensor_descriptor_t: tensor_view.h and
+    # transforms.h, two different structs) comes from the header of the
+    # functions the code calls with it; two different definitions of one name
+    # are never included together (res.include_conflicts instead).
     skip = ("ir.h", "ir_internal.h", "error.hpp", header)
     type_text = "\n".join(struct_lines) + "\n" + joined
-    for t in set(re.findall(r"\b(rocke_\w+_t)\b", type_text)):
-        f = env.headers.typedef_file.get(t)
-        if f is not None and f not in skip:
-            if header is None or not _includes(env, header, f):
-                incs.add(f)
+    incs = set()
     several = []
     for fname in dict.fromkeys(re.findall(r"\b(rocke_\w+)\(", joined)):
         f = env.headers.funcs.get(fname)
@@ -1724,9 +1731,40 @@ def translate(modname: str, rocke: str, abi_dir: str | None = None) -> Result:
             several.append(files)
         elif f.file not in skip:
             incs.add(f.file)
+    shared = []
+    for t in sorted(set(re.findall(r"\b(rocke_\w+_t)\b", type_text))):
+        files = env.headers.typedef_files.get(t) or []
+        if len(files) > 1:
+            shared.append((t, files))
+            continue
+        f = env.headers.typedef_file.get(t)
+        if f is not None and f not in skip:
+            if header is None or not _includes(env, header, f):
+                incs.add(f)
+    for t, files in shared:
+        have = _closure(env, [x for x in skip if x] + sorted(incs))
+        bodies = env.headers.typedef_bodies.get(t, {})
+        if files[0] in have:
+            if files[0] not in skip and (
+                header is None or not _includes(env, header, files[0])
+            ):
+                incs.add(files[0])
+            continue
+        if any(x in have and (x in bodies or not bodies) for x in files):
+            continue  # a header the code needs already brings its definition
+        ok = [x for x in files if not _adds_conflict(env, have, x)]
+        ok.sort(key=lambda x: x not in bodies)  # a definition over a declaration
+        incs.add((ok or files)[0])  # none fits: the conflict is reported below
     for files in several:
         if not any(x in incs or x in skip for x in files):
-            incs.add(files[0])
+            have = _closure(env, [x for x in skip if x] + sorted(incs))
+            ok = [x for x in files if not _adds_conflict(env, have, x)]
+            incs.add((ok or files)[0])
+    res.include_conflicts = _conflicts(
+        env, _closure(env, [x for x in skip if x] + sorted(incs))
+    )
+    for name, why in res.include_conflicts.items():
+        lines.append(f'#error "include conflict: {name}: {why}"')
     for inc in sorted(incs):
         if f'#include "rocke/{inc}"' not in lines:
             lines.append(f'#include "rocke/{inc}"')
@@ -1828,6 +1866,48 @@ def used_internals(internals: list[list[str]], outside: list[str]) -> list[list[
         keep, names = [b for b, _ in pairs], [n for _, n in pairs]
 
 
+def _closure(env: Env, headers: list) -> set:
+    """The rocKE headers a source including each of headers sees: those and
+    every rocke/ header they include, directly or not."""
+    out = set()
+    todo = [h for h in headers if h]
+    while todo:
+        h = todo.pop()
+        if h in out or h not in env.headers.paths:
+            continue
+        out.add(h)
+        text = open(env.headers.paths[h]).read()
+        todo += re.findall(r'^\s*#\s*include\s+"rocke/([^"]+)"', text, re.M)
+    return out
+
+
+def _norm_c(text: str) -> str:
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    text = re.sub(r"//[^\n]*", "", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _conflicts(env: Env, files: set) -> dict[str, str]:
+    """Typedef names that two of the headers files define with different
+    bodies (a source that sees both cannot compile): name -> why."""
+    out = {}
+    for name, bodies in sorted(env.headers.typedef_bodies.items()):
+        seen = {f: _norm_c(b) for f, b in bodies.items() if f in files}
+        if len(set(seen.values())) > 1:
+            out[name] = (
+                f"defined differently in {' and '.join(sorted(seen))}, and the"
+                " source needs both: include one"
+            )
+    return out
+
+
+def _adds_conflict(env: Env, have: set, inc: str) -> bool:
+    """Including inc next to the headers have would define a name twice."""
+    return bool(
+        set(_conflicts(env, have | _closure(env, [inc]))) - set(_conflicts(env, have))
+    )
+
+
 def _includes(env: Env, header: str, other: str, seen=None) -> bool:
     """header includes rocke/<other>, directly or through the headers it includes."""
     seen = set() if seen is None else seen
@@ -1913,6 +1993,8 @@ def main(argv=None) -> int:
         print(f"clone-{c['status']:4} {c['name']}@{c['host']}{extra}")
     for name, why in res.abi_refused.items():
         print(refusal_line(name, why))
+    for name, why in res.include_conflicts.items():
+        print(conflict_line(name, why))
     print(summary(res.functions, res.abi_refused))
     if a.report:
         json.dump(res.functions, open(a.report, "w"), indent=1)
@@ -1923,7 +2005,8 @@ def main(argv=None) -> int:
         open(a.out, "w").write(code)
     else:
         sys.stdout.write(code)
-    return 0 if not any(f["status"] == "hole" for f in res.functions) else 1
+    left = any(f["status"] == "hole" for f in res.functions)
+    return 1 if left or res.include_conflicts else 0
 
 
 if __name__ == "__main__":

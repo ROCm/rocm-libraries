@@ -173,6 +173,13 @@ headers) are removed on exit.
    `tr.abi` prints them as `not exported: ...`. While any is left the header
    is incomplete, even with no hole. `tr.regen` prints the same summary per
    module and lists the refusals.
+   An include conflict is listed as `conflict <type> (...)`: two headers the
+   source needs (it calls functions of each) define that type differently,
+   so no source including both compiles. When a type is defined in several
+   headers, the source includes the one of the functions it calls with it,
+   never two different definitions. A conflict is left to you (change the
+   headers or which functions the code calls); `tr.translate` exits 1 and
+   `tr.regen` writes nothing while one is open.
    `TR_DEBUG=1` adds tracebacks for internal errors.
 3. Fill only the holes it reports (next section).
 4. Run `tr.regen`, then the gate.

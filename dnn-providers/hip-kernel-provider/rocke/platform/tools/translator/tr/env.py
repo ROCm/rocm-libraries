@@ -179,6 +179,12 @@ class Headers:
         self.file_of: dict[str, str] = {}
         self.fnptrs: dict[str, tuple] = {}  # typedef name -> (ret, [(ctype, name)])
         self.typedef_file: dict[str, str] = {}  # typedef name -> header defining it
+        # typedef name -> every header that typedefs it (rocke_tensor_descriptor_t
+        # is in helper_rocke.helpers.tensor_view.h and .transforms.h), and
+        # -> {header: its text} for the ones that define the type with a body
+        # (two different bodies cannot both be included)
+        self.typedef_files: dict[str, list[str]] = {}
+        self.typedef_bodies: dict[str, dict[str, str]] = {}
         self.decl_text: dict[str, str] = (
             {}
         )  # function prototype / typedef / macro / inline -> its source text
@@ -244,6 +250,11 @@ class Headers:
                 elif s.kind == "typedef":
                     typedef_ranges.append(s)
                     self.typedef_file.setdefault(s.name, fn)
+                    if fn not in self.typedef_files.setdefault(s.name, []):
+                        self.typedef_files[s.name].append(fn)
+                    tdef = "\n".join(text[s.line - 1 : max(s.end_line, s.line)])
+                    if "{" in tdef:
+                        self.typedef_bodies.setdefault(s.name, {})[fn] = tdef
                     self.decl_text.setdefault(
                         s.name, "\n".join(text[s.line - 1 : max(s.end_line, s.line)])
                     )

@@ -180,12 +180,14 @@ def regen(a, scratch: list) -> int:
     out = {}
     holes = []
     refused = []
+    conflicts = []
     for m in a.modules:
         res = translate(m, rocke, abi_dir)
         left = [f for f in res.functions if f["status"] == "hole"]
         print(f"{m}: {summary(res.functions, res.abi_refused)}")
         refused += [f"  {m}: {n} ({w})" for n, w in res.abi_refused.items()]
         holes += [f"  {m}: {f['name']} ({f['reason']} at line {f['at']})" for f in left]
+        conflicts += [f"  {m}: {n} ({w})" for n, w in res.include_conflicts.items()]
         out[m] = clang_format(res.code, rocke)
     if refused:
         print(
@@ -198,6 +200,12 @@ def regen(a, scratch: list) -> int:
         print("\n".join(holes))
         if hand_abi and not a.hand_abi:
             print("headers were picked automatically; try --generated-abi")
+    if conflicts:
+        # two headers the source needs define one name differently: it cannot
+        # compile whatever is filled; the headers (or the calls) must change
+        print("include conflicts (resolve them in the headers or the calls); nothing written:")
+        print("\n".join(conflicts))
+    if holes or conflicts:
         return 1
 
     # support headers the sources include from their own directory
