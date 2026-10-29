@@ -135,12 +135,12 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
         return errorCode;
     }
 
-    double alphaD;
+    double alphaD{};
     if(alpha != nullptr)
     {
         alphaD = hiptensor::readVal<double>(alpha, hiptensor::convertToComputeType(typeScalar));
     }
-    double gammaD;
+    double gammaD{};
     if(gamma != nullptr)
     {
         gammaD = hiptensor::readVal<double>(gamma, hiptensor::convertToComputeType(typeScalar));

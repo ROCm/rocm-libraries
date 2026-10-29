@@ -42,7 +42,7 @@ hiptensorStatus_t hiptensorElementwisePermuteReference(const void*              
     const int32_t dim       = descA->mLengths.size();
     auto&         instances = hiptensor::ElementwiseCpuReferenceInstances::instance();
 
-    double alphaD;
+    double alphaD{};
     if(alpha != nullptr)
     {
         alphaD = hiptensor::readVal<double>(alpha, hiptensor::convertToComputeType(typeScalar));
@@ -98,12 +98,12 @@ hiptensorStatus_t hiptensorElementwiseBinaryOpReference(const void*             
     const int32_t dim       = descA->mLengths.size();
     auto&         instances = hiptensor::ElementwiseCpuReferenceInstances::instance();
 
-    double alphaD;
+    double alphaD{};
     if(alpha != nullptr)
     {
         alphaD = hiptensor::readVal<double>(alpha, hiptensor::convertToComputeType(typeScalar));
     }
-    double gammaD;
+    double gammaD{};
     if(gamma != nullptr)
     {
         gammaD = hiptensor::readVal<double>(gamma, hiptensor::convertToComputeType(typeScalar));
@@ -167,17 +167,17 @@ hiptensorStatus_t hiptensorElementwiseTrinaryOpReference(const void*            
     const int32_t dim       = descA->mLengths.size();
     auto&         instances = hiptensor::ElementwiseCpuReferenceInstances::instance();
 
-    double alphaD;
+    double alphaD{};
     if(alpha != nullptr)
     {
         alphaD = hiptensor::readVal<double>(alpha, hiptensor::convertToComputeType(typeScalar));
     }
-    double betaD;
+    double betaD{};
     if(beta != nullptr)
     {
         betaD = hiptensor::readVal<double>(beta, hiptensor::convertToComputeType(typeScalar));
     }
-    double gammaD;
+    double gammaD{};
     if(gamma != nullptr)
     {
         gammaD = hiptensor::readVal<double>(gamma, hiptensor::convertToComputeType(typeScalar));
