@@ -15,16 +15,16 @@ Every case ends as `pass`, `fail`, `crash`, `not-run`, `declined` (hipDNN has no
 
 ## CPU tests
 
-Needs `aotriton/requirements.txt`. From `tools/sdpa_conformance/`:
+These tests are not registered with CTest and are not part of hipDNN's test categories or CI: they
+need torch, pytest-xdist and numpy (`aotriton/requirements.txt`), which hipDNN's builds do not
+require. Run them by hand from `tools/sdpa_conformance/`:
 
 ```
 python -m pytest aotriton/tests          # plugin, shim, reference forward, reconcile, runner
-python -m pytest tests -m 'not gpu'      # hipdnn_sdpa
-python aotriton/sync.py --check          # vendored files and collection counts (~5 min; manual)
+python -m pytest tests -m 'not gpu'      # hipdnn_sdpa (graph tests need hipdnn_frontend importable)
+python aotriton/sync.py --check --no-collect   # vendored files unchanged (hashes)
+python aotriton/sync.py --check          # plus collection counts per FOR_RELEASE level (~5 min)
 ```
-
-`HIPDNN_ENABLE_SDPA_CONFORMANCE_TESTS=ON` registers the first two and a hash-only vendor check
-(`sync.py --check --no-collect`) with CTest (`hipdnn_sdpa_conformance_*`).
 
 ## GPU run
 

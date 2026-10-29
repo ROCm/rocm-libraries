@@ -2,7 +2,7 @@
 
 AOTriton's SDPA pytest suite, copied byte-identical, with `aotriton_flash.py` replaced by a
 hipDNN-backed shim (`shim/aotriton_flash.py`). `vendor.lock.json` records the sha256 of every
-file; `sync.py --check` verifies it. CTest runs only the hash check (`--check --no-collect`); the
+file; `sync.py --check` verifies it. `--check --no-collect` checks hashes only; the
 collection counts are a manual `sync.py --check` (about 5 minutes), and runs compare counts via `collected.txt`.
 
 | | |
