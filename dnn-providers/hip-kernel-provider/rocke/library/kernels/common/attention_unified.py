@@ -1775,6 +1775,9 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         # The builder derives the scalar-state / mask / skip-qreg / fast-paged-KV
         # spec fields from the combo predicate, which reads max_seqlen_q.
         _enable_combo_2d(problem, arch),
+        # Bakes the 64/8 head geometry, which the heads entry above does not
+        # carry when the counts are kernargs.
+        _enable_fast_paged_kv_desc(problem, arch),
         # sched_barrier is implied by _enable_v_double_buffer, which is already
         # in the key above.
         single_batch_sched,
@@ -2899,6 +2902,25 @@ def _enable_transposed_subflags(problem: UnifiedAttentionProblem, arch: str) -> 
     if problem.softcap > 0 or _has_score_bias(problem):
         return False
     return _enable_transposed_qk_32x32(problem, arch)
+
+
+def _enable_fast_paged_kv_desc(problem: UnifiedAttentionProblem, arch: str) -> bool:
+    """The fast multi-block paged-KV descriptor of the no-window bf16 2D combo.
+
+    Its loader bakes the h64kv8 bf16 T=64 geometry (the spec validator pins it),
+    so it is on only for exactly that head pair. The head counts are kernargs
+    and the cache key carries only their ratio, so the key carries this flag
+    too: a 32/4 problem at the same ratio must not reuse a 64/8 fast binary.
+    """
+    return (
+        _enable_combo_2d(problem, arch)
+        and problem.sliding_window == 0
+        and problem.dtype == "bf16"
+        and not problem.use_fp8
+        and problem.num_query_heads == 64
+        and problem.num_kv_heads == 8
+        and _select_2d_tile_size(problem, arch) == 64
+    )
 
 
 # Largest paged KV cache, in bytes, that i32 addressing reads correctly on the

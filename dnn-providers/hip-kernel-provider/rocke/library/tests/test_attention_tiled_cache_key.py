@@ -575,6 +575,71 @@ _SHARED_PAIRS = [
         P(total_q=4, num_seqs=4, sliding_window=256, **_D128_DECODE),
         P(total_q=4, num_seqs=4, sliding_window=4096, **_D128_DECODE),
     ),
+    # gfx950 reads the head counts as kernargs, so head pairs at one GQA ratio
+    # share a binary. 32/4 and 16/2 stay off the 64/8 fast paged-KV descriptor.
+    (
+        "gfx950-2d-h32kv4-vs-h16kv2",
+        "gfx950",
+        "2d",
+        P(
+            total_q=2048,
+            num_seqs=2,
+            max_seqlen_q=1024,
+            max_seqlen_k=1024,
+            **dict(_D64_GQA8, num_query_heads=32, num_kv_heads=4),
+        ),
+        P(
+            total_q=2048,
+            num_seqs=2,
+            max_seqlen_q=1024,
+            max_seqlen_k=1024,
+            **dict(_D64_GQA8, num_query_heads=16, num_kv_heads=2),
+        ),
+    ),
+    (
+        "gfx950-2d-single-batch-h32kv8-vs-h64kv16",
+        "gfx950",
+        "2d",
+        P(total_q=4096, num_seqs=1, **_D128_SB_FP16),
+        P(
+            total_q=4096,
+            num_seqs=1,
+            **dict(_D128_SB_FP16, num_query_heads=64, num_kv_heads=16),
+        ),
+    ),
+    (
+        "gfx950-2d-d256-h16kv2-vs-h32kv4",
+        "gfx950",
+        "2d",
+        P(total_q=2 * 4096, num_seqs=2, **_D256_4WARP),
+        P(
+            total_q=2 * 4096,
+            num_seqs=2,
+            **dict(_D256_4WARP, num_query_heads=32, num_kv_heads=4),
+        ),
+    ),
+    (
+        "gfx950-3d-prefill-h32kv8-vs-h64kv16",
+        "gfx950",
+        "3d",
+        P(total_q=6, num_seqs=3, **_D128_TWO_TOKENS),
+        P(
+            total_q=6,
+            num_seqs=3,
+            **dict(_D128_TWO_TOKENS, num_query_heads=64, num_kv_heads=16),
+        ),
+    ),
+    (
+        "gfx950-3d-decode-h32kv8-vs-h64kv16",
+        "gfx950",
+        "3d",
+        P(total_q=31, num_seqs=31, **_D128_DECODE),
+        P(
+            total_q=31,
+            num_seqs=31,
+            **dict(_D128_DECODE, num_query_heads=64, num_kv_heads=16),
+        ),
+    ),
     # gfx942 reads the search trip count from num_seqs at runtime, so batch
     # sizes several log2 buckets apart share a binary on every builder route.
     (
@@ -728,6 +793,19 @@ def test_same_outputs_share_key_and_ir(routing_env, arch, path, a, b, flavor):
     assert lower(a, arch, flavor) == lower(b, arch, flavor)
 
 
+def test_fast_paged_kv_desc_splits_head_pairs_at_one_ratio(routing_env):
+    # The gfx950 fast paged-KV descriptor bakes the 64/8 head geometry. The key
+    # carries only the GQA ratio, so it must carry the fast-desc flag too: a
+    # 32/4 problem at ratio 8 must not reuse the 64/8 fast binary.
+    arch = "gfx950"
+    base = dict(total_q=2048, num_seqs=2, max_seqlen_q=1024, max_seqlen_k=1024)
+    a = P(**base, **_D64_GQA8)
+    b = P(**base, **dict(_D64_GQA8, num_query_heads=32, num_kv_heads=4))
+    assert au._tiled_spec_from_problem(a, arch).use_fast_paged_kv_desc
+    assert not au._tiled_spec_from_problem(b, arch).use_fast_paged_kv_desc
+    assert au._tiled_cache_key(a, arch) != au._tiled_cache_key(b, arch)
+
+
 # ---------------------------------------------------------------------------
 # Launch geometry still separates batch counts
 # ---------------------------------------------------------------------------
@@ -758,12 +836,14 @@ def test_launch_meta_separates_num_seqs_under_one_key(routing_env):
     assert grid_b[1] - grid_a[1] == b.num_seqs - a.num_seqs
 
 
-def test_launch_geometry_separates_head_counts_under_one_key(routing_env):
-    # gfx942 reads the head counts as kernargs, so one binary serves 32/8 and
-    # 64/16. The 2D grid spans the kv heads and the 3D workspace the query
-    # heads, so with equal token and sequence counts the launch caches must
-    # still tell them apart.
-    arch = "gfx942"
+@pytest.mark.parametrize("arch,num_cus", [("gfx942", 304), ("gfx950", 256)])
+def test_launch_geometry_separates_head_counts_under_one_key(
+    routing_env, arch, num_cus
+):
+    # gfx942 and gfx950 read the head counts as kernargs, so one binary serves
+    # 32/8 and 64/16. The 2D grid spans the kv heads and the 3D workspace the
+    # query heads, so with equal token and sequence counts the launch caches
+    # must still tell them apart.
     base = dict(
         total_q=1025,
         num_seqs=1,
@@ -772,7 +852,7 @@ def test_launch_geometry_separates_head_counts_under_one_key(routing_env):
         max_seqlen_q=1025,
         max_seqlen_k=1025,
         dtype="bf16",
-        num_cus=304,
+        num_cus=num_cus,
     )
     a = P(num_query_heads=32, num_kv_heads=8, **base)
     b = P(num_query_heads=64, num_kv_heads=16, **base)

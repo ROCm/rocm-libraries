@@ -88,16 +88,20 @@ static int rocke__wave_bytes(const rocke_gfx950_attn2d_build_ctx_t* ctx)
     return ctx->WAVE * 16;
 }
 
-/* kv_block_bytes_c value = BS * NUM_KV * HD * KV_BYTES (one-block buffer bound,
- * Python 1458). Python creates this const ONCE and reuses it in every loader;
- * cache it on ctx so we do not allocate a duplicate const per loader (which would
- * shift downstream %values). */
+/* kv_block_bytes_c = kv_stride_blk_b (one-block buffer bound). Python derives
+ * the token and block strides ONCE and reuses them in every loader; cache them
+ * on ctx so we do not emit a duplicate multiply per loader (which would shift
+ * downstream %values). */
 static rocke_value_t* rocke__kv_block_bytes_c(rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
     if(ctx->kv_block_bytes_c_v == NULL)
     {
-        int kv_stride_blk_b = ctx->BS * ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
-        ctx->kv_block_bytes_c_v = rocke_b_const_i32(ctx->b, kv_stride_blk_b);
+        /* The token and block strides scale with the runtime kv head count. */
+        ctx->kv_stride_tok_b_v = rocke_b_mul(
+            ctx->b, ctx->num_kv_p, rocke_b_const_i32(ctx->b, ctx->HD * ctx->KV_BYTES));
+        ctx->kv_stride_blk_b_v
+            = rocke_b_mul(ctx->b, ctx->kv_stride_tok_b_v, rocke_b_const_i32(ctx->b, ctx->BS));
+        ctx->kv_block_bytes_c_v = ctx->kv_stride_blk_b_v;
     }
     return ctx->kv_block_bytes_c_v;
 }
@@ -198,9 +202,9 @@ void rocke_gfx950_attn2d_emit_preloop(rocke_gfx950_attn2d_build_ctx_t* ctx)
         (void)((ctx->T * ctx->HD) % kv_halves_per_call);
     }
 
-    /* kv_block_bytes_c (1458): Python creates this one-block-bound const here,
-     * after the byte-stride derivation and BEFORE lane_half_base, and reuses it
-     * in every loader. Emit it now so its SSA value lands in source order. */
+    /* kv_block_bytes_c (1458): Python derives the byte strides and this
+     * one-block bound here, BEFORE lane_half_base, and reuses them in every
+     * loader. Emit them now so their SSA values land in source order. */
     (void)rocke__kv_block_bytes_c(ctx);
 
     /* Per-lane starting half index (1460), then K/V LDS base ptrtoints (1462-
@@ -243,18 +247,16 @@ void rocke_gfx950_attn2d_emit_preloop(rocke_gfx950_attn2d_build_ctx_t* ctx)
     }
 
     /* ---- Paged KV byte descriptor (full transform DAG, 1591-1629) ----
-     * _kv_base = naive("paged_kv_bytes",
-     *     lengths=[1<<24, BS, NUM_KV, HD],
-     *     strides=[kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES],
-     *     coord_names=("physical_block","token","kv_head","dim")). */
-    int blk_b = ctx->BS * ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
-    int tok_b = ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
-    int h_b = ctx->HD * ctx->KV_BYTES;
-    int kv_lengths[4] = {1 << 24, ctx->BS, ctx->NUM_KV, ctx->HD};
-    int kv_strides[4] = {blk_b, tok_b, h_b, ctx->KV_BYTES};
+     * _kv_base = DynamicTensorDescriptor.create("paged_kv_bytes",
+     *     coord_names=("physical_block","token","kv_head","dim"),
+     *     strides=(kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES)),
+     * the first two the runtime strides derived above. */
+    int kv_strides[4] = {1, 1, ctx->HD * ctx->KV_BYTES, ctx->KV_BYTES};
+    rocke_value_t* kv_dyn[4] = {ctx->kv_stride_blk_b_v, ctx->kv_stride_tok_b_v, NULL, NULL};
     static const char* const kv_coords[4] = {"physical_block", "token", "kv_head", "dim"};
-    rocke_tensor_descriptor_t* kv_base = rocke_tensor_descriptor_naive(
-        b, "paged_kv_bytes", kv_lengths, 4, kv_strides, kv_coords, 4);
+    rocke_tensor_descriptor_t* kv_base = &rocke_tensor_descriptor_naive_dynamic_mixed(
+                                              b, "paged_kv_bytes", kv_coords, 4, kv_dyn, kv_strides)
+                                              ->base;
 
     /* Single-block tile (N_BLOCKS_PER_TILE == 1, T == BS):
      *   indirect(tile_idx -> physical_block) ; unmerge(linear_half -> token,dim).

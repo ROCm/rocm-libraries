@@ -78,7 +78,13 @@ from rocke.helpers.attention import (
 )
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
-from rocke.helpers.transforms import TensorDescriptor, embed, indirect, unmerge
+from rocke.helpers.transforms import (
+    DynamicTensorDescriptor,
+    TensorDescriptor,
+    embed,
+    indirect,
+    unmerge,
+)
 
 
 MFMA_M = 16
@@ -157,7 +163,11 @@ class UnifiedAttention2DTiledSpec:
     # Problem fields this body reads as trailing i32 kernargs instead of baking
     # them, in ABI order. The launch signature, the argument pack and the cache
     # key read the same tuple (``_runtime_kernarg_fields``).
-    RUNTIME_KERNARG_FIELDS: ClassVar[Tuple[str, ...]] = ("sliding_window",)
+    RUNTIME_KERNARG_FIELDS: ClassVar[Tuple[str, ...]] = (
+        "num_query_heads",
+        "num_kv_heads",
+        "sliding_window",
+    )
     # The cu_q search derives its trip count from the num_seqs kernarg, so
     # num_seqs never reaches the IR and one binary serves every batch.
     RUNTIME_SEARCH_ITERS: ClassVar[bool] = True
@@ -904,7 +914,8 @@ class UnifiedAttention2DTiledSpec:
             f"d{self.head_size}",
             f"b{self.block_size}",
             f"t{self.tile_size_eff}" if self.n_blocks_per_tile != 1 else "",
-            f"h{self.num_query_heads}kv{self.num_kv_heads}",
+            # Head counts are kernargs; only the GQA ratio is baked.
+            f"g{self.num_queries_per_kv}",
             self.dtype,
             f"kv{self.kv_storage_dtype}" if self.kv_storage_dtype else "",
             "" if not self.use_sinks else "sinks",
@@ -1144,7 +1155,6 @@ def build_unified_attention_2d_tiled(
     NQK = spec.num_queries_per_kv
     VALID_ROWS = BLOCK_Q * NQK
     NUM_KV = spec.num_kv_heads
-    NUM_QH = spec.num_query_heads
     SLIDING_WINDOW = spec.sliding_window
     USE_SOFTCAP = spec.has_softcap
     USE_SINKS = spec.use_sinks
@@ -1299,6 +1309,8 @@ def build_unified_attention_2d_tiled(
     # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
     # after every fixed param so the shared launch signature can append them.
     rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}
+    num_qh_p = rt["num_query_heads"]
+    num_kv_p = rt["num_kv_heads"]
     # Additive-bias params are appended only when the feature is on, so the
     # non-bias kernel ABI (and its IR) is unchanged.
     additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
@@ -1676,15 +1688,11 @@ def build_unified_attention_2d_tiled(
     # Coordinate transform for Q (and the symmetric output buffer):
     # ``(token, head, dim)`` packed contiguously. The element-unit
     # descriptor is reused below for the output store too.
-    q_desc = TensorDescriptor.naive(
+    # The head count is a kernarg, so the token stride is too.
+    q_desc = DynamicTensorDescriptor.create(
         "Q",
-        # The runtime extents (total_q, num_query_heads, head_size) are
-        # only used by the validity predicate (which we don't request
-        # here). Use generous compile-time bounds so the descriptor's
-        # row-major stride product matches the kernel's layout
-        # assumptions exactly.
-        lengths=[1 << 30, NUM_QH, HD],
         coord_names=("token", "head", "dim"),
+        strides=(b.mul(num_qh_p, b.const_i32(HD)), HD, 1),
     )
     # direct-reg: skip the cooperative Q->LDS staging store entirely.
     # The per-lane Q32 MFMA operand is gathered straight from global in the
@@ -1699,7 +1707,7 @@ def build_unified_attention_2d_tiled(
         )
         _qmask_inner = b.land(
             b.cmp_lt(q_pos_t, cur_batch_q_len),
-            b.cmp_lt(qh_t, b.const_i32(NUM_QH)),
+            b.cmp_lt(qh_t, num_qh_p),
         )
         qmask_t = (
             b.land(_qmask_inner, b.cmp_lt(Q_row, b.const_i32(VALID_ROWS)))
@@ -1889,7 +1897,7 @@ def build_unified_attention_2d_tiled(
             qh = b.add(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
             )
-            qh_in = b.cmp_lt(qh, b.const_i32(NUM_QH))
+            qh_in = b.cmp_lt(qh, num_qh_p)
             sink_h = b.global_load(sinks, qh, dtype, align=2)
             sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
             m_inits.append(b.select(qh_in, sink_f, neg_inf))
@@ -1899,7 +1907,7 @@ def build_unified_attention_2d_tiled(
                 qh = b.add(
                     b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
                 )
-                qh_in = b.cmp_lt(qh, b.const_i32(NUM_QH))
+                qh_in = b.cmp_lt(qh, num_qh_p)
                 sink_h = b.global_load(sinks, qh, dtype, align=2)
                 sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
                 m_inits.append(b.select(qh_in, sink_f, neg_inf))
@@ -1985,10 +1993,11 @@ def build_unified_attention_2d_tiled(
     # so for the FP8 K/V path the loader switches to a sync per-thread
     # dequant chain below; the byte-stride math here is shared so the
     # paged_kv_desc compiles consistently in both branches.
-    kv_stride_blk_b = BS * NUM_KV * HD * KV_BYTES
-    kv_stride_tok_b = NUM_KV * HD * KV_BYTES
+    # The token and block strides scale with the runtime kv head count.
+    kv_stride_tok_b = b.mul(num_kv_p, b.const_i32(HD * KV_BYTES))
+    kv_stride_blk_b = b.mul(kv_stride_tok_b, b.const_i32(BS))
     kv_stride_h_b = HD * KV_BYTES
-    kv_block_bytes_c = b.const_i32(kv_stride_blk_b)  # one-block buffer bound
+    kv_block_bytes_c = kv_stride_blk_b  # one-block buffer bound
 
     lane_half_base = b.mul(tid, b.const_i32(8))
 
@@ -2142,13 +2151,10 @@ def build_unified_attention_2d_tiled(
             return None, b.add(block_b, within)
 
     else:
-        _kv_base = TensorDescriptor.naive(
+        _kv_base = DynamicTensorDescriptor.create(
             "paged_kv_bytes",
-            # ``lengths`` here is just informational (validity propagation
-            # is driven by the transforms above, not by these bounds).
-            lengths=[1 << 24, BS, NUM_KV, HD],
-            strides=[kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES],
             coord_names=("physical_block", "token", "kv_head", "dim"),
+            strides=(kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES),
         )
         if N_BLOCKS_PER_TILE == 1:
             paged_kv_desc = _kv_base.transform(
@@ -2932,7 +2938,7 @@ def build_unified_attention_2d_tiled(
         # so the <8 x dtype> operand is bit-identical to the staged path.
         #   row -> q_pos = qb_start_pos + row // NQK ; qh = kv_head*NQK + row%NQK
         #   col -> dim
-        # Out-of-range (token >= q_len or head >= NUM_QH) lanes read 0 (masked),
+        # Out-of-range (token >= q_len or head >= num_query_heads) lanes read 0 (masked),
         # matching the staging store's zero-fill.
         def _read_q32_global(k: int) -> Value:
             q32_col = b.add(b.const_i32(k * 16), b.mul(lane_half, b.const_i32(8)))
@@ -2943,7 +2949,7 @@ def build_unified_attention_2d_tiled(
             )
             qg_mask = b.land(
                 b.cmp_lt(qg_pos, cur_batch_q_len),
-                b.cmp_lt(qg_h, b.const_i32(NUM_QH)),
+                b.cmp_lt(qg_h, num_qh_p),
             )
             qg_pos_safe = b.select(qg_mask, qg_pos, b.const_i32(0))
             qg_h_safe = b.select(qg_mask, qg_h, b.const_i32(0))
@@ -3045,7 +3051,7 @@ def build_unified_attention_2d_tiled(
     # ``qp_r``, ``qh_r``, ``row_ok``, ``causal_lim``, and ``alibi_per_row``
     # depend only on CTA-level constants (``wave_row_base``, ``lane_rg``,
     # ``qb_start_pos``, ``kv_head_idx``, ``cur_batch_q_len``, ``context_len``,
-    # ``NUM_QH``, ``NQK``). Computing them BEFORE the kvloop avoids paying
+    # ``num_qh_p``, ``NQK``). Computing them BEFORE the kvloop avoids paying
     # them per kv tile. LLVM LICM should hoist them automatically, but
     # explicit hoisting makes the IR's hot path leaner and eliminates a
     # source of compiler-scheduling variability. The per-reg arrays
@@ -3065,7 +3071,7 @@ def build_unified_attention_2d_tiled(
         qh_r = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK)))
         _row_ok_inner = b.land(
             b.cmp_lt(qp_r, cur_batch_q_len),
-            b.cmp_lt(qh_r, b.const_i32(NUM_QH)),
+            b.cmp_lt(qh_r, num_qh_p),
         )
         row_ok = (
             b.land(_row_ok_inner, b.cmp_lt(row, b.const_i32(VALID_ROWS)))
@@ -3083,7 +3089,7 @@ def build_unified_attention_2d_tiled(
         hoist_alibi = []
         for reg in range(REGS_PER_LANE):
             qh_r = hoist_qh_r[reg]
-            qh_ok = b.cmp_lt(qh_r, b.const_i32(NUM_QH))
+            qh_ok = b.cmp_lt(qh_r, num_qh_p)
             slope = b.masked_global_load(
                 alibi_slopes_ptr, qh_r, qh_ok, b.const_f32(0.0), dtype=F32, align=4
             )
@@ -3099,7 +3105,7 @@ def build_unified_attention_2d_tiled(
         )
         _st_row_ok_inner = b.land(
             b.cmp_lt(st_qp, cur_batch_q_len),
-            b.cmp_lt(st_qh, b.const_i32(NUM_QH)),
+            b.cmp_lt(st_qh, num_qh_p),
         )
         st_row_ok = (
             b.land(_st_row_ok_inner, b.cmp_lt(st_q_row, b.const_i32(VALID_ROWS)))
@@ -3126,7 +3132,7 @@ def build_unified_attention_2d_tiled(
         and TRANSPOSED_QK_32X32
         and TRANSPOSED_INVARIANT_HOIST
     ):
-        st_qh_ok = b.cmp_lt(st_qh, b.const_i32(NUM_QH))
+        st_qh_ok = b.cmp_lt(st_qh, num_qh_p)
         st_alibi_slope = b.masked_global_load(
             alibi_slopes_ptr, st_qh, st_qh_ok, b.const_f32(0.0), dtype=F32, align=4
         )
@@ -3205,7 +3211,7 @@ def build_unified_attention_2d_tiled(
             )
             _st_row_ok_iter_inner = b.land(
                 b.cmp_lt(st_qp_iter, cur_batch_q_len),
-                b.cmp_lt(st_qh_iter, b.const_i32(NUM_QH)),
+                b.cmp_lt(st_qh_iter, num_qh_p),
             )
             st_row_ok_iter = (
                 b.land(
@@ -3217,7 +3223,7 @@ def build_unified_attention_2d_tiled(
             )
             st_causal_lim_iter = b.add(context_len, st_qp_iter)
             if USE_ALIBI:
-                st_qh_iter_ok = b.cmp_lt(st_qh_iter, b.const_i32(NUM_QH))
+                st_qh_iter_ok = b.cmp_lt(st_qh_iter, num_qh_p)
                 st_alibi_slope_iter = b.masked_global_load(
                     alibi_slopes_ptr,
                     st_qh_iter,
@@ -3488,7 +3494,7 @@ def build_unified_attention_2d_tiled(
                         slope_for_lane = b.masked_global_load(
                             alibi_slopes_ptr,
                             qh_t_alibi,
-                            b.cmp_lt(qh_t_alibi, b.const_i32(NUM_QH)),
+                            b.cmp_lt(qh_t_alibi, num_qh_p),
                             b.const_f32(0.0),
                             dtype=F32,
                             align=4,
@@ -3543,7 +3549,7 @@ def build_unified_attention_2d_tiled(
                                     )
                                     _row_ok_inner_t = b.land(
                                         b.cmp_lt(qp_r, cur_batch_q_len),
-                                        b.cmp_lt(qh_r, b.const_i32(NUM_QH)),
+                                        b.cmp_lt(qh_r, num_qh_p),
                                     )
                                     row_ok = (
                                         b.land(
@@ -4548,7 +4554,7 @@ def build_unified_attention_2d_tiled(
             )
             _op_mask_t_inner = b.land(
                 b.cmp_lt(op_pos_t, cur_batch_q_len),
-                b.cmp_lt(op_qh_t, b.const_i32(NUM_QH)),
+                b.cmp_lt(op_qh_t, num_qh_p),
             )
             op_mask_t = (
                 b.land(_op_mask_t_inner, b.cmp_lt(q_row_t, b.const_i32(VALID_ROWS)))
@@ -4601,7 +4607,7 @@ def build_unified_attention_2d_tiled(
         )
         _op_mask32_inner = b.land(
             b.cmp_lt(op_pos32_base, cur_batch_q_len),
-            b.cmp_lt(op_qh32_base, b.const_i32(NUM_QH)),
+            b.cmp_lt(op_qh32_base, num_qh_p),
         )
         op_mask32_base = (
             b.land(_op_mask32_inner, b.cmp_lt(OUT_ROW_BASE32, b.const_i32(VALID_ROWS)))
@@ -4700,7 +4706,7 @@ def build_unified_attention_2d_tiled(
     )
     _op_mask_inner = b.land(
         b.cmp_lt(op_pos, cur_batch_q_len),
-        b.cmp_lt(op_qh, b.const_i32(NUM_QH)),
+        b.cmp_lt(op_qh, num_qh_p),
     )
     op_mask = (
         b.land(_op_mask_inner, b.cmp_lt(OUT_ROW_BASE, b.const_i32(VALID_ROWS)))

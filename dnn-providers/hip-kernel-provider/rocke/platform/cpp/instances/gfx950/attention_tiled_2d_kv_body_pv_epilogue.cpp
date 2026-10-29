@@ -778,8 +778,7 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
             rocke_value_t* op_qh_mod = rocke_b_mod(b, q_row_t, rocke_b_const_i32(b, ctx->NQK));
             rocke_value_t* op_qh_t = rocke_b_add(b, op_qh_mul, op_qh_mod);
             rocke_value_t* op_mask_pos = rocke_b_cmp_lt(b, op_pos_t, ctx->cur_batch_q_len);
-            rocke_value_t* op_mask_qh
-                = rocke_b_cmp_lt(b, op_qh_t, rocke_b_const_i32(b, ctx->NUM_QH));
+            rocke_value_t* op_mask_qh = rocke_b_cmp_lt(b, op_qh_t, ctx->num_qh_p);
             rocke_value_t* op_mask_inner = rocke_b_land(b, op_mask_pos, op_mask_qh);
             rocke_value_t* op_mask_t;
             if(ctx->VALID_ROWS < ctx->BLOCK_M)
@@ -875,8 +874,7 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
             }
             {
                 rocke_value_t* mask_pos = rocke_b_cmp_lt(b, op_pos32_base, ctx->cur_batch_q_len);
-                rocke_value_t* mask_qh
-                    = rocke_b_cmp_lt(b, op_qh32_base, rocke_b_const_i32(b, ctx->NUM_QH));
+                rocke_value_t* mask_qh = rocke_b_cmp_lt(b, op_qh32_base, ctx->num_qh_p);
                 rocke_value_t* mask_inner = rocke_b_land(b, mask_pos, mask_qh);
                 if(ctx->VALID_ROWS < ctx->BLOCK_M)
                 {
@@ -994,7 +992,7 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
         }
         {
             rocke_value_t* mask_pos = rocke_b_cmp_lt(b, op_pos, ctx->cur_batch_q_len);
-            rocke_value_t* mask_qh = rocke_b_cmp_lt(b, op_qh, rocke_b_const_i32(b, ctx->NUM_QH));
+            rocke_value_t* mask_qh = rocke_b_cmp_lt(b, op_qh, ctx->num_qh_p);
             rocke_value_t* mask_inner = rocke_b_land(b, mask_pos, mask_qh);
             if(ctx->VALID_ROWS < ctx->BLOCK_M)
             {

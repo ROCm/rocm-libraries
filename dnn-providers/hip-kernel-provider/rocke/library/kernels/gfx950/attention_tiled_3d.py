@@ -69,7 +69,7 @@ from rocke.helpers.attention import (
 )
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
-from rocke.helpers.transforms import TensorDescriptor, indirect, unmerge
+from rocke.helpers.transforms import DynamicTensorDescriptor, indirect, unmerge
 
 MFMA_M = 16
 MFMA_N = 16
@@ -128,7 +128,11 @@ class UnifiedAttention3DTiledSpec:
     # Problem fields this body reads as trailing i32 kernargs instead of baking
     # them, in ABI order. The launch signature, the argument pack and the cache
     # key read the same tuple (``_runtime_kernarg_fields``).
-    RUNTIME_KERNARG_FIELDS: ClassVar[Tuple[str, ...]] = ("sliding_window",)
+    RUNTIME_KERNARG_FIELDS: ClassVar[Tuple[str, ...]] = (
+        "num_query_heads",
+        "num_kv_heads",
+        "sliding_window",
+    )
     # The cu_q search derives its trip count from the num_seqs kernarg, so
     # num_seqs never reaches the IR and one binary serves every batch.
     RUNTIME_SEARCH_ITERS: ClassVar[bool] = True
@@ -314,7 +318,8 @@ class UnifiedAttention3DTiledSpec:
             f"d{self.head_size}",
             f"b{self.block_size}",
             f"t{self.tile_size}" if self.n_blocks_per_tile != 1 else "",
-            f"h{self.num_query_heads}kv{self.num_kv_heads}",
+            # Head counts are kernargs; only the GQA ratio is baked.
+            f"g{self.num_queries_per_kv}",
             f"seg{self.num_segments}",
             self.dtype,
             f"kv{self.kv_storage_dtype}" if self.kv_storage_dtype else "",
@@ -433,8 +438,6 @@ def build_unified_attention_3d_tiled(
     BLOCK_M = spec.block_m
     BLOCK_Q = spec.block_q
     NQK = spec.num_queries_per_kv
-    NUM_KV = spec.num_kv_heads
-    NUM_QH = spec.num_query_heads
     NUM_SEG = spec.num_segments
     SLIDING_WINDOW = spec.sliding_window
     USE_SOFTCAP = spec.has_softcap
@@ -519,6 +522,8 @@ def build_unified_attention_3d_tiled(
     # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
     # after every fixed param so the shared launch signature can append them.
     rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}
+    num_qh_p = rt["num_query_heads"]
+    num_kv_p = rt["num_kv_heads"]
     # Additive-bias params are appended only when the feature is on, so the
     # non-bias kernel ABI (and its IR) is unchanged.
     additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
@@ -586,23 +591,22 @@ def build_unified_attention_3d_tiled(
     #   segm_max     [total_q, num_qh, num_segments]
     #   segm_expsum  [total_q, num_qh, num_segments]
     #   segm_output  [total_q, num_qh, num_segments, head_size]
-    # plus Q / output which both share ``(token, head, dim)``. ``1<<30``
-    # is a compile-time upper bound on ``total_q`` so the row-major
-    # stride product matches the kernel's layout assumptions exactly.
-    ml_desc = TensorDescriptor.naive(
+    # plus Q / output which both share ``(token, head, dim)``. The head count
+    # is a kernarg, so each token stride is too.
+    ml_desc = DynamicTensorDescriptor.create(
         "segm_ml",
-        lengths=[1 << 30, NUM_QH, NUM_SEG],
         coord_names=("token", "head", "seg"),
+        strides=(b.mul(num_qh_p, b.const_i32(NUM_SEG)), NUM_SEG, 1),
     )
-    seg_acc_desc = TensorDescriptor.naive(
+    seg_acc_desc = DynamicTensorDescriptor.create(
         "segm_output",
-        lengths=[1 << 30, NUM_QH, NUM_SEG, HD],
         coord_names=("token", "head", "seg", "dim"),
+        strides=(b.mul(num_qh_p, b.const_i32(NUM_SEG * HD)), NUM_SEG * HD, HD, 1),
     )
-    q_desc = TensorDescriptor.naive(
+    q_desc = DynamicTensorDescriptor.create(
         "Q",
-        lengths=[1 << 30, NUM_QH, HD],
         coord_names=("token", "head", "dim"),
+        strides=(b.mul(num_qh_p, b.const_i32(HD)), HD, 1),
     )
 
     seg_start_tile_pos = b.mul(b.mul(seg_idx, tps), b.const_i32(T))
@@ -616,9 +620,7 @@ def build_unified_attention_3d_tiled(
             qh_r = b.add(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
             )
-            row_ok = b.land(
-                b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
-            )
+            row_ok = b.land(b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, num_qh_p))
             qp_r_safe = b.select(row_ok, qp_r, b.const_i32(0))
             qh_r_safe = b.select(row_ok, qh_r, b.const_i32(0))
             qtoken = b.add(cu_q_start, qp_r_safe)
@@ -638,7 +640,7 @@ def build_unified_attention_3d_tiled(
                     b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
                 )
                 row_ok = b.land(
-                    b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
+                    b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, num_qh_p)
                 )
                 qp_r_safe = b.select(row_ok, qp_r, b.const_i32(0))
                 qh_r_safe = b.select(row_ok, qh_r, b.const_i32(0))
@@ -695,9 +697,7 @@ def build_unified_attention_3d_tiled(
             b.mul(kv_head_idx, b.const_i32(NQK)),
             b.mod(Q_row, b.const_i32(NQK)),
         )
-        qmask_t = b.land(
-            b.cmp_lt(q_pos_t, cur_batch_q_len), b.cmp_lt(qh_t, b.const_i32(NUM_QH))
-        )
+        qmask_t = b.land(b.cmp_lt(q_pos_t, cur_batch_q_len), b.cmp_lt(qh_t, num_qh_p))
         q_pos_safe = b.select(qmask_t, q_pos_t, b.const_i32(0))
         qh_safe = b.select(qmask_t, qh_t, b.const_i32(0))
         q_off_base, _ = q_desc.offset(
@@ -751,7 +751,7 @@ def build_unified_attention_3d_tiled(
         qh = b.add(
             b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(lane_col, b.const_i32(NQK))
         )
-        qh_in = b.cmp_lt(qh, b.const_i32(NUM_QH))
+        qh_in = b.cmp_lt(qh, num_qh_p)
         sink_h = b.global_load(sinks, qh, dtype, align=2)
         sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
         sink_with_mask = b.select(qh_in, sink_f, neg_inf)
@@ -782,14 +782,15 @@ def build_unified_attention_3d_tiled(
     # fp8e4m3. The FP8 sync loader path below dequantises and stores to
     # LDS in the working dtype, so ``bytes_per_buf`` stays at the working
     # dtype slab size.
-    kv_stride_blk_b = BS * NUM_KV * HD * KV_BYTES
-    kv_stride_tok_b = NUM_KV * HD * KV_BYTES
+    # The token and page strides scale with the runtime kv head count.
+    kv_stride_tok_b = b.mul(num_kv_p, b.const_i32(HD * KV_BYTES))
+    kv_stride_blk_b = b.mul(kv_stride_tok_b, b.const_i32(BS))
     kv_stride_h_b = HD * KV_BYTES
     bytes_per_buf = T * HD * 2
     # One-block buffer bound for the i64-addressing path: each per-block
     # buffer descriptor only spans a single physical KV block, so the
     # within-block i32 voffset can never overflow.
-    kv_block_bytes_c = b.const_i32(kv_stride_blk_b)
+    kv_block_bytes_c = kv_stride_blk_b
 
     lane_half_base = b.mul(tid, b.const_i32(8))
     K_lds_addr = b.smem_addr_of(K_lds)
@@ -814,11 +815,10 @@ def build_unified_attention_3d_tiled(
     PAGE_IDS = not KV_FP8 and spec.kv_layout == "paged"
     WAVE_PAGE_ID_LOAD = spec.use_wave_page_id_load
     if not PAGE_IDS:
-        paged_kv_desc = TensorDescriptor.naive(
+        paged_kv_desc = DynamicTensorDescriptor.create(
             "paged_kv_bytes",
-            lengths=[1 << 24, T, NUM_KV, HD],
-            strides=[kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES],
             coord_names=("physical_block", "token", "kv_head", "dim"),
+            strides=(kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES),
         ).transform(
             indirect(
                 "tile_idx", into="physical_block", table=block_tables, base=seq_base
@@ -840,7 +840,7 @@ def build_unified_attention_3d_tiled(
         lane_tok = b.div(lane_half_base, b.const_i32(HD))
         lane_dim = b.mod(lane_half_base, b.const_i32(HD))
         lane_tok_head = b.add(
-            b.mul(lane_tok, b.const_i32(kv_stride_tok_b)),
+            b.mul(lane_tok, kv_stride_tok_b),
             b.mul(kv_head_idx, b.const_i32(kv_stride_h_b)),
         )
         # Per-lane byte offset within a page, keyed by the call's swizzle
@@ -864,6 +864,16 @@ def build_unified_attention_3d_tiled(
             lane_within_b[0] = b.add(
                 lane_tok_head, b.mul(lane_dim, b.const_i32(KV_BYTES))
             )
+        # The token stride is a kernarg, so each call's token offset within the
+        # page is a multiply. They are wave-uniform and loop-invariant: build
+        # them once here rather than in every tile's copies.
+        call_tok_b = {}
+        for call in range(kv_calls_per_tile):
+            tok0 = (call % calls_per_block) * tokens_per_call
+            if tok0 and tok0 not in call_tok_b:
+                call_tok_b[tok0] = b.mul(kv_stride_tok_b, b.const_i32(tok0))
+        if I64_KV_ADDR:
+            kv_stride_blk_i64 = b.zext(kv_stride_blk_b, I64)
 
     def _kv_col(row: Value, col: Value) -> Value:
         # LDS column of K/V element (row, col): its 16-byte chunk is permuted
@@ -914,18 +924,18 @@ def build_unified_attention_3d_tiled(
             blk = call // calls_per_block
             tok0 = (call % calls_per_block) * tokens_per_call
             ph = (call * tokens_per_call) % KV_CHUNKS_PER_ROW if KV_SWZ else 0
-            voff = b.add(lane_within_b[ph], b.const_i32(tok0 * kv_stride_tok_b))
+            voff = lane_within_b[ph]
+            if tok0:
+                voff = b.add(voff, call_tok_b[tok0])
             if I64_KV_ADDR:
-                base_i64 = b.mul(
-                    b.zext(page_ids[blk], I64), b.const_i64(kv_stride_blk_b)
-                )
+                base_i64 = b.mul(b.zext(page_ids[blk], I64), kv_stride_blk_i64)
                 call_rsrc = b.buffer_rsrc(
                     b.global_ptr_add(src, base_i64), kv_block_bytes_c
                 )
                 soff = zero_soff
             else:
                 call_rsrc = src_rsrc
-                soff = b.mul(page_ids[blk], b.const_i32(kv_stride_blk_b))
+                soff = b.mul(page_ids[blk], kv_stride_blk_b)
             dst = b.smem_ptr_add(buf_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(
                 call_rsrc, dst, voff, soff, 4, coherency=KV_CACHE_BITS
@@ -1126,13 +1136,11 @@ def build_unified_attention_3d_tiled(
     qh_r = b.add(
         b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(lane_col, b.const_i32(NQK))
     )
-    row_ok = b.land(
-        b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
-    )
+    row_ok = b.land(b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, num_qh_p))
     causal_lim = b.add(context_len, qp_r)
 
     if USE_ALIBI:
-        qh_ok = b.cmp_lt(qh_r, b.const_i32(NUM_QH))
+        qh_ok = b.cmp_lt(qh_r, num_qh_p)
         alibi_slope = b.masked_global_load(
             alibi_slopes_ptr, qh_r, qh_ok, b.const_f32(0.0), dtype=F32, align=4
         )
@@ -1377,6 +1385,11 @@ def build_unified_attention_3d_tiled(
 
 @dataclass(frozen=True)
 class UnifiedAttentionReduceTiledSpec:
+    # Problem fields this body reads as trailing i32 kernargs instead of baking
+    # them, in ABI order. The launch signature, the argument pack and the cache
+    # key read the same tuple (``_runtime_kernarg_fields``).
+    RUNTIME_KERNARG_FIELDS: ClassVar[Tuple[str, ...]] = ("num_query_heads",)
+
     head_size: int
     num_query_heads: int
     num_kv_heads: int
@@ -1409,7 +1422,6 @@ class UnifiedAttentionReduceTiledSpec:
 
         parts = [
             f"d{self.head_size}",
-            f"h{self.num_query_heads}",
             f"seg{self.num_segments}",
             self.dtype,
         ]
@@ -1441,7 +1453,6 @@ def build_unified_attention_reduce_tiled(
     """
     HD = spec.head_size
     NUM_SEG = spec.num_segments
-    NUM_QH = spec.num_query_heads
     dtype = spec.dtype_ir
 
     THREADS = 64
@@ -1462,6 +1473,8 @@ def build_unified_attention_reduce_tiled(
     seg_max = b.param("segm_max_ptr", PtrType(F32, "global"), readonly=True, align=4)
     seg_l = b.param("segm_expsum_ptr", PtrType(F32, "global"), readonly=True, align=4)
     _seq_lens = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
+    rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}
+    num_qh_p = rt["num_query_heads"]
     lse = (
         b.param(
             "lse_ptr",
@@ -1486,21 +1499,22 @@ def build_unified_attention_reduce_tiled(
     #   segm_output            : [total_q, num_qh, num_segments, head_size]
     # And the final output uses ``(token, head, dim)``. Encoding them
     # as descriptors makes the per-pass offset math one call instead of
-    # an `add(mul(qt,...), mul(qh,...))` ladder.
-    ml_desc_red = TensorDescriptor.naive(
+    # an `add(mul(qt,...), mul(qh,...))` ladder. The head count is a kernarg,
+    # so each token stride is too.
+    ml_desc_red = DynamicTensorDescriptor.create(
         "segm_ml",
-        lengths=[1 << 30, NUM_QH, NUM_SEG],
         coord_names=("token", "head", "seg"),
+        strides=(b.mul(num_qh_p, b.const_i32(NUM_SEG)), NUM_SEG, 1),
     )
-    seg_acc_desc_red = TensorDescriptor.naive(
+    seg_acc_desc_red = DynamicTensorDescriptor.create(
         "segm_output",
-        lengths=[1 << 30, NUM_QH, NUM_SEG, HD],
         coord_names=("token", "head", "seg", "dim"),
+        strides=(b.mul(num_qh_p, b.const_i32(NUM_SEG * HD)), NUM_SEG * HD, HD, 1),
     )
-    out_desc_red = TensorDescriptor.naive(
+    out_desc_red = DynamicTensorDescriptor.create(
         "out",
-        lengths=[1 << 30, NUM_QH, HD],
         coord_names=("token", "head", "dim"),
+        strides=(b.mul(num_qh_p, b.const_i32(HD)), HD, 1),
     )
 
     # Per-segment ml base for this (q_token, q_head); the
@@ -1620,7 +1634,7 @@ def build_unified_attention_reduce_tiled(
         # scale*log2e); lse_store converts to natural log and writes -inf for a
         # row with no mass (every segment empty), whose O is already 0.
         with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
-            lse_index = b.add(b.mul(q_token, b.const_i32(NUM_QH)), q_head)
+            lse_index = b.add(b.mul(q_token, num_qh_p), q_head)
             lse_store(
                 b,
                 lse,

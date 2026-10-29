@@ -84,12 +84,10 @@ void rocke_gfx942_attn2d_emit_q_load(rocke_gfx942_attn2d_build_ctx_t* ctx)
      * recompute here for the staged-store fallback path. */
     z8 = rocke_b_zero_vec(b, dtype, 8);
 
-    /* q_desc = TensorDescriptor.naive("Q", lengths=[1<<30, NUM_QH, HD],
-     *          coord_names=("token","head","dim")). Stored on ctx for the
-     *          downstream Q gather (32x32 direct-global) + the epilogue store. */
-    if(ctx->runtime_shape)
+    /* q_desc over (token, head, dim), stored on ctx for the downstream Q gather
+     * (32x32 direct-global) + the epilogue store. The head count is a kernarg,
+     * so the token stride is too. */
     {
-        /* The head count is a kernarg, so the token stride is too. */
         static const char* const coord_names[3] = {"token", "head", "dim"};
         rocke_value_t* strides[3]
             = {rocke_b_mul(b, ctx->num_qh_p, rocke_b_const_i32(b, ctx->HD)), NULL, NULL};
@@ -97,15 +95,6 @@ void rocke_gfx942_attn2d_emit_q_load(rocke_gfx942_attn2d_build_ctx_t* ctx)
         ctx->q_desc = &rocke_tensor_descriptor_naive_dynamic_mixed(
                            b, "Q", coord_names, 3, strides, static_strides)
                            ->base;
-    }
-    else
-    {
-        int lengths[3];
-        static const char* const coord_names[3] = {"token", "head", "dim"};
-        lengths[0] = 1 << 30;
-        lengths[1] = ctx->NUM_QH;
-        lengths[2] = ctx->HD;
-        ctx->q_desc = rocke_tensor_descriptor_naive(b, "Q", lengths, 3, NULL, coord_names, 3);
     }
 
     if(ctx->Q_DIRECT_GLOBAL)
@@ -163,7 +152,7 @@ void rocke_gfx942_attn2d_emit_q_load(rocke_gfx942_attn2d_build_ctx_t* ctx)
          * guard is always true — omitting it avoids a redundant cmp+and on the hot path. */
         {
             rocke_value_t* lt_pos = rocke_b_cmp_lt(b, q_pos_t, ctx->cur_batch_q_len);
-            rocke_value_t* lt_qh = rocke_b_cmp_lt(b, qh_t, rocke_gfx942_attn2d_num_qh(ctx));
+            rocke_value_t* lt_qh = rocke_b_cmp_lt(b, qh_t, ctx->num_qh_p);
             rocke_value_t* and_pos_qh = rocke_b_land(b, lt_pos, lt_qh);
             if(ctx->VALID_ROWS < ctx->BLOCK_M)
             {
@@ -437,7 +426,7 @@ void rocke_gfx942_attn2d_emit_q_gather(rocke_gfx942_attn2d_build_ctx_t* ctx)
                 /* q32_mask = (q32_pos<cur_batch_q_len) && (q32_h<NUM_QH) */
                 q32_mask = rocke_b_land(b,
                                         rocke_b_cmp_lt(b, q32_pos, ctx->cur_batch_q_len),
-                                        rocke_b_cmp_lt(b, q32_h, rocke_gfx942_attn2d_num_qh(ctx)));
+                                        rocke_b_cmp_lt(b, q32_h, ctx->num_qh_p));
                 q32_pos_safe = rocke_b_select(b, q32_mask, q32_pos, rocke_b_const_i32(b, 0));
                 q32_h_safe = rocke_b_select(b, q32_mask, q32_h, rocke_b_const_i32(b, 0));
 

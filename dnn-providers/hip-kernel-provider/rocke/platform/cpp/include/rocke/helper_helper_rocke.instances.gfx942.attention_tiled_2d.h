@@ -203,8 +203,6 @@ int rocke_attention_tiled_2d_spec_n_blocks_per_tile(const rocke_attention_tiled_
 /* dtype_ir: F16 for "fp16", BF16 otherwise (returns a rocke_type_t*). */
 const rocke_type_t*
     rocke_attention_tiled_2d_spec_dtype_ir(const rocke_attention_tiled_2d_spec_t* s);
-/* binary_search_iters: 32 if num_seqs<=0, else max(1, ceil(log2(num_seqs+1))) */
-int rocke_attention_tiled_2d_spec_binary_search_iters(const rocke_attention_tiled_2d_spec_t* s);
 
 /* __post_init__ validator (builder variant). Reproduces the Python validation
  * order and messages; on the first failing check it records the Python
