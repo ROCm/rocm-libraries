@@ -1,8 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Origami Boost in TensileLite: the Stream-K launch the hook passes the re-rank, the switch, and
-// the dtype classes of logic files and problems.
+// Origami Boost in TensileLite: the Stream-K launch the hook passes the re-rank, the switch, the
+// dtype classes of logic files and problems, and the shipped models against the built library.
 
 #include <Tensile/OrigamiBoost.hpp>
 
@@ -11,12 +11,19 @@
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 #include <origami/hardware.hpp>
+#include <origami/nn/boost/load_validate.hpp>
 #include <origami/nn/nn.hpp>
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <string>
@@ -238,4 +245,146 @@ TEST(OrigamiBoost, LogicAndProblemClasses)
     swizzled.setSwizzleTensorA(true);
     EXPECT_EQ(OB::problemClass(swizzled), nullptr);
     EXPECT_EQ(OB::problemClass(f8(DataType::Float8, DataType::Float8, DataType::Float)), nullptr);
+}
+
+namespace
+{
+    namespace fs = std::filesystem;
+
+    // The library root (holding <arch>/) to check: HIPBLASLT_ORIGAMI_BOOST_TEST_LIBRARY, else
+    // this build's, else the one installed with the tests (<prefix>/bin/hipblaslt-tensilelite/).
+    fs::path builtLibraryRoot()
+    {
+        if(const char* env = std::getenv("HIPBLASLT_ORIGAMI_BOOST_TEST_LIBRARY"))
+            return env;
+        std::vector<fs::path> dirs{TENSILELITE_TEST_BUILT_LIBRARY_DIR};
+#ifdef __linux__
+        std::error_code ec;
+        const auto      exe = fs::read_symlink("/proc/self/exe", ec);
+        if(!ec)
+            dirs.push_back(exe.parent_path().parent_path().parent_path()
+                           / TENSILELITE_TEST_INSTALLED_LIBRARY_DIR);
+#endif
+        for(auto const& dir : dirs)
+            if(fs::is_directory(dir))
+                return dir;
+        return {};
+    }
+
+    bool hasKernelLibrary(fs::path const& archDir, std::string const& arch)
+    {
+        std::error_code ec;
+        for(fs::directory_iterator it(archDir, ec), end; !ec && it != end; it.increment(ec))
+        {
+            const std::string name = it->path().filename().string();
+            if(name.rfind("TensileLibrary_", 0) == 0 && name.find(arch) != std::string::npos)
+                return true;
+        }
+        return false;
+    }
+
+    std::vector<fs::path> modelsIn(fs::path const& dir)
+    {
+        std::vector<fs::path> out;
+        std::error_code       ec;
+        for(fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec))
+            if(it->path().extension() == ".orr")
+                out.push_back(it->path());
+        std::sort(out.begin(), out.end());
+        return out;
+    }
+
+    std::string fileBytes(fs::path const& p)
+    {
+        std::ifstream f(p, std::ios::binary);
+        return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+    }
+} // namespace
+
+// Every shipped Origami Boost model (shared/origami/data/nn/boost/<arch>/*.orr; installed tests:
+// the copies next to the library) must load the way hipBLASLt loads it with
+// HIPBLASLT_ORIGAMI_BOOST=1 (OrigamiBoost::loadForLogic): this build's Origami stamps, and the
+// manifest diff against the kernel library this build made. A library change the model was not
+// trained for (RETRAIN-REQUIRED) fails here. Each library-directory copy must be the shipped file.
+TEST(OrigamiBoostLibrary, ShippedModelsAcceptBuiltLibrary)
+{
+    namespace ob       = origami::nn::boost;
+    const fs::path lib = builtLibraryRoot();
+    if(lib.empty())
+        GTEST_SKIP() << "no built kernel library (set HIPBLASLT_ORIGAMI_BOOST_TEST_LIBRARY to a "
+                        "library directory holding <arch>/)";
+    // Deserializing the library's predicates asks the current device for its CU count.
+    try
+    {
+        TensileLite::hip::GetCurrentDevice();
+    }
+    catch(std::exception const& e)
+    {
+        GTEST_SKIP() << "no HIP device to deserialize the kernel library with: " << e.what();
+    }
+    const fs::path shipped     = ORIGAMI_BOOST_SHIPPED_MODELS;
+    const bool     fromSources = fs::is_directory(shipped);
+    const fs::path modelRoot   = fromSources ? shipped : lib;
+
+    int tested = 0;
+    for(auto const& entry : fs::directory_iterator(modelRoot))
+    {
+        const std::string arch    = entry.path().filename().string();
+        const fs::path    archDir = lib / arch;
+        if(!entry.is_directory() || !hasKernelLibrary(archDir, arch))
+            continue;
+        for(auto const& model : modelsIn(entry.path()))
+        {
+            SCOPED_TRACE(model.string() + " against " + archDir.string());
+            ob::status_t status;
+            std::string  detail;
+            auto         m = ob::ensemble_t::load_file(model.string(), status, detail);
+            ASSERT_NE(m, nullptr) << ob::to_string(status) << ": " << detail;
+            const std::string dtype = m->head_string("dtype");
+
+            const auto                        t0 = std::chrono::steady_clock::now();
+            std::vector<ob::manifest_entry_t> library;
+            std::string                       error;
+            if(!TensileLite::OrigamiBoost::libraryManifest(
+                   archDir.string(), arch, dtype, library, error))
+            {
+                ADD_FAILURE() << error;
+                continue;
+            }
+            const auto diff = ob::diff_library(*m, library);
+            EXPECT_TRUE(diff.decision != ob::library_decision_t::retrain_required)
+                << "the kernel library has " << dtype
+                << " kernels whose structural values the model never saw in training: "
+                << diff.summary()
+                << ". hipBLASLt would refuse the model and keep stock Origami ranking. Retrain "
+                   "the model on this library (OrigamiML, outside this repository; see "
+                   "shared/origami/README.md, \"Shipped Origami Boost models\") or drop the "
+                   "kernels from the PredictionMatching rows.";
+
+            auto booster = ob::booster_t::create(std::move(m),
+                                                 ob::deployment_t{arch, dtype, &library},
+                                                 ob::build_identity(),
+                                                 status,
+                                                 detail);
+            EXPECT_TRUE(booster != nullptr)
+                << "refused (" << ob::to_string(status) << "): " << detail
+                << " (origami-tests \"[shipped]\" says how to fix a stamp mismatch)";
+            const double ms
+                = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
+                      .count();
+            std::cout << "[origami boost] " << model.filename().string() << " on " << archDir
+                      << ": " << diff.summary() << " (" << ms << " ms)" << std::endl;
+
+            if(fromSources)
+            {
+                const fs::path copy = archDir / model.filename();
+                EXPECT_TRUE(fs::is_regular_file(copy) && fileBytes(copy) == fileBytes(model))
+                    << copy << " is missing or not the shipped model: rebuild "
+                    << "origami-nn-colocate-" << arch;
+            }
+            ++tested;
+        }
+    }
+    if(tested == 0)
+        GTEST_SKIP() << "no shipped model has a kernel library for its arch in " << lib;
 }

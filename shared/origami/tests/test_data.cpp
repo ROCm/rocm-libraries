@@ -44,3 +44,7 @@ fs::path origami_test_data(const fs::path& name, const char* source_dir) {
 }
 
 fs::path boost_test_data() { return origami_test_data("boost", ORIGAMI_BOOST_TEST_DATA); }
+
+fs::path boost_shipped_models() {
+  return origami_test_data("nn/boost", ORIGAMI_BOOST_SHIPPED_MODELS);
+}

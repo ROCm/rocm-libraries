@@ -12,5 +12,8 @@ std::filesystem::path origami_test_data(const std::filesystem::path& name, const
 /// The Origami Boost fixtures (tests/data/boost).
 std::filesystem::path boost_test_data();
 
+/// The shipped Origami Boost models (data/nn/boost).
+std::filesystem::path boost_shipped_models();
+
 /// This test binary, or "" where the platform does not say.
 std::filesystem::path test_executable();

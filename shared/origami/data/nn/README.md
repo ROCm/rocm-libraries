@@ -37,3 +37,8 @@ data/nn/boost/<arch>/
 The models are tracked (2.1–2.5 MB each; `*.orr binary` in `shared/origami/.gitattributes`). A
 boost model loads only through `origami::nn::load_boost_model`, which checks it against the build
 and the kernel library it serves.
+
+Each model is stamped with the Origami sources it was trained against, and a build whose sources
+differ refuses it. `origami-tests "[shipped]"` fails when that would happen and says whether to
+re-stamp (`shared/origami/tools/origami_boost_restamp.py`) or retrain; see "Shipped Origami Boost
+models" in `shared/origami/README.md`. Retraining happens outside this repository (OrigamiML).
