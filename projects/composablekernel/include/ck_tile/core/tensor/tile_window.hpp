@@ -8,6 +8,7 @@
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/container/array.hpp"
 #include "ck_tile/core/container/sequence.hpp"
+#include "ck_tile/core/container/static_array.hpp"
 #include "ck_tile/core/container/tuple.hpp"
 #include "ck_tile/core/container/container_helper.hpp"
 #include "ck_tile/core/tensor/null_tile_window.hpp"
@@ -125,6 +126,31 @@ struct tile_window_with_static_distribution
     static_assert(Base::Traits::NumAccess % NumCoord == 0,
                   "wrong! # of access is not divisible by NumCoord");
     static constexpr index_t NumAccessPerCoord = Base::Traits::NumAccess / NumCoord;
+
+    // Thread buffer offsets of the ScalarPerVector / PackedSize elements that access IAccess
+    // reads or writes, in units of PackedSize. One constexpr loop on a value index replaces a
+    // generate_tuple index and a typed calculate_offset per element.
+    template <index_t IAccess>
+    CK_TILE_HOST_DEVICE static constexpr auto get_access_d_offsets()
+    {
+        using Traits = typename Base::Traits;
+        static_assert(Traits::ScalarPerVector % Traits::PackedSize == 0,
+                      "wrong! ScalarPerVector is not divisible by PackedSize");
+
+        constexpr index_t NumElem = Traits::ScalarPerVector / Traits::PackedSize;
+        constexpr auto tile_dstr  = typename Base::TileDstr{};
+
+        static_array<index_t, NumElem> d_offsets{};
+        const auto idx_ys_start = Traits::SFC_Ys::_get_index(number<IAccess>{});
+        for(index_t j = 0; j < NumElem; ++j)
+        {
+            auto idx_ys = idx_ys_start;
+            idx_ys(Traits::VectorDimY) += j * Traits::PackedSize;
+            d_offsets[j] =
+                tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) / Traits::PackedSize;
+        }
+        return d_offsets;
+    }
 
     CK_TILE_DEVICE constexpr tile_window_with_static_distribution() = default;
 
@@ -291,7 +317,6 @@ struct tile_window_with_static_distribution
         using vector_t = typename Traits::vector_t;
         using SFC_Ys   = typename Traits::SFC_Ys;
 
-        constexpr auto tile_dstr   = typename Base::TileDstr{};
         constexpr auto sizeOfTuple = remove_cvref_t<decltype(tile_windows)>::size();
         //  loop over thread tensor space [y0, y1, ...]
         {
@@ -304,9 +329,6 @@ struct tile_window_with_static_distribution
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
-
-                // data index [y0, y1, ...]
-                constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
 
                 // read from bottom tensor
                 const auto idx_vec_value = generate_tuple(
@@ -321,26 +343,11 @@ struct tile_window_with_static_distribution
                     number<sizeOfTuple>{});
 
                 // write into distributed tensor
-                static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
-                    constexpr auto idx_ys = generate_tuple(
-                        [&](auto jj) {
-                            return jj == Traits::VectorDimY ? (idx_ys_start[jj] + j)
-                                                            : idx_ys_start[jj];
-                        },
-                        number<Base::NDimY>{});
-
-                    constexpr index_t d =
-                        tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
-                        Traits::PackedSize;
-
-                    ck_tile::apply(
-                        [&](auto&&... t) {
-                            elementwise(dst_tensor.get_thread_buffer().template at<d>(),
-                                        t.template get_as<
-                                            typename Base::DataType>()[j / Traits::PackedSize]...);
-                        },
-                        idx_vec_value);
-                });
+                elementwise_access<iAccess>(
+                    dst_tensor.get_thread_buffer(),
+                    idx_vec_value,
+                    elementwise,
+                    make_index_sequence<Traits::ScalarPerVector / Traits::PackedSize>{});
                 // move thread coordinate
                 if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
                 {
@@ -403,7 +410,6 @@ struct tile_window_with_static_distribution
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
                 if constexpr(Begin <= iAccess && iAccess < End)
                 {
-                    constexpr auto idx_ys_start     = SFC_Ys::get_index(iAccess);
                     const index_t lds_access_offset = [&]() {
                         constexpr auto idx_off_ys = SFC_Ys::get_step_between(number<0>{}, iAccess);
                         constexpr auto adapter_ys_offset = make_tensor_adaptor_coordinate(
@@ -425,20 +431,10 @@ struct tile_window_with_static_distribution
                             bottom_tensor_thread_coord,
                             linear_off + lds_access_offset,
                             bool_constant<true>{});
-                    static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
-                        constexpr auto idx_ys = generate_tuple(
-                            [&](auto jj) {
-                                return jj == Traits::VectorDimY ? (idx_ys_start[jj] + j)
-                                                                : idx_ys_start[jj];
-                            },
-                            number<Base::NDimY>{});
-                        constexpr index_t d =
-                            tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
-                            Traits::PackedSize;
-                        dst_tensor.get_thread_buffer().template at<d>() =
-                            vec_value
-                                .template get_as<typename Base::DataType>()[j / Traits::PackedSize];
-                    });
+                    scatter_access<iAccess>(
+                        dst_tensor.get_thread_buffer(),
+                        vec_value,
+                        make_index_sequence<Traits::ScalarPerVector / Traits::PackedSize>{});
                 }
             });
         }
@@ -504,9 +500,6 @@ struct tile_window_with_static_distribution
                 static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                     constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
 
-                    // data index [y0, y1, ...]
-                    constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
-
                     // offset from access 0 to current access
                     const index_t lds_access_offset = [&]() {
                         constexpr auto idx_off_ys = SFC_Ys::get_step_between(number<0>{}, iAccess);
@@ -531,19 +524,13 @@ struct tile_window_with_static_distribution
                             bottom_tensor_thread_coord,
                             linear_off + lds_access_offset,
                             bool_constant<oob_conditional_check>{});
-                    // write into distributed tensor
+                    // write into distributed tensor. Keep this per-element copy here, not in
+                    // scatter_access: behind the helper call LLVM types the loaded 8-bit vector
+                    // as i32, and 8-bit (fp8, bf8, int8) WMMA GEMMs on gfx1250 get a byte unpack
+                    // and repack in the main loop.
                     static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
-                        constexpr auto idx_ys = generate_tuple(
-                            [&](auto jj) {
-                                return jj == Traits::VectorDimY ? (idx_ys_start[jj] + j)
-                                                                : idx_ys_start[jj];
-                            },
-                            number<Base::NDimY>{});
-
-                        constexpr index_t d =
-                            tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
-                            Traits::PackedSize;
-
+                        constexpr index_t d = get_access_d_offsets<iAccess>()[decltype(j)::value /
+                                                                              Traits::PackedSize];
                         dst_tensor.get_thread_buffer().template at<d>() =
                             vec_value
                                 .template get_as<typename Base::DataType>()[j / Traits::PackedSize];
@@ -584,28 +571,19 @@ struct tile_window_with_static_distribution
                             return 0;
                     }();
 
-                    // data index [y0, y1, ...]
-                    constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
-
                     // read from bottom tensor
                     const vector_t vec_value =
                         this->get_bottom_tensor_view().template get_vectorized_elements<vector_t>(
                             bottom_tensor_thread_coord,
                             linear_off + ys_offset,
                             bool_constant<oob_conditional_check>{});
-                    // write into distributed tensor
+                    // write into distributed tensor. Keep this per-element copy here, not in
+                    // scatter_access: behind the helper call LLVM types the loaded 8-bit vector
+                    // differently, and the code of 8-bit (fp8, bf8, int8) XDL GEMMs on gfx942
+                    // and gfx950 changes.
                     static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
-                        constexpr auto idx_ys = generate_tuple(
-                            [&](auto jj) {
-                                return jj == Traits::VectorDimY ? (idx_ys_start[jj] + j)
-                                                                : idx_ys_start[jj];
-                            },
-                            number<Base::NDimY>{});
-
-                        constexpr index_t d =
-                            tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
-                            Traits::PackedSize;
-
+                        constexpr index_t d = get_access_d_offsets<iAccess>()[decltype(j)::value /
+                                                                              Traits::PackedSize];
                         dst_tensor.get_thread_buffer().template at<d>() =
                             vec_value
                                 .template get_as<typename Base::DataType>()[j / Traits::PackedSize];
@@ -1663,8 +1641,6 @@ struct tile_window_with_static_distribution
         using vector_t = typename Traits::vector_t;
         using SFC_Ys   = typename Traits::SFC_Ys;
 
-        constexpr auto tile_dstr = typename Base::TileDstr{};
-
         // loop over thread tensor space [y0, y1, ...]
         // One iteration, but keep the static_for: as a plain block, the gfx942/gfx950
         // code of int8 GEMMs changes.
@@ -1694,28 +1670,14 @@ struct tile_window_with_static_distribution
                         return 0;
                 }();
 
-                // data index [y0, y1, ...]
-                constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
-
                 // read from distributed tensor
                 // vector_type_t vec;
                 vector_t vec_value;
 
-                static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
-                    constexpr auto idx_ys = generate_tuple(
-                        [&](auto jj) {
-                            return jj == Traits::VectorDimY ? (idx_ys_start[jj] + j)
-                                                            : idx_ys_start[jj];
-                        },
-                        number<Base::NDimY>{});
-
-                    constexpr index_t d =
-                        tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
-                        Traits::PackedSize;
-
-                    vec_value.template get_as<typename Base::DataType>()(j / Traits::PackedSize) =
-                        dstr_tensor.get_thread_buffer().template at<d>();
-                });
+                gather_access<iAccess>(
+                    dstr_tensor.get_thread_buffer(),
+                    vec_value,
+                    make_index_sequence<Traits::ScalarPerVector / Traits::PackedSize>{});
 
                 // const vector_t vec_value = vec.template get_as<vector_t>().template at<0>();
 
@@ -1753,7 +1715,6 @@ struct tile_window_with_static_distribution
         using vector_t = typename Traits::vector_t;
         using SFC_Ys   = typename Traits::SFC_Ys;
 
-        constexpr auto tile_dstr                    = typename Base::TileDstr{};
         static constexpr bool oob_conditional_check = true;
 
         // loop over thread tensor space [y0, y1, ...]
@@ -1766,24 +1727,12 @@ struct tile_window_with_static_distribution
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
 
-                // data index [y0, y1, ...]
-                constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
-
                 // read from distributed tensor
                 vector_t vec_value;
-                static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
-                    constexpr auto idx_ys = generate_tuple(
-                        [&](auto jj) {
-                            return jj == Traits::VectorDimY ? (idx_ys_start[jj] + j)
-                                                            : idx_ys_start[jj];
-                        },
-                        number<Base::NDimY>{});
-                    constexpr index_t d =
-                        tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
-                        Traits::PackedSize;
-                    vec_value.template get_as<typename Base::DataType>()(j / Traits::PackedSize) =
-                        dstr_tensor.get_thread_buffer().template at<d>();
-                });
+                gather_access<iAccess>(
+                    dstr_tensor.get_thread_buffer(),
+                    vec_value,
+                    make_index_sequence<Traits::ScalarPerVector / Traits::PackedSize>{});
 
                 // write into bottom tensor
                 this->get_bottom_tensor_view()
@@ -1818,8 +1767,6 @@ struct tile_window_with_static_distribution
         using vector_t = typename Traits::vector_t;
         using SFC_Ys   = typename Traits::SFC_Ys;
 
-        constexpr auto tile_dstr = typename Base::TileDstr{};
-
         // loop over thread tensor space [y0, y1, ...]
         // One iteration, but keep the static_for: as a plain block, the gfx942/gfx950
         // code of int8 GEMMs changes.
@@ -1831,27 +1778,13 @@ struct tile_window_with_static_distribution
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
 
-                // data index [y0, y1, ...]
-                constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
-
                 // read from distributed tensor
                 vector_t vec_value;
 
-                static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
-                    constexpr auto idx_ys = generate_tuple(
-                        [&](auto jj) {
-                            return jj == Traits::VectorDimY ? (idx_ys_start[jj] + j)
-                                                            : idx_ys_start[jj];
-                        },
-                        number<Base::NDimY>{});
-
-                    constexpr index_t d =
-                        tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
-                        Traits::PackedSize;
-
-                    vec_value.template get_as<typename Base::DataType>()(j / Traits::PackedSize) =
-                        dstr_tensor.get_thread_buffer().template at<d>();
-                });
+                gather_access<iAccess>(
+                    dstr_tensor.get_thread_buffer(),
+                    vec_value,
+                    make_index_sequence<Traits::ScalarPerVector / Traits::PackedSize>{});
 
                 // write into bottom tensor
                 this->get_bottom_tensor_view().template update_vectorized_elements<vector_t>(
@@ -1889,8 +1822,6 @@ struct tile_window_with_static_distribution
         using vector_t = typename Traits::vector_t;
         using SFC_Ys   = typename Traits::SFC_Ys;
 
-        constexpr auto tile_dstr = typename Base::TileDstr{};
-
         // loop over thread tensor space [y0, y1, ...]
         {
             constexpr auto iCoord = I0;
@@ -1901,27 +1832,13 @@ struct tile_window_with_static_distribution
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
 
-                // data index [y0, y1, ...]
-                constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
-
                 // read from distributed tensor
                 vector_t vec_value;
 
-                static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
-                    constexpr auto idx_ys = generate_tuple(
-                        [&](auto jj) {
-                            return jj == Traits::VectorDimY ? (idx_ys_start[jj] + j)
-                                                            : idx_ys_start[jj];
-                        },
-                        number<Base::NDimY>{});
-
-                    constexpr index_t d =
-                        tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
-                        Traits::PackedSize;
-
-                    vec_value.template get_as<typename Base::DataType>()(j / Traits::PackedSize) =
-                        dstr_tensor.get_thread_buffer().template at<d>();
-                });
+                gather_access<iAccess>(
+                    dstr_tensor.get_thread_buffer(),
+                    vec_value,
+                    make_index_sequence<Traits::ScalarPerVector / Traits::PackedSize>{});
 
                 // write into bottom tensor
                 this->get_bottom_tensor_view().template update_vectorized_elements_raw<vector_t>(
@@ -2010,6 +1927,53 @@ struct tile_window_with_static_distribution
     }
 
     private:
+    // vector -> thread buffer, for access IAccess (one fold, no closure per element)
+    template <index_t IAccess, typename DstBuffer, typename Vector, index_t... Js>
+    CK_TILE_DEVICE static void
+    scatter_access(DstBuffer& dst_buf, const Vector& vec_value, sequence<Js...>)
+    {
+        constexpr auto d_offsets = get_access_d_offsets<IAccess>();
+        ((dst_buf.template at<d_offsets[Js]>() =
+              vec_value.template get_as<typename Base::DataType>()[Js]),
+         ...);
+    }
+
+    // thread buffer -> vector, for access IAccess (one fold, no closure per element)
+    template <index_t IAccess, typename SrcBuffer, typename Vector, index_t... Js>
+    CK_TILE_DEVICE static void
+    gather_access(const SrcBuffer& src_buf, Vector& vec_value, sequence<Js...>)
+    {
+        constexpr auto d_offsets = get_access_d_offsets<IAccess>();
+        ((vec_value.template get_as<typename Base::DataType>()(Js) =
+              src_buf.template at<d_offsets[Js]>()),
+         ...);
+    }
+
+    // elementwise(thread buffer, vectors...) per element, for access IAccess. The vectors pack
+    // and Js cannot expand in one expression, so each element is one call of a single lambda.
+    template <index_t IAccess,
+              typename DstBuffer,
+              typename VectorTuple,
+              typename ElementWise,
+              index_t... Js>
+    CK_TILE_DEVICE static void elementwise_access(DstBuffer& dst_buf,
+                                                  const VectorTuple& vec_values,
+                                                  ElementWise& elementwise,
+                                                  sequence<Js...>)
+    {
+        auto apply_one = [&](auto j) {
+            constexpr index_t d = get_access_d_offsets<IAccess>()[decltype(j)::value];
+            ck_tile::apply(
+                [&](auto&&... t) {
+                    elementwise(
+                        dst_buf.template at<d>(),
+                        t.template get_as<typename Base::DataType>()[decltype(j)::value]...);
+                },
+                vec_values);
+        };
+        (apply_one(number<Js>{}), ...);
+    }
+
     // Cached computation for global strides.
     //
     // Per top-level dimension i, the stride is the byte (or PackedSize-scaled
