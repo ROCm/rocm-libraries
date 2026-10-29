@@ -8,6 +8,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 * Memory leak in device_reduce unit test.
 * Incorrect benchmark measurements for block_run_length_encode and block_histogram.
+* `DeviceSpmv::CsrMV` dropping the nonzeros of a row past `256 * floor(num_cols / 256)`, which gave wrong results for matrices with more than 256 columns when `num_cols` was not a multiple of 256, or for rows with more entries than `num_cols`.
 
 ### Upcoming changes
 

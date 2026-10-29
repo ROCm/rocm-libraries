@@ -67,8 +67,11 @@ public:
     static constexpr bool    use_graphs = Params::use_graphs;
 };
 
+// Dense rows wider than the 256-thread block, with widths that are not multiples of it
 using HipcubDeviceSpmvTestsParams = ::testing::Types<DeviceSpmvParams<float, 4, 0, 0, 0>,
-                                                     DeviceSpmvParams<float, 4, 0, 0, 0, true>>;
+                                                     DeviceSpmvParams<float, 4, 0, 0, 0, true>,
+                                                     DeviceSpmvParams<float, 0, 0, 0, 300>,
+                                                     DeviceSpmvParams<float, 0, 0, 0, 700>>;
 
 template<typename T, typename OffsetType>
 static void generate_matrix(CooMatrix<T, OffsetType>& coo_matrix,
@@ -94,15 +97,9 @@ static void generate_matrix(CooMatrix<T, OffsetType>& coo_matrix,
     }
     else if(dense > 0)
     {
-#if 0
-        // Generate dense graph
-        OffsetType size = 1 << 24; // 16M nnz
-        args.GetCmdLineArgument("size", size);
-
-        OffsetType rows = size / dense;
-        printf("dense_%d_x_%d, ", rows, dense); fflush(stdout);
+        // Generate a dense matrix with `dense` columns
+        constexpr OffsetType rows = 8;
         coo_matrix.InitDense(rows, dense);
-#endif
     }
 }
 

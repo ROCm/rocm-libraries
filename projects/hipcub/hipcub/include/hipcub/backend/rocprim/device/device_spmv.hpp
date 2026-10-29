@@ -84,28 +84,25 @@ CsrMVKernel(SpmvParams<ValueT, int> spmv_params)
     }
     __syncthreads();
 
-    int32_t row_offset = (row_id == 0) ? (0) : (spmv_params.d_row_end_offsets[row_id - 1]);
-    for(uint32_t thread_offset = 0; thread_offset < spmv_params.num_cols / blockDim.x;
-        thread_offset++)
+    // Walk the row by its own extent, so that rows with more entries than
+    // blockDim.x * floor(num_cols / blockDim.x) are not truncated.
+    const int32_t row_begin = (row_id == 0) ? (0) : (spmv_params.d_row_end_offsets[row_id - 1]);
+    const int32_t row_end   = spmv_params.d_row_end_offsets[row_id];
+
+    ValueT thread_partial = ValueT(0);
+    for(int32_t offset = row_begin + threadIdx.x; offset < row_end; offset += blockDim.x)
     {
-        int32_t offset = row_offset + thread_offset * blockDim.x + threadIdx.x;
+        thread_partial += spmv_params.alpha * spmv_params.d_values[offset]
+                          * spmv_params.d_vector_x[spmv_params.d_column_indices[offset]];
+    }
+    atomicAdd(&partial, thread_partial);
 
-        if(offset < spmv_params.d_row_end_offsets[row_id])
-        {
-            ValueT t_value =
-                spmv_params.alpha *
-                spmv_params.d_values[offset] *
-                spmv_params.d_vector_x[spmv_params.d_column_indices[offset]];
+    // Every thread must reach this barrier, so it cannot be inside the loop or a branch.
+    __syncthreads();
 
-            atomicAdd(&partial, t_value);
-
-            __syncthreads();
-
-            if(threadIdx.x == 0)
-            {
-                spmv_params.d_vector_y[row_id] = partial;
-            }
-        }
+    if(threadIdx.x == 0)
+    {
+        spmv_params.d_vector_y[row_id] = partial;
     }
 }
 
