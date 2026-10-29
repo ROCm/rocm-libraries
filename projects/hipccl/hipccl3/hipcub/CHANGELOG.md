@@ -20,6 +20,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 ### Resolved issues
 
 * Fixed a build failure when libhipcxx is not on the include path. `radix_rank_sort_operations.hpp` included the libhipcxx `bit` header unconditionally, which does not exist in the standard library fallback.
+* Fixed `CachingDeviceAllocator` handing a block that was still in use to a different host thread when both threads used `hipStreamPerThread`, or stream `0` with per-thread default streams. These handles name a different stream on each thread, so cached blocks are now reused without waiting for their ready event only on the thread that last used them.
 
 ### Removed
 * The hipCUB migration to cccl3 has resulted in the following removals and deprecations:
