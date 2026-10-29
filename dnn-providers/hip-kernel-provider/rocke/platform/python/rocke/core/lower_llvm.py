@@ -3710,21 +3710,28 @@ class _Lowerer:
     def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
         """Lower the packed-fp16 atomic add to its AMDGCN intrinsic.
 
-        Mirrors ``_op_memref_global_atomic_add_pk_bf16`` for fp16.
-        GEPs into the fp16 buffer at ``idx`` and calls
-        ``llvm.amdgcn.global.atomic.fadd.v2f16.p1`` (gfx940+).
+        Mirrors ``_op_memref_global_atomic_add_pk_bf16`` for fp16: a generic
+        ``atomicrmw fadd <2 x half>`` (agent scope, monotonic) with the
+        device-local memory-model metadata, which the backend selects as the
+        native ``global_atomic_pk_add_f16``. The legacy
+        ``llvm.amdgcn.global.atomic.fadd.v2f16`` intrinsic it replaces is
+        lowered on gfx1250 as a fenced atomic: a ``global_wb`` / ``global_inv``
+        pair and full counter drains around every single add, which
+        serialised the split-K epilogues.
         """
         ptr, idx, val = op.operands
-        self._need("global.atomic.fadd.v2f16")
         gep = self._fresh("gep")
         self._current().emit(
             f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"
         )
+        self._needs_fp_atomic_md = True
         self._current().emit(
-            f"  {op.result.name} = call <2 x half> "
-            f"@llvm.amdgcn.global.atomic.fadd.v2f16.p1("
-            f"ptr addrspace(1) {gep}, <2 x half> {self._operand(val)})"
+            f"  {op.result.name} = atomicrmw fadd ptr addrspace(1) {gep}, "
+            f'<2 x half> {self._operand(val)} syncscope("agent") monotonic'
+            ", !amdgpu.no.fine.grained.memory !1"
+            ", !amdgpu.no.remote.memory !1"
+            ", !amdgpu.ignore.denormal.mode !1"
         )
 
     def _op_memref_global_load_vN(self, op: Op) -> None:
