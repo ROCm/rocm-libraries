@@ -7,8 +7,11 @@
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceLayernorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMatmul.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceRMSNorm.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceReduction.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <unordered_map>
@@ -19,13 +22,13 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include "ConvolutionFwdGraphTestUtils.hpp"
 #include "LayernormBwdGraphTestUtils.hpp"
 #include "LayernormFwdGraphTestUtils.hpp"
 #include "MatmulGraphTestUtils.hpp"
 #include "RaggedGraphTestUtils.hpp"
+#include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 
@@ -35,8 +38,8 @@ namespace
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::test_utils;
 using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
+using hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter;
 using hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor;
-using hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor;
 
 // Creates a minimal pointwise graph with two FLOAT tensors (input + output).
 // The pointwise operation is RELU_FWD but the dummy plan ignores the operation.
@@ -352,7 +355,7 @@ void runConvFwdExecutorVsCpu(const std::vector<int64_t>& xDims,
     cpuVariantPack[W_UID] = cpuW.rawHostData();
     cpuVariantPack[Y_UID] = cpuY.rawHostData();
 
-    CpuReferenceGraphExecutor cpuExecutor;
+    CpuReferenceGraphExecutorAdapter cpuExecutor;
     cpuExecutor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), cpuVariantPack);
 
     // Compare GPU executor output against CPU executor output

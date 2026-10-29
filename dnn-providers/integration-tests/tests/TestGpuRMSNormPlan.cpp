@@ -9,13 +9,13 @@
 
 #include "RaggedGraphTestUtils.hpp"
 #include "ScalarTestUtils.hpp"
+#include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/gpu-graph-executor/detail/GpuRMSNormPlan.hpp"
 #include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
@@ -482,7 +482,7 @@ void runFwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     cpuVariantPack[nodeAttributes->scale_tensor_uid()] = scaleTensor.rawHostData();
     cpuVariantPack[nodeAttributes->y_tensor_uid()] = cpuY.rawHostData();
 
-    CpuReferenceGraphExecutor cpuExecutor;
+    hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter cpuExecutor;
     cpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), cpuVariantPack);
     cpuY.markHostModified();
 
@@ -657,7 +657,7 @@ void runBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     cpuVariantPack[nodeAttributes->dscale_tensor_uid()] = dCpuScaleTensor.rawHostData();
     cpuVariantPack[nodeAttributes->dbias_tensor_uid().value()] = dCpuBiasTensor.rawHostData();
 
-    CpuReferenceGraphExecutor cpuExecutor;
+    hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter cpuExecutor;
     cpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), cpuVariantPack);
     dxCpuTensor.markHostModified();
     dCpuScaleTensor.markHostModified();
