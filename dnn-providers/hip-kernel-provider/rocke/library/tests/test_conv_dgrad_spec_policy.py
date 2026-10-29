@@ -436,6 +436,8 @@ class TestTapOuterKIdentity(unittest.TestCase):
             "lds_kpack",
             "xcd_remap",
             "sep_addr",
+            "reg_prefetch",
+            "lds_xor",
         ):
             del fields[name]
         del fields["streamk"], fields["streamk_reduction"]
