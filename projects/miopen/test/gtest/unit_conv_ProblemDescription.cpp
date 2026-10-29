@@ -447,6 +447,10 @@ public:
 
     void RunTest()
     {
+        // The variable overrides the deterministic attribute of the test cases.
+        if(MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC)
+            GTEST_SKIP() << "MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC is set";
+
         const auto p       = GetParam();
         const auto problem = miopen::conv::ProblemDescription{p.in.GetTensorDescriptor(),
                                                               p.weights.GetTensorDescriptor(),
