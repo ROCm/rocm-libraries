@@ -1861,3 +1861,100 @@ TEST_CASE("gfx950 pci_chip_id id75a0 vs id75a8", "[hardware]") {
   REQUIRE(hw_v2.pci_chip_id.has_value());
   REQUIRE(hw_v2.pci_chip_id.value() == 0x75a8);
 }
+
+// Empty problems (M, N or batch is 0) have no output tiles. The model divides
+// by M, N and the tile count, so the ranking entry points must not reach it.
+// They return every config, in input order, with the rejected (max) latency.
+// K = 0 is not empty (D = beta * C still needs a kernel) and is ranked normally.
+TEST_CASE("Origami: ranking entry points rank empty problems as all rejected", "[origami][empty]") {
+  struct shape_t {
+    const char* name;
+    size_t m, n, k, batch;
+  };
+  const shape_t shapes[] = {{"M = 0", 0, 1024, 1024, 1},
+                            {"N = 0", 1024, 0, 1024, 1},
+                            {"batch = 0", 1024, 1024, 1024, 0},
+                            {"M = N = K = 0", 0, 0, 0, 1}};
+  constexpr double rejected = std::numeric_limits<double>::max();
+
+  for (int gpu_arch : test_architectures) {
+    auto hardware = make_hardware(gpu_arch);
+    // Smallest tile first: the latency tie-breaks would move the largest tile to
+    // the front, so this checks that input order is kept.
+    std::vector<origami::config_t> configs;
+    configs.push_back(make_config(64, 64, 64, 16, 16, 32, false, 1, 1, 0, 0, /*stream_k=*/0));
+    configs.push_back(make_config(128, 128, 64, 16, 16, 32));
+    configs.push_back(make_config(256, 256, 64, 16, 16, 32));
+
+    auto same_tile = [](const origami::config_t& a, const origami::config_t& b) {
+      return a.mt.m == b.mt.m && a.mt.n == b.mt.n && a.mt.k == b.mt.k;
+    };
+
+    for (const auto& s : shapes) {
+      DYNAMIC_SECTION("gfx" << gpu_arch << " - " << s.name) {
+        auto problem =
+            make_problem(s.m, s.n, s.k, origami::transpose_t::T, origami::transpose_t::N, s.batch);
+
+        for (auto model : {origami::model_t::gemm, origami::model_t::attention}) {
+          auto ranked = origami::rank_configs(problem, hardware, configs, model);
+          REQUIRE(ranked.size() == configs.size());
+          for (size_t i = 0; i < ranked.size(); ++i) {
+            REQUIRE(ranked[i].latency == rejected);
+            REQUIRE(same_tile(ranked[i].config, configs[i]));
+          }
+        }
+
+        auto top2 = origami::select_topk_configs(problem, hardware, configs, 2);
+        REQUIRE(top2.size() == 2);
+        REQUIRE(same_tile(top2[0].config, configs[0]));
+        REQUIRE(same_tile(top2[1].config, configs[1]));
+        REQUIRE(top2[1].latency == rejected);
+
+        auto selected = origami::select_config(problem, hardware, configs);
+        REQUIRE(selected.latency == rejected);
+        REQUIRE(same_tile(selected.config, configs[0]));
+        if (s.batch == 1) {
+          auto selected_mnk = origami::select_config_mnk(s.m, s.n, s.k, hardware, configs);
+          REQUIRE(selected_mnk.latency == rejected);
+          REQUIRE(same_tile(selected_mnk.config, configs[0]));
+        }
+
+        // An empty config list is still an error, as for any other problem.
+        std::vector<origami::config_t> empty_configs;
+        REQUIRE_THROWS_WITH(origami::rank_configs(problem, hardware, empty_configs),
+                            "No configurations provided.");
+
+        // The model itself reports "nothing to model" rather than dividing by zero.
+        for (const auto& config : configs) {
+          REQUIRE(origami::gemm::compute_total_latency(problem, hardware, config) == rejected);
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("Origami: ranking entry points rank K = 0 problems", "[origami][empty]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - K = 0") {
+      auto hardware = make_hardware(gpu_arch);
+      std::vector<origami::config_t> configs;
+      configs.push_back(make_config(256, 256, 64, 16, 16, 32));
+      configs.push_back(make_config(128, 128, 64, 16, 16, 32));
+      configs.push_back(make_config(64, 64, 64, 16, 16, 32, false, 1, 1, 0, 0, /*stream_k=*/0));
+
+      auto problem = make_problem(1024, 1024, 0);
+
+      auto ranked = origami::rank_configs(problem, hardware, configs);
+      REQUIRE(ranked.size() == configs.size());
+      REQUIRE(ranked[0].latency < std::numeric_limits<double>::max());
+      for (size_t i = 1; i < ranked.size(); ++i) {
+        REQUIRE(ranked[i - 1].latency <= ranked[i].latency);
+      }
+
+      REQUIRE(origami::select_topk_configs(problem, hardware, configs, 2).size() == 2);
+      REQUIRE(origami::select_config(problem, hardware, configs).latency == ranked[0].latency);
+      REQUIRE(origami::select_config_mnk(1024, 1024, 0, hardware, configs).latency <
+              std::numeric_limits<double>::max());
+    }
+  }
+}

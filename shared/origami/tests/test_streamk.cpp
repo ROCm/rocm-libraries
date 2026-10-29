@@ -457,3 +457,46 @@ TEST_CASE("Origami streamk: ipt <= 1 switches to DP above two waves of workgroup
                 p, make_hardware(950), c, origami::grid_selection_t::k_split_aware) == 768);
   }
 }
+
+TEST_CASE("Origami streamk: select_grid_size handles empty and K = 0 problems",
+          "[origami][streamk][empty]") {
+  const auto hardware = make_hardware(950);
+  auto config         = make_config(128, 128, 64, 16, 16, 32);
+
+  SECTION("empty problems launch no workgroups") {
+    const origami::problem_t problems[] = {
+        make_problem(0, 1024, 1024),
+        make_problem(1024, 0, 1024),
+        make_problem(1024, 1024, 1024, origami::transpose_t::T, origami::transpose_t::N, 0),
+    };
+    for (const auto& problem : problems) {
+      for (auto reduction : {origami::reduction_t::tree, origami::reduction_t::parallel}) {
+        config.reduction_strategy = reduction;
+        for (uint32_t a = 0; a < static_cast<uint32_t>(origami::grid_selection_t::count); ++a) {
+          const auto algorithm = static_cast<origami::grid_selection_t>(a);
+          const size_t grid =
+              origami::streamk::select_grid_size(problem, hardware, config, algorithm);
+          if (algorithm == origami::grid_selection_t::data_parallel ||
+              algorithm == origami::grid_selection_t::analytical ||
+              algorithm == origami::grid_selection_t::k_split_aware) {
+            REQUIRE(grid == 0);
+          }
+        }
+        // compute_launch_parameters is the path that reaches grid_k_split_aware
+        // from the model.
+        auto [strategy, wgs, cus, timesteps, split] = origami::gemm::compute_launch_parameters(
+            problem, hardware, config, origami::grid_selection_t::k_split_aware);
+        REQUIRE(wgs == 0);
+        REQUIRE(timesteps == 0);
+      }
+    }
+  }
+
+  SECTION("K = 0 still launches workgroups") {
+    const auto problem = make_problem(1024, 1024, 0);
+    for (uint32_t a = 0; a < static_cast<uint32_t>(origami::grid_selection_t::count); ++a) {
+      const auto algorithm = static_cast<origami::grid_selection_t>(a);
+      REQUIRE(origami::streamk::select_grid_size(problem, hardware, config, algorithm) > 0);
+    }
+  }
+}
