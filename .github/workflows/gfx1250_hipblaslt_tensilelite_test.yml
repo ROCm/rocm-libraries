@@ -154,6 +154,8 @@ jobs:
         --user 0:0
       volumes:
         - /scratch/pip-cache:/pip-cache${{ github.event_name != 'schedule' && ':ro' || '' }}
+        # Host-wide lock shared by this host's runners (see "Run hipBLASLt tests").
+        - /scratch/ci-locks:/ci-locks
     defaults:
       run:
         shell: bash
@@ -381,25 +383,98 @@ jobs:
             || { echo "::error::cannot list a hipBLASLt code object with the SDK's clang-offload-bundler"; exit 1; }
           grep -q -- '-gfx1250-strict$' <<<"$IDS" \
             || { echo "::error::hipBLASLt code objects are not labelled gfx1250-strict"; exit 1; }
-          FILTER=()
-          [ -n "$GTEST_FILTER_ARG" ] && FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
-          # Each shard is scrubbed as it runs (hardware info and timing), so no unscrubbed
+          # Large-memory tests (2^31/2^32 sizes, on gfx1250 since #13504). Sharded, every
+          # shard reaches them at once and a single job nearly fills the host's memory: the
+          # client's pool keeps their pinned host buffers until the process exits. So the
+          # shards skip them, and they run after the shards, one group per process (each
+          # starts with an empty pool), one job at a time on this host. A custom filter gets
+          # the same split. Stopgap: remove the split and the lock once the test harness
+          # bounds its own host memory (AIHPBLAS-5352).
+          LARGE=('*fast_check_size_t_index_overflow*' '*stress_matmul_size_t_index_overflow*'
+            '*size_t_output_overflow*' '*offset_above_2_32*' '*batch_offset_large*')
+          # One process per group; the two stress groups apart (together they keep ~1.4x
+          # the larger one's memory).
+          LARGE_GROUPS=('*fast_check_size_t_index_overflow*' '*stress_matmul_size_t_index_overflow_hpa*'
+            '*stress_matmul_size_t_index_overflow_*-*stress_matmul_size_t_index_overflow_hpa*'
+            '*size_t_output_overflow*' '*offset_above_2_32*' '*batch_offset_large*')
+          # gtest filter syntax is POSITIVE[-NEGATIVE]; the shards add LARGE to the negatives.
+          POS="${GTEST_FILTER_ARG%%-*}" NEG=""
+          [[ "$GTEST_FILTER_ARG" == *-* ]] && NEG="${GTEST_FILTER_ARG#*-}:"
+          FILTER=(--gtest_filter="${POS:-*}-${NEG}$(IFS=:; echo "${LARGE[*]}")")
+          # True if test name $1 matches gtest filter $2 (* and ? wildcards).
+          in_filter() {
+            local p pos="${2%%-*}" neg="" hit=1
+            [[ "$2" == *-* ]] && neg="${2#*-}"
+            local -a P N
+            IFS=: read -ra P <<<"${pos:-*}"
+            IFS=: read -ra N <<<"$neg"
+            for p in "${P[@]}"; do [[ "$1" == $p ]] && { hit=0; break; }; done
+            for p in "${N[@]}"; do [[ "$1" == $p ]] && hit=1; done
+            return "$hit"
+          }
+          # Each log is scrubbed as it runs (hardware info and timing), so no unscrubbed
           # output reaches disk. The subshell makes wait return the test's status
           # (pipefail), not awk's.
+          run_tests() {  # log name, then hipblaslt-test arguments
+            local log="$1"; shift
+            ( "$BIN" "$@" 2>&1 | sed -E 's/ \([0-9]+ ms( total)?\)//g' \
+                | awk -F, -v OFS=, "$HW_SCRUB" > "$OUT/$log" )
+          }
           OUT="$GITHUB_WORKSPACE/test_results"
           mkdir -p "$OUT"
           pids=()
           for i in $(seq 0 $((HIPBLASLT_TEST_SHARDS - 1))); do
-            ( GTEST_TOTAL_SHARDS=$HIPBLASLT_TEST_SHARDS GTEST_SHARD_INDEX=$i "$BIN" "${FILTER[@]}" 2>&1 \
-                | sed -E 's/ \([0-9]+ ms( total)?\)//g' \
-                | awk -F, -v OFS=, "$HW_SCRUB" > "$OUT/hipblaslt_test_shard$i.log" ) &
+            GTEST_TOTAL_SHARDS=$HIPBLASLT_TEST_SHARDS GTEST_SHARD_INDEX=$i \
+              run_tests "hipblaslt_test_shard$i.log" "${FILTER[@]}" &
             pids+=($!)
           done
           rc=0
           for p in "${pids[@]}"; do wait "$p" || rc=1; done
-          for i in $(seq 0 $((HIPBLASLT_TEST_SHARDS - 1))); do
-            echo "::group::hipBLASLt shard $i of $HIPBLASLT_TEST_SHARDS"
-            cat "$OUT/hipblaslt_test_shard$i.log"
+          # The large tests this run selects, by group: the names gtest lists for the run's
+          # filter (suite lines end in "."; test lines are indented), matched to each group.
+          LIST=(--gtest_list_tests)
+          [ -n "$GTEST_FILTER_ARG" ] && LIST+=(--gtest_filter="$GTEST_FILTER_ARG")
+          LARGE_RE="$(printf '%s\n' "${LARGE[@]}" | sed 's/\*/.*/g' | paste -sd'|')"
+          mapfile -t NAMES < <("$BIN" "${LIST[@]}" 2>/dev/null \
+            | awk '/^[^ ].*\.$/ {s = $1; next} /^  [^ ]/ && s != "" {print s $1}' \
+            | grep -E "^($LARGE_RE)$")
+          SELECTED=()
+          for k in "${!LARGE_GROUPS[@]}"; do
+            sel=()
+            for n in "${NAMES[@]}"; do in_filter "$n" "${LARGE_GROUPS[$k]}" && sel+=("$n"); done
+            SELECTED[k]="$(IFS=:; echo "${sel[*]}")"
+            # gtest passes a filter that matches nothing, so a renamed test would silently
+            # drop out of the run. Without a custom filter every group must match.
+            if [ -z "$GTEST_FILTER_ARG" ] && [ "${#sel[@]}" -eq 0 ]; then
+              echo "::error::large-memory group '${LARGE_GROUPS[$k]}' matches no test; update LARGE / LARGE_GROUPS"
+              rc=1
+            fi
+          done
+          if [ -n "$(IFS=; echo "${SELECTED[*]}")" ]; then
+            # The shards are done, so the large tests get this job's whole CPU share.
+            export OMP_NUM_THREADS=$(( T * HIPBLASLT_TEST_SHARDS )) OPENBLAS_NUM_THREADS=$(( T * HIPBLASLT_TEST_SHARDS ))
+            exec 9>/ci-locks/gfx1250-hipblaslt-large-tests.lock
+            echo "Waiting for the host's large-test lock"
+            # ~5 min per job (93 tests in 4.4 min on one GPU), so a 4th queued job waits
+            # ~15 min; the cap only catches a stuck holder.
+            if flock -x -w 3000 9; then
+              for k in "${!LARGE_GROUPS[@]}"; do
+                [ -n "${SELECTED[k]}" ] || continue
+                run_tests "hipblaslt_test_shard_large$k.log" --gtest_filter="${SELECTED[k]}" || rc=1
+              done
+              flock -u 9
+            else
+              echo "::error::waited 50 min for another job's large hipBLASLt tests; skipped them"
+              rc=1
+            fi
+          fi
+          for f in "$OUT"/hipblaslt_test_shard_large*.log; do
+            [ -f "$f" ] && grep -q '^\[==========\] Running 0 tests' "$f" \
+              && { echo "::error::$(basename "$f") ran no tests"; rc=1; }
+          done
+          for f in "$OUT"/hipblaslt_test_shard*.log; do
+            echo "::group::hipBLASLt $(basename "$f" .log)"
+            cat "$f"
             echo "::endgroup::"
           done
           grep -hE '^\[(==========|  PASSED  |  SKIPPED |  FAILED  )\] [0-9]+ test' "$OUT"/hipblaslt_test_shard*.log || true
