@@ -11,7 +11,6 @@
 #include <string>
 #include <vector>
 
-#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceLayernorm.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
@@ -59,10 +58,7 @@ Shapes shapesFrom(const Config& config)
     return {{n, c, h, w}, {1, c, h, w}, {n, 1, 1, 1}};
 }
 
-fe::Tensor statsTensor(int64_t uid, const std::vector<int64_t>& dims)
-{
-    return v8_sample::makeTensor(uid, dims, sdk::generateStrides(dims), CUDNN_DATA_FLOAT);
-}
+using v8_sample::makeFloatTensor;
 
 template <typename T>
 bool runForward(cudnnHandle_t handle, const Config& config, const TensorLayout& layout)
@@ -86,8 +82,8 @@ bool runForward(cudnnHandle_t handle, const Config& config, const TensorLayout& 
                   v8_sample::makeTensor(BIAS_UID, shapes.affine, layout, CUDNN_DATA_FLOAT))
               .setEpsilonTensor(v8_sample::makeScalar(EPSILON_UID))
               .setyDesc(v8_sample::makeTensor(Y_UID, shapes.data, layout, ioType))
-              .setSavedMeanAndInvVar(statsTensor(MEAN_UID, shapes.stats),
-                                     statsTensor(INV_VAR_UID, shapes.stats))
+              .setSavedMeanAndInvVar(makeFloatTensor(MEAN_UID, shapes.stats),
+                                     makeFloatTensor(INV_VAR_UID, shapes.stats))
               .build();
     fe::OperationGraph graph = v8_sample::makeGraph(handle, {&op});
 
@@ -125,7 +121,7 @@ bool runForward(cudnnHandle_t handle, const Config& config, const TensorLayout& 
     y.memory().markDeviceModified();
     mean.memory().markDeviceModified();
     invVar.memory().markDeviceModified();
-    v8_sample::ranVariant();
+    v8_sample::ranVariant(variant.str());
 
     bool validationPassed = true;
     if(config.cpuValidation)
@@ -168,8 +164,8 @@ bool runBackward(cudnnHandle_t handle, const Config& config, const TensorLayout&
               .setxDesc(v8_sample::makeTensor(X_UID, shapes.data, layout, ioType))
               .setdyDesc(v8_sample::makeTensor(DY_UID, shapes.data, layout, ioType))
               .setScale(v8_sample::makeTensor(SCALE_UID, shapes.affine, layout, CUDNN_DATA_FLOAT))
-              .setSavedMeanAndInvVar(statsTensor(MEAN_UID, shapes.stats),
-                                     statsTensor(INV_VAR_UID, shapes.stats))
+              .setSavedMeanAndInvVar(makeFloatTensor(MEAN_UID, shapes.stats),
+                                     makeFloatTensor(INV_VAR_UID, shapes.stats))
               .setEpsilonTensor(v8_sample::makeScalar(EPSILON_UID))
               .setdxDesc(v8_sample::makeTensor(DX_UID, shapes.data, layout, ioType))
               .setDScaleAndDBias(
@@ -233,7 +229,7 @@ bool runBackward(cudnnHandle_t handle, const Config& config, const TensorLayout&
     dx.memory().markDeviceModified();
     dscale.memory().markDeviceModified();
     dbias.memory().markDeviceModified();
-    v8_sample::ranVariant();
+    v8_sample::ranVariant(variant.str());
 
     bool validationPassed = true;
     if(config.cpuValidation)

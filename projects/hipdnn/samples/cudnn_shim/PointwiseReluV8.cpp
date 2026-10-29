@@ -67,7 +67,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
                        {X_UID, Y_UID},
                        {xTensor.memory().deviceData(), yTensor.memory().deviceData()});
     yTensor.memory().markDeviceModified();
-    v8_sample::ranVariant();
+    v8_sample::ranVariant(variant.str());
 
     bool validationPassed = true;
     if(config.cpuValidation)

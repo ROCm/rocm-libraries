@@ -53,11 +53,7 @@ std::vector<int64_t> dataDims(const Config& config)
     return {pick(0, 4), pick(1, 16), pick(2, 8), pick(3, 8)};
 }
 
-// Scale, bias and the statistics are fp32 [1, C, 1, 1] whatever the data type.
-fe::Tensor channelTensor(int64_t uid, const std::vector<int64_t>& dims)
-{
-    return v8_sample::makeTensor(uid, dims, sdk::generateStrides(dims), CUDNN_DATA_FLOAT);
-}
+using v8_sample::makeFloatTensor;
 
 template <typename T>
 bool runTraining(cudnnHandle_t handle, const Config& config, const TensorLayout& layout)
@@ -77,17 +73,17 @@ bool runTraining(cudnnHandle_t handle, const Config& config, const TensorLayout&
               .setNormalizationMode(CUDNN_BATCH_NORM)
               .setNormFwdPhase(CUDNN_NORM_FWD_TRAINING)
               .setxDesc(v8_sample::makeTensor(X_UID, dims, layout, ioType))
-              .setScaleAndBias(channelTensor(SCALE_UID, channelDims),
-                               channelTensor(BIAS_UID, channelDims))
+              .setScaleAndBias(makeFloatTensor(SCALE_UID, channelDims),
+                               makeFloatTensor(BIAS_UID, channelDims))
               .setEpsilonTensor(v8_sample::makeScalar(EPSILON_UID))
               .setyDesc(v8_sample::makeTensor(Y_UID, dims, layout, ioType))
-              .setSavedMeanAndInvVar(channelTensor(MEAN_UID, channelDims),
-                                     channelTensor(INV_VAR_UID, channelDims))
-              .setPrevRunningMeanAndVar(channelTensor(PREV_MEAN_UID, channelDims),
-                                        channelTensor(PREV_VAR_UID, channelDims))
+              .setSavedMeanAndInvVar(makeFloatTensor(MEAN_UID, channelDims),
+                                     makeFloatTensor(INV_VAR_UID, channelDims))
+              .setPrevRunningMeanAndVar(makeFloatTensor(PREV_MEAN_UID, channelDims),
+                                        makeFloatTensor(PREV_VAR_UID, channelDims))
               .setExpDecayFactorTensor(v8_sample::makeScalar(MOMENTUM_UID))
-              .setNextRunningMeanAndVar(channelTensor(NEXT_MEAN_UID, channelDims),
-                                        channelTensor(NEXT_VAR_UID, channelDims))
+              .setNextRunningMeanAndVar(makeFloatTensor(NEXT_MEAN_UID, channelDims),
+                                        makeFloatTensor(NEXT_VAR_UID, channelDims))
               .build();
     fe::OperationGraph graph = v8_sample::makeGraph(handle, {&op});
 
@@ -152,7 +148,7 @@ bool runTraining(cudnnHandle_t handle, const Config& config, const TensorLayout&
     {
         output->memory().markDeviceModified();
     }
-    v8_sample::ranVariant();
+    v8_sample::ranVariant(variant.str());
 
     bool validationPassed = true;
     if(config.cpuValidation)
@@ -213,13 +209,13 @@ bool runBackward(cudnnHandle_t handle, const Config& config, const TensorLayout&
                                  .setNormalizationMode(CUDNN_BATCH_NORM)
                                  .setxDesc(v8_sample::makeTensor(X_UID, dims, layout, ioType))
                                  .setdyDesc(v8_sample::makeTensor(DY_UID, dims, layout, ioType))
-                                 .setScale(channelTensor(SCALE_UID, channelDims))
-                                 .setSavedMeanAndInvVar(channelTensor(MEAN_UID, channelDims),
-                                                        channelTensor(INV_VAR_UID, channelDims))
+                                 .setScale(makeFloatTensor(SCALE_UID, channelDims))
+                                 .setSavedMeanAndInvVar(makeFloatTensor(MEAN_UID, channelDims),
+                                                        makeFloatTensor(INV_VAR_UID, channelDims))
                                  .setEpsilonTensor(v8_sample::makeScalar(EPSILON_UID))
                                  .setdxDesc(v8_sample::makeTensor(DX_UID, dims, layout, ioType))
-                                 .setDScaleAndDBias(channelTensor(DSCALE_UID, channelDims),
-                                                    channelTensor(DBIAS_UID, channelDims))
+                                 .setDScaleAndDBias(makeFloatTensor(DSCALE_UID, channelDims),
+                                                    makeFloatTensor(DBIAS_UID, channelDims))
                                  .build();
     fe::OperationGraph graph = v8_sample::makeGraph(handle, {&op});
 
@@ -271,7 +267,7 @@ bool runBackward(cudnnHandle_t handle, const Config& config, const TensorLayout&
     dx.memory().markDeviceModified();
     dscale.memory().markDeviceModified();
     dbias.memory().markDeviceModified();
-    v8_sample::ranVariant();
+    v8_sample::ranVariant(variant.str());
 
     bool validationPassed = true;
     if(config.cpuValidation)

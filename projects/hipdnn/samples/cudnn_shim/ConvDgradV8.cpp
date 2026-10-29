@@ -69,7 +69,7 @@ bool runVariant(cudnnHandle_t handle,
         {DX_UID, W_UID, DY_UID},
         {dx.memory().deviceData(), w.memory().deviceData(), dy.memory().deviceData()});
     dx.memory().markDeviceModified();
-    v8_sample::ranVariant();
+    v8_sample::ranVariant(variant.str());
 
     bool validationPassed = true;
     if(config.cpuValidation)

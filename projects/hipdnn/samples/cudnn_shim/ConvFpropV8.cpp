@@ -408,7 +408,7 @@ int runOverhead(cudnnHandle_t handle, const v8_sample::Options& options)
               << " timed=" << timed.size() << " workspace=" << timingWorkspaceSize << '\n';
     std::cout << "CONCURRENT " << (concurrent ? "PASS" : "FAIL") << '\n';
 
-    v8_sample::ranVariant();
+    v8_sample::ranVariant("overhead fp32 [NCHW]");
     // Wall-clock budgets depend on runner load, so they gate only when asked to.
     const bool withinBudget = m1.pass() && m2.pass();
     if(!withinBudget && !options.has("--enforce-budget"))
@@ -452,7 +452,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
                        {X_UID, W_UID, Y_UID},
                        {x.memory().deviceData(), w.memory().deviceData(), y.memory().deviceData()});
     y.memory().markDeviceModified();
-    v8_sample::ranVariant();
+    v8_sample::ranVariant(variant.str());
 
     bool validationPassed = true;
     if(config.cpuValidation)

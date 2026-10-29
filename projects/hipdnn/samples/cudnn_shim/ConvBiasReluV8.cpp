@@ -91,7 +91,7 @@ bool runVariant(cudnnHandle_t handle, const Config& config, const TensorLayout& 
                         biasTensor.memory().deviceData(),
                         yTensor.memory().deviceData()});
     yTensor.memory().markDeviceModified();
-    v8_sample::ranVariant();
+    v8_sample::ranVariant(variant.str());
 
     bool validationPassed = true;
     if(config.cpuValidation)

@@ -198,7 +198,7 @@ bool runForward(cudnnHandle_t handle,
     }
     v8_sample::execute(handle, *plan, uids, pointers);
     y.memory().markDeviceModified();
-    v8_sample::ranVariant();
+    v8_sample::ranVariant(variant);
 
     // The index is checked through the max backward variant, which consumes it.
     bool validationPassed = true;
@@ -275,7 +275,7 @@ bool runBackward(cudnnHandle_t handle,
     }
     v8_sample::execute(handle, *plan, uids, pointers);
     dx.memory().markDeviceModified();
-    v8_sample::ranVariant();
+    v8_sample::ranVariant(variant);
 
     bool validationPassed = true;
     if(config.cpuValidation)

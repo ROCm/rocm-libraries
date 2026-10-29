@@ -40,6 +40,7 @@ struct Summary
 {
     int ran = 0;
     int skipped = 0;
+    std::vector<std::string> ranVariants;
 };
 
 inline Summary& summary()
@@ -51,8 +52,10 @@ inline Summary& summary()
 struct Options
 {
     Config config;
-    // The run fails when fewer variants executed, so losing every engine is not a skip.
+    // The run fails when fewer variants executed, or when a named variant did not execute, so
+    // losing an engine the CI devices have is a failure, not a skip.
     int requireRan = 0;
+    std::vector<std::string> requireVariants;
     std::vector<std::string> switches;
 
     bool has(std::string_view name) const
@@ -82,6 +85,15 @@ inline Options
             {
                 throw std::invalid_argument("--require-ran must not be negative");
             }
+            continue;
+        }
+        if(i > 0 && arg == "--require-variant")
+        {
+            if(i + 1 >= argc)
+            {
+                throw std::invalid_argument("--require-variant requires a variant name");
+            }
+            options.requireVariants.emplace_back(argv[++i]);
             continue;
         }
         if(i > 0
@@ -158,6 +170,12 @@ inline fe::Tensor makeTensor(int64_t uid,
                              bool isVirtual = false)
 {
     return makeTensor(uid, dims, sdk::generateStrides(dims, layout.strideOrder), type, isVirtual);
+}
+
+// Packed fp32: norm scales, biases and statistics stay fp32 whatever the data type.
+inline fe::Tensor makeFloatTensor(int64_t uid, const std::vector<int64_t>& dims)
+{
+    return makeTensor(uid, dims, sdk::generateStrides(dims), CUDNN_DATA_FLOAT);
 }
 
 // A by-value scalar: its variant-pack entry is a host pointer.
@@ -394,9 +412,10 @@ inline bool skipVariant(const std::string& what)
     return true;
 }
 
-inline void ranVariant()
+inline void ranVariant(const std::string& what)
 {
     ++summary().ran;
+    summary().ranVariants.push_back(what);
 }
 
 inline int finish(const Options& options, bool allPassed)
@@ -407,15 +426,30 @@ inline int finish(const Options& options, bool allPassed)
     {
         return 1;
     }
+    bool floorMet = true;
     if(result.ran < options.requireRan)
     {
         std::cout << "FAILED: " << result.ran << " variant(s) ran, --require-ran expects at least "
                   << options.requireRan << '\n';
+        floorMet = false;
+    }
+    for(const std::string& required : options.requireVariants)
+    {
+        if(std::find(result.ranVariants.begin(), result.ranVariants.end(), required)
+           == result.ranVariants.end())
+        {
+            std::cout << "FAILED: --require-variant \"" << required << "\" did not run\n";
+            floorMet = false;
+        }
+    }
+    if(!floorMet)
+    {
         return 1;
     }
     if(result.ran == 0)
     {
-        std::cout << "SKIPPED: no applicable engine for any variant\n";
+        std::cout << "SKIPPED: no applicable engine for any variant; no loaded provider has an "
+                     "engine for this sample on this device, and its floor is 0\n";
     }
     return 0;
 }

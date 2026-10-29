@@ -357,29 +357,38 @@ if(HIPDNN_SAMPLES_CUDNN_SHIM)
     add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_hipify_conv_fprop
         SKIP_REGULAR_EXPRESSION "SKIPPED: No GPU devices available")
 
-    # The v8 samples execute on a GPU. Only the whole-binary tokens match; a per-variant skip does
-    # not, so a sample that validated nothing reports Skipped rather than Passed. --require-ran is
-    # the number of fp32 variants MIOpen runs on every device, so losing those engines fails instead
-    # of skipping. A floor of 0 means no provider CI installs has an engine for that sample.
     set(HIPDNN_CUDNN_V8_SKIP_REGEX "SKIPPED: (No GPU devices available|no applicable engine)")
-    foreach(_v8_sample_and_floor
-            conv_fprop_v8:2
-            conv_dgrad_v8:2
-            conv_wgrad_v8:2
-            conv_bias_relu_v8:1
-            pointwise_relu_v8:2
-            batchnorm_v8:4
-            matmul_bias_act_v8:0
-            layernorm_v8:0
-            reduction_v8:0
-            resample_v8:0)
-        string(REPLACE ":" ";" _v8_sample_and_floor "${_v8_sample_and_floor}")
-        list(GET _v8_sample_and_floor 0 _v8_sample)
-        list(GET _v8_sample_and_floor 1 _v8_floor)
-        add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_${_v8_sample}
+    # The v8 samples execute on a GPU. Only the whole-binary tokens match; a per-variant skip does
+    # not, so a sample that validated nothing reports Skipped rather than Passed.
+    # FLOOR (--require-ran) is the number of fp32 variants MIOpen runs on every device, and each
+    # named fp32 variant (--require-variant) must run, so losing those engines fails instead of
+    # skipping, and losing fp32 while fp16 or bf16 still run fails too.
+    function(add_hipdnn_cudnn_v8_sample_test SAMPLE FLOOR)
+        set(_args --require-ran ${FLOOR})
+        foreach(_variant IN LISTS ARGN)
+            list(APPEND _args --require-variant "${_variant}")
+        endforeach()
+        add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_${SAMPLE}
             SKIP_REGULAR_EXPRESSION "${HIPDNN_CUDNN_V8_SKIP_REGEX}"
-            ARGS --require-ran ${_v8_floor})
-    endforeach()
+            ARGS ${_args})
+    endfunction()
+    add_hipdnn_cudnn_v8_sample_test(conv_fprop_v8 2 "fp32 [NCHW]")
+    # The CUDNN_CONVOLUTION and asymmetric-padding variants are skipped: MIOpen rejects them.
+    add_hipdnn_cudnn_v8_sample_test(conv_dgrad_v8 2 "dgrad fp32 [NCHW]")
+    add_hipdnn_cudnn_v8_sample_test(conv_wgrad_v8 2 "wgrad fp32 [NCHW]")
+    add_hipdnn_cudnn_v8_sample_test(conv_bias_relu_v8 1 "fp32 [NCHW] K=1")
+    add_hipdnn_cudnn_v8_sample_test(pointwise_relu_v8 2 "pointwise relu fp32 [NCHW]")
+    add_hipdnn_cudnn_v8_sample_test(batchnorm_v8 4
+        "batch norm forward training fp32 [NCHW]" "batch norm backward fp32 [NCHW]")
+    # Floor 0: no engine in TheRock's samples job, which loads only the MIOpen provider. Matmul
+    # needs hipBLASLt, and layer norm and resample need hip-kernel-provider; these floors rise once
+    # that job loads both providers.
+    add_hipdnn_cudnn_v8_sample_test(matmul_bias_act_v8 0)
+    add_hipdnn_cudnn_v8_sample_test(layernorm_v8 0)
+    add_hipdnn_cudnn_v8_sample_test(resample_v8 0)
+    # No provider implements reduction, so this sample always reports Skipped; it starts checking
+    # results when a provider claims the reduction operation.
+    add_hipdnn_cudnn_v8_sample_test(reduction_v8 0)
 
     # The v8 samples run the heuristics' first engine config, so an engine preference must be
     # refused rather than ignored.
@@ -388,6 +397,15 @@ if(HIPDNN_SAMPLES_CUDNN_SHIM)
         hipdnn_sample_cudnn_shim_conv_fprop_v8
         ARGS --dtype fp32 --layout nchw --engine-id 12345
         PASS_REGULAR_EXPRESSION "--engine-id and --engine-name are not supported"
+        SKIP_REGULAR_EXPRESSION "SKIPPED: No GPU devices available"
+    )
+
+    # A named variant that did not run fails the sample even when the variant count is met.
+    add_hipdnn_sample_command_test(
+        hipdnn_sample_cudnn_shim_conv_fprop_v8_require_variant
+        hipdnn_sample_cudnn_shim_conv_fprop_v8
+        ARGS --dtype fp32 --layout nhwc --require-variant "fp32 [NCHW]"
+        PASS_REGULAR_EXPRESSION "--require-variant .* did not run"
         SKIP_REGULAR_EXPRESSION "SKIPPED: No GPU devices available"
     )
 

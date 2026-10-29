@@ -2,7 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 // Per-channel ADD and MAX reductions built with the cuDNN v8 (v0.x) builders, run through the
-// shim on a real provider and checked against the CPU reference.
+// shim on a real provider and checked against the CPU reference. No provider implements
+// reduction yet, so every variant is skipped until one does.
 
 #include <array>
 #include <cstdint>
@@ -87,7 +88,7 @@ bool runVariant(cudnnHandle_t handle,
     v8_sample::execute(
         handle, *plan, {X_UID, Y_UID}, {x.memory().deviceData(), y.memory().deviceData()});
     y.memory().markDeviceModified();
-    v8_sample::ranVariant();
+    v8_sample::ranVariant(variant.str());
 
     bool validationPassed = true;
     if(config.cpuValidation)
