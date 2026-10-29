@@ -411,6 +411,23 @@ namespace TensileLite
                     std::max<std::int64_t>(sizeMapping.CUOccupancy, 1)};
         }
 
+        // tilewright's re-rank memo (TW_LEVER_MEMO) may answer a ranking with
+        // the scores of the thread's last one when both rank this pool for
+        // equal tilewright inputs (problem, hardware, context), which assumes
+        // that plan() returns equal plans for both. plan() also reads, of the
+        // scope's device, its persistent settings, its CU count and its whole
+        // analytical hardware, of which the tilewright hardware holds only the
+        // CU count and the LDS and L2 sizes, and, for a kernel it does not
+        // plan from its record, the scope's whole problem. TensileLite gives
+        // every device it builds the persistent settings it reads once per
+        // process, so only devices whose CU count or analytical hardware
+        // differ beyond what the tilewright hardware holds can plan
+        // differently for equal inputs. A remembered ranking only orders
+        // candidates that TensileLite's predicates still check against the
+        // call's problem: at worst a call serves another valid kernel than a
+        // fresh ranking would. Where the memo's plan check (TW_LEVER_MEMO_CHECK)
+        // is compiled, by default in builds with assertions, it asks for the
+        // plans again and ranks afresh when one differs.
         tilewright::LaunchPlan plan(tilewright::Config const&           config,
                                     tilewright::Problem const&          problem,
                                     tilewright::ExecutionContext const& context) const override
