@@ -5213,6 +5213,95 @@ def cases():
             build_winograd_fused_1d_case(_c, _k, _ax, **_kw),
         )
 
+    # Stride 2 (3x3 phases and the 2x2 patch merge), dilation, packed small
+    # groups, the split barrier with and without the per-wave epilogue, and
+    # tile widths that are not a power of two. Also llvm23-only.
+    def build_direct_dgrad_wmma_ext_case(prob_kw, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_dgrad_wmma import (
+                DirectDgradWmmaSpec,
+                build_direct_dgrad_wmma,
+            )
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            pk = dict(
+                N=2,
+                H=20,
+                W=24,
+                groups=1,
+                cpg=64,
+                kpg=96,
+                KH=3,
+                PAD=1,
+                stride=1,
+                dtype="bf16",
+            )
+            pk.update(prob_kw)
+            pk["KW"] = pk["KH"]
+            return build_direct_dgrad_wmma(
+                DirectDgradWmmaSpec(problem=DirectConvProblem(**pk), **spec_kw),
+                arch="gfx1250",
+            )
+
+        return _build
+
+    _dgw_pf = dict(prefetch=True, sched="iterative-ilp")
+    for _case_id, _prob, _over in (
+        (
+            "bf16_dil2x2_p2",
+            dict(PAD=2, dil_h=2, dil_w=2),
+            dict(waves_c=2, waves_p=4, tiles_c=4, tiles_p=8, **_dgw_pf),
+        ),
+        (
+            "bf16_pg4_c8k8",
+            dict(groups=8, cpg=8, kpg=8),
+            dict(waves_c=1, waves_p=8, tiles_c=2, tiles_p=4, tile_n=2, pack_groups=4),
+        ),
+        (
+            "bf16_s2_3x3",
+            dict(stride=2),
+            dict(waves_c=2, waves_p=4, tiles_c=2, tiles_p=4, tile_w=8, tile_n=2, ck=64),
+        ),
+        (
+            "bf16_s2_patch2",
+            dict(KH=2, PAD=0, stride=2),
+            dict(waves_c=2, waves_p=4, tiles_c=2, tiles_p=4, ck=64),
+        ),
+        (
+            "bf16_sb_tw56",
+            {},
+            dict(
+                waves_c=1,
+                waves_p=7,
+                tiles_c=4,
+                tiles_p=10,
+                tile_w=56,
+                split_barrier=True,
+            ),
+        ),
+        (
+            "bf16_sb_we_tw24",
+            {},
+            dict(
+                waves_c=1,
+                waves_p=8,
+                tiles_c=4,
+                tiles_p=6,
+                tile_w=24,
+                tile_n=4,
+                split_barrier=True,
+                wave_epilogue=True,
+                **_dgw_pf,
+            ),
+        ),
+    ):
+        add(
+            "conv_direct_dgrad_wmma",
+            f"conv_direct_dgrad_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_direct_dgrad_wmma_ext_case(_prob, **_over),
+        )
+
     # --- conv_direct_wgrad: the direct wgrad kernels on gfx950 ---
     # Tiled (LDS-DMA row pipeline, swizzled transpose reads, atomics), the
     # depthwise partial-slot kernels and their fold, the small-C gather, and
