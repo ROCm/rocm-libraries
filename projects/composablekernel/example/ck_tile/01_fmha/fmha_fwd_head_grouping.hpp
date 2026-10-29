@@ -225,7 +225,13 @@ inline size_t get_default_llc_cache_bytes_for_arch(const std::string& arch)
         return 32ull * 1024ull * 1024ull;
     if(arch == "gfx1103")
         return 32ull * 1024ull * 1024ull;
+    if(arch == "gfx1150")
+        return 32ull * 1024ull * 1024ull;
     if(arch == "gfx1151")
+        return 32ull * 1024ull * 1024ull;
+    if(arch == "gfx1152")
+        return 32ull * 1024ull * 1024ull;
+    if(arch == "gfx1153")
         return 32ull * 1024ull * 1024ull;
     if(arch == "gfx1200")
         return 32ull * 1024ull * 1024ull;
