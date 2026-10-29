@@ -18,6 +18,7 @@
 #include <hipdnn_plugin_sdk/heuristics/uhd/AdapterFactory.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/adapters/TreeDataAdapter.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <nlohmann/json.hpp>
@@ -446,6 +447,231 @@ TEST(TestUhdGenArtifactGrouped, TheRuntimeGroupsWhatTheToolTrained)
     EXPECT_TRUE(std::isfinite(scores[2]));
     EXPECT_GT(scores[2], scores[1]);
 }
+
+namespace
+{
+
+/// Trains a `--model-family` model the way a user's script would, exports it through
+/// uhd_gen to argv[2], and writes to argv[3] the rows to score and, for each, the library's
+/// own per-tree outputs summed in the runtime's order (what the runtime must return bit for
+/// bit) and its `predict`. Rows: training rows with missing values, and a row on and on each
+/// side of every split value, the only rows that tell `<=` from `<` and a float64 feature
+/// from a float32 one. JSON has no NaN, so a missing value is written as null.
+constexpr const char* FAMILY_PROBE_SCRIPT = R"(import json, sys
+import numpy as np
+from uhd_gen import model_families
+
+family, model_path, probe_path = sys.argv[1:4]
+rng = np.random.default_rng(7)
+rows = 3000
+X = np.column_stack([
+    rng.integers(1, 1 << 16, rows).astype(float),
+    rng.choice([16.0, 32.0, 64.0, 128.0, 256.0], rows),
+    rng.normal(0.0, 1.0, rows),
+    rng.uniform(0.0, 5.3e12, rows),
+])
+y = (np.log(X[:, 0]) * np.log2(X[:, 1]) + np.sin(X[:, 2]) + X[:, 3] / 1e12
+     + rng.normal(0.0, 0.05, rows))
+X[rng.random(X.shape) < 0.05] = np.nan
+if family == "sklearn-hgb":
+    from sklearn.ensemble import HistGradientBoostingRegressor
+    model = HistGradientBoostingRegressor(
+        max_iter=60, early_stopping=False, random_state=0).fit(X, y)
+    predict = model.predict
+else:
+    import xgboost as xgb
+    model = xgb.train({"objective": "reg:squarederror", "tree_method": "hist",
+                       "max_depth": 6, "eta": 0.1, "seed": 0},
+                      xgb.DMatrix(X, label=y), 60)
+    def predict(probes):
+        return model.predict(xgb.DMatrix(probes)).astype(np.float64)
+features_hash = "sha256:model_family_probe"
+model_families.export_family(model, features_hash, model_path)
+with open(model_path, "rb") as file:
+    artifact = file.read()
+stored = model_families.GbdtModelT.InitFromPackedBuf(bytearray(artifact), 0)
+base = np.nanmedian(X, axis=0)
+probes = [X[:500]]
+for tree in stored.trees:
+    for node, left in enumerate(tree.leftChildren):
+        if left < 0:
+            continue
+        threshold = tree.thresholds[node]
+        with np.errstate(over="ignore"):
+            values = (threshold, np.nextafter(threshold, -np.inf),
+                      np.nextafter(threshold, np.inf))
+        for value in values:
+            # A DBL_MAX threshold, a scikit-learn NaN-only split, has +inf above it, which
+            # no runtime feature can be.
+            if np.isfinite(value):
+                row = base.copy()
+                row[tree.featureIndices[node]] = value
+                probes.append(row[None, :])
+probes.append(np.full((1, X.shape[1]), np.nan))
+probes = np.vstack(probes)
+with open(probe_path, "w") as out:
+    json.dump({"features_hash": features_hash,
+               "trees": len(stored.trees),
+               "rows": [[None if v != v else float(v) for v in row] for row in probes],
+               "runtime_order": [float(v) for v in
+                   model_families.library_scores_in_runtime_order(model, artifact, probes)],
+               "predict": [float(v) for v in predict(probes)]}, out)
+)";
+
+/// The Python module each `--model-family` trains with. scikit-learn is a uhd_gen
+/// requirement; xgboost is an optional extra, so its tests skip when it is absent.
+std::string familyModule(const std::string& family)
+{
+    return family == "xgboost" ? "xgboost" : "sklearn";
+}
+
+void writeProvenance(const std::filesystem::path& path)
+{
+    std::ofstream(path)
+        << nlohmann::json{{"ued",
+                           {{"id", "11000000-0000-0000-0000-000000000000"}, {"revision", "1.0"}}},
+                          {"kmd",
+                           {{"id", "12000000-0000-0000-0000-000000000000"}, {"revision", "1.0"}}},
+                          {"umd", nlohmann::json::array()}}
+               .dump();
+}
+
+/// A non-LightGBM family exported to the tree_data artifact the runtime already reads.
+class TestUhdGenModelFamily : public ::testing::TestWithParam<std::string>
+{
+protected:
+    void SetUp() override
+    {
+        if(const auto missing = missingPrerequisite(); !missing.empty())
+        {
+            if(prerequisitesRequired())
+            {
+                FAIL() << "uhd_gen cannot run from here and HIPDNN_REQUIRE_UHD_GEN_TESTS is set: "
+                       << missing;
+            }
+            GTEST_SKIP() << "uhd_gen cannot run from here: " << missing;
+        }
+        if(runPython("-c \"import " + familyModule(GetParam()) + "\"") != 0)
+        {
+            GTEST_SKIP() << familyModule(GetParam()) << " is not installed; it is an optional "
+                         << "uhd_gen dependency";
+        }
+        _dir = std::make_unique<hipdnn_test_sdk::utilities::ScopedDirectory>(
+            hipdnn_test_sdk::utilities::claimScratchDirectory("uhd_gen_family"));
+    }
+
+    std::unique_ptr<hipdnn_test_sdk::utilities::ScopedDirectory> _dir;
+};
+
+std::string familyTestName(const ::testing::TestParamInfo<std::string>& info)
+{
+    auto name = info.param;
+    std::replace(name.begin(), name.end(), '-', '_');
+    return name;
+}
+
+} // namespace
+
+TEST_P(TestUhdGenModelFamily, TheRuntimeLoadsAndRanksWhatTheFamilyTrained)
+{
+    const auto csv = _dir->path() / "corpus.csv";
+    std::ofstream(csv) << trainingCsv();
+    writeProvenance(_dir->path() / "provenance.json");
+    const auto outputDir = _dir->path() / "out";
+    ASSERT_EQ(
+        runUhdGenTrain("--input \"" + csv.string() + "\""
+                       + " --features q.M kernel.tile_m --target tflops --provenance \""
+                       + (_dir->path() / "provenance.json").string() + "\"" + " --output-dir \""
+                       + outputDir.string() + "\"" + " --name \"uhd_gen family test\""
+                       + " --num-boost-round 200 --early-stopping 20 --model-family " + GetParam()),
+        0);
+
+    const auto path = outputDir / "heuristic.uhd.json";
+    std::ifstream file(path);
+    const auto config = hipdnn_plugin_sdk::ingestor::UhdKernelHeuristic::configFrom(
+        hipdnn_plugin_sdk::ingestor::detail::parseHeuristicDescriptor(nlohmann::json::parse(file),
+                                                                      path));
+    EXPECT_EQ(config.adapterType, "tree_data");
+    const auto adapter = makeUhdAdapter(config);
+    ASSERT_NE(adapter, nullptr) << "the " << GetParam() << " artifact did not load";
+
+    const FeatureExtractor extractor(config.featuresSignature, config.categoricalEncoding);
+    constexpr int64_t QUERY_M = 2048;
+    const auto scoreFor = [&](int64_t tileM) {
+        FeatureExtractionContext ctx;
+        ctx.bindQueryVars({{"q.M", QUERY_M}});
+        ctx.bindKernelVars({{"tile_m", tileM}});
+        return score_transform::applyInverse(adapter->score(extractor.extract(ctx)),
+                                             config.scoreTransform);
+    };
+    EXPECT_GT(scoreFor(256), scoreFor(128));
+    EXPECT_GT(scoreFor(128), scoreFor(64));
+    for(const int64_t tileM : {64, 128, 256})
+    {
+        const double expected = corpusTflops(QUERY_M, tileM);
+        EXPECT_NEAR(scoreFor(tileM), expected, 0.01 * expected) << "tile_m=" << tileM;
+    }
+}
+
+TEST_P(TestUhdGenModelFamily, TheRuntimeScoresAsTheLibraryBitForBit)
+{
+    const auto script = _dir->path() / "probe.py";
+    const auto modelPath = _dir->path() / "model.bin";
+    const auto probes = _dir->path() / "probes.json";
+    std::ofstream(script) << FAMILY_PROBE_SCRIPT;
+    ASSERT_EQ(runPython("\"" + script.string() + "\" " + GetParam() + " \"" + modelPath.string()
+                        + "\" \"" + probes.string() + "\""),
+              0);
+    std::ifstream file(probes);
+    const auto document = nlohmann::json::parse(file);
+
+    const auto adapter = TreeDataAdapter::load(modelPath.string(),
+                                               document.at("features_hash").get<std::string>());
+    ASSERT_NE(adapter, nullptr) << "the develop TreeDataAdapter refused the " << GetParam()
+                                << " artifact";
+
+    const auto& rows = document.at("rows");
+    const auto& runtimeOrder = document.at("runtime_order");
+    const auto& predict = document.at("predict");
+    ASSERT_EQ(rows.size(), runtimeOrder.size());
+    ASSERT_EQ(rows.size(), predict.size());
+    ASSERT_GT(rows.size(), 500U) << "no split was probed";
+
+    size_t mismatches = 0;
+    double maxGapToPredict = 0.0;
+    for(size_t i = 0; i < rows.size(); ++i)
+    {
+        std::vector<double> features;
+        for(const auto& value : rows[i])
+        {
+            features.push_back(value.is_null() ? std::numeric_limits<double>::quiet_NaN()
+                                               : value.get<double>());
+        }
+        const double score = adapter->score(features);
+        // Exact: the same leaves added in the same order give the same double.
+        if(score != runtimeOrder[i].get<double>())
+        {
+            if(++mismatches <= 5)
+            {
+                ADD_FAILURE() << "probe " << i << " " << rows[i].dump() << ": runtime " << score
+                              << ", library " << runtimeOrder[i].get<double>();
+            }
+        }
+        maxGapToPredict = std::max(maxGapToPredict, std::abs(score - predict[i].get<double>()));
+    }
+    EXPECT_EQ(mismatches, 0U) << "of " << rows.size() << " probes over "
+                              << document.at("trees").get<size_t>() << " trees";
+    // The library's predict differs only by summation: scikit-learn adds the baseline first,
+    // XGBoost accumulates in float32.
+    EXPECT_LT(maxGapToPredict, 1e-4);
+    RecordProperty("probes", static_cast<int>(rows.size()));
+    RecordProperty("max_gap_to_predict", std::to_string(maxGapToPredict));
+}
+
+INSTANTIATE_TEST_SUITE_P(Families,
+                         TestUhdGenModelFamily,
+                         ::testing::Values(std::string("sklearn-hgb"), std::string("xgboost")),
+                         familyTestName);
 
 } // namespace hipdnn_plugin_sdk::uhd
 
