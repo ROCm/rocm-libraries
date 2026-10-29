@@ -2044,9 +2044,14 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableBoundsTheTsProductByTheResolvedTileSi
 
     constexpr int64_t K_BF16_BYTES = 2;
     const int64_t limit = static_cast<int64_t>(UINT32_MAX) / (K_BF16_BYTES * *tileSizeKv);
-    // One past the Ts limit must still clear the per-field stride guard, or the
-    // test would prove nothing about Ts.
-    ASSERT_LE((limit + 1) * K_BF16_BYTES, static_cast<int64_t>(UINT32_MAX));
+    // DQDKDV indexes K's sequence axis and dK's head axis in 4-byte records, so
+    // isApplicable also declines an odd stride there. Both probes are even, so
+    // the Ts guard is the only check that separates them.
+    const int64_t atLimit = limit - limit % 2;
+    const int64_t pastLimit = (limit + 1) + (limit + 1) % 2;
+    // The first stride past the Ts limit must still clear the per-field stride
+    // guard, or the test would prove nothing about Ts.
+    ASSERT_LE(pastLimit * K_BF16_BYTES, static_cast<int64_t>(UINT32_MAX));
 
     const std::vector<int64_t> dims = {4, 8, 256, 128};
     const std::vector<int64_t> normalStrides = hipdnn_data_sdk::utilities::generateStrides(dims);
@@ -2065,12 +2070,12 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableBoundsTheTsProductByTheResolvedTileSi
             hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
     };
 
-    auto builderAtLimit = buildWithKSeqStride(limit);
+    auto builderAtLimit = buildWithKSeqStride(atLimit);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwAtLimit(
         builderAtLimit.GetBufferPointer(), builderAtLimit.GetSize());
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwAtLimit));
 
-    auto builderPastLimit = buildWithKSeqStride(limit + 1);
+    auto builderPastLimit = buildWithKSeqStride(pastLimit);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwPastLimit(
         builderPastLimit.GetBufferPointer(), builderPastLimit.GetSize());
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwPastLimit));
