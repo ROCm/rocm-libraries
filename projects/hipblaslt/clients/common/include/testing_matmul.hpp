@@ -969,6 +969,15 @@ auto _sigmoid = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
                                      / (static_cast<decltype(in)>(1) + std::exp(-in)));
 };
 
+// -1 inherits the handle. A value on the test argument is this problem's request
+// and wins over the bench-wide CLI knob.
+inline int32_t resolved_uniform_summation_order(const Arguments& arg)
+{
+    if(arg.uniform_summation_order >= 0)
+        return arg.uniform_summation_order;
+    return hipblaslt_bench_options::uniform_summation_order();
+}
+
 void testing_matmul_bad_arg(const Arguments& arg)
 {
     const int64_t M = 128;
@@ -1214,6 +1223,18 @@ inline std::string solution_description(hipblasLtHandle_t      handle,
     return s.str();
 }
 
+// After check(), names the solution that the failure lines it printed were for.
+inline void report_failed_solution(int64_t                failures_before,
+                                   hipblasLtHandle_t      handle,
+                                   hipblasLtMatmulAlgo_t& algo,
+                                   size_t                 sol,
+                                   size_t                 count)
+{
+    if(hipblaslt_bench_options::verification_failures() > failures_before)
+        hipblaslt_cerr << "the failed checks above are for "
+                       << solution_description(handle, algo, sol, count, true) << std::endl;
+}
+
 void check(hipStream_t                   stream,
            const Arguments&              arg,
            const uint32_t&               gemm_count,
@@ -1457,40 +1478,53 @@ void check(hipStream_t                   stream,
 
         if(arg.norm_check)
         {
-            double norm_error = 0.0;
-            if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+            // norm_error, the reported value, sums the per-batch errors. The limit applies to
+            // each batch, so a large batch count of accurate results does not add up to a failure.
+            double       norm_error  = 0.0;
+            double       worst_error = 0.0;
+            int64_t      worst_batch = 0;
+            const double limit       = norm_tolerance(To, arg.compute_type, arg.a_type, arg.b_type);
+            const bool   can_compare = limit > 0.0 && norm_check_general_supports(To);
+            if(can_compare)
             {
-                norm_error = std::abs(norm_check_general('F',
-                                                         M[gemmIdx],
-                                                         N[gemmIdx],
-                                                         ldd[gemmIdx],
-                                                         stride_d[gemmIdx],
-                                                         hD_gold[gemmIdx].buf(),
-                                                         hD_1[gemmIdx].buf(),
-                                                         num_batches[gemmIdx],
-                                                         To));
-            }
-            else
-            {
+                const bool strided      = batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+                const auto stride_bytes = strided ? stride_d[gemmIdx] * realDataTypeSize(To) : 0;
                 for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
                 {
-                    norm_error = std::abs(norm_check_general('F',
-                                                             M[gemmIdx],
-                                                             N[gemmIdx],
-                                                             ldd[gemmIdx],
-                                                             0,
-                                                             hD_gold[batch].buf(),
-                                                             hD_1[batch].buf(),
-                                                             1,
-                                                             To));
-                    hipblaslt_error += norm_error;
+                    const auto offset = batch * stride_bytes;
+                    void*      gold
+                        = (char*)(strided ? hD_gold[gemmIdx] : hD_gold[batch]).buf() + offset;
+                    void* result = (char*)(strided ? hD_1[gemmIdx] : hD_1[batch]).buf() + offset;
+                    const double batch_error = std::abs(norm_check_general(
+                        'F', M[gemmIdx], N[gemmIdx], ldd[gemmIdx], 0, gold, result, 1, To));
+                    norm_error += batch_error;
+                    if(!std::isnan(worst_error)
+                       && (std::isnan(batch_error) || batch_error > worst_error))
+                    {
+                        worst_error = batch_error;
+                        worst_batch = batch;
+                    }
                 }
             }
             hipblaslt_error += norm_error;
             if(arg.norm_check_assert)
             {
-                CHECK_SUCCESS(
-                    norm_check(norm_error, To, arg.compute_type, arg.a_type, arg.b_type));
+                CHECK_SUCCESS(norm_check(norm_error, To, arg.compute_type, arg.a_type, arg.b_type));
+            }
+            if(!can_compare)
+            {
+                hipblaslt_bench_options::verification_failures()++;
+                hipblaslt_cerr << "norm check of D of gemm " << gemmIdx
+                               << " not done: no norm limit or comparison for "
+                               << hip_datatype_to_string(To) << ", so D was not verified"
+                               << std::endl;
+            }
+            else if(!(worst_error < limit))
+            {
+                hipblaslt_bench_options::verification_failures()++;
+                hipblaslt_cerr << "norm check failed for D of gemm " << gemmIdx << ": batch "
+                               << worst_batch << " has norm_error " << worst_error
+                               << ", at or above the GEMM limit of " << limit << std::endl;
             }
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
@@ -1594,8 +1628,11 @@ void check(hipStream_t                   stream,
             }
             allclose_merge_pair(hipblaslt_atol, hipblaslt_rtol, gemm_atol, gemm_rtol);
             if(failure.bad_count)
+            {
+                hipblaslt_bench_options::verification_failures()++;
                 hipblaslt_cerr << "allclose check failed for D of gemm " << gemmIdx << ": "
                                << allclose_failure_message(failure) << std::endl;
+            }
         }
 
         if(arg.ulp_check)
@@ -2690,7 +2727,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     &dyn,
                     sizeof(dyn)));
             }
-            int32_t uso = hipblaslt_bench_options::uniform_summation_order();
+            int32_t uso = resolved_uniform_summation_order(arg);
             if(uso >= 0)
             {
                 CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
@@ -4237,7 +4274,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         &dyn,
                         sizeof(dyn)));
                 }
-                int32_t uso = hipblaslt_bench_options::uniform_summation_order();
+                int32_t uso = resolved_uniform_summation_order(arg);
                 if(uso >= 0)
                 {
                     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
@@ -6152,6 +6189,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
                 }
+                const int64_t failures_before = hipblaslt_bench_options::verification_failures();
                 check(stream,
                       arg,
                       gemm_count,
@@ -6186,6 +6224,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                       Taux,
                       Talpha,
                       batchMode);
+                report_failed_solution(failures_before,
+                                       handle,
+                                       heuristicResult[sol].algo,
+                                       sol,
+                                       heuristicResult.size());
             }
             if(arg.fast_check)
             {
@@ -6625,6 +6668,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                     "batch_" + std::to_string(batchId) + "_D_Gold_output.txt");
                     }
                 }
+                const int64_t failures_before = hipblaslt_bench_options::verification_failures();
                 check(stream,
                       arg,
                       gemm_count,
@@ -6659,6 +6703,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                       Taux,
                       Talpha,
                       batchMode);
+                report_failed_solution(failures_before,
+                                       handle,
+                                       heuristicResult[sol].algo,
+                                       sol,
+                                       heuristicResult.size());
             }
 
 #define argument_param                                                                            \

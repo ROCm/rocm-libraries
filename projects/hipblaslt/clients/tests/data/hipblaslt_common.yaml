@@ -694,6 +694,7 @@ Arguments:
   - rotating: c_int32
   - use_gpu_timer: c_bool
   - skip_slow_solution_ratio: c_float
+  - uniform_summation_order: c_int32
   - gsu_vector: c_int32*32
   - wgm_vector: c_int32*32
   - print_solution_found: c_bool
@@ -833,6 +834,7 @@ Defaults:
   rotating: 0
   use_gpu_timer: false
   skip_slow_solution_ratio: 0.0
+  uniform_summation_order: -1
   gsu_vector: 0
   wgm_vector: 0
   print_solution_found: false

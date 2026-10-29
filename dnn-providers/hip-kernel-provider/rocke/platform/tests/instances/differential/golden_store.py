@@ -10,10 +10,11 @@ Format (schema 2)::
 
     {
       "schema": 2,
-      "ll": {                      # LLVM IR text, one section per LLVM flavor
+      "aliases": {"llvm24": "llvm23"},  # lanes sharing an emission profile
+      "ll": {                      # LLVM IR text, one section per LLVM profile
         "llvm20": {"<family>": {"<config index>": "<sha256>", ...}, ...},
         "llvm22": {...},
-        "llvm23": {...}
+        "llvm23": {...}           # llvm24 resolves through aliases
       },
       "ir_canonical": {            # canonical ck.dsl.ir: the same in every flavor
         "<family>": {"<config index>": "<sha256>", ...}
@@ -77,6 +78,7 @@ def _check_section(kind: str, flavor: str | None) -> None:
 class GoldenStore:
     """The parsed golden: hashes for `ll` per flavor, and for `ir_canonical`."""
 
+    aliases: dict[str, str] = field(default_factory=dict)
     ll: dict[str, FamilyShas] = field(default_factory=dict)
     ir_canonical: FamilyShas = field(default_factory=dict)
 
@@ -97,15 +99,43 @@ class GoldenStore:
                 "format stored no LLVM flavor -- re-record it with run_diff.py "
                 "--record-golden for each flavor"
             )
-        unknown = sorted(set(document) - {"schema", *KINDS})
+        unknown = sorted(set(document) - {"schema", "aliases", *KINDS})
         if unknown:
             raise GoldenFormatError(
                 f"golden file {path} has unknown sections {unknown}"
             )
-        return cls(ll=document.get(LL, {}), ir_canonical=document.get(IR_CANONICAL, {}))
+        aliases = document.get("aliases", {})
+        if not isinstance(aliases, dict) or not all(
+            isinstance(lane, str) and isinstance(source, str)
+            for lane, source in aliases.items()
+        ):
+            raise GoldenFormatError(
+                "golden aliases must map flavor strings to flavor strings"
+            )
+        ll = document.get(LL, {})
+        overlap = sorted(set(aliases) & set(ll))
+        if overlap:
+            raise GoldenFormatError(
+                f"golden flavors are both direct and aliased: {overlap}"
+            )
+        missing = sorted(source for source in aliases.values() if source not in ll)
+        if missing:
+            raise GoldenFormatError(
+                f"golden aliases name missing flavor sections: {missing}"
+            )
+        return cls(
+            aliases=aliases,
+            ll=ll,
+            ir_canonical=document.get(IR_CANONICAL, {}),
+        )
 
     def save(self, path: Path) -> None:
-        document = {"schema": SCHEMA, LL: self.ll, IR_CANONICAL: self.ir_canonical}
+        document = {
+            "schema": SCHEMA,
+            "aliases": self.aliases,
+            LL: self.ll,
+            IR_CANONICAL: self.ir_canonical,
+        }
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
 
@@ -114,7 +144,10 @@ class GoldenStore:
     def section(self, kind: str, flavor: str | None) -> FamilyShas:
         """The hashes for `kind`; `ll` needs the flavor, `ir_canonical` takes none."""
         _check_section(kind, flavor)
-        return self.ll.get(flavor, {}) if kind == LL else self.ir_canonical
+        if kind == IR_CANONICAL:
+            return self.ir_canonical
+        source = self.aliases.get(flavor, flavor)
+        return self.ll.get(source, {})
 
     def record(
         self,
@@ -143,7 +176,8 @@ class GoldenStore:
                 else:
                     merged.pop(family, None)
         if kind == LL:
-            self.ll[flavor] = merged
+            source = self.aliases.get(flavor, flavor)
+            self.ll[source] = merged
         else:
             self.ir_canonical = merged
         return sorted(set(before) - set(merged))
