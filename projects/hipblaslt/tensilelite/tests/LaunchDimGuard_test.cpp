@@ -31,11 +31,16 @@
 
 #include <hip/hip_runtime.h>
 
+#include <Tensile/AMDGPU.hpp>
+#include <Tensile/ContractionProblem.hpp>
+#include <Tensile/ContractionSolution.hpp>
+#include <Tensile/ContractionTaskPredicates.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 
 #include <cstdint>
 #include <limits>
+#include <sstream>
 
 namespace
 {
@@ -197,3 +202,84 @@ TEST(LaunchDimGuard, ClusterDimensionsValidatedBeforeKernelLookup)
     }
 }
 #endif
+
+#ifdef HIP_HAS_CLUSTER_LAUNCH
+// A cluster launch delivers the workgroup id in y and z to the kernel as 16-bit
+// values. A grid beyond 65535 in either dimension used to launch successfully
+// and wrap on the device, leaving part of D unwritten.
+TEST(LaunchDimGuard, ClusterLaunchGridYZBeyond16Bits_Refused)
+{
+    using namespace TensileLite;
+    const struct
+    {
+        TensileLite::dim3 grid;
+        bool              invalid;
+    } cases[] = {
+        {{2, 2, 65535}, false},
+        {{2, 2, 65536}, true},
+        {{2, 2, 98666}, true},
+        {{2, 65534, 1}, false},
+        {{2, 65536, 1}, true},
+    };
+    hip::SolutionAdapter adapter;
+    for(auto const& test : cases)
+    {
+        SCOPED_TRACE(::testing::Message() << "grid " << test.grid);
+        auto kernel       = makeInvocation({128, 1, 1}, test.grid);
+        kernel.clusterDim = {2, 2, 1};
+        EXPECT_EQ(adapter.launchKernel(kernel) == hipErrorInvalidValue, test.invalid);
+    }
+}
+#endif
+
+namespace
+{
+    // Non-persistent 192x192 tile solution, as generated for
+    // MatrixInstruction [16, 16, 32, 1, 1, 6, 6, 2, 2].
+    void initClusterSolution(TensileLite::ContractionSolution& solution,
+                             TensileLite::dim3 const&          clusterDim)
+    {
+        solution.kernelName                  = "LaunchDimGuard_test_cluster_solution";
+        solution.sizeMapping.workGroupSize   = {128, 1, 1};
+        solution.sizeMapping.macroTile       = {192, 192, 1};
+        solution.sizeMapping.depthU          = 64;
+        solution.sizeMapping.globalSplitU    = 1;
+        solution.sizeMapping.clusterDim      = clusterDim;
+    }
+
+    bool launchLimitsAccept(TensileLite::ContractionSolution const& solution,
+                            size_t                                  m,
+                            size_t                                  n,
+                            size_t                                  batch)
+    {
+        using namespace TensileLite;
+        AMDGPU hardware(AMDGPU::Processor::gfx1250, 256, "gfx1250");
+        auto   problem = ContractionProblemGemm::GEMM(true, false, m, n, 96, 96, 96, m, 0.0, false, batch);
+        Task   task(hardware, problem, solution);
+        Predicates::Contraction::LaunchLimits predicate;
+        std::ostringstream                     diagnostic;
+        bool                                   rv = predicate(task);
+        EXPECT_EQ(predicate.debugEval(task, diagnostic), rv) << diagnostic.str();
+        return rv;
+    }
+}
+
+// Selection must not pick a cluster solution whose launch would exceed the
+// cluster grid y/z limit, so another solution serves the problem instead.
+TEST(LaunchDimGuard, LaunchLimitsRejectsClusterGridBeyond16Bits)
+{
+    TensileLite::ContractionSolution cluster, linear;
+    initClusterSolution(cluster, {2, 2, 1});
+    initClusterSolution(linear, {1, 1, 1});
+
+    // z carries the batch count.
+    EXPECT_TRUE(launchLimitsAccept(cluster, 224, 128, 65535));
+    EXPECT_FALSE(launchLimitsAccept(cluster, 224, 128, 65536));
+    EXPECT_FALSE(launchLimitsAccept(cluster, 224, 128, 98666));
+    EXPECT_TRUE(launchLimitsAccept(linear, 224, 128, 98666));
+
+    // y carries the N tiles, rounded up to whole clusters.
+    EXPECT_TRUE(launchLimitsAccept(cluster, 192, 192 * 65534, 1));
+    EXPECT_FALSE(launchLimitsAccept(cluster, 192, 192 * 65535, 1));
+    EXPECT_TRUE(launchLimitsAccept(linear, 192, 192 * 65535, 1));
+}

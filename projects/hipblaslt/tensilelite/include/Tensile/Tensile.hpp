@@ -121,6 +121,12 @@ namespace TensileLite
     struct TENSILELITEHOST_EXPORT KernelInvocation
     {
     public:
+        // A cluster launch delivers the workgroup id in y and z to the kernel as
+        // 16-bit values, so its grid y and z dimensions are limited to 65535
+        // workgroups each. Larger values are accepted by the launch API but wrap
+        // on the device.
+        static constexpr size_t MaxClusterGridDimYZ = 65535;
+
         std::string kernelName;
         std::string codeObjectFile; //Code object file kernel is located in
 
