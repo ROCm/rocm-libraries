@@ -982,8 +982,18 @@ class FmhaFwdKernel:
             tr_load=self.F_pipeline.F_trload,
             sink=self.F_pipeline.F_sink,
             occupancy=int(self.F_tile.F_occupancy),
-            constraint=self.F_tile.F_constraint & self.F_pipeline.F_constraint,
+            constraint=self._api_constraint(),
         )
+
+    def _api_constraint(self):
+        constraint = self.F_tile.F_constraint & self.F_pipeline.F_constraint
+        if (
+            self.F_pipeline.tag == "qr_tdm_sched"
+            and int(self.F_hdim) == 64
+            and self.F_tile.F_bn0 == 128
+        ):
+            constraint = constraint & GFX125_D64_N128_CONSTRAINT
+        return constraint
 
 
 @dataclass
@@ -1591,6 +1601,29 @@ GFX125_QR_TDM_PINGPONG_RANGE = (
     " && a.batch * a.nhead_q >= 2 * static_cast<ck_tile::index_t>(num_cus)"
 )
 
+# D64 N128 qr_tdm_sched is measured for BF16 batch BSHD only: square lengths that
+# are multiples of 256, contiguous Q/K/V/O (row, head and batch strides), no
+# logical-length pointers, dense or full causal. It is attached to every D64 N128
+# scheduled trait in FmhaFwdKernel.api_trait, so a custom-tune tile cannot bypass it.
+_LL = "static_cast<long long>"
+GFX125_D64_N128_CONSTRAINT = CppConstraint(
+    "a.seqlen_q == a.seqlen_k && a.seqlen_q % 256 == 0"
+    " && a.seqlen_q_ptr == nullptr && a.cu_seqlen_q_ptr == nullptr"
+    " && a.seqlen_k_ptr == nullptr && a.cu_seqlen_k_ptr == nullptr"
+    f" && {_LL}(a.stride_q) == {_LL}(a.nhead_q) * a.hdim_q && a.nhead_stride_q == a.hdim_q"
+    f" && {_LL}(a.stride_k) == {_LL}(a.nhead_k) * a.hdim_q && a.nhead_stride_k == a.hdim_q"
+    f" && {_LL}(a.stride_v) == {_LL}(a.nhead_k) * a.hdim_v && a.nhead_stride_v == a.hdim_v"
+    f" && {_LL}(a.stride_o) == {_LL}(a.nhead_q) * a.hdim_v && a.nhead_stride_o == a.hdim_v"
+    f" && {_LL}(a.batch_stride_q) == {_LL}(a.seqlen_q) * a.nhead_q * a.hdim_q"
+    f" && {_LL}(a.batch_stride_k) == {_LL}(a.seqlen_k) * a.nhead_k * a.hdim_q"
+    f" && {_LL}(a.batch_stride_v) == {_LL}(a.seqlen_k) * a.nhead_k * a.hdim_v"
+    f" && {_LL}(a.batch_stride_o) == {_LL}(a.seqlen_q) * a.nhead_q * a.hdim_v"
+    " && (t.mask_type == mask_enum::no_mask ||"
+    " ((t.mask_type == mask_enum::mask_top_left ||"
+    " t.mask_type == mask_enum::mask_bottom_right)"
+    " && a.window_size_left < 0 && a.window_size_right == 0))"
+)
+
 
 def _gfx125_qr_tdm_crossover_constraint(hdim):
     return CppConstraint(
@@ -1628,6 +1661,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     # compatibility share these entries; runtime constraints are attached to copies.
     _QR_TDM_SCHED_TILES = {
         (64, 64): (
+            FmhaFwdTileSize(128, 128, 32, 64, 32, 64, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 3),
             FmhaFwdTileSize(128, 64, 32, 64, 32, 64, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 3),
         ),
         (128, 128): (
@@ -1690,6 +1724,16 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 return False
 
             if problem_ctx.hdim == 64:
+                # N128 has BF16 evidence only, for simplified masks, and only
+                # as the unpadded batch specialization; the runtime constraint
+                # excludes group lengths, tails and finite windows.
+                if kernel_ctx.tile.F_bn0 == 128 and (
+                    problem_ctx.dtype != "bf16"
+                    or problem_ctx.mode == "group"
+                    or kernel_ctx.pipeline.F_spad != "f"
+                    or kernel_ctx.pipeline.F_mask not in ("s_no", "s_mask")
+                ):
+                    return False
                 # Match qr_tdm's exact D64/V64 head traits. Aligned batch can
                 # use unpadded sequences; group and tails retain padding.
                 return (
@@ -1798,7 +1842,8 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 (512, 512) : [FmhaFwdTileSize( 64,  64,  32, 512,  32,  512,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
             })  # fmt: skip
             if dtype in cls._DT_FP16_BF16:
-                # D64 matches qr_tdm's M128/N64 geometry and occupancy hint3.
+                # D64 tries N128 first (its measured contract is attached to every
+                # N128 trait in FmhaFwdKernel.api_trait), then N64.
                 result[(64, 64)].extend(
                     copy.deepcopy(cls._QR_TDM_SCHED_TILES[(64, 64)])
                 )
