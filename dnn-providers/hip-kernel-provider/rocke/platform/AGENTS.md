@@ -118,11 +118,12 @@ change must be made in **both** engines in the same change. Prove it:
 ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py   # build engine fresh + gate
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # and llvm22
 ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # and llvm23
+ROCKE_LLVM_FLAVOR=llvm24 python tools/check_byte_identity.py   # and llvm24
 ```
 
 A change is done only when the gate is GREEN for every family at every flavor.
 The llvm20 and llvm22 runs also re-run the `gfx1250_lowering` family at llvm23,
-because its gfx1250-only ops lower at no other flavor.
+because its gfx1250-only ops need the LLVM23-generation emission profile.
 
 ## Build / test / run
 
@@ -481,7 +482,7 @@ dual-engine vs Python-only split.
 | `ROCKE_BACKEND` | `cpp` (default) \| `python` \| `both` (differential assert) |
 | `ROCKE_CPP_STRICT` | `1` = raise instead of silently falling back to Python when `rocke_engine` isn't built |
 | `ROCKE_DEBUG_LOC` | `1` = capture Python source locations while building and emit DWARF, so ATT traces map to source; off by default because it changes the emitted `.ll` |
-| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (AUTO queries the loaded COMGR compiler: LLVM <=20, 21/22, >=23; unavailable evidence raises; explicit flavors support offline emission) |
+| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` \| `llvm24` (AUTO queries loaded COMGR: LLVM <=20, 21/22, 23, or 24; newer majors and unavailable evidence raise; explicit lanes support offline emission) |
 | `ROCKE_TEST_VERIFY_IR` | `1` = assemble emitted IR with `llvm-as` in `TestNewTargetIntrinsics`; needs an LLVM as new as the newest flavor |
 | `ROCM_PATH` / `ROCM_HOME` | ROCm install root; `<root>/lib` is searched for `comgr`/HIP before the globbed `/opt/rocm*` trees |
 | `ROCKE_COMGR_LIB` / `ROCKE_HIP_LIB` | explicit full path to `libamd_comgr` / `libamdhip64`; wins over all discovery |

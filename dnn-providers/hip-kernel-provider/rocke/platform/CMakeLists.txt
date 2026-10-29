@@ -415,11 +415,11 @@ if(ROCKE_INSTALL_TESTS)
     # Install the full pytest suite for installed/artifact test execution.
     # Excludes: C/C++ parity emitters (compiled against rocke_core at build time),
     # the differential harness (needs compiler + source; its Python-only golden
-    # check is installed separately above), the WaveScope sidecar
-    # and LDS analyzer tests (load tools from the adjacent dsl_docs source tree),
-    # and the arch-domain artifact unit tests. The latter remain source-only
-    # units, while the full regeneration sweep is installed below as its own
-    # CTest with an independent timeout and resource policy.
+    # check is installed separately above), the WaveScope sidecar,
+    # LDS analyzer and dsl_probes tests (load tools from the adjacent dsl_doc
+    # source tree), and the arch-domain artifact unit tests. The latter remain
+    # source-only units, while the full regeneration sweep is installed below as
+    # its own CTest with an independent timeout and resource policy.
     # Include run_all.py: installed runner unit tests import it as a dependency.
     # Linux detector fixtures link a stdin wrapper against the production archive.
     # Keep it with the pytest assets so TheRock's test artifact captures it even
@@ -440,6 +440,7 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_engine_linkage.py" EXCLUDE
               PATTERN "test_wavescope_sidecar.py" EXCLUDE
               PATTERN "test_lds_analyzer.py" EXCLUDE
+              PATTERN "test_dsl_probes.py" EXCLUDE
               PATTERN "test_arch_domain_artifact.py" EXCLUDE
               PATTERN "test_gpu_references.py" EXCLUDE)
 
@@ -531,7 +532,7 @@ if(ROCKE_INSTALL_TESTS)
     # checks all of them) and canonical IR. tests/instances/differential/golden/README.md.
     set(_ROCKE_RUN_DIFF "${ROCKE_TEST_CTEST_REL}tests/instances/differential/run_diff.py")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_differential_golden_ll python \"${_ROCKE_RUN_DIFF}\" --mode ll --python-only --check-golden --flavor llvm20,llvm22,llvm23)\n")
+           "add_test(rocke_differential_golden_ll python \"${_ROCKE_RUN_DIFF}\" --mode ll --python-only --check-golden --flavor llvm20,llvm22,llvm23,llvm24)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_differential_golden_ll PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT 300)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -601,8 +602,16 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
         "tests/library/tests/test_conv_aot_grid_limits.py"
+        "tests/library/tests/test_fwd_small_wmma.py"
         "tests/library/tests/test_direct_dgrad_wmma.py"
+        "tests/library/tests/test_direct_fwd_wmma.py"
+        "tests/library/tests/test_conv_winograd_fwd_cpu.py"
+        "tests/library/tests/test_conv_winograd_gemm_wmma.py"
+        "tests/library/tests/test_conv_winograd_gen_cpu.py"
+        "tests/library/tests/test_conv_winograd_select.py"
+        "tests/library/tests/dispatch/test_conv_winograd_dispatch.py"
         "tests/library/tests/test_direct_kernel_cache.py"
+        "tests/library/tests/test_direct_depthwise_fwd_cpl.py"
         "tests/library/tests/test_conv_gradient_contract.py"
         "tests/library/tests/test_builder_signature_contract.py"
         "tests/library/tests/test_library_layering.py")
@@ -624,13 +633,15 @@ if(ROCKE_INSTALL_TESTS)
             "  TIMEOUT 180)\n")
 
     # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
-    # dense block-order decodes, spec-wrapper parity gate, and the 3D decode split
-    # rule and K/V cache policy.
+    # dense block-order decodes, spec-wrapper parity gate, the 3D decode split rule
+    # and K/V cache policy, and the scalar fallback's cache key and block-table
+    # stride kernarg.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
         "tests/library/tests/test_attention_dense_decode.py"
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
+        "tests/library/tests/test_attention_scalar_cache_key.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
         "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py")
@@ -739,6 +750,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_gdn_decode_tune.py"
         "tests/library/tests/dispatch/gdn/test_gfx950_registry.py"
         "tests/library/tests/dispatch/gdn/test_gfx950_wiring.py"
+        "tests/library/tests/dispatch/gdn/test_tuning_contract.py"
         "tests/library/tests/dispatch/gdn/test_gfx950_prefill_wiring.py")
     set(_ROCKE_LIBRARY_GDN_TESTS "")
     foreach(_rocke_gdn_test ${_ROCKE_LIBRARY_GDN_TEST_RELPATHS})
@@ -828,7 +840,12 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_dgrad_4c.py"
         "tests/library/tests/test_conv_dgrad_fused_weights.py"
         "tests/library/tests/test_direct_mfma_dgrad_correctness.py"
+        "tests/library/tests/test_conv_winograd_fwd_gpu.py"
+        "tests/library/tests/test_conv_winograd_gemm_wmma.py"
+        "tests/library/tests/test_conv_winograd_gen_gpu.py"
+        "tests/library/tests/test_conv_winograd_dispatch_gpu.py"
         "tests/library/tests/test_attention_dense_gfx942_numeric.py"
+        "tests/library/tests/test_attention_scalar_block_table_numeric.py"
         "tests/library/tests/test_attention_unified_lse_numeric.py"
         "tests/library/tests/test_attn_bf16_d128_ring.py"
         "tests/library/tests/test_dtype_dispatch.py"

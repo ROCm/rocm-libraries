@@ -561,8 +561,9 @@ TEST(TestCpuFpReferenceSdpaFp64, BottomRightCausalMaskLargerSq)
 
 TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowTopLeftSquare)
 {
-    // Generic sliding window with leftBound=1, rightBound=1 (TopLeft alignment).
-    // Square shape Sq=Skv=4. Window is centered at sq, width 3.
+    // Generic sliding window with leftBound=2, rightBound=1 (TopLeft alignment).
+    // leftBound=2 keeps 2 keys ending at the diagonal (cuDNN), so with rightBound=1
+    // the window is centered at sq, width 3. Square shape Sq=Skv=4.
     // Q=K=0 → all unmasked scores equal → softmax is uniform over the window.
     // V = {1, 2, 3, 4} → output is the mean of unmasked V values.
     //
@@ -593,7 +594,7 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowTopLeftSquare)
                                 o,
                                 std::nullopt,
                                 noMask,
-                                /*leftBound=*/1,
+                                /*leftBound=*/2,
                                 /*rightBound=*/1,
                                 /*topLeftAlignment=*/true);
 
@@ -605,8 +606,9 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowTopLeftSquare)
 
 TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricTopLeft)
 {
-    // Generic sliding window with leftBound=2, rightBound=1 (TopLeft alignment).
+    // Generic sliding window with leftBound=3, rightBound=1 (TopLeft alignment).
     // Asymmetric window (wider on the left) with Sq=4, Skv=5.
+    // Unmasked iff (sq - leftBound) < skv <= (sq + rightBound)
     //
     // Expected mask (1=unmasked):
     //    _____kv______
@@ -636,7 +638,7 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricTopLeft)
                                 o,
                                 std::nullopt,
                                 noMask,
-                                /*leftBound=*/2,
+                                /*leftBound=*/3,
                                 /*rightBound=*/1,
                                 /*topLeftAlignment=*/true);
 
@@ -648,10 +650,10 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricTopLeft)
 
 TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricBottomRight)
 {
-    // Generic sliding window with leftBound=2, rightBound=1 (BottomRight alignment).
+    // Generic sliding window with leftBound=3, rightBound=1 (BottomRight alignment).
     // Asymmetric window (wider on the left) with Sq=4, Skv=5.
     // diagonal offset = Skv - Sq = 1.
-    // Unmasked iff (sq + offset - leftBound) <= skv <= (sq + offset + rightBound)
+    // Unmasked iff (sq + offset - leftBound) < skv <= (sq + offset + rightBound)
     //         iff (sq - 1)                  <= skv <= (sq + 2)
     //
     // Expected mask (1=unmasked):
@@ -682,7 +684,7 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricBottomRight)
                                 o,
                                 std::nullopt,
                                 noMask,
-                                /*leftBound=*/2,
+                                /*leftBound=*/3,
                                 /*rightBound=*/1,
                                 /*topLeftAlignment=*/false);
 
@@ -694,9 +696,9 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricBottomRight)
 
 TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSkv)
 {
-    // Generic sliding window with leftBound=1, rightBound=1, BottomRight alignment.
+    // Generic sliding window with leftBound=2, rightBound=1, BottomRight alignment.
     // Sq=2, Skv=4 → diagonal offset = Skv - Sq = 2.
-    // Unmasked iff (sq + offset - leftBound) <= skv <= (sq + offset + rightBound)
+    // Unmasked iff (sq + offset - leftBound) < skv <= (sq + offset + rightBound)
     //         iff (sq + 1)                  <= skv <= (sq + 3)
     //
     // Expected mask (1=unmasked):
@@ -724,7 +726,7 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSkv)
                                 o,
                                 std::nullopt,
                                 noMask,
-                                /*leftBound=*/1,
+                                /*leftBound=*/2,
                                 /*rightBound=*/1,
                                 /*topLeftAlignment=*/false);
 
@@ -734,9 +736,9 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSkv)
 
 TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSq)
 {
-    // Generic sliding window with leftBound=1, rightBound=1, BottomRight alignment.
+    // Generic sliding window with leftBound=2, rightBound=1, BottomRight alignment.
     // Sq=4, Skv=2 → diagonal offset = Skv - Sq = -2.
-    // Unmasked iff (sq - 2 - 1) <= skv <= (sq - 2 + 1)
+    // Unmasked iff (sq - 2 - 2) < skv <= (sq - 2 + 1)
     //         iff (sq - 3)      <= skv <= (sq - 1)
     //
     // Expected mask (1=unmasked):
@@ -764,7 +766,7 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSq)
                                 o,
                                 std::nullopt,
                                 noMask,
-                                /*leftBound=*/1,
+                                /*leftBound=*/2,
                                 /*rightBound=*/1,
                                 /*topLeftAlignment=*/false);
 
@@ -772,6 +774,60 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSq)
     EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), 1.0, 1e-5);
     EXPECT_NEAR(o.getHostValue(0, 0, 2, 0), 1.5, 1e-5);
     EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), 1.5, 1e-5);
+}
+
+TEST(TestCpuFpReferenceSdpaFp64, LeftBoundKeepsLKeysIncludingDiagonalLikeCudnn)
+{
+    // cuDNN's left bound: leftBound = L keeps the L keys ending at the diagonal,
+    // i.e. skv > sq - L (cudnn-frontend sliding_window_mask keeps col + L > row).
+    // With L = 2, TopLeft, query 5 attends to keys {4, 5}, not {3, 4, 5}.
+    // Q=K=0 makes the softmax uniform over the kept keys; V = {1..6}.
+    constexpr int64_t SEQ = 6;
+    Tensor<double> q({1, 1, SEQ, 1});
+    Tensor<double> k({1, 1, SEQ, 1});
+    Tensor<double> v({1, 1, SEQ, 1});
+    Tensor<double> o({1, 1, SEQ, 1});
+
+    q.fillWithValue(0.0);
+    k.fillWithValue(0.0);
+    for(int64_t s = 0; s < SEQ; ++s)
+    {
+        v.setHostValue(static_cast<double>(s + 1), 0, 0, s, 0);
+    }
+
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                std::nullopt,
+                                noMask,
+                                /*leftBound=*/2,
+                                /*rightBound=*/0,
+                                /*topLeftAlignment=*/true);
+
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 1.0, 1e-5); // keys {0}
+    for(int64_t s = 1; s < SEQ; ++s)
+    {
+        // keys {s - 1, s} -> mean(s, s + 1)
+        EXPECT_NEAR(o.getHostValue(0, 0, s, 0), static_cast<double>(s) + 0.5, 1e-5)
+            << "query " << s;
+    }
+
+    // L = 1 keeps only the diagonal.
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                std::nullopt,
+                                noMask,
+                                /*leftBound=*/1,
+                                /*rightBound=*/0,
+                                /*topLeftAlignment=*/true);
+    for(int64_t s = 0; s < SEQ; ++s)
+    {
+        EXPECT_NEAR(o.getHostValue(0, 0, s, 0), static_cast<double>(s + 1), 1e-5) << "query " << s;
+    }
 }
 
 TEST(TestCpuFpReferenceSdpaFp64, CausalMaskFutureTokensHaveNoEffect)
