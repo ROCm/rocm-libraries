@@ -82,8 +82,7 @@ try
     // extra requirements for calling GETRF
     size_t size_pivotval, size_pivotidx, size_iinfo, size_iipiv;
 
-    I const max_batch_count = 64 * 1024 - 1;
-    I const nsweep = ceildiv(batch_count_arg, max_batch_count);
+    I const nsweep = ceildiv(batch_count_arg, MAX_BATCH_COUNT);
     I const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
     {
         auto const batch_count = bid_inc;
