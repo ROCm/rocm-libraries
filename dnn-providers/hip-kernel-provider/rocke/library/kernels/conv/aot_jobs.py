@@ -518,8 +518,42 @@ def _wgrad_k_loops(wave_size: int, pipeline: str, two_stage: bool) -> List[dict]
             {"pipeline": "wmma_v1"},
             {"unroll_k": True},
             {"pipeline": "wmma_v1", "unroll_k": True},
+            {"async_dma": True},
+            {"pipeline": "wmma_v1", "async_dma": True},
         ]
     return loops
+
+
+def _wgrad_async_chunks(cfg: dict, dtypes, caps: dict, arch: str) -> Optional[dict]:
+    """The gfx1250 async wgrad loaders' chunk widths, for the identity.
+
+    ``{}`` for a synchronous loop; ``None`` when the async loop cannot serve
+    this configuration (the job is skipped). Taken from the builder's own
+    width choice (_wmma_async_vecs) on the probe problem, as the fwd chunks.
+    """
+    if not cfg.get("async_dma"):
+        return {}
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+    from kernels.common.conv_implicit_gemm_wgrad import (
+        WgradConvSpec,
+        _wmma_async_available,
+        _wmma_async_vecs,
+    )
+
+    da, db, dd = dtypes
+    try:
+        spec = WgradConvSpec(
+            problem=_probe_problem("wgrad", caps),
+            data=ConvDataSpec(dtype_a=da, dtype_b=db, dtype_d=dd),
+            **cfg,
+        )
+        ok, _ = _wmma_async_available(spec, arch)
+        if not ok:
+            return None
+        a_vec, b_vec = _wmma_async_vecs(spec)
+    except (ValueError, TypeError):
+        return None
+    return dict(async_chunk_a=a_vec, async_chunk_b=b_vec)
 
 
 def _wgrad_two_stages(split_k: int) -> Tuple[bool, ...]:
@@ -1012,7 +1046,17 @@ def _wgrad_jobs(
                     cfg["ws_replicas"] = _DEFAULT_WS_REPLICAS
                 for k_loop in _wgrad_k_loops(wave_size, pipeline, two_stage):
                     kcfg = dict(cfg, **k_loop)
+                    if k_loop.get("async_dma"):
+                        # The async copy picks its own chunk width (recorded
+                        # below), so A / B widths are left unset: built once
+                        # per geometry, on the widest-vector iteration.
+                        if (vec_a, vec_bc) != (_VECS[-1], _VECS[-1]):
+                            continue
+                        kcfg.update(vector_size_a=None, vector_size_b=None)
                     kcfg["prefetch_addr"] = _wgrad_prefetch_addr(arch, kcfg)
+                    chunks = _wgrad_async_chunks(kcfg, (da, db, dd), caps, arch)
+                    if chunks is None:
+                        continue
                     yield BuildJob(
                         identity=KernelIdentity(
                             arch=arch,
@@ -1024,6 +1068,7 @@ def _wgrad_jobs(
                             dtype_d=dd,
                             grouped=grouped,
                             **kcfg,
+                            **chunks,
                         ),
                         direction="wgrad",
                         spec_kwargs=kcfg,
