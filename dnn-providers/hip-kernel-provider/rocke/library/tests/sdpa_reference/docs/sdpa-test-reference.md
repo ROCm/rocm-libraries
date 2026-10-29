@@ -52,9 +52,9 @@ signatures, and why a kernel update does not automatically replace its baseline.
 New gfx942/gfx950 qualifications record the `dense-v2` replay ABI and freeze the
 runtime shape and indexing scalars alongside the exported signature. Both
 architectures use the production runtime-argument helper
-(`attention_dense_runtime_args`): gfx942's includes head counts and the
-persistent grid's fast-division parameters, and gfx950's includes head counts on
-the runtime-shape grid. Older dense sources without the helper expose only
+(`attention_dense_runtime_args`): on both, it includes the shape, the head counts
+and, on the persistent grid, the work decode's fast-division parameters. Older
+dense sources without the helper expose only
 batch and sequence-length scalars. Qualification rejects a signature with
 unbound arguments before writing a certificate. Replay binds fresh HIP pointers,
 uses the enrolled case's scale, and restores the frozen runtime scalars.
@@ -84,8 +84,11 @@ Sq=Sk=512, Hq=16, with the default softmax scale:
 
 The adapter uses named production tuning candidates, matching the original
 numeric tests. It selects wide DMA only for persistent, causal D128 cases.
-Grid kernels take runtime shape and head-count scalars; persistent kernels bake
-both. The existing replay worker supports both ABIs for this cohort.
+Grid and persistent kernels both take runtime shape and head-count scalars, and
+persistent kernels also take fast-division parameters. The published bundle was
+qualified when persistent kernels baked both; its frozen kernels replay with their
+own recorded scalars. The existing replay worker supports both ABIs for this
+cohort.
 The input recipe, independent oracle, absolute tolerances, and budget policy below
 apply to both architectures. Error bounds and output identities are qualified
 separately on each architecture.
