@@ -302,17 +302,9 @@ jobs:
       - name: Add ROCm bin to PATH
         run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
 
-      # Parallel: see the Linux lane for why two calls. Serial this step was 14-20 min on Windows.
+      # Parallel: see the Linux lane. Serial this step was 14-20 min on Windows.
       - name: Run tests
-        env:
-          # Tests registered without the `full` label (`-L '^full$'` skips them): the ctest
-          # tooling tests. The golden-data suites are covered by `-L '^full$'`.
-          UNLABELED_TESTS: '^shared_ctest_'
-        run: |
-          rc=0
-          ctest --test-dir build --output-on-failure --no-tests=error --parallel 16 -L '^full$' || rc=$?
-          ctest --test-dir build --output-on-failure --no-tests=error --parallel 16 -R "$UNLABELED_TESTS" || rc=$?
-          exit $rc
+        run: ctest --test-dir build --output-on-failure --no-tests=error --parallel 16
 
       - name: Patch ROCm SDK with superbuild outputs
         shell: pwsh
@@ -581,23 +573,14 @@ jobs:
           test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
           printf '%s\n' "${kpacks[@]}"
 
-      # `-L '^full$'` selects the unfiltered set without running the same gtest filter several
-      # times: the provider quick/standard/comprehensive/ffm-quick suites repeat one filter and
-      # `full` runs a superset, so each of them is dropped. A few tests carry no `full` label,
-      # so they run in the second call. Parallel: the suites are independent processes, and the
-      # ones that share state are marked RUN_SERIAL / FIXTURES_* in CMake, which ctest honors.
-      # Serial this step was 7.7-11.3 min, dominated by a few long Python suites.
+      # Parallel: the suites are independent processes, and the ones that share state are
+      # marked RUN_SERIAL / FIXTURES_* in CMake, which ctest honors. Serial this step was
+      # 7.7-11.3 min, dominated by a few long Python suites running back to back.
       - name: Run tests
         env:
           # Native rocKE AUTO detection must see the wheel COMGR used by packaging.
           ROCKE_COMGR_LIB: ${{ env.HKP_ROCKE_COMGR_LIB }}
-          # Registered without the `full` label (see the comment above).
-          UNLABELED_TESTS: '^(shared_ctest_|hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests$)'
-        run: |
-          rc=0
-          ctest --test-dir build --output-on-failure --no-tests=error --parallel 16 -L '^full$' || rc=$?
-          ctest --test-dir build --output-on-failure --no-tests=error --parallel 16 -R "$UNLABELED_TESTS" || rc=$?
-          exit $rc
+        run: ctest --test-dir build --output-on-failure --no-tests=error --parallel 16
 
       # The full support matrix is too large to commit (only its overview is,
       # in dnn-providers/integration-tests/), so publish it from every run.
