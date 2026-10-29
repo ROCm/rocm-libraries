@@ -516,6 +516,30 @@ inline bool operator!=(const EngineDescriptor& lhs, const EngineDescriptor& rhs)
     return !(lhs == rhs);
 }
 
+/// The engine's native graph_match symbol, or an empty string when its `graph_match` is not
+/// the `native` arm (a `nodes` pattern, or none).
+inline std::string nativeGraphMatchSymbol(const EngineDescriptor& engine)
+{
+    const auto* native = std::get_if<NativeGraphMatch>(&engine.graphMatch);
+    return native != nullptr ? native->symbol : std::string{};
+}
+
+namespace detail
+{
+
+/// The GraphMatch a native symbol spells: std::monostate for an empty symbol, otherwise the
+/// `native` arm. Backs the overloads that take the symbol as a string.
+inline GraphMatch graphMatchFromNativeSymbol(const std::string& symbol)
+{
+    if(symbol.empty())
+    {
+        return std::monostate{};
+    }
+    return NativeGraphMatch{symbol};
+}
+
+} // namespace detail
+
 /// Which inputs a matcher reads, and so what its failure prunes.
 enum class MatchScope
 {

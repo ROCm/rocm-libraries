@@ -408,6 +408,44 @@ placeholder. Returning `std::nullopt` from `graph_match` empties the **whole** e
 catalog; it is not a per-candidate decline. A heuristic-disabled engine has no scorer
 declaration, implementation or registration, and no UHD.
 
+### `graph_match` arms
+
+A UED's `graph_match` takes one of two arms. The generator emits the `native` arm:
+`<slug>.ued.json` carries `"graph_match": {"native": "<namespace>.graph_match"}`, and
+`packs/<Name>Native.cpp` declares and registers that symbol. The declarative `nodes` arm
+([RFC 0020 §4.3](../../docs/rfcs/0020_UniversalEngineDescriptor.md#43-the-nodes-pattern-normative))
+is also supported. The generator does not emit it, so write it by hand:
+
+1. In the emitted UED, replace the `native` key with a `nodes` array. Take each opcode,
+   operand name and result name from the op-schema registry
+   (`projects/hipdnn/flatbuffers_sdk/op_schema_registry.json`). A binary pointwise engine
+   looks like this:
+
+   ```json
+   "graph_match": {
+     "nodes": [
+       {"kind": "op", "id": "pointwise", "op": "pointwise",
+        "operands": {"in_0": "$input_a", "in_1": "$input_b"},
+        "results": {"out_0": "$output"}}
+     ]
+   }
+   ```
+
+2. Name the node `id` values and the `$` variables as your criteria and dispatch read
+   them. The pattern publishes each variable as a tensor root and each node `id` as a
+   node root (RFC 0020 §6).
+3. Delete the stub's graph_match function and its registration, or leave them. Nothing
+   resolves the symbol once the UED names no `native` arm.
+4. For a single-pack engine, change `CarriesNoGraphScopedMatcher` in
+   `tests/Test<Name>Packs.cpp`. It asserts the `native` arm.
+5. Validate the bundle. `hkp_pack` checks the pattern against the registry when it packs
+   the root, and `hipdnn_validate_descriptors` compiles it when it loads the bundle
+   ([The generate -> validate round trip](#the-generate---validate-round-trip)). Both
+   reject a pattern the runtime would refuse.
+
+A `--force` regeneration writes the `native` arm back. Regenerate into a scratch
+directory and copy the pattern across.
+
 ### Matcher-test stub
 
 `tests/Test<Name>Matchers.cpp` constructs its `DeviceProperties` fixture **by value**,

@@ -244,6 +244,37 @@ public:
         validateAndIndexPacks();
     }
 
+    /// The constructor for callers that hold the native graph_match symbol as a string. An
+    /// empty @p graphMatchSymbol means the engine declares no graph_match.
+    ///
+    /// The symbol's type is deduced, so a braced `{}` cannot select this constructor and
+    /// reaches the GraphMatch one as std::monostate, which also means no graph_match.
+    template <typename TSymbol,
+              std::enable_if_t<std::is_convertible_v<const TSymbol&, std::string>, int> = 0>
+    [[deprecated("use NativeGraphMatch{symbol}")]] KernelIngestorStateManager(
+        MetadataSchema schema,
+        std::vector<MatchDescriptor> matchers,
+        std::vector<DispatchDescriptor> dispatches,
+        std::vector<KernelDescriptorPack> packs,
+        std::shared_ptr<IKernelHeuristic> heuristic,
+        const TSymbol& graphMatchSymbol,
+        const std::string& describedBy = {},
+        size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY,
+        EngineIdentity engine = {},
+        size_t winnerCacheCapacity = DEFAULT_WINNER_CACHE_CAPACITY)
+        : KernelIngestorStateManager(std::move(schema),
+                                     std::move(matchers),
+                                     std::move(dispatches),
+                                     std::move(packs),
+                                     std::move(heuristic),
+                                     detail::graphMatchFromNativeSymbol(graphMatchSymbol),
+                                     describedBy,
+                                     catalogCacheCapacity,
+                                     std::move(engine),
+                                     winnerCacheCapacity)
+    {
+    }
+
     // Pinned in place: catalog pointers into `_definitions` rely on a stable address.
     KernelIngestorStateManager(const KernelIngestorStateManager&) = delete;
     KernelIngestorStateManager& operator=(const KernelIngestorStateManager&) = delete;

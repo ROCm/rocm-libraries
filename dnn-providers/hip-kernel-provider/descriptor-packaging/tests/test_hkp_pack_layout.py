@@ -27,7 +27,7 @@ import pytest
 from pack_helpers import _restem_uuid_ids
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
-from hkp_pack.graph_pattern import OP_SCHEMA_REGISTRY_ENV
+from hkp_pack.graph_pattern import DEFAULT_OP_SCHEMA_REGISTRY, OP_SCHEMA_REGISTRY_ENV
 from hkp_pack.hip_compile import hip_variant_key
 from hkp_pack import pipeline
 from hkp_pack.pipeline import (
@@ -1106,10 +1106,13 @@ def test_ued_sdk_version_accepts_what_the_runtime_parses(
     load_flat_input(root, GENERIC_TARGETS)
 
 
-def _empty_arch_pattern_root(tmp_path, empty_arch_fixture):
-    """The empty-arch fixture, its UED matching by a `nodes` pattern."""
+def _empty_arch_pattern_root(tmp_path, empty_arch_fixture, embedded=False):
+    """The empty-arch fixture, its UED matching by a `nodes` pattern. An `embedded`
+    root compiles nothing, so a full pack needs no hipcc."""
     root = tmp_path / "root"
     folder = _nest(root, "hip", empty_arch_fixture)
+    if embedded:
+        _make_embedded(folder)
     path = folder / "solo.ued.json"
     document = _read(path)
     document["graph_match"] = {
@@ -2189,6 +2192,35 @@ def test_a_misspelled_disabled_kind_fails_the_command_naming_it(
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "rokce" in result.stderr
+
+
+@pytest.mark.quick
+def test_the_registry_flag_wins_over_the_environment_registry(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir, monkeypatch
+):
+    """`--op-schema-registry` reaches the UED check and wins over
+    HKP_OP_SCHEMA_REGISTRY. The pattern's opcode resolves exactly when the flag's
+    registry declares it, whatever the environment's registry declares."""
+    root = _empty_arch_pattern_root(tmp_path, empty_arch_fixture, embedded=True)
+    ops = json.loads(DEFAULT_OP_SCHEMA_REGISTRY.read_text(encoding="utf-8"))["ops"]
+    declares = tmp_path / "declares.json"
+    declares.write_text(json.dumps({"ops": {"pointwise": ops["pointwise"]}}))
+    lacks = tmp_path / "lacks.json"
+    lacks.write_text(json.dumps({"ops": {"convolution": ops["convolution"]}}))
+
+    monkeypatch.setenv(OP_SCHEMA_REGISTRY_ENV, str(lacks))
+    accepted = _hkp_pack_cli(
+        root, tmp_path, ARCH, rocm_kpack_dir, "--op-schema-registry", str(declares)
+    )
+    assert accepted.returncode == 0, accepted.stdout + accepted.stderr
+
+    shutil.rmtree(tmp_path / "out", ignore_errors=True)
+    monkeypatch.setenv(OP_SCHEMA_REGISTRY_ENV, str(declares))
+    refused = _hkp_pack_cli(
+        root, tmp_path, ARCH, rocm_kpack_dir, "--op-schema-registry", str(lacks)
+    )
+    assert refused.returncode == 1, refused.stdout + refused.stderr
+    assert "opcode 'pointwise' is not in the op-schema registry" in refused.stderr
 
 
 def _separate_kdps_root(tmp_path, fixture):

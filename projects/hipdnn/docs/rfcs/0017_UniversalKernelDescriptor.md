@@ -492,9 +492,8 @@ that table.
 
 It takes one of two forms. The **declarative arm**, `nodes`, is a structural pattern over the op
 DAG: named op nodes and the operand and result edges connecting them to the graph's tensors, each
-mapped to a pattern variable. The **native arm**, `native`, is the escape hatch — a registered
-symbol resolving to C++ that returns the binding or declines the graph — for a match the
-declarative form cannot yet state; it is what ships today. Either way the match is engine-wide: a
+mapped to a pattern variable. The **native arm**, `native`, is a registered symbol resolving to
+C++ that returns the binding or declines the graph. Both arms are supported. Either way the match is engine-wide: a
 UED carries exactly one, so every pack naming that engine matches the same graph shape and
 constrains it differently. An engine may also omit `graph_match` entirely, binding nothing and
 leaving applicability to its packs' criteria.
@@ -994,12 +993,12 @@ probe into a backing library's own support query whose logic lives in vendor cod
 reduced to schema fields, is written as **native code standing beside the descriptor** rather than
 inside it: the descriptor names a registered symbol, never inline code.
 
-That hatch has **two roles, at two scopes**, and they are not interchangeable:
+Native code beside a descriptor has **two roles, at two scopes**, and they are not interchangeable:
 
 - A **native match** is the engine's, named by its UED's `graph_match.native`
   ([RFC 0020 § 4.5](0020_UniversalEngineDescriptor.md#45-the-native-arm-normative)). It runs at
   stage one, and it *produces* the binding: it either declines the graph or returns the bound
-  tokens. This is the arm that ships today, ahead of the declarative pattern it substitutes for.
+  tokens. It is one of the two `graph_match` arms; the `nodes` pattern is the other.
 - A **native criterion** is a pack's, named by a UMD, and it runs at stage two as one of the
   pack's applicability checks. It *reads* the binding the engine's match produced and returns a
   verdict; it cannot add to the binding.
@@ -2097,8 +2096,9 @@ Four areas are new here:
 
 ### 14.2 Follow-up RFCs
 
-The state of each row is: KDP + AOT packaging is built (kpack). For UED, UMD, and UHD, only the
-native arms are built (`graph_match.native`, `matchSymbol`, `NATIVE`). UDD + dispatch and KMD +
+The state of each row is: KDP + AOT packaging is built (kpack). For the UED, both `graph_match`
+arms are built (`nodes` and `native`). For the UMD and UHD, only the native arms are built
+(`matchSymbol`, `NATIVE`). UDD + dispatch and KMD +
 metadata schema have no RFC yet; the UDD is a native `dispatchSymbol`, and the KMD loads as
 `MetadataSchema`. The expression language has no RFC yet; its `jsonexpr` interpreter exists but
 the loader does not use it. Shape matching, runtime drop-in, adapters, composition, and JIT are
@@ -2111,7 +2111,7 @@ a descriptor format with the subsystem it drives. Together they form the planned
 |---|---|
 | KDP + AOT packaging | The pack format plus the producer, packer, per-architecture manifest, and build-time validation ([§12](#12-packaging-and-delivery)) |
 | Expression language | The shared dialect every descriptor is written in: its grammar, type system, closed operator set, three-valued semantics, safe bounded interpreter, and conformance suite |
-| UED + graph matching ([RFC 0020](0020_UniversalEngineDescriptor.md), landed) | The engine format and the graph-matching specification: the `graph_match` member and both its arms — the `nodes` structural pattern and the native escape hatch that produces an engine's binding — the matching semantics that bind them against a graph, the symbols matching publishes for every other descriptor to read, the op-schema registry that generates those bindings, and the registry that populates the generic engine and its plan builder from descriptor data |
+| UED + graph matching ([RFC 0020](0020_UniversalEngineDescriptor.md), landed) | The engine format and the graph-matching specification: the `graph_match` member and both its arms — the `nodes` structural pattern and the `native` match, either of which produces an engine's binding — the matching semantics that bind them against a graph, the symbols matching publishes for every other descriptor to read, the op-schema registry that generates those bindings, and the registry that populates the generic engine and its plan builder from descriptor data |
 | UMD + applicability ([RFC 0018](0018_UniversalMatchDescriptor.md), landed) | How the expression language is used to decide applicability: the criteria model over the symbols the engine's match published, evaluated per matcher with run-once memoization and fail-prune, the native-criterion escape hatch for a check that needs real C++, and arbitration when several packs match ([§5](#5-matching-the-ueds-pattern-and-the-umds-criteria)) |
 | Shape matching | Variable-rank tensors: how a criterion reasons over `$x.rank` across the ranks one engine serves, whether a dim may be named rather than read by position, and how that relates to variadic operands ([§5](#5-matching-the-ueds-pattern-and-the-umds-criteria)) |
 | UDD + dispatch | The dispatch format plus the symbolic grid, block, shared-memory, workspace, and argument descriptions |
@@ -2600,8 +2600,8 @@ choices; none is a dependency.
   optionally, its role-scoped heuristics (UHDs, arch-keyed); many KDPs may share one engine, and they all inherit its one
   match.
 - **`graph_match`:** the UED member holding stage one, in one of two arms — the declarative
-  **structural pattern** (`nodes`) or the **native match** (`native`), the escape hatch
-  for a shape the pattern cannot state. Absent means the engine binds nothing and its packs' criteria decide alone.
+  **structural pattern** (`nodes`) or the **native match** (`native`), a registered C++
+  function. Absent means the engine binds nothing and its packs' criteria decide alone.
 - **Structural pattern:** a UED's `graph_match.nodes` block, the op nodes and named operand/result
   edges the engine matches against the graph. It runs at most once per engine per graph, and its
   binding is what a UMD's criteria, a UDD's formulas, and the UHD's features are all written over.
@@ -2698,6 +2698,7 @@ choices; none is a dependency.
   adapter in the provider SDK; deferred to its own follow-up RFC.
 - **Escape hatch:** a named, registry-resolved handler for logic the declarative model cannot
   express, carried as a symbol name, never inline code. It stands beside a descriptor, never inside
-  an expression: the operator set is closed and admits no provider hook. Three instances, at three
-  scopes: the **native match** (engine, `graph_match.native` — produces the binding), the **native
-  criterion** (pack, named by a UMD — reads it), and the **custom plan** (dispatch side).
+  an expression: the operator set is closed and admits no provider hook. Two instances, at two
+  scopes: the **native criterion** (pack, named by a UMD — reads the binding) and the **custom
+  plan** (dispatch side). The **native match** (engine, `graph_match.native`) uses the same
+  named-symbol mechanism as one of the two `graph_match` arms.

@@ -623,8 +623,8 @@ adapter invocation: the builder, plus the exact build values for that instance.
   "sort_kernel_catalog": {"gfx950": "2b7a4e1c-6f3d-4a8e-9c2b-5d1f0a7e8b93"},  // arch -> the UHD above (RFC 0020 § 4.6)
   "metadata":    "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40",
 
-  // Stage one (RFC 0020 § 4.2). The declarative arm: this engine's shape is expressible as a
-  // pattern, so it needs no `native` escape hatch (RFC 0020 § 4.5).
+  // Stage one (RFC 0020 § 4.2), written with the `nodes` arm (RFC 0020 § 4.3). The `native` arm
+  // (RFC 0020 § 4.5) would put a registered C++ function's symbol in this slot instead.
   "graph_match": {
     "nodes": [
       {"kind": "op", "id": "sdpa", "op": "sdpa",

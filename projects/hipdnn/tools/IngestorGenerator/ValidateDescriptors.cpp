@@ -54,7 +54,9 @@
  * descriptor structure, cross-references and completeness only. Whether a provider
  * implements those symbols is answered by the provider host checks, which run the real
  * typed registration (`discoverDescriptorSets()` -> `registerNativeIngestorSymbols()` ->
- * `loadValidatedDescriptorSets<Handle>()`) and census the loaded bundle.
+ * `loadValidatedDescriptorSets<Handle>()`) and census the loaded bundle. A UED whose
+ * `graph_match` uses the `nodes` arm needs no stub: the loader compiles its pattern
+ * against the op-schema registry while reading the file.
  *
  * Every UHD bound through a role map, for every architecture and metric, is also admitted
  * as the runtime admits that role: KMD fields and `features_hash` must match, kernel-scoped
@@ -790,6 +792,10 @@ void printHelp(const char* programName)
               << "NOT check that a provider implements those symbols -- the provider host\n"
               << "checks do that, by running the real typed registration and censusing what\n"
               << "loads.\n"
+              << "A UED's graph_match is validated in either arm: a `native` symbol gets a\n"
+              << "stub like the other native symbols, and a `nodes` pattern is compiled\n"
+              << "against the op-schema registry built into this hipDNN, so a pattern error\n"
+              << "fails its UED.\n"
               << "Options:\n"
               << "  <root>                    Descriptor root directory (repeatable)\n"
               << "  --expect-engine <name>    Require this engine name in the validated set "

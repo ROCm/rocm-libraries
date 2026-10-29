@@ -9,6 +9,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -84,14 +85,16 @@ inline nlohmann::json rankerIdentity(const HeuristicDescriptor& descriptor)
                           {"transform", descriptor.score.transform}};
 }
 
-/// What identifies an engine's graph_match to a selector revision: the native symbol, or the
-/// compiled pattern's nodes, variables and the opcodes each node admits. Equal patterns yield
-/// equal identities; any change to what a pattern matches yields a different one.
+/// What identifies an engine's graph_match to a selector revision: the bare native symbol, or
+/// the compiled pattern's nodes, variables and the opcodes each node admits. The native arm is
+/// the bare string so a native engine keeps the selector revision its trained models record.
+/// Equal patterns yield equal identities; any change to what a pattern matches yields a
+/// different one.
 inline nlohmann::json graphMatchIdentity(const GraphMatch& graphMatch)
 {
     if(const auto* native = std::get_if<NativeGraphMatch>(&graphMatch))
     {
-        return nlohmann::json{{"native", native->symbol}};
+        return native->symbol;
     }
     const auto* pattern = std::get_if<std::shared_ptr<const CompiledGraphPattern>>(&graphMatch);
     if(pattern == nullptr || *pattern == nullptr)
@@ -361,6 +364,28 @@ std::unique_ptr<KernelIngestorStateManager<THandle>> makeStateManager(Descriptor
         describedBy,
         KernelIngestorStateManager<THandle>::DEFAULT_CATALOG_CACHE_CAPACITY,
         std::move(engine));
+}
+
+/// The `makeStateManager` overload for callers that hold the native graph_match symbol as a
+/// string. An empty @p graphMatchSymbol means the engine declares no graph_match.
+///
+/// The symbol's type is deduced, so a braced `{}` cannot select this overload and reaches the
+/// GraphMatch one as std::monostate, which also means no graph_match.
+template <typename THandle,
+          typename TSymbol,
+          std::enable_if_t<std::is_convertible_v<const TSymbol&, std::string>, int> = 0>
+[[deprecated("use NativeGraphMatch{symbol}")]] std::unique_ptr<KernelIngestorStateManager<THandle>>
+    makeStateManager(DescriptorSet set,
+                     const TSymbol& graphMatchSymbol,
+                     std::string describedBy = {},
+                     EngineIdentity engine = {},
+                     std::vector<std::string> knobs = {})
+{
+    return makeStateManager<THandle>(std::move(set),
+                                     detail::graphMatchFromNativeSymbol(graphMatchSymbol),
+                                     std::move(describedBy),
+                                     std::move(engine),
+                                     std::move(knobs));
 }
 
 /// @param deviceResolver Held by reference by the engine; providers use a

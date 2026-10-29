@@ -102,7 +102,7 @@
       "addedInVersion": "1.0"
     },
     "graph_match": {
-      "description": "Stage one: exactly one arm. 'nodes' is the declarative pattern (RFC 0020 section 4.3); 'native' is the escape-hatch symbol (section 4.5) and MUST be registered in the provider's graph-match registry (semantic; see section 13.2).",
+      "description": "Stage one: exactly one arm. 'nodes' is the declarative pattern (RFC 0020 section 4.3); 'native' names a C++ function the provider registers (section 4.5) and MUST be registered in the provider's graph-match registry (semantic; see section 13.2).",
       "type": "object",
       "additionalProperties": false,
       "patternProperties": {

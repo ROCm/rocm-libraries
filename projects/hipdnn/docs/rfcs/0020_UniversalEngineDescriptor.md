@@ -2,7 +2,7 @@
 
 - Contributors: TBD
 - **Status**: In progress
-- **Status notes**: The UED loads and registers a generic engine (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp`; #10606, #10679, #10850, #11033). `graph_match` has both arms: the declarative `nodes` pattern, compiled against the generated op-schema registry when the UED is read, and the `native` escape hatch. The loader reads the three role-scoped heuristic maps and the runtime resolves them by arch (#13028). The JSON Schema file is `plugin_sdk/schemas/universal_engine_descriptor.schema.json`. The cross-engine root-opcode index and the per-consumer published-symbol validation are not built.
+- **Status notes**: The UED loads and registers a generic engine (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp`; #10606, #10679, #10850, #11033). `graph_match` has both arms: the declarative `nodes` pattern, compiled against the generated op-schema registry when the UED is read, and the `native` arm, a C++ function resolved through `GraphMatchRegistry`. The loader reads the three role-scoped heuristic maps and the runtime resolves them by arch (#13028). The JSON Schema file is `plugin_sdk/schemas/universal_engine_descriptor.schema.json`. The cross-engine root-opcode index and the per-consumer published-symbol validation are not built.
 - **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 - **Follows**: [RFC 0017](0017_UniversalKernelDescriptor.md) (Universal Kernel Descriptors). This is the "UED + graph matching" follow-up named in RFC 0017 § 14.2: the engine format together with the graph-matching specification: the `nodes` structural pattern, the symbols matching publishes, and the op-schema registry behind them.
 
@@ -48,8 +48,8 @@ Concretely, this RFC delivers:
 - The **`nodes` structural pattern**, normatively: the node-object members, the opcode and
   optional-operand forms, how nodes connect through shared variables, and the well-formedness
   rules a load rejects on (§ 4.3). RFC 0017 § 4 shows the block by example and defers its format
-  here. It is the declarative arm of `graph_match`; the **`native` escape hatch** beside it, for a
-  match the declarative arm cannot express, is § 4.5.
+  here. It is the declarative arm of `graph_match`; the **`native` arm** beside it, a registered
+  C++ function that matches and binds the graph, is § 4.5.
 - The **graph model the pattern is matched against** and the **op-schema registry** generated from
   FlatBuffers annotations that makes a UID-centric graph readable by name (§ 5, Appendix B).
 - The **symbol table matching publishes**: the five namespaces, the auto-binding formula, and the
@@ -98,7 +98,7 @@ a follow-up, filling 0017's deferred scope is expected and is not itself a diver
   format to this follow-up; this RFC fixes the node-object members, the opcode-set form, the `?`
   optional-operand suffix, how nodes connect, and the well-formedness and registry-resolution rules
   a load rejects on. It also adds the **`native` arm** (§ 4.5) beside it, the registry-resolved
-  escape hatch 0017 § 5 calls a "native predicate", scoped here to the engine's stage-one match.
+  function 0017 § 5 calls a "native predicate", scoped here to the engine's stage-one match.
 - **Pattern compile at registration (§ 12).** 0017 § 8.1 step 3 defers the pattern's compile — and
   the native symbol's resolution — to registration and names this section as the authority for it;
   the mechanism is specified here, so an unresolvable op or operand name is a load error rather
@@ -156,8 +156,8 @@ UUID `id` binds. Names must be **globally unique** and should be scoped, e.g. `r
 ## 4. The UED Schema
 
 This section **defines** the UED schema: § 4.1 an example instance, § 4.2 the normative
-definition, § 4.3 the `nodes` structural pattern, § 4.4 serialization, § 4.5 the native
-escape hatch, § 4.6 the heuristic roles and their arch keying. A UED carries a `major.minor` `version` field that the accept rule gates on
+definition, § 4.3 the `nodes` structural pattern, § 4.4 serialization, § 4.5 the `native`
+arm, § 4.6 the heuristic roles and their arch keying. A UED carries a `major.minor` `version` field that the accept rule gates on
 (§ 14).
 
 A UED does not carry an in-band type tag, so the descriptor kind is determined externally rather
@@ -192,8 +192,8 @@ to be a UED.
 }
 ```
 
-The same engine written against the **native arm** instead, the escape hatch for a match the
-declarative form cannot yet state (§ 4.5). The two arms are mutually exclusive; everything
+The same engine written against the **native arm** instead, which names a registered C++ function
+(§ 4.5). The two arms are mutually exclusive; everything
 outside `graph_match` is unchanged:
 
 ```jsonc
@@ -226,7 +226,7 @@ structure, and it holds whichever of the two arms (§ 4.3, § 4.5) this engine m
 | `predict_engine` | no | object (arch → UUID or [UUID]) | Optional **engine-estimate** map (§ 4.6): cheap `f(graph) → expected metric value` UHDs, one per ranking metric, consulted at engine selection, before any catalog is ranked. Same arch-key form and resolution. Each UHD must declare a `score.metric`. |
 | `predict_applicable_kernels` | no | object (arch → UUID) | Optional **candidate-generator** map (§ 4.6): a UHD producing the applicable candidate set for a combinatorial/JIT space, which `sort_kernel_catalog` then ranks. Same arch-key form; one UUID per key. The loader validates it. No runtime component consumes it. |
 | `metadata` | yes | string | UUID of this engine's one KMD. Must resolve to a loadable KMD at load (§ 13.2). |
-| `graph_match` | no | object | Stage one: how this engine decides a graph and binds the tokens every later stage reads (§ 6, § 7). Exactly one arm, and they are mutually exclusive: **`nodes`**, the declarative pattern of **§ 4.3**, or **`native`**, the escape-hatch symbol of **§ 4.5**. Absent => the engine binds nothing, publishes an empty symbol table, and is admitted or declined by its packs' UMDs alone. |
+| `graph_match` | no | object | Stage one: how this engine decides a graph and binds the tokens every later stage reads (§ 6, § 7). Exactly one arm, and they are mutually exclusive: **`nodes`**, the declarative pattern of **§ 4.3**, or **`native`**, the registered C++ function of **§ 4.5**. Absent => the engine binds nothing, publishes an empty symbol table, and is admitted or declined by its packs' UMDs alone. |
 | `knobs` | no | array of string | Each element is a field name declared in the referenced KMD (§ 8). No duplicates. Absent or `[]` => engine exposes no descriptor knobs. Every element must match a KMD field or it is a load error (§ 13.2). |
 | `behavior_notes` | no | array of string | hipDNN behavior-note tags ([RFC 0010](0010_BehaviorNotes.md)), each mapped to a `hipdnnBackendBehaviorNote_t` value. The loader accepts `runtime_compilation` and rejects any other tag. No duplicates. Absent => none. |
 | `numerical_notes` | no | array of string | hipDNN numerical-note tags (§ 9). No duplicates. Absent => none. |
@@ -347,7 +347,7 @@ provider's native registry (is this symbol registered) is semantic and runs in �
       "addedInVersion": "1.0"
     },
     "graph_match": {
-      "description": "Stage one: exactly one arm. 'nodes' is the declarative pattern (RFC 0020 section 4.3); 'native' is the escape-hatch symbol (section 4.5) and MUST be registered in the provider's graph-match registry (semantic; see section 13.2).",
+      "description": "Stage one: exactly one arm. 'nodes' is the declarative pattern (RFC 0020 section 4.3); 'native' names a C++ function the provider registers (section 4.5) and MUST be registered in the provider's graph-match registry (semantic; see section 13.2).",
       "type": "object",
       "additionalProperties": false,
       "oneOf": [
@@ -475,8 +475,8 @@ loader parses `nodes`, checks it (§ 4.3.2), and compiles it against the generat
 registry (§ 4.3.3, Appendix B) when the UED is read, and the compiled pattern decides and binds
 each graph (§ 7). Before the search, each engine's matcher declines a graph whose root node
 carries an opcode no root of the pattern carries. The cross-engine root-opcode index of § 7 and
-§ 12 step 4 is not built yet, so every engine is still consulted. The escape hatch of § 4.5
-remains for a match this arm cannot express.
+§ 12 step 4 is not built yet, so every engine is still consulted. The `native` arm of § 4.5 is
+the other way to fill `graph_match`.
 
 #### 4.3.1 Grammar
 
@@ -664,8 +664,8 @@ they are not part of a valid file.
 ### 4.5 The `native` arm (normative)
 
 `graph_match.native` is a symbol naming a function the provider ships, resolved through the
-provider's graph-match registry. It is the **escape hatch** for a match the declarative arm cannot
-yet state. Its signature:
+provider's graph-match registry. The function decides the match in C++, so it can test any
+property of the graph, including one the `nodes` grammar cannot state. Its signature:
 
 ```cpp
 std::optional<BoundTokens> (*)(const MatchContext&);
@@ -688,8 +688,8 @@ format needs no reconciliation rule for that case.
 key. **Semantic check.** The symbol must be registered in the loading provider; an engine naming
 an unregistered symbol is dropped at read time, before its id is advertised (§ 13.2).
 
-**What this arm does not provide.** Each of these is a guarantee the declarative arm gives and
-this one cannot, and each is why `native` is a hatch rather than the format's steady state:
+**Trade-offs against the `nodes` arm.** Each of these is a guarantee the `nodes` arm gives and
+this one does not:
 
 - **No load-time symbol set.** The tokens are whatever the function returns on a live graph, so
   the published set is unknown at load. The cross-descriptor validation of § 6 and § 13.2 — that
@@ -703,9 +703,9 @@ this one cannot, and each is why `native` is a hatch rather than the format's st
   checks (the UMD's criteria); a native function may fuse both, and in the shipped engines it
   does. Checks that would be per-pack memoized criteria then prune the whole engine instead.
 
-A UED SHOULD move to the declarative arm once the pattern it needs is expressible. Both arms fill
-the same slot in the same object, so that migration is a change within `graph_match` and not a
-format break.
+In return, a native function can check any property of the graph in C++ and can combine topology
+and value checks in one pass. Both arms fill the same slot in the same object, so an engine
+switches arms with a change within `graph_match` and no format break.
 
 ### 4.6 Heuristic roles and arch keying
 
@@ -1262,8 +1262,7 @@ performed at build time and run time alike:
   that drops or renames a bound variable invalidates every consumer written against it, loudly, at
   load. **Under the native arm this check cannot run**: the token set is not known until the
   function returns on a live graph (§ 4.5), so a consumer's `$`-reference is unvalidated at load and
-  fails closed at match time instead. That is the guarantee the hatch trades away, and the reason a
-  UED should leave it once the declarative arm can express its pattern.
+  fails closed at match time instead. This is one of the § 4.5 trade-offs between the two arms.
 - **Uniqueness (§ 13.2.1).** No two loaded UEDs may share a descriptor `id`, and independently
   none may share a `name`, except for the content-identical case (§ 13.2.1).
 
@@ -1498,7 +1497,7 @@ fuzzing, this RFC adds UED-specific coverage.
 - **Published-symbol-set resolution is declarative-only** (§ 4.5, § 13.2): the consumer-pair check
   above is skipped for an engine on the native arm, and a UMD naming a token that arm does not
   return fails closed at match time rather than at load. The test pins the *difference*, so the
-  guarantee the hatch trades away stays visible rather than being assumed absent.
+  guarantee the native arm does not give stays visible rather than being assumed absent.
 - **`sdk_version` floor** (§ 4.2): a UED below the graph's reported floor declines the whole engine
   before binding, taking every pack naming it; an omitted `sdk_version` reads as `1.0.0`. The
   loader does not refuse a UED newer than the runtime's own graph schema: the version is compared
@@ -1557,14 +1556,14 @@ The descriptor pipeline parses untrusted input on the drop-in path, so the loade
   arch-keyed UHDs (§ 4.6), by id.
   1:1 with a hipDNN engine.
 - **`graph_match`:** the UED member holding stage one, in exactly one of two arms: the declarative
-  **structural pattern** (`nodes`, § 4.3) or the **native escape hatch** (`native`, § 4.5). Absent
+  **structural pattern** (`nodes`, § 4.3) or the **native match** (`native`, § 4.5). Absent
   means the engine binds nothing.
 - **Structural pattern:** a UED's `graph_match.nodes` block — the op nodes and named operand/result
   edges the engine matches against the graph, connected implicitly through shared pattern variables
   (§ 4.3). One per engine; it runs at most once per engine per graph (§ 7) and its binding is what a
   UMD's criteria, a UDD's formulas, and the UHD's features are all written over.
 - **Native match:** a registry-resolved function named by `graph_match.native`, returning the
-  binding or declining the graph (§ 4.5). The engine-scoped escape hatch, distinct from a UMD's
+  binding or declining the graph (§ 4.5). Engine-scoped, and distinct from a UMD's
   pack-scoped native criterion, which reads the binding rather than producing it.
 - **Pattern variable:** a `$name` in the `nodes` block, bound by exactly one edge and read by any
   number of others; the unit of both connectivity (§ 4.3) and publication (§ 6.1).

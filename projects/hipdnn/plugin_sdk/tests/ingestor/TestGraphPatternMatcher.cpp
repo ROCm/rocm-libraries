@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -172,6 +173,40 @@ TEST(TestGraphPatternMatcher, DeclinesNonfiniteFloatAttribute)
     }
 }
 
+TEST(TestGraphPatternMatcher, DeclinesEnumAttributeWithNoName)
+{
+    // One past the last PointwiseMode, as a graph from a newer schema might carry. The
+    // generated enum-name table has no entry for it, so there is no name to publish.
+    auto attributes = addAttributes();
+    attributes.operation = static_cast<PointwiseMode>(static_cast<int8_t>(PointwiseMode::MAX) + 1);
+    EXPECT_FALSE(match(BINARY_POINTWISE_PATTERN, binaryPointwiseGraph(attributes)).has_value());
+}
+
+TEST(TestGraphPatternMatcher, PublishesBoolAttribute)
+{
+    const std::string dequantize = R"([{"kind": "op", "id": "dequantize",
+        "op": "block_scale_dequantize", "operands": {"x": "$x", "scale": "$scale"},
+        "results": {"y": "$y"}}])";
+    for(const bool negative : {false, true})
+    {
+        BlockScaleDequantizeAttributesT attributes;
+        attributes.x_tensor_uid = 1;
+        attributes.scale_tensor_uid = 2;
+        attributes.y_tensor_uid = 3;
+        attributes.is_negative_scale = negative;
+        auto node = std::make_unique<NodeT>();
+        node->name = "dequantize";
+        node->compute_data_type = DataType::FLOAT;
+        node->attributes.Set(std::move(attributes));
+        PatternGraphBuilder graph;
+        graph.tensor(1).tensor(2).tensor(3).node(std::move(node));
+
+        const auto bound = match(dequantize, graph);
+        ASSERT_TRUE(bound.has_value());
+        EXPECT_EQ(std::get<bool>(bound->at("dequantize.is_negative_scale")), negative);
+    }
+}
+
 TEST(TestGraphPatternMatcher, DeclinesNodeCountMismatch)
 {
     PatternGraphBuilder graph;
@@ -332,6 +367,33 @@ TEST(TestGraphPatternMatcher, ChainBindsIntermediateConsistently)
 TEST(TestGraphPatternMatcher, DeclinesChainWhoseConsumerReadsAnotherTensor)
 {
     EXPECT_FALSE(match(CONV_ADD_CHAIN, convAddGraph(6)).has_value());
+}
+
+TEST(TestGraphPatternMatcher, DeclinesProducedVariableReadThroughTheWrongOperand)
+{
+    // The add reads `$conv_out` through in_0 and `$unary_out` through in_1. The swapped
+    // graph reads each tensor through the other operand. Each pattern node still has one
+    // possible graph node, and the add consumes both tensors, so only the rule that a
+    // bound variable keeps its uid declines the swapped graph.
+    const std::string pattern = R"([
+        {"kind": "op", "id": "conv", "op": "convolution",
+         "operands": {"x": "$x", "w": "$w"}, "results": {"y": "$conv_out"}},
+        {"kind": "op", "id": "unary", "op": "pointwise",
+         "operands": {"in_0": "$a"}, "results": {"out_0": "$unary_out"}},
+        {"kind": "op", "id": "add", "op": "pointwise",
+         "operands": {"in_0": "$conv_out", "in_1": "$unary_out"}, "results": {"out_0": "$y"}}
+    ])";
+    const auto addReading = [](int64_t in0, int64_t in1) {
+        PatternGraphBuilder graph;
+        graph.tensor(1).tensor(2).tensor(3).tensor(4).tensor(5).tensor(6);
+        graph.node(convolutionFwdNode(1, 2, 3));
+        graph.node(pointwiseNode(PointwiseMode::ABS, 4, std::nullopt, 5));
+        graph.node(pointwiseNode(PointwiseMode::ADD, in0, in1, 6));
+        return graph;
+    };
+
+    EXPECT_TRUE(match(pattern, addReading(3, 5)).has_value());
+    EXPECT_FALSE(match(pattern, addReading(5, 3)).has_value());
 }
 
 TEST(TestGraphPatternMatcher, DeclinesGraphInputVariableProducedInsideTheGraph)

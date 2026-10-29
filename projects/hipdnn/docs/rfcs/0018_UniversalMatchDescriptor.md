@@ -58,8 +58,8 @@ Deciding whether a kernel applies to an incoming problem graph is two questions,
 gives each its own descriptor. The first question is: does this engine serve graphs of this shape,
 and what are the pieces called? That is the **UED (Universal Engine Descriptor)**, specified in
 [RFC 0020](0020_UniversalEngineDescriptor.md). Its `graph_match` binds every tensor and attribute
-the graph supplies. A `graph_match` is either a structural pattern over the op DAG (directed acyclic
-graph), or the native escape hatch standing in for one. The second question is: given those pieces,
+the graph supplies. A `graph_match` takes one of two arms: `nodes`, a structural pattern over the
+op DAG (directed acyclic graph), or `native`, a C++ function the provider registers. The second question is: given those pieces,
 can this kernel take the problem? That is the **UMD (Universal Match Descriptor)**, one JsonLogic
 boolean over the symbols the pattern bound, and it is what this RFC specifies. Together the two
 replace a hand-coded `IPlanBuilder::isApplicable`
@@ -403,7 +403,7 @@ language to grow a registry, a signature table, and a per-argument type contract
 mechanism differing only in grain from the closed operator set
 ([Appendix A.3](#a3-the-expression-language)).
 
-This is the pack-scoped half of a two-part hatch. The engine-scoped half is the UED's
+This is the pack-scoped counterpart of the UED's
 `graph_match.native` ([RFC 0020 § 4.5](0020_UniversalEngineDescriptor.md#45-the-native-arm-normative)),
 which *produces* the binding at stage one by declining the graph or returning the bound tokens. A
 native criterion *reads* that binding and returns a verdict; it cannot add to it. The two use
@@ -447,7 +447,7 @@ else, while the C++ behind it reads ten KMD fields. The descriptor therefore dec
 uses. Declaring it is optional; a criterion that does not is evaluated once per candidate and its
 metadata reads are unchecked until a live graph reaches them. This is the same trade
 [RFC 0020 § 4.5](0020_UniversalEngineDescriptor.md#45-the-native-arm-normative) records for the
-engine-scoped hatch, one scope down.
+UED's `native` arm, one scope down.
 
 **A native criterion owes totality itself.** The bounded, fail-closed guarantees of
 [§11](#11-security-and-hostile-input) — depth and step caps, checked arithmetic, a decline on any

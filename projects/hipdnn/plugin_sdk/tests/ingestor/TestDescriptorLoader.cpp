@@ -5903,6 +5903,30 @@ TEST(TestDescriptorLoader, ChangingALaunchCodeObjectChangesTheEngineSelectorRevi
               revisionWith("rocke_merge_v2", "revision_a"));
 }
 
+/// A trained engine-level model records the selector revision it was trained against and is
+/// UNAVAILABLE when the engine reports another. The digest below is what a native engine
+/// reported before `graph_match` had a `nodes` arm, so a change to how the native arm enters
+/// the selector, which would orphan every such model, fails here.
+TEST(TestDescriptorLoader, NativeEngineSelectorRevisionIsStableForTrainedModels)
+{
+    namespace fixtures = hipdnn_plugin_sdk::ingestor::testing;
+    DescriptorSet set;
+    set.engine.id = fixtures::ENGINE_ID;
+    set.engine.name = "test:pinned_native";
+    set.engine.graphMatch = NativeGraphMatch{"test.pinned.graph_match"};
+    set.engine.knobs = {"block_size"};
+    set.schema.id = fixtures::SCHEMA_ID;
+    set.matchers = {{fixtures::KERNEL_MATCHER_ID,
+                     "kernel scoped",
+                     MatchScope::KERNEL,
+                     "test.pinned.kernel_match"}};
+    set.dispatches = {{fixtures::DISPATCH_ID, "dispatch", "test.pinned.dispatch"}};
+
+    EXPECT_EQ(engineSelectorRevision(set),
+              "generic-untuned-v1/"
+              "dd35c754f320f476b00c38b87c966be1addf80a1bd0319a41b8322d89991a312");
+}
+
 /// A launch name is `^[a-z][a-z0-9_]*$`: underscores and digits after the first letter are
 /// part of the name.
 TEST(TestDescriptorLoader, AcceptsLaunchNamesWithUnderscoresAndDigits)
