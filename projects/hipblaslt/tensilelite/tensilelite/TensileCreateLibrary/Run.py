@@ -1286,6 +1286,42 @@ def deferCyclicGC():
         atexit.register(gc.unfreeze)
 
 
+def archRenamesOf(archs, compiler) -> Dict[str, str]:
+    """Logic-file architecture name -> the compiler target it is built as.
+
+    Only names that are built as something else get an entry; everything else
+    is left alone, so the common case yields an empty map.
+
+    Both sides are bare, and for two different reasons.
+
+    The key is matched against the name a logic file declares, and a logic file
+    carries the architecture alone -- never a qualifier, which names a driver
+    configuration rather than a body of tuning data. Keying on the spec as
+    requested would put ``gfx1250:xnack-`` here, a string no logic file can ever
+    equal, so the rename would silently not happen for precisely the builds that
+    asked for it.
+
+    The value becomes the logic's ``ArchitectureName``, which ends up as the
+    device part of a runtime hardware predicate (``SolutionLibrary`` ->
+    ``Hardware.HardwarePredicate``). The runtime reports a bare processor name,
+    so a qualified value yields a predicate nothing can satisfy and the renamed
+    architecture's kernels stop being selectable at all. Stripping here also
+    keeps the map from changing shape the day a compiler starts accepting
+    ``gfx1250:xnack-``: an alias maps to its target's name either way.
+
+    Args:
+        archs: The requested architecture specs, qualified or not.
+        compiler: The compiler to ask about target IDs; see ``compilerTargetOf``.
+    """
+    renames: Dict[str, str] = {}
+    for a in archs:
+        tuningArch = baseArchName(tuningArchOf(a))
+        target = baseArchName(compilerTargetOf(a, compiler))
+        if tuningArch != target:
+            renames[tuningArch] = target
+    return renames
+
+
 @timing
 def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInfoMap):
 
@@ -1300,8 +1336,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     splitGSU = False
     printSolutionRejectionReason = True
     printIndexAssignmentInfo = False
-    archRenames = {tuningArchOf(a): compilerTargetOf(a, assembler.path)
-                   for a in archs if tuningArchOf(a) != compilerTargetOf(a, assembler.path)}
+    archRenames = archRenamesOf(archs, assembler.path)
 
     fIter = zip(
         logicFiles,
