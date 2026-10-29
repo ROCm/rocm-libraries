@@ -291,6 +291,12 @@ void* heap_pages(std::size_t bytes);
 // system for as refused, so that tests reach what follows a refusal.
 void refuse_huge_page_mappings(bool refuse) noexcept;
 
+// While `refuse` is true, allocate_huge_pages throws std::bad_alloc as if no
+// memory could be had at all, so that tests reach what follows: a thread
+// without its scratch block, whose arrays all come from the heap, and a
+// candidate set without its copy.
+void refuse_huge_pages(bool refuse) noexcept;
+
 // The selection-time options (README.md, Building and testing): TW_LEVER_PREFETCH
 // and TW_LEVER_MEMO are on unless defined to 0, as the CMake options define them
 // when off, and the memo's plan check TW_LEVER_MEMO_CHECK is on wherever

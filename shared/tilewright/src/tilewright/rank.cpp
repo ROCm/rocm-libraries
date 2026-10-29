@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <initializer_list>
@@ -674,8 +675,9 @@ namespace {
 // batched kernels load whole rows of kBatch floats; a row that straddles cache
 // lines costs a split load per weight) from one block of allocate_huge_pages
 // that the thread's first ranking takes; what does not fit, or every array of
-// a thread that cannot have the block, comes from the heap. A carving goes
-// back to the block only when it is the last.
+// a thread that cannot have the block, comes from the heap, one cache line past
+// a tag that deallocate() checks. A carving goes back to the block only when it
+// is the last.
 class ScratchBlock {
  public:
   static constexpr std::size_t kBytes = std::size_t{1} << 21;
@@ -697,18 +699,39 @@ class ScratchBlock {
       used_ = at + bytes;
       return base_ + at;
     }
-    return ::operator new(bytes, kLine);
+    if (bytes > std::numeric_limits<std::size_t>::max() - kTagBytes) throw std::bad_alloc();
+    auto* const tag = static_cast<std::uintptr_t*>(::operator new(bytes + kTagBytes, kLine));
+    tag[0]          = kHeapTag ^ reinterpret_cast<std::uintptr_t>(tag);
+    tag[1]          = bytes;
+    return reinterpret_cast<char*>(tag) + kTagBytes;
   }
 
+  // Stops the process on memory that is neither in this thread's block nor a
+  // heap array, such as an array carved from another thread's block, which
+  // the heap never handed out and must not take: std::abort(), or a fault
+  // reading the tag when that array starts its block or its thread has
+  // exited.
   void deallocate(void* p, std::size_t bytes) noexcept {
     const std::uintptr_t at   = reinterpret_cast<std::uintptr_t>(p);
     const std::uintptr_t base = reinterpret_cast<std::uintptr_t>(base_);
-    if (base_ == nullptr || at < base || at - base >= kBytes) return ::operator delete(p, kLine);
-    if (at - base + bytes == used_) used_ = at - base;
+    if (base_ != nullptr && at >= base && at - base < kBytes) {
+      if (at - base + bytes == used_) used_ = at - base;
+      return;
+    }
+    if (p == nullptr) return;
+    auto* const tag = reinterpret_cast<std::uintptr_t*>(static_cast<char*>(p) - kTagBytes);
+    if (tag[0] != (kHeapTag ^ reinterpret_cast<std::uintptr_t>(tag)) || tag[1] != bytes)
+      std::abort();
+    ::operator delete(tag, kLine);
   }
 
  private:
   static constexpr std::align_val_t kLine{64};
+  // A heap array's tag, the line before it: kHeapTag XOR the tag's address,
+  // then the array's size in bytes.
+  static constexpr std::size_t kTagBytes   = 64;
+  static constexpr std::uintptr_t kHeapTag = static_cast<std::uintptr_t>(0x7477736372617463ull);
+
   char* base_       = nullptr;
   std::size_t used_ = 0;
   bool tried_       = false;
@@ -719,6 +742,13 @@ ScratchBlock& scratch_block() {
   return block;
 }
 
+// The allocator of the scratch arrays. It holds no state: deallocate() gives
+// memory back to the calling thread's block, or to the heap when it lies
+// outside that block. That is right because the arrays are members of the
+// thread's own Scratch, each freed by the thread that allocated it. An array
+// carved from one thread's block and freed or grown by another would give the
+// heap memory it never handed out; ScratchBlock::deallocate() stops the
+// process instead.
 template <class T>
 struct ScratchAllocator {
   using value_type   = T;
@@ -1974,10 +2004,15 @@ static_assert(kHeapOffset % 64 == 0 && kHeapOffset > 0 &&
 
 namespace {
 std::atomic<bool> refused_mappings{false};
+std::atomic<bool> refused_memory{false};
 }  // namespace
 
 void refuse_huge_page_mappings(bool refuse) noexcept {
   refused_mappings.store(refuse, std::memory_order_relaxed);
+}
+
+void refuse_huge_pages(bool refuse) noexcept {
+  refused_memory.store(refuse, std::memory_order_relaxed);
 }
 
 void* heap_pages(std::size_t bytes) {
@@ -1992,6 +2027,9 @@ void* heap_pages(std::size_t bytes) {
 }  // namespace detail
 
 void* allocate_huge_pages(std::size_t bytes) {
+  // The tests can refuse all such memory (refuse_huge_pages): then this
+  // throws as the heap does when it has none.
+  if (detail::refused_memory.load(std::memory_order_relaxed)) throw std::bad_alloc();
 #if defined(__linux__)
   if (bytes <= std::numeric_limits<std::size_t>::max() - 2 * kHugePage) {
     const std::size_t length = huge_length(bytes);

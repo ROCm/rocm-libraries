@@ -353,6 +353,56 @@ TEST_CASE("allocate_huge_pages takes heap memory where a mapping is refused", "[
   }
 }
 
+TEST_CASE("rankings without huge-page memory equal rank_configs", "[memory]") {
+  // No huge-page memory at all while one lives: a candidate set prepared then
+  // keeps no copy, and a new thread gets no scratch block, so its rankings
+  // take every scratch array from the heap, tagged, and free each through its
+  // tag; the rankings are those with huge-page memory.
+  struct Refused {
+    Refused() { tw::detail::refuse_huge_pages(true); }
+    ~Refused() { tw::detail::refuse_huge_pages(false); }
+    Refused(const Refused&)            = delete;
+    Refused& operator=(const Refused&) = delete;
+  };
+  const LimitGuard guard;
+  tw::set_cache_limit(kUnlimited);
+  std::mt19937_64 rng(37);
+  const std::vector<tw::Config> pool = random_pool(rng, 40);
+  const tw::ModelPtr model           = load_spec(listed_grid(tw::WeightType::Int4, pool, 9));
+  std::vector<tw::Problem> problems;
+  std::vector<std::size_t> depth;
+  for (int i = 0; i < 24; ++i) {
+    problems.push_back(random_problem(rng));
+    depth.push_back(i % 3 == 0 ? kAll : 1);
+  }
+  std::vector<std::vector<tw::Result>> expect;
+  for (std::size_t i = 0; i < problems.size(); ++i)
+    expect.push_back(tw::rank_configs(*model, problems[i], test_hardware(), pool, depth[i]));
+
+  std::vector<std::vector<tw::Result>> ranked, top;
+  {
+    const Refused refused;
+    CHECK_THROWS_AS(tw::allocate_huge_pages(1), std::bad_alloc);
+    const tw::CandidateSet set(model, pool);
+    set.prepare();
+    std::thread ranking([&] {
+      std::vector<tw::Result> r;
+      for (std::size_t i = 0; i < problems.size(); ++i) {
+        ranked.push_back(set.rank(problems[i], test_hardware(), depth[i]));
+        set.rank_top(problems[i], test_hardware(), {}, depth[i], r);
+        top.push_back(r);
+      }
+    });
+    ranking.join();
+  }
+  REQUIRE(ranked.size() == problems.size());
+  for (std::size_t i = 0; i < problems.size(); ++i) {
+    INFO("problem " << i);
+    CHECK(same_results(ranked[i], expect[i]));
+    CHECK(same_results(top[i], scored_prefix(expect[i], depth[i])));
+  }
+}
+
 TEST_CASE("the cache stays within its limit and releases the least recently used parts",
           "[cache]") {
   const LimitGuard guard;
