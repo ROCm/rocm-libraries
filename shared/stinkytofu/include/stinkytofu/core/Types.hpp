@@ -219,6 +219,14 @@ struct AsmCapsConfig {
     /// When false, all of the above are skipped; only Rule 4a remains
     /// active if `requiresXCntForVolatileVMEM` is set independently.
     /// See Gfx1250HazardPass for the complete rule definitions.
+    ///
+    /// The four SW instruction-prefetch passes read the same flag for the drain
+    /// before each prefetch, so a caller gets replay protection from both passes
+    /// or from neither. There is deliberately no third "unspecified" state: a
+    /// caller that leaves this false gets no gfx1250 replay protection anywhere,
+    /// which is what Gfx1250HazardPass has always done with it. Every in-tree
+    /// entry point sets it -- `Backend::configurePassManager` from
+    /// `ModuleOptions`, and `stinkytofu-opt` from its `--arch` target ID.
     bool enableXnackReplay = false;
 };
 }  // namespace stinkytofu
