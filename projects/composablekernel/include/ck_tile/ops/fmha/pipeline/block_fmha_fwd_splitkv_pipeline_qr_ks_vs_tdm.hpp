@@ -149,6 +149,13 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                                           BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 128;
 
     static constexpr bool kDeferSink = kHwGemm1Scale && kHasSink;
+    // MergeSink folds the sink in after the main loop with no i_split test, so
+    // every split carrying work would add exp(sink) again. The non-deferred
+    // path derives ownership in init_ml instead. Unreachable today -- split-kv
+    // emits no fp8 V with a 128 gemm1 warp tile -- and blocked here so the
+    // first instance that would be silently wrong fails to compile instead.
+    static_assert(!kDeferSink,
+                  "qr_tdm split-kv does not implement the deferred sink path");
 
     static constexpr index_t kScaleBytes        = 4;
     static constexpr index_t kGemm1KPerByte     = kK1 / kScaleBytes;
@@ -356,7 +363,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         {
             if(__builtin_isinf_sign(sink_v) >= 0)
             {
-                // Same split the pre-seed used: the bias paths carry scale_s inside m, the
+                // Note this has no i_split test, which is why kDeferSink is
+                // asserted off above. The bias paths carry scale_s inside m, the
                 // plain path applies it when the exponent is evaluated.
                 constexpr bool kScaledMax = BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                                             BiasEnum == BlockAttentionBiasEnum::ALIBI ||
@@ -720,12 +728,21 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                                        ? aligned_physical_seqlen_k_start
                                        : 0;
 
-        // Bias tile window (ELEMENTWISE_BIAS or ALIBI -- null window for NO_BIAS)
-        const auto bias_origin = bias_dram_block_window_tmp.get_window_origin();
+        // Bias tile window (ELEMENTWISE_BIAS or ALIBI -- null window for NO_BIAS).
+        // Bias is indexed logically, so outside the sink range the origin has to
+        // come back out of the physical frame; mirrors qr_ks_vs.
+        const auto bias_origin      = bias_dram_block_window_tmp.get_window_origin();
+        const index_t bias_n_offset = [&]() {
+            if constexpr(kHasSink)
+                return kv_load_start;
+            else
+                return logical_seqlen_k_start -
+                       (physical_seqlen_k_start - aligned_physical_seqlen_k_start);
+        }();
         auto bias_dram_window =
             make_tile_window(bias_dram_block_window_tmp.get_bottom_tensor_view(),
                              bias_dram_block_window_tmp.get_window_lengths(),
-                             {bias_origin.at(number<0>{}), kv_load_start},
+                             {bias_origin.at(number<0>{}), bias_n_offset},
                              gemm_0.MakeCBlockTile().get_tile_distribution());
 
         // K is staged a whole (kN0 x kSubQKHeaddim) tile at a time, into two
