@@ -512,10 +512,11 @@ static void testing_csrsm_reuse(csrsm_reuse_source          source,
     CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_fill_mode(descr, uplo));
     CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_diag_type(descr, diag));
 
-    const rocsparse_solve_policy spol  = rocsparse_solve_policy_auto;
-    const rocsparse_int          M     = hcsr_row_ptr.size() - 1;
-    const rocsparse_int          nnz   = hcsr_val.size();
-    const T                      alpha = static_cast<T>(1);
+    const rocsparse_operation    trans_B = rocsparse_operation_none;
+    const rocsparse_solve_policy spol    = rocsparse_solve_policy_auto;
+    const rocsparse_int          M       = hcsr_row_ptr.size() - 1;
+    const rocsparse_int          nnz     = hcsr_val.size();
+    const T                      alpha   = static_cast<T>(1);
 
     host_dense_matrix<T> hB(M, nrhs);
     for(rocsparse_int j = 0; j < nrhs; ++j)
@@ -544,7 +545,7 @@ static void testing_csrsm_reuse(csrsm_reuse_source          source,
     buffer_size = std::max(buffer_size, size);
     CHECK_ROCSPARSE_ERROR(rocsparse_csrsm_buffer_size<T>(handle,
                                                          trans,
-                                                         rocsparse_operation_none,
+                                                         trans_B,
                                                          M,
                                                          nrhs,
                                                          nnz,
@@ -615,7 +616,7 @@ static void testing_csrsm_reuse(csrsm_reuse_source          source,
 
     CHECK_ROCSPARSE_ERROR(rocsparse_csrsm_analysis<T>(handle,
                                                       trans,
-                                                      rocsparse_operation_none,
+                                                      trans_B,
                                                       M,
                                                       nrhs,
                                                       nnz,
@@ -638,7 +639,7 @@ static void testing_csrsm_reuse(csrsm_reuse_source          source,
 
     CHECK_ROCSPARSE_ERROR(rocsparse_csrsm_solve<T>(handle,
                                                    trans,
-                                                   rocsparse_operation_none,
+                                                   trans_B,
                                                    M,
                                                    nrhs,
                                                    nnz,
@@ -664,7 +665,7 @@ static void testing_csrsm_reuse(csrsm_reuse_source          source,
                                                 nrhs,
                                                 nnz,
                                                 trans,
-                                                rocsparse_operation_none,
+                                                trans_B,
                                                 alpha,
                                                 hcsr_row_ptr,
                                                 hcsr_col_ind,

@@ -1638,9 +1638,10 @@ static void sptrsm_csr_reuse_spsv(rocsparse_operation         trans,
     std::copy(ind.begin(), ind.end(), hA.ind.data());
     std::copy(val.begin(), val.end(), hA.val.data());
 
-    const rocsparse_datatype ttype = rocsparse_datatype_f32_r;
-    const int64_t            m     = hA.m;
-    float                    alpha = 1.0f;
+    const rocsparse_operation trans_B = rocsparse_operation_none;
+    const rocsparse_datatype  ttype   = rocsparse_datatype_f32_r;
+    const int64_t             m       = hA.m;
+    float                     alpha   = 1.0f;
 
     host_dense_matrix<float> hB(m, nrhs);
     for(int64_t j = 0; j < nrhs; ++j)
@@ -1697,7 +1698,7 @@ static void sptrsm_csr_reuse_spsv(rocsparse_operation         trans,
 
     rocsparse_local_sptrsm sptrsm_descr(handle,
                                         trans,
-                                        rocsparse_operation_none,
+                                        trans_B,
                                         rocsparse_sptrsm_alg_default,
                                         ttype,
                                         ttype,
@@ -1729,7 +1730,7 @@ static void sptrsm_csr_reuse_spsv(rocsparse_operation         trans,
                                         nrhs,
                                         hA.nnz,
                                         trans,
-                                        rocsparse_operation_none,
+                                        trans_B,
                                         alpha,
                                         hA.ptr,
                                         hA.ind,
