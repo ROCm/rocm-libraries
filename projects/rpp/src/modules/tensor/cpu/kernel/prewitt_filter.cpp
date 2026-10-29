@@ -52,9 +52,8 @@ Spec (the gtest golden, utilities/test/src/reference/prewitt_filter_ref.hpp, is 
   - Layouts: srcDescPtr / dstDescPtr may differ (NHWC <-> NCHW); address src through src strides
     and dst through dst strides. layoutParams carries the source channel/pixel increments.
 
-  Reference structure for the batch loop: gaussian_filter_host_tensor in gaussian_filter.cpp
-  (compute_roi_validation_host, nStride per image, omp parallel for over the batch). The 3x3
-  load/permute helpers sobel_filter.cpp uses are in rpp_cpu_filter.hpp.
+  Implementation: scalar, one omp thread per image of the batch. No AVX2 path yet; the 3x3
+  load/permute helpers sobel_filter.cpp vectorizes with are in rpp_cpu_filter.hpp.
 
   Test: rpp_tests --gtest_filter='Image_Filter/PrewittFilter*HOST_*'
 */
@@ -64,8 +63,71 @@ RppStatus prewitt_filter_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPt
                                      RpptDescPtr dstDescPtr, Rpp32u prewittType,
                                      RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                      RppLayoutParams layoutParams, rpp::Handle& handle) {
-    // TODO: implement. Replace this whole body.
-    return RPP_ERROR_NOT_IMPLEMENTED;
+    RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+    omp_set_dynamic(0);
+    omp_set_num_threads(handle.GetNumThreads());
+#pragma omp parallel for
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
+        RpptROI roi;
+        RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
+        compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
+
+        T *srcPtrImage, *dstPtrImage;
+        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+
+        // ROI bounds in image coordinates
+        Rpp32s xStart = roi.xywhROI.xy.x;
+        Rpp32s yStart = roi.xywhROI.xy.y;
+        Rpp32s xEnd = xStart + roi.xywhROI.roiWidth;
+        Rpp32s yEnd = yStart + roi.xywhROI.roiHeight;
+
+        // Each channel is filtered on its own; strides handle both NCHW (planar) and NHWC (packed)
+        for (Rpp32u c = 0; c < srcDescPtr->c; c++) {
+            T* srcPtrChannel = srcPtrImage + c * srcDescPtr->strides.cStride;
+            T* dstPtrChannel = dstPtrImage + c * dstDescPtr->strides.cStride;
+
+            // REPLICATE border: neighbors outside the ROI take the nearest ROI edge pixel, so
+            // padding is never read. Gx and Gy sum to zero, so an i8 pixel needs no +128 shift here
+            auto srcPixel = [&](Rpp32s y, Rpp32s x) -> Rpp32f {
+                y = std::clamp(y, yStart, yEnd - 1);
+                x = std::clamp(x, xStart, xEnd - 1);
+                return static_cast<Rpp32f>(srcPtrChannel[y * srcDescPtr->strides.hStride +
+                                                         x * srcDescPtr->strides.wStride]);
+            };
+
+            for (Rpp32s y = yStart; y < yEnd; y++) {
+                T* dstPtrRow = dstPtrChannel + (y - yStart) * dstDescPtr->strides.hStride;
+                for (Rpp32s x = xStart; x < xEnd; x++) {
+                    // The 8 neighbors of (y, x); the center has weight 0 in both kernels
+                    Rpp32f topLeft = srcPixel(y - 1, x - 1);
+                    Rpp32f top = srcPixel(y - 1, x);
+                    Rpp32f topRight = srcPixel(y - 1, x + 1);
+                    Rpp32f left = srcPixel(y, x - 1);
+                    Rpp32f right = srcPixel(y, x + 1);
+                    Rpp32f bottomLeft = srcPixel(y + 1, x - 1);
+                    Rpp32f bottom = srcPixel(y + 1, x);
+                    Rpp32f bottomRight = srcPixel(y + 1, x + 1);
+
+                    // Gx: right column minus left column. Gy: bottom row minus top row
+                    Rpp32f gx = (topRight + right + bottomRight) - (topLeft + left + bottomLeft);
+                    Rpp32f gy = (bottomLeft + bottom + bottomRight) - (topLeft + top + topRight);
+
+                    // prewittType 0 = X, 1 = Y, 2 = XY. The magnitude uses the unclamped gx and
+                    // gy; only the final value is saturated to the destination range
+                    Rpp32f result = (prewittType == 0)   ? gx
+                                    : (prewittType == 1) ? gy
+                                                         : std::sqrt(gx * gx + gy * gy);
+
+                    // saturate_pixel rounds and clamps u8/i8 (subtracting 128 for i8) and clamps
+                    // f16/f32 to [0, 1]
+                    saturate_pixel(result, dstPtrRow + (x - xStart) * dstDescPtr->strides.wStride);
+                }
+            }
+        }
+    }
+
+    return RPP_SUCCESS;
 }
 
 template RppStatus prewitt_filter_host_tensor<Rpp8u>(Rpp8u*, RpptDescPtr, Rpp8u*, RpptDescPtr,
