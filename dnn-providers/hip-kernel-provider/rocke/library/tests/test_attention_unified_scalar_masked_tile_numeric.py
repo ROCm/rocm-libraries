@@ -24,15 +24,21 @@ Covered:
   trailing segments: those segments must count as empty, not give NaN.
 
 Not covered: sinks, softcap and multi-sequence batches.
+
+The kernels run on ``rocke.runtime`` device buffers filled from numpy, and the
+FP32 reference is numpy over the fp16/bf16-rounded inputs, so the tests run in
+GPU lanes without torch. The scalar kernels are arch-neutral: the tests run on
+any GPU whose target id the attention builders know, and skip elsewhere.
+``test_attention_unified_masked_tile_ir.py`` pins the same properties on the
+emitted IR without a GPU.
 """
 
 import math
 
+import numpy as np
 import pytest
 
-torch = pytest.importorskip("torch")
-
-from kernels.common.attention_unified import (  # noqa: E402
+from kernels.common.attention_unified import (
     UnifiedAttention3DSpec,
     UnifiedAttentionProblem,
     UnifiedAttentionReduceSpec,
@@ -40,18 +46,22 @@ from kernels.common.attention_unified import (  # noqa: E402
     build_unified_attention_reduce,
     run_unified_attention_torch,
 )
+from rocke.core.arch.target import known_arches
+from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
+from rocke.runtime.hip_module import get_device_arch
 
+from ._attention_device_array import DeviceArray
 
-def _arch():
-    if not torch.cuda.is_available():
-        return None
-    name = torch.cuda.get_device_properties(0).gcnArchName.lower()
-    return next((a for a in ("gfx942", "gfx950") if a in name), None)
-
-
-requires_cdna3_or_4 = pytest.mark.skipif(
-    _arch() is None, reason="needs a gfx942 or gfx950 GPU with ROCm torch"
-)
+# The launches compile for the device's own target id, which the builders must
+# know (gfx11 devices are only known through their generic target).
+_ARCH = get_device_arch()
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.skipif(
+        _ARCH not in known_arches(),
+        reason=f"needs a GPU with a known attention target, found {_ARCH}",
+    ),
+]
 
 # Natural-log score of every visible key: exp2(-110 * log2(e)) = 2^-158.7 is
 # below the smallest fp32 denormal, so P underflows to 0 when m is pinned at 0.
@@ -62,8 +72,30 @@ _NUM_SEGMENTS = 8
 _DTYPES = ["fp16", "bf16"]
 
 
-def _tdt(dtype):
-    return torch.float16 if dtype == "fp16" else torch.bfloat16
+@pytest.fixture(scope="module")
+def rt():
+    from rocke.runtime.hip_module import Runtime
+
+    return Runtime()
+
+
+def _encode(x, dtype):
+    """fp32 values as the kernel's fp16 or bf16 (raw uint16) host array."""
+    x = np.asarray(x, dtype=np.float32)
+    return x.astype(np.float16) if dtype == "fp16" else f32_to_bf16(x)
+
+
+def _decode(x, dtype):
+    return x.astype(np.float32) if dtype == "fp16" else bf16_to_f32(x)
+
+
+def _nan_filled(like):
+    """An array like ``like`` with every byte 0xFF: NaN as fp16, bf16 and f32,
+    so an element a kernel skips fails the checks instead of passing on stale
+    memory."""
+    out = np.empty_like(like)
+    out.view(np.uint8)[...] = 0xFF
+    return out
 
 
 def _problem(dtype, q_len, kv_len, num_blocks, top_left, window=_WINDOW):
@@ -84,27 +116,24 @@ def _problem(dtype, q_len, kv_len, num_blocks, top_left, window=_WINDOW):
 
 
 def _inputs(dtype, q_len, kv_len):
-    """Q, paged K/V and metadata where every visible score equals ``_SCORE``."""
-    tdt = _tdt(dtype)
-    g = torch.Generator(device="cuda").manual_seed(0)
+    """Q, paged K/V and metadata where every visible score equals ``_SCORE``,
+    as host arrays."""
+    rng = np.random.default_rng(0)
     max_blocks = (kv_len + _BS - 1) // _BS
     num_blocks = max_blocks + 3
     scale = 1.0 / math.sqrt(_D)
     # q = 1, k = b with D * b * scale = _SCORE: b = -13.75, exact in fp16 and bf16.
     b = _SCORE / (_D * scale)
-    q = torch.ones((q_len, _HQ, _D), device="cuda", dtype=tdt)
-    k_cache = torch.full((num_blocks, _BS, _HKV, _D), b, device="cuda", dtype=tdt)
-    v_cache = torch.randn(
-        num_blocks, _BS, _HKV, _D, device="cuda", dtype=tdt, generator=g
-    )
-    perm = torch.randperm(num_blocks, device="cuda", generator=g)[:max_blocks]
+    shape = (num_blocks, _BS, _HKV, _D)
+    perm = rng.permutation(num_blocks)[:max_blocks]
     return dict(
-        q=q,
-        k=k_cache,
-        v=v_cache,
-        block_table=perm.view(1, max_blocks).to(torch.int32).contiguous(),
-        cu=torch.tensor([0, q_len], dtype=torch.int32, device="cuda"),
-        seqused=torch.tensor([kv_len], dtype=torch.int32, device="cuda"),
+        dtype=dtype,
+        q=_encode(np.ones((q_len, _HQ, _D)), dtype),
+        k=_encode(np.full(shape, b), dtype),
+        v=_encode(rng.standard_normal(shape), dtype),
+        block_table=perm.reshape(1, max_blocks).astype(np.int32),
+        cu=np.array([0, q_len], dtype=np.int32),
+        seqused=np.array([kv_len], dtype=np.int32),
         scale=scale,
         num_blocks=num_blocks,
     )
@@ -112,55 +141,63 @@ def _inputs(dtype, q_len, kv_len):
 
 def _reference(data, kv_len, top_left, window=_WINDOW):
     """FP32 O for one sequence, causal + sliding window (0: none); keyless rows give 0."""
-    q = data["q"]
+    dtype = data["dtype"]
+    q = _decode(data["q"], dtype)
     q_len = q.shape[0]
     nblk = (kv_len + _BS - 1) // _BS
-    blocks = data["block_table"][0, :nblk].long()
-    k = data["k"][blocks].reshape(-1, _HKV, _D)[:kv_len].float()
-    v = data["v"][blocks].reshape(-1, _HKV, _D)[:kv_len].float()
-    k = k.transpose(0, 1).repeat_interleave(_HQ // _HKV, dim=0)
-    v = v.transpose(0, 1).repeat_interleave(_HQ // _HKV, dim=0)
-    s = torch.matmul(q.float().transpose(0, 1), k.transpose(-1, -2)) * data["scale"]
-    p = torch.arange(q_len, device=q.device).view(-1, 1)
-    kk = torch.arange(kv_len, device=q.device).view(1, -1)
+    blocks = data["block_table"][0, :nblk]
+    k = _decode(data["k"], dtype)[blocks].reshape(-1, _HKV, _D)[:kv_len]
+    v = _decode(data["v"], dtype)[blocks].reshape(-1, _HKV, _D)[:kv_len]
+    k = np.repeat(k.transpose(1, 0, 2), _HQ // _HKV, axis=0)
+    v = np.repeat(v.transpose(1, 0, 2), _HQ // _HKV, axis=0)
+    s = np.matmul(q.transpose(1, 0, 2), k.transpose(0, 2, 1)) * np.float32(
+        data["scale"]
+    )
+    p = np.arange(q_len).reshape(-1, 1)
+    kk = np.arange(kv_len).reshape(1, -1)
     diag = p + (0 if top_left else kv_len - q_len)
     visible = kk <= diag
     if window:
         visible &= diag - kk < window
-    s = s.masked_fill(~visible, float("-inf"))
-    probs = torch.softmax(s, dim=-1).nan_to_num(0.0)
-    return torch.matmul(probs, v).transpose(0, 1), visible.any(dim=-1)
+    has_key = visible.any(axis=-1)
+    s = np.where(visible, s, -np.inf)
+    m = np.where(has_key[:, None], s.max(axis=-1, keepdims=True), 0.0)
+    e = np.exp(s - m)
+    total = e.sum(axis=-1, keepdims=True)
+    probs = np.divide(e, total, out=np.zeros_like(e), where=total > 0)
+    return np.matmul(probs, v).transpose(1, 0, 2), has_key
 
 
-def _run_scalar_2d(problem, data):
-    out = torch.empty_like(data["q"])
+def _run_scalar_2d(rt, problem, data):
+    out = DeviceArray(rt, _nan_filled(data["q"]))
     run_unified_attention_torch(
         problem=problem,
-        q=data["q"],
-        k=data["k"],
-        v=data["v"],
+        q=DeviceArray(rt, data["q"]),
+        k=DeviceArray(rt, data["k"]),
+        v=DeviceArray(rt, data["v"]),
         out=out,
-        cu_seqlens_q=data["cu"],
-        seqused_k=data["seqused"],
+        cu_seqlens_q=DeviceArray(rt, data["cu"]),
+        seqused_k=DeviceArray(rt, data["seqused"]),
         softmax_scale=data["scale"],
-        block_table=data["block_table"],
+        block_table=DeviceArray(rt, data["block_table"]),
         softcap=0.0,
         backend="scalar",
     )
-    return out
+    return _decode(out.read(), data["dtype"])
 
 
-def _run_scalar_3d(problem, data, between=None):
+def _run_scalar_3d(rt, problem, data, between=None):
     """Scalar split-3D segment kernel then the scalar reduce, launched directly.
 
-    ``between(segm_sum)``, if given, runs after the segment launch and
-    before the reduce launch, so a test can edit the per-segment workspace.
+    ``between(segm_sum)``, if given, runs after the segment launch and before
+    the reduce launch on a host copy of the per-segment sum workspace; the copy
+    is written back before the reduce, so a test can edit the workspace.
     """
     from rocke.helpers.compile import compile_kernel
     from rocke.helpers.spec import SignatureBuilder
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
-    arch = _arch()
+    arch = _ARCH
     io = "f16" if problem.dtype == "fp16" else "bf16"
     q_len = problem.total_q
 
@@ -216,27 +253,28 @@ def _run_scalar_3d(problem, data, between=None):
 
     # The segm_ml descriptor spans max_seqlen_q + 1 tokens.
     rows = problem.max_seqlen_q + 1
-    nan = float("nan")
-    segm_out = torch.full(
-        (rows, _HQ, _NUM_SEGMENTS, _D), nan, device="cuda", dtype=torch.float32
+    segm_out = DeviceArray(
+        rt, np.full((rows, _HQ, _NUM_SEGMENTS, _D), np.nan, dtype=np.float32)
     )
-    segm_max = torch.full((rows, _HQ, _NUM_SEGMENTS), nan, device="cuda")
-    segm_sum = torch.full((rows, _HQ, _NUM_SEGMENTS), nan, device="cuda")
-    out = torch.empty_like(data["q"])
+    segm_max = DeviceArray(rt, np.full((rows, _HQ, _NUM_SEGMENTS), np.nan, np.float32))
+    segm_sum = DeviceArray(rt, np.full((rows, _HQ, _NUM_SEGMENTS), np.nan, np.float32))
+    out = DeviceArray(rt, _nan_filled(data["q"]))
+    seqused = DeviceArray(rt, data["seqused"])
+    cu = DeviceArray(rt, data["cu"])
     seg(
         {
             "segm_output_ptr": segm_out,
             "segm_max_ptr": segm_max,
             "segm_expsum_ptr": segm_sum,
-            "query_ptr": data["q"],
-            "key_cache_ptr": data["k"],
-            "value_cache_ptr": data["v"],
+            "query_ptr": DeviceArray(rt, data["q"]),
+            "key_cache_ptr": DeviceArray(rt, data["k"]),
+            "value_cache_ptr": DeviceArray(rt, data["v"]),
             "sink_ptr": 0,
-            "block_tables_ptr": data["block_table"],
-            "seq_lens_ptr": data["seqused"],
+            "block_tables_ptr": DeviceArray(rt, data["block_table"]),
+            "seq_lens_ptr": seqused,
             "alibi_slopes_ptr": 0,
             "qq_bias_ptr": 0,
-            "query_start_len_ptr": data["cu"],
+            "query_start_len_ptr": cu,
             "scale": float(data["scale"]),
             "k_scale": 1.0,
             "v_scale": 1.0,
@@ -246,38 +284,50 @@ def _run_scalar_3d(problem, data, between=None):
         config=LaunchConfig(grid=(q_len, _HQ, _NUM_SEGMENTS * _D), block=(64, 1, 1)),
     )
     if between is not None:
-        torch.cuda.synchronize()
-        between(segm_sum)
+        sums = segm_sum.read()
+        between(sums)
+        segm_sum.write(sums)
     red(
         {
             "output_ptr": out,
             "segm_output_ptr": segm_out,
             "segm_max_ptr": segm_max,
             "segm_expsum_ptr": segm_sum,
-            "seq_lens_ptr": data["seqused"],
-            "query_start_len_ptr": data["cu"],
+            "seq_lens_ptr": seqused,
+            "query_start_len_ptr": cu,
         },
         config=LaunchConfig(grid=(q_len, _HQ, _D), block=(64, 1, 1)),
     )
-    return out
+    return _decode(out.read(), data["dtype"])
 
 
 def _check(out, ref, has_key, dtype):
-    assert torch.isfinite(out).all(), (
-        f"{(~torch.isfinite(out)).any(dim=-1).any(dim=-1).sum().item()} rows "
-        "with non-finite O"
-    )
-    err = (out.float() - ref).abs().amax(dim=(1, 2))
+    finite = np.isfinite(out)
+    assert (
+        finite.all()
+    ), f"{int((~finite).any(axis=(1, 2)).sum())} rows with non-finite O"
+    err = np.abs(out - ref).max(axis=(1, 2))
     # A row that sees keys has |O| ~ mean of V over its window (~0.2 for randn
     # V), so a collapsed row (O = 0) fails; a keyless row must be exactly 0.
     tol = 2e-2 if dtype == "fp16" else 4e-2
     bad = err >= tol
     assert not bad.any(), (
-        f"{bad.sum().item()} of {out.shape[0]} query rows wrong; first bad row "
-        f"{int(bad.nonzero()[0])} (sees keys: {bool(has_key[bad][0])})"
+        f"{int(bad.sum())} of {out.shape[0]} query rows wrong; first bad row "
+        f"{int(np.flatnonzero(bad)[0])} (sees keys: {bool(has_key[bad][0])})"
     )
     if (~has_key).any():
         assert (out[~has_key] == 0).all(), "keyless rows must give O = 0"
+
+
+def _check_nan_slot(out, ref, row, head, dtype, message):
+    """O is NaN at (row, head) only, and matches ``ref`` everywhere else."""
+    assert np.isnan(out[row, head]).all(), message
+    others = np.ones(out.shape[:2], dtype=bool)
+    others[row, head] = False
+    assert np.isfinite(out[others]).all(), "NaN leaked into another (row, head)"
+    tol = 2e-2 if dtype == "fp16" else 4e-2
+    err = np.abs(out - ref).max(axis=-1)[others]
+    assert err.max() < tol, f"{int((err >= tol).sum())} (row, head) wrong"
 
 
 # (q_len, kv_len, top_left). Rows past the first window have masked leading
@@ -289,24 +339,19 @@ _CASES = {
 }
 
 
-@requires_cdna3_or_4
-@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("case", list(_CASES))
-def test_scalar_2d_masked_leading_keys(case, dtype):
+def test_scalar_2d_masked_leading_keys(rt, case, dtype):
     q_len, kv_len, top_left = _CASES[case]
     data = _inputs(dtype, q_len, kv_len)
     problem = _problem(dtype, q_len, kv_len, data["num_blocks"], top_left)
-    out = _run_scalar_2d(problem, data)
-    torch.cuda.synchronize()
+    out = _run_scalar_2d(rt, problem, data)
     ref, has_key = _reference(data, kv_len, top_left)
     _check(out, ref, has_key, dtype)
 
 
-@requires_cdna3_or_4
-@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", _DTYPES)
-def test_scalar_2d_default_mask_keyless_rows(dtype):
+def test_scalar_2d_default_mask_keyless_rows(rt, dtype):
     """Default mask (bottom-right causal, no window) with q_len > kv_len.
 
     Query row i sees keys 0..i - (q_len - kv_len), so the first 16 of 32 rows
@@ -316,18 +361,15 @@ def test_scalar_2d_default_mask_keyless_rows(dtype):
     data = _inputs(dtype, q_len, kv_len)
     problem = _problem(dtype, q_len, kv_len, data["num_blocks"], False, window=0)
     assert problem.default_mask
-    out = _run_scalar_2d(problem, data)
-    torch.cuda.synchronize()
+    out = _run_scalar_2d(rt, problem, data)
     ref, has_key = _reference(data, kv_len, False, window=0)
     assert int((~has_key).sum()) == 16
     _check(out, ref, has_key, dtype)
 
 
-@requires_cdna3_or_4
-@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("case", ["bottom_right", "top_left"])
-def test_scalar_2d_propagates_nan_query_row(case, dtype):
+def test_scalar_2d_propagates_nan_query_row(rt, case, dtype):
     """A NaN query row must give NaN O, not be stored as a keyless 0.
 
     The NaN scores make the row's sum l NaN. The epilogue stores 0 only for an
@@ -349,40 +391,27 @@ def test_scalar_2d_propagates_nan_query_row(case, dtype):
     problem = _problem(dtype, q_len, kv_len, data["num_blocks"], top_left)
     ref, has_key = _reference(data, kv_len, top_left)
     assert bool(has_key[row])
-    data["q"][row, head] = float("nan")
-    out = _run_scalar_2d(problem, data)
-    torch.cuda.synchronize()
-
-    assert torch.isnan(
-        out[row, head]
-    ).all(), f"row {row} head {head}: NaN query did not reach O"
-    others = torch.ones(out.shape[:2], dtype=torch.bool, device=out.device)
-    others[row, head] = False
-    assert torch.isfinite(out[others]).all(), "NaN leaked into another (row, head)"
-    tol = 2e-2 if dtype == "fp16" else 4e-2
-    err = (out.float() - ref).abs().amax(dim=-1)[others]
-    assert err.max().item() < tol, f"{(err >= tol).sum().item()} (row, head) wrong"
+    data["q"][row, head] = _encode(np.nan, dtype)
+    out = _run_scalar_2d(rt, problem, data)
+    _check_nan_slot(
+        out, ref, row, head, dtype, f"row {row} head {head}: NaN query did not reach O"
+    )
 
 
-@requires_cdna3_or_4
-@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("case", ["top_left", "top_left_keyless"])
-def test_scalar_3d_masked_leading_keys_and_segments(case, dtype):
+def test_scalar_3d_masked_leading_keys_and_segments(rt, case, dtype):
     # The scalar 3D body applies the window only for non-default masks.
     q_len, kv_len, top_left = _CASES[case]
     data = _inputs(dtype, q_len, kv_len)
     problem = _problem(dtype, q_len, kv_len, data["num_blocks"], top_left)
-    out = _run_scalar_3d(problem, data)
-    torch.cuda.synchronize()
+    out = _run_scalar_3d(rt, problem, data)
     ref, has_key = _reference(data, kv_len, top_left)
     _check(out, ref, has_key, dtype)
 
 
-@requires_cdna3_or_4
-@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", _DTYPES)
-def test_scalar_3d_default_mask_masked_trailing_segments(dtype):
+def test_scalar_3d_default_mask_masked_trailing_segments(rt, dtype):
     """Default mask with q_len == kv_len = 128, keys split over 8 segments.
 
     Row 0 sees key 0 only, so every later segment sees only masked keys.
@@ -393,17 +422,14 @@ def test_scalar_3d_default_mask_masked_trailing_segments(dtype):
     data = _inputs(dtype, q_len, kv_len)
     problem = _problem(dtype, q_len, kv_len, data["num_blocks"], False, window=0)
     assert problem.default_mask
-    out = _run_scalar_3d(problem, data)
-    torch.cuda.synchronize()
+    out = _run_scalar_3d(rt, problem, data)
     ref, has_key = _reference(data, kv_len, False, window=0)
     assert bool(has_key.all())
     _check(out, ref, has_key, dtype)
 
 
-@requires_cdna3_or_4
-@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", _DTYPES)
-def test_scalar_3d_reduce_propagates_nan_segment_sum(dtype):
+def test_scalar_3d_reduce_propagates_nan_segment_sum(rt, dtype):
     """A NaN per-segment sum must reach O, not be skipped as an empty segment.
 
     The reduce treats only an exact-zero sum as an empty segment (``fcmp oeq``).
@@ -419,27 +445,24 @@ def test_scalar_3d_reduce_propagates_nan_segment_sum(dtype):
     picked = {}
 
     def poison(segm_sum):
-        sums = segm_sum[row, head]
-        with_keys = (sums > 0).nonzero().flatten()
-        assert with_keys.numel() > 0, f"row {row} head {head}: no segment has keys"
+        with_keys = np.flatnonzero(segm_sum[row, head] > 0)
+        assert with_keys.size > 0, f"row {row} head {head}: no segment has keys"
         seg = int(with_keys[0])
         picked["seg"] = seg
-        segm_sum[row, head, seg] = float("nan")
+        segm_sum[row, head, seg] = np.nan
 
     data = _inputs(dtype, q_len, kv_len)
     problem = _problem(dtype, q_len, kv_len, data["num_blocks"], top_left)
-    out = _run_scalar_3d(problem, data, between=poison)
-    torch.cuda.synchronize()
+    out = _run_scalar_3d(rt, problem, data, between=poison)
     ref, has_key = _reference(data, kv_len, top_left)
     assert bool(has_key[row])
 
-    assert torch.isnan(out[row, head]).all(), (
+    _check_nan_slot(
+        out,
+        ref,
+        row,
+        head,
+        dtype,
         f"row {row} head {head}: NaN sum in segment {picked['seg']} did not "
-        "reach O (reduce skipped it as empty)"
+        "reach O (reduce skipped it as empty)",
     )
-    others = torch.ones(out.shape[:2], dtype=torch.bool, device=out.device)
-    others[row, head] = False
-    assert torch.isfinite(out[others]).all(), "NaN leaked into another (row, head)"
-    tol = 2e-2 if dtype == "fp16" else 4e-2
-    err = (out.float() - ref).abs().amax(dim=-1)[others]
-    assert err.max().item() < tol, f"{(err >= tol).sum().item()} (row, head) wrong"
