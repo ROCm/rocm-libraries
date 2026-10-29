@@ -57,10 +57,10 @@ GELU apply a function to each output value.
 
 ## Automated runs and reproduction
 
-The existing Multi-Arch workflows run 100 samples per relevant PR and 1,000
-nightly, using seed 0 and eight concurrent GEMMs. Both emulate gfx950, the
-GPU instruction set used by the MI350 family. The PR workload is the first
-100 samples of the nightly workload.
+The existing Multi-Arch workflows run 1,000 samples nightly. A PR runs the
+first 100 of those samples when it changes hipBLASLt or the race-check job, or
+has the `test:hipblaslt` label. Both use seed 0 and eight concurrent
+GEMMs, and both emulate gfx950, the GPU instruction set used by the MI350 family.
 
 The [CPU test job](../../../.github/workflows/therock-rocjitsu-race-check-linux.yml)
 uses the library and benchmark built by the same workflow, then builds a fixed

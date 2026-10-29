@@ -95,6 +95,37 @@ jobs:
       - name: Test sampling and failure handling
         run: python3 -B -m unittest discover -s .github/scripts/tests -p test_random_hipblaslt_gemms.py
 
+  # The rocjitsu race checks emulate GPU kernels on CPUs and take several
+  # minutes, so PRs run them only for changes that can alter the hipBLASLt
+  # kernels, the benchmark, or the race-check job itself. Documentation changes
+  # are ignored.
+  rocjitsu_race_scope:
+    name: Select rocjitsu race checks
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      run: ${{ steps.scope.outputs.run }}
+    steps:
+      - name: Check changed files
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          changed_files="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" \
+            --jq '.[].filename')"
+          relevant='^(projects/hipblaslt/|\.github/scripts/(run_rocjitsu_hipblaslt_race_check\.sh|run_random_hipblaslt_gemms\.py|sample_hipblaslt_gemms\.py)$|\.github/workflows/therock-rocjitsu-race-check-linux\.yml$)'
+          docs='\.(md|rst)$|^(projects|shared)/.+/docs/'
+          if grep -Ev "${docs}" <<<"${changed_files}" | grep -Eq "${relevant}"; then
+            echo "run=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "run=false" >> "${GITHUB_OUTPUT}"
+          fi
+
   ci-env:
     name: Load CI Environment
     runs-on: ubuntu-24.04
@@ -309,7 +340,7 @@ jobs:
     # A caller cannot depend on an individual job inside a reusable workflow,
     # so start after the Linux workflow has finished publishing its artifacts.
     # This sidecar remains advisory and is not part of the required summary.
-    needs: [ci-env, configure, setup, linux_build_and_test]
+    needs: [ci-env, rocjitsu_race_scope, setup, linux_build_and_test]
     strategy:
       fail-fast: false
       matrix:
@@ -333,15 +364,8 @@ jobs:
         !cancelled() &&
         github.event_name == 'pull_request' &&
         (
-          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt,') ||
-          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt/tensilelite,') ||
-          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblas-common,') ||
-          contains(format(',{0},', needs.configure.outputs.changed_projects), ',shared/origami,') ||
-          contains(format(',{0},', needs.configure.outputs.changed_projects), ',shared/stinkytofu,') ||
-          contains(format(',{0},', needs.configure.outputs.changed_projects), ',shared/mxdatagenerator,') ||
-          contains(format(',{0},', needs.configure.outputs.changed_projects), ',shared/rocroller,') ||
-          contains(github.event.pull_request.labels.*.name, 'test:hipblaslt') ||
-          needs.configure.outputs.run_all_tests == 'true'
+          needs.rocjitsu_race_scope.outputs.run == 'true' ||
+          contains(github.event.pull_request.labels.*.name, 'test:hipblaslt')
         ) &&
         needs.linux_build_and_test.result != 'skipped'
       }}
