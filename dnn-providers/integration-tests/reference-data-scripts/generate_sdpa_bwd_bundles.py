@@ -1658,7 +1658,7 @@ def write_tree(cases, bundle_dir, dry_run):
         sup = bundle_dir / rel / "support.json"
         ids = {c["case_id"] for c in cs}
         files[rel / "support.json"] = support_json(
-            sup.read_text() if sup.exists() else None, ids
+            sup.read_text(encoding="utf-8") if sup.exists() else None, ids
         )
     if dry_run:
         return files
@@ -1718,13 +1718,13 @@ def toml_block():
 
 def update_toml(path, dry_run):
     """Rewrite the generated block of an engine TOML. True if it changed."""
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     i, j = text.find(TOML_BEGIN), text.find(TOML_END)
     if i < 0 or j < i:
         raise SystemExit(f"{path}: no '{TOML_BEGIN}' ... '{TOML_END}' block")
     new = text[:i] + toml_block() + text[j + len(TOML_END) + 1 :]
     if not dry_run and new != text:
-        path.write_text(new)
+        path.write_text(new, encoding="utf-8", newline="\n")
     return new != text
 
 
@@ -1747,7 +1747,7 @@ def write_spec(cases, path):
         window_semantics=P.WINDOW_SEMANTICS,
         cases=[c["record"] for c in cases],
     )
-    Path(path).write_text(json.dumps(spec, indent=1) + "\n")
+    Path(path).write_text(json.dumps(spec, indent=1) + "\n", encoding="utf-8", newline="\n")
 
 
 # --------------------------------------------------------------------------

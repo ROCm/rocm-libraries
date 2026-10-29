@@ -76,7 +76,7 @@ def test_checked_in_sweeps_are_generated(files):
         path = BUNDLES / rel
         assert path.is_file(), f"{rel} is not checked in; rerun the generator"
         assert (
-            path.read_text() == text
+            path.read_text(encoding="utf-8") == text
         ), f"{rel} differs from the generator output; rerun the generator"
     owned = {"graph.template.json", "sweep.json", "support.json"}
     on_disk = {
@@ -90,7 +90,7 @@ def test_checked_in_sweeps_are_generated(files):
 
 
 def test_engine_toml_block_is_generated():
-    text = ENGINE_TOML.read_text()
+    text = ENGINE_TOML.read_text(encoding="utf-8")
     i, j = text.index(G.TOML_BEGIN), text.index(G.TOML_END)
     assert text[i : j + len(G.TOML_END) + 1] == G.toml_block()
 
@@ -234,7 +234,7 @@ def _toml_rows(text):
 
 
 def test_every_case_id_matches_exactly_one_toml_row(cases):
-    rows = _toml_rows(ENGINE_TOML.read_text())
+    rows = _toml_rows(ENGINE_TOML.read_text(encoding="utf-8"))
     assert rows
     for c in cases:
         name = G.gtest_name(c)
@@ -254,7 +254,7 @@ def test_every_case_id_matches_exactly_one_toml_row(cases):
 def test_test_skips_match_written_cases(written):
     """Every SdpaBackward [[test_skips]] filter of the engine TOML still
     selects a written case (no stale skip)."""
-    text = ENGINE_TOML.read_text()
+    text = ENGINE_TOML.read_text(encoding="utf-8")
     names = [G.gtest_name(c) for c in written]
     for block in text.split("[[test_skips]]")[1:]:
         for f in re.findall(r'"([^"]*SdpaBackward[^"]*)"', block.split("[[")[0]):
