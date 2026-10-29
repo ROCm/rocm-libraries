@@ -241,6 +241,59 @@ TEST_F(TestTreeDataAdapter, LoadFailsOnWrongFileIdentifier)
     EXPECT_EQ(adapter, nullptr);
 }
 
+/// RFC 0019 §12: each refusal is the only trace of the fallback, so every one reports at
+/// ERROR with its reason. The caller's own message ("built no scorer") does not say why.
+TEST_F(TestTreeDataAdapter, EveryRefusedArtifactReportsWhyAtError)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const auto good = GbdtModelBuilder()
+                          .setNumFeatures(2)
+                          .setFeaturesHash(TEST_HASH)
+                          .addTree(makeLeafTree(1.0))
+                          .build();
+    // The control: the untouched buffer loads without an error.
+    ASSERT_NE(TreeDataAdapter::loadFromBuffer(good.data(), good.size(), TEST_HASH), nullptr);
+    ASSERT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0U)
+        << recorder.getRecordedLogsAsString();
+
+    auto wrongIdentifier = good;
+    wrongIdentifier[4] = 'X';
+    // Keeps the identifier but cuts off the tables the root offset points into.
+    const std::vector<uint8_t> truncated(good.begin(), good.begin() + 12);
+    const auto nonfiniteBase = GbdtModelBuilder()
+                                   .setNumFeatures(2)
+                                   .setFeaturesHash(TEST_HASH)
+                                   .setBaseScore(std::numeric_limits<double>::infinity())
+                                   .addTree(makeLeafTree(1.0))
+                                   .build();
+    const std::vector<uint8_t> garbage = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
+
+    const std::vector<std::pair<const char*, std::vector<uint8_t>>> refused
+        = {{"empty", {}},
+           {"garbage", garbage},
+           {"wrong identifier", wrongIdentifier},
+           {"truncated", truncated},
+           {"nonfinite base_score", nonfiniteBase}};
+    for(const auto& [what, bytes] : refused)
+    {
+        recorder.clearLogs();
+        EXPECT_EQ(TreeDataAdapter::loadFromBuffer(bytes.data(), bytes.size(), TEST_HASH), nullptr)
+            << what;
+        EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
+            << what << " must report at ERROR:\n"
+            << recorder.getRecordedLogsAsString();
+    }
+
+    // A missing file goes through load(), which reads the bytes first.
+    recorder.clearLogs();
+    EXPECT_EQ(TreeDataAdapter::load("/nonexistent/uhd/model.bin", TEST_HASH), nullptr);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
+        << "an unreadable file must report at ERROR:\n"
+        << recorder.getRecordedLogsAsString();
+}
+
 // ========== Single Tree Scoring Tests ==========
 
 TEST_F(TestTreeDataAdapter, ScoreLeafOnlyTree)

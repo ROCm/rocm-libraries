@@ -179,23 +179,32 @@ inline std::unique_ptr<TreeDataAdapter>
                           const std::string& transform,
                           const std::string& metric)
 {
+    // RFC 0019 §12: the ERROR is the only trace of the fallback, and the caller cannot say why.
+    const auto refuse = [&modelPath](const char* reason) {
+        HIPDNN_SDK_LOG_ERROR("TreeDataAdapter: model artifact '"
+                             << modelPath << "' " << reason
+                             << "; the model is not used -- ranking degrades to static_order and "
+                                "an engine estimate is reported as 0");
+        return nullptr;
+    };
+
     std::ifstream file(modelPath, std::ios::binary | std::ios::ate);
     if(!file)
     {
-        return nullptr;
+        return refuse("cannot be opened");
     }
 
     auto size = file.tellg();
     if(size <= 0 || size > static_cast<std::streamoff>(256 * 1024 * 1024))
     {
-        return nullptr;
+        return refuse("is empty or larger than 256 MiB");
     }
 
     std::vector<uint8_t> buffer(static_cast<size_t>(size));
     file.seekg(0);
     if(!file.read(reinterpret_cast<char*>(buffer.data()), size))
     {
-        return nullptr;
+        return refuse("cannot be read");
     }
 
     return loadFromBuffer(buffer.data(),
@@ -216,10 +225,20 @@ inline std::unique_ptr<TreeDataAdapter>
                                     const std::string& transform,
                                     const std::string& metric)
 {
+    // RFC 0019 §12: every refusal reports at ERROR; this log is the only trace of the fallback.
+    const auto refuse = [](const std::string& reason) {
+        HIPDNN_SDK_LOG_ERROR("TreeDataAdapter: "
+                             << reason
+                             << "; the model is not used -- ranking degrades to static_order and "
+                                "an engine estimate is reported as 0");
+        return nullptr;
+    };
+
     if(buffer == nullptr || size < sizeof(flatbuffers::uoffset_t) + 4
        || size > size_t{256} * 1024 * 1024)
     {
-        return nullptr;
+        return refuse("model buffer of " + std::to_string(size)
+                      + " bytes is missing, too small or larger than 256 MiB");
     }
 
     // RFC 0019 §9.2 integrity check. ERROR, not WARN (§12): this log is the only trace of the
@@ -240,19 +259,23 @@ inline std::unique_ptr<TreeDataAdapter>
 
     if(!flatbuffers::BufferHasIdentifier(buffer, fb::GbdtModelIdentifier()))
     {
-        return nullptr;
+        return refuse(std::string("model is not a GbdtModel buffer (file identifier is not '")
+                      + fb::GbdtModelIdentifier() + "')");
     }
 
+    // Structural failure of a buffer with the right identifier: corrupt or truncated, or
+    // written by a newer uhd_gen in an encoding this runtime cannot read.
     flatbuffers::Verifier verifier(buffer, size);
     if(!fb::VerifyGbdtModelBuffer(verifier))
     {
-        return nullptr;
+        return refuse("GbdtModel buffer fails FlatBuffers verification (corrupt, truncated, or "
+                      "from an incompatible uhd_gen)");
     }
 
     const auto* model = fb::GetGbdtModel(buffer);
     if(model == nullptr)
     {
-        return nullptr;
+        return refuse("GbdtModel buffer has no root table");
     }
 
     // RFC 0019 §6.3 check 3. ERROR for the reason given above.
@@ -269,12 +292,11 @@ inline std::unique_ptr<TreeDataAdapter>
 
     if(model->num_features() < 0)
     {
-        HIPDNN_SDK_LOG_ERROR("TreeDataAdapter: negative feature count");
-        return nullptr;
+        return refuse("negative feature count");
     }
     if(!std::isfinite(model->base_score()))
     {
-        return nullptr;
+        return refuse("base_score is not finite");
     }
 
     // Many `trees` entries may share one table, so the node count the offsets claim is not
