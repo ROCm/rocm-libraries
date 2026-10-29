@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from geko.config_generator.constants import *
+from geko.config_generator.constants import library_logic_architecture
 from geko.config_generator.shared_utils import ForkParameter, GroupDimension
 from geko.config_generator.mi_candidates import (
     allowable_mfmas,
