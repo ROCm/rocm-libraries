@@ -53,15 +53,31 @@ class DwWgradFoldSpec:
 
     taps: int
     name: str = "dw_wgrad_fold"
+    # Block shape: ``cols`` outputs per block, ``slices`` threads per output
+    # splitting the partition axis, ``unroll`` loads in flight per thread.
+    # Few outputs over many partitions want narrower blocks (more of them)
+    # and deeper unrolling; the defaults keep the original kernel.
+    cols: int = _FOLD_COLS
+    slices: int = _FOLD_SLICES
+    unroll: int = _FOLD_UNROLL
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
-        return kernel_name_join(self.name, f"t{self.taps}")
+        shape = (self.cols, self.slices, self.unroll)
+        if shape == (_FOLD_COLS, _FOLD_SLICES, _FOLD_UNROLL):
+            return kernel_name_join(self.name, f"t{self.taps}")
+        return kernel_name_join(
+            self.name,
+            f"t{self.taps}",
+            f"c{self.cols}",
+            f"s{self.slices}",
+            f"u{self.unroll}",
+        )
 
     def launch_geometry(self, channels: int):
-        return (ceil_div(channels * self.taps, _FOLD_COLS), 1, 1), (
-            _FOLD_SLICES * _WAVE,
+        return (ceil_div(channels * self.taps, self.cols), 1, 1), (
+            self.slices * self.cols,
             1,
             1,
         )
@@ -88,11 +104,13 @@ def dw_wgrad_fold_signature(spec: DwWgradFoldSpec) -> list:
 
 
 def build_dw_wgrad_fold(spec: DwWgradFoldSpec, arch: str = "gfx950") -> KernelDef:
-    """Each block owns 64 outputs; 16 waves split the partition axis, meet in LDS."""
+    """Each block owns ``cols`` outputs; ``slices`` rows of threads split the
+    partition axis and meet in LDS."""
     from rocke.core.ir import I32, PtrType
 
     b = IRBuilder(spec.kernel_name())
-    b.kernel.attrs["max_workgroup_size"] = _FOLD_SLICES * _WAVE
+    COLS, S, U = spec.cols, spec.slices, spec.unroll
+    b.kernel.attrs["max_workgroup_size"] = S * COLS
     ws = b.param("A", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
     dw = b.param(
         "D",
@@ -110,16 +128,15 @@ def build_dw_wgrad_fold(spec: DwWgradFoldSpec, arch: str = "gfx950") -> KernelDe
         return b.const_i32(v)
 
     tid = b.thread_id_x()
-    lane = b.mod(tid, ci(_WAVE))
-    slc = b.div(tid, ci(_WAVE))
+    lane = b.mod(tid, ci(COLS))
+    slc = b.div(tid, ci(COLS))
     n_out = b.mul(chans, ci(spec.taps))
-    o = b.add(b.mul(b.block_id_x(), ci(_FOLD_COLS)), lane)
+    o = b.add(b.mul(b.block_id_x(), ci(COLS)), lane)
     o_ok = b.cmp_lt(o, n_out)
     o_safe = b.select(o_ok, o, ci(0))
     zero = b.const_f32(0.0)
-    U = _FOLD_UNROLL
     # Partition p = slc + SLICES * (U * it + j).
-    n_it = b.div(b.add(parts, ci(_FOLD_SLICES * U - 1)), ci(_FOLD_SLICES * U))
+    n_it = b.div(b.add(parts, ci(S * U - 1)), ci(S * U))
     loop = b.scf_for_iter(
         ci(0),
         n_it,
@@ -131,7 +148,7 @@ def build_dw_wgrad_fold(spec: DwWgradFoldSpec, arch: str = "gfx950") -> KernelDe
     with loop as (it, acc):
         acc = list(acc)
         for j in range(U):
-            pidx = b.add(slc, b.mul(b.add(b.mul(it, ci(U)), ci(j)), ci(_FOLD_SLICES)))
+            pidx = b.add(slc, b.mul(b.add(b.mul(it, ci(U)), ci(j)), ci(S)))
             ok = b.cmp_lt(pidx, parts)
             v = b.global_load_f32(
                 ws, b.add(b.mul(b.select(ok, pidx, ci(0)), n_out), o_safe)
@@ -141,14 +158,14 @@ def build_dw_wgrad_fold(spec: DwWgradFoldSpec, arch: str = "gfx950") -> KernelDe
     tot = loop.results[0]
     for v in loop.results[1:]:
         tot = b.fadd(tot, v)
-    red = b.smem_alloc(F32, [1, _FOLD_SLICES * _WAVE], name_hint="fold")
+    red = b.smem_alloc(F32, [1, S * COLS], name_hint="fold")
     b.smem_store_vN_f32(red, [ci(0), tid], tot, 1)
     b.sync()
     with b.scf_if(b.land(b.cmp_eq(slc, ci(0)), o_ok)):
         t = None
-        for q in range(_FOLD_SLICES):
+        for q in range(S):
             v = b.vec_extract(
-                b.smem_load_vN_f32(red, ci(0), b.add(lane, ci(q * _WAVE)), n=1), 0
+                b.smem_load_vN_f32(red, ci(0), b.add(lane, ci(q * COLS)), n=1), 0
             )
             t = v if t is None else b.fadd(t, v)
         tap = b.div(o, chans)

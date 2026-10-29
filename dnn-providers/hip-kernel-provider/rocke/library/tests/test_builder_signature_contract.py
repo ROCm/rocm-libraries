@@ -352,6 +352,8 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_direct_wgrad_gather.WgradGatherSpec": ("problem",),
     "kernels.common.conv_direct_nongrouped.DirectSplitReduceSpec": (),
     "kernels.common.conv_direct_grouped_wgrad_mfma.GroupedWgradMfmaSpec": ("problem",),
+    "kernels.common.conv_direct_grouped_wgrad_wmma.GroupedWgradWmmaSpec": ("problem",),
+    "kernels.common.conv_direct_wgrad_wmma.DirectWgradWmmaSpec": ("problem",),
     "kernels.common.deep_fused_conv_pool.FusedConvPoolProblem": ("conv",),
     "kernels.common.deep_fused_conv_pool.DeepFusedConvPoolSpec": ("problem",),
     "kernels.common.img2col.Img2ColSpec": ("problem",),

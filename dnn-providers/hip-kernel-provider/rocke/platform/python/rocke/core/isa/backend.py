@@ -648,13 +648,18 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         a_arg = lowerer._operand(a)
         b_arg = lowerer._operand(b)
         # gfx1250 8-operand form: (i1 negA, A, i1 negB, B, i16 fmt, C, i1, i1).
-        # bf16 operands are <16 x bfloat> directly (no i16 bitcast).
+        # bf16 operands are <16 x bfloat> directly (no i16 bitcast). The last
+        # two flags are the operand-reuse hints (``reuse_a`` / ``reuse_b``
+        # attrs): the next WMMA reads the same A / B, so the hardware may
+        # keep it in its operand cache instead of reading the VGPRs again.
+        reuse_a = "true" if op.attrs.get("reuse_a") else "false"
+        reuse_b = "true" if op.attrs.get("reuse_b") else "false"
         lowerer._current().emit(
             f"  {op.result.name} = call <8 x float> @{intrinsic}("
             f"i1 false, <16 x {elt}> {a_arg}, "
             f"i1 false, <16 x {elt}> {b_arg}, "
             f"i16 0, <8 x float> {lowerer._operand(c)}, "
-            f"i1 false, i1 false)"
+            f"i1 {reuse_a}, i1 {reuse_b})"
         )
 
     def _emit_wmma_fp8(self, lowerer, op, spec) -> None:

@@ -432,6 +432,23 @@ WGRAD_GROUPED_MFMA_WAVES = ((4, 2), (4, 1), (2, 1), (2, 2))
 WGRAD_GROUPED_MFMA_RPC = (28, 56)
 WGRAD_GROUPED_MFMA_PREFETCH = (2, 3)
 WGRAD_GROUPED_MFMA_BLOCKS = (1024, 2048)
+# The same layers on wave32 WMMA, groups packed block-diagonally
+# (GroupedWgradWmmaSpec, gfx1250): waves along the channels (16 each),
+# 32-column WMMA steps per block, input rows per unit, workgroups, LDS row
+# buffers. Measured on the ResNeXt g32 layers: 8 waves and short units lead.
+WGRAD_GROUPED_WMMA_WAVES_C = (4, 8)
+WGRAD_GROUPED_WMMA_Q_STEPS = (1, 2)
+WGRAD_GROUPED_WMMA_RPC = (8, 16, 32)
+WGRAD_GROUPED_WMMA_BLOCKS = (1024, 2048)
+WGRAD_GROUPED_WMMA_STAGES = (2, 3, 4)
+# Dense direct wgrad on wave32 WMMA (DirectWgradWmmaSpec, gfx1250), streamed
+# row by row: 8 waves of 2x2 tiles per tap, 4 row buffers of 2 rows, TDM
+# copies spread over the waves (rows by TDM win from 32^2 to 384^2; the
+# per-lane copies are kept as the alternative), next-row fragment prefetch,
+# runs grouped per XCD. (waves_k, waves_c), target blocks, copy mode.
+WGRAD_WMMA_WAVES = ((4, 2), (2, 4))
+WGRAD_WMMA_BLOCKS = (256, 512)
+WGRAD_WMMA_COPY = ("tdm", "fast_copy")
 
 # Runtime-channel MFMA dgrad (direct_dgrad_mfma_rtc). Its compute pass is the
 # forward kernel on the transposed problem, whose K reduction runs over the
@@ -815,6 +832,22 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for pad in _col_pads(3)
         ),
     ),
+    # Dense direct wgrad on wave32 WMMA (gfx1250): channel counts runtime.
+    "direct_wgrad_wmma": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=3, PAD=pad, stride=1, cpg=0, kpg=0) for pad in _col_pads(3)
+        ),
+    ),
+    # The same grouped wgrad on wave32 WMMA (gfx1250).
+    "direct_wgrad_grouped_wmma": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=3, PAD=pad, stride=1, cpg=c, kpg=c)
+            for c in _GROUPED_MFMA_CHANNELS
+            for pad in _col_pads(3)
+        ),
+    ),
     # Dense small-C wgrad, any stride: C is baked, K runtime.
     "direct_wgrad_gather": (
         "wgrad",
@@ -1135,6 +1168,47 @@ def _knob_grid(
                 rows_per_chunk=rpc,
                 prefetch=pf,
                 target_blocks=tb,
+            )
+    elif variant == "direct_wgrad_wmma":
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return  # a wave32 kernel: no tuning for this arch at all
+        for (wk, wc), tb, copy in itertools.product(
+            WGRAD_WMMA_WAVES, WGRAD_WMMA_BLOCKS, WGRAD_WMMA_COPY
+        ):
+            yield dict(
+                waves_k=wk,
+                waves_c=wc,
+                tiles_k=2,
+                tiles_c=2,
+                stages=4,
+                rows=2,
+                target_blocks=tb,
+                prefetch=True,
+                sched=True,
+                pad=16,
+                xcd=8,
+                **{copy: True},
+            )
+    elif variant == "direct_wgrad_grouped_wmma":
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return  # a wave32 kernel: no tuning for this arch at all
+        for wc, qs, rpc, tb, st in itertools.product(
+            WGRAD_GROUPED_WMMA_WAVES_C,
+            WGRAD_GROUPED_WMMA_Q_STEPS,
+            WGRAD_GROUPED_WMMA_RPC,
+            WGRAD_GROUPED_WMMA_BLOCKS,
+            WGRAD_GROUPED_WMMA_STAGES,
+        ):
+            yield dict(
+                waves_c=wc,
+                q_steps=qs,
+                rows_per_chunk=rpc,
+                target_blocks=tb,
+                stages=st,
             )
     elif variant == "direct_wgrad_gather":
         for (wk16, wk), pf, rps, tb in itertools.product(

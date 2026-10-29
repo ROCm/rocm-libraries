@@ -3792,11 +3792,11 @@ def _run_aot_wgrad_one(arch: str, variant: str, problem, knobs: dict) -> float:
 
     p = problem
     folded = variant in DIRECT_WGRAD_FOLDED
-    if variant == "direct_wgrad_tiled":
+    if variant in ("direct_wgrad_tiled", "direct_wgrad_wmma"):
         caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=0, kpg=0)
     elif variant == "direct_wgrad_gather":
         caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=p.cpg, kpg=0)
-    elif variant == "direct_wgrad_grouped_mfma":
+    elif variant in ("direct_wgrad_grouped_mfma", "direct_wgrad_grouped_wmma"):
         caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=p.cpg, kpg=p.kpg)
     else:
         caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=1, kpg=1)
@@ -3919,6 +3919,98 @@ class TestDirectWgradAotKernelsCorrectness(unittest.TestCase):
         self._check("fp16")
 
     def test_aot_wgrad_bf16(self):
+        self._check("bf16")
+
+
+# Grouped wgrad on wave32 WMMA (gfx1250): groups packed block-diagonally.
+_AOT_WGRAD_W32_CASES = [
+    # 4 channels per group, odd extents, several partitions per channel tile.
+    (
+        "grouped_wmma_c4",
+        "direct_wgrad_grouped_wmma",
+        dict(N=3, H=13, W=37, groups=32, cpg=4, kpg=4),
+        dict(waves_c=4, q_steps=1, rows_per_chunk=8, target_blocks=1024, stages=3),
+    ),
+    # 8 channels per group, a partial channel tile, a 2-step column tile.
+    (
+        "grouped_wmma_c8",
+        "direct_wgrad_grouped_wmma",
+        dict(N=2, H=9, W=70, groups=6, cpg=8, kpg=8),
+        dict(waves_c=4, q_steps=2, rows_per_chunk=16, target_blocks=2048, stages=2),
+    ),
+    # Valid padding, the deepest copy ring.
+    (
+        "grouped_wmma_c4_pad0",
+        "direct_wgrad_grouped_wmma",
+        dict(N=2, H=12, W=40, groups=16, cpg=4, kpg=4, PAD=0),
+        dict(waves_c=8, q_steps=2, rows_per_chunk=8, target_blocks=1024, stages=4),
+    ),
+    # Dense WMMA wgrad, streamed rows: TDM copies, 2 rows per barrier, a run
+    # split that starts runs mid-image, partial channel tiles in C and K.
+    (
+        "dense_wmma_tdm",
+        "direct_wgrad_wmma",
+        dict(N=3, H=13, W=37, groups=1, cpg=96, kpg=136),
+        dict(
+            waves_k=4,
+            waves_c=2,
+            tiles_k=2,
+            tiles_c=2,
+            stages=4,
+            rows=2,
+            target_blocks=37,
+            prefetch=True,
+            sched=True,
+            pad=16,
+            xcd=8,
+            tdm=True,
+        ),
+    ),
+    # Per-lane copies with the interior fast path, two column chunks, valid
+    # padding.
+    (
+        "dense_wmma_copy_pad0",
+        "direct_wgrad_wmma",
+        dict(N=2, H=11, W=70, groups=1, cpg=128, kpg=64, PAD=0),
+        dict(
+            waves_k=2,
+            waves_c=4,
+            tiles_k=2,
+            tiles_c=2,
+            stages=4,
+            rows=2,
+            target_blocks=16,
+            prefetch=True,
+            sched=True,
+            pad=16,
+            fast_copy=True,
+        ),
+    ),
+]
+
+
+@unittest.skipUnless(
+    not _WGRAD_SKIP_REASON and GPU_ARCH == "gfx1250",
+    _WGRAD_SKIP_REASON or "the grouped WMMA wgrad is wave32 (gfx1250) only",
+)
+class TestDirectWgradAotWave32Correctness(unittest.TestCase):
+    """The wave32-only direct wgrad kernels of the AOT sweep (grouped and dense WMMA)."""
+
+    def _check(self, dtype: str) -> None:
+        from kernels.common.conv_direct_grouped import DirectConvProblem
+
+        tol = _TOL_BF16 if dtype == "bf16" else _TOL
+        for case_id, variant, shape, knobs in _AOT_WGRAD_W32_CASES:
+            problem = DirectConvProblem(dtype=dtype, **shape)
+            with self.subTest(case=case_id, dtype=dtype):
+                rel_err = _run_aot_wgrad_one(GPU_ARCH, variant, problem, knobs)
+                print(f"  {case_id:24s} {dtype}  rel_err={rel_err:.2e}", flush=True)
+                self.assertLess(rel_err, tol, f"{case_id} {problem.short()} {dtype}")
+
+    def test_aot_wgrad_w32_fp16(self):
+        self._check("fp16")
+
+    def test_aot_wgrad_w32_bf16(self):
         self._check("bf16")
 
 
