@@ -44,8 +44,8 @@
 #define HIP_PLUGIN_GFX120X 0
 #endif
 
-// batchnorm - both stats paths are enabled so the code they guard is analysed rather than
-// preprocessed away.
+// Default batchnorm configuration. CMake creates additional object targets for the other
+// backward variant and saved-statistics combinations.
 
 #ifndef HIP_PLUGIN_BN_INPUT_TYPE
 #define HIP_PLUGIN_BN_INPUT_TYPE float
