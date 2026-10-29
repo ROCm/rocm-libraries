@@ -49,7 +49,7 @@ logit uses the existing `qr_tdm` fallback. This runtime pointer is independent
 of the compile-time sink-token flag.
 
 The generated API tries matching scheduled traits first. D64/V64 tries a
-128-by-128 Q/K sequence tile for BF16 batch attention with contiguous BSHD
+128-by-128 Q/K sequence tile for FP16/BF16 batch attention with contiguous BSHD
 Q/K/V/O, square sequence lengths divisible by 256, no logical sequence-length
 pointers, and dense or full causal masks. This N128 variant uses WMMA-first
 placement. Other D64/V64 configurations retain the 128-by-64 tile and read-first

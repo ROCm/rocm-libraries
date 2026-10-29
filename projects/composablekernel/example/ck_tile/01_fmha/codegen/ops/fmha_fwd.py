@@ -1596,7 +1596,7 @@ GFX125_QR_TDM_PINGPONG_RANGE = (
     " && a.batch * a.nhead_q >= 2 * static_cast<ck_tile::index_t>(num_cus)"
 )
 
-# D64 N128 qr_tdm_sched is measured for BF16 batch BSHD only: square lengths that
+# D64 N128 qr_tdm_sched is measured for FP16/BF16 batch BSHD only: square lengths that
 # are multiples of 256, contiguous Q/K/V/O (row, head and batch strides), no
 # logical-length pointers, dense or full causal. It is attached to every D64 N128
 # scheduled trait in FmhaFwdKernel.api_trait, so a custom-tune tile cannot bypass it.
@@ -1719,12 +1719,11 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 return False
 
             if problem_ctx.hdim == 64:
-                # N128 has BF16 evidence only, for simplified masks, and only
+                # N128 is measured for FP16/BF16, for simplified masks, and only
                 # as the unpadded batch specialization; the runtime constraint
                 # excludes group lengths, tails and finite windows.
                 if kernel_ctx.tile.F_bn0 == 128 and (
-                    problem_ctx.dtype != "bf16"
-                    or problem_ctx.mode == "group"
+                    problem_ctx.mode == "group"
                     or kernel_ctx.pipeline.F_spad != "f"
                     or kernel_ctx.pipeline.F_mask not in ("s_no", "s_mask")
                 ):
