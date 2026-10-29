@@ -1472,14 +1472,19 @@ void check(hipStream_t                   stream,
             }
             else
             {
-                std::vector<void*> gold(num_batches[gemmIdx]), result(num_batches[gemmIdx]);
                 for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
                 {
-                    gold[batch]   = hD_gold[batch].buf();
-                    result[batch] = hD_1[batch].buf();
+                    norm_error = std::abs(norm_check_general('F',
+                                                             M[gemmIdx],
+                                                             N[gemmIdx],
+                                                             ldd[gemmIdx],
+                                                             0,
+                                                             hD_gold[batch].buf(),
+                                                             hD_1[batch].buf(),
+                                                             1,
+                                                             To));
+                    hipblaslt_error += norm_error;
                 }
-                norm_error = norm_check_pointer_array(
-                    'F', M[gemmIdx], N[gemmIdx], ldd[gemmIdx], gold, result, To);
             }
             hipblaslt_error += norm_error;
             if(arg.norm_check_assert)

@@ -624,30 +624,6 @@ inline double norm_check_general(char        norm_type,
     }
 }
 
-// D norm error for pointer-array batches, where each batch is a separate buffer. Batch errors
-// combine as in the strided-batched check: summed for the Frobenius norm, max otherwise, so a
-// wrong result in any batch is reported.
-inline double norm_check_pointer_array(char                      norm_type,
-                                       int64_t                   M,
-                                       int64_t                   N,
-                                       int64_t                   lda,
-                                       std::vector<void*> const& hCPU,
-                                       std::vector<void*> const& hGPU,
-                                       hipDataType               type)
-{
-    double cumulative_error = 0.0;
-    for(size_t batch = 0; batch < hCPU.size(); batch++)
-    {
-        double error = std::abs(
-            norm_check_general(norm_type, M, N, lda, 0, hCPU[batch], hGPU[batch], 1, type));
-        if(norm_type == 'F' || norm_type == 'f')
-            cumulative_error += error;
-        else
-            cumulative_error = std::max(cumulative_error, error);
-    }
-    return cumulative_error;
-}
-
 template <typename T>
 bool norm_check(double norm_error)
 {
