@@ -29,8 +29,6 @@
  */
 
 #pragma once
-#ifndef _ROCBLASLT_AUXILIARY_H_
-#define _ROCBLASLT_AUXILIARY_H_
 
 #include "rocblaslt-types.h"
 #include <filesystem>
@@ -113,6 +111,21 @@ rocblaslt_status rocblaslt_set_sm_count_target(rocblaslt_handle handle,
 rocblaslt_status rocblaslt_get_sm_count_target(rocblaslt_handle handle,
                                                int32_t*         sm_count_target);
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+/*! \ingroup aux_module
+ *  \brief Bytes in one device communicator channel's flag region.
+ *
+ *  \details
+ *  The kernel's arrival atomics and drain barrier index into this region, so the
+ *  backend that supplies the kernel owns its layout and this only reports the
+ *  total, which is all the host needs in order to allocate and zero it. Stating
+ *  the geometry a second time on the host would be a second definition of an ABI
+ *  the kernel already fixes, and a host region smaller than the block the kernel
+ *  addresses corrupts memory rather than returning a wrong answer.
+ */
+size_t rocblaslt_device_comm_flag_block_bytes(void);
+#endif
+
 /*! \ingroup aux_module
  *  \brief Set the handle-level uniform-summation-order request.
  *  See hipblasLtSetUniformSummationOrder.
@@ -145,6 +158,18 @@ rocblaslt_status rocblaslt_matrix_layout_create(rocblaslt_matrix_layout* matDesc
                                                 uint64_t                 rows,
                                                 uint64_t                 cols,
                                                 int64_t                  ld);
+
+/*! \ingroup aux_module
+ *  \brief Create a grouped matrix descriptor (HIPBLASLT_BATCH_MODE_GROUPED).
+ *  The arrays are device pointers with groupCount elements, or null to use the
+ *  ROWS, COLS, or LD attribute for every group.
+ */
+rocblaslt_status rocblaslt_grouped_matrix_layout_create(rocblaslt_matrix_layout* matDescr,
+                                                        hipDataType              valueType,
+                                                        int                      groupCount,
+                                                        const void*              rowsArray,
+                                                        const void*              colsArray,
+                                                        const void*              ldArray);
 
 /*! \ingroup aux_module
  *  \brief Destroy a matrix descriptor
@@ -437,7 +462,7 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
 
 void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
-                                bool                   value);
+                                int32_t                value);
 
 rocblaslt_status
     rocblaslt_algo_get_heuristic_cpp(rocblaslt_handle       handle,
@@ -445,19 +470,18 @@ rocblaslt_status
                                      std::shared_ptr<void>  gemmData,
                                      const size_t           maxWorkspaceBytes,
                                      const int32_t          streamKTileSchedulingMode,
-                                     const bool             uniformSummationOrder,
+                                     const int32_t          uniformSummationOrder,
                                      const int              requestedAlgoCount,
                                      std::vector<rocblaslt_matmul_heuristic_result>& results);
 
 rocblaslt_status rocblaslt_copy_matmul(rocblaslt_matmul_desc src, rocblaslt_matmul_desc dst);
 
 // for internal use during testing, fetch arch name
+// The name the runtime reports for the current device. This is also the compiler
+// target its kernels were built for -- including a silicon-revision variant such
+// as gfx1250-strict, which ROCr reports for gfx1250 A0 parts -- so it names both
+// the device-library subtree and the files inside it.
 std::string rocblaslt_internal_get_arch_name();
-
-// The library subtree the current device loads: "gfx1250v0" for a v0 part (its
-// own tree only, no fallback), otherwise the base name. Filenames inside the
-// subtree keep the revision-agnostic rocblaslt_internal_get_arch_name().
-std::string rocblaslt_internal_get_library_arch_name();
 
 // for internal use of testing existence of path
 bool rocblaslt_internal_test_path(const std::string&);
@@ -490,5 +514,3 @@ std::optional<std::filesystem::path>
 
 void rocblaslt_log_error(const char* func, const char* var, const char* msg);
 #endif
-
-#endif /* _ROCBLASLT_AUXILIARY_H_ */

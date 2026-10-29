@@ -18,6 +18,7 @@
 #include <gmock/gmock.h>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceNotApplicableError.hpp>
 
 #include "BundleFixtureFiles.hpp"
@@ -31,6 +32,7 @@
 
 using namespace hipdnn_integration_tests;
 using namespace hipdnn_integration_tests::bundle;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 
 namespace
 {
@@ -44,7 +46,7 @@ protected:
     void SetUp() override
     {
         testing_support::ensureTestConfigInitialized();
-        _scopedDir.emplace(scratch::makeDir("err_path_test_"));
+        _scopedDir.emplace(claimScratchDirectory("err_path"));
         _tempDir = _scopedDir->path();
     }
 
@@ -134,8 +136,9 @@ TEST_F(TestErrorPaths, EngineFailureWithNoMessageStillFails)
 }
 
 // One of the two forms the harness maps to CAPABILITY_MISS; the other is
-// isApplicable()==false, covered by RefNotApplicableSkips below.
-TEST_F(TestErrorPaths, RefCapabilityMissSkips)
+// isApplicable()==false, covered by RefNotApplicableFails below. Either way the
+// only reference asked for cannot check the engine, so the bundle has no oracle.
+TEST_F(TestErrorPaths, RefCapabilityMissFails)
 {
     testing_support::HarnessMocks mocks;
     testing_support::engineWrites(
@@ -145,20 +148,30 @@ TEST_F(TestErrorPaths, RefCapabilityMissSkips)
             throw ReferenceCapabilityError("stub: no plan for this op");
         });
 
+    std::vector<std::string> refErrors;
+    testing_support::captureReferenceErrors(mocks.reporter, refErrors);
+    std::vector<std::string> unverifiable;
+    testing_support::captureUnverifiable(mocks.reporter, unverifiable);
+
     ::testing::TestPartResultArray results;
     runCapturing(mocks,
                  loadBundle("ref_cap_miss", /*includeGoldenOutput=*/false),
                  VerificationMode::CPU,
                  &results);
 
-    EXPECT_TRUE(testing_support::anySkipped(results))
-        << "ReferenceCapabilityError should produce a SKIP";
-    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_TRUE(testing_support::anyFailed(results))
+        << "ReferenceCapabilityError leaves no oracle, which should FAIL";
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    const std::string messages = testing_support::allMessages(results);
+    EXPECT_THAT(messages, ::testing::HasSubstr("Unverifiable: the requested oracle"));
+    EXPECT_THAT(messages, ::testing::HasSubstr("CPU reference (cannot run this op"));
+    EXPECT_TRUE(refErrors.empty());
+    EXPECT_EQ(unverifiable.size(), 1U);
 }
 
 // The other capability-miss form: the reference says up front, via isApplicable(),
 // that it has no plan for this op, without ever being asked to execute.
-TEST_F(TestErrorPaths, RefNotApplicableSkips)
+TEST_F(TestErrorPaths, RefNotApplicableFails)
 {
     testing_support::HarnessMocks mocks;
     testing_support::engineWrites(
@@ -167,15 +180,25 @@ TEST_F(TestErrorPaths, RefNotApplicableSkips)
         .WillByDefault(::testing::Return(false));
     EXPECT_CALL(mocks.cpuReference, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
 
+    std::vector<std::string> refErrors;
+    testing_support::captureReferenceErrors(mocks.reporter, refErrors);
+    std::vector<std::string> unverifiable;
+    testing_support::captureUnverifiable(mocks.reporter, unverifiable);
+
     ::testing::TestPartResultArray results;
     runCapturing(mocks,
                  loadBundle("ref_not_applicable", /*includeGoldenOutput=*/false),
                  VerificationMode::CPU,
                  &results);
 
-    EXPECT_TRUE(testing_support::anySkipped(results))
-        << "isApplicable()==false should produce a SKIP";
-    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_TRUE(testing_support::anyFailed(results))
+        << "isApplicable()==false leaves no oracle, which should FAIL";
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    const std::string messages = testing_support::allMessages(results);
+    EXPECT_THAT(messages, ::testing::HasSubstr("Unverifiable: the requested oracle"));
+    EXPECT_THAT(messages, ::testing::HasSubstr("CPU reference (not applicable)"));
+    EXPECT_TRUE(refErrors.empty());
+    EXPECT_EQ(unverifiable.size(), 1U);
 }
 
 // A reference that breaks on an op it accepted is a real defect in the reference,

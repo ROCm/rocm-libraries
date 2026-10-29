@@ -10,6 +10,8 @@
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
+#include "ApplicabilityManager.hpp"
+#include "ApplicabilityPool.hpp"
 #include "Handle.hpp"
 #include "compilation/IKernelCompiler.hpp"
 #include "device/IDevicePropertyProvider.hpp"
@@ -45,7 +47,7 @@ public:
     // SUCCESS with *name pointing at a NUL-terminated name valid for the library's lifetime.
     static hipdnnPluginStatus_t getEngineName(int64_t engineId, const char** name);
 
-    hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>& getEngineManager();
+    ApplicabilityManager& getEngineManager();
 
 private:
     struct EngineDefinition
@@ -59,9 +61,16 @@ private:
 
     static const std::vector<EngineDefinition>& getEngineDefinitions();
 
+    // Declared first so it is released last, after every engine this Container built. A
+    // SharedKpackArchives lease under HIPDNN_ENABLE_KERNEL_INGESTOR, null otherwise; typed
+    // opaquely so this class's layout does not depend on the flag. The last Container
+    // releasing its lease closes every kpack archive the ingestor's loads opened.
+    std::shared_ptr<void> _kpackArchiveLease;
     std::unique_ptr<device::IDevicePropertyProvider> _devicePropertyProvider;
     std::unique_ptr<compilation::IKernelCompiler> _kernelCompiler;
-    std::unique_ptr<hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>> _engineManager;
+    std::unique_ptr<ApplicabilityManager> _engineManager;
+    // Declared after the engine manager, so its threads are joined before the engines go.
+    ApplicabilityPool _applicabilityPool;
 };
 
 } // namespace hip_kernel_provider::core

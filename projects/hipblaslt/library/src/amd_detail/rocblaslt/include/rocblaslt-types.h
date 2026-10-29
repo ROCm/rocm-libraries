@@ -29,8 +29,6 @@
  */
 
 #pragma once
-#ifndef _ROCBLASLT_TYPES_H_
-#define _ROCBLASLT_TYPES_H_
 
 #include <hip/hip_bfloat16.h>
 #ifdef __cplusplus
@@ -344,7 +342,12 @@ typedef enum rocblaslt_matrix_layout_attribute_
     ROCBLASLT_MATRIX_LAYOUT_LD         = 6,
     ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE = 7,
     ROCBLASLT_MATRIX_LAYOUT_OFFSET     = 8,
-    ROCBLASLT_MATRIX_LAYOUT_MAX        = 9
+    ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_ARRAY                   = 9,
+    ROCBLASLT_GROUPED_MATRIX_LAYOUT_COLS_ARRAY                   = 10,
+    ROCBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY                     = 11,
+    ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_COLS_ARRAY_INTEGER_WIDTH = 12,
+    ROCBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY_INTEGER_WIDTH       = 13,
+    ROCBLASLT_MATRIX_LAYOUT_MAX                                  = 14
 } rocblaslt_matrix_layout_attribute;
 
 typedef enum
@@ -392,12 +395,18 @@ typedef enum rocblaslt_matmul_desc_attributes_
     ROCBLASLT_MATMUL_DESC_A_SCALE_MODE               = 31,
     ROCBLASLT_MATMUL_DESC_B_SCALE_MODE               = 32,
     ROCBLASLT_MATMUL_DESC_SM_COUNT_TARGET            = 33,
+    ROCBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE         = 34,
+    ROCBLASLT_MATMUL_DESC_BETA_BATCH_STRIDE          = 35,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT   = 100,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
     ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT    = 104,
     ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT    = 105,
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE                 = 106,
+#endif
+    ROCBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT            = 107,
     ROCBLASLT_MATMUL_DESC_MAX,
 } rocblaslt_matmul_desc_attributes;
 
@@ -414,7 +423,14 @@ typedef enum rocblaslt_matmul_preference_attributes_
     ROCBLASLT_MATMUL_PREF_SEARCH_MODE         = 0,
     ROCBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES = 1,
     ROCBLASLT_MATMUL_PREF_SM_COUNT_TARGET     = 2,
-    ROCBLASLT_MATMUL_PREF_MAX                 = 3
+    ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_ROWS       = 3,
+    ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_COLS       = 4,
+    ROCBLASLT_MATMUL_PREF_GROUPED_AVERAGE_REDUCTION_DIM     = 5,
+    ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_ROWS_EXT       = 100,
+    ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_COLS_EXT       = 101,
+    ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_TOTAL_ROWS_EXT = 102,
+    ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_TOTAL_COLS_EXT = 103,
+    ROCBLASLT_MATMUL_PREF_MAX
 } rocblaslt_matmul_preference_attributes;
 
 /********************************************************************************
@@ -480,6 +496,14 @@ typedef struct _rocblaslt_matrix_transform_desc
 }
 #endif
 
+namespace rocblaslt
+{
+    namespace adaptive_sm
+    {
+        class Launch;
+    }
+}
+
 /********************************************************************
  * RocblasltContractionProblem captures the arguments for a GEMM-like *
  * contraction problem, to be passed to runContractionProblem.      *
@@ -498,6 +522,20 @@ struct RocblasltContractionProblem
         Block_32_UE5M3,
         Block_16_UE5M3,
         Block_32_UE8M0_32_8_EXT,
+        // w4a16: dense [M][ceil(K/G)] scales; _ZP adds packed int4 zero-points.
+        // Scale type must equal B's (validateW4A16Args).
+        Block_32_BF16,
+        Block_64_BF16,
+        Block_128_BF16,
+        Block_32_BF16_ZP,
+        Block_64_BF16_ZP,
+        Block_128_BF16_ZP,
+        Block_32_F16,
+        Block_64_F16,
+        Block_128_F16,
+        Block_32_F16_ZP,
+        Block_64_F16_ZP,
+        Block_128_F16_ZP,
     };
 
     hipblasOperation_t trans_a;
@@ -592,6 +630,8 @@ struct RocblasltContractionProblem
     // constructor parameter: the object API builds the problem before it knows
     // its stream, so this is assigned once the stream is available rather than
     // threaded through a 60-argument constructor that every caller spells out.
+    // HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT. Set after construction, like streamKFlags.
+    int32_t     int4EncodingA = 0;
     void*       streamKFlags = nullptr;
     bool        swizzleA;
     bool        swizzleB;
@@ -614,6 +654,21 @@ struct RocblasltContractionProblem
     // 1 = on. Forwarded into ContractionProblemParameters::setUniformSummationOrder
     // by tensile_host.cpp.
     int32_t uniform_summation_order = 0;
+    // The C API launch's adaptive state (null: none), set post-construction.
+    // runContractionProblem forwards its probe target into
+    // ContractionProblemParameters::setOccupancyProbe and sets its `probed`.
+    rocblaslt::adaptive_sm::Launch* adaptive_launch = nullptr;
+    // sm_count_target came from the adaptive estimator rather than the user.
+    bool adaptive_sm_count = false;
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    // The four below are set post-construction, not through the constructor.
+    // fused_epilogue and fused_a2a_peer_flag are non-owning.
+    const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue      = nullptr;
+    uint32_t                                       fused_a2a_world     = 0;
+    uint32_t                                       fused_a2a_rank      = 0;
+    void* const*                                   fused_a2a_peer_flag = nullptr;
+#endif
 
     // gemm_ex
     // gemm_strided_batched_ex
@@ -686,6 +741,23 @@ struct RocblasltContractionProblem
                                 int32_t                uniform_summation_order = 0);
 };
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+// Fields of hipblasLtFusedEpilogueDescriptor, flattened for this layer.
+struct RocblasltFusedEpilogueInfo
+{
+    bool                         hasA2APrefix      = false;
+    const hipblasLtSdmaQueue_t*  a2aSdmaQueues     = nullptr;
+    void* const*                 a2aRecvPtrs       = nullptr;
+    int64_t                      a2aExtent         = 0;
+    hipblasLtA2ACompletionMode_t a2aCompletionMode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
+    uint32_t                     commChannel       = 0;
+};
+
+// Returns false when desc is nullptr.
+bool rocblaslt_resolve_fused_epilogue(const struct hipblasLtFusedEpilogueDescriptor* desc,
+                                      RocblasltFusedEpilogueInfo&                    out);
+#endif
+
 namespace rocblaslt
 {
 
@@ -708,6 +780,9 @@ namespace rocblaslt
         rocblaslt_compute_type type_compute;
         hipblasLtOrder_t       order_a;
         hipblasLtOrder_t       order_b;
+        // Mirrors GemmProblemType::GemmProblemTypeImpl, which is
+        // reinterpret_cast to this; keep the two field lists identical.
+        int32_t int4_encoding_a = 0;
     };
 
     class RocGemmEpilogueV2
@@ -753,5 +828,3 @@ namespace rocblaslt
         void* amaxD         = nullptr;
     };
 } // End of namespace rocblaslt
-
-#endif /* _ROCBLASLT_TYPES_H_ */

@@ -26,15 +26,16 @@
  * ************************************************************************ */
 
 #pragma once
-#ifndef HANDLE_H
-#define HANDLE_H
 
 #include "rocblaslt.h"
+#include "rocblaslt_adaptive_sm_controller.hpp"
+#include <hipblaslt/hipblaslt-opt-in-features.h>
 //#include "rocblaslt_ostream.hpp"
 #include <atomic>
 #include <fstream>
 #include <hip/hip_runtime_api.h>
 #include <iostream>
+#include <memory>
 #include <vector>
 
 struct _rocblaslt_attribute
@@ -110,11 +111,13 @@ struct _rocblaslt_handle
     int32_t sm_count_target = 0;
 
     // Handle-level uniform-summation-order request. 0 off, 1 on; see hipblaslt.h.
-    int32_t uniform_summation_order = 0;
+    int32_t uniform_summation_order = 1;
 
+    // -1: rocRoller (or the checked-in KFA kernels) for block-scaled GEMMs.
+    //  1: force that path. 0: Tensile only. Parsed even when rocRoller is not linked.
+    int useRocRoller = -1;
 #ifdef HIPBLASLT_USE_ROCROLLER
     void* rocroller_handle = nullptr;
-    int   useRocRoller     = -1;
 #endif
 
     // HIPBLASLT_CHECK_NUMERICS state. Read once in the ctor; opt-in via env.
@@ -134,6 +137,10 @@ struct _rocblaslt_handle
     bool                  check_numerics_stop_on_first = false;
     // Sticky bypass for scan_D once any caller observes a NaN.
     std::atomic<bool>     check_numerics_short_circuit{false};
+
+    // HIPBLASLT_CHECK_SYNCHRONIZER state, read once in the ctor. See
+    // check_synchronizer.hpp for the checker protocol.
+    bool check_synchronizer = false;
 
     // Kernels treat these buffers as inter-workgroup flags that they set, spin
     // on, and reset themselves, so a flag region may only be touched by one
@@ -207,15 +214,35 @@ struct _rocblaslt_handle
         if(problemIndex >= c_syncSkSlotsPerStream)
             return rocblaslt_status_internal_error;
 
+        const int i = streamSlot(stream);
+        if(i < 0)
+            return rocblaslt_status_internal_error;
+
+        *out = static_cast<char*>(StreamKFlags)
+               + (i * c_syncSkSlotsPerStream + problemIndex) * c_syncSkSlotBytes;
+        return rocblaslt_status_success;
+    }
+
+    // Index of the per-stream block owned by `stream`, claiming a free one on
+    // first use; -1 once all c_syncSkStreamSlots are taken.
+    int streamSlot(hipStream_t stream)
+    {
         // hipStreamPerThread is a sentinel that resolves to a different stream
         // for every host thread, so every thread would present the same key and
         // share one block. Key those by thread instead. The legacy null stream
-        // needs no such treatment: it really is one stream shared by all threads.
+        // is nullptr, which the loop below also uses to mean "block free", so it
+        // would reserve nothing and alias whichever stream claims that block
+        // next; hipStreamLegacy names that same stream and shares its key.
         const void* key = static_cast<const void*>(stream);
         if(stream == hipStreamPerThread)
         {
             static thread_local char perThreadKey;
             key = &perThreadKey;
+        }
+        else if(stream == nullptr || stream == hipStreamLegacy)
+        {
+            static char legacyNullKey;
+            key = &legacyNullKey;
         }
 
         for(size_t i = 0; i < c_syncSkStreamSlots; ++i)
@@ -232,18 +259,39 @@ struct _rocblaslt_handle
                             : expected;
             }
             if(owner == key)
-            {
-                *out = static_cast<char*>(StreamKFlags)
-                       + (i * c_syncSkSlotsPerStream + problemIndex) * c_syncSkSlotBytes;
-                return rocblaslt_status_success;
-            }
+                return static_cast<int>(i);
         }
 
-        return rocblaslt_status_internal_error;
+        return -1;
     }
 
     // Value-initialised so every block starts unowned.
     std::atomic<const void*> m_skSlotOwner[c_syncSkStreamSlots] = {};
+
+    // Adaptive sm_count_target state, per stream slot; null when the mode is
+    // off or its setup failed.
+    std::unique_ptr<rocblaslt::adaptive_sm::Controller> adaptive_sm;
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    // Device communicator, registered once by hipblasLtSetDeviceComm. Every rank
+    // registers on its own handle; the W handles form one communicator, of which
+    // this is the local view. A world of zero is the absent one: registration
+    // rejects a world below one and publishes it only once it has succeeded, so
+    // nonzero here means every field below is good.
+    uint32_t device_comm_rank     = 0;
+    uint32_t device_comm_world    = 0;
+    uint32_t device_comm_channels = 0;
+
+    // Completion flags: device_comm_channels independent regions per rank, never
+    // passed in nor readable by the caller. device_comm_peer_flags[j] is rank j's
+    // region as addressed from this process, and is one of three kinds. Entry
+    // device_comm_rank is this handle's own allocation, which it frees. A peer in
+    // another process is an IPC mapping this handle owns and closes, which is what
+    // device_comm_peer_flags_mapped[j] marks. A peer in this process is its raw
+    // device pointer, borrowed from the handle that allocated it.
+    void* device_comm_peer_flags[HIPBLASLT_DEVICE_COMM_MAX_WORLD]        = {};
+    bool  device_comm_peer_flags_mapped[HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
+#endif
 };
 
 /********************************************************************************
@@ -273,7 +321,28 @@ struct _rocblaslt_matrix_layout
     int64_t          batch_offset = 0;
     hipblasLtOrder_t order        = HIPBLASLT_ORDER_COL;
     // Batch Mode
-    hipblasLtBatchMode_t batch_mode = HIPBLASLT_BATCH_MODE_STRIDED;    
+    hipblasLtBatchMode_t batch_mode = HIPBLASLT_BATCH_MODE_STRIDED;
+
+    // HIPBLASLT_BATCH_MODE_GROUPED only. The arrays are device pointers with group_count
+    // elements; a null array means m, n, or ld applies to every group.
+    int32_t     group_count         = 0;
+    const void* rows_array          = nullptr;
+    const void* cols_array          = nullptr;
+    const void* ld_array            = nullptr;
+    int32_t     rows_cols_int_width = HIPBLASLT_INTEGER_WIDTH_32;
+    int32_t     ld_int_width        = HIPBLASLT_INTEGER_WIDTH_32;
+};
+
+// Grouped GEMM size hints from the HIPBLASLT_MATMUL_PREF_GROUPED_* attributes. 0 means not set.
+struct rocblaslt_grouped_hints
+{
+    int64_t avg_rows       = 0;
+    int64_t avg_cols       = 0;
+    int64_t avg_k          = 0;
+    int64_t max_rows       = 0;
+    int64_t max_cols       = 0;
+    int64_t max_total_rows = 0;
+    int64_t max_total_cols = 0;
 };
 
 /********************************************************************************
@@ -337,13 +406,32 @@ struct _rocblaslt_matmul_desc
     // 1 = ON (force SK4 dynamic), 2 = AUTO (heuristic picks per launch).
     int32_t streamk_tile_scheduling_ext = 0;
 
-    // Uniform summation order. 0 inherits the handle request; 1 enables.
+    // Uniform summation order. -1 inherits the handle request; 0 disables;1 enables.
     // See hipblaslt.h for the guarantee.
-    int32_t uniform_summation_order = 0;
+    int32_t uniform_summation_order = -1;
+
+    // HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT (hipblasLtInt4Encoding_t).
+    int32_t int4_encoding_a_ext = 0;
 
     // Added this new bias_stride parameter to capture the stride in bias vector to get unique bias vector for each batch in strided batch case. 
     // Default value is 0 which means same bias vector will be used across all batches (broadcast).
     int32_t bias_stride = 0;
+
+    // Grouped GEMM only: 0 = one alpha/beta for all groups, 1 = per-group pointer array.
+    int64_t alpha_batch_stride = 0;
+    int64_t beta_batch_stride  = 0;
+
+    // Grouped GEMM: hipblasLtMatmul gets no preference, so the heuristic records the
+    // hints here. grouped_launch caches launch state built from them.
+    rocblaslt_grouped_hints grouped_hints;
+    bool                    grouped_hints_set = false;
+    std::shared_ptr<void>   grouped_launch;
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    // Fused epilogue attached via ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE. Non-owning:
+    // the descriptor is the caller's and must outlive every matmul using this desc.
+    const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue = nullptr;
+#endif
 
     std::shared_ptr<void> m_data; // Tensile data
 
@@ -377,7 +465,16 @@ struct _rocblaslt_matmul_desc
         this->sm_count_target         = src.sm_count_target;
         this->streamk_tile_scheduling_ext = src.streamk_tile_scheduling_ext;
         this->uniform_summation_order = src.uniform_summation_order;
+        this->int4_encoding_a_ext     = src.int4_encoding_a_ext;
         this->bias_stride             = src.bias_stride;
+        this->alpha_batch_stride      = src.alpha_batch_stride;
+        this->beta_batch_stride       = src.beta_batch_stride;
+        this->grouped_hints           = src.grouped_hints;
+        this->grouped_hints_set       = src.grouped_hints_set;
+        this->grouped_launch.reset();
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        this->fused_epilogue          = src.fused_epilogue;
+#endif
     }
 };
 
@@ -402,6 +499,8 @@ struct _rocblaslt_matmul_preference
     // Negative values are rejected by the setter.
     int32_t sm_count_target = 0;
 
+    rocblaslt_grouped_hints grouped;
+
     int64_t alg_config_id     = 0;
     int64_t alg_max_id        = 0;
     int64_t search_iterations = 0;
@@ -424,21 +523,33 @@ inline int32_t effective_sm_count_target(const _rocblaslt_handle*            han
     return 0;
 }
 
+// True when the hint for a matmul comes from the adaptive estimator: adaptive
+// mode on, StreamK tile scheduling AUTO or ON, and no desc or handle hint.
+inline bool adaptive_sm_count_applies(const _rocblaslt_handle*      handle,
+                                      const _rocblaslt_matmul_desc* desc)
+{
+    return handle && desc
+           && rocblaslt::adaptive_sm::applies(
+               handle->adaptive_sm != nullptr,
+               desc->streamk_tile_scheduling_ext == HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO
+                   || desc->streamk_tile_scheduling_ext == HIPBLASLT_STREAMK_TILE_SCHEDULING_ON,
+               desc->sm_count_target,
+               handle->sm_count_target);
+}
+
 // Resolve the effective uniform-summation-order request for a matmul launch
 // using first-on-wins precedence (C++ preference true, then desc==1, then
 // handle==1). 0 on desc/pref means inherit. There is no per-GEMM opt-out
 // when the handle is on.
 inline int32_t effective_uniform_summation_order(const _rocblaslt_handle*      handle,
                                                  const _rocblaslt_matmul_desc* desc,
-                                                 bool                          pref_uso = false)
+                                                 int32_t                       pref_uso = -1)
 {
-    if(pref_uso)
-        return 1;
-    if(desc && desc->uniform_summation_order)
-        return 1;
-    if(handle && handle->uniform_summation_order)
-        return 1;
-    return 0;
+    if(pref_uso != -1)
+        return pref_uso;
+    if(desc && desc->uniform_summation_order != -1)
+        return desc->uniform_summation_order;
+    if(handle)
+        return handle->uniform_summation_order;
+    return 1;
 }
-
-#endif // HANDLE_H

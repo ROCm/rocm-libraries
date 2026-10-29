@@ -12,10 +12,10 @@ import math
 import re
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 from .caps import glc_bit_name_from_caps, slc_bit_name_from_caps
-from .enum import CacheScope, HighBitSel, NonVolatile, SelectBit, TemporalHint, UnusedBit
+from .enum import CacheScope, NonVolatile, SelectBit, TemporalHint, UnusedBit
 
 _P = "rocisa.container"
 
@@ -181,6 +181,7 @@ class RegisterContainer(Container):
         "isAbs",
         "isMacro",
         "isOff",
+        "halfSelect",
     )
 
     def __init__(
@@ -205,6 +206,7 @@ class RegisterContainer(Container):
         self.isAbs: bool = isAbs
         self.isMacro: bool = isMacro
         self.isOff: bool = isOff
+        self.halfSelect: Optional[Any] = None
 
     # --- Setters. ---------------------------------------------------------
 
@@ -221,6 +223,28 @@ class RegisterContainer(Container):
         """Return a copy with ``isMinus=True`` (for negation operands)."""
         c = self._shallow_clone()
         c.setMinus(True)
+        return c
+
+    # --- true16 half-word select. -----------------------------------------
+
+    def setHalfSelect(self, sel: Any) -> None:
+        """Select the ``.l``/``.h`` half-word in place."""
+        self.halfSelect = sel
+
+    def lo(self) -> "RegisterContainer":
+        """Return a copy selecting the low half-word (``.l``)."""
+        from .enum import HighBitSel  # noqa: WPS433
+
+        c = self._shallow_clone()
+        c.halfSelect = HighBitSel.LOW
+        return c
+
+    def hi(self) -> "RegisterContainer":
+        """Return a copy selecting the high half-word (``.h``)."""
+        from .enum import HighBitSel  # noqa: WPS433
+
+        c = self._shallow_clone()
+        c.halfSelect = HighBitSel.HIGH
         return c
 
     # --- regName mutation. ------------------------------------------------
@@ -355,6 +379,7 @@ class RegisterContainer(Container):
         # Empty when HasVgprMSB cap isn't set or rocIsa wasn't initialised,
         # so __str__ stays side-effect-free for unit tests.
         msb_str = self._msb_suffix()
+        half_str = self._half_suffix()
 
         if self.isInlineAsm:
             return minus_str + "%" + str(self.regIdx) + abs_str
@@ -372,6 +397,7 @@ class RegisterContainer(Container):
                     + str(self.regName)
                     + msb_str
                     + "]"
+                    + half_str
                     + abs_str
                 )
             return (
@@ -403,9 +429,10 @@ class RegisterContainer(Container):
                     + str(self.regIdx)
                     + msb_str
                     + "]"
+                    + half_str
                     + abs_str
                 )
-            return minus_str + self.regType + str(self.regIdx) + abs_str
+            return minus_str + self.regType + str(self.regIdx) + half_str + abs_str
 
         return (
             minus_str
@@ -419,6 +446,18 @@ class RegisterContainer(Container):
             + "]"
             + abs_str
         )
+
+    def _half_suffix(self) -> str:
+        """``.l`` / ``.h`` for a selected half-word, else empty.
+
+        ``NONE`` renders as empty just like an unset ``halfSelect``, matching
+        the native ``halfSelect.has_value() && *halfSelect != NONE`` guard.
+        """
+        from .enum import HighBitSel  # noqa: WPS433
+
+        if self.halfSelect is None or self.halfSelect == HighBitSel.NONE:
+            return ""
+        return ".h" if self.halfSelect == HighBitSel.HIGH else ".l"
 
     def _msb_suffix(self) -> str:
         """Compute the ``-256*msb`` suffix appended to ``toString``."""
@@ -469,6 +508,7 @@ class RegisterContainer(Container):
         c.isAbs = self.isAbs
         c.isMacro = self.isMacro
         c.isOff = self.isOff
+        c.halfSelect = self.halfSelect
         return c
 
     def _deep_clone(self) -> "RegisterContainer":
@@ -482,7 +522,7 @@ class RegisterContainer(Container):
     def __deepcopy__(self, memo: dict) -> "RegisterContainer":
         return self._shallow_clone()
 
-    def __getstate__(self) -> Tuple[str, Optional[RegName], int, int, bool, bool, bool, bool, bool, int]:
+    def __getstate__(self) -> Tuple[str, Optional[RegName], int, int, bool, bool, bool, bool, bool, int, Any]:
         return (
             self.regType,
             deepcopy(self.regName),
@@ -494,11 +534,12 @@ class RegisterContainer(Container):
             self.isMacro,
             self.isOff,
             self.msb,
+            None if self.halfSelect is None else int(self.halfSelect),
         )
 
     def __setstate__(
         self,
-        state: Tuple[str, Optional[RegName], int, int, bool, bool, bool, bool, bool, int],
+        state: Tuple[str, Optional[RegName], int, int, bool, bool, bool, bool, bool, int, Any],
     ) -> None:
         (
             self.regType,
@@ -511,7 +552,11 @@ class RegisterContainer(Container):
             self.isMacro,
             self.isOff,
             self.msb,
+            half,
         ) = state
+        from .enum import HighBitSel
+
+        self.halfSelect = None if half is None else HighBitSel(half)
 
     # --- logicalIR handoff -------------------------------------------------
 
@@ -576,11 +621,9 @@ class RegisterContainer(Container):
             )
         reg = helper(physical_idx, self.regNum)
 
-        # VGPR MSB offset: for idx >= 256, the asm emitter needs
-        # reg.offset = -(idx//256)*256 to produce "v[516-512]" format.
-        # Mirrors native C++ ToStinkyTofuUtils.cpp getMsbOffsetFromStinkyVgpr().
-        if self.regType == "v" and physical_idx >= 256:
-            reg.set_offset(-(physical_idx // 256) * 256)
+        # Bank bias stays 0 until InsertVgprMsbPass, as native toStinkyRegister
+        # does. Writing it here prints v[idx-256] in the pre-pipeline asm dump
+        # while rocisa still prints v[idx].
 
         if self.isMinus:
             reg.set_minus(True)
@@ -834,15 +877,20 @@ class HolderContainer(RegisterContainer):
         independent: subsequent mutation of either side does not bleed.
         """
         if self.holderType == 0:
-            return RegisterContainer(self.regType, None, self.regIdx, self.regNum)
-        return RegisterContainer(
-            self.regType,
-            RegName(self.regName.name, list(self.regName.offsets))
-            if self.regName is not None
-            else None,
-            self.regIdx,
-            self.regNum,
-        )
+            rc = RegisterContainer(self.regType, None, self.regIdx, self.regNum)
+        else:
+            rc = RegisterContainer(
+                self.regType,
+                RegName(self.regName.name, list(self.regName.offsets))
+                if self.regName is not None
+                else None,
+                self.regIdx,
+                self.regNum,
+            )
+        # Preserve the true16 half-select, else the .l/.h suffix is lost and
+        # the operand is invalid on NoSDWA (same as the native getCopiedRC).
+        rc.halfSelect = self.halfSelect
+        return rc
 
     # --- splitRegContainer override. --------------------------------------
 
@@ -888,6 +936,11 @@ class HolderContainer(RegisterContainer):
         c.isAbs = self.isAbs
         c.isMacro = self.isMacro
         c.isOff = self.isOff
+        # Parent true16 half-select slot: RegisterContainer._shallow_clone copies
+        # it, and getCopiedRC reads it, so a cloned holder must carry it too --
+        # otherwise the __slots__ slot stays unset and getCopiedRC raises
+        # AttributeError (e.g. accvgpr replaceHolder in globalWriteBatch).
+        c.halfSelect = self.halfSelect
         # Subclass fields.
         c.holderName = self.holderName
         c.holderIdx = self.holderIdx
@@ -905,7 +958,7 @@ class HolderContainer(RegisterContainer):
 
     def __getstate__(  # type: ignore[override]
         self,
-    ) -> Tuple[str, int, int, str, Optional[RegName], int, int]:
+    ) -> Tuple[str, int, int, str, Optional[RegName], int, int, Optional[int]]:
         return (
             self.holderName,
             self.holderIdx,
@@ -914,12 +967,15 @@ class HolderContainer(RegisterContainer):
             deepcopy(self.regName),
             self.regIdx,
             self.regNum,
+            None if self.halfSelect is None else int(self.halfSelect),
         )
 
     def __setstate__(  # type: ignore[override]
         self,
-        state: Tuple[str, int, int, str, Optional[RegName], int, int],
+        state: Tuple[str, int, int, str, Optional[RegName], int, int, Optional[int]],
     ) -> None:
+        from .enum import HighBitSel  # noqa: WPS433
+
         (
             holder_name,
             holder_idx,
@@ -928,7 +984,11 @@ class HolderContainer(RegisterContainer):
             reg_name,
             reg_idx,
             reg_num,
+            half,
         ) = state
+        # A __slots__ slot left unset raises on read, and getCopiedRC reads
+        # this one. Plain int for the same pickle reason as RegisterContainer.
+        self.halfSelect = None if half is None else HighBitSel(half)
         # Restore the snapshot verbatim, skipping ctor's holderType-derived
         # state setup. RC flags default to False (not preserved in state).
         self.regType = reg_type
@@ -1855,7 +1915,7 @@ class SDWAModifiers(Container):
 class DPPModifiers(Container):
     """DPP modifier bundle (``rocisa::DPPModifiers``)."""
 
-    __slots__ = ("row_shr", "row_bcast", "bound_ctrl", "quad_perm")
+    __slots__ = ("row_shr", "row_bcast", "bound_ctrl", "quad_perm", "row_xmask")
 
     def __init__(
         self,
@@ -1863,11 +1923,13 @@ class DPPModifiers(Container):
         row_bcast: int = -1,
         bound_ctrl: int = -1,
         quad_perm: Optional[List[int]] = None,
+        row_xmask: int = -1,
     ) -> None:
         self.row_shr = row_shr
         self.row_bcast = row_bcast
         self.bound_ctrl = bound_ctrl
         self.quad_perm: List[int] = list(quad_perm) if quad_perm else []
+        self.row_xmask = row_xmask
 
     def toString(self) -> str:
         k_str = ""
@@ -1879,29 +1941,35 @@ class DPPModifiers(Container):
             k_str += f" bound_ctrl:{self.bound_ctrl}"
         if self.quad_perm:
             k_str += f" quad_perm:{_int_vector_to_string(self.quad_perm)}"
+        if self.row_xmask != -1:
+            k_str += f" row_xmask:{self.row_xmask}"
         return k_str
 
     def __repr__(self) -> str:
         return (
             f"DPPModifiers(row_shr={self.row_shr!r}, row_bcast={self.row_bcast!r}, "
-            f"bound_ctrl={self.bound_ctrl!r}, quad_perm={self.quad_perm!r})"
+            f"bound_ctrl={self.bound_ctrl!r}, quad_perm={self.quad_perm!r}, "
+            f"row_xmask={self.row_xmask!r})"
         )
 
     def __copy__(self) -> "DPPModifiers":
         return DPPModifiers(
-            self.row_shr, self.row_bcast, self.bound_ctrl, self.quad_perm,
+            self.row_shr, self.row_bcast, self.bound_ctrl, self.quad_perm, self.row_xmask,
         )
 
     def __deepcopy__(self, memo: dict) -> "DPPModifiers":
         return DPPModifiers(
-            self.row_shr, self.row_bcast, self.bound_ctrl, list(self.quad_perm),
+            self.row_shr, self.row_bcast, self.bound_ctrl, list(self.quad_perm), self.row_xmask,
         )
 
-    def __getstate__(self) -> Tuple[int, int, int, List[int]]:
-        return (self.row_shr, self.row_bcast, self.bound_ctrl, list(self.quad_perm))
+    def __getstate__(self) -> Tuple[int, int, int, List[int], int]:
+        return (
+            self.row_shr, self.row_bcast, self.bound_ctrl, list(self.quad_perm), self.row_xmask,
+        )
 
-    def __setstate__(self, state: Tuple[int, int, int, List[int]]) -> None:
-        self.row_shr, self.row_bcast, self.bound_ctrl, self.quad_perm = state
+    def __setstate__(self, state: Tuple) -> None:
+        self.row_shr, self.row_bcast, self.bound_ctrl, self.quad_perm = state[:4]
+        self.row_xmask = state[4] if len(state) > 4 else -1
         self.quad_perm = list(self.quad_perm)
 
 
@@ -1952,35 +2020,3 @@ class VOP3PModifiers(Container):
         self.op_sel = list(self.op_sel)
         self.op_sel_hi = list(self.op_sel_hi)
         self.byte_sel = list(self.byte_sel)
-
-
-class True16Modifiers(Container):
-    """True16 high/low selector (``rocisa::True16Modifiers``)."""
-
-    __slots__ = ("high_bit",)
-
-    def __init__(self, high_bit: Union[HighBitSel, int] = HighBitSel.NONE) -> None:
-        if isinstance(high_bit, int):
-            self.high_bit = HighBitSel(high_bit)
-        else:
-            self.high_bit = high_bit
-
-    def toString(self) -> str:
-        if self.high_bit == HighBitSel.NONE:
-            return ""
-        return ".h" if self.high_bit == HighBitSel.HIGH else ".l"
-
-    def __repr__(self) -> str:
-        return f"True16Modifiers(high_bit={self.high_bit!r})"
-
-    def __copy__(self) -> "True16Modifiers":
-        return True16Modifiers(self.high_bit)
-
-    def __deepcopy__(self, memo: dict) -> "True16Modifiers":
-        return True16Modifiers(self.high_bit)
-
-    def __getstate__(self) -> Tuple[int]:
-        return (int(self.high_bit),)
-
-    def __setstate__(self, state: Tuple[int]) -> None:
-        self.high_bit = HighBitSel(state[0])

@@ -25,11 +25,144 @@
  * ************************************************************************ */
 
 #pragma once
-#ifndef ROCBLASLT_UTILS_HPP
-#define ROCBLASLT_UTILS_HPP
+
 #include "auxiliary.hpp"
 #include "handle.h"
 #include "utility.hpp"
+
+#include <cstdint>
+#include <limits>
+
+/*******************************************************************************
+ * Clamp Workspace Size
+ * Kernels and helper kernels address the workspace with 32-bit byte offsets
+ * and buffer sizes, so a larger workspace cannot be used. A workspace size or
+ * limit is a ceiling, so larger values (e.g. SIZE_MAX for "no limit") are
+ * clamped.
+ ******************************************************************************/
+constexpr size_t rocblaslt_max_workspace_bytes = std::numeric_limits<uint32_t>::max();
+
+inline size_t clampWorkspaceSize(const char* func, size_t workspaceBytes)
+{
+    if(workspaceBytes <= rocblaslt_max_workspace_bytes)
+        return workspaceBytes;
+    log_hints(func,
+              "workspace size",
+              workspaceBytes,
+              "clamped to the maximum of",
+              rocblaslt_max_workspace_bytes,
+              "bytes");
+    return rocblaslt_max_workspace_bytes;
+}
+
+inline bool isW4A16ScaleFormat(RocblasltContractionProblem::ScalingFormat format)
+{
+    using Format = RocblasltContractionProblem::ScalingFormat;
+    switch(format)
+    {
+    case Format::Block_32_BF16:
+    case Format::Block_64_BF16:
+    case Format::Block_128_BF16:
+    case Format::Block_32_BF16_ZP:
+    case Format::Block_64_BF16_ZP:
+    case Format::Block_128_BF16_ZP:
+    case Format::Block_32_F16:
+    case Format::Block_64_F16:
+    case Format::Block_128_F16:
+    case Format::Block_32_F16_ZP:
+    case Format::Block_64_F16_ZP:
+    case Format::Block_128_F16_ZP:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/// Scale type named by a w4a16 mode, or HIPBLASLT_DATATYPE_INVALID.
+inline hipDataType w4a16ScaleType(RocblasltContractionProblem::ScalingFormat format)
+{
+    using Format = RocblasltContractionProblem::ScalingFormat;
+    switch(format)
+    {
+    case Format::Block_32_BF16:
+    case Format::Block_64_BF16:
+    case Format::Block_128_BF16:
+    case Format::Block_32_BF16_ZP:
+    case Format::Block_64_BF16_ZP:
+    case Format::Block_128_BF16_ZP:
+        return HIP_R_16BF;
+    case Format::Block_32_F16:
+    case Format::Block_64_F16:
+    case Format::Block_128_F16:
+    case Format::Block_32_F16_ZP:
+    case Format::Block_64_F16_ZP:
+    case Format::Block_128_F16_ZP:
+        return HIP_R_16F;
+    default:
+        return HIPBLASLT_DATATYPE_INVALID;
+    }
+}
+
+/// w4a16 checks shared by rocblaslt_matmul_valid_args and the ext setProblem paths.
+/// Returns rocblaslt_status_continue if not w4a16 or valid.
+inline rocblaslt_status
+    validateW4A16Args(hipDataType                                typeA,
+                      hipDataType                                typeB,
+                      RocblasltContractionProblem::ScalingFormat scaleAType,
+                      const void*                                scaleA,
+                      int64_t                                    numBatchesA,
+                      int64_t                                    rowsA,
+                      int64_t                                    lda)
+{
+    // int4 A and a group A-scale only make sense together.
+    const bool int4A       = (typeA == HIP_R_4I);
+    const bool blockScaleA = isW4A16ScaleFormat(scaleAType);
+    if(int4A != blockScaleA)
+    {
+        log_error(__func__,
+                  "w4a16 requires HIP_R_4I matrix A together with a "
+                  "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC*_{16BF,16F}[_ZP]_EXT A scale mode; "
+                  "got a_type=",
+                  static_cast<int>(typeA),
+                  " scaleAType=",
+                  rocblaslt_scaling_format_to_string(scaleAType));
+        return rocblaslt_status_invalid_value;
+    }
+    if(int4A && scaleA == nullptr)
+    {
+        log_error(__func__, "w4a16 requires a non-null A scale pointer");
+        return rocblaslt_status_invalid_pointer;
+    }
+    // Only scales of B's type are implemented.
+    if(int4A && w4a16ScaleType(scaleAType) != typeB)
+    {
+        log_error(__func__,
+                  "w4a16 A scale mode names scale type ",
+                  static_cast<int>(w4a16ScaleType(scaleAType)),
+                  " but matrix B is type ",
+                  static_cast<int>(typeB),
+                  "; the scale type must equal B's");
+        return rocblaslt_status_invalid_value;
+    }
+    // The scale tensor has no batch dimension.
+    if(int4A && numBatchesA > 1)
+    {
+        log_error(
+            __func__, "w4a16 does not support batch_count > 1 yet (got ", numBatchesA, ")");
+        return rocblaslt_status_not_implemented;
+    }
+    // Kernels step A rows by lda >> 3 dwords.
+    if(int4A && (lda < rowsA || lda % 8 != 0))
+    {
+        log_error(__func__,
+                  "w4a16 requires lda >= rows of A and lda % 8 == 0; lda",
+                  lda,
+                  "rows_A",
+                  rowsA);
+        return rocblaslt_status_invalid_value;
+    }
+    return rocblaslt_status_continue;
+}
 
 inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order)
 {
@@ -125,6 +258,133 @@ inline rocblaslt_status validateMatmulSwizzleArgs(const rocblaslt_matmul_desc   
 }
 
 /*******************************************************************************
+ * Validate Kernel Argument Widths
+ * Kernels receive M, N, K, the leading dimensions and the batch strides as 32-bit
+ * values; a single batch never uses its batch stride.
+ ******************************************************************************/
+inline bool problemFitsKernelArgs(int64_t m,
+                                  int64_t n,
+                                  int64_t k,
+                                  int64_t lda,
+                                  int64_t ldb,
+                                  int64_t ldc,
+                                  int64_t ldd,
+                                  int64_t num_batches,
+                                  int64_t batch_stride_a,
+                                  int64_t batch_stride_b,
+                                  int64_t batch_stride_c,
+                                  int64_t batch_stride_d)
+{
+    constexpr int64_t max_arg = std::numeric_limits<uint32_t>::max();
+    for(int64_t value : {m, n, k, lda, ldb, ldc, ldd})
+        if(value > max_arg)
+            return false;
+    return num_batches <= 1
+           || (batch_stride_a <= max_arg && batch_stride_b <= max_arg && batch_stride_c <= max_arg
+               && batch_stride_d <= max_arg);
+}
+
+/*******************************************************************************
+ * Host alpha/beta scalar
+ *
+ * Alpha and beta are scalars of the matmul scale type. The ext API does not
+ * carry a scale type (the problem stores HIPBLASLT_DATATYPE_INVALID). The
+ * scalar width then follows the compute type, except for complex A: compute
+ * type is real, so a complex alpha must follow the A type or only the real
+ * part is read. A fixed 4-byte load over-reads a 2-byte HIP_R_16F scalar and
+ * can treat a zero half as nonzero when the next two bytes are nonzero
+ * (ROCM-31553).
+ ******************************************************************************/
+inline hipDataType scalarTypeFromCompute(rocblaslt_compute_type compute_type)
+{
+    switch(compute_type)
+    {
+    case rocblaslt_compute_f16:
+    case rocblaslt_compute_f16_pedantic:
+        return HIP_R_16F;
+    case rocblaslt_compute_f64:
+    case rocblaslt_compute_f64_pedantic:
+        return HIP_R_64F;
+    case rocblaslt_compute_i32:
+    case rocblaslt_compute_i32_pedantic:
+        return HIP_R_32I;
+    default:
+        return HIP_R_32F;
+    }
+}
+
+inline hipDataType alphaBetaScalarType(hipDataType             scale_type,
+                                       rocblaslt_compute_type  compute_type,
+                                       hipDataType             type_a = HIPBLASLT_DATATYPE_INVALID)
+{
+    switch(scale_type)
+    {
+    case HIP_R_16F:
+    case HIP_R_32F:
+    case HIP_R_64F:
+    case HIP_R_32I:
+    case HIP_C_32F:
+    case HIP_C_64F:
+        return scale_type;
+    default:
+        break;
+    }
+    // Ext API: no scale type. Complex alpha is the A type, not the real compute type.
+    if(type_a == HIP_C_32F || type_a == HIP_C_64F)
+        return type_a;
+    return scalarTypeFromCompute(compute_type);
+}
+
+// Reads only the bytes `type` occupies. Unknown types are not loaded and
+// compare as nonzero, so a null A or B stays rejected.
+inline bool hostScalarIsZero(hipDataType type, const void* ptr)
+{
+    if(!ptr)
+        return false;
+
+    switch(type)
+    {
+    case HIP_R_16F:
+        return static_cast<float>(*reinterpret_cast<const hipblasLtHalf*>(ptr)) == 0.f;
+    case HIP_R_32F:
+        return *reinterpret_cast<const float*>(ptr) == 0.f;
+    case HIP_R_64F:
+        return *reinterpret_cast<const double*>(ptr) == 0.0;
+    case HIP_R_32I:
+        return *reinterpret_cast<const int32_t*>(ptr) == 0;
+    case HIP_C_32F:
+    {
+        const auto value = *reinterpret_cast<const hipblaslt_complex_float*>(ptr);
+        return value.real() == 0.f && value.imag() == 0.f;
+    }
+    case HIP_C_64F:
+    {
+        const auto value = *reinterpret_cast<const hipblaslt_complex_double*>(ptr);
+        return value.real() == 0.0 && value.imag() == 0.0;
+    }
+    default:
+        return false;
+    }
+}
+
+// True when a null A or B is not allowed. Host scalars are loaded with the
+// width of `scalar_type`. Device pointer modes are not dereferenced.
+inline bool alphaForbidsNullAB(hipDataType            scalar_type,
+                               rocblaslt_pointer_mode pointermode,
+                               const void*            alpha,
+                               const void*            a,
+                               const void*            b)
+{
+    if(!alpha)
+        return true;
+    if(a && b)
+        return false;
+    if(pointermode != rocblaslt_pointer_mode_host)
+        return true;
+    return !hostScalarIsZero(scalar_type, alpha);
+}
+
+/*******************************************************************************
  * Validate Matmul Arguments
  ******************************************************************************/
 inline rocblaslt_status validateMatmulArgs(int64_t                       m,
@@ -143,6 +403,10 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
                                            rocblaslt_compute_type        compute_type,
                                            hipblasOperation_t            opA,
                                            hipblasOperation_t            opB,
+                                           int64_t                       lda,
+                                           int64_t                       ldb,
+                                           int64_t                       ldc,
+                                           int64_t                       ldd,
                                            int                           num_batches_a  = 1,
                                            int                           num_batches_b  = 1,
                                            int                           num_batches_c  = 1,
@@ -156,7 +420,8 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
                                            int64_t                       batch_offset_c = 0,
                                            int64_t                       batch_offset_d = 0,
                                            const rocblaslt_pointer_mode& pointermode
-                                           = rocblaslt_pointer_mode_host)
+                                           = rocblaslt_pointer_mode_host,
+                                           hipDataType scale_type = HIPBLASLT_DATATYPE_INVALID)
 {
     rocblaslt_status status = rocblaslt_status_continue;
 
@@ -244,6 +509,47 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
         return rocblaslt_status_invalid_size;
     }
 
+    if(!problemFitsKernelArgs(m,
+                              n,
+                              k,
+                              lda,
+                              ldb,
+                              ldc,
+                              ldd,
+                              num_batches_a,
+                              batch_stride_a,
+                              batch_stride_b,
+                              batch_stride_c,
+                              batch_stride_d))
+    {
+        log_error(__func__,
+                  "sizes, leading dimensions and batch strides of 2^32 elements or more are not "
+                  "supported",
+                  "m",
+                  m,
+                  "n",
+                  n,
+                  "k",
+                  k,
+                  "lda",
+                  lda,
+                  "ldb",
+                  ldb,
+                  "ldc",
+                  ldc,
+                  "ldd",
+                  ldd,
+                  "stride_a",
+                  batch_stride_a,
+                  "stride_b",
+                  batch_stride_b,
+                  "stride_c",
+                  batch_stride_c,
+                  "stride_d",
+                  batch_stride_d);
+        return rocblaslt_status_not_implemented;
+    }
+
     // quick return 0 is valid in BLAS
     // Note: k==0 is not a quick return, because C must still be multiplied by
     // beta
@@ -254,8 +560,10 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
     if(!beta)
         return rocblaslt_status_invalid_pointer;
 
-    // Update for the valid case: ((alpha_in_host && alpha=0) && (A=NULL || B=NULL))
-    bool alpha_A_B_violation = (!alpha || ((pointermode || (*((float*)alpha))) && (!a || !b)));
+    // A host alpha of 0 may leave A or B null. Load alpha at the scalar width:
+    // a 4-byte read of a HIP_R_16F alpha over-reads the caller (ROCM-31553).
+    const bool alpha_A_B_violation = alphaForbidsNullAB(
+        alphaBetaScalarType(scale_type, compute_type, type_a), pointermode, alpha, a, b);
     // pointers must be valid
     if(n && ((k && alpha_A_B_violation) || !c || !d))
         return rocblaslt_status_invalid_pointer;
@@ -319,7 +627,11 @@ inline rocblaslt_status
     batch_stride_e = original_stride_e > 0 ? original_stride_e : original_lde * num_cols_e;
     if(E != nullptr && ((lde < num_rows_e) || (batch_stride_e < (num_cols_e * num_rows_e))))
         status = rocblaslt_status_invalid_value;
-    if(scaleAType != RocblasltContractionProblem::ScalingFormat::None
+    const bool w4a16ScalarB
+        = isW4A16ScaleFormat(scaleAType)
+          && scaleBType == RocblasltContractionProblem::ScalingFormat::Scalar;
+    if(!w4a16ScalarB
+       && scaleAType != RocblasltContractionProblem::ScalingFormat::None
        && scaleBType != RocblasltContractionProblem::ScalingFormat::None
        && scaleAType != scaleBType)
     {
@@ -445,6 +757,16 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
         }
     }
 
+    if(auto status = validateW4A16Args(matA->type,
+                             matB->type,
+                             matmul_descr->scaleAType,
+                             matmul_descr->scaleA,
+                             num_batches_a,
+                             num_rows_a,
+                             lda);
+       status != rocblaslt_status_continue)
+        return status;
+
     auto matmul_status = validateMatmulArgs(m,
                                             n,
                                             k,
@@ -461,6 +783,10 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                             compute_type,
                                             matmul_descr->op_A,
                                             matmul_descr->op_B,
+                                            lda,
+                                            ldb,
+                                            ldc,
+                                            ldd,
                                             num_batches_a,
                                             num_batches_b,
                                             num_batches_c,
@@ -473,7 +799,8 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                             batch_offset_b,
                                             batch_offset_c,
                                             batch_offset_d,
-                                            matmul_descr->pointermode);
+                                            matmul_descr->pointermode,
+                                            matmul_descr->scale_type);
 
     const void* alphaVecPtr     = matmul_descr->pointermode ? alpha : nullptr;
     auto        epilogue_status = rocblaslt_epilogue_valid_args(matmul_descr->epilogue,
@@ -522,6 +849,12 @@ inline void setTo1(const rocblaslt_compute_type& compute_type, const void* onePt
         *((int32_t*)onePtr) = 1.f;
         *dst                = onePtr;
     }
+    else if(compute_type == rocblaslt_compute_f16 || compute_type == rocblaslt_compute_f16_pedantic)
+    {
+        // A float 1.0 (0x3f800000) read back as a half is 0.
+        *((hipblasLtHalf*)onePtr) = hipblasLtHalf(1.f);
+        *dst                      = onePtr;
+    }
     else
     {
         *((float*)onePtr) = 1.f;
@@ -545,8 +878,11 @@ inline hipblaslt_complex_double get_alpha_beta_scalar(hipDataType type, const vo
             return {static_cast<double>(*(reinterpret_cast<const int32_t*>(ptr))), 0.0};
         
         case HIP_R_16F:
+            return {static_cast<double>(*reinterpret_cast<const hipblasLtHalf*>(ptr)), 0.0};
         case HIP_R_16BF:
-            return {static_cast<double>(*(reinterpret_cast<const float*>(ptr))), 0.0};
+            return {static_cast<double>(static_cast<float>(
+                        *reinterpret_cast<const hipblasLtBfloat16*>(ptr))),
+                    0.0};
 
         case HIP_C_32F:
         {
@@ -562,5 +898,3 @@ inline hipblaslt_complex_double get_alpha_beta_scalar(hipDataType type, const vo
             return {0.0, 0.0};
     }
 }
-
-#endif

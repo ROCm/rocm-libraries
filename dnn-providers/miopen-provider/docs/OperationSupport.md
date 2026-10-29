@@ -23,6 +23,7 @@ The following table lists all operations currently supported in hipDNN:
 | Convolution Forward + (Bias) + Activation<sup>4</sup> | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>2,3,6</sup>, Deterministic<sup>5</sup> |
 | Convolution Wgrad   | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup> |
 | Pointwise Activation (standalone) | FP16, FP32 | NCHW, NHWC | Single-node graph<sup>7</sup> |
+| Pointwise Binary Elementwise (standalone) | FP16, FP32 | NCHW, NCDHW | Single-node graph<sup>8</sup> |
 
 ¹ See Batchnorm Operations note below
 ² See Convolution Operations note below
@@ -31,6 +32,7 @@ The following table lists all operations currently supported in hipDNN:
 ⁵ See Deterministic Engine Support section
 ⁶ 3D tensors are internally padded to 4D for MIOpen compatibility. For convolution, the padding also extends the padding, stride and dilation vectors with a trailing spatial dimension of length 1.
 ⁷ See Standalone Activation note below
+⁸ See Standalone Binary Elementwise note below
 
 ## Detailed Requirements
 
@@ -49,9 +51,10 @@ The following table lists all operations currently supported in hipDNN:
 - Compute data type: FP32
 - Activation mode: RELU_FORWARD
 - Supports
-    - no clipping
-    - relu_lower_clip set
-    - relu_lower_clip and relu_upper_clip set
+    - standard ReLU: no clips set, or relu_lower_clip = 0
+    - clipped ReLU: relu_upper_clip set
+    - CLAMP: relu_lower_clip and relu_upper_clip set
+- relu_lower_clip_slope must be unset or 0 (leaky ReLU is not supported when fused)
 
 ## Operation Notes
 
@@ -72,10 +75,23 @@ The following table lists all operations currently supported in hipDNN:
 >   - **Convolution Forward + (Bias) + Activation:** Combines convolution forward, optional bias addition, and forward activation
 
 > [!NOTE]
-> **Activation Functions (fused):** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips). Leaky ReLU, Sigmoid and Tanh are **not** supported when fused onto a producer op; use a standalone activation node for those.
+> **Activation Functions (fused):** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips). Leaky ReLU (non-zero `relu_lower_clip_slope`), Sigmoid and Tanh are **not** supported when fused onto a producer op; use a standalone activation node for those.
 
 > [!NOTE]
 > **Standalone Activation:** A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower/upper clips), Leaky ReLU (configurable negative slope), Sigmoid and Tanh.
+
+> [!NOTE]
+> **ReLU parameters:** An unset `relu_lower_clip` is treated as 0, an unset `relu_upper_clip` as no
+> upper bound, and an unset `relu_lower_clip_slope` or a slope of exactly 0 as no leaky slope, so
+> equivalent encodings select the same MIOpen activation. A non-zero `relu_lower_clip` without an
+> upper clip is not supported.
+
+> [!NOTE]
+> **Standalone Binary Elementwise:** A single-node pointwise graph supports ADD, SUB, MUL, MAX and MIN
+> across ranks 3-5, with packed channels-first strides and FP16/FP32 datatypes only. `in_0` must be
+> the full-shape operand; only `in_1` may broadcast per-axis at matching rank, and all three tensors
+> must share one datatype. SUB is executed internally as Add with `in_1` scaled by −1. In-place
+> execution is not supported.
 
 > [!NOTE]
 > **Sparse Support:** All operations currently work with dense tensors only.
@@ -85,7 +101,7 @@ The following table lists all operations currently supported in hipDNN:
 
 ## Deterministic Engine Support
 
-The MIOpen provider offers a deterministic execution engine (`MIOPEN_ENGINE_DETERMINISTIC`) for convolution operations. This engine guarantees bit-reproducible results across multiple executions with the same inputs.
+The MIOpen provider offers a deterministic execution engine (`MIOPEN_ENGINE_DETERMINISTIC`) for convolution, unary activation, and binary pointwise operations. This engine guarantees bit-reproducible results across multiple executions with the same inputs.
 
 To use the deterministic engine, set it as the preferred engine on your graph before building:
 

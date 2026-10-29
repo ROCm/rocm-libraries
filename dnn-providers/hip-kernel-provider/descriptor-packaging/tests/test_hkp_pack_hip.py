@@ -4,10 +4,12 @@ import shutil
 
 import pytest
 
+from hkp_pack import agreement
 from hkp_pack.hip_compile import hip_variant_key as variant_key
 from hkp_pack.descriptors import load_flat_input, reachable_generic_ids
 from hkp_pack.errors import HkpPackError
-from hkp_pack.pipeline import run_pipeline
+from hkp_pack.kernel_signature import kernel_signature
+from pack_helpers import GENERIC_TARGETS, read_shipped, run_pipeline
 
 ARCHES = ["gfx942", "gfx950", "gfx90a"]
 
@@ -241,7 +243,8 @@ def test_symbol_in_round_tripped_blob(built, rocm_kpack_dir):
 
 
 def test_rewrite_kpack_form_and_provenance(built):
-    kdp = _read(built["out"] / "gfx942" / "pointwise.kdp.json")
+    path = built["out"] / "gfx942" / "pointwise.kdp.json"
+    kdp = read_shipped(path)
     ukd = kdp["kernelDescriptors"][0]
     ks = ukd["kernel_source"]
     assert ks["kind"] == "kpack"
@@ -260,6 +263,35 @@ def test_rewrite_kpack_form_and_provenance(built):
     # the rewrite.
     assert kdp["version"] == "0.1"
     assert ukd["version"] == "0.1"
+
+
+def test_rewrite_stamps_the_signature_read_from_the_object(built, rocm_kpack_dir):
+    """The stamped list comes from the compiled object, per symbol.
+
+    Recomputed from the archived blob rather than compared against a literal: a
+    hand-written expectation would be satisfied just as well by a stamp derived
+    from the authored descriptor, and derivation from the binary is the entire
+    reason the field is worth comparing at dispatch.
+
+    Both inline UKDs are checked because they share one toc_key and one blob.
+    Extracting once per variant and reusing the result would give the second its
+    neighbour's signature and pass every fixture with one symbol per variant.
+    """
+    kpack = _load_kpack(rocm_kpack_dir)
+    archive = kpack.PackedKernelArchive.read(
+        built["out"] / "gfx942" / "kpack" / "hip_kernel_provider_gfx942.kpack"
+    )
+    ukds = _inline_ukds(built["out"] / "gfx942", "pointwise.kdp.json")
+    assert len({u["kernel_source"]["symbol"] for u in ukds}) == len(ukds)
+
+    for ukd in ukds:
+        ks = ukd["kernel_source"]
+        blob = bytes(archive.get_kernel(ks["toc_key"], "gfx942"))
+        assert ks["signature"] == kernel_signature(blob, ks["symbol"], "test")
+        # PointwiseAdd(const T*, const T*, T*) and its neighbour: three device
+        # pointers each, and no names -- clang records none for HIP.
+        assert [a["kind"] for a in ks["signature"]] == ["global_buffer"] * 3
+        assert all("name" not in a for a in ks["signature"])
 
 
 def test_distinct_variant_storage(built):
@@ -379,6 +411,57 @@ def test_neg_missing_field(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
         _run(src, tmp_path, hipcc, rocm_kpack_dir)
 
 
+_KPACK_SOURCE = {
+    "kind": "kpack",
+    "library": "kpack/hip_kernel_provider_gfx942.kpack",
+    "toc_key": "0f1e2d3c4b5a6978",
+    "symbol": "Copy",
+    "sha256": "a" * 64,
+    "signature": [{"kind": "global_buffer", "size": 8, "offset": 0}],
+}
+
+
+def _author_kpack_source(src, drop=None):
+    p = src / "copy.kdp.json"
+    doc = _read(p)
+    ks = dict(_KPACK_SOURCE)
+    if drop is not None:
+        del ks[drop]
+    doc["kernelDescriptors"][0]["kernel_source"] = ks
+    p.write_text(json.dumps(doc), encoding="utf-8")
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("field", sorted(set(_KPACK_SOURCE) - {"kind"}))
+def test_neg_kpack_source_missing_field(tmp_path, main_fixture, field):
+    """The validator's kpack key list names what the loader will demand.
+
+    Nothing in this tree authors a kpack kernel_source -- it is the form the
+    packer rewrites into, and the fields it carries are read out of a compiled
+    object rather than written by hand. The list is pinned anyway because it is
+    the only place the tool can reject a descriptor the loader would reject
+    later, and it went a field stale once the loader began requiring
+    `signature`. Pinned as a list rather than one member, because going stale by
+    a field is the failure this exists to catch and the next field will go the
+    same way. Validation runs at load, so this needs no compiler.
+    """
+    src = _copy_fixture(tmp_path, main_fixture)
+    _author_kpack_source(src, drop=field)
+    with pytest.raises(HkpPackError, match=f"missing required field '{field}'"):
+        load_flat_input(src, GENERIC_TARGETS)
+
+
+@pytest.mark.quick
+def test_kpack_source_complete_is_accepted(tmp_path, main_fixture):
+    # The control for the parametrised negative: without it, a rewrite that was
+    # rejected for some reason of its own would read as the drop being caught.
+    src = _copy_fixture(tmp_path, main_fixture)
+    _author_kpack_source(src)
+    flat = load_flat_input(src, GENERIC_TARGETS)
+    kdp = next(d for d in flat.kdps() if d.path.name == "copy.kdp.json")
+    assert kdp.doc["kernelDescriptors"][0]["kernel_source"]["kind"] == "kpack"
+
+
 @pytest.mark.quick
 def test_neg_dangling_id(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
     src = _copy_fixture(tmp_path, main_fixture)
@@ -459,7 +542,7 @@ def test_cli2_empty_gpu_targets(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
 # --- Unit: pruning reachability + wildcard ---------------------------------
 @pytest.mark.quick
 def test_wildcard_arch_matches(main_fixture):
-    flat = load_flat_input(main_fixture)
+    flat = load_flat_input(main_fixture, GENERIC_TARGETS)
     wild = next(k for k in flat.kdps() if k.id == "kdp-pointwise-wild")
     from hkp_pack.descriptors import arch_matches
 
@@ -610,10 +693,13 @@ def test_standalone_ukd_copied_to_both_arch_shards(built):
 
 def test_standalone_ukd_matches_inline_kpack_shape(built):
     # A standalone UKD's shipped kernel_source is kpack-form with the same
-    # structure as an inline UKD's (library/toc_key/symbol/sha256 + provenance).
-    ukd = _read(built["out"] / "gfx942" / _STANDALONE_UKD_FILE)
+    # structure as an inline UKD's (library/toc_key/symbol/sha256/signature +
+    # provenance).
+    ukd = read_shipped(built["out"] / "gfx942" / _STANDALONE_UKD_FILE)
     ks = ukd["kernel_source"]
-    assert set(["kind", "library", "toc_key", "symbol", "sha256"]).issubset(ks)
+    assert set(
+        ["kind", "library", "toc_key", "symbol", "sha256", "signature"]
+    ).issubset(ks)
     assert "file" not in ks and "build" not in ks
     assert ks["symbol"] == "PointwiseAdd"
     prov = ukd["provenance"]
@@ -682,8 +768,27 @@ def test_standalone_ukd_shared_by_two_kdps_stored_once(
     # and pointwise.kdp.json reference the same standalone id on gfx942.
     p = src / "copy.kdp.json"
     doc = _read(p)
+    doc["arch"] = ["gfx942", "gfx950"]
     doc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
     p.write_text(json.dumps(doc), encoding="utf-8")
+    # A second referencing KDP is a second CONSUMER: it resolves to its own engine
+    # and KMD, so the UKD declares what it claims for that pair too. Every field of
+    # the copy KMD is matcher-only here -- a hip source compiles no specialization --
+    # but the claim is stated rather than inferred from silence.
+    ukd_path = src / _STANDALONE_UKD_FILE
+    ukd_doc = _read(ukd_path)
+    consumers = ukd_doc["provenance"]["specialization_contract"]["consumers"]
+    consumers.append(
+        {
+            "engine_id": _read(src / "copy.ued.json")["id"],
+            "kmd_id": _read(src / "copy.kmd.json")["id"],
+            "metadata_fields": [],
+            "matcher_only_fields": ["block_size", "dtype"],
+            "bindings": {},
+            "vocabulary": {},
+        }
+    )
+    ukd_path.write_text(json.dumps(ukd_doc), encoding="utf-8")
     _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
     kpack = _load_kpack(rocm_kpack_dir)
     archive = kpack.PackedKernelArchive.read(
@@ -695,18 +800,39 @@ def test_standalone_ukd_shared_by_two_kdps_stored_once(
     assert list(archive.toc[toc_key]) == ["gfx942"]
 
 
+def test_standalone_ukd_referenced_by_a_second_engine_without_declaring_it_fails(
+    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+):
+    """The same second reference with the declaration left alone. A UKD several
+    engines reference carries one entry per engine, and silence is not a waiver:
+    packing without the entry ships a catalog entry nothing checked.
+    """
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "copy.kdp.json"
+    doc = _read(p)
+    doc["arch"] = ["gfx942", "gfx950"]
+    doc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="expected exactly one"):
+        _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
+
+
 def test_standalone_ukd_referenced_by_wildcard_kdp(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    # A standalone UKD referenced by a wildcard KDP (arch []) ships in every shard.
     src = _copy_fixture(tmp_path, main_fixture)
+    wild_doc = _read(src / _STANDALONE_UKD_FILE)
+    wild_doc["id"] = "ukd-pointwise-add-f32-b128-wild"
+    del wild_doc["arch"]
+    wild_file = "pointwise_add_b128_wild.ukd.json"
+    (src / wild_file).write_text(json.dumps(wild_doc), encoding="utf-8")
     p = src / "pointwise_wild.kdp.json"
     doc = _read(p)
-    doc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
+    doc["kernelDescriptors"].append(wild_doc["id"])
     p.write_text(json.dumps(doc), encoding="utf-8")
     _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942", "gfx90a"])
     for arch in ("gfx942", "gfx90a"):
-        assert (tmp_path / "out" / arch / _STANDALONE_UKD_FILE).exists(), arch
+        assert (tmp_path / "out" / arch / wild_file).exists(), arch
 
 
 @pytest.mark.quick
@@ -784,9 +910,10 @@ def test_ukd_arch_not_subset_of_kdp_hard_errors(
 def test_ukd_arch_subset_wildcard_combinations_accepted(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    # (a) UKD explicit subset of KDP explicit; (b) UKD wildcard + KDP explicit;
-    # (c) KDP wildcard + UKD explicit. Each loads without error and emits the
-    # standalone into the expected shard(s).
+    # (a) UKD explicit subset of KDP explicit; (c) KDP wildcard + UKD explicit.
+    # Each loads without error and emits the standalone into the expected shard(s).
+    # The legal wildcard-UKD shape is the inline UKD inheriting a concrete KDP's arch,
+    # covered by _ACCEPTED["inline_inheriting_a_concrete_kdp"].
     # (a) explicit subset: b128 -> [gfx942] under pointwise KDP [gfx942, gfx950].
     src_a = _copy_fixture(tmp_path / "a", main_fixture)
     p = src_a / _STANDALONE_UKD_FILE
@@ -796,12 +923,6 @@ def test_ukd_arch_subset_wildcard_combinations_accepted(
     _run(src_a, tmp_path / "a", hipcc, rocm_kpack_dir, arches=["gfx942", "gfx950"])
     assert (tmp_path / "a" / "out" / "gfx942" / _STANDALONE_UKD_FILE).exists()
     assert not (tmp_path / "a" / "out" / "gfx950" / _STANDALONE_UKD_FILE).exists()
-
-    # (b) UKD wildcard (unchanged fixture) under explicit KDP -> ships in both.
-    src_b = _copy_fixture(tmp_path / "b", main_fixture)
-    _run(src_b, tmp_path / "b", hipcc, rocm_kpack_dir, arches=["gfx942", "gfx950"])
-    assert (tmp_path / "b" / "out" / "gfx942" / _STANDALONE_UKD_FILE).exists()
-    assert (tmp_path / "b" / "out" / "gfx950" / _STANDALONE_UKD_FILE).exists()
 
     # (c) KDP wildcard + UKD explicit: reference b128 (arch [gfx942]) from the
     # wildcard KDP; it ships only in gfx942.
@@ -901,7 +1022,7 @@ def test_neg_duplicate_standalone_ukd_ids(tmp_path, main_fixture):
     dup = _read(src / _STANDALONE_UKD_FILE)
     (src / "dup.ukd.json").write_text(json.dumps(dup), encoding="utf-8")
     with pytest.raises(HkpPackError, match="duplicate"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -912,7 +1033,7 @@ def test_neg_duplicate_kdp_ids(tmp_path, main_fixture):
     doc["id"] = "kdp-pointwise"  # already the id of pointwise.kdp.json
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="duplicate"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -920,10 +1041,12 @@ def test_neg_duplicate_generic_ids(tmp_path, main_fixture):
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "copy.kmd.json"
     doc = _read(p)
-    doc["id"] = "kmd-pointwise"  # already the id of pointwise.kmd.json
+    # pointwise.kmd.json's id in another letter case: the loader parses both
+    # spellings to the same UUID.
+    doc["id"] = _read(src / "pointwise.kmd.json")["id"].upper()
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="duplicate"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -933,10 +1056,10 @@ def test_neg_cross_type_id_reuse_rejected(tmp_path, main_fixture):
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "pointwise.ued.json"
     doc = _read(p)
-    doc["id"] = "kmd-pointwise"  # a KMD id, different type
+    doc["id"] = _read(src / "pointwise.kmd.json")["id"]  # a KMD id, different type
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="duplicate"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 # --- H. Version enforcement --------------------------
@@ -948,7 +1071,7 @@ def test_neg_file_backed_missing_version(tmp_path, main_fixture):
     del doc["version"]
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="missing required field 'version'"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -960,7 +1083,7 @@ def test_neg_malformed_version(tmp_path, main_fixture, bad):
     doc["version"] = bad
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="invalid version"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -972,7 +1095,7 @@ def test_neg_inline_ukd_missing_version(tmp_path, main_fixture):
     del doc["kernelDescriptors"][0]["version"]
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="missing required field 'version'"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 # --- I. UED scoped name ------------------------------
@@ -984,14 +1107,14 @@ def test_neg_ued_name_not_scoped(tmp_path, main_fixture):
     doc["name"] = "Pointwise engine"  # unscoped
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="scoped"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
 def test_scoped_ued_name_loads_clean(main_fixture):
     # The renamed fixture UED (test_fixture:pointwise) validates without error.
-    flat = load_flat_input(main_fixture)
-    ued = next(d for d in flat.by_type("ued") if d.id == "ued-pointwise")
+    flat = load_flat_input(main_fixture, GENERIC_TARGETS)
+    ued = next(d for d in flat.by_type("ued") if d.path.name == "pointwise.ued.json")
     assert ued.doc["name"] == "test_fixture:pointwise"
 
 
@@ -999,19 +1122,114 @@ def test_scoped_ued_name_loads_clean(main_fixture):
 def test_authored_provenance_cannot_hijack(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    # An authored top-level 'provenance' is dropped; the shipped block is the
-    # generated traceability record, not the authored value.
+    # The shipped provenance block is the generated traceability record: an authored
+    # value for a field the producer writes is overwritten, while an authored field
+    # the producer does not write survives.
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / _STANDALONE_UKD_FILE
+    doc = _read(p)
+    doc["provenance"].update(
+        {
+            "origin_kind": "rocke",
+            "source": "HIJACKED.cpp",
+            "entry": "Hijacked",
+            "note": "authored",
+        }
+    )
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
+    prov = read_shipped(tmp_path / "out" / "gfx942" / _STANDALONE_UKD_FILE)[
+        "provenance"
+    ]
+    assert prov["origin_kind"] == "hip"
+    assert prov["source"] == "PointwiseAdd.cpp"
+    assert prov["entry"] == "PointwiseAdd"
+    assert prov["note"] == "authored"
+
+
+@pytest.mark.quick
+def test_non_object_provenance_is_refused_at_load(tmp_path, main_fixture):
+    # A provenance that is not an object cannot carry the reserved keys the
+    # loader has to police, so it is refused at the door rather than dropped.
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / _STANDALONE_UKD_FILE
     doc = _read(p)
     doc["provenance"] = "HIJACKED"
     p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="provenance must be an object"):
+        load_flat_input(src, GENERIC_TARGETS)
+
+
+def _share_contract_onto_kdp(kdp_path):
+    """Move the inline kernels' identical declaration onto the enclosing KDP."""
+    doc = _read(kdp_path)
+    contracts = [
+        e["provenance"].pop("specialization_contract")
+        for e in doc["kernelDescriptors"]
+        if isinstance(e, dict)
+    ]
+    assert contracts and all(c == contracts[0] for c in contracts)
+    for entry in doc["kernelDescriptors"]:
+        if isinstance(entry, dict) and not entry["provenance"]:
+            del entry["provenance"]
+    doc["provenance"] = {"specialization_contract": contracts[0]}
+    kdp_path.write_text(json.dumps(doc), encoding="utf-8")
+
+
+def test_kdp_level_contract_is_inherited_and_ships(
+    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+):
+    # A declaration written once on the KDP covers every inline kernel under it, so a
+    # reader with only the shipped shard still resolves a full consumer list for each.
+    src = _copy_fixture(tmp_path, main_fixture)
+    _share_contract_onto_kdp(src / "pointwise.kdp.json")
     _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
-    prov = _read(tmp_path / "out" / "gfx942" / _STANDALONE_UKD_FILE)["provenance"]
-    assert prov != "HIJACKED"
-    assert prov["origin_kind"] == "hip"
-    assert prov["source"] == "PointwiseAdd.cpp"
-    assert prov["entry"] == "PointwiseAdd"
+
+    out = tmp_path / "out" / "gfx942"
+    shipped = read_shipped(out / "pointwise.kdp.json")
+    assert "specialization_contract" in shipped["provenance"]
+    inline = [e for e in shipped["kernelDescriptors"] if isinstance(e, dict)]
+    assert inline
+    assert not any("specialization_contract" in e.get("provenance", {}) for e in inline)
+
+    engine = _read(out / "pointwise.ued.json")
+    kmd = _read(out / "pointwise.kmd.json")
+    for kernel in inline:
+        declaration = agreement.select_declaration(
+            kernel, engine, kmd, {kmd["id"]: kmd}, shipped
+        )
+        assert declaration["engine_id"] == engine["id"]
+
+    # The standalone UKD the same KDP references keeps its own: it is its own
+    # file and no KDP speaks for it.
+    standalone = read_shipped(out / _STANDALONE_UKD_FILE)
+    assert "specialization_contract" in standalone["provenance"]
+
+
+@pytest.mark.quick
+def test_effective_spec_on_a_kdp_is_refused_at_load(tmp_path, main_fixture):
+    # Producer evidence binds specific payload bytes and a pack has none, so a
+    # KDP claiming one is refused rather than being inherited by its kernels.
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "pointwise.kdp.json"
+    doc = _read(p)
+    doc["provenance"] = {"effective_spec": {"schema_version": 1}}
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="effective_spec is reserved"):
+        load_flat_input(src, GENERIC_TARGETS)
+
+
+@pytest.mark.quick
+def test_a_malformed_kdp_contract_is_refused_at_load(tmp_path, main_fixture):
+    # An unusable declaration fails at the document that wrote it rather than at
+    # every kernel that would have inherited it.
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "pointwise.kdp.json"
+    doc = _read(p)
+    doc["provenance"] = {"specialization_contract": {"schema_version": 1}}
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="specialization_contract must be"):
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 # --- K. Drop diagnostics + arch warning --------------
@@ -1023,7 +1241,7 @@ def test_orphan_standalone_ukd_warns(tmp_path, main_fixture):
     orphan["id"] = "ukd-orphan"
     (src / "orphan.ukd.json").write_text(json.dumps(orphan), encoding="utf-8")
     logs = []
-    load_flat_input(src, log=logs.append)
+    load_flat_input(src, GENERIC_TARGETS, log=logs.append)
     assert any("orphan.ukd.json" in m and "not referenced" in m for m in logs)
 
 

@@ -359,6 +359,21 @@ namespace TensileLite
         {
             m_firstSolutionIdx = firstSolutionIdx;
 
+            // Indexes library->solutions. For an indexed library that map is
+            // empty until caches are parsed and published; materializeAllSolutions()
+            // does both. The cache's own materializeAll() only parses, and
+            // leaves the reads below on an empty map.
+            //
+            // Best/Top iterators must not call this: they measure selection
+            // latency and should stay lazy.
+            library->materializeAllSolutions();
+
+            if(library->solutions.empty())
+            {
+                throw std::runtime_error(
+                    "[AllSolutionsIterator] library contains no solutions to enumerate");
+            }
+
             if(m_firstSolutionIdx < 0)
                 m_firstSolutionIdx = library->solutions.begin()->first;
 
@@ -560,7 +575,10 @@ namespace TensileLite
             }
             if(m_currentSolution == nullptr)
             {
-                m_currentSolution = m_library->solutions.find(0)->second;
+                // Goes through the resolver rather than solutions.find(0):
+                // indexed libraries have not materialized index 0 yet, and the
+                // old form dereferenced end() when it was missing.
+                m_currentSolution = m_library->resolveSolutionByIndex(0);
             }
             m_usedCurrentSolution = false;
         }
@@ -633,7 +651,9 @@ namespace TensileLite
             }
             if(m_solutions.size() == 0)
             {
-                m_solutions.push_back(m_library->solutions.find(0)->second);
+                // See the note in BestSolutionIterator::preProblem.
+                if(auto fallback = m_library->resolveSolutionByIndex(0))
+                    m_solutions.push_back(fallback);
             }
 
             if(m_predictionThreshold > 1.0 || !isPredictionAvailable(*m_hardware))

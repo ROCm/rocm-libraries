@@ -31,7 +31,7 @@ Quantized-weight GEMM:
 32. Its validator accepts gfx1151 and gfx1201.
 
 Deep fusion:
-[`deep_fused_conv_pool.py`](../../python/rocke/instances/common/deep_fused_conv_pool.py)
+[`deep_fused_conv_pool.py`](../../../library/kernels/common/deep_fused_conv_pool.py)
 ships the conv -> epilogue -> conv -> maxpool prototype. gfx950 and gfx1201 use
 the shared target-selected `MmaOp` body; gfx1151 has a target-specific
 implementation.
@@ -41,11 +41,22 @@ implementation.
 | File | Spec | Doc |
 |-----------------------------------|-------------------------------------------------------------------|------------------------------|
 | `conv_implicit_gemm.py` | `ConvProblem`, `ImplicitGemmConvSpec` | `instances/convolution.md` |
-| `conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec` | `instances/convolution.md` |
+| `conv_implicit_gemm_dgrad.py` | `DgradConvSpec` (backward data; tilde and stride-1 binaries, `tap_outer_k`, `dy_halo`) | `instances/convolution.md`, [`README_conv_implicit_gemm_dgrad.md`](../../../library/kernels/common/README_conv_implicit_gemm_dgrad.md) |
+| `conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec` (incl. 4c dgrad), `DirectConvSpec` (incl. fused-weight dgrad), `DirectDepthwiseDgradWindowedSpec` | `instances/convolution.md`, [`README_conv_direct_grouped.md`](../../../library/kernels/common/README_conv_direct_grouped.md) |
+| `conv_direct_nongrouped.py` | `DirectNongroupedConvSpec` (`groups == 1`) | `instances/convolution.md` |
+| `conv_direct_dgrad_wmma.py` | `DirectDgradWmmaSpec` (gfx1250 dgrad) | `instances/convolution.md` |
+| `conv_direct_fwd_wmma.py` | `DirectFwdWmmaSpec` (gfx1250 forward) | `instances/convolution.md` |
+| `conv_fwd_small_wmma.py` | `FwdSmallcWmmaSpec`, `FwdSmallkWmmaSpec` (gfx1250 forward, tiny C / K) | `instances/convolution.md` |
+| `conv_winograd_fwd.py`, `conv_winograd_gemm_wmma.py`, `conv_winograd_gen.py`, `conv_winograd_fused_1d_wmma.py`, `conv_winograd_select.py` | `WinogradFwdSpec`, `WinogradMergedSpec`, `WinogradGemmWmmaSpec`, `WinogradGemmReduceSpec`, `WinogradGenSpec`, `FusedWino1DSpec`; plan selector `select_winograd` (gfx1250 Winograd forward) | `instances/convolution.md` |
+| `conv_direct_wgrad_tiled.py` | `DirectWgradTiledSpec` (direct wgrad, atomics) | `instances/convolution.md` |
+| `conv_direct_dw_wgrad.py` | `DwWgradLdsSpec`, `DwWgradColsSpec`, `DwWgradFoldSpec` (depthwise wgrad) | `instances/convolution.md` |
+| `conv_direct_wgrad_gather.py` | `WgradGatherSpec` (dense small-C wgrad) | `instances/convolution.md` |
+| `conv_direct_dw_wgrad_mfma.py` | `DwWgradMfmaSpec` (depthwise wgrad, 4x4x4 MFMA) | `instances/convolution.md` |
+| `conv_direct_grouped_wgrad_mfma.py` | `GroupedWgradMfmaSpec` (4/8-channel grouped wgrad, 4x4x4 MFMA) | `instances/convolution.md` |
 | `img2col.py` | `Img2ColSpec` | `instances/convolution.md` |
 | `pooling.py` | `PoolingProblem`, `Pooling2DSpec`, `PoolOp` | `instances/convolution.md` |
 
-ABI: `(A, B, D, A_bytes, B_bytes, D_bytes)` for implicit-GEMM / direct grouped conv. Img2col writes `Y`. Pooling reads `X` and writes `Y`.
+ABI: conv kernels are ahead-of-time compiled and shape-generic. Every implicit-GEMM / direct grouped conv kernel takes `(A, B, D, A_bytes, B_bytes, D_bytes)` followed by the problem block -- extents, strides, padding, dilation, groups and the host-computed magic-division constants -- whose names and order come from `kernels.common.conv_abi` (`conv_arg_names(direction)` / `conv_direct_arg_names(direction)`; C++ twin `instance_conv_abi.h`). Hosts fill them with `kernels.common.conv_args.ConvArgs.from_problem(...).to_launch_values(...)`; wgrad appends the split-K `ks` / `ks_count` pair (and the two-stage `ws_ptr` / `ws_bytes`), dgrad its sub-GEMM table. See `instances/convolution.md`. Img2col writes `Y`. Pooling reads `X` and writes `Y`.
 
 Layouts: NHWC input, KYXC weight, NHWK output for conv. Grouping via `cpg`/`kpg`.
 
@@ -88,6 +99,31 @@ Coverage: fp16 / bf16, head_size in `{64, 128, 256}`, block_size in `{16, 64}`, 
 
 FP8 K/V cache + output scale/clamp is wired through `UnifiedAttentionProblem.use_fp8` (the kernel takes per-tensor `k_scale` / `v_scale` and stores the cache as `fp8e4m3`); see attention parity README.
 
+## Attention Backward Family (SDPA dQ / dK / dV)
+
+Library builders under `library/kernels/` (Python-only; see the C++-engine
+statement in `instances/attention_bwd.md` section 0.3). The `fmha_bwd.py`
+row above is a separate, older scalar backward.
+
+| File | Spec / entry points | Doc |
+|-----------------------------------|-------------------------------------------------------------------|------------------------------|
+| `common/attention_bwd.py` | `AttnBwdSpec`, `validate_attn_bwd_spec`, `build_attn_bwd_main` (layout-general main kernel) | `instances/attention_bwd.md` |
+| `common/attention_bwd_dq.py` | `AttnBwdDqSpec`, `build_attn_bwd_dq` (split dQ kernel) | `instances/attention_bwd.md` |
+| `common/attention_bwd_aux.py` | `AttnBwdAuxSpec`, `build_attn_bwd_prep`, `build_attn_bwd_convert`, `build_attn_bwd_reduce`, `build_attn_bwd_page_zero`, `build_attn_bwd_page_convert` | `instances/attention_bwd.md` |
+| `common/attention_bwd_plan.py` | `AttnBwdRequest`, `attn_bwd_support`, `attn_bwd_plan`, `attn_bwd_declaration`, `AttnBwdPolicy` | `instances/attention_bwd.md` |
+| `common/attention_bwd_run.py`, `attention_bwd_cache.py`, `attention_bwd_comgr.py` | launch glue, the on-disk code-object cache, the torch-free production comgr pin | `instances/attention_bwd.md` |
+| `common/attention_dense_bwd_spec.py`, `attention_dense_bwd_plan.py`, `attention_dense_bwd_dq.py`; `gfx942/attention_dense_bwd.py`, `gfx950/attention_dense_bwd.py` | `AttentionDenseBwdSpec`, `ArchAttentionDenseBwdSpec` (bound per target by `Gfx942AttentionDenseBwdSpec`, `Gfx950AttentionDenseBwdSpec`), `build_attention_dense_bwd`, `AttentionDenseBwdDqSpec`, `attn_dense_bwd_plan` (dense family) | `instances/attention_bwd.md` (8.2) |
+| `common/attention_bwd_unified.py`, `attention_bwd_unified_plan.py`, `attention_bwd_unified_run.py` | `AttnBwdUnifiedSpec`, `build_attn_bwd_unified_main`, `AttnBwdUnifiedRequest`, `attn_bwd_unified_support`, `attn_bwd_unified_plan` (paged KV) | `instances/attention_bwd_unified.md` |
+| `common/_attention_bwd_*.py`, `_attention_dense_bwd_shell.py`, `_lse_store.py` | family glue (tile step, LDS planner, rings, schedules, addressing, sinks, refusals); the forward LSE store | `instances/attention_bwd.md` (0.2) |
+
+Routing, tuning and the dispatcher: `library/dispatch/attention_bwd/`
+(`tuning_common.py`, `dense_tuning.py`, `unified_tuning.py`,
+`gfx942_tuning.py`, `gfx950_tuning.py`, `tuned_tables.py`, `routing.py`,
+`registry.py`). Coverage: fp16 / bf16, head sizes 32 / 64 / 128 (d = 256
+declined); general family on gfx942, gfx950, gfx1151, gfx1201; dense and
+split dQ on gfx942 / gfx950; unified served on gfx942 / gfx950 (built on
+RDNA, declined `ARCH_NOT_VALIDATED` there).
+
 ## Linear Attention Family
 
 A gated delta-rule recurrence rather than softmax attention, so it shares no
@@ -102,6 +138,22 @@ Three kernels: a fused prefill, and a two-phase split path (per-chunk tile
 builder, then state scan). gfx942 and gfx950 are bf16-only; prefill only, no varlen.
 Dispatch is `library/dispatch/kda/` (`dispatch_kda`), which defaults to the
 fused kernel and keeps the split halves opt-in.
+
+### GDN
+
+| File | Spec | Doc |
+|-----------------------------------|-------------------------------------------------------------------|------------------------------|
+| `gfx950/gdn_decode.py` | `GdnDecodeSpec` (gated delta rule; single-token decode over a paged recurrent state) | `instances/gdn.md` |
+
+Runtime entry points: `dispatch_gdn_decode(GdnDecodeRequest(...))` (single-token decode) and `dispatch_gdn_prefill(GdnPrefillRequest(...))` (split chunkwise prefill — the shared KDA chunkwise kernels run in `gate_kind="gdn"` mode; there is no fused single-kernel GDN prefill, so the caller pins `chunk_prep` then `chunk_scan`).
+
+Linear attention carries a fixed-size recurrent state per value head instead of re-reading past tokens, so cost per token does not grow with sequence length. GDN ships a single-token decode kernel and a split chunkwise prefill mode; gfx950.
+
+GDN decode runs one static `auto` configuration per case (gate kind x fused x
+state width; `instances/gdn.md`); batch changes its grid, not its configuration.
+GDN prefill picks `value_splits` per `batch_heads`. Both tune the same tension
+-- splitting a head's value dimension across workgroups buys parallelism when
+the natural grid starves, and costs redundant tile reads once it does not.
 
 ## Small Ops
 
@@ -148,6 +200,24 @@ allowed_block_sizes = (64, 128, 256, 512, 1024)
 allowed_vecs = (2, 4, 8)
 ```
 
+## Sparse Attention Family (DSA)
+
+The DeepSeek Sparse Attention scorer. A score-only kernel: it rates every allowed
+key against the query so a later top-k can keep the highest-scoring subset. No
+softmax and no value output, and the index-key is shared across heads (MQA-style,
+one D_I vector per token).
+
+| File | Spec | Doc |
+|-----------------------------------|-------------------------------------------------------------------|------------------------------|
+| `common/lightning_indexer.py` | `IndexerSpec`, `IndexerTileSpec` | `instances/dsa.md` |
+
+Arch-neutral kernel on gfx942 and gfx950 (bf16), runtime seqlen_q/seqlen_k, with
+two bodies: a scalar reduction (sub-tile seqlen_q and single-query decode
+fallback, correctness oracle) and an MFMA matrix-core body (tail-masked for any
+seqlen_q/seqlen_k; index_head_dim 16-aligned). fp8 is a later phase. Dispatch is
+`library/dispatch/dsa/` (`dispatch_lightning_indexer`) in its own registry, so a
+DSA request never selects a standard-attention kernel and vice versa.
+
 ## Cross-Family Capability Matrix
 
 From `helpers/README.md`:
@@ -163,13 +233,20 @@ From `helpers/README.md`:
 | batched_gemm | - | - | - | - | - | yes | - | (wraps gemm_universal) |
 | grouped_gemm | - | planned | - | - | - | yes | - | (wraps gemm_universal) |
 | conv_implicit_gemm | yes (buffer) | full (unmerge+embed+pad) | - | - | - | yes | - | `AsyncTileLoader`, `CoalescedTileLoader`, `CShuffleEpilogue`, `MfmaAtom`, `WarpGrid`, `LdsLayout`, `SchedulePolicy` |
-| conv_direct_grouped | - | input/output/weight + H/W pad | - | - | - | yes | - | `MfmaAtom` (4x4x4 / 16x16x{16,32}) |
+| conv_direct_grouped | - | input/output/weight + H/W pad | - | - | - | yes | - | `MfmaAtom` (4x4x4 / 16x16x{16,32}), `chiplet_transform_chunked_runtime` (`helpers.grid`, `xcd_tiles`) |
+| conv_direct_nongrouped | - | - | - | - | - | yes | - | `chiplet_aware_super_tile_dynamic` (`helpers.grid`), `emit_direct_params` (AOT kernargs) |
+| conv_direct_dgrad_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `ds_read_tr16_b128` |
+| conv_direct_fwd_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, split barriers, `permlane16` |
+| conv_fwd_small_wmma (smallc / smallk) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds` |
+| conv_winograd (fwd / gemm_wmma / gen / fused_1d_wmma) | yes (buffer) | - | - | - | - | yes | - | TDM `tensor_load_to_lds` / `tensor_store_from_lds` (K3), `chiplet_transform_chunked_runtime` (`helpers.grid`), `global_load_async_to_lds`, `ds_read_tr16_b128` (fused 1-D) |
+| conv_direct_wgrad (tiled / dw / gather) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), kernel attr `lds_alias_scopes` |
 | img2col | - | reuses A descriptor | - | yes | - | yes | - | - |
 | pooling | - | full (input + pad) | - | yes | - | yes | - | - |
 | attention_unified | - | Q + output + paged-KV | - | - | - | yes | - | `OnlineSoftmaxState`, `PagedKvDescriptor` |
 | attention_tiled_2d | - | Q + output + paged-KV | - | - | - | yes | - | `TransposeLdsReader`, `OnlineSoftmaxState`, MFMA helpers |
 | attention_tiled_3d | - | Q + workspace + paged-KV| - | - | - | yes | - | `TransposeLdsReader`, `OnlineSoftmaxState`, MFMA helpers |
 | kda_chunkwise | - | - | - | - | yes (grouped cumsum) | yes | - | `MfmaAtom` (bf16 16x16x16 / 32x32x8), `SignatureBuilder` |
+| lightning_indexer | - | - | - | - | yes (dot + head sum) | yes | - | scalar FMA reduction (bf16), `SignatureBuilder` |
 
 ## Building Any Instance
 
@@ -192,3 +269,11 @@ art = compile_kernel(kernel)
 `art.hsaco` is ready for `KernelLauncher`; `art.llvm_text` is ready for `analyze_llvm_ir`; `art.timings` is the per-stage codegen budget.
 
 For end-to-end execution, see `runtime/compile_launch_and_manifest.md` and `runtime/manifest_schema.md`.
+
+## Native gfx950 block-scaled GEMM
+
+[`gfx950/block_scaled_gemm.py`](../../python/rocke/instances/gfx950/block_scaled_gemm.py)
+provides `BlockScaledGemmSpec`, `build_block_scaled_gemm`, signature and grid helpers.
+It consumes all 25 F8/F6/F4 format pairs with K32 E8M0 scales and a wave64
+32x32x64 native scaled MFMA. See [the family contract](gfx950_block_scaled_gemm.md)
+and [F8, F6, F4 and mixed examples](../../python/rocke/examples/gfx950/gemm/README.md).

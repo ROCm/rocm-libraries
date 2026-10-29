@@ -74,6 +74,20 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "num_kv_heads",
         "num_query_heads",
     ),
+    # Layout-general attention backward: only the head size is problem shape.
+    "kernels.common.attention_bwd.AttnBwdSpec": ("head_size",),
+    "kernels.common.attention_bwd_aux.AttnBwdAuxSpec": ("head_size",),
+    "kernels.common.attention_bwd_dq.AttnBwdDqSpec": ("head_size",),
+    # Dense backward split dQ kernel: the dense problem shape (batch is a
+    # runtime kernarg); its dQ tuning rides in the defaulted ``dq`` field.
+    "kernels.common.attention_dense_bwd_dq.AttentionDenseBwdDqSpec": (
+        "head_size",
+        "num_kv_heads",
+        "num_query_heads",
+        "seqlen_kv",
+        "seqlen_q",
+    ),
+    "kernels.common.attention_bwd_unified.AttnBwdUnifiedSpec": ("head_size",),
     "kernels.common.attention_unified.UnifiedAttention2DSpec": ("problem",),
     "kernels.common.attention_unified.UnifiedAttention3DSpec": ("problem",),
     "kernels.common.attention_unified.UnifiedAttentionProblem": (
@@ -131,7 +145,19 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "seqlen_q",
     ),
     "kernels.common.sparse_attention.VsaSparseSpec": ("common", "seqlen_k", "seqlen_q"),
-    "kernels.gfx1151.wmma_fmha_fwd.WmmaFmhaFwdSpec": ("head_size", "num_query_heads"),
+    # The lightning indexer's problem shape: how many query rows, how many keys,
+    # and how many index heads. These size the grid and the score matrix, so a
+    # descriptor cannot omit them. `index_head_dim` and everything else default.
+    # `IndexerTileSpec` (the nested `tile` struct) demands nothing -- every knob
+    # carries a default.
+    "kernels.common.lightning_indexer.IndexerSpec": (
+        "n_index_heads",
+        "seqlen_k",
+        "seqlen_q",
+    ),
+    "kernels.common.lightning_indexer.IndexerTileSpec": (),
+    "kernels.gfx1151.wmma_fmha_decode.WmmaFmhaDecodeSpec": ("head_size",),
+    "kernels.gfx1151.wmma_fmha_fwd_v2.WmmaFmhaFwdV2Spec": (),
     "kernels.gfx1250.attention_tiled_2d.UnifiedAttention2DTiledSpec": (
         "block_size",
         "dtype",
@@ -167,6 +193,14 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     # Both dense specs inherit the architecture-neutral required shape fields.
     "kernels.gfx942.attention_dense.Gfx942AttentionDenseSpec": (
         "batch",
+        "head_size",
+        "num_kv_heads",
+        "num_query_heads",
+        "seqlen_kv",
+        "seqlen_q",
+    ),
+    # Dense attention backward: the problem shape (batch is a runtime kernarg).
+    "kernels.gfx942.attention_dense_bwd.Gfx942AttentionDenseBwdSpec": (
         "head_size",
         "num_kv_heads",
         "num_query_heads",
@@ -217,6 +251,13 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "seqlen_kv",
         "seqlen_q",
     ),
+    "kernels.gfx950.attention_dense_bwd.Gfx950AttentionDenseBwdSpec": (
+        "head_size",
+        "num_kv_heads",
+        "num_query_heads",
+        "seqlen_kv",
+        "seqlen_q",
+    ),
     "kernels.gfx950.attention_tiled_2d.UnifiedAttention2DTiledSpec": (
         "block_size",
         "dtype",
@@ -245,14 +286,88 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "num_query_heads",
         "num_segments",
     ),
+    "kernels.gfx950.gdn_decode.GdnDecodeSpec": (),
     # gfx950's KDA specs carry extra fusion / split knobs over gfx942's, all
     # defaulted, so the required set is empty on this arch too.
     "kernels.gfx950.kda_chunkwise.KdaChunkFusedSpec": (),
     "kernels.gfx950.kda_chunkwise.KdaChunkPrepSpec": (),
     "kernels.gfx950.kda_chunkwise.KdaChunkScanSpec": (),
     "kernels.gfx950.kda_chunkwise.KdaTileSpec": (),
+    "kernels.mla.mla_prefill_gfx942.MlaPrefillSpec": ("num_heads",),
     # Reached through a spec field, so a descriptor has to express it too.
     "rocke.helpers.qk_scale.QkScaleSpec": ("layout",),
+    # Convolution specs (migrated from platform to library in AICK-5627).
+    # Required fields are the problem shape; everything else carries a default.
+    "kernels.common._conv_implicit_gemm_common.ConvProblem": (
+        "C",
+        "Hi",
+        "K",
+        "N",
+        "Wi",
+        "X",
+        "Y",
+    ),
+    "kernels.common._conv_implicit_gemm_common.ConvDataSpec": (),
+    "kernels.common._conv_implicit_gemm_common.ConvAccumulatorEpilogue": (),
+    "kernels.common.conv_implicit_gemm.ImplicitGemmConvSpec": ("problem",),
+    "kernels.common.conv_implicit_gemm_wgrad.WgradConvSpec": ("problem",),
+    "kernels.common.conv_wgrad_workspace_reduce.WgradReduceSpec": ("problem",),
+    "kernels.common.conv_implicit_gemm_dgrad.DgradConvSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectConvProblem": (
+        "H",
+        "N",
+        "W",
+        "cpg",
+        "groups",
+        "kpg",
+    ),
+    "kernels.common.conv_direct_grouped.DirectConv4cSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectConv8cSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectConv16cSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectConv32cSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectDepthwiseSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectDepthwiseColSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectDepthwiseSpatialSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectDepthwiseTiledSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectConvSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectConvDgradSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectDepthwiseDgradSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectDepthwiseDgradStreamSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectDepthwiseDgradWindowedSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectTransposeWeightsDgradSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectReorganizeWeightsSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectCoalescedWeightsDgradSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectMfmaDgradSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectConvWgradSpec": ("problem",),
+    "kernels.common.conv_direct_nongrouped.DirectNongroupedConvSpec": ("problem",),
+    "kernels.common.conv_direct_dgrad_wmma.DirectDgradWmmaSpec": ("problem",),
+    "kernels.common.conv_direct_fwd_wmma.DirectFwdWmmaSpec": ("problem",),
+    "kernels.common.conv_fwd_small_wmma.FwdSmallcWmmaSpec": ("problem",),
+    "kernels.common.conv_fwd_small_wmma.FwdSmallkWmmaSpec": ("problem",),
+    "kernels.common.conv_direct_wgrad_tiled.DirectWgradTiledSpec": ("problem",),
+    "kernels.common.conv_direct_dw_wgrad.DwWgradLdsSpec": ("problem",),
+    "kernels.common.conv_direct_dw_wgrad_mfma.DwWgradMfmaSpec": ("problem",),
+    "kernels.common.conv_direct_dw_wgrad.DwWgradColsSpec": ("problem",),
+    # The dW extent per output channel the fold sums partial slots over.
+    "kernels.common.conv_direct_dw_wgrad.DwWgradFoldSpec": ("taps",),
+    "kernels.common.conv_direct_wgrad_gather.WgradGatherSpec": ("problem",),
+    "kernels.common.conv_direct_nongrouped.DirectSplitReduceSpec": (),
+    "kernels.common.conv_direct_grouped_wgrad_mfma.GroupedWgradMfmaSpec": ("problem",),
+    "kernels.common.deep_fused_conv_pool.FusedConvPoolProblem": ("conv",),
+    "kernels.common.deep_fused_conv_pool.DeepFusedConvPoolSpec": ("problem",),
+    "kernels.common.img2col.Img2ColSpec": ("problem",),
+    "kernels.gfx1151.deep_fused_conv_pool.Gfx1151DeepFusedConvPoolSpec": ("problem",),
+    # Winograd forward (gfx1250)
+    "kernels.common.conv_winograd_fwd.WinogradFwdSpec": ("problem",),
+    "kernels.common.conv_winograd_gemm_wmma.WinogradGemmReduceSpec": (),
+    "kernels.common.conv_winograd_gemm_wmma.WinogradGemmWmmaSpec": (),
+    # Winograd forward: merged transform launch
+    "kernels.common.conv_winograd_fwd.WinogradMergedSpec": ("fwd",),
+    # Generalized Winograd forward
+    "kernels.common.conv_winograd_gen.WinoAxis": ("m", "r"),
+    "kernels.common.conv_winograd_gen.WinogradGenSpec": ("ax_x", "ax_y", "problem"),
+    # Fused 1-D Winograd forward
+    "kernels.common.conv_winograd_fused_1d_wmma.FusedWino1DSpec": ("ax", "problem"),
 }
 
 

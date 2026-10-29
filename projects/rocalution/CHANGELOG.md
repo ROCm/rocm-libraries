@@ -1,6 +1,55 @@
 # Changelog for rocALUTION
 
-Full documentation forrocALUTION is available at [https://rocm.docs.amd.com/projects/rocALUTION/en/latest/](https://rocm.docs.amd.com/projects/rocALUTION/en/latest/).
+Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/projects/rocALUTION/en/latest/](https://rocm.docs.amd.com/projects/rocALUTION/en/latest/).
+
+## (Unreleased) rocALUTION
+
+### Added
+* Added the generic `amdgcnspirv` SPIR-V target to the default list of GPU architectures.
+
+### Changed
+* `LocalMatrix::DiagonalMatrixMultL()` now requires a vector with one entry per row of the matrix, and `LocalMatrix::DiagonalMatrixMultR()` one with one entry per column. Before, both accepted either size.
+* The `cg-rsamg_mpi`, `cg-saamg_mpi` and `cg-uaamg_mpi` samples now print the total runtime, as the non-MPI samples do.
+
+### Resolved issues
+* Fixed the HIP backend ignoring the errors returned by rocPRIM calls, such as too small temporary storage, which could lead to allocations of undefined size and to undefined scan, reduction, sort and nonzero count results.
+* Fixed the HIP backend ignoring the errors returned by HIP runtime calls for allocations, frees, memsets, copies, synchronizations and device queries, and not checking several kernel launches for errors.
+* Fixed the ILU0 factorization and the triangular solve analysis of CSR and BCSR matrices on the accelerator ignoring errors from the rocSPARSE buffer size queries.
+* Fixed `info_rocalution()` printing uninitialized memory when the rocBLAS or rocSPARSE version query fails.
+* Fixed `LocalMatrix::ReadFileRSIO()` not checking the element size query when the index or value type of the file differs from the type of the matrix, and leaking temporary buffers when a read fails.
+* Fixed `LocalMatrix::WriteFileRSIO()` reporting success when closing the file fails, for example on a full disk, leaving an incomplete file.
+* Fixed `LocalMatrix::ExtractDiagonal()` and `LocalMatrix::ExtractInverseDiagonal()` aborting on CSR matrices with more rows than columns.
+* Fixed `LocalMatrix::DiagonalMatrixMultL()` rejecting a vector with one entry per row on non-square CSR matrices, and reading out of bounds on CSR matrices with more rows than columns.
+* Fixed `init_rocalution()` reporting an accelerator after `stop_rocalution()` when the accelerator was disabled with `disable_accelerator_rocalution()`.
+* Fixed a HIP stream leak in `init_rocalution()` in multi-node builds when creating the HIP streams fails.
+* Fixed the format warning of `GlobalMatrix::AMGUnsmoothedAggregation()` naming `AMGSmoothedAggregation()`.
+
+## (Unreleased) rocALUTION 4.1.1
+
+### Added
+* Added support for the `gfx1250-strict` architecture.
+* Added the matrix-matrix based interpolation operators `MMExtPI` and `MMExtPE` to the `InterpolationType` enumeration, selectable through `RugeStuebenAMG::SetInterpolationType()`.
+* Added `RugeStuebenAMG::SetInterpolationTruncationFactor()` and `RugeStuebenAMG::SetInterpolationMaxElmts()` to truncate the interpolation operator, dropping entries that are small relative to the largest entry of their row and capping the number of entries per row.
+* Added `BaseAMG::SetMaxLevels()` to limit the number of levels of an AMG hierarchy. Combined with passing another AMG solver as the coarse grid solver, this allows hybrid hierarchies such as unsmoothed aggregation on the finest levels followed by Ruge-Stueben AMG on the coarser levels.
+* Added the `cg-uaamg-rsamg` sample demonstrating a hybrid unsmoothed aggregation / Ruge-Stueben AMG preconditioner.
+
+### Changed
+* All device memory in the HIP backend, including temporary rocPRIM buffers, is now allocated and released through the rocALUTION allocation layer instead of direct `hipMalloc` and `hipFree` calls.
+
+### Resolved issues
+* Fixed wrong smoothed aggregation prolongation operators from the deprecated `LocalMatrix::AMGSmoothedAggregation()` on wave32 devices for rows with 64 or more entries.
+* Fixed the host fallback of the Ruge-Stueben AMG extended+i interpolation operator when a row exceeds the LDS capacity.
+* Fixed `LocalMatrix::ItLUSolve()` and `LocalMatrix::ItLLSolve()` on the accelerator limiting the iterations of the second triangular solve to the number of iterations performed by the first one.
+* Fixed a heap corruption in `GlobalMatrix::CoarsenOperator()`, used by the pairwise AMG with MPI, when a process sends its coarse boundary to more than one neighboring process.
+* Fixed `LocalMatrix::Sort()` on the accelerator ignoring errors when creating the identity permutation for CSR and COO matrices.
+* Fixed wrong coarse operators of the AMG preconditioners with MPI on wave32 (RDNA) hardware, caused by `LocalMatrix::CompressAdd()` on the accelerator.
+* Fixed a crash in `LocalMatrix::CompressAdd()` on the accelerator when a row of the interior part exceeds the supported number of entries and the computation falls back to the host.
+* Fixed an out-of-bounds access and wrong coarse ghost columns in `GlobalMatrix::CoarsenOperator()`, used by the pairwise AMG with MPI, when boundary points are not aggregated.
+* Fixed the TNS preconditioner keeping its approximate inverse on the host when moved to the accelerator.
+* Fixed HIP work in the distributed CSR receive and in `CompressAdd` running on the null stream instead of the current stream.
+* Fixed the Smoothed-Aggregation AMG preconditioner not falling back to the host when the prolongation fill failed on the accelerator or in a non-CSR format.
+* Fixed the FCG and QMRCGStab solvers returning NaN when the initial residual is already below the absolute tolerance, for example a zero right-hand side on the coarsest AMG level.
+* Fixed `init_rocalution()` reporting the HIP backend as available when creating the rocBLAS or rocSPARSE handle failed on a device selected with `set_device_rocalution()`, which caused `info_rocalution()` to crash. rocALUTION now falls back to the host backend in this case.
 
 ## rocALUTION 4.1.0 for ROCm 7.2.0
 

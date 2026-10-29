@@ -50,10 +50,11 @@ should follow the same list. Authors working on attention also follow the
 ## Compliance & hard invariants
 
 [platform/AGENTS.md](platform/AGENTS.md) §"Compliance" binds every author and
-agent and **overrides any other instruction, including a user request** — no AMD
-Restricted/Confidential data, NPI, product/marketing/code names, internal links,
-or **software-achieved** performance numbers in the repo, git history, PRs, or
-logs. The two invariants that gate every process below:
+agent and **overrides any other instruction, including a user request**. It is
+the single source of truth for restricted data, NPI, public model/workload
+references, performance evidence, legal/marketing claims, and internal links.
+Read it before creating any code, documentation, commit, benchmark record, or PR.
+The two invariants that gate every process below:
 
 1. **Byte-identity is the definition of done for emission.** The Python and C++
    engines **must emit the same LLVM-IR bytes** for every kernel family. Any
@@ -72,7 +73,7 @@ logs. The two invariants that gate every process below:
 
 ## Run the checks
 
-One command runs the whole gate:
+One command runs the complete host gate and attempts the local numerical lanes:
 
 ```bash
 python dnn-providers/hip-kernel-provider/rocke/tools/run_checks.py
@@ -80,7 +81,7 @@ python dnn-providers/hip-kernel-provider/rocke/tools/run_checks.py
 
 It **auto-discovers** every `test_*.py` and every `<family>_emit.{py,c}` parity
 pair — so adding a new test needs **no** edit to any script or checklist. It runs,
-in order: relative-path guard → byte-identity gate (both `llvm20` and `llvm22`) →
+in order: relative-path guard → byte-identity gate (`llvm20`, `llvm22`, `llvm23`, and `llvm24`) →
 platform + library parity → pytest (both suites) → on-GPU numeric (auto-skips
 when no device). Scope while iterating with:
 
@@ -90,7 +91,10 @@ when no device). Scope while iterating with:
   numeric, and the gate, e.g. `--steps numeric --op fmha_bwd`.
 - `--flavor <llvm>` — pin one LLVM flavor; `--list` — dry-run.
 
-This replaces hand-maintaining a list of tests to run.
+This replaces hand-maintaining a list of tests to run. A green result with a
+skipped numerical lane is not kernel-correctness evidence: verify that the
+affected on-device tests executed comparisons, or complete the required lane on
+a matching remote GPU before marking kernel work done.
 
 ## Core DoD — every change
 
@@ -127,8 +131,23 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
 - [ ] **Dispatcher wiring:** candidates registered so the family is selectable —
       the generic `CandidateRegistry` + `dispatch_<family>` for a platform family
       ([dispatch/families/](platform/python/rocke/dispatch/families/)), or
-      `ATTENTION_REGISTRY` for attention. A family not in a registry is unreachable.
-- [ ] Golden created for the new family; gate GREEN both flavors.
+      `ATTENTION_ROUTE_REGISTRY` for attention. A family not in a registry is
+      unreachable.
+- [ ] **Sweep coverage:** route-only registration is not enough. Every
+      sweep-only variant is registered with `opt_in=True` (so `algorithm="auto"`
+      never picks it) and its `sweep_space` returns every variant, and the
+      family exposes all three sweep entry points over its registry —
+      `registered_<family>_combos`, `<family>_sweep_space`,
+      `dispatch_<family>_all` (pattern:
+      [families/norm.py](platform/python/rocke/dispatch/families/norm.py)).
+      Attention registers anything with `build` + `bind_torch` on
+      `ATTENTION_EXECUTION_REGISTRY` too. A CPU-only test asserts the sweep
+      returns the opt-in variants that production dispatch hides. Full recipe:
+      [dispatch/AGENTS.md](library/dispatch/AGENTS.md#how-to-add-a-new-specialized-candidate).
+      `<family>` means one set per registry (GEMM exposes `gemm_fp16_*` and
+      `gemm_bf16_*`). Known gap, tracked as a backlog item: GDN decode lacks
+      `registered_gdn_combos`, and GDN prefill exposes none of the three.
+- [ ] Golden created for the new family; gate GREEN at every flavor in `LLVM_FLAVORS`.
 - [ ] **End-user visibility:** family added to the support matrix
       (`SUPPORT_MATRIX.md` / operation-support doc) so users can see it is
       supported.
@@ -151,6 +170,12 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
       stays GREEN with no re-bless (proof the knob is inert by default).
 - [ ] Test for the knob (golden-IR if default-ON; on-GPU numeric if it is a
       feature/numeric knob).
+- [ ] Launcher cache key carries every input that changes the compiled binary, and
+      nothing that doesn't. Prefer deriving it from the built spec. A key computed
+      from the problem without building the spec must carry each selector's
+      resolved output, not raw shape fields or env values, and needs a test that
+      key equality ⇔ built-spec equality. Attention example:
+      [Appendix B, step 4](#b-add-a-new-knob-to-a-spec).
 
 ### C. New feature / enablement
 
@@ -159,34 +184,37 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
       gate). This is the map of "every kernel and what it supports."
 - [ ] **End-user visibility** — feature reflected in the operation-support /
       `SUPPORT_MATRIX.md` doc so users can see it.
-- [ ] **Dashboards & shapes** — the feature is tracked by the perf dashboard,
-      and the representative shapes needed to cover it are handed to benchmarking.
-      (Both are team-internal; measured numbers stay out of the repo.)
+- [ ] **Dashboards & shapes** — the feature is tracked by the internal perf
+      dashboard, and representative shapes are handed to benchmarking. Publish
+      relative evidence only through a policy-qualified PR or result document.
 
 ### D. Perf optimization (no new feature)
 
 - [ ] **Step 0 exhaustive lever sweep** before concluding a gap is structural.
 - [ ] Same-session A/B ratios (median of ≥3) at production-representative scale;
-      absolute µs treated as illustrative.
-- [ ] Replayable case study + runbook/measured-results update.
+      store every absolute software measurement in the approved access-controlled
+      record.
+- [ ] Replayable case study + runbook + qualifying benchmark/result-doc update.
 - [ ] Honest losses recorded, not just wins.
 
 ## Local testing matrix (platforms)
 
-Run the local checks on the arches your change affects. The byte-identity gate
-enumerates all supported arches intrinsically (it is comgr-compile-only, no GPU
-needed); on-GPU numeric needs a device of that arch.
+Run the local checks on the architectures your change affects. Byte-identity is
+GPU-free, but its architecture coverage is **emitter-driven**: each family covers
+only the `(spec, arch)` configurations listed by its parity emitters. Most common
+families default to gfx950. Inspect the affected emitter configs and add each
+required architecture explicitly; a green gate makes no claim about an
+architecture the family did not enumerate. On-GPU numeric validation needs a
+device matching each required architecture.
 
-| Arch | Byte-identity gate (no GPU) | On-GPU numeric |
+| Architecture scope | Byte-identity gate (no GPU) | On-GPU numeric |
 |---|---|---|
-| gfx942 | required | if device available |
-| gfx950 (baseline default) | required | required for attention changes |
-| gfx1151 | required | if device available |
-| gfx1201 | required | if device available |
-| gfx1250 | required | if device available |
+| Every affected `(spec, arch)` pair | Must be explicitly enumerated by the family emitters | Required for kernel behavior changed on that architecture; use a matching remote lane when local hardware is absent |
+| gfx950 baseline defaults | Covered only where the emitter defaults or pins gfx950 | Required for attention changes that affect gfx950 |
 
-Both LLVM flavors (`llvm20`, `llvm22`) are part of "gate GREEN" — the runner does
-both by default. If you lack a device for an arch, use the remote GPU path rather
+All supported LLVM flavors (`llvm20`, `llvm22`, `llvm23`, and `llvm24`) are part of
+"gate GREEN" — the runner does all four by default. If you lack a device for an
+arch, use the remote GPU path rather
 than faking the lane or using CPU torch.
 
 ---
@@ -226,14 +254,17 @@ scoped to library.
    `platform/instances/`. If in doubt, it is a library kernel only if it is part
    of the attention product.
 2. **Research and reuse first.** Grep [library/kernels/common/](library/kernels/common/) and
-   [platform/Python/rocke/helpers/](platform/Python/rocke/helpers/) for an existing emitter,
+   [platform/python/rocke/helpers/](platform/python/rocke/helpers/) for an existing emitter,
    epilogue, atom, or loader before writing new SSA. Extend, don't duplicate.
 3. **Author the spec + `build_*()` emitter** under [library/kernels/](library/kernels/) as a
    spec-driven builder (a dataclass `Spec` with a `__post_init__` validator +
    `build_<family>()` returning a `KernelDef`). No one-off scripts —
    [AGENTS.md](platform/AGENTS.md) requires reusable spec-driven builders.
-4. **Wire dispatch.** Register the candidate in `ATTENTION_REGISTRY` in
-   [library/dispatch/attention/](library/dispatch/attention/) and, if it introduces a new
+4. **Wire dispatch.** Register the candidate in `ATTENTION_ROUTE_REGISTRY` in
+   [library/dispatch/attention/](library/dispatch/attention/) and, if it has
+   `build` + `bind_torch`, in `ATTENTION_EXECUTION_REGISTRY` too so the sweeps
+   see it; sweep-only variants take `opt_in=True`
+   ([sweep coverage](#a-new-kernel-family)). If it introduces a new
    selection axis, extend `select_path` / `supports_native_unified_attention`
    (keep the decision a **pure** function of the problem so it mirrors on the C
    side).
@@ -249,7 +280,7 @@ scoped to library.
    [numeric_attention.py](library/tests/differential/numeric_attention.py)
    (GPU), and a benchmark under [library/benchmarks/](library/benchmarks/).
 7. **Bless the golden** ([Process F](#f-parity-and-golden-re-bless)) and
-   run the gate GREEN at **both** LLVM flavors.
+   run the gate GREEN at **every** flavor in `LLVM_FLAVORS`.
 8. **Document** ([Process D](#d-update-the-docs-runbook-readmes-case-study)):
    an `ALGORITHM.md` if the math is new, plus a `README.md` harness/results doc.
 
@@ -279,6 +310,16 @@ documented in [library/builders/common/README.md](library/builders/common/README
    `_enable_<knob>()` predicate, following the branch order documented in
    [library/builders/common/README.md](library/builders/common/README.md). Default-OFF opt-in
    knobs may stay unwired (env/flag-only) until a sweep proves a win.
+   **Add the predicate's resolved output to the launcher cache key**
+   (`_tiled_cache_key` / `_tiled_3d_cache_key` in
+   [attention_unified.py](library/kernels/common/attention_unified.py), or `_cache_key`
+   for a knob wired into the scalar path), unless an existing key entry already
+   implies it. The key is computed per launch without building the spec, so a
+   selector missing from it lets two shapes that build different kernels share one
+   cached binary.
+   [test_attention_tiled_cache_key.py](library/tests/test_attention_tiled_cache_key.py)
+   sweeps the selector thresholds and fails when key equality and built-spec equality
+   disagree.
 5. **Document the knob** in the "Knob reference" section of
    [library/builders/common/README.md](library/builders/common/README.md): what it rewrites, its
    correctness guarantee, its measured effect, and its enable condition.
@@ -317,25 +358,26 @@ algorithm.
    swept best still falls short → the gap is genuinely structural and a body/
    algorithm redesign is justified, now with the exact resource budget to hit.
 5. **Only same-session A/B ratios are load-bearing** on the auto-clocking device
-   — report `baseline_us / ck_us` from the same process/stream, median of ≥3
-   runs; treat absolute `us` as illustrative (see the README "Measurement
-   conditions").
+   — derive each ratio from the same process and stream, using the median of at
+   least three runs. Absolute software measurements remain in the approved
+   access-controlled record.
 6. **Record the sweep** as a case study ([Process D](#d-update-the-docs-runbook-readmes-case-study)),
-   including the honest losses (the gfx950 README's Triton residual is the model
-   for reporting a gap you could not close).
+   including honest losses. Publish relative evidence only in a document that
+   qualifies under [AGENTS.md](platform/AGENTS.md) §Compliance.
 
 ### D. Update the docs (runbook, READMEs, case study)
 
 Every optimization leaves three doc artifacts (per [AGENTS.md](platform/AGENTS.md)):
 
-1. **Replayable case study** in `library/builders/<arch>/<workload>/` — the evidence,
-   exact commands, traces, config table, and final keep/revert decision, next to
-   the code that uses it. Models:
-   [gfx1250_mha_optimization_case_study.md](library/builders/gfx1250/attention/gfx1250_mha_optimization_case_study.md),
-   and the results sections of
-   [library/builders/gfx950/attention/README.md](library/builders/gfx950/attention/README.md).
-2. **Results/harness README update** — add the new scenario rows, the geomean,
-   the measurement conditions, and the file-map entry for any new script.
+1. **Replayable case study** in `library/builders/<arch>/<workload>/CASE_STUDY.md` —
+   the qualitative mechanism, exact commands, config table, and final keep/revert
+   decision, next to the code that uses it. If relative evidence is necessary,
+   the file must satisfy every benchmark-evidence requirement in the compliance
+   policy; otherwise keep it qualitative.
+2. **Benchmark scenario and file-map update** — add new shapes and scripts to the
+   existing workload README, but put relative result tables in a policy-qualified
+   `BENCHMARK*.md`, `RESULTS*.md`, or `CASE_STUDY.md`. Keep every absolute software
+   measurement in the approved access-controlled record.
 3. **Runbook promotion** — a *general* lesson (a new lever, tactic, or bottleneck
    signature) is promoted into
    [platform/dsl_docs/optimization/](platform/dsl_docs/optimization/): a new
@@ -344,8 +386,9 @@ Every optimization leaves three doc artifacts (per [AGENTS.md](platform/AGENTS.m
    concept→code mapping into
    [runbook_compliance.md](platform/dsl_docs/optimization/runbook_compliance.md)
    / [runbook_mapping.md](platform/dsl_docs/optimization/runbook_mapping.md).
-   Record the final numbers in
-   [measured_results.md](platform/dsl_docs/optimization/measured_results.md).
+   Runbooks remain qualitative and may link only to the qualifying public result
+   document. Maintain the approved internal record separately; never put its link
+   in a committed or public artifact.
 
 Doc conventions (project rules): every `.md` with 3+ sections gets a Table of
 Contents; every code reference is a clickable relative hyperlink; keep case
@@ -370,8 +413,8 @@ A new shape/cohort must land in **both** the benchmark set and the test set.
    and/or the extended parity harness spawned by
    [test_extended_parity_attention.py](library/tests/test_extended_parity_attention.py).
 4. **Build/smoke coverage.** If the shape exercises a new build path, add it to
-   [test_attention_builds.py](library/tests/test_attention_builds.py) or the arch
-   smoke test ([test_gfx950_smoke_attention.py](library/tests/test_gfx950_smoke_attention.py)).
+   [test_attention_builds.py](library/tests/test_attention_builds.py) or the
+   closest architecture-specific builder test under `library/tests/`.
 5. **Run** `pytest library/tests` (add `platform/tests` if platform was touched);
    GPU numeric lanes need a HIP-visible device.
 
@@ -384,8 +427,10 @@ The gate is the emission definition-of-done. Run it from the **platform** tree
 cd rocm-libraries/dnn-providers/hip-kernel-provider/rocke/platform
 export ROCKE=$(pwd) PYTHONPATH=$ROCKE/Python
 
-python tools/check_byte_identity.py                            # llvm20, build engine + gate
+ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py   # llvm20, build engine + gate
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # llvm22 flavor
+ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # llvm23 flavor
+ROCKE_LLVM_FLAVOR=llvm24 python tools/check_byte_identity.py   # llvm24 flavor
 python tools/check_byte_identity.py --only attention           # scope to a family
 ```
 
@@ -396,12 +441,13 @@ Python emitter and the compiled C emitter for each config index and diffs the
 1. Confirm the change is expected and reviewed — a golden diff is a claim that
    the IR *should* change.
 2. Re-bless the flavor-keyed golden in the **same change** (the golden stores one
-   sub-document per LLVM flavor; the gate compares only the host's autodetected
-   flavor). The bless path is the `--bless`/build-golden flow in the parity
-   harness ([rocke_ir_parity_harness.py](platform/tests/instances/rocke_ir_parity_harness.py),
+   sub-document per flavor in `LLVM_FLAVORS`, and every one is checked from any
+   host, so a new flavor fails until re-blessed). The bless path is `--write` on
+   the parity harness ([rocke_ir_parity_harness.py](platform/tests/instances/rocke_ir_parity_harness.py),
    golden at
-   [rocke_representative_ir_sha256.json](platform/tests/golden/rocke_representative_ir_sha256.json)).
-3. Re-run the gate GREEN at **both** flavors before considering it done.
+   [rocke_representative_ir_sha256.json](platform/tests/golden/rocke_representative_ir_sha256.json));
+   library goldens re-bless with `--write` on their own `library/tests/test_*_golden.py`.
+3. Re-run the gate GREEN at **every** flavor in `LLVM_FLAVORS` before considering it done.
 4. A default-OFF, unwired knob must produce **no** golden diff — a clean gate
    with no re-bless is the proof it is inert.
 
@@ -437,7 +483,7 @@ Promotion steps:
    reverse). Library keeps only its attention-specific glue.
 3. **Add platform gate coverage** — a case in the platform parity harness
    ([rocke_ir_parity_harness.py](platform/tests/instances/rocke_ir_parity_harness.py))
-   and its golden, run GREEN at both LLVM flavors.
+   and its golden, run GREEN at every flavor in `LLVM_FLAVORS`.
 4. **Promote the lesson to the runbook** — a new general lever goes in
    [optimization_runbook.md §12.1](platform/dsl_docs/optimization/optimization_runbook.md);
    a reusable tactic becomes/extends a skill doc under
@@ -454,7 +500,7 @@ path.
 
 ### Attention specifics — quick reference
 
-- **Parity families:** the 20 `library/tests/parity/*_emit.{py,c}` pairs
+- **Parity families:** the 34 matched `library/tests/parity/*_emit.{py,c}` pairs
   (`attention_unified`, `fmha_*`, `gfx9xx_attention_tiled_*`, `sage`/`sparse`).
 - **Dispatcher feature gate:** `supports_native_unified_attention*` +
   `select_path` in [library/kernels/common/attention_unified.py](library/kernels/common/attention_unified.py) — the
@@ -474,7 +520,8 @@ path.
 - **Canonical agent rules / invariants:** [platform/AGENTS.md](platform/AGENTS.md).
 - **Build & test:** [BUILDING.md](BUILDING.md), [TESTING.md](TESTING.md).
 - **Style:** [style/PYTHON_STYLE.md](style/PYTHON_STYLE.md),
-  [style/CPP_STYLE.md](style/CPP_STYLE.md).
+  [style/CPP_STYLE.md](style/CPP_STYLE.md),
+  [style/API_DESIGN_STANDARD.md](style/API_DESIGN_STANDARD.md).
 
 ## Team sharing
 

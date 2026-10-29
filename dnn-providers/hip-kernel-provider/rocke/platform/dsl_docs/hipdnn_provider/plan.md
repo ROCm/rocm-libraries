@@ -371,7 +371,7 @@ real CPU-reference verification, both of which are meaningful only on a
 non-trivial kernel.
 
 **Op:** forward 2D convolution via `build_implicit_gemm_conv`
-(`dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/instances/common/conv_implicit_gemm.py`).
+(`dnn-providers/hip-kernel-provider/rocke/library/kernels/common/conv_implicit_gemm.py`).
 
 **Shape:** the bake-off shape from
 `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/examples/common/bake_off_implicit_gemm.py`
@@ -385,13 +385,18 @@ kernel (`bake_off_implicit_gemm.py:16–17`). Tolerable for an
 integration test; the second invocation hits the JIT cache and is
 sub-millisecond.
 
-**Launch ABI:** 6 kernel args — `A_ptr, B_ptr, D_ptr` (FP16 globals)
-plus `A_bytes, B_bytes, D_bytes` (i32). Grid is 2D over `(num_pid_n,
-num_pid_m, 1)` where `num_pid_m = ceil((N·Ho·Wo)/tile_m)` and
-`num_pid_n = ceil(K/tile_n)`. Block size: `warp_m · warp_n ·
-wave_size`. All of this is derivable from the spec at JIT time and
-emitted by the DSL into the kernel artifact's launch metadata — the C++
-side does not hard-code it.
+**Launch ABI:** the kernel is AOT-compiled and shape-generic, so the
+shape travels as kernargs: `A_ptr, B_ptr, D_ptr` (FP16 globals) and
+`A_bytes, B_bytes, D_bytes` (i32), then the conv problem block
+(extents, strides, padding, dilation, groups, per-group channels, GEMM
+dims, operand strides, magic-division constants and the tile counts),
+in the order of `kernels.common.conv_abi.conv_arg_names("fwd")` (C++:
+`rocke_conv_arg_names`). `ConvArgs.from_problem(...)` computes every
+value on the host. Grid is `(num_pid_n, num_pid_m, groups)` where
+`num_pid_m = ceil((N·Ho·Wo)/tile_m)` and `num_pid_n = ceil(kpg/tile_n)`.
+Block size: `warp_m · warp_n · wave_size`. All of this is recorded in
+the kernel artifact's launch metadata (`args_signature`) — the C++ side
+does not hard-code it.
 
 ### Spec mirroring scope
 
@@ -572,7 +577,7 @@ simplicity.
 - **P-4.** Confirm the `rocke` package version surface. Does
   `rocke.__version__` exist? If not, plan a small upstream patch to
   add it (we need it for the cache key).
-- **P-5.** Read `instances/common/conv_implicit_gemm.py` and
+- **P-5.** Read `library/kernels/common/conv_implicit_gemm.py` and
   `examples/common/bake_off_implicit_gemm.py` end to end. Inventory the 36
   spec fields, mark which are graph-derived vs constexpr defaults, and
   capture the bake-off knob values verbatim. This becomes the
@@ -822,7 +827,7 @@ All entries are committed code or in-tree documentation.
 
 - DSL compile entry: `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/helpers/compile.py`
 - DSL instances: `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/instances/`
-- DSL conv builder used for M1: `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/instances/common/conv_implicit_gemm.py`
+- DSL conv builder used for M1: `dnn-providers/hip-kernel-provider/rocke/library/kernels/common/conv_implicit_gemm.py`
 - DSL conv example (shape + perf numbers cited in §4): `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/examples/common/bake_off_implicit_gemm.py`
 - Existing DSL C++ launcher (HSACO load + launch): `projects/composablekernel/example/ck_tile/dsl/common/launcher.cpp`
 - Plugin SDK developer guide: `projects/hipdnn/docs/PluginDevelopment.md`
