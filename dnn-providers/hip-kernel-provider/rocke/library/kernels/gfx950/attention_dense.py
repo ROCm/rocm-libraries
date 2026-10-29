@@ -107,6 +107,8 @@ from kernels.common.attention_dense_decode import (
     PersistHkvMajor,
     PersistHqMinorSwz,
     PersistQbMajor,
+    fastdiv_kernargs,
+    make_fastdiv,
 )
 from kernels.gfx950.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
 from kernels.common.attention_dense_kv_split import (
@@ -450,12 +452,22 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         non-runtime k-tile trip count -- so they must keep per-shape identity.
         A moving bottom-right diagonal also bakes the sequence-length difference;
         equal-length bottom-right stays in the unshifted runtime-shape cohort.
-        ``persistent`` is excluded for a stronger reason: it is a separate body that
-        declares no shape params at all. Sliding-window attention uses the runtime
-        k-tile trip count while keeping the window size specialized."""
-        return not (
+        Sliding-window attention uses the runtime k-tile trip count while keeping the
+        window size specialized.
+
+        The persistent body is on this path too (as on gfx942): it derives the work
+        count from the params and decodes work items through host-computed
+        fast-division pairs. The exceptions are the persistent orders that list no
+        fast-division divisors (``gqa_pair``, ``gqa_pair_2phase``): their CTA count is
+        a formula of the shape, so they stay baked. The ``auto`` order never picks
+        them."""
+        if (
             self.persistent
-            or self.ragged
+            and not PERSIST_DECODES[self.resolved_persist_decode].fastdiv_divisors
+        ):
+            return False
+        return not (
+            self.ragged
             or self.varlen
             or self.paged
             or (self.causal_bottom_right and self.seqlen_q != self.seqlen_kv)
@@ -1903,8 +1915,11 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     SW = spec.sliding_window  # sliding-window length (0 = disabled)
     SWt = SW // BN  # window length in KV tiles
     RIGHT = spec.right_bound  # keys visible ahead of the diagonal (causal only)
-    # See the default builder: rows with no visible key output zeros.
-    EMPTY_ROWS = SW > 0 and not spec.varlen and not spec.emit_lse and Sq > Skv + SW - 1
+    # See the default builder: rows with no visible key output zeros. WINDOW_EMPTY is
+    # the shape-independent part; EMPTY_ROWS adds the baked Sq/Skv test and applies
+    # only off the runtime-shape path.
+    WINDOW_EMPTY = SW > 0 and not spec.varlen and not spec.emit_lse
+    EMPTY_ROWS = WINDOW_EMPTY and Sq > Skv + SW - 1
     LAZY_RESCALE = spec.lazy_rescale
     use_sinks = spec.use_sinks
     WIDE_DMA = spec.wide_lds_dma
@@ -1943,6 +1958,36 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         "o_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
     )
     scale = b.param("scale", F32)
+    # Runtime shape (every persistent spec but ragged and the gqa_pair orders, as on
+    # gfx942): the shape and head counts are kernargs right after scale, then one
+    # magic/shift pair per work-decode divisor (spec.runtime_kernarg_fields). The
+    # strides and GQA ratio are CTA-uniform values computed once. A baked spec
+    # declares none of these and keeps its exact IR: each helper below returns the
+    # compile-time constant for it, emitted in place at its use.
+    RT = spec.runtime_shape
+    if RT:
+        rt = {f: b.param(f, I32) for f in spec.runtime_kernarg_fields}
+        batch_p, seqlen_q_p, seqlen_kv_p = rt["batch"], rt["seqlen_q"], rt["seqlen_kv"]
+        hq_p, hkv_p = rt["num_query_heads"], rt["num_kv_heads"]
+        gqa_p = b.div(hq_p, hkv_p)
+        stride_q_p = b.mul(hq_p, b.const_i32(D))
+        stride_k_p = b.mul(hkv_p, b.const_i32(D))
+
+    def _sq():
+        return seqlen_q_p if RT else b.const_i32(Sq)
+
+    def _skv():
+        return seqlen_kv_p if RT else b.const_i32(Skv)
+
+    def _hq_count():
+        return hq_p if RT else b.const_i32(Hq)
+
+    def _stride_q():
+        return stride_q_p if RT else b.const_i32(stride_q_tok)
+
+    def _stride_k():
+        return stride_k_p if RT else b.const_i32(stride_k_tok)
+
     if use_sinks:
         sinks = b.param(
             "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
@@ -2040,8 +2085,17 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     zero_soff = b.const_i32(0)
     K_lds_addr = b.smem_addr_of(K_lds)
     V_lds_addr = b.smem_addr_of(V_lds)
-    k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * Hkv * D * 2))
-    v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * Hkv * D * 2))
+    if RT:
+        # num_records must track THIS launch's extent: one binary serves every shape.
+        k_rsrc = b.buffer_rsrc(
+            k, b.mul(b.mul(batch_p, seqlen_kv_p), b.mul(stride_k_p, b.const_i32(2)))
+        )
+        v_rsrc = b.buffer_rsrc(
+            v, b.mul(b.mul(batch_p, seqlen_kv_p), b.mul(stride_k_p, b.const_i32(2)))
+        )
+    else:
+        k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * Hkv * D * 2))
+        v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * Hkv * D * 2))
     # ragged: bounds-checked Q load (OOB partial-block rows -> 0 register pad).
     q_rsrc = b.buffer_rsrc(q, b.const_i32(B * Sq * Hq * D * 2)) if RAGGED else None
     # Unused, but the lowering keeps dead ops, so dropping it moves every golden.
@@ -2050,9 +2104,42 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     # tile's LDS destination is scalar math instead of VGPR math + readfirstlane.
     wave_s = b.to_sgpr_u32(wave) if WIDE_DMA else None
 
+    if RT:
+        # Work count and KV trip count from the params, once per CTA. Ragged is never
+        # runtime-shape, so Sq % BLOCK_M == 0 and Skv % BN == 0: both divides are exact
+        # and strength-reduce (the divisors are compile-time constants).
+        nqb_p = b.div(seqlen_q_p, b.const_i32(BLOCK_M))
+        w_p = b.mul(b.mul(nqb_p, hq_p), batch_p)
+        n_ktiles_p = b.div(seqlen_kv_p, b.const_i32(BN))
+        # The decodes divide by runtime B / Hq / gqa / NQB through the host-computed
+        # fast-division pairs, so the grid-stride loop has no software division.
+        work_shape = DecodeShape(
+            b,
+            spec,
+            {
+                "batch": batch_p,
+                "seqlen_q": seqlen_q_p,
+                "seqlen_kv": seqlen_kv_p,
+                "num_query_heads": hq_p,
+                "num_kv_heads": hkv_p,
+                "gqa": gqa_p,
+                "nqb": nqb_p,
+                "w": w_p,
+            },
+            fastdiv=make_fastdiv(b, rt),
+        )
+
+    def _n_ktiles():
+        return n_ktiles_p if RT else b.const_i32(n_ktiles)
+
+    def _decode_shape():
+        return work_shape if RT else DecodeShape(b, spec)
+
     # ----- persistent grid-stride loop over the flattened work-item space -----
     cta_id = b.block_id_x()
-    outer = b.scf_for(cta_id, b.const_i32(W), b.const_i32(NP), iv_name="wi")
+    outer = b.scf_for(
+        cta_id, w_p if RT else b.const_i32(W), b.const_i32(NP), iv_name="wi"
+    )
     with outer as wi:
         # Cross-work-item LDS reuse safety: drain the previous item's trailing DMA
         # and barrier so all waves finished the previous epilogue reads before we
@@ -2060,20 +2147,21 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         b.s_waitcnt(vmcnt=0)
         b.s_barrier_bare()
 
-        # No shape params on this body: the decode reads the baked shape.
         qb, hq, bt, hkv = PERSIST_DECODES[spec.resolved_persist_decode].emit_decode(
-            DecodeShape(b, spec), wi
+            _decode_shape(), wi
         )
         if hkv is None:
-            hkv = b.div(hq, b.const_i32(gqa))
+            # The kv head where the decode has it as a digit, else hq // gqa (through
+            # the gqa fast-division pair on the runtime path).
+            hkv = work_shape.div(hq, "gqa") if RT else b.div(hq, b.const_i32(gqa))
 
         q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
         q_base = b.add(
-            b.mul(b.mul(bt, b.const_i32(Sq)), b.const_i32(stride_q_tok)),
+            b.mul(b.mul(bt, _sq()), _stride_q()),
             b.mul(hq, b.const_i32(D)),
         )
         k_base = b.add(
-            b.mul(b.mul(bt, b.const_i32(Skv)), b.const_i32(stride_k_tok)),
+            b.mul(b.mul(bt, _skv()), _stride_k()),
             b.mul(hkv, b.const_i32(D)),
         )
 
@@ -2081,7 +2169,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         q_packs = []
         for ks in range(K_STEPS):
             col = b.add(b.const_i32(ks * 16), d_base)
-            addr = b.add(b.add(q_base, b.mul(q_tok, b.const_i32(stride_q_tok))), col)
+            addr = b.add(b.add(q_base, b.mul(q_tok, _stride_q())), col)
             if RAGGED:
                 raw = b.buffer_load_vN(
                     q_rsrc, b.mul(addr, b.const_i32(2)), b.const_i32(0), dtype, 8
@@ -2107,7 +2195,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 voff = b.add(
                     b.add(
                         k_base,
-                        b.mul(b.add(tile_key0, row0), b.const_i32(stride_k_tok)),
+                        b.mul(b.add(tile_key0, row0), _stride_k()),
                     ),
                     gcol,
                 )
@@ -2118,7 +2206,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                     )
                     if r + 1 < ROWS_PER_WAVE:
                         row_lds_off = b.add(row_lds_off, b.const_i64(group_bytes))
-                        voff = b.add(voff, b.const_i32(stride_k_tok))
+                        voff = b.add(voff, _stride_k())
             else:
                 lanes_per_row = D // 2
                 sub_row = b.div(lane, b.const_i32(lanes_per_row))
@@ -2137,9 +2225,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                     )
                     row_base = b.smem_ptr_add(lds_base, row_lds_off)
                     gkey = b.add(b.add(tile_key0, row0), sub_row)
-                    voff = b.add(
-                        b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), col
-                    )
+                    voff = b.add(b.add(k_base, b.mul(gkey, _stride_k())), col)
                     b.async_buffer_load_lds_addr(
                         rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
                     )
@@ -2159,7 +2245,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                     b.add(b.mul(n_in_wave, b.const_i32(8)), line_id),
                 )
                 src_base = b.add(
-                    b.add(k_base, b.mul(krow, b.const_i32(stride_k_tok))),
+                    b.add(k_base, b.mul(krow, _stride_k())),
                     b.mul(d_bucket, b.const_i32(8)),
                 )
                 for d_rpt in range(K_D_RPT):
@@ -2195,7 +2281,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                     b.add(b.mul(n_in_wave, b.const_i32(8)), line_id),
                 )
                 src_base = b.add(
-                    b.add(k_base, b.mul(vrow, b.const_i32(stride_k_tok))),
+                    b.add(k_base, b.mul(vrow, _stride_k())),
                     b.mul(d_bucket, b.const_i32(8)),
                 )
                 for d_rpt in range(V_D_RPT):
@@ -2593,12 +2679,12 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 b.const_i32((BLOCK_M - 1 + RIGHT) // BN + 1),
             )
             n_upper = b.select(
-                b.cmp_lt(n_upper, b.const_i32(n_ktiles)),
+                b.cmp_lt(n_upper, _n_ktiles()),
                 n_upper,
-                b.const_i32(n_ktiles),
+                _n_ktiles(),
             )
         else:
-            n_upper = b.const_i32(n_ktiles)
+            n_upper = _n_ktiles()
 
         # Sliding-window start tile (see default builder). SW==0 -> start_tile=0.
         if SW > 0:
@@ -2607,7 +2693,14 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             start_tile = b.select(
                 b.cmp_gt(_lo_raw, b.const_i32(0)), _lo_raw, b.const_i32(0)
             )
-            if EMPTY_ROWS:
+            if RT:
+                # As the grid builder: the last real tile is the runtime one, and the
+                # clamp is always emitted since any windowed run shape can be empty.
+                _last_tile = b.sub(n_ktiles_p, b.const_i32(1))
+                start_tile = b.select(
+                    b.cmp_lt(start_tile, _last_tile), start_tile, _last_tile
+                )
+            elif EMPTY_ROWS:
                 # See the grid builder: pin a fully-past-the-keys block to the last
                 # real tile instead of reading other batches' tokens.
                 start_tile = b.select(
@@ -2759,41 +2852,48 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             rcp_l = b.rcp(b.select(positive_l, l_i, b.const_f32(1.0)))
         else:
             rcp_l = b.rcp(l_i)
-        if EMPTY_ROWS:
-            # See the grid builder: a max still at the mask sentinel means no visible key.
+        if EMPTY_ROWS and not RT:
+            # See the grid builder: a max still at the mask sentinel means no visible
+            # key. Under runtime_shape those rows are zeroed by row_has_key below.
             rcp_l = b.select(
                 b.fcmp("ogt", m_i, b.const_f32(_EMPTY_ROW_MAX_PERSIST)),
                 rcp_l,
                 b.const_f32(0.0),
             )
         _, hq_e, bt_e, _ = PERSIST_DECODES[spec.resolved_persist_decode].emit_decode(
-            DecodeShape(b, spec), wi
+            _decode_shape(), wi
         )
         o_base = b.add(
-            b.mul(b.mul(bt_e, b.const_i32(Sq)), b.const_i32(stride_q_tok)),
+            b.mul(b.mul(bt_e, _sq()), _stride_q()),
             b.mul(hq_e, b.const_i32(D)),
         )
         qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
-        q_row_byte = b.add(o_base, b.mul(qtok, b.const_i32(stride_q_tok)))
+        q_row_byte = b.add(o_base, b.mul(qtok, _stride_q()))
         d_half = b.mul(lane_h, b.const_i32(4))
-        if spec.emit_lse:
+        # The exact per-row "sees at least one key" predicate. LSE always needs it. A
+        # runtime_shape window kernel also needs it for the O store: one binary serves
+        # shapes with and without keyless rows, and for a shape without them the
+        # predicate keeps every row.
+        row_has_key = None
+        if spec.emit_lse or (WINDOW_EMPTY and RT):
             row_has_key = dense_row_has_key(
                 b,
                 qtok,
-                b.const_i32(Skv),
+                _skv(),
                 causal=causal,
                 diagonal=0,
                 window=SW,
                 right_bound=RIGHT,
             )
+        if spec.emit_lse:
             lse_index = b.add(
                 b.mul(
-                    b.add(b.mul(bt_e, b.const_i32(Hq)), hq_e),
-                    b.const_i32(Sq),
+                    b.add(b.mul(bt_e, _hq_count()), hq_e),
+                    _sq(),
                 ),
                 qtok,
             )
-            row_exists = b.cmp_lt(qtok, b.const_i32(Sq))
+            row_exists = b.cmp_lt(qtok, _sq())
             _dense_lse_output(
                 b,
                 lse,
@@ -2822,7 +2922,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 dtype,
                 D_TILES,
                 spec.o_store_width,
-                row_has_key=row_has_key if spec.emit_lse else None,
+                row_has_key=row_has_key,
             )
 
     b.ret()
@@ -2853,43 +2953,49 @@ def attention_dense_block(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
 def _has_shape_params(spec: AttentionDenseSpec) -> bool:
     """Whether the body for ``spec`` takes batch/seqlen_q/seqlen_kv as kernargs.
 
-    ``build_attention_dense`` declares them unconditionally;
-    ``_build_attention_dense_persistent`` declares none, since its work-item space
-    ``NP = spec.num_persistent`` is validated against ``nqb*Hkv*B`` at spec
-    construction and is itself baked -- the shape cannot become a param there
-    without ``num_persistent`` following it.
+    ``build_attention_dense`` declares them unconditionally. The persistent body
+    declares them only on the runtime-shape path; a baked persistent spec (ragged,
+    or a ``gqa_pair`` order whose CTA count is a formula of the shape) declares none.
 
     This is the ABI question. ``spec.runtime_shape`` is the narrower cache-identity
     question (does the body bake the shape *anywhere*), and the two differ for
-    paged / ragged / varlen / moving bottom-right causal.
+    paged / ragged / varlen / moving bottom-right causal on the grid body.
     """
-    return not spec.persistent
+    return not spec.persistent or spec.runtime_shape
 
 
 def _shape_kernarg_fields(spec: AttentionDenseSpec) -> tuple[str, ...]:
     """The i32 scalar kernargs after ``scale``, in ABI order.
 
-    Every grid body takes batch/seqlen_q/seqlen_kv (``_has_shape_params``), baked or
-    not; the head counts ride along only under ``runtime_shape``, the one path whose
-    body reads them from kernargs. The persistent body takes none.
+    Under ``runtime_shape``: ``spec.runtime_kernarg_fields``, the shape and head
+    counts, then on the persistent body one magic/shift pair per work-decode
+    divisor. A baked grid body still takes batch/seqlen_q/seqlen_kv
+    (``_has_shape_params``); a baked persistent body takes none.
     """
-    if not _has_shape_params(spec):
-        return ()
-    fields = ("batch", "seqlen_q", "seqlen_kv")
     if spec.runtime_shape:
-        fields += ("num_query_heads", "num_kv_heads")
-    return fields
+        return spec.runtime_kernarg_fields
+    if _has_shape_params(spec):
+        return ("batch", "seqlen_q", "seqlen_kv")
+    return ()
 
 
 def attention_dense_runtime_args(spec: AttentionDenseSpec) -> dict[str, int]:
-    """Values for every :func:`_shape_kernarg_fields` entry, read off the spec.
+    """Values for every :func:`_shape_kernarg_fields` entry: the shape fields read
+    off the spec, then the persistent decode's fast-division pairs
+    (:func:`~kernels.common.attention_dense_decode.fastdiv_kernargs`, which raises
+    past the fast-division dividend limit).
 
     The single source for the scalar kernargs: :func:`attention_dense_signature`
     declares the same fields and every launcher (``run_attention_dense_torch``, the
     SDPA reference export) merges this into its pointer/scale args rather than
     listing the fields itself.
     """
-    return {f: int(getattr(spec, f)) for f in _shape_kernarg_fields(spec)}
+    fields = (
+        spec.runtime_param_fields if spec.runtime_shape else _shape_kernarg_fields(spec)
+    )
+    args = {f: int(getattr(spec, f)) for f in fields}
+    args.update(fastdiv_kernargs(spec, "gfx950"))
+    return args
 
 
 def attention_dense_signature(spec: AttentionDenseSpec):
