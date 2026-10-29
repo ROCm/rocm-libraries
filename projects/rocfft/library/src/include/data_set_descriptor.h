@@ -24,9 +24,11 @@
 #include "rocfft/rocfft.h"
 
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <set>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 // Label distinguishing between input and output data layouts where or
@@ -112,6 +114,39 @@ struct data_descriptor_t
                       size_t                     batch_rank = 1);
 
     /**
+     * @brief Constructs a new `data_descriptor_t` object with explicit member values,
+     * including the precision and array type of the data set.
+     *
+     * @param[in] precision precision of the data set's elements.
+     * @param[in] array_type array type of the data set.
+     * @param[in] lower lower bounds along all axes of the logical index range
+     * (lower bounds are included).
+     * @param[in] upper upper bounds along all axes of the logical index range
+     * (upper bounds are excluded).
+     * @param[in] strides in-buffer strides associated with all axes of the
+     * logical index range.
+     * @param[in] batch_rank number of batch axes in the logical index range.
+     * Default value is `1`.
+     *
+     * @note `precision` and `array_type` are deliberately listed first: both are
+     * unscoped enums that implicitly convert to `size_t`, so trailing positions
+     * would let a call with a missing argument silently bind to the overload
+     * without them (using an enum value as `batch_rank`).
+     *
+     * @note All vector arguments implicitly consider that length axes are listed
+     * first followed by `batch_rank` batch axes.
+     *
+     * @throw An `std::invalid_argument` is thrown in the same cases as the
+     * overload without `precision` and `array_type`.
+     */
+    data_descriptor_t(rocfft_precision           precision,
+                      rocfft_array_type          array_type,
+                      const std::vector<size_t>& lower,
+                      const std::vector<size_t>& upper,
+                      const std::vector<size_t>& strides,
+                      size_t                     batch_rank = 1);
+
+    /**
      * @brief Constructs a new `data_descriptor_t` object capturing a full range of logical
      * indices with one batch axis.
      * 
@@ -165,6 +200,19 @@ struct data_descriptor_t
      * @return The total number of axes (length and batch axes).
      */
     size_t get_full_rank() const;
+    /**
+     * @return The array type of the data set (`rocfft_array_type_unset` if not provided).
+     */
+    rocfft_array_type get_array_type() const;
+    /**
+     * @return The precision of the data set.
+     * @throw std::logic_error if no precision was provided (see `has_precision`).
+     */
+    rocfft_precision get_precision() const;
+    /**
+     * @return Whether a precision was provided for the data set.
+     */
+    bool has_precision() const;
     /**
      * @return The spans of the logical index range along all its axes (length followed by batch axes).
      */
@@ -254,7 +302,8 @@ struct data_descriptor_t
     bool is_continuous_in(const data_descriptor_t& other) const;
 
     /**
-     * @return A string reporting this object's state.
+     * @return A string reporting this object's state, including its precision
+     * and array type ("unset" for either if not provided).
      */
     std::string str() const;
 
@@ -269,6 +318,37 @@ struct data_descriptor_t
     size_t buffer_element_count() const;
 
     /**
+     * @return The size in bytes of one element of the data set, as defined by its
+     * precision and array type. For planar array types, this is the size of one
+     * real component (elements are split across two planes).
+     * @throw An `std::logic_error` is thrown if the precision or the array type
+     * is unset.
+     */
+    size_t element_size() const;
+
+    /**
+     * @return The (minimum) number of bytes required in a buffer to store the data
+     * layout described by this object, i.e., `buffer_element_count() * element_size()`.
+     * For planar array types, this is the number of bytes required *per plane*.
+     * @throw An `std::logic_error` is thrown if the precision or the array type
+     * is unset.
+     */
+    size_t buffer_size_bytes() const;
+
+    /**
+     * @param[in] new_array_type array type to be given to the returned object.
+     * @return A copy of this object relabeled with `new_array_type`. Only relabeling
+     * is supported, i.e., the array type must be unchanged or switch between the
+     * hermitian and complex variants of the same format (interleaved or planar).
+     * The precision is never changed.
+     * @throw An `std::invalid_argument` is thrown if this object's array type or
+     * `new_array_type` is unset, or if the request switches between interleaved and
+     * planar formats. An `std::logic_error` is thrown for requests between real and
+     * complex/hermitian array types (not implemented yet).
+     */
+    data_descriptor_t reinterpret_as(rocfft_array_type new_array_type) const;
+
+    /**
      * @return `true` iff this object describes a contiguous data layout, i.e., iff all
      * in-buffer elements between offset 0 and logical_count() (excluded) correspond
      * to a distinct element in logical range.
@@ -277,7 +357,8 @@ struct data_descriptor_t
 
     /**
      * @param[in] other data descriptor to be compared to this one.
-     * @return `true` iff this object and `other` are strictly identical.
+     * @return `true` iff this object and `other` are strictly identical, including
+     * their precisions and array types (an unset value only equals an unset value).
      */
     bool operator==(const data_descriptor_t& other) const;
 
@@ -296,10 +377,14 @@ struct data_descriptor_t
      * @param[in] second a data_descriptor_t object that's dimensionally consistent with `first`
      * @return A data_descriptor_t object capturing the intersection of the logical ranges
      * between `first` and `second`. The in-buffer strides of the constructed intersection
-     * are set to their default contiguous values.
+     * are set to their default contiguous values. The returned object has `first`'s
+     * array type and the common precision.
      * 
      * @throw An `std::invalid_argument` is thrown if `first` and `second` are not
-     * dimensionally consistent, or have different embeddings (if any).
+     * dimensionally consistent, have different embeddings (if any), have different
+     * precisions (unset only matches unset), or have array types that are neither
+     * identical nor the hermitian and complex variants of the same format
+     * (interleaved or planar).
      */
     static data_descriptor_t make_contiguous_intersection_of(const data_descriptor_t& first,
                                                              const data_descriptor_t& second);
@@ -342,7 +427,12 @@ struct data_descriptor_t
      * transform.
      * 
      * @return An `std::optional<data_descriptor_t>` object which has a value set
-     * iff a corresponding layout for in-place operation does actually exist.
+     * iff a corresponding layout for in-place operation does actually exist. Its
+     * precision is this object's. For complex transforms, its array type is this
+     * object's; for real transforms, it is `rocfft_array_type_real` (resp.
+     * `rocfft_array_type_hermitian_interleaved`) if the returned layout is in real
+     * (resp. hermitian) domain, unless this object's array type is unset, in which
+     * case it remains unset.
      * 
      * @note This function does not verify if either layout is self-aliasing and
      * ignores offsets as `data_descriptor_t` objects do not capture them.
@@ -374,6 +464,7 @@ struct data_descriptor_t
      * or if any of the values in `len_indices` is out of bounds.
      * @note If `len_indices = {0, 1, ..., get_len_rank() - 1}`, this function is
      * equivalent to a simple copy of the current object.
+     * @note Precision and array type are passed through unchanged.
      */
     data_descriptor_t get_layout_for_len_axes(const std::set<size_t>& len_indices) const;
 
@@ -382,6 +473,7 @@ struct data_descriptor_t
      * current object is embedded.
      * @note If this object is not representing the data layout of an embedded data set,
      * this function is equivalent to a simple copy of the current object.
+     * @note Precision and array type are passed through unchanged.
      * @throw An `std::logic_error` exception is thrown if the object's embedding map is
      * found inconsistent.
      */
@@ -457,6 +549,19 @@ private:
     // vector plus a batch_rank counter because the split *is* the rank bookkeeping.
     std::vector<axis_t> len_axes;
     std::vector<axis_t> batch_axes;
+
+    // Array type of the data set's elements; unset until provided.
+    rocfft_array_type array_type = rocfft_array_type_unset;
+
+    // Marker for "no precision provided". Stored as the enum's underlying integer
+    // type because rocfft_precision has no unset value and out-of-range enum
+    // values are undefined behavior. Never exposed outside this struct.
+    static constexpr std::underlying_type_t<rocfft_precision> precision_unset
+        = std::numeric_limits<std::underlying_type_t<rocfft_precision>>::max();
+
+    // Precision of the data set's elements; precision_unset until provided.
+    std::underlying_type_t<rocfft_precision> precision = precision_unset;
+
     // If the current object captures the data layout for a sub-dimensional data set
     // embedded within another, an embedding map is required to keep track of which of
     // the current object's axes correspond to the embedding set's length axes. If
@@ -467,6 +572,9 @@ private:
     std::optional<std::vector<size_t>> embedding;
 
     inline bool has_consistent_embedding() const;
+
+    // Stores the underlying value of `p`; used by the constructor and by friends.
+    void set_precision(rocfft_precision p);
 
     /**
      * @brief Implementation-simplifying helper accessor for the length and batch
@@ -486,7 +594,8 @@ private:
     size_t slowest_varying_axis() const;
 
     /**
-     * @brief Empties all layout axes.
+     * @brief Empties all layout axes and resets the embedding map. Precision and
+     * array type are left untouched.
      */
     void clear();
 
@@ -510,6 +619,7 @@ private:
     /**
      * @brief Resets the object's state to capture a full range of logical
      * indices with either prescribed or default strides and/or distance.
+     * Precision and array type are left untouched.
      * 
      * @param[in] lengths spans of the logical index range along all length axes.
      * @param[in] strides in-buffer strides associated with all length axes.
