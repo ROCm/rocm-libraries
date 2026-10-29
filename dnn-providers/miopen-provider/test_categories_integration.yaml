@@ -98,7 +98,7 @@ test_categories:
       # single-graph bundle path); regenerating a sweep can rename them, in
       # which case this tier silently shrinks. Verify with:
       #   ctest -L ffm-quick -N
-      - "quick_ConvolutionFwd_Default.1_16_16_16_bfp16_nchw_dil1x1_postpad0x0_prepad0x0"
+      - "quick_ConvolutionFwd_Default.S3_2d_i16x16_n1c16k32_f3x3_fp16_cl"
       - "quick_BatchnormInference_Default.1_3_224_fp32_ncl"
       - "quick_Pointwise_Default.2_4_8_8_fp16_nchw"
       - "quick_Reduction_Default.1_16_8_8_bfp16_nchw_modeadd"

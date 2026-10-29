@@ -57,11 +57,48 @@ rtol = 0.3
 # atol to 5e-5 (rtol unchanged at the 1e-5 default) for the 3D fp32 forward
 # cases only; 5e-5 clears the floor while staying ~50x below the worst-case
 # bound (~2.5e-3).
-# 3D fp32 conv forward override for the bundle cases
+# 3D fp32 conv forward override for the bundle cases. Case ids come from
+# reference-data-scripts/generate_conv_fwd_bundles.py:
+# <items>_3d_i<spatial>_n<N>c<C>k<K>_f<filter>_fp32_<layout>.
 [[tolerance_overrides]]
-filters = ["*_ConvolutionFwd_Default.*fp32_ncdhw*", "*_ConvolutionFwd_Default.*fp32_ndhwc*"]
+filters = ["*_ConvolutionFwd_Default.*_3d_*_fp32_*", "*_ConvolutionFwdPointwise_*.*_3d_*_fp32_*"]
 atol = 5e-5
 rtol = 1e-5
+
+# Conv forward fp32 numerical floor, calibrated on gfx942 from the conv-fwd test plan
+# run (docs/test-plans/convolution-fwd.md). MIOpen and the GPU reference accumulate in
+# different orders, so the absolute error of a long fp32 reduction grows with the
+# accumulation length A = C/G x filter volume. Observed worst absolute error:
+#   A <= 1,152 (L, M, H shapes)        5.2e-5
+#   A 3,200 - 4,608 (L10, A1, A2)      1.9e-4
+#   A >= 65,536 (S19, L19, X4)         8.2e-3
+# Each class takes about 2x its observed maximum. Later entries win.
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.L*_fp32_*",
+    "*_ConvolutionFwd*.M*_fp32_*",
+    "*_ConvolutionFwd*.H*_fp32_*",
+    "*_ConvolutionFwd*.X*_fp32_*",
+]
+atol = 1e-4
+rtol = 1e-4
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.A*_fp32_*",
+    "*_ConvolutionFwd*.L10_*_fp32_*",
+]
+atol = 5e-4
+rtol = 1e-4
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.S19_*_fp32_*",
+    "*_ConvolutionFwd*.L19_*_fp32_*",
+    "*_ConvolutionFwd*.X4_*_fp32_*",
+]
+atol = 2e-2
+rtol = 1e-4
 
 # MatmulPointwise Variant3 bf16 swish — single-element ULP mismatch at
 # magnitude ~2.0 (diff=3.125e-2, one bf16 ULP). Default atol=0.01 is
@@ -80,3 +117,45 @@ rtol = 0.01
 #   filters: array of GTest globs matched against the full GTest name
 #   reason:  human-readable string surfaced in the GTEST_SKIP message
 # First matching entry wins.
+
+# conv-fwd test plan run on gfx942 (docs/test-plans/convolution-fwd.md): graphs that the
+# MIOpen plugin accepts but then fails or computes wrongly. They are probes (a typed
+# rejection or a correct accept is the pass criterion), so each is skipped with its
+# observed failure until the plugin declines or fixes it. Remove an entry when its
+# defect is fixed; the case then runs and reports unclaimed_support.
+[[test_skips]]
+archs   = ["gfx942"]
+filters = ["*_ConvolutionFwdPointwise_Variant4.*"]
+reason  = "conv -> add(residual) -> relu is accepted for fp32 and the output is wrong (every case, up to 100% of elements); the plugin should decline the residual add"
+
+[[test_skips]]
+archs   = ["gfx942"]
+filters = ["*_ConvolutionFwd_Default.*_F20_*"]
+reason  = "mixed-precision conv (x, w, y or compute types differ) is accepted but fails at execute (miopenStatusBadParm), has no reference, or faults the device (hipErrorIllegalAddress, 3D fp32 x fp16 w)"
+
+[[test_skips]]
+archs   = ["gfx942"]
+filters = ["*_ConvolutionFwd_Default.*_F15_*"]
+reason  = "conv with mixed x, w and y layouts is accepted and the output is wrong or non-finite for the cases that execute"
+
+[[test_skips]]
+archs   = ["gfx942"]
+filters = ["*_ConvolutionFwdPointwise_Variant2.*_F25type_*"]
+reason  = "conv -> bias -> relu with a bias data type different from the io type is accepted and the output is garbage (differences up to 5.8e4)"
+
+[[test_skips]]
+archs   = ["gfx942"]
+filters = [
+    "*_ConvolutionFwd_Default.S13a_F16chan_2d_i16x16_n1c16k16g16_f3x3_fp32_cf",
+    "*_ConvolutionFwd_Default.S13a_F16fast_3d_i16x16x16_n1c16k16g16_f3x3x3_bf16_cl",
+    "*_ConvolutionFwd_Default.S13b_F16plane_1d_i16_n1c16k32g16_f3_bf16_cf",
+    "*_ConvolutionFwd_Default.S20_F16plane_3d_i16x16x16_n1c16k32_f3x3x3_fp32_cl",
+    "*_ConvolutionFwd_Default.S3_F16plane_3d_i16x16x16_n1c16k32_f3x3x3_fp16_cl",
+    "*_ConvolutionFwd_Default.S3_F16plane_3d_i16x16x16_n1c16k32_f3x3x3_fp32_cl",
+    "*_ConvolutionFwd_Default.S7_F16fast_2d_i16x16_n1c16k32g2_f3x3_bf16_cl",
+    "*_ConvolutionFwd_Default.S7_F16plane_1d_i16_n1c16k32g2_f3_bf16_cf",
+    "*_ConvolutionFwd_Default.S8_F16chan_2d_i16x16_n2c32k64g4_f3x3_fp32_cf",
+    "*_ConvolutionFwd_Default.S8_F16chan_3d_i16x16x16_n2c32k64g4_f3x3x3_fp32_cf",
+    "*_ConvolutionFwd_Default.S9_F16plane_3d_i16x16x16_n8c16k32_f1x1x1_fp32_cl",
+]
+reason  = "conv on non-packed strides (padded rows, channel or plane stride) is accepted and the output is wrong for these cases (grouped, depthwise and 3D shapes)"

@@ -2,21 +2,279 @@
   "version": 1,
   "cases": [
     {
-      "id": "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_f61755",
+      "id": "S2_1d_i16_n1c16k32_f3_fp32_cf_relu_lo",
       "values": {
         "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1
+          ],
+          "post_padding": [
+            0
+          ],
+          "pre_padding": [
+            0
+          ],
+          "stride": [
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": 0.1,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": null,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
         "tensors": [
           {
             "uid": 0,
             "dims": [
               1,
+              32,
+              14
+            ],
+            "strides": [
+              448,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              14
+            ],
+            "strides": [
+              448,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              16,
+              3
+            ],
+            "strides": [
+              48,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
               1,
               16,
+              16
+            ],
+            "strides": [
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S2"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 1711297850,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1642697878
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1831250662
+          }
+        }
+      }
+    },
+    {
+      "id": "S3_1d_i16_n1c16k32_f3_fp32_cl_relu6",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1
+          ],
+          "post_padding": [
+            1
+          ],
+          "pre_padding": [
+            1
+          ],
+          "stride": [
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": null,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": 6.0,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              16
+            ],
+            "strides": [
+              512,
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              16
+            ],
+            "strides": [
+              512,
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              16,
+              3
+            ],
+            "strides": [
+              48,
+              1,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S3"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 1926352169,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 676250664
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1613725657
+          }
+        }
+      }
+    },
+    {
+      "id": "S4_1d_i16_n1c16k32_f3_fp16_cf_relu_clamp",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1
+          ],
+          "post_padding": [
+            1
+          ],
+          "pre_padding": [
+            1
+          ],
+          "stride": [
+            2
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": 0.1,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": 0.5,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
               8
             ],
             "strides": [
-              128,
-              128,
+              256,
               8,
               1
             ],
@@ -26,14 +284,488 @@
             "uid": 1,
             "dims": [
               1,
-              1,
-              16,
+              32,
               8
             ],
             "strides": [
-              128,
-              128,
+              256,
               8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              16,
+              3
+            ],
+            "strides": [
+              48,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S4"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 181067589,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 501006596
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 320209052
+          }
+        }
+      }
+    },
+    {
+      "id": "S5_1d_i16_n1c16k32_f3_fp16_cl_relu_leaky",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            2
+          ],
+          "post_padding": [
+            2
+          ],
+          "pre_padding": [
+            2
+          ],
+          "stride": [
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": null,
+          "act_relu_lower_clip_slope": 0.1,
+          "act_relu_upper_clip": null,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              16
+            ],
+            "strides": [
+              512,
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              16
+            ],
+            "strides": [
+              512,
+              1,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              16,
+              3
+            ],
+            "strides": [
+              48,
+              1,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S5"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 1962628135,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1576139405
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1029025784
+          }
+        }
+      }
+    },
+    {
+      "id": "S7_1d_i16_n1c16k32g2_f3_bf16_cf_relu",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1
+          ],
+          "post_padding": [
+            1
+          ],
+          "pre_padding": [
+            1
+          ],
+          "stride": [
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": null,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": null,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              16
+            ],
+            "strides": [
+              512,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              16
+            ],
+            "strides": [
+              512,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              8,
+              3
+            ],
+            "strides": [
+              24,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S7"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 727923144,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 803542933
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1060992291
+          }
+        }
+      }
+    },
+    {
+      "id": "S8_1d_i16_n2c32k64g4_f3_bf16_cl_relu_lo",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            2
+          ],
+          "post_padding": [
+            1
+          ],
+          "pre_padding": [
+            1
+          ],
+          "stride": [
+            2
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": 0.1,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": null,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              64,
+              7
+            ],
+            "strides": [
+              448,
+              1,
+              64
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              64,
+              7
+            ],
+            "strides": [
+              448,
+              1,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              64,
+              8,
+              3
+            ],
+            "strides": [
+              24,
+              1,
+              8
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              16
+            ],
+            "strides": [
+              512,
+              1,
+              32
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S8"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 639641717,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1878429289
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1104487122
+          }
+        }
+      }
+    },
+    {
+      "id": "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_relu6",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1
+          ],
+          "stride": [
+            1,
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": null,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": 6.0,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              256,
+              16,
               1
             ],
             "data_type": "float"
@@ -41,7 +773,7 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              32,
               16,
               3,
               3
@@ -53,6 +785,393 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S3"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 1915386935,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1847683967
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 648513805
+          }
+        }
+      }
+    },
+    {
+      "id": "S4_2d_i16x16_n1c16k32_f3x3_fp32_cl_relu_clamp",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1
+          ],
+          "stride": [
+            2,
+            2
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": 0.1,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": 0.5,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              8,
+              8
+            ],
+            "strides": [
+              2048,
+              1,
+              256,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              8,
+              8
+            ],
+            "strides": [
+              2048,
+              1,
+              256,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              1,
+              48,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S4"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 1365820656,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 60721867
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 37949371
+          }
+        }
+      }
+    },
+    {
+      "id": "S5_2d_i16x16_n1c16k32_f3x3_fp16_cf_relu_leaky",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            2,
+            2
+          ],
+          "post_padding": [
+            2,
+            2
+          ],
+          "pre_padding": [
+            2,
+            2
+          ],
+          "stride": [
+            1,
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": null,
+          "act_relu_lower_clip_slope": 0.1,
+          "act_relu_upper_clip": null,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S5"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 2056213884,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1169939249
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1333109812
+          }
+        }
+      }
+    },
+    {
+      "id": "S6_2d_i16x8_n1c16k32_f3x3_fp16_cl_relu",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1
+          ],
+          "stride": [
+            1,
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": null,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": null,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              16,
+              8
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              16,
+              8
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              1,
+              48,
+              16
+            ],
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -64,64 +1183,89 @@
             ],
             "strides": [
               2048,
+              1,
               128,
-              8,
-              1
+              16
             ],
-            "data_type": "float"
+            "data_type": "half"
           }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            1,
-            1
-          ],
-          "parameters__pre_padding": [
-            1,
-            1
-          ],
-          "parameters__stride": [
-            1,
-            1
-          ],
-          "relu_lower_clip": null,
-          "relu_lower_clip_slope": null,
-          "relu_upper_clip": null
-        }
+        ]
       },
       "metadata": {
         "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/12",
-        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_12"
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S6"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 2043514194,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1995658644
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1080576046
+          }
+        }
       }
     },
     {
-      "id": "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_013158",
+      "id": "S7_2d_i16x16_n1c16k32g2_f3x3_bf16_cf_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1
+          ],
+          "stride": [
+            1,
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": 0.1,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": null,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
         "tensors": [
           {
             "uid": 0,
             "dims": [
               1,
-              1,
+              32,
               16,
-              8,
-              4
+              16
             ],
             "strides": [
-              512,
-              512,
-              32,
-              4,
+              8192,
+              256,
+              16,
               1
             ],
             "data_type": "float"
@@ -130,16 +1274,14 @@
             "uid": 1,
             "dims": [
               1,
-              1,
+              32,
               16,
-              8,
-              4
+              16
             ],
             "strides": [
-              512,
-              512,
-              32,
-              4,
+              8192,
+              256,
+              16,
               1
             ],
             "data_type": "bfloat16"
@@ -147,15 +1289,13 @@
           {
             "uid": 2,
             "dims": [
-              1,
-              16,
-              3,
+              32,
+              8,
               3,
               3
             ],
             "strides": [
-              432,
-              27,
+              72,
               9,
               3,
               1
@@ -168,74 +1308,228 @@
               1,
               16,
               16,
-              8,
-              4
+              16
             ],
             "strides": [
-              8192,
-              512,
-              32,
-              4,
+              4096,
+              256,
+              16,
               1
             ],
             "data_type": "bfloat16"
           }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            1,
-            1,
-            1
-          ],
-          "parameters__pre_padding": [
-            1,
-            1,
-            1
-          ],
-          "parameters__stride": [
-            1,
-            1,
-            1
-          ],
-          "relu_lower_clip": null,
-          "relu_lower_clip_slope": null,
-          "relu_upper_clip": null
-        }
+        ]
       },
       "metadata": {
         "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/12",
-        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_12"
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S7"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 1786151847,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1020060828
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 349705394
+          }
+        }
       }
     },
     {
-      "id": "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_947b9f",
+      "id": "S8_2d_i16x16_n2c32k64g4_f3x3_bf16_cl_relu6",
       "values": {
-        "io_data_type": "half",
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            2,
+            2
+          ],
+          "post_padding": [
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1
+          ],
+          "stride": [
+            2,
+            2
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": null,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": 6.0,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              64,
+              7,
+              7
+            ],
+            "strides": [
+              3136,
+              1,
+              448,
+              64
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              64,
+              7,
+              7
+            ],
+            "strides": [
+              3136,
+              1,
+              448,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              64,
+              8,
+              3,
+              3
+            ],
+            "strides": [
+              72,
+              1,
+              24,
+              8
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              1,
+              512,
+              32
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S8"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 1056663969,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1095275633
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 2082743056
+          }
+        }
+      }
+    },
+    {
+      "id": "S4_3d_i16x16x16_n1c16k32_f3x3x3_fp32_cf_relu_clamp",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1,
+            1
+          ],
+          "post_padding": [
+            1,
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "stride": [
+            2,
+            2,
+            2
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": 0.1,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": 0.5,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
         "tensors": [
           {
             "uid": 0,
             "dims": [
               1,
-              1,
-              16,
+              32,
               8,
-              4
+              8,
+              8
             ],
             "strides": [
+              16384,
               512,
-              1,
-              32,
-              4,
+              64,
+              8,
               1
             ],
             "data_type": "float"
@@ -244,24 +1538,165 @@
             "uid": 1,
             "dims": [
               1,
+              32,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              16384,
+              512,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
               1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S4"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 608257492,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 2049585033
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 654541852
+          }
+        }
+      }
+    },
+    {
+      "id": "S5_3d_i16x8x4_n1c16k32_f3x3x3_fp32_cl_relu_leaky",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            2,
+            2,
+            2
+          ],
+          "post_padding": [
+            2,
+            2,
+            2
+          ],
+          "pre_padding": [
+            2,
+            2,
+            2
+          ],
+          "stride": [
+            1,
+            1,
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": null,
+          "act_relu_lower_clip_slope": 0.1,
+          "act_relu_upper_clip": null,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
               16,
               8,
               4
             ],
             "strides": [
-              512,
+              16384,
+              1,
+              1024,
+              128,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
               1,
               32,
-              4,
-              1
+              16,
+              8,
+              4
             ],
-            "data_type": "half"
+            "strides": [
+              16384,
+              1,
+              1024,
+              128,
+              32
+            ],
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              32,
               16,
               3,
               3,
@@ -274,7 +1709,7 @@
               48,
               16
             ],
-            "data_type": "half"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -292,267 +1727,92 @@
               64,
               16
             ],
-            "data_type": "half"
-          }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            1,
-            1,
-            1
-          ],
-          "parameters__pre_padding": [
-            1,
-            1,
-            1
-          ],
-          "parameters__stride": [
-            1,
-            1,
-            1
-          ],
-          "relu_lower_clip": null,
-          "relu_lower_clip_slope": null,
-          "relu_upper_clip": null
-        }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/30",
-        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_30"
-      }
-    },
-    {
-      "id": "1_16_16_16_bfp16_nchw_dil1x1_postpad0x0_prepad0x0_6ec8ae",
-      "values": {
-        "io_data_type": "bfloat16",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              256,
-              16,
-              1
-            ],
             "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              1,
-              1
-            ],
-            "strides": [
-              16,
-              1,
-              1,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
           }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            0,
-            0
-          ],
-          "parameters__pre_padding": [
-            0,
-            0
-          ],
-          "parameters__stride": [
-            1,
-            1
-          ],
-          "relu_lower_clip": null,
-          "relu_lower_clip_slope": null,
-          "relu_upper_clip": 6.0
-        }
+        ]
       },
       "metadata": {
         "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/1",
-        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dBfp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_1"
-      }
-    },
-    {
-      "id": "8_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0_4e5feb",
-      "values": {
-        "io_data_type": "bfloat16",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              8,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              8,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              1,
-              1
-            ],
-            "strides": [
-              16,
-              1,
-              16,
-              16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              8,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16
-            ],
-            "data_type": "bfloat16"
-          }
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S5"
         ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            0,
-            0
-          ],
-          "parameters__pre_padding": [
-            0,
-            0
-          ],
-          "parameters__stride": [
-            1,
-            1
-          ],
-          "relu_lower_clip": 0.10000000149011612,
-          "relu_lower_clip_slope": null,
-          "relu_upper_clip": 0.5
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 48281635,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1308224522
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 609788143
+          }
         }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/114",
-        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dBfp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_114"
       }
     },
     {
-      "id": "2_8_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_b24b66",
+      "id": "S6_3d_i16x8x4_n1c16k32_f3x3x3_fp16_cf_relu",
       "values": {
         "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1,
+            1
+          ],
+          "post_padding": [
+            1,
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "stride": [
+            1,
+            1,
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": null,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": null,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
         "tensors": [
           {
             "uid": 0,
             "dims": [
               1,
-              2,
+              32,
               16,
-              16
+              8,
+              4
             ],
             "strides": [
+              16384,
               512,
-              1,
               32,
-              2
+              4,
+              1
             ],
             "data_type": "float"
           },
@@ -560,29 +1820,174 @@
             "uid": 1,
             "dims": [
               1,
-              2,
+              32,
               16,
-              16
+              8,
+              4
             ],
             "strides": [
+              16384,
               512,
-              1,
               32,
-              2
+              4,
+              1
             ],
             "data_type": "half"
           },
           {
             "uid": 2,
             "dims": [
-              2,
-              8,
+              32,
+              16,
+              3,
               3,
               3
             ],
             "strides": [
-              72,
+              432,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
               1,
+              16,
+              16,
+              8,
+              4
+            ],
+            "strides": [
+              8192,
+              512,
+              32,
+              4,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S6"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 2046034865,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1675317561
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1737825847
+          }
+        }
+      }
+    },
+    {
+      "id": "S7_3d_i16x8x8_n1c16k32g2_f3x3x3_fp16_cl_relu_lo",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1,
+            1
+          ],
+          "post_padding": [
+            1,
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "stride": [
+            1,
+            1,
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": 0.1,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": null,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              16,
+              8,
+              8
+            ],
+            "strides": [
+              32768,
+              1,
+              2048,
+              256,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              16,
+              8,
+              8
+            ],
+            "strides": [
+              32768,
+              1,
+              2048,
+              256,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              8,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              216,
+              1,
+              72,
               24,
               8
             ],
@@ -594,272 +1999,101 @@
               1,
               16,
               16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16
-            ],
-            "data_type": "half"
-          }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            1,
-            1
-          ],
-          "parameters__pre_padding": [
-            1,
-            1
-          ],
-          "parameters__stride": [
-            1,
-            1
-          ],
-          "relu_lower_clip": null,
-          "relu_lower_clip_slope": null,
-          "relu_upper_clip": 6.0
-        }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/129",
-        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_129"
-      }
-    },
-    {
-      "id": "2_4_7_7_fp16_nchw_dil2x2_postpad1x1_prepad1x1_e634d6",
-      "values": {
-        "io_data_type": "half",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              4,
-              7,
-              7
-            ],
-            "strides": [
-              196,
-              49,
-              7,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              4,
-              7,
-              7
-            ],
-            "strides": [
-              196,
-              49,
-              7,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              4,
               8,
-              3,
-              3
+              8
             ],
             "strides": [
-              72,
-              9,
-              3,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              32,
-              16,
+              16384,
+              1,
+              1024,
+              128,
               16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
             ],
             "data_type": "half"
           }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            2,
-            2
-          ],
-          "parameters__post_padding": [
-            1,
-            1
-          ],
-          "parameters__pre_padding": [
-            1,
-            1
-          ],
-          "parameters__stride": [
-            2,
-            2
-          ],
-          "relu_lower_clip": 0.0,
-          "relu_lower_clip_slope": null,
-          "relu_upper_clip": null
-        }
+        ]
       },
       "metadata": {
         "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/64",
-        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_64"
-      }
-    },
-    {
-      "id": "1_16_3_3_fp32_nhwc_dil2x2_postpad2x2_prepad2x2_96aa21",
-      "values": {
-        "io_data_type": "float",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16,
-              1
-            ],
-            "data_type": "float"
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S7"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 1662711253,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1947843836
           },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              1,
-              48,
-              16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16
-            ],
-            "data_type": "float"
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 297370912
           }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            2,
-            2
-          ],
-          "parameters__post_padding": [
-            2,
-            2
-          ],
-          "parameters__pre_padding": [
-            2,
-            2
-          ],
-          "parameters__stride": [
-            1,
-            1
-          ],
-          "relu_lower_clip": 0.0,
-          "relu_lower_clip_slope": null,
-          "relu_upper_clip": null
         }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/104",
-        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp32",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_104"
       }
     },
     {
-      "id": "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_7cbb62",
+      "id": "S8_3d_i16x8x8_n2c32k64g4_f3x3x3_bf16_cf_relu6",
       "values": {
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            2,
+            2,
+            2
+          ],
+          "post_padding": [
+            1,
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "stride": [
+            2,
+            2,
+            2
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": null,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": 6.0,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
         "tensors": [
           {
             "uid": 0,
             "dims": [
-              1,
-              1,
-              16,
-              8,
-              4
+              2,
+              64,
+              7,
+              3,
+              3
             ],
             "strides": [
-              512,
-              1,
-              32,
-              4,
+              4032,
+              63,
+              9,
+              3,
               1
             ],
             "data_type": "float"
@@ -867,17 +2101,17 @@
           {
             "uid": 1,
             "dims": [
-              1,
-              1,
-              16,
-              8,
-              4
+              2,
+              64,
+              7,
+              3,
+              3
             ],
             "strides": [
-              512,
-              1,
-              32,
-              4,
+              4032,
+              63,
+              9,
+              3,
               1
             ],
             "data_type": "bfloat16"
@@ -885,17 +2119,158 @@
           {
             "uid": 2,
             "dims": [
-              1,
-              16,
+              64,
+              8,
               3,
               3,
               3
             ],
             "strides": [
-              432,
+              216,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              16,
+              8,
+              8
+            ],
+            "strides": [
+              32768,
+              1024,
+              64,
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S8"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 805170102,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1514642048
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1453325943
+          }
+        }
+      }
+    },
+    {
+      "id": "S9_3d_i16x8x4_n8c16k32_f1x1x1_bf16_cl_relu_clamp",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1,
+            1
+          ],
+          "post_padding": [
+            0,
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0,
+            0
+          ],
+          "stride": [
+            1,
+            1,
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": 0.1,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": 0.5,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              8,
+              32,
+              16,
+              8,
+              4
+            ],
+            "strides": [
+              16384,
               1,
-              144,
-              48,
+              1024,
+              128,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              8,
+              32,
+              16,
+              8,
+              4
+            ],
+            "strides": [
+              16384,
+              1,
+              1024,
+              128,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              16,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16,
               16
             ],
             "data_type": "bfloat16"
@@ -903,7 +2278,7 @@
           {
             "uid": 3,
             "dims": [
-              1,
+              8,
               16,
               16,
               8,
@@ -918,176 +2293,83 @@
             ],
             "data_type": "bfloat16"
           }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            1,
-            1,
-            1
-          ],
-          "parameters__pre_padding": [
-            1,
-            1,
-            1
-          ],
-          "parameters__stride": [
-            1,
-            1,
-            1
-          ],
-          "relu_lower_clip": 0.0,
-          "relu_lower_clip_slope": null,
-          "relu_upper_clip": null
-        }
+        ]
       },
       "metadata": {
         "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/120",
-        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dBfp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_120"
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S9"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 1377273669,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1463635898
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1638350954
+          }
+        }
       }
     },
     {
-      "id": "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_ddd28d",
+      "id": "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_sigmoid",
       "values": {
-        "io_data_type": "half",
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1
+          ],
+          "stride": [
+            1,
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "sigmoid_fwd",
+          "act_relu_lower_clip": null,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": null,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
         "tensors": [
           {
             "uid": 0,
             "dims": [
               1,
-              1,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              512,
-              512,
               32,
-              4,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              1,
               16,
-              8,
-              4
-            ],
-            "strides": [
-              512,
-              512,
-              32,
-              4,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              3,
-              3,
-              3
-            ],
-            "strides": [
-              432,
-              27,
-              9,
-              3,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              16,
-              16,
-              8,
-              4
+              16
             ],
             "strides": [
               8192,
-              512,
-              32,
-              4,
-              1
-            ],
-            "data_type": "half"
-          }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            1,
-            1,
-            1
-          ],
-          "parameters__pre_padding": [
-            1,
-            1,
-            1
-          ],
-          "parameters__stride": [
-            1,
-            1,
-            1
-          ],
-          "relu_lower_clip": 0.10000000149011612,
-          "relu_lower_clip_slope": null,
-          "relu_upper_clip": 0.5
-        }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/50",
-        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_50"
-      }
-    },
-    {
-      "id": "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_379605",
-      "values": {
-        "io_data_type": "float",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              1,
+              256,
               16,
-              8,
-              4
-            ],
-            "strides": [
-              512,
-              1,
-              32,
-              4,
               1
             ],
             "data_type": "float"
@@ -1096,16 +2378,14 @@
             "uid": 1,
             "dims": [
               1,
-              1,
+              32,
               16,
-              8,
-              4
+              16
             ],
             "strides": [
-              512,
-              1,
-              32,
-              4,
+              8192,
+              256,
+              16,
               1
             ],
             "data_type": "float"
@@ -1113,129 +2393,13 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              32,
               16,
-              3,
               3,
               3
             ],
             "strides": [
-              432,
-              1,
               144,
-              48,
-              16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              16,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              64,
-              16
-            ],
-            "data_type": "float"
-          }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            1,
-            1,
-            1
-          ],
-          "parameters__pre_padding": [
-            1,
-            1,
-            1
-          ],
-          "parameters__stride": [
-            1,
-            1,
-            1
-          ],
-          "relu_lower_clip": 0.10000000149011612,
-          "relu_lower_clip_slope": null,
-          "relu_upper_clip": 0.5
-        }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/122",
-        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp32",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_122"
-      }
-    },
-    {
-      "id": "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_93e7db",
-      "values": {
-        "io_data_type": "float",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              1,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              512,
-              512,
-              32,
-              4,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              1,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              512,
-              512,
-              32,
-              4,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              3,
-              3,
-              3
-            ],
-            "strides": [
-              432,
-              27,
               9,
               3,
               1
@@ -1248,125 +2412,9 @@
               1,
               16,
               16,
-              8,
-              4
-            ],
-            "strides": [
-              8192,
-              512,
-              32,
-              4,
-              1
-            ],
-            "data_type": "float"
-          }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            1,
-            1,
-            1
-          ],
-          "parameters__pre_padding": [
-            1,
-            1,
-            1
-          ],
-          "parameters__stride": [
-            1,
-            1,
-            1
-          ],
-          "relu_lower_clip": null,
-          "relu_lower_clip_slope": null,
-          "relu_upper_clip": 6.0
-        }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/49",
-        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp32",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_49"
-      }
-    },
-    {
-      "id": "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0_81e6bb",
-      "values": {
-        "io_data_type": "float",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              1,
-              14,
-              14,
-              14
-            ],
-            "strides": [
-              2744,
-              2744,
-              196,
-              14,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              1,
-              14,
-              14,
-              14
-            ],
-            "strides": [
-              2744,
-              2744,
-              196,
-              14,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              3,
-              3,
-              3
-            ],
-            "strides": [
-              432,
-              27,
-              9,
-              3,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              16,
-              16,
-              16,
               16
             ],
             "strides": [
-              65536,
               4096,
               256,
               16,
@@ -1374,155 +2422,35 @@
             ],
             "data_type": "float"
           }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            0,
-            0,
-            0
-          ],
-          "parameters__pre_padding": [
-            0,
-            0,
-            0
-          ],
-          "parameters__stride": [
-            1,
-            1,
-            1
-          ],
-          "relu_lower_clip": 0.10000000149011612,
-          "relu_lower_clip_slope": null,
-          "relu_upper_clip": 0.5
-        }
+        ]
       },
       "metadata": {
         "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/10",
-        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp32",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_10"
-      }
-    },
-    {
-      "id": "1_16_3_3_3_fp32_ndhwc_dil2x2x2_postpad2x2x2_prepad2x2x2_a008a7",
-      "values": {
-        "io_data_type": "float",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S3"
+        ],
+        "purpose": "probe",
+        "size_class": "S",
+        "seed": 241306760,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1103126990
           },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              3,
-              3,
-              3
-            ],
-            "strides": [
-              432,
-              1,
-              144,
-              48,
-              16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              16,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              65536,
-              1,
-              4096,
-              256,
-              16
-            ],
-            "data_type": "float"
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1624031858
           }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            2,
-            2,
-            2
-          ],
-          "parameters__post_padding": [
-            2,
-            2,
-            2
-          ],
-          "parameters__pre_padding": [
-            2,
-            2,
-            2
-          ],
-          "parameters__stride": [
-            1,
-            1,
-            1
-          ],
-          "relu_lower_clip": 0.10000000149011612,
-          "relu_lower_clip_slope": null,
-          "relu_upper_clip": 0.5
-        }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/106",
-        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp32",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_106"
+        },
+        "notes": "probe: F26 non-ReLU activation"
       }
     }
   ]
