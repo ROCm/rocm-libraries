@@ -57,7 +57,12 @@ std::vector<at::Tensor> mha_varlen_fwd(
     const float softcap,
     const bool return_softmax,
     std::optional<at::Generator> gen_,
-    int /*num_splits*/);
+    int num_splits,
+    std::optional<at::Tensor> q_descale_,
+    std::optional<at::Tensor> k_descale_,
+    std::optional<at::Tensor> v_descale_,
+    std::string qscale,
+    bool return_lse);
 
 std::vector<at::Tensor>
 mha_bwd(const at::Tensor& dout, // batch_size x seqlen_q x num_heads, x multiple_of(head_size_og, 8)
@@ -165,8 +170,36 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
           pybind11::arg("return_lse")    = true,
           pybind11::arg("block_size_q")  = 128,
           pybind11::arg("block_size_kv") = 128);
-    m.def(
-        "varlen_fwd", &ck_tile::fmha::torch_api::mha_varlen_fwd, "Forward pass (variable length)");
+    m.def("varlen_fwd",
+          &ck_tile::fmha::torch_api::mha_varlen_fwd,
+          "Forward pass (variable length)",
+          pybind11::arg("q"),
+          pybind11::arg("k"),
+          pybind11::arg("v"),
+          pybind11::arg("out"),
+          pybind11::arg("cu_seqlens_q"),
+          pybind11::arg("cu_seqlens_k"),
+          pybind11::arg("seqused_k"),
+          pybind11::arg("leftpad_k"),
+          pybind11::arg("block_table"),
+          pybind11::arg("alibi_slopes"),
+          pybind11::arg("max_seqlen_q"),
+          pybind11::arg("max_seqlen_k"),
+          pybind11::arg("dropout_p"),
+          pybind11::arg("softmax_scale"),
+          pybind11::arg("zero_tensors"),
+          pybind11::arg("causal"),
+          pybind11::arg("window_size_left"),
+          pybind11::arg("window_size_right"),
+          pybind11::arg("softcap"),
+          pybind11::arg("return_softmax"),
+          pybind11::arg("gen"),
+          pybind11::arg("num_splits"),
+          pybind11::arg("q_descale")  = pybind11::none(),
+          pybind11::arg("k_descale")  = pybind11::none(),
+          pybind11::arg("v_descale")  = pybind11::none(),
+          pybind11::arg("qscale")     = "no_scale",
+          pybind11::arg("return_lse") = true);
     m.def("bwd",
           &ck_tile::fmha::torch_api::mha_bwd,
           "Backward pass",

@@ -70,7 +70,7 @@ and added to `Q @ K.T * softmax_scale` before softmax. It cannot be combined wit
 Bias gradients require a `(batch_size, nheads, seqlen_q, seqlen_k)` temporary,
 reduced across batches and heads.
 
-## FP8 fixed-length forward
+## FP8 forward
 
 `fmha_fp8_func` takes prequantized E4M3 Q/K/V and returns BF16 output.
 Use `torch.float8_e4m3fn` on gfx1250/gfx950 and `torch.float8_e4m3fnuz` on gfx94x.
@@ -103,6 +103,21 @@ Supports MHA/GQA/MQA and causal/local masks. FP8 backward, dropout, bias and ALi
 are not exposed. `return_lse=True` returns `(out, lse)` with FP32 LSE
 `[batch, nheads, seqlen_q]`.
 
+`fmha_varlen_fp8_func` supports `no_scale`, `pertensor` and `perhead` with
+packed Q `[total_q, nheads, dim]` and K/V `[total_k, nheads_kv, dim]`:
+
+```python
+from ck_tile_fmha import fmha_varlen_fp8_func
+
+out = fmha_varlen_fp8_func(q8, k8, v8, cu_seqlens_q, cu_seqlens_k,
+                          max_seqlen_q, max_seqlen_k, qs, ks, vs, qscale="perhead")
+```
+
+The cumulative lengths are GPU int32 tensors of shape `[batch + 1]`.
+Per-tensor scales cover each entire packed tensor; per-head scales retain the
+`[batch, heads]` layout above. Optional LSE is `[nheads, total_q]`.
+Varlen blockscale and paged KV FP8 are not exposed.
+
 - **gfx1250:** all four modes and LSE, head dimensions <= 128.
 - **gfx950:** no-scale, per-tensor and block-scale, head dimensions <= 256.
   LSE requires no-scale/per-tensor, head dimension 128 and no/causal mask.
@@ -120,7 +135,7 @@ must be positive powers of two** (E8M0); Q/K descales may be general FP32 values
 | File | Coverage |
 | --- | --- |
 | `tests/test_fixedlen.py` | Fixed-length/packed forward and backward, bias |
-| `tests/test_fp8.py` | FP8 fixed-length quantization, validation and `torch.compile` |
+| `tests/test_fp8.py` | FP8 fixed/variable-length quantization, validation and `torch.compile` |
 | `tests/test_varlen.py` | Variable-length/packed forward and backward, paged attention |
 | `tests/test_kvcache.py` | Cache updates, decode, rotary embeddings, cache indexing |
 | `tests/test_interface.py` | Validation, native compatibility, fake tensors, `torch.compile` |

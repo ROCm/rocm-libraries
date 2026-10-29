@@ -241,6 +241,11 @@ def _fmha_varlen_forward(
     seqused_k: Optional[torch.Tensor] = None,
     zero_tensors: bool = False,
     num_splits: int = 0,
+    q_descale: Optional[torch.Tensor] = None,
+    k_descale: Optional[torch.Tensor] = None,
+    v_descale: Optional[torch.Tensor] = None,
+    qscale: str = "no_scale",
+    return_lse: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     q, k, v = [maybe_contiguous(x) for x in (q, k, v)]
     out, softmax_lse, S_dmask, rng_state = fmha_gpu.varlen_fwd(
@@ -266,6 +271,11 @@ def _fmha_varlen_forward(
         return_softmax,
         None,  # unused generator slot, kept for backwards-compat arg positioning
         num_splits,
+        q_descale,
+        k_descale,
+        v_descale,
+        qscale,
+        return_lse,
     )
     return out, softmax_lse, S_dmask, rng_state
 
@@ -292,13 +302,24 @@ def _fmha_varlen_forward_fake(
     seqused_k: Optional[torch.Tensor] = None,
     zero_tensors: bool = False,
     num_splits: int = 0,
+    q_descale: Optional[torch.Tensor] = None,
+    k_descale: Optional[torch.Tensor] = None,
+    v_descale: Optional[torch.Tensor] = None,
+    qscale: str = "no_scale",
+    return_lse: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     q, k, v = [maybe_contiguous(x) for x in (q, k, v)]
     total_q, num_heads, _ = q.shape
 
-    out = torch.empty_like(q)
+    out_dtype = (
+        torch.bfloat16 if q.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz) else q.dtype
+    )
+    out = torch.empty_like(q, dtype=out_dtype)
     softmax_lse = torch.empty(
-        (num_heads, total_q), dtype=torch.float32, device=q.device, layout=q.layout
+        (num_heads, total_q) if return_lse else (0,),
+        dtype=torch.float32,
+        device=q.device,
+        layout=q.layout,
     )
     p = torch.empty((0,), dtype=q.dtype, device=q.device, layout=q.layout)
     if return_softmax:
@@ -316,6 +337,73 @@ if tuple(int(part) for part in torch.__version__.split("+")[0].split(".")[:2]) >
     _wrapped_fmha_varlen_forward = torch.ops.ck_tile_fmha._fmha_varlen_forward
 else:
     _wrapped_fmha_varlen_forward = _fmha_varlen_forward
+
+
+def fmha_varlen_fp8_func(
+    q,
+    k,
+    v,
+    cu_seqlens_q,
+    cu_seqlens_k,
+    max_seqlen_q,
+    max_seqlen_k,
+    q_descale=None,
+    k_descale=None,
+    v_descale=None,
+    *,
+    qscale="pertensor",
+    causal=False,
+    window_size=(-1, -1),
+    softmax_scale=None,
+    return_lse=False,
+):
+    """Variable-length FP8 E4M3 attention with BF16 output; forward only.
+
+    Q: [total_q, nheads, dim]; K/V: [total_k, nheads_kv, dim].
+    cu_seqlens_q/k are contiguous GPU int32 tensors of shape [batch + 1].
+    max_seqlen_q/k bound the lengths of the individual sequences.
+
+    qscale supports no_scale (no descales), pertensor (one FP32 scale per
+    packed tensor), and perhead (FP32 [batch, heads], K/V using nheads_kv).
+    Dequantization is input.float() * descale. Per-head scaling requires
+    gfx1250 and head dimension <= 128. Other dtype, head dimension and LSE
+    restrictions match fmha_fp8_func. Optional LSE has shape [nheads, total_q].
+    Supports MHA/GQA/MQA and causal/local masks; paged KV is not supported.
+    """
+    if q.dtype not in (torch.float8_e4m3fn, torch.float8_e4m3fnuz):
+        raise ValueError("FP8 attention requires float8_e4m3fn or float8_e4m3fnuz inputs")
+    if any(x.requires_grad for x in (q, k, v, q_descale, k_descale, v_descale) if x is not None):
+        raise ValueError("FP8 attention supports forward only")
+    if q.ndim != 3 or k.ndim != 3 or v.ndim != 3:
+        raise ValueError("query, key and value must be three-dimensional")
+    head_size = q.shape[-1]
+    if not 0 < head_size <= 256 or k.shape[-1] != head_size or v.shape[-1] != head_size:
+        raise ValueError("FP8 attention requires equal Q/K/V head dimensions in [1, 256]")
+    if softmax_scale is None:
+        softmax_scale = head_size ** (-0.5)
+    if head_size % 8:
+        q, k, v = (torch.nn.functional.pad(x, (0, 8 - head_size % 8)) for x in (q, k, v))
+    out, lse, _, _ = _wrapped_fmha_varlen_forward(
+        q,
+        k,
+        v,
+        cu_seqlens_q,
+        cu_seqlens_k,
+        max_seqlen_q,
+        max_seqlen_k,
+        0.0,
+        softmax_scale,
+        causal,
+        int(window_size[0]),
+        int(window_size[1]),
+        q_descale=q_descale,
+        k_descale=k_descale,
+        v_descale=v_descale,
+        qscale=qscale,
+        return_lse=return_lse,
+    )
+    out = out[..., :head_size]
+    return (out, lse) if return_lse else out
 
 
 @_torch_custom_op_wrapper(

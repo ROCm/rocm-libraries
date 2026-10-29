@@ -339,10 +339,10 @@ std::vector<at::Tensor> mha_varlen_fwd(
         out_, // total_q x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
     const at::Tensor& cu_seqlens_q, // b+1
     const at::Tensor& cu_seqlens_k, // b+1
-    std::optional<at::Tensor>& /*seqused_k*/,
-    std::optional<const at::Tensor>& /*leftpad_k_*/, // batch_size
-    std::optional<at::Tensor>& block_table_,         // batch_size x max_num_blocks_per_seq
-    std::optional<at::Tensor>& alibi_slopes_,        // num_heads or b x num_heads
+    std::optional<at::Tensor>& seqused_k,
+    std::optional<const at::Tensor>& leftpad_k_, // batch_size
+    std::optional<at::Tensor>& block_table_,     // batch_size x max_num_blocks_per_seq
+    std::optional<at::Tensor>& alibi_slopes_,    // num_heads or b x num_heads
     int max_seqlen_q,
     const int max_seqlen_k,
     const float p_dropout,
@@ -354,25 +354,39 @@ std::vector<at::Tensor> mha_varlen_fwd(
     const float softcap,
     const bool return_dropout_randval,
     std::optional<at::Generator> gen_,
-    int /*num_splits*/)
+    int num_splits_requested,
+    std::optional<at::Tensor> q_descale_,
+    std::optional<at::Tensor> k_descale_,
+    std::optional<at::Tensor> v_descale_,
+    std::string qscale,
+    bool return_lse)
 {
     TORCH_CHECK(softcap == 0.0f, "CK Tile FMHA Python bindings do not support softcap");
-    auto q_dtype = q.dtype();
-    TORCH_CHECK(q_dtype == torch::kFloat16 || q_dtype == torch::kBFloat16,
-                "CK Tile FMHA only supports fp16 and bf16 data type");
+    auto q_dtype      = q.dtype();
+    const bool is_fp8 = q.scalar_type() == at::ScalarType::Float8_e4m3fn ||
+                        q.scalar_type() == at::ScalarType::Float8_e4m3fnuz;
+    TORCH_CHECK(q_dtype == torch::kFloat16 || q_dtype == torch::kBFloat16 || is_fp8,
+                "CK Tile FMHA only supports fp16, bf16 and fp8 e4m3 data types");
 
     TORCH_CHECK(k.dtype() == q_dtype, "query and key must have the same dtype");
     TORCH_CHECK(v.dtype() == q_dtype, "query and value must have the same dtype");
     TORCH_CHECK(cu_seqlens_q.dtype() == torch::kInt32, "cu_seqlens_q must have dtype int32");
     TORCH_CHECK(cu_seqlens_k.dtype() == torch::kInt32, "cu_seqlens_k must have dtype int32");
 
-    std::string q_dtype_str = q_dtype == torch::kFloat16 ? "fp16" : "bf16";
+    std::string q_dtype_str = is_fp8 ? "fp8bf16" : q_dtype == torch::kFloat16 ? "fp16" : "bf16";
 
     CK_TILE_FMHA_CHECK_DEVICE(q);
     CK_TILE_FMHA_CHECK_DEVICE(k);
     CK_TILE_FMHA_CHECK_DEVICE(v);
     CK_TILE_FMHA_CHECK_DEVICE(cu_seqlens_q);
     CK_TILE_FMHA_CHECK_DEVICE(cu_seqlens_k);
+
+    TORCH_CHECK(k.device() == q.device() && v.device() == q.device() &&
+                    cu_seqlens_q.device() == q.device() && cu_seqlens_k.device() == q.device(),
+                "query, key, value and cu_seqlens must be on the same device");
+    TORCH_CHECK(q.dim() == 3 && k.dim() == (block_table_.has_value() ? 4 : 3) && v.dim() == k.dim(),
+                "query must be three-dimensional; key/value must match the attention layout");
+    TORCH_CHECK(max_seqlen_q >= 0 && max_seqlen_k >= 0, "max_seqlens must be nonnegative");
 
     at::Tensor block_table;
     const bool paged_KV = block_table_.has_value();
@@ -416,11 +430,75 @@ std::vector<at::Tensor> mha_varlen_fwd(
     const int total_q = q.size(0);
 
     TORCH_CHECK(batch_size > 0, "batch size must be postive");
-    TORCH_CHECK(head_size <= 256, "CK only supports head dimension at most 256");
+    TORCH_CHECK(head_size > 0 && head_size <= 256, "CK only supports head dimension in [1, 256]");
     TORCH_CHECK(head_size % 8 == 0,
                 "query, key, value, and out_ must have a head_size that is a multiple of 8");
-    TORCH_CHECK(num_heads % num_heads_k == 0,
+    TORCH_CHECK(num_heads > 0 && num_heads_k > 0 && num_heads % num_heads_k == 0,
                 "Number of heads in key/value must divide number of heads in query");
+
+    const bool perhead           = qscale == "perhead";
+    quant_scale_enum qscale_type = quant_scale_enum::no_scale;
+    TORCH_CHECK(qscale == "no_scale" || qscale == "pertensor" || perhead,
+                "Unsupported FP8 varlen qscale: ",
+                qscale);
+    if(is_fp8)
+    {
+        TORCH_CHECK(
+            !paged_KV && !seqused_k.has_value() && !leftpad_k_.has_value() &&
+                num_splits_requested == 0,
+            "FP8 varlen attention requires contiguous sequences without paged KV or splits");
+        TORCH_CHECK(p_dropout == 0.0f && !return_dropout_randval,
+                    "FP8 attention does not support dropout");
+        TORCH_CHECK(!alibi_slopes_.has_value(), "FP8 attention does not support ALiBi");
+        TORCH_CHECK(!q.requires_grad() && !k.requires_grad() && !v.requires_grad(),
+                    "FP8 attention supports forward only");
+        const std::string arch = at::cuda::getDeviceProperties(q.get_device())->gcnArchName;
+        const bool use_fnuz    = arch.rfind("gfx94", 0) == 0;
+        TORCH_CHECK(q.scalar_type() == (use_fnuz ? at::ScalarType::Float8_e4m3fnuz
+                                                 : at::ScalarType::Float8_e4m3fn),
+                    "FP8 dtype does not match the GPU: expected ",
+                    use_fnuz ? "float8_e4m3fnuz" : "float8_e4m3fn");
+        TORCH_CHECK(!perhead || (arch.rfind("gfx1250", 0) == 0 && head_size <= 128),
+                    "FP8 per-head attention requires gfx1250 and head dimension at most 128");
+        qscale_type = perhead                 ? quant_scale_enum::perhead
+                      : qscale == "pertensor" ? quant_scale_enum::pertensor
+                                              : quant_scale_enum::no_scale;
+        const auto check_descale =
+            [&](const std::optional<at::Tensor>& descale, int heads, const char* name) {
+                if(qscale_type == quant_scale_enum::no_scale)
+                {
+                    TORCH_CHECK(!descale.has_value(), "no_scale does not accept descales");
+                    return;
+                }
+                TORCH_CHECK(descale.has_value(), name, " is required for FP8 attention");
+                const auto& tensor = descale.value();
+                TORCH_CHECK(
+                    tensor.device() == q.device(), name, " must be on the same device as query");
+                TORCH_CHECK(tensor.scalar_type() == at::ScalarType::Float,
+                            name,
+                            " must have dtype float32");
+                TORCH_CHECK(!tensor.requires_grad(), "FP8 attention supports forward only");
+                if(perhead)
+                {
+                    TORCH_CHECK(tensor.sizes() == torch::IntArrayRef({batch_size, heads}),
+                                name,
+                                " must have shape [batch_size, nheads]");
+                }
+                else
+                {
+                    TORCH_CHECK(tensor.numel() == 1, name, " must contain one scale");
+                }
+            };
+        check_descale(q_descale_, num_heads, "q_descale");
+        check_descale(k_descale_, num_heads_k, "k_descale");
+        check_descale(v_descale_, num_heads_k, "v_descale");
+    }
+    else
+    {
+        TORCH_CHECK(!q_descale_.has_value() && !k_descale_.has_value() && !v_descale_.has_value() &&
+                        qscale == "no_scale",
+                    "descale is only supported for FP8 inputs");
+    }
 
     if(window_size_left >= max_seqlen_k)
     {
@@ -469,31 +547,34 @@ std::vector<at::Tensor> mha_varlen_fwd(
     CK_TILE_FMHA_CHECK_SHAPE(cu_seqlens_q, batch_size + 1);
     CK_TILE_FMHA_CHECK_SHAPE(cu_seqlens_k, batch_size + 1);
     at::Tensor out;
+    const auto out_dtype = is_fp8 ? at::ScalarType::BFloat16 : q.scalar_type();
     if(out_.has_value())
     {
         out = out_.value();
-        TORCH_CHECK(out.dtype() == q_dtype, "Output must have the same dtype as inputs");
+        TORCH_CHECK(out.scalar_type() == out_dtype, "Output has an incorrect dtype");
+        TORCH_CHECK(out.device() == q.device(), "Output must be on the same device as query");
         CK_TILE_FMHA_CHECK_DEVICE(out);
         TORCH_CHECK(out.stride(-1) == 1, "Output tensor must have contiguous last dimension");
         CK_TILE_FMHA_CHECK_SHAPE(out, total_q, num_heads, head_size);
     }
     else
     {
-        out = torch::empty_like(q);
+        out = torch::empty_like(q, q.options().dtype(out_dtype));
     }
 
     // Otherwise the kernel will be launched from cuda:0 device
     at::cuda::CUDAGuard device_guard{q.device()};
 
     auto opts        = q.options();
-    bool has_lse     = true;
+    bool has_lse     = return_lse;
     bool has_dropout = p_dropout > 0.0f;
     if(has_dropout)
         TORCH_CHECK(!paged_KV, "Paged KV does not support dropout");
 
     at::Tensor softmax_lse;
     // TODO - check gradient, only training require lse
-    softmax_lse = torch::empty({num_heads, total_q}, opts.dtype(torch::kFloat32));
+    softmax_lse = has_lse ? torch::empty({num_heads, total_q}, opts.dtype(torch::kFloat32))
+                          : torch::empty({0}, opts.dtype(torch::kFloat32));
 
     at::Tensor p;
     if(return_dropout_randval)
@@ -541,7 +622,7 @@ std::vector<at::Tensor> mha_varlen_fwd(
             detail::ParsePhiloxCudaState, dim3(1), dim3(64), 0, 0, philox_args, rng_state_ptr);
     }
 
-    if(max_seqlen_k > 0)
+    if(max_seqlen_k > 0 && total_q > 0)
     {
 #ifdef HIPIFY_V2
         auto stream = at::cuda::getCurrentCUDAStream().stream();
@@ -608,6 +689,23 @@ std::vector<at::Tensor> mha_varlen_fwd(
                                                     p_dropout,
                                                     drop_seed_offset);
 
+            traits.qscale_type = qscale_type;
+            if(is_fp8 && qscale_type != quant_scale_enum::no_scale)
+            {
+                args.q_descale_ptr = q_descale_.value().data_ptr();
+                args.k_descale_ptr = k_descale_.value().data_ptr();
+                args.v_descale_ptr = v_descale_.value().data_ptr();
+                if(perhead)
+                {
+                    args.nhead_stride_q_descale = q_descale_.value().stride(1);
+                    args.nhead_stride_k_descale = k_descale_.value().stride(1);
+                    args.nhead_stride_v_descale = v_descale_.value().stride(1);
+                    args.batch_stride_q_descale = q_descale_.value().stride(0);
+                    args.batch_stride_k_descale = k_descale_.value().stride(0);
+                    args.batch_stride_v_descale = v_descale_.value().stride(0);
+                }
+            }
+
             float t = detail::maybe_dispatch_head_grouped_fwd(
                 stream_config,
                 traits,
@@ -629,7 +727,15 @@ std::vector<at::Tensor> mha_varlen_fwd(
             {
                 t = fmha_fwd(traits, args, stream_config);
             }
-            TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
+            TORCH_CHECK(t >= 0,
+                        "No FMHA variable-length forward kernel supports these arguments: dtype=",
+                        q_dtype_str,
+                        ", head_size=",
+                        head_size,
+                        ", qscale=",
+                        qscale,
+                        ", return_lse=",
+                        return_lse);
         }
     }
     else

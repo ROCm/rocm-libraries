@@ -2216,11 +2216,15 @@ def get_product(receipt: int) -> Product:
             pipeline = kernel_ctx.pipeline
             if problem_ctx.dtype == "fp8bf16":
                 return (
-                    problem_ctx.mode == "batch"
-                    and problem_ctx.hdim == problem_ctx.hdim_v <= 256
+                    problem_ctx.hdim == problem_ctx.hdim_v <= 256
                     and pipeline.F_vlayout == "row"
-                    and pipeline.F_qscale
-                    in ["no", "pertensor", "perhead", "blockscale"]
+                    and (
+                        pipeline.F_qscale in ["no", "pertensor", "perhead"]
+                        or (
+                            problem_ctx.mode == "batch"
+                            and pipeline.F_qscale == "blockscale"
+                        )
+                    )
                     and pipeline.F_bias == "no"
                     and pipeline.F_dropout == "f"
                     and pipeline.F_logits == "f"
