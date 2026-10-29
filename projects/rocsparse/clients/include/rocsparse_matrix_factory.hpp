@@ -252,6 +252,9 @@ public:
                    I&                   ell_block_size,
                    rocsparse_index_base base);
 
+    void
+        init_bell(host_bell_matrix<T, I>& that, I& m, I& n, I block_dim, rocsparse_index_base base);
+
     //
     // SLICED ELL
     //

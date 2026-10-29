@@ -26,7 +26,7 @@
 
 bool is_lockable(::std::recursive_timed_mutex& m) {
   bool did_lock;
-  hip::thread t = support::make_test_thread([&] {
+  hip::wthread t = support::make_test_thread([&] {
     did_lock = m.try_lock();
     if (did_lock)
       m.unlock(); // undo side effects
@@ -81,7 +81,7 @@ int main(int, char**) {
     ::std::recursive_timed_mutex m;
     m.lock();
 
-    hip::thread t = support::make_test_thread([&] {
+    hip::wthread t = support::make_test_thread([&] {
       auto elapsed = measure([&] {
         ready          = true;
         bool succeeded = m.try_lock_until(cuda::std::chrono::steady_clock::now() + wait_time);
@@ -115,7 +115,7 @@ int main(int, char**) {
     ::std::recursive_timed_mutex m;
     m.lock();
 
-    hip::thread t = support::make_test_thread([&] {
+    hip::wthread t = support::make_test_thread([&] {
       auto elapsed = measure([&] {
         bool succeeded = m.try_lock_until(cuda::std::chrono::steady_clock::now() + wait_time);
         assert(!succeeded);

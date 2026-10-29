@@ -47,6 +47,7 @@
 #endif
 #include "unit.hpp"
 #include "utility.hpp"
+#include <limits>
 
 void testing_aux_handle_init_bad_arg(const Arguments& arg)
 {
@@ -468,6 +469,55 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
         HIPBLAS_STATUS_SUCCESS);
     ASSERT_TRUE(data_r == data);
 
+    // for HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT (w4a16 weight encoding)
+    int32_t enc_r = -1;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT,
+                                                          &enc_r,
+                                                          sizeof(enc_r),
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(enc_r == HIPBLASLT_INT4_ENCODING_SIGNED_EXT); // default
+    ASSERT_TRUE(sizeWritten == sizeof(int32_t));
+
+    for(int32_t enc = 0; enc < HIPBLASLT_INT4_ENCODING_END_EXT; ++enc)
+    {
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescSetAttribute(
+                matmul, HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT, &enc, sizeof(enc)),
+            HIPBLAS_STATUS_SUCCESS);
+        enc_r = -1;
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescGetAttribute(
+                matmul, HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT, &enc_r, sizeof(enc_r), &sizeWritten),
+            HIPBLAS_STATUS_SUCCESS);
+        ASSERT_TRUE(enc_r == enc);
+    }
+
+    // Out of range and undersized buffers are rejected, and a rejected set
+    // leaves the previously stored value alone.
+    const int32_t encLast    = HIPBLASLT_INT4_ENCODING_END_EXT - 1;
+    const int32_t encBad[]   = {-1, HIPBLASLT_INT4_ENCODING_END_EXT, 99};
+    for(int32_t bad : encBad)
+    {
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescSetAttribute(
+                matmul, HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT, &bad, sizeof(bad)),
+            HIPBLAS_STATUS_INVALID_VALUE);
+    }
+    int8_t encTooSmall = 0;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT,
+                                                          &encTooSmall,
+                                                          sizeof(encTooSmall)),
+                          HIPBLAS_STATUS_INVALID_VALUE);
+    enc_r = -1;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescGetAttribute(
+            matmul, HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT, &enc_r, sizeof(enc_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(enc_r == encLast);
+
     // for HIPBLASLT_MATMUL_DESC_BIAS_POINTER set and get
     void* d_bias;
     void* d_bias_r;
@@ -697,6 +747,37 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
         == HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3); // validate round-trip
     ASSERT_TRUE(scale_mode_b_r == HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3); // ditto
 
+    // Round-trip every mode through the independent setter and getter mappings.
+    const hipblasLtMatmulMatrixScale_t w4a16Modes[] = {
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16BF_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16BF_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_ZP_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16BF_ZP_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16BF_ZP_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16F_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16F_ZP_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_ZP_EXT,
+    };
+    for(auto mode : w4a16Modes)
+    {
+        uint32_t modeSet = mode, modeGot = 0xFFFFFFFFu;
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescSetAttribute(
+                matmul, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &modeSet, sizeof(uint32_t)),
+            HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                              HIPBLASLT_MATMUL_DESC_A_SCALE_MODE,
+                                                              &modeGot,
+                                                              sizeof(uint32_t),
+                                                              &sizeWritten),
+                              HIPBLAS_STATUS_SUCCESS);
+        ASSERT_TRUE(modeGot == modeSet);
+    }
+
     hipStream_t stream;
     CHECK_HIP_ERROR(hipStreamCreate(&stream));
 
@@ -783,6 +864,12 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatmulDescSetAttribute(
             matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER, &d_scale_e, sizeof(float*)),
+        HIPBLAS_STATUS_NOT_SUPPORTED);
+
+    float* no_scale_e = nullptr;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescSetAttribute(
+            matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER, &no_scale_e, sizeof(float*)),
         HIPBLAS_STATUS_SUCCESS);
 
     // For HIPBLASLT_MATMUL_DESC_POINTER_MODE
@@ -1292,6 +1379,140 @@ void testing_aux_matmul_streamk_tile_scheduling_ext(const Arguments& arg)
     ASSERT_TRUE(value_r == 0);
 
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));
+}
+
+void testing_aux_matmul_uniform_summation_order_ext(const Arguments& arg)
+{
+    size_t                sizeWritten = 0;
+    hipblasLtMatmulDesc_t matmul      = nullptr;
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(&matmul, arg.compute_type, arg.scale_type));
+
+    // Default is -1 (inherit from handle).
+    int32_t value_r = -1;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescGetAttribute(matmul,
+                                        HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                        &value_r,
+                                        sizeof(value_r),
+                                        &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(value_r == -1);
+    ASSERT_TRUE(sizeWritten == sizeof(int32_t));
+
+    // ON / OFF / ON round-trip.
+    for(int32_t value_set : {1, 0, 1})
+    {
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescSetAttribute(matmul,
+                                            HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                            &value_set,
+                                            sizeof(value_set)),
+            HIPBLAS_STATUS_SUCCESS);
+        value_r = -1;
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescGetAttribute(matmul,
+                                            HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                            &value_r,
+                                            sizeof(value_r),
+                                            &sizeWritten),
+            HIPBLAS_STATUS_SUCCESS);
+        ASSERT_TRUE(value_r == value_set);
+    }
+
+    // Anything outside {-1,0,1} is rejected and must leave the stored value (-1) intact.
+    for(int32_t bad : {int32_t{2}, int32_t{-2}, std::numeric_limits<int32_t>::min()})
+    {
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescSetAttribute(
+                matmul, HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT, &bad, sizeof(bad)),
+            HIPBLAS_STATUS_INVALID_VALUE);
+        value_r = -1;
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescGetAttribute(matmul,
+                                            HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                            &value_r,
+                                            sizeof(value_r),
+                                            &sizeWritten),
+            HIPBLAS_STATUS_SUCCESS);
+        ASSERT_TRUE(value_r == 1); // unchanged (last successful set was 1)
+    }
+
+    // An undersized get fails, but *sizeWritten is assigned before the size
+    // check, so the caller still learns how large the buffer has to be.
+    sizeWritten = 0;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescGetAttribute(matmul,
+                                        HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                        &value_r,
+                                        sizeof(int32_t) / 2,
+                                        &sizeWritten),
+        HIPBLAS_STATUS_INVALID_VALUE);
+    ASSERT_TRUE(sizeWritten == sizeof(int32_t));
+
+    // A null sizeWritten is legal.
+    value_r = -1;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescGetAttribute(matmul,
+                                        HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                        &value_r,
+                                        sizeof(value_r),
+                                        nullptr),
+        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(value_r == 1); // unchanged (last successful set was 1)
+
+    // An undersized set is rejected.
+    int32_t enable = 1;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescSetAttribute(matmul,
+                                        HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                        &enable,
+                                        sizeof(int32_t) / 2),
+        HIPBLAS_STATUS_INVALID_VALUE);
+
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));
+
+    // _rocblaslt_matmul_desc::copy() is a hand-written field-by-field copy, so a
+    // new attribute is silently dropped on the copyMatmul and grouped-GEMM paths
+    // unless it is added there too.
+    hipblasLtMatmulDesc_t matmul_src = nullptr;
+    hipblasLtMatmulDesc_t matmul_dst = nullptr;
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(&matmul_src, arg.compute_type, arg.scale_type));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(&matmul_dst, arg.compute_type, arg.scale_type));
+
+    int32_t sm_count_set = 77;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescSetAttribute(
+            matmul_src, HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT, &enable, sizeof(enable)),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescSetAttribute(
+            matmul_src, HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET, &sm_count_set, sizeof(sm_count_set)),
+        HIPBLAS_STATUS_SUCCESS);
+
+    EXPECT_HIPBLAS_STATUS(hipblaslt_ext::copyMatmul(matmul_src, matmul_dst),
+                          HIPBLAS_STATUS_SUCCESS);
+
+    value_r = -1;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescGetAttribute(matmul_dst,
+                                        HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                        &value_r,
+                                        sizeof(value_r),
+                                        &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(value_r == 1);
+
+    value_r = -1;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul_dst,
+                                                          HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                                          &value_r,
+                                                          sizeof(value_r),
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(value_r == sm_count_set);
+
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul_src));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul_dst));
 }
 
 void testing_aux_matmul_pref_sm_count_target(const Arguments& arg)
@@ -2537,6 +2758,10 @@ inline void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_R_8F_E4M3)} == "R_8F_E4M3");
     ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_R_8F_E5M2)} == "R_8F_E5M2");
     ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_R_8I)} == "R_8I");
+    ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_R_4I)} == "R_4I");
+    ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_R_32I)} == "R_32I");
+    ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_C_32F)} == "C_32F");
+    ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_C_64F)} == "C_64F");
     ASSERT_TRUE(std::string_view{hipDataType_to_string(static_cast<hipDataType>(HIP_R_6F_E2M3))}
                 == "R_6F_E2M3");
     ASSERT_TRUE(std::string_view{hipDataType_to_string(static_cast<hipDataType>(HIP_R_6F_E3M2))}
@@ -2551,6 +2776,9 @@ inline void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_16F)} == "f16_r");
     ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_16BF)} == "bf16_r");
     ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_8I)} == "i8_r");
+    // w4a16 A type; must round-trip through the bench client's string_to_hip_datatype.
+    ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_4I)} == "i4_r");
+    ASSERT_TRUE(string_to_hip_datatype(hipDataType_to_bench_string(HIP_R_4I)) == HIP_R_4I);
     ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_32I)} == "i32_r");
     ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_8F_E4M3_FNUZ)} == "f8_r");
     ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_8F_E5M2_FNUZ)} == "bf8_r");
@@ -2589,13 +2817,30 @@ inline void testing_aux_rocblaslt_utility_func(const Arguments& arg)
         std::string_view{rocblaslt_compute_type_to_string(static_cast<rocblaslt_compute_type>(999))}
         == "Invalid");
 
+    // Encoding names emitted by log_bench must round-trip through the parser.
+    for(int e = 0; e < HIPBLASLT_INT4_ENCODING_END_EXT; ++e)
+    {
+        const auto  encoding = static_cast<hipblasLtInt4Encoding_t>(e);
+        const char* name     = hipblaslt_int4_encoding_to_string(encoding);
+        ASSERT_TRUE(std::string_view{name} != "invalid");
+        ASSERT_TRUE(string_to_int4_encoding(name) == encoding);
+        // Numerals are accepted too.
+        ASSERT_TRUE(string_to_int4_encoding(std::to_string(e)) == encoding);
+    }
+    ASSERT_TRUE(std::string_view{hipblaslt_int4_encoding_to_string(
+                    static_cast<hipblasLtInt4Encoding_t>(HIPBLASLT_INT4_ENCODING_END_EXT))}
+                == "invalid");
+    ASSERT_TRUE(string_to_int4_encoding("2") == HIPBLASLT_INT4_ENCODING_END_EXT);
+    ASSERT_TRUE(string_to_int4_encoding("nonsense") == HIPBLASLT_INT4_ENCODING_END_EXT);
+    ASSERT_TRUE(string_to_int4_encoding("") == HIPBLASLT_INT4_ENCODING_END_EXT);
+
     // Test rocblaslt_matrix_layout_attributes_to_string
     ASSERT_TRUE(std::string_view{rocblaslt_matrix_layout_attributes_to_string(
                     ROCBLASLT_MATRIX_LAYOUT_BATCH_COUNT)}
-                == "MATRIX_LAYOUT_BATCH_COUNT");
+                == "ROCBLASLT_MATRIX_LAYOUT_BATCH_COUNT");
     ASSERT_TRUE(std::string_view{rocblaslt_matrix_layout_attributes_to_string(
                     ROCBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET)}
-                == "MATRIX_LAYOUT_STRIDED_BATCH_OFFSET");
+                == "ROCBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET");
     ASSERT_TRUE(
         std::string_view{rocblaslt_matrix_layout_attributes_to_string(ROCBLASLT_MATRIX_LAYOUT_TYPE)}
         == "ROCBLASLT_MATRIX_LAYOUT_TYPE");
@@ -3451,6 +3696,10 @@ inline void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
     int64_t                batch_stride_c = 0;
     int64_t                batch_stride_d = 0;
     int64_t                batch_stride_e = 0;
+    int64_t                batch_offset_a = 0;
+    int64_t                batch_offset_b = 0;
+    int64_t                batch_offset_c = 0;
+    int64_t                batch_offset_d = 0;
     bool                   strided_batch  = true;
     bool                   grouped_gemm   = true;
     void*                  bias           = nullptr;
@@ -3478,15 +3727,19 @@ inline void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
                                                            a_type,
                                                            lda,
                                                            batch_stride_a,
+                                                           batch_offset_a,
                                                            b_type,
                                                            ldb,
                                                            batch_stride_b,
+                                                           batch_offset_b,
                                                            c_type,
                                                            ldc,
                                                            batch_stride_c,
+                                                           batch_offset_c,
                                                            d_type,
                                                            ldd,
                                                            batch_stride_d,
+                                                           batch_offset_d,
                                                            lde,
                                                            batch_stride_e,
                                                            bias,
@@ -3512,22 +3765,26 @@ inline void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
                                         nullptr,
                                         lda, // arg.lda
                                         batch_stride_a,
+                                        batch_offset_a,
                                         b_type,
                                         B, // B
                                         nullptr,
                                         ldb, // arg.ldb
                                         batch_stride_b,
+                                        batch_offset_b,
                                         beta,
                                         c_type,
                                         C, // C
                                         nullptr,
                                         ldc, // arg.ldc
                                         batch_stride_c,
+                                        batch_offset_c,
                                         d_type,
                                         D, // D
                                         nullptr,
                                         ldd, // arg.ldc
                                         batch_stride_d,
+                                        batch_offset_d,
                                         E, // E
                                         nullptr,
                                         lde, //arg.lde

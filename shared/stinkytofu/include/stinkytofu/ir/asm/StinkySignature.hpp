@@ -232,8 +232,10 @@ struct SrdUpperValue125X : public BitfieldUnion {
     std::string desc() const override;
 };
 
-// Factory function to create appropriate SRD value based on ISA version
-std::shared_ptr<BitfieldUnion> createSrdUpperValue(const std::array<int, 3>& isa);
+// Factory function to create appropriate SRD value based on ISA version.
+// Exported for the _stinkytofu.so Python module (libstinkytofu hides all
+// symbols by default; see shared/stinkytofu/CMakeLists.txt).
+STINKYTOFU_EXPORT std::shared_ptr<BitfieldUnion> createSrdUpperValue(const std::array<int, 3>& isa);
 
 /***************************************
  * Signature Argument
@@ -266,6 +268,12 @@ struct SignatureArgument {
 /// (the value emitted as `.amdhsa_next_free_vgpr`). Signature producers stamp it
 /// onto Function; occupancy-aware passes read it. Absent or 0 means "unknown".
 inline constexpr const char* kSigTotalVgprsMetaKey = "SignatureKernelDescriptor.totalVgprs";
+
+/// Function-metadata key (uint64) carrying the SGPRs the dispatch writes before
+/// the first instruction, per settledDispatchFilledSgprCount. The allocator pins
+/// live-ins against it; absent or 0 means "unknown", which must read as "filled".
+inline constexpr const char* kSigDispatchFilledSgprsMetaKey =
+    "SignatureKernelDescriptor.dispatchFilledSgprs";
 
 struct SignatureKernelDescriptor {
     std::string kernelName;
@@ -371,6 +379,17 @@ struct STINKYTOFU_EXPORT SignatureBase {
     void setTotalInstructionBytes(int64_t totalBytes);
     void addArg(const std::string& name, SignatureValueKind kind, const std::string& type,
                 const std::string& addrSpaceQual = "");
+
+    /// Write \p totalVgprs to both places the count appears,
+    /// `.amdhsa_next_free_vgpr` and the metadata `.vgpr_count`. The count can
+    /// move either way: declaring too many costs occupancy, declaring too few
+    /// gives the wave fewer registers than the code names. Capping it at what
+    /// the architecture can address is the caller's job, not this layer's.
+    ///
+    /// Not setGprs, which would move originalTotalVgprs too and lose the
+    /// producer's figure. Does nothing when AGPRs share the register file,
+    /// where the count is `accumOffset + totalAgprs` instead.
+    void setDeclaredVgprs(int totalVgprs);
 
     void addDescriptionTopic(const std::string& text);
     void addDescriptionBlock(const std::string& text);

@@ -8,6 +8,8 @@
 
 #include <cstdint>
 #include <gmock/gmock.h>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -20,6 +22,10 @@ public:
     // Mock all public methods from EnginePlugin
     MOCK_METHOD(hipdnnEnginePluginHandle_t, createHandle, (), (const));
     MOCK_METHOD(std::vector<int64_t>, getAllEngineIds, (), (const));
+    // Left unstubbed, gmock returns false: the "plugin exports no engine names"
+    // case, which resolves to the hexadecimal fallback.
+    MOCK_METHOD(bool, hasEngineName, (), (const));
+    MOCK_METHOD(std::optional<std::string>, getEngineName, (int64_t engineId), (const));
     MOCK_METHOD(void, destroyHandle, (hipdnnEnginePluginHandle_t handle), (const));
     MOCK_METHOD(void, setStream, (hipdnnEnginePluginHandle_t handle, hipStream_t stream), (const));
     MOCK_METHOD(std::vector<int64_t>,
@@ -33,6 +39,24 @@ public:
                  const hipdnnPluginConstData_t* opGraph,
                  hipdnnPluginConstData_t* engineDetails),
                 (const));
+    MOCK_METHOD(void,
+                enumerateCandidates,
+                (hipdnnEnginePluginHandle_t handle,
+                 const hipdnnPluginConstData_t* engineConfig,
+                 const hipdnnPluginConstData_t* opGraph,
+                 uint64_t offset,
+                 uint64_t limit,
+                 hipdnnPluginConstData_t* engineDetails),
+                (const, override));
+    MOCK_METHOD(bool,
+                getPrediction,
+                (hipdnnEnginePluginHandle_t handle,
+                 const hipdnnPluginConstData_t* engineConfig,
+                 const hipdnnPluginConstData_t* opGraph,
+                 hipdnnEnginePredictionKind_t kind,
+                 bool evaluate,
+                 hipdnnPluginConstData_t* prediction),
+                (const, override));
     MOCK_METHOD(void,
                 destroyEngineDetails,
                 (hipdnnEnginePluginHandle_t handle, hipdnnPluginConstData_t* engineDetails),
@@ -104,6 +128,16 @@ public:
     MOCK_METHOD(std::string_view, apiVersion, (), (const));
     MOCK_METHOD(hipdnnPluginType_t, type, (), (const));
     MOCK_METHOD(hipdnnPluginStatus_t, setLoggingCallback, (hipdnnCallback_t callback), (const));
+
+    // Public so tests can exercise the production parse helper directly.
+    using EnginePlugin::parseApiVersion;
+
+    // Re-parses the mocked apiVersion() on every call, so expectations set on
+    // apiVersion() after construction drive the parsed result.
+    std::optional<hipdnn_data_sdk::utilities::Version> parsedApiVersion() const override
+    {
+        return parseApiVersion(apiVersion(), cachedName());
+    }
 };
 
 } // namespace hipdnn_backend::plugin

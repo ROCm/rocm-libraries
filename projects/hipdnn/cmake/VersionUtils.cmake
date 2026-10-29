@@ -36,6 +36,10 @@ function(hipdnn_setup_version COMPONENT_NAME)
 
     if(NOT GIT_RESULT EQUAL 0 OR ${COMPONENT_NAME_UPPER}_VERSION_TWEAK STREQUAL "")
         set(${COMPONENT_NAME_UPPER}_VERSION_TWEAK "unknown")
+        message(STATUS
+            "${COMPONENT_NAME}: could not resolve a git commit hash (no .git directory, git "
+            "not installed, or not a git checkout) -- version tweak falls back to 'unknown', "
+            "so on-disk caches keyed by this version string stop distinguishing commits.")
     endif()
 
     # Full version string
@@ -52,10 +56,24 @@ function(hipdnn_setup_version COMPONENT_NAME)
     set(${COMPONENT_NAME_UPPER}_VERSION ${${COMPONENT_NAME_UPPER}_VERSION} PARENT_SCOPE)
 endfunction()
 
-# Function to generate the version header
+# Function to generate the version headers.
+#
+# version_number.h holds MAJOR/MINOR/PATCH only; version.h includes it and adds the git
+# hash (TWEAK/STRING). configure_file() rewrites an output only when its content changes,
+# so after a new commit only version.h changes and only its includers rebuild. Widely
+# included headers must include version_number.h, never version.h.
 function(hipdnn_generate_version_header COMPONENT_NAME)
 
     hipdnn_version_file_dir(${COMPONENT_NAME} _version_dir)
+    string(TOUPPER ${COMPONENT_NAME} _VERSION_PREFIX)
+    set(_VERSION_MAJOR ${${_VERSION_PREFIX}_VERSION_MAJOR})
+    set(_VERSION_MINOR ${${_VERSION_PREFIX}_VERSION_MINOR})
+    set(_VERSION_PATCH ${${_VERSION_PREFIX}_VERSION_PATCH})
+    configure_file(
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/version_number.h.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/include/${COMPONENT_NAME}/version_number.h"
+        @ONLY
+    )
     configure_file(
         "${_version_dir}/version.h.in"
         "${CMAKE_CURRENT_BINARY_DIR}/include/${COMPONENT_NAME}/version.h"

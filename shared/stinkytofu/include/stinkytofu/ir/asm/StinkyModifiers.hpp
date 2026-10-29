@@ -70,6 +70,9 @@ STINKYTOFU_EXPORT std::string matrixScaleFmtToStr(MatrixScaleFmt fmt);
 // Parse assembly string to MatrixScaleFmt enum.
 STINKYTOFU_EXPORT MatrixScaleFmt parseMatrixScaleFmt(std::string_view s);
 
+// Parse MX scale-select assembly string.
+STINKYTOFU_EXPORT int parseMatrixScaleSel(std::string_view s);
+
 enum class MUBUFScope : uint8_t {
     SCOPE_NONE = 0,
     SCOPE_CU = 1,
@@ -299,6 +302,7 @@ struct Modifier {
         VCC,
         SWAITCNT_DATA,
         SWAITTENSORCNT_DATA,
+        SWAITASYNCCNT_DATA,
         SWAITSTORECNT_DATA,
         SDELAYALU_DATA,
         SWAITALU_DATA,
@@ -397,20 +401,40 @@ struct FLATModifiers : public TypedModifier<FLATModifiers> {
     TemporalHint th;
 };
 
-// Modifiers for global_* memory ops. Carries the immediate offset (offset:N)
-// plus the temporal hint and cache scope used by global_prefetch_b8 (gfx1250
-// gl2-prefetch). The hint/scope mirror rocisa's GLOBALModifiers defaults
-// (TH_NONE / SCOPE_NONE are not printed); offset-only ops leave them default.
+// Modifiers for global_* memory ops. Mirrors rocisa's GLOBALModifiers,
+// including cache-control bits and gfx12+ temporal hint / cache scope.
 struct GLOBALModifiers : public TypedModifier<GLOBALModifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::GLOBAL;
 
     GLOBALModifiers(int offset = 0, TemporalHint th = TemporalHint::TH_NONE,
-                    MUBUFScope scope = MUBUFScope::SCOPE_NONE)
-        : TypedModifier<GLOBALModifiers>(), offset(offset), th(th), scope(scope) {}
+                    MUBUFScope scope = MUBUFScope::SCOPE_NONE, bool glc = false, bool slc = false,
+                    bool dlc = false, bool lds = false, bool isStore = false,
+                    bool hasGLCModifier = false, bool hasSC0Modifier = false,
+                    bool hasDLCModifier = false)
+        : TypedModifier<GLOBALModifiers>(),
+          offset(offset),
+          th(th),
+          scope(scope),
+          glc(glc),
+          slc(slc),
+          dlc(dlc),
+          lds(lds),
+          isStore(isStore),
+          hasGLCModifier(hasGLCModifier),
+          hasSC0Modifier(hasSC0Modifier),
+          hasDLCModifier(hasDLCModifier) {}
 
     int offset;
     TemporalHint th;
     MUBUFScope scope;
+    uint32_t glc : 1;
+    uint32_t slc : 1;
+    uint32_t dlc : 1;
+    uint32_t lds : 1;
+    uint32_t isStore : 1;
+    uint32_t hasGLCModifier : 1;
+    uint32_t hasSC0Modifier : 1;
+    uint32_t hasDLCModifier : 1;
 };
 
 struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
@@ -813,6 +837,15 @@ struct SWaitTensorCntData : public TypedModifier<SWaitTensorCntData> {
     int8_t tlcnt;
 };
 
+struct SWaitAsyncCntData : public TypedModifier<SWaitAsyncCntData> {
+    static constexpr Modifier::Type Type = Modifier::Type::SWAITASYNCCNT_DATA;
+
+    SWaitAsyncCntData(int8_t asynccnt = -1)
+        : TypedModifier<SWaitAsyncCntData>(), asynccnt(asynccnt) {}
+
+    int8_t asynccnt;
+};
+
 struct SWaitStoreCntData : public TypedModifier<SWaitStoreCntData> {
     static constexpr Modifier::Type Type = Modifier::Type::SWAITSTORECNT_DATA;
 
@@ -1024,6 +1057,8 @@ struct MFMAModifiers : public TypedModifier<MFMAModifiers> {
 // instructions, the per-matrix scale numeric format (scaleFmtA/scaleFmtB).
 // Used both for assembly emission (matrix_a_fmt:..., matrix_a_scale_fmt:...)
 // and as the match key for cost-override entries in *_Instructions.def.
+// MX scale-select (matrix_a_scale:N / matrix_b_scale:N): which MX scale
+// slot the WMMA reads (0 = default lower half-wave, 1 = partner upper half-wave).
 struct MatrixFmtModifiers : public TypedModifier<MatrixFmtModifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::MATRIX_FMT;
 
@@ -1031,6 +1066,8 @@ struct MatrixFmtModifiers : public TypedModifier<MatrixFmtModifiers> {
     MatrixFmt fmtB = MatrixFmt::NONE;
     MatrixScaleFmt scaleFmtA = MatrixScaleFmt::NONE;
     MatrixScaleFmt scaleFmtB = MatrixScaleFmt::NONE;
+    int scaleSelA = 0;
+    int scaleSelB = 0;
 
     MatrixFmtModifiers() : TypedModifier<MatrixFmtModifiers>() {}
     MatrixFmtModifiers(MatrixFmt a, MatrixFmt b)
@@ -1045,10 +1082,12 @@ struct MatrixFmtModifiers : public TypedModifier<MatrixFmtModifiers> {
     // Must check all fields, to avoid a false "empty":
     // e.g. v_wmma_scale_f32_32x16x128_f4 carries no fmtA/fmtB but is not really
     // empty — it still sets scaleFmtA/scaleFmtB. Checking fmtA/fmtB alone would
-    // drop its matrix_*_scale_fmt.
+    // drop its matrix_*_scale_fmt. Likewise a non-zero scale-select (matrix_*_scale:1)
+    // is meaningful on its own and must not be treated as empty.
     bool empty() const {
-        return fmtA == MatrixFmt::NONE && fmtB == MatrixFmt::NONE
-               && scaleFmtA == MatrixScaleFmt::NONE && scaleFmtB == MatrixScaleFmt::NONE;
+        return fmtA == MatrixFmt::NONE && fmtB == MatrixFmt::NONE &&
+               scaleFmtA == MatrixScaleFmt::NONE && scaleFmtB == MatrixScaleFmt::NONE &&
+               scaleSelA == 0 && scaleSelB == 0;
     }
 };
 

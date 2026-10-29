@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -310,6 +310,7 @@ namespace
         TensileLite::TensorDescriptor scaleC{"scaleC"};
         TensileLite::TensorDescriptor scaleD{"scaleD"};
         TensileLite::TensorDescriptor scaleAlphaVec{"scaleAlphaVec"};
+        TensileLite::TensorDescriptor gate{"gate"};
 
         // The ContractionProblemGemm
         TensileLite::ContractionProblemGemm tensileProblem(a,
@@ -327,7 +328,8 @@ namespace
                                                        batchIndex,
                                                        boundIndex,
                                                        static_cast<double>(*prob.beta),
-                                                       prob.workspaceSize);
+                                                       prob.workspaceSize,
+                                                       gate);
         tensileProblem.setComputeInputTypeA(Tensile_Ti);
         tensileProblem.setComputeInputTypeB(Tensile_Ti);
         tensileProblem.setAlphaType(Tensile_Tc);
@@ -424,6 +426,19 @@ namespace
                                                                                 : d.sizes()[0],
                                             prob.order == rocsparselt_order_row);
         }
+
+        // set gate residual
+        if(prob.gate != nullptr)
+        {
+            auto             gateType    = hipDataType_to_tensile_type(prob.gate_type);
+            std::vector<size_t> gateSizes   = {prob.m, prob.n, prob.batch_count};
+            std::vector<size_t> gateStrides = {prob.row_stride_g,
+                                               prob.col_stride_g,
+                                               prob.batch_stride_g};
+            tensileProblem.setUseGateResidual(true);
+            tensileProblem.setGateResidual(gateType, gateSizes, gateStrides);
+        }
+
         return tensileProblem;
     }
 
@@ -469,6 +484,9 @@ namespace
 
         // set bias vector
         inputs.bias = reinterpret_cast<const void*>(prob.bias_vector);
+
+        // set gate residual
+        inputs.gateResidual = reinterpret_cast<const void*>(prob.gate);
         if(prob.alpha_vector_scaling)
             inputs.scaleAlphaVec = reinterpret_cast<const void*>(prob.alpha);
 
@@ -511,7 +529,20 @@ namespace
         {
             return TensileLite::LazyLoadingInit::gfx950;
         }
+        else if(deviceString.find("gfx1250") != std::string::npos)
+        {
+            return TensileLite::LazyLoadingInit::gfx1250;
+        }
         return TensileLite::LazyLoadingInit::None;
+    }
+
+    // Mirrors hipBLASLt's rocblaslt_revisioned_arch_name: an A0 part reporting gfx1250
+    // (asicRevision 0) loads library/gfx1250v0/ only -- B0 kernels are not valid on A0.
+    std::string rocsparselt_revisioned_arch_name(const std::string& baseArch, int asicRevision)
+    {
+        if(baseArch == "gfx1250" && asicRevision == 0)
+            return "gfx1250v0";
+        return baseArch;
     }
 
     /**************************************************
@@ -638,8 +669,32 @@ namespace
                 else
                     path += "/hipsparselt/library";
 
-                if(TestPath(path + "/" + processor))
-                    path += "/" + processor;
+                int asicRevision = -1;
+#if HIP_VERSION >= 307
+                if(processor == "gfx1250")
+                {
+                    hipDeviceProp_t deviceProperties;
+                    HIP_CHECK_EXC(hipGetDeviceProperties(&deviceProperties, deviceId));
+                    asicRevision = deviceProperties.asicRevision;
+                }
+#endif
+                const std::string libArch
+                    = rocsparselt_revisioned_arch_name(processor, asicRevision);
+                if(TestPath(path + "/" + libArch))
+                    path += "/" + libArch;
+                else if(libArch != processor)
+                {
+                    hipsparselt_cerr
+                        << "\nhipsparselt_error: " << processor
+                        << " device with asicRevision 0 (A0) needs the " << libArch
+                        << " GEMM library, but " << path << "/" << libArch
+                        << " does not exist. Build with the " << libArch
+                        << " subtree (the default for -a " << processor
+                        << "), or run with HSA_DISABLE_GFX12_STRICT=0 and a " << processor
+                        << "-strict build. Not falling back to " << path << "/" << processor
+                        << ": its kernels give wrong results on A0." << std::endl;
+                    path += "/" + libArch;
+                }
             }
 
             // only load modules for the current architecture

@@ -26,11 +26,7 @@ include: hipsparse_common.yaml
 
 
 Tests:
-- name: csrgemm_bad_arg
-  category: pre_checkin
-  function: csrgemm_bad_arg
-  precision: *single_double_precisions_complex_real
-
+# Quick
 - name: csrgemm
   category: quick
   function: csrgemm
@@ -43,6 +39,12 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   baseB: [HIPSPARSE_INDEX_BASE_ZERO]
   baseC: [HIPSPARSE_INDEX_BASE_ZERO]
+
+# Pre-checkin
+- name: csrgemm_bad_arg
+  category: pre_checkin
+  function: csrgemm_bad_arg
+  precision: *single_double_precisions_complex_real
 
 - name: csrgemm
   category: pre_checkin
@@ -64,8 +66,27 @@ Tests:
              nos6,
              nos7]
 
+# Nightly
 - name: csrgemm
   category: nightly
+  function: csrgemm
+  precision: *double_only_precisions
+  M: 1
+  N: [5]
+  K: 1
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  baseB: [HIPSPARSE_INDEX_BASE_ONE]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [mc2depi,
+             scircuit,
+             rma10,
+             bibd_22_8]
+
+# Stress
+- name: csrgemm
+  category: stress
   function: csrgemm
   precision: *double_only_precisions
   M: 1
@@ -76,8 +97,4 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ONE]
   baseB: [HIPSPARSE_INDEX_BASE_ONE]
   baseC: [HIPSPARSE_INDEX_BASE_ZERO]
-  filename: [mc2depi,
-             scircuit,
-             rma10,
-             bibd_22_8,
-             amazon0312]
+  filename: [amazon0312]

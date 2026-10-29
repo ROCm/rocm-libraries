@@ -16,10 +16,10 @@
 
 template <class CharT, class TestFunction, class ExceptionTest>
 void format_tests(TestFunction check, ExceptionTest check_exception) {
-  // Note the output of hip::thread::id is unspecified. The output text is the
+  // Note the output of hip::wthread::id is unspecified. The output text is the
   // same as the stream operator. Since that format is already released this
   // test follows the practice on existing systems.
-  hip::thread::id input{};
+  hip::wthread::id input{};
 
   /***** Test the type specific part *****/
 #if !defined(__APPLE__) && !defined(__FreeBSD__)

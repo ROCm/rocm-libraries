@@ -63,7 +63,7 @@ void test() {
     ::std::condition_variable_any cv;
     Mutex mutex;
 
-    hip::thread t1 = support::make_test_thread([&] {
+    hip::wthread t1 = support::make_test_thread([&] {
       Lock lock(mutex);
       ready       = true;
       bool result = cv.wait_until(lock, timeout, [&] { return !likely_spurious; });
@@ -71,7 +71,7 @@ void test() {
       assert(Clock::now() < timeout);
     });
 
-    hip::thread t2 = support::make_test_thread([&] {
+    hip::wthread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
@@ -99,7 +99,7 @@ void test() {
     ::std::condition_variable_any cv;
     Mutex mutex;
 
-    hip::thread t1 = support::make_test_thread([&] {
+    hip::wthread t1 = support::make_test_thread([&] {
       Lock lock(mutex);
       bool result = cv.wait_until(lock, timeout, [] { return false; }); // never stop waiting (until timeout)
       assert(!result); // return value should be false since the predicate returns false after the timeout
@@ -126,7 +126,7 @@ void test() {
     ::std::condition_variable_any cv;
     Mutex mutex;
 
-    hip::thread t1 = support::make_test_thread([&] {
+    hip::wthread t1 = support::make_test_thread([&] {
       Lock lock(mutex);
       ready       = true;
       bool result = cv.wait_until(lock, timeout, [&] { return true; });
@@ -135,7 +135,7 @@ void test() {
       assert(Clock::now() < timeout); // can technically fail if t2 never executes and we timeout, but very unlikely
     });
 
-    hip::thread t2 = support::make_test_thread([&] {
+    hip::wthread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
@@ -166,7 +166,7 @@ void test() {
 
 int main(int, char**) {
   // Run on multiple threads to speed up the test, and because it ought to work anyways.
-  hip::thread tests[] = {
+  hip::wthread tests[] = {
       support::make_test_thread([] {
         test<hip::unique_lock<::std::mutex>, TestClock>();
         test<hip::unique_lock<::std::mutex>, cuda::std::chrono::steady_clock>();
@@ -184,7 +184,7 @@ int main(int, char**) {
         test<MyLock<::std::timed_mutex>, cuda::std::chrono::steady_clock>();
       })};
 
-  for (hip::thread& t : tests)
+  for (hip::wthread& t : tests)
     t.join();
 
   return 0;

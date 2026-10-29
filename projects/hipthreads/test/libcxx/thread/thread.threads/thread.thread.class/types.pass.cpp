@@ -25,7 +25,7 @@
 
 int main(int, char**)
 {
-    static_assert((::std::is_same<hip::thread::native_handle_type, pthread_t>::value), "");
+    static_assert((::std::is_same<hip::wthread::native_handle_type, pthread_t>::value), "");
 
   return 0;
 }

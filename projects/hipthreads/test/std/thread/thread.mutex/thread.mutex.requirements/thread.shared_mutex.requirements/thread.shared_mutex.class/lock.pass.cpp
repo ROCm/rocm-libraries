@@ -40,7 +40,7 @@ int main(int, char**) {
     m.lock();
     ::std::atomic<bool> is_locked_from_main(true);
 
-    hip::thread t = support::make_test_thread([&] {
+    hip::wthread t = support::make_test_thread([&] {
       ready = true;
       m.lock();
       assert(!is_locked_from_main);
@@ -66,7 +66,7 @@ int main(int, char**) {
     m.lock_shared();
     ::std::atomic<bool> is_locked_from_main(true);
 
-    hip::thread t = support::make_test_thread([&] {
+    hip::wthread t = support::make_test_thread([&] {
       ready = true;
       m.lock();
       assert(!is_locked_from_main);
@@ -90,7 +90,7 @@ int main(int, char**) {
     ::std::atomic<int> counter = 0;
     ::std::shared_mutex mutex;
 
-    ::std::vector<hip::thread> threads;
+    ::std::vector<hip::wthread> threads;
     for (int i = 0; i != 10; ++i) {
       threads.push_back(support::make_test_thread([&] {
         mutex.lock();

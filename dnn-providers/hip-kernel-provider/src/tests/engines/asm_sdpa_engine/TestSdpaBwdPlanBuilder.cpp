@@ -15,10 +15,12 @@
 #include "engines/asm_sdpa_engine/plans/SdpaKernelUtils.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
+#include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <optional>
 
 namespace asm_sdpa_engine
 {
@@ -140,6 +142,231 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
         EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
             << test.message;
     }
+}
+
+// =============================================================================
+// Runtime pass-by-value scale tensor (RFC 0016)
+// =============================================================================
+
+// Build a backward SDPA graph with a runtime pass-by-value scale tensor
+// (is_runtime_pass_by_value=true, no baked value).
+flatbuffers::FlatBufferBuilder createSdpaBwdGraphWithRuntimePbvScale()
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    int64_t uid = 1;
+    const auto qUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, qUid, "q", DataType::BFLOAT16, &strides, &dims));
+    const auto kUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, kUid, "k", DataType::BFLOAT16, &strides, &dims));
+    const auto vUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, vUid, "v", DataType::BFLOAT16, &strides, &dims));
+    const auto oUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, oUid, "o", DataType::BFLOAT16, &strides, &dims));
+    const auto doUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, doUid, "do", DataType::BFLOAT16, &strides, &dims));
+
+    const std::vector<int64_t> statsDims = {dims[0], dims[1], dims[2], 1};
+    const std::vector<int64_t> statsStrides = {dims[1] * dims[2], dims[2], 1, 1};
+    const auto statsUid = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, statsUid, "stats", DataType::FLOAT, &statsStrides, &statsDims));
+
+    const auto dqUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dqUid, "dq", DataType::BFLOAT16, &strides, &dims));
+    const auto dkUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dkUid, "dk", DataType::BFLOAT16, &strides, &dims));
+    const auto dvUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dvUid, "dv", DataType::BFLOAT16, &strides, &dims));
+
+    // Runtime pass-by-value scale tensor: is_runtime_pass_by_value=true, no value
+    const std::vector<int64_t> scaleDims = {1};
+    const auto scaleUid = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                            scaleUid,
+                                                            "scale",
+                                                            DataType::FLOAT,
+                                                            &scaleDims,
+                                                            &scaleDims,
+                                                            false, // virtual
+                                                            TensorValue::NONE, // no baked value
+                                                            0, // value offset
+                                                            true)); // is_runtime_pass_by_value
+
+    const auto sdpaAttributes = CreateSdpaBackwardAttributes(builder,
+                                                             qUid,
+                                                             kUid,
+                                                             vUid,
+                                                             oUid,
+                                                             doUid,
+                                                             statsUid,
+                                                             dqUid,
+                                                             dkUid,
+                                                             dvUid,
+                                                             scaleUid); // scale_tensor_uid
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_bwd",
+                                     DataType::FLOAT,
+                                     NodeAttributes::SdpaBackwardAttributes,
+                                     sdpaAttributes.Union()));
+
+    const auto graphOffset = CreateGraphDirect(builder,
+                                               "test",
+                                               DataType::FLOAT,
+                                               DataType::HALF,
+                                               DataType::BFLOAT16,
+                                               &tensorAttributes,
+                                               &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+// Build a backward SDPA graph with a non-pass-by-value scale tensor.
+flatbuffers::FlatBufferBuilder createSdpaBwdGraphWithNonPbvScaleTensor()
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    int64_t uid = 1;
+    const auto qUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, qUid, "q", DataType::BFLOAT16, &strides, &dims));
+    const auto kUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, kUid, "k", DataType::BFLOAT16, &strides, &dims));
+    const auto vUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, vUid, "v", DataType::BFLOAT16, &strides, &dims));
+    const auto oUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, oUid, "o", DataType::BFLOAT16, &strides, &dims));
+    const auto doUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, doUid, "do", DataType::BFLOAT16, &strides, &dims));
+
+    const std::vector<int64_t> statsDims = {dims[0], dims[1], dims[2], 1};
+    const std::vector<int64_t> statsStrides = {dims[1] * dims[2], dims[2], 1, 1};
+    const auto statsUid = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, statsUid, "stats", DataType::FLOAT, &statsStrides, &statsDims));
+
+    const auto dqUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dqUid, "dq", DataType::BFLOAT16, &strides, &dims));
+    const auto dkUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dkUid, "dk", DataType::BFLOAT16, &strides, &dims));
+    const auto dvUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dvUid, "dv", DataType::BFLOAT16, &strides, &dims));
+
+    // Regular device tensor — NOT pass-by-value
+    const std::vector<int64_t> scaleDims = {1};
+    const auto scaleUid = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, scaleUid, "scale", DataType::FLOAT, &scaleDims, &scaleDims));
+
+    const auto sdpaAttributes = CreateSdpaBackwardAttributes(builder,
+                                                             qUid,
+                                                             kUid,
+                                                             vUid,
+                                                             oUid,
+                                                             doUid,
+                                                             statsUid,
+                                                             dqUid,
+                                                             dkUid,
+                                                             dvUid,
+                                                             scaleUid); // scale_tensor_uid
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_bwd",
+                                     DataType::FLOAT,
+                                     NodeAttributes::SdpaBackwardAttributes,
+                                     sdpaAttributes.Union()));
+
+    const auto graphOffset = CreateGraphDirect(builder,
+                                               "test",
+                                               DataType::FLOAT,
+                                               DataType::HALF,
+                                               DataType::BFLOAT16,
+                                               &tensorAttributes,
+                                               &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsRuntimePassByValueScale)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    auto builder = createSdpaBwdGraphWithRuntimePbvScale();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsNonPassByValueScaleTensor)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    auto builder = createSdpaBwdGraphWithNonPbvScaleTensor();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsCompileTimeConstantScaleTensor)
+{
+    // Existing withScale=true path uses a compile-time constant scale tensor.
+    // Verify it still passes after the PBV changes.
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    auto builder = createSdpaBwdGraph({4, 8, 256, 128},
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                                      /*withScale=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
 TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeSmallUnaligned)
@@ -494,6 +721,8 @@ TEST(TestSdpaBwdRegistryLookupFp16, RegistryLookupHd128CausalBatch)
 
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsHd96)
 {
+    SKIP_IF_NO_DEVICES();
+
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {
         GTEST_SKIP();
@@ -509,6 +738,8 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsHd96)
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFp8)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
 
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {
@@ -527,6 +758,8 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsGfx950)
     // Cannot synthesise a different device string from the test harness, so
     // this test only meaningfully runs on a non-gfx942 device. On gfx942 it
     // is skipped (the positive case is covered by IsApplicableSdpaBwdVariations).
+    SKIP_IF_NO_DEVICES();
+
     auto deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
     if(deviceString == "gfx942")
     {
@@ -544,13 +777,16 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFractionalGqaRatio)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
+    SKIP_IF_NO_DEVICES();
+
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {
         GTEST_SKIP();
     }
 
-    // nhead_q = 6, nhead_k = 4 → 6 % 4 = 2.  SdpaBwdPlan would silently
-    // truncate ratio = 6/4 = 1, dropping K/V heads in dispatch.
+    // nhead_q = 6, nhead_k = 4.  GQA/MQA is now rejected outright (dK/dV head
+    // expansion is unimplemented); a fractional ratio would additionally truncate
+    // to ratio = 6/4 = 1 and silently drop K/V heads in dispatch.
     const std::vector<int64_t> qDims = {2, 6, 256, 128};
     const std::vector<int64_t> kDims = {2, 4, 256, 128};
     const std::vector<int64_t> vDims = {2, 4, 256, 128};
@@ -573,9 +809,49 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFractionalGqaRatio)
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsIntegralGqaRatio)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    // llama-3-8b backward shape: nhead_q = 32, nhead_k = 8 (ratio 4).  The dqdkdv
+    // kernel writes nhead_q head slots into dK/dV, so passing the user's 8-head
+    // tensors overruns them by (32 - 8) * 128 * sizeof(bf16) = 6144 bytes and
+    // faults with HSA_STATUS_ERROR_MEMORY_FAULT.  Reject until dK/dV head expansion
+    // and the ratio-group reduction are implemented.
+    const std::vector<int64_t> qDims = {1, 32, 256, 128};
+    const std::vector<int64_t> kDims = {1, 8, 256, 128};
+    const std::vector<int64_t> vDims = {1, 8, 256, 128};
+    const std::vector<int64_t> oDims = {1, 32, 256, 128};
+
+    auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+        qDims,
+        hipdnn_data_sdk::utilities::generateStrides(qDims),
+        kDims,
+        hipdnn_data_sdk::utilities::generateStrides(kDims),
+        vDims,
+        hipdnn_data_sdk::utilities::generateStrides(vDims),
+        oDims,
+        hipdnn_data_sdk::utilities::generateStrides(oDims),
+        DataType::BFLOAT16);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsAsymmetricHdim)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
 
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {
@@ -609,13 +885,13 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsAsymmetricHdim)
 }
 
 // =============================================================================
-// Canonical mask-attribute policy (plan_utils::getMaskType)
+// Canonical mask-attribute policy (resolveDiagonalBand + getMaskType)
 // =============================================================================
 //
-// These tests exercise the shared mask-precedence policy directly through
-// plan_utils::getMaskType rather than through isApplicable. When a deprecated
-// causal boolean is set it takes precedence over the modern bounds trio; only
-// setting both deprecated booleans at once throws. The policy is
+// These tests exercise the shared mask policy directly through
+// plan_utils::resolveDiagonalBand and plan_utils::getMaskType rather than through isApplicable. A deprecated causal
+// boolean is merged with the stored bounds and alignment (see
+// plan_utils::resolveDiagonalBand); only setting both booleans throws. The policy is
 // hardware-agnostic (it runs before any device dispatch and independent of the
 // kernel registry), so the assertions are meaningful on any device — including
 // this gfx950 box. The backward isApplicable cannot be used here: it rejects
@@ -723,7 +999,7 @@ flatbuffers::FlatBufferBuilder createSdpaBwdGraphWithMask(
     return builder;
 }
 
-// Resolve the SDPA backward attributes from a graph buffer and classify the mask.
+// Extract the diagonal band from a backward graph buffer and classify the mask.
 plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
 {
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
@@ -732,96 +1008,210 @@ plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
         = graphWrapper.nodeWrappers()
               .front()
               ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
-    return plan_utils::getMaskType(attrs);
+    const auto band = plan_utils::resolveDiagonalBand(attrs);
+    return plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsCausalMaskAndBottomRightSetTogether)
+// cuDNN's default: no attn_scale_value and no scale tensor means no scaling.
+TEST_F(TestSdpaBwdPlanBuilder, AbsentAttnScaleValueIsOne)
 {
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    // Both deprecated causal booleans set is a contradiction.
-    auto builder = createSdpaBwdGraphWithMask(
-        /*causalMask=*/true,
-        /*causalMaskBottomRight=*/true,
-        flatbuffers::nullopt,
-        flatbuffers::nullopt,
-        DiagonalAlignment::TOP_LEFT);
-
-    EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
-}
-
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicablePrefersCausalMaskOverWindowBounds)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    // causal_mask=true takes precedence over the bounds trio, even though the
-    // bounds describe a sliding window (left=64, right=64): result is causal.
-    auto builder = createSdpaBwdGraphWithMask(
-        /*causalMask=*/true,
-        /*causalMaskBottomRight=*/false,
-        flatbuffers::Optional<int64_t>(64),
-        flatbuffers::Optional<int64_t>(64),
-        DiagonalAlignment::TOP_LEFT);
-
-    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
-    EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
-}
-
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverTopLeftBounds)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    // causal_mask_bottom_right=true takes precedence over the bounds trio, even
-    // though the trio (left=-1, right=0, diag=TOP_LEFT) would derive
-    // TOP_LEFT_CAUSAL: result is bottom-right causal.
     auto builder = createSdpaBwdGraphWithMask(
         /*causalMask=*/false,
-        /*causalMaskBottomRight=*/true,
-        flatbuffers::Optional<int64_t>(-1),
-        flatbuffers::Optional<int64_t>(0),
-        DiagonalAlignment::TOP_LEFT);
-
-    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
-    EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
-}
-
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsConsistentCausalMaskAndBounds)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    // causal_mask=true with a consistent bounds trio (left=-1, right=0,
-    // diag=TOP_LEFT -> TOP_LEFT_CAUSAL) must not throw and classify as causal.
-    auto builder = createSdpaBwdGraphWithMask(
-        /*causalMask=*/true,
         /*causalMaskBottomRight=*/false,
-        flatbuffers::Optional<int64_t>(-1),
-        flatbuffers::Optional<int64_t>(0),
-        DiagonalAlignment::TOP_LEFT);
-
-    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
-    EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto& attrs
+        = graphWrapper.nodeWrappers()
+              .front()
+              ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
+    ASSERT_FALSE(attrs.attn_scale_value().has_value());
+    EXPECT_EQ(plan_utils::attnScaleOrDefault(attrs), 1.0f);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverWindowBounds)
+class TestSdpaBwdDeprecatedCausalMask : public ::testing::TestWithParam<DeprecatedCausalMaskCase>
 {
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
+};
 
-    // causal_mask_bottom_right=true takes precedence over the bounds trio, even
-    // though a symmetric sliding window (left=64, right=64) would derive
-    // SLIDING_WINDOW: result is bottom-right causal.
-    auto builder = createSdpaBwdGraphWithMask(
-        /*causalMask=*/false,
-        /*causalMaskBottomRight=*/true,
-        flatbuffers::Optional<int64_t>(64),
-        flatbuffers::Optional<int64_t>(64),
-        DiagonalAlignment::BOTTOM_RIGHT);
+TEST_P(TestSdpaBwdDeprecatedCausalMask, Classifies)
+{
+    const auto& param = GetParam();
+    auto builder = createSdpaBwdGraphWithMask(param.causalMask,
+                                              param.causalMaskBottomRight,
+                                              param.leftBound,
+                                              param.rightBound,
+                                              param.alignment);
 
+    if(!param.expected.has_value())
+    {
+        EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
+        return;
+    }
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
+    EXPECT_EQ(maskType, param.expected.value());
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestSdpaBwdDeprecatedCausalMask,
+                         ::testing::ValuesIn(deprecatedCausalMaskCases()),
+                         deprecatedCausalMaskCaseName);
+
+// =============================================================================
+// plan_utils::makeCoveringBoundsUnbound
+// =============================================================================
+//
+// A window that already covers the whole sequence span masks nothing on that
+// side, so it classifies as the plain causal or unmasked kernel. Narrower windows
+// stay sliding windows. Spans: top-left left=seqLenQ-1 right=seqLenKv-1;
+// bottom-right left=seqLenKv-1 right=seqLenQ-1.
+
+namespace
+{
+using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
+
+constexpr int64_t COVERING_SEQ_LEN_Q = 128;
+constexpr int64_t COVERING_SEQ_LEN_KV = 512;
+
+plan_utils::MaskType classifyAfterUnbounding(int64_t leftBound,
+                                             int64_t rightBound,
+                                             DiagonalAlignment alignment,
+                                             int64_t seqLenQ = COVERING_SEQ_LEN_Q,
+                                             int64_t seqLenKv = COVERING_SEQ_LEN_KV)
+{
+    const auto band = plan_utils::makeCoveringBoundsUnbound(
+        {leftBound, rightBound, alignment}, seqLenQ, seqLenKv);
+    return plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
+}
+} // namespace
+
+TEST(TestSdpaBwdMakeCoveringBoundsUnbound, TopLeftCoveringLeftBoundIsCausal)
+{
+    EXPECT_EQ(classifyAfterUnbounding(127, 0, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::TOP_LEFT_CAUSAL);
+    EXPECT_EQ(classifyAfterUnbounding(126, 0, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+TEST(TestSdpaBwdMakeCoveringBoundsUnbound, TopLeftCoveringRightBoundIsNoMask)
+{
+    EXPECT_EQ(classifyAfterUnbounding(-1, 511, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 510, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+TEST(TestSdpaBwdMakeCoveringBoundsUnbound, BottomRightCoveringLeftBoundIsCausal)
+{
+    EXPECT_EQ(classifyAfterUnbounding(511, 0, DiagonalAlignment::BOTTOM_RIGHT),
+              plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
+    EXPECT_EQ(classifyAfterUnbounding(510, 0, DiagonalAlignment::BOTTOM_RIGHT),
+              plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+TEST(TestSdpaBwdMakeCoveringBoundsUnbound, BottomRightCoveringRightBoundIsNoMask)
+{
+    EXPECT_EQ(classifyAfterUnbounding(-1, 127, DiagonalAlignment::BOTTOM_RIGHT),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 126, DiagonalAlignment::BOTTOM_RIGHT),
+              plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+TEST(TestSdpaBwdMakeCoveringBoundsUnbound, BothBoundsCoveringIsNoMask)
+{
+    EXPECT_EQ(classifyAfterUnbounding(127, 511, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, -1, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::NO_MASK);
+}
+
+TEST(TestSdpaBwdMakeCoveringBoundsUnbound, BoundsInsideSequencePassThroughUnchanged)
+{
+    for(const auto alignment : {DiagonalAlignment::TOP_LEFT, DiagonalAlignment::BOTTOM_RIGHT})
+    {
+        const auto band = plan_utils::makeCoveringBoundsUnbound(
+            {10, 20, alignment}, COVERING_SEQ_LEN_Q, COVERING_SEQ_LEN_KV);
+        EXPECT_EQ(band.leftBound, 10);
+        EXPECT_EQ(band.rightBound, 20);
+        EXPECT_EQ(band.alignment, alignment);
+    }
+}
+
+// A raw int64 bound of 4294967298 would wrap to 2 in an int32 kernel field and
+// shrink the window; once covering it is the unbounded request instead.
+TEST(TestSdpaBwdMakeCoveringBoundsUnbound, HugeCoveringBoundBecomesUnboundedRequest)
+{
+    constexpr int64_t HUGE_BOUND = 4294967298;
+    const auto band = plan_utils::makeCoveringBoundsUnbound(
+        {HUGE_BOUND, 0, DiagonalAlignment::TOP_LEFT}, COVERING_SEQ_LEN_Q, COVERING_SEQ_LEN_KV);
+    EXPECT_EQ(band.leftBound, -1);
+    EXPECT_EQ(plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment),
+              plan_utils::MaskType::TOP_LEFT_CAUSAL);
+
+    constexpr auto SEQ_Q = static_cast<int32_t>(COVERING_SEQ_LEN_Q);
+    constexpr auto SEQ_KV = static_cast<int32_t>(COVERING_SEQ_LEN_KV);
+    EXPECT_EQ(plan_utils::computeMaskCoordinates(
+                  static_cast<int32_t>(band.leftBound), 0, SEQ_Q, SEQ_KV, true),
+              plan_utils::computeMaskCoordinates(SEQ_Q - 1, 0, SEQ_Q, SEQ_KV, true));
+}
+
+TEST(TestSdpaBwdMakeCoveringBoundsUnbound, HugeBoundBelowHugeSequenceStaysSlidingWindow)
+{
+    constexpr int64_t HUGE_BOUND = 4294967298;
+    constexpr int64_t HUGE_SEQ_LEN = int64_t{1} << 40;
+    const auto band = plan_utils::makeCoveringBoundsUnbound(
+        {HUGE_BOUND, 0, DiagonalAlignment::TOP_LEFT}, HUGE_SEQ_LEN, HUGE_SEQ_LEN);
+    EXPECT_EQ(band.leftBound, HUGE_BOUND);
+    EXPECT_EQ(plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment),
+              plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+// A sequence length of 0 or 1 gives a span <= 0, so a causal right bound of 0
+// covers it and the mask is dropped on that side.
+TEST(TestSdpaBwdMakeCoveringBoundsUnbound, SingleTokenSequenceDropsCausalMaskOnItsAxis)
+{
+    EXPECT_EQ(classifyAfterUnbounding(-1, 0, DiagonalAlignment::TOP_LEFT, 128, 1),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 0, DiagonalAlignment::BOTTOM_RIGHT, 1, 128),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 0, DiagonalAlignment::TOP_LEFT, 1, 128),
+              plan_utils::MaskType::TOP_LEFT_CAUSAL);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 0, DiagonalAlignment::BOTTOM_RIGHT, 128, 1),
+              plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
+}
+
+// The backward sliding-window path hands the extracted band to the kernel, so a
+// deprecated boolean must contribute its causal right bound to the window.
+TEST(TestSdpaBwdDeprecatedCausalMaskBand, CausalWithLeftBoundResolvesToCausalWindow)
+{
+    auto builder = createSdpaBwdGraphWithMask(true, false, 64, NO_BOUND, ALIGN_BOTTOM_RIGHT);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto& attrs
+        = graphWrapper.nodeWrappers()
+              .front()
+              ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
+
+    // left_bound = 64 keeps 64 keys (cuDNN), which is FlashAttention's window_size_left 63.
+    const auto band = plan_utils::resolveDiagonalBand(attrs);
+    EXPECT_EQ(band.leftBound, 63);
+    EXPECT_EQ(band.rightBound, 0);
+    EXPECT_EQ(band.alignment, ALIGN_BOTTOM_RIGHT);
+
+    constexpr int64_t SEQ_LEN_ABOVE_BOUND = 256;
+    const auto windowed
+        = plan_utils::makeCoveringBoundsUnbound(band, SEQ_LEN_ABOVE_BOUND, SEQ_LEN_ABOVE_BOUND);
+    EXPECT_EQ(windowed.leftBound, 63);
+    EXPECT_EQ(windowed.rightBound, 0);
+
+    // 64 keys cover every row of a 64-long sequence; at 65 the last row would drop key 0.
+    constexpr int64_t SEQ_LEN_COVERED_BY_BOUND = 64;
+    const auto covered = plan_utils::makeCoveringBoundsUnbound(
+        band, SEQ_LEN_COVERED_BY_BOUND, SEQ_LEN_COVERED_BY_BOUND);
+    EXPECT_EQ(covered.leftBound, -1);
+    EXPECT_EQ(covered.rightBound, 0);
 }
 
 // Modern bounds-trio path (no deprecated boolean set). An unset bound is treated

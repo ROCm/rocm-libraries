@@ -18,7 +18,7 @@
 // <thread>
 
 // template<class charT>
-// struct formatter<thread::id, charT>;
+// struct formatter<wthread::id, charT>;
 
 // string vformat(string_view fmt, format_args args);
 // wstring vformat(wstring_view fmt, wformat_args args);

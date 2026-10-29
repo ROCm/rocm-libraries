@@ -85,8 +85,8 @@ __device__ void f2()
 int main(int, char**)
 {
 #ifdef __HIP_DEVICE_COMPILE__
-  hip::thread t1 = support::make_test_thread(f1);
-  hip::thread t2 = support::make_test_thread(f2);
+  hip::wthread t1 = support::make_test_thread(f1);
+  hip::wthread t2 = support::make_test_thread(f2);
   {
     while (ready > 0)
       hip::this_thread::pseudo_yield();

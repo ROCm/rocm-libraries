@@ -56,6 +56,7 @@ public:
     rocblas_int singular = 0;
     rocblas_int iters = 5;
     rocblas_int alg_mode = 0;
+    rocblas_int hetrd_alg_mode = 1;
     rocblas_int mem_query = 0;
     rocblas_int profile = 0;
     rocblas_int profile_kernels = 0;
@@ -115,6 +116,7 @@ public:
         to_consume.erase("verify");
         to_consume.erase("iters");
         to_consume.erase("alg_mode");
+        to_consume.erase("hetrd_alg_mode");
         to_consume.erase("mem_query");
         to_consume.erase("profile");
         to_consume.erase("profile_kernels");
@@ -327,6 +329,17 @@ public:
         char norm_type = std::toupper(val->second.as<char>());
         if(norm_type != 'O' && norm_type != '1' && norm_type != 'F' && norm_type != 'I'
            && norm_type != 'M')
+            throw std::invalid_argument("Invalid value for " + name);
+    }
+
+    void validate_cholshift(const std::string name) const
+    {
+        auto val = find(name);
+        if(val == end())
+            return;
+
+        char algo = std::toupper(val->second.as<char>());
+        if(algo != 'N' && algo != 'C' && algo != 'P')
             throw std::invalid_argument("Invalid value for " + name);
     }
 

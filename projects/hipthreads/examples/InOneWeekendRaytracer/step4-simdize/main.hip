@@ -139,15 +139,18 @@ int main() {
     auto image_d = thrust::make_unique<uint8_t[]>(nx * ny * 3);
 
     {
-        hip::thread world_constructor([=] __device__ () { new (world) hittable_list(random_scene()); });
+        // Use list-initialization {} instead of direct-initialization () here:
+        // on Windows the clang HIP front-end mis-parses `Type name(device_lambda)`
+        // as a declaration and rejects the __device__ specifier (ROCM-25863).
+        hip::wthread world_constructor{[=] __device__ () { new (world) hittable_list(random_scene()); }};
         world_constructor.join();
 
         const int k_threads = 4096;
-        std::vector<hip::thread> threads(k_threads);
+        std::vector<hip::wthread> threads(k_threads);
         for (int t = 0; t < k_threads; ++t) {
-            threads[t] = hip::thread(hip::thread::max_width(),
+            threads[t] = hip::wthread(hip::wthread::max_width(),
                                     [=, image = image_d.get_raw()] __device__ () {
-                // Each hip::thread (block) processes a range of tiles.
+                // Each hip::wthread (block) processes a range of tiles.
                 // --- All 32 fibers in this block work on the SAME tile_idx ---
                 for (int tile_idx = t; tile_idx < total_tiles; tile_idx += k_threads) {
                     int tile_x = tile_idx % tiles_x;
@@ -173,7 +176,7 @@ int main() {
                     }
                     col /= float(ns);
                     col = vec3( sqrt(col[0]), sqrt(col[1]), sqrt(col[2]) );
-                
+
                     image[3*(j*nx+i)+0] = int(255.99*col[0]);
                     image[3*(j*nx+i)+1] = int(255.99*col[1]);
                     image[3*(j*nx+i)+2] = int(255.99*col[2]);
@@ -184,7 +187,7 @@ int main() {
             threads[t].join();
         }
 
-        hip::thread([=] __device__ () { world->~hittable_list(); }).join();
+        hip::wthread([=] __device__ () { world->~hittable_list(); }).join();
     }
 
     thrust::device_free(dev_ptr_world);

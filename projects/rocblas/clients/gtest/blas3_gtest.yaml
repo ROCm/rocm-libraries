@@ -2,6 +2,8 @@
 include: get_solutions_gtest.yaml
 include: gemm_gtest.yaml
 include: gemm_batched_gtest.yaml
+include: gemm_grouped_batched_gtest.yaml
+include: gemm_grouped_batched_ex_gtest.yaml
 include: gemm_strided_batched_gtest.yaml
 include: gemmt_gtest.yaml
 include: dgmm_gtest.yaml

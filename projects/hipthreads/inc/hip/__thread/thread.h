@@ -32,8 +32,8 @@
  * @brief GPU-adapted lightweight thread handle and launch wrapper.
  * @ingroup thread
  *
- * Provides a `cuda::thread` API analogous (not identical) to `std::thread`,
- * adapted for HIP device execution queues. A thread represents a unit of
+ * Provides a `cuda::wthread` API analogous (not identical) to `std::thread`,
+ * adapted for HIP device execution queues. A wthread represents a unit of
  * GPU work submitted through an internal WorkNode. Construction captures a
  * callable and (optionally) a "width" (workgroup size) and schedules it for
  * execution. The handle can then be queried (`get_id`, `joinable`) and
@@ -47,7 +47,7 @@
  * - Host vs device constructors: host constructor copies a work node to
  *   device; device constructor inserts directly into a device queue.
  * - No native handle exposure yet (could be added later).
- * - Defining `cuda::thread` variables with static storage duration is undefined behaviour.
+ * - Defining `cuda::wthread` variables with static storage duration is undefined behaviour.
  *
  * Thread life-cycle states:
  * - Default constructed: not joinable (no work node).
@@ -63,7 +63,7 @@
 #include <memory>
 #include <atomic>
 
-// TODO: Define a custom assert macro for the GPU that cleans up the thread state before invoking __assert_fail(#expr,
+// TODO: Define a custom assert macro for the GPU that cleans up the wthread state before invoking __assert_fail(#expr,
 // __FILE__, __LINE__, __ASSERT_FUNCTION). Maybe do the cleanup work in a function that wraps around __assert_fail?
 #include <cassert>
 
@@ -84,11 +84,9 @@ namespace internal {
 //      THREAD CLASS DEFINITION
 //====================================================================================================================//
 
-// TODO: split this file up into a WorkNode header and a thread header
-
 /**
- * @class thread
- * @brief Handle owning (at most) one scheduled GPU work node (thread of execution).
+ * @class wthread
+ * @brief Handle owning (at most) one scheduled GPU work node (wave of execution).
  * @ingroup thread
  *
  * Constructing schedules a callable for execution (host or device path).
@@ -107,29 +105,27 @@ namespace internal {
  * - Optional first constructor parameter `width` ( <= `max_width()` ) describes
  *   how many lanes participate; implementation may map this to a warp subset.
  */
-class thread {
+class wthread {
   public:
-    // TODO: temporary measure. Should to be replaced with an actual class.
-    // Right now a default constructed id is a valid thread id, and it shouldn't be.
     /// Alias for thread identifier type (may be refined later).
     using id = __thread_id;
 
-    // TODO: The default member initializer for worknode_d makes it impossible to have an instance of hip::thread in
-    // __shared__ or __device__ memory (pointers to hip::thread are still allowed). This is not ideal.
+    // TODO: The default member initializer for worknode_d makes it impossible to have an instance of hip::wthread in
+    // __shared__ or __device__ memory (pointers to hip::wthread are still allowed). This is not ideal.
     
-    /// Default constructs a non-joinable thread (no associated work node).
-    __host__ thread() noexcept;
+    /// Default constructs a non-joinable wthread (no associated work node).
+    __host__ wthread() noexcept;
     /// Device-side default constructor (no work node).
-    __device__ thread() noexcept {}
+    __device__ wthread() noexcept {}
 
     /// \name Deleted copy / move operations
     /// These special members are intentionally disabled (handle is non-copyable / non-movable).
     ///@{
-    __host__ __device__ thread(const thread &) = delete;
+    __host__ __device__ wthread(const wthread &) = delete;
     ///@}
 
     /// Move construction transfers ownership; source becomes not joinable.
-    __host__ __device__ thread(thread &&other) noexcept
+    __host__ __device__ wthread(wthread &&other) noexcept
 #ifdef __HIP_DEVICE_COMPILE__
         : worknode_d(other.worknode_d), cached_tdata(::std::move(other.cached_tdata)) {
         other.worknode_d = nullptr;
@@ -138,11 +134,11 @@ class thread {
         : worknode_d(::std::move(other.worknode_d)), cached_tdata(::std::move(other.cached_tdata)) {}
 #endif
     ///@{
-    __host__ __device__ thread &operator=(const thread&) = delete;
+    __host__ __device__ wthread &operator=(const wthread&) = delete;
     ///@}
 
     /// Move assignment transfers ownership; source becomes not joinable.
-    __host__ __device__ thread &operator=(thread &&other) noexcept;
+    __host__ __device__ wthread &operator=(wthread &&other) noexcept;
 
     /**
      * @brief Construct with explicit width and callable (device path).
@@ -151,14 +147,14 @@ class thread {
      * @param args Argument pack forwarded to callable.
      */
     template <class Fn_t, class... Args_t>
-    explicit __device__ thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args);
+    explicit __device__ wthread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args);
 
     /**
      * @brief Construct with explicit width and callable (host path).
      * Schedules work node for device execution.
      */
     template <class Fn_t, class... Args_t>
-    explicit __host__ thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args);
+    explicit __host__ wthread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args);
 
     // TODO: replace the enable_if_t condition with one that checks if Fn_t is callable
     /**
@@ -167,8 +163,8 @@ class thread {
     template <class Fn_t, class... Args_t,
               ::std::enable_if_t<!::std::is_arithmetic_v<::std::remove_reference_t<Fn_t>>,
                                bool> = true>
-    explicit __device__ thread(Fn_t &&typed_fn, Args_t &&...args)
-        : thread(1, ::std::forward<Fn_t>(typed_fn), ::std::forward<Args_t>(args)...) {}
+    explicit __device__ wthread(Fn_t &&typed_fn, Args_t &&...args)
+        : wthread(1, ::std::forward<Fn_t>(typed_fn), ::std::forward<Args_t>(args)...) {}
 
     /**
      * @brief Host-side convenience constructor (width = 1) for initial drop-in replacement of `std::thread`.
@@ -176,20 +172,20 @@ class thread {
     template <class Fn_t, class... Args_t,
               ::std::enable_if_t<!::std::is_arithmetic_v<::std::remove_reference_t<Fn_t>>,
                                bool> = true>
-    explicit __host__ thread(Fn_t &&typed_fn, Args_t &&...args)
-        : thread(1, ::std::forward<Fn_t>(typed_fn), ::std::forward<Args_t>(args)...) {}
+    explicit __host__ wthread(Fn_t &&typed_fn, Args_t &&...args)
+        : wthread(1, ::std::forward<Fn_t>(typed_fn), ::std::forward<Args_t>(args)...) {}
 
-    /// Destructor: thread must be not joinable (joined or detached).
-    __host__ __device__ ~thread();
+    /// Destructor: wthread must be not joinable (joined or detached).
+    __host__ __device__ ~wthread();
 
-    /// Swaps underlying work node ownership with another thread.
-    __host__ __device__ void swap(thread& __t) noexcept { hip::std::swap(worknode_d, __t.worknode_d); hip::std::swap(cached_tdata, __t.cached_tdata); }
+    /// Swaps underlying work node ownership with another wthread.
+    __host__ __device__ void swap(wthread& __t) noexcept { hip::std::swap(worknode_d, __t.worknode_d); hip::std::swap(cached_tdata, __t.cached_tdata); }
 
     /**
      * @brief Returns the id of the (possibly width-partitioned) logical lane.
      * @param index Lane index (default 0).
      */
-    __host__ __device__ thread::id get_id(uint32_t index = 0) const;
+    __host__ __device__ wthread::id get_id(uint32_t index = 0) const;
     
     /// Returns true if an execution context is owned and not yet joined/detached.
     __host__ __device__ bool joinable() const noexcept { return worknode_d != nullptr; }
@@ -217,7 +213,7 @@ class thread {
 
   private:
 #ifdef __HIP_DEVICE_COMPILE__
-    // If we don't initialize worknode_d to nullptr, operator= might fail when assigning to a default constructed hip::thread.
+    // If we don't initialize worknode_d to nullptr, operator= might fail when assigning to a default constructed hip::wthread.
     // TODO: Make WorkNodeDeleter work for both host and device and replace this with
     // hip::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> so we don't have to specialize between host and device
     WorkNode_Header *worknode_d = nullptr;
@@ -227,18 +223,21 @@ class thread {
     ThreadData cached_tdata;
 };
 
+/// Deprecated alias for hip::wthread
+using thread = wthread;
+
 } // namespace internal
 
 //====================================================================================================================//
 //      USER FACING API
 //====================================================================================================================//
 
-using internal::thread;
+using internal::wthread;
 
 template <class Fn_t, class... Args_t>
-inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
+inline __host__ wthread::wthread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
     if (width > max_width()) {
-        throw ::std::length_error("thread::thread: width must not exceed " + ::std::to_string(max_width()));
+        throw ::std::length_error("wthread::wthread: width must not exceed " + ::std::to_string(max_width()));
     }
 
     auto worknode_h = WorkNode_Header::make_worknode(width, ::std::forward<Fn_t>(typed_fn), ::std::forward<Args_t>(args)...);
@@ -249,7 +248,7 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
     // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html 14.7.2.18 Extended Lambda Restrictions
     //
     // TODO: We really can't accept raw fn pointers right now because references to device functions from host code is
-    // forbidden. However, if a __host__ __device__ function tries to construct a hip::thread object using a function
+    // forbidden. However, if a __host__ __device__ function tries to construct a hip::wthread object using a function
     // object passed in from a __device__ function, the compiler seems to try to instantiate this __host__ template and
     // fail on this static_assert if we don't allow function types.
     static_assert(::std::is_trivially_copyable_v<::std::remove_reference_t<Fn_t>> || ::std::is_function_v<::std::remove_reference_t<Fn_t>>);
@@ -268,7 +267,7 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
 }
 
 template <class Fn_t, class... Args_t>
-inline __device__ thread::thread(uint32_t width [[maybe_unused]], Fn_t &&typed_fn [[maybe_unused]], Args_t &&...args [[maybe_unused]]) {
+inline __device__ wthread::wthread(uint32_t width [[maybe_unused]], Fn_t &&typed_fn [[maybe_unused]], Args_t &&...args [[maybe_unused]]) {
 #ifdef __HIP_DEVICE_COMPILE__
     assert(width <= max_width());
     assert(threadIdx.x == 0);
@@ -278,7 +277,7 @@ inline __device__ thread::thread(uint32_t width [[maybe_unused]], Fn_t &&typed_f
     // First two are prerequisites for the third, and produce more user-friendly error messages
     static_assert(::std::is_trivially_destructible_v<Fn_t>);
     static_assert((::std::is_trivially_destructible_v<Args_t> && ...));
-    // hip::thread loses the information about what type WorkNode<Callable_t> is, so can't call the destructor
+    // hip::wthread loses the information about what type WorkNode<Callable_t> is, so can't call the destructor
     static_assert(::std::is_trivially_destructible_v<decltype(*typed_worknode_ptr)>);
 
     worknode_d = typed_worknode_ptr;
@@ -290,7 +289,7 @@ inline __device__ thread::thread(uint32_t width [[maybe_unused]], Fn_t &&typed_f
 } // namespace cuda
 
 namespace cuda::std {
-    __host__ __device__ inline _LIBHIPTHREADS_HIDE_FROM_ABI void swap(hip::thread& __x, hip::thread& __y) _NOEXCEPT { __x.swap(__y); }
+    __host__ __device__ inline _LIBHIPTHREADS_HIDE_FROM_ABI void swap(hip::wthread& __x, hip::wthread& __y) _NOEXCEPT { __x.swap(__y); }
 }
 
 #endif // __LIBHIPTHREADS___THREAD_THREAD_H__

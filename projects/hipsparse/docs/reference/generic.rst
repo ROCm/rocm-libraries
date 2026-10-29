@@ -340,6 +340,41 @@ hipsparseSpGEMMreuse_compute()
       :end-before: /*! [doc example end] */
       :linenos:
 
+hipsparseSpGEAM_createDescr()
+=============================
+
+.. doxygenfunction:: hipsparseSpGEAM_createDescr
+
+hipsparseSpGEAM_destroyDescr()
+==============================
+
+.. doxygenfunction:: hipsparseSpGEAM_destroyDescr
+
+hipsparseSpGEAM_bufferSize()
+============================
+
+.. doxygenfunction:: hipsparseSpGEAM_bufferSize
+
+hipsparseSpGEAM_nnz()
+=====================
+
+.. doxygenfunction:: hipsparseSpGEAM_nnz
+
+hipsparseSpGEAM()
+=================
+
+.. doxygenfunction:: hipsparseSpGEAM
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_spgeam_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+      :linenos:
+
 hipsparseSDDMM_bufferSize()
 ===========================
 

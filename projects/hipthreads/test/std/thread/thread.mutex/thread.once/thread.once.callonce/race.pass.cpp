@@ -42,8 +42,8 @@ void f0()
 
 int main(int, char**)
 {
-    hip::thread t0 = support::make_test_thread(f0);
-    hip::thread t1 = support::make_test_thread(f0);
+    hip::wthread t0 = support::make_test_thread(f0);
+    hip::wthread t1 = support::make_test_thread(f0);
     t0.join();
     t1.join();
     assert(global == 1);

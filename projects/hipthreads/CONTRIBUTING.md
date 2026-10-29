@@ -27,7 +27,7 @@ Please use the GitHub Issues tab to notify us of issues.
 ## Acceptance Criteria ##
 
 hipThreads is a C++-style concurrency library for AMD GPUs.
-It implements `std::thread`-like primitives (`hip::thread`, `hip::mutex`, `hip::lock_guard`, `hip::condition_variable`, ...) that run inside GPU kernels, so existing `std::thread` CPU code can be ported to the GPU with minimal changes.
+It implements `std::thread`-like primitives (`hip::wthread`, `hip::mutex`, `hip::lock_guard`, `hip::condition_variable`, ...) that run inside GPU kernels, so existing `std::thread` CPU code can be ported to the GPU with minimal changes.
 It is built on [HIP](https://github.com/ROCm/HIP) and [libhipcxx](https://github.com/ROCm/libhipcxx).
 
 Code in hipThreads should keep the public interface compatible with the C++ Standard Library threading facilities wherever practical, so that familiar `std::`-style concurrency code ports to the GPU with minimal changes.

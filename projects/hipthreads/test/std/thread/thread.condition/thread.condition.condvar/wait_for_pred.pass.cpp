@@ -51,7 +51,7 @@ int main(int, char**) {
     ::std::condition_variable cv;
     ::std::mutex mutex;
 
-    hip::thread t1 = support::make_test_thread([&] {
+    hip::wthread t1 = support::make_test_thread([&] {
       hip::unique_lock<::std::mutex> lock(mutex);
       auto elapsed = measure([&] {
         ready       = true;
@@ -61,7 +61,7 @@ int main(int, char**) {
       assert(elapsed < timeout);
     });
 
-    hip::thread t2 = support::make_test_thread([&] {
+    hip::wthread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
@@ -89,7 +89,7 @@ int main(int, char**) {
     ::std::condition_variable cv;
     ::std::mutex mutex;
 
-    hip::thread t1 = support::make_test_thread([&] {
+    hip::wthread t1 = support::make_test_thread([&] {
       hip::unique_lock<::std::mutex> lock(mutex);
       auto elapsed = measure([&] {
         bool result = cv.wait_for(lock, timeout, [] { return false; }); // never stop waiting (until timeout)
@@ -118,7 +118,7 @@ int main(int, char**) {
     ::std::condition_variable cv;
     ::std::mutex mutex;
 
-    hip::thread t1 = support::make_test_thread([&] {
+    hip::wthread t1 = support::make_test_thread([&] {
       hip::unique_lock<::std::mutex> lock(mutex);
       auto elapsed = measure([&] {
         ready       = true;
@@ -129,7 +129,7 @@ int main(int, char**) {
       assert(elapsed < timeout); // can technically fail if t2 never executes and we timeout, but very unlikely
     });
 
-    hip::thread t2 = support::make_test_thread([&] {
+    hip::wthread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }

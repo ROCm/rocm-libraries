@@ -106,7 +106,7 @@ int main(int argc, char** argv)
     fake_main_kernel<<<1, cuda_thread_count>>>(hip_ret);
 #else
     {
-        hip::thread thd(cuda_thread_count, [] __device__(int *ret) { *ret = fake_main(0, NULL); }, hip_ret);
+        hip::wthread thd(cuda_thread_count, [] __device__(int *ret) { *ret = fake_main(0, NULL); }, hip_ret);
         thd.join();
     }
 #endif

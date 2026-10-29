@@ -59,6 +59,8 @@
  * - 3400-3499: Shared resample descriptor attributes
  * - 3500-3599: RMSNorm backward operation attributes
  * - 3600-3699: Layernorm backward operation attributes
+ * - 3700-3799: MoE grouped matmul operation attributes
+ * - 3800-3899: MoE grouped matmul backward operation attributes
  * - 60000-60099: Knob info serialized value extension attributes
  * - 60100-60199: Knob choice serialized value extension attributes
  * - 60200-60299: Operation type extension attributes
@@ -111,6 +113,16 @@ typedef enum
      */
     HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT = 106,
 
+    /**
+     * @brief Ranking metric the prediction policies order engines by (HIPDNN_TYPE_CHAR,
+     * extension; RFC 0019 §11.4).
+     *
+     * A name registered in hipdnn_data_sdk/utilities/RankingMetrics.hpp; others fail with
+     * HIPDNN_STATUS_BAD_PARAM. Empty means "tflops"; HIPDNN_HEUR_RANKING_METRIC overrides it.
+     * Every result EngineConfig carries the effective metric, which reads return after finalize.
+     */
+    HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT = 107,
+
     /** @} */
 
     /**
@@ -130,6 +142,24 @@ typedef enum
 
     /** @brief Required workspace size in bytes */
     HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE = 203,
+
+    /** @brief Whether the prediction read from this configuration evaluates its model
+     * (int64, in, default 1). Set to 0 to describe the binding and features without
+     * running the model. Set before reading HIPDNN_ATTR_ENGINECFG_PREDICTION_EXT.
+     */
+    HIPDNN_ATTR_ENGINECFG_PREDICTION_EVALUATE_EXT = 204,
+
+    /** @brief Read-only configuration-kind prediction for this configuration's knobs, as one
+     * HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT (root EnginePrediction) that lives until the
+     * descriptor is destroyed. Readable on an unfinalized, knob-only configuration.
+     */
+    HIPDNN_ATTR_ENGINECFG_PREDICTION_EXT = 205,
+
+    /** @brief Ranking metric this configuration is predicted and built in (HIPDNN_TYPE_CHAR,
+     * extension; RFC 0019 §11.4). Unregistered names fail with HIPDNN_STATUS_BAD_PARAM; empty
+     * means "tflops". Readable before finalize; reads return the effective metric.
+     */
+    HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT = 206,
 
     /** @} */
 
@@ -404,6 +434,60 @@ typedef enum
     /** @brief Device properties for this engine */
     HIPDNN_ATTR_ENGINE_DEVICEPROP = 1007,
 
+    /**
+     * @brief Human-readable name of this engine (HIPDNN_TYPE_CHAR, extension).
+     *
+     * Read-only and supplied by the backend. Never empty for a finalized engine
+     * descriptor. Names are unique across loaded engines, so the name reported
+     * here maps back to this engine through `hipdnnGetEngineIdByName_ext` and
+     * agrees with `hipdnnGetEngineInfo_ext`. See
+     * `EnginePluginResourceManager::resolveEngineName()`.
+     */
+    HIPDNN_ATTR_ENGINE_NAME_EXT = 1008,
+
+    /** @brief Whether the engine-kind prediction read from this engine evaluates its model
+     * (int64, in, default 1). Set to 0 to describe the model binding and feature map
+     * without running the model. Set before finalizing the engine descriptor.
+     */
+    HIPDNN_ATTR_ENGINE_PREDICTION_EVALUATE_EXT = 1009,
+
+    /** @brief Read-only engine-kind prediction in HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT, as
+     * one HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT (root EnginePrediction) that lives until the
+     * descriptor is destroyed. Engines without a model report UNAVAILABLE rather than failing.
+     */
+    HIPDNN_ATTR_ENGINE_PREDICTION_EXT = 1010,
+
+    /** @brief Zero-based offset into this engine's matched catalog (int64, in, default 0).
+     * Set before finalizing the engine descriptor.
+     */
+    HIPDNN_ATTR_ENGINE_CANDIDATE_OFFSET_EXT = 1011,
+
+    /** @brief Maximum catalog entries returned by one read of
+     * HIPDNN_ATTR_ENGINE_CANDIDATES_EXT (int64, in, must be in [1, 10000], default 10000).
+     * Set before finalizing the engine descriptor.
+     */
+    HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT = 1012,
+
+    /** @brief Knob choices restricting the enumerated catalog, as an array of finalized
+     * HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR descriptors (HIPDNN_TYPE_BACKEND_DESCRIPTOR, in).
+     * Unset knobs are unconstrained; default knob values never restrict discovery.
+     * Set before finalizing the engine descriptor.
+     */
+    HIPDNN_ATTR_ENGINE_CANDIDATE_SCOPE_EXT = 1013,
+
+    /** @brief Read-only EngineDetails carrying candidate_page, as one
+     * HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT that lives until the descriptor is destroyed. An
+     * offset beyond the total count is invalid. Engines that cannot enumerate report
+     * HIPDNN_STATUS_NOT_SUPPORTED rather than an empty page.
+     */
+    HIPDNN_ATTR_ENGINE_CANDIDATES_EXT = 1014,
+
+    /** @brief Ranking metric HIPDNN_ATTR_ENGINE_PREDICTION_EXT answers in (HIPDNN_TYPE_CHAR,
+     * extension; RFC 0019 §11.4). Unregistered names fail with HIPDNN_STATUS_BAD_PARAM; empty
+     * means "tflops"; no other metric is substituted. Set before finalize.
+     */
+    HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT = 1015,
+
     /** @} */
 
     /**
@@ -473,8 +557,14 @@ typedef enum
     /** @brief Required byte alignment of the tensor's physical buffer pointer */
     HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT = 1309,
 
-    /** @brief UID of the ragged-offset aux tensor for this tensor (int64_t, optional) */
+    /** @brief Ragged-offset aux tensor descriptor for this tensor
+     * (hipdnnBackendDescriptor_t of a HIPDNN_BACKEND_TENSOR_DESCRIPTOR, optional) */
     HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC = 1310,
+
+    /** @brief Multiplier applied to the stored ragged offset to recover the element
+     * offset (`element_offset = stored_offset * multiplier`, int64, default 1). A value
+     * of `H*D` lets a token-unit offset tensor be bound directly as the ragged offset. */
+    HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER = 1311,
 
     /** @} */
 
@@ -1207,7 +1297,24 @@ typedef enum
     /** @} */
 
     /**
-     * @name Shared Resample Descriptor Attributes (3400-3499)
+      * @name Resample Backward Operation Attributes (3408-3410)
+     * Attributes for HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Gradient of output tensor for backward resample */
+    HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC = 3408,
+
+    /** @brief Gradient of input tensor for backward resample */
+    HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC = 3409,
+
+    /** @brief Optional index tensor for max resample backward */
+    HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC = 3410,
+
+    /** @} */
+
+    /**
+      * @name Shared Resample Descriptor Attributes (3400-3407)
      * Attributes shared across resample operation descriptors (forward, backward).
      * These are set directly on the operation descriptor.
      * @{
@@ -1313,6 +1420,64 @@ typedef enum
     /** @} */
 
     /**
+     * @name MoE Grouped Matmul Operation Attributes (3700-3799)
+     * Attributes for HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Token tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_DESC = 3700,
+
+    /** @brief Expert weight tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_WEIGHT_DESC = 3701,
+
+    /** @brief First-token offset tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_FIRST_TOKEN_OFFSET_DESC = 3702,
+
+    /** @brief Optional source-token index tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_INDEX_DESC = 3703,
+
+    /** @brief Optional routed-token expert-index tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_KS_DESC = 3704,
+
+    /** @brief Output tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_OUTPUT_DESC = 3705,
+
+    /** @brief Routing mode */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MODE = 3706,
+
+    /** @brief Number of routed experts per token */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOP_K = 3707,
+
+    /** @brief Math precision */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MATH_PREC = 3708,
+
+    /** @} */
+
+    /**
+     * @name MoE Grouped Matmul Backward Operation Attributes (3800-3899)
+     * Attributes for HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_BWD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Output gradient tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DOUTPUT_DESC = 3800,
+
+    /** @brief Token tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_TOKEN_DESC = 3801,
+
+    /** @brief First-token offset tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_FIRST_TOKEN_OFFSET_DESC = 3802,
+
+    /** @brief Expert weight gradient tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DWEIGHT_DESC = 3803,
+
+    /** @brief Math precision */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_MATH_PREC = 3804,
+
+    /** @} */
+
+    /**
      * @name Extension Attributes (60000+)
      * hipDNN-specific extension attributes
      * @{
@@ -1369,11 +1534,48 @@ typedef enum
     /** @brief Trigger: record stop event on the stream (HIPDNN_TYPE_BOOLEAN, write-only) */
     HIPDNN_ATTR_PROFILING_STOP_EXT = 60402,
 
-    /** @brief Elapsed time in milliseconds between start and stop events (HIPDNN_TYPE_FLOAT, read-only) */
+    /** @brief Elapsed time in milliseconds between start and stop events. Zero is a
+     *  valid back-to-back-event span; a finite negative value is a raw
+     *  invalid-measurement sentinel a caller must check for (never thrown, never
+     *  ranked as a real timing). STALL_TIMED_OUT_EXT true takes precedence and marks
+     *  the value invalid regardless of sign (HIPDNN_TYPE_FLOAT, read-only) */
     HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT = 60403,
 
     /** @brief Trigger: call hipDeviceSynchronize before benchmarking (HIPDNN_TYPE_BOOLEAN, write-only) */
     HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT = 60404,
+
+    /** @brief Introduced in hipdnn_backend 0.4.0: the five stall-gate profiling
+     *  attributes below (60405-60409). */
+    /** @brief Trigger: stall the stream so the measured span excludes host submission.
+     *  Must be set before PROFILING_START_EXT: arming after start is a lifecycle error,
+     *  since the delay it exists to exclude has already elapsed
+     *  (HIPDNN_TYPE_BOOLEAN, write-only) */
+    HIPDNN_ATTR_PROFILING_STALL_ARM_EXT = 60405,
+
+    /** @brief Trigger: release the stall so the queued work runs (HIPDNN_TYPE_BOOLEAN, write-only) */
+    HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT = 60406,
+
+    /** @brief True when a stall watchdog timeout, not the caller, released the stall.
+     *  The elapsed time is then invalid for this measurement; later arm attempts are
+     *  unaffected (HIPDNN_TYPE_BOOLEAN, read-only) */
+    HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT = 60407,
+
+    /** @brief Latched result of the most recent STALL_ARM_EXT attempt: true only when
+     *  arm() actually stalled the stream for this measurement. Not the current armed
+     *  state -- it stays readable after STALL_RELEASE_EXT and finalize() (both of which
+     *  always release the gate). False when STALL_ARM_EXT was never set or the device
+     *  does not support stalling (a HIP call failure during arming is a backend error,
+     *  not a decline). Read after finalize() (HIPDNN_TYPE_BOOLEAN, read-only) */
+    HIPDNN_ATTR_PROFILING_STALL_USED_EXT = 60408,
+
+    /** @brief Trigger: reuse this context for another measurement. The only attribute
+     *  accepted once finalized; also valid on a fresh or partially executed descriptor.
+     *  Releases the gate, drains any outstanding stream work not already covered by a
+     *  prior successful finalize(), and clears the finalized/start/stop/elapsed/
+     *  stall-used/timed-out state. The handle, stream, events, and gate are retained;
+     *  rebinding to a different handle/stream requires a new descriptor
+     *  (HIPDNN_TYPE_BOOLEAN, write-only) */
+    HIPDNN_ATTR_PROFILING_RESET_EXT = 60409,
 
     /** @} */
 

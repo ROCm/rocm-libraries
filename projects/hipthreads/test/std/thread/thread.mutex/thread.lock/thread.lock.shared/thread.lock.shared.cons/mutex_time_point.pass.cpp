@@ -66,7 +66,7 @@ int main(int, char**)
 {
   {
     m.lock();
-    ::std::vector<hip::thread> v;
+    ::std::vector<hip::wthread> v;
     for (unsigned i = 0; i < Threads; ++i)
       v.push_back(support::make_test_thread(f1));
     while (CountDown > 0)
@@ -78,7 +78,7 @@ int main(int, char**)
   }
   {
     m.lock();
-    ::std::vector<hip::thread> v;
+    ::std::vector<hip::wthread> v;
     for (unsigned i = 0; i < Threads; ++i)
       v.push_back(support::make_test_thread(f2));
     for (auto& t : v)

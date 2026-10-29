@@ -78,8 +78,9 @@ std::string dppCtrlToAsmStr(DppCtrl ctrl) {
 static int parseTrailingInt(std::string_view s, std::string_view prefix) {
     if (s.size() <= prefix.size()) return -1;
     auto numStr = s.substr(prefix.size());
+    std::string numStrOwned(numStr);
     char* end = nullptr;
-    long val = std::strtol(std::string(numStr).c_str(), &end, 10);
+    long val = std::strtol(numStrOwned.c_str(), &end, 10);
     return (end && *end == '\0') ? static_cast<int>(val) : -1;
 }
 
@@ -196,6 +197,16 @@ MatrixScaleFmt parseMatrixScaleFmt(std::string_view s) {
     if (s == "1") return MatrixScaleFmt::E5M3;
     if (s == "2") return MatrixScaleFmt::E4M3;
     return MatrixScaleFmt::NONE;
+}
+
+int parseMatrixScaleSel(std::string_view s) {
+    // matrix_a_scale / matrix_b_scale map to the hardware SCL_OPSEL[0] /
+    // SCL_OPSEL_HI[0] bit.
+    // Operations: "SCL_OPSEL[0], SCL_OPSEL_HI[0]: 0 = use lanes 0..15; 1 = use
+    // lanes 16..31 for scale values"). It is a single bit, so only 0 and 1 are
+    // valid.
+    if (s == "1") return 1;
+    return 0;
 }
 
 }  // namespace stinkytofu

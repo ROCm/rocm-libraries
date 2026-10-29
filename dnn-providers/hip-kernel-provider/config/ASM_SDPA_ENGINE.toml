@@ -1,0 +1,44 @@
+# Integration test configuration for ASM_SDPA_ENGINE
+# Filters use GTest-style globs: * matches any sequence of characters
+# Later entries take precedence over earlier ones when multiple filters match
+
+[meta]
+version = 1
+
+# -- Test Skips --
+# Skip tests on specific architectures (or globally if 'archs' is omitted).
+# Each entry requires:
+#   archs:   optional array of substrings matched against the device's raw
+#            gcnArchName (e.g. "gfx942" matches "gfx942:sramecc+:xnack-").
+#            Omit or leave empty to skip on every arch.
+#   filters: array of GTest globs matched against the full GTest name
+#   reason:  human-readable string surfaced in the GTEST_SKIP message
+# First matching entry wins.
+#
+# -- Tolerance Overrides --
+# Override default tolerances for specific tests or groups of tests.
+# Each entry requires:
+#   filters: array of glob patterns matched against the full GTest name
+#   atol: absolute tolerance
+#   rtol: relative tolerance
+#
+
+# The common suite's ToleranceResolver maps both SdpaAttributes and
+# SdpaBackwardAttributes to tol::sdpa::getToleranceFwd<T>() (tight, tuned for
+# forward), so SDPA backward gradients (dQ/dK/dV) get their own entries here.
+# Calibrated on gfx942 against the CPU reference, with O and the LSE derived from
+# Q, K and V by the bundle fill, over every SdpaBackward case and eight seeds: the
+# worst |GPU - CPU| was 7.8e-3 for bf16 and 2.0e-3 for fp16, about one bf16 and two
+# fp16 ulps of the largest gradient (|dV| up to 2.1). Each entry leaves about 3x
+# that at the worst element, and an all-zero output fails every case.
+# Filters key on the SdpaBackward bundle case ids' dtype token; the leading "_"
+# in "_fp16_" keeps it from also matching "bfp16_".
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_fp16_*"]
+atol = 2.5e-3
+rtol = 2.5e-3
+
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_bfp16_*"]
+atol = 1e-2
+rtol = 1e-2

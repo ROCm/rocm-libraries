@@ -37,7 +37,8 @@ typedef enum
     HIPDNN_PLUGIN_STATUS_INVALID_VALUE = 2,
     HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR = 3,
     HIPDNN_PLUGIN_STATUS_ALLOC_FAILED = 4,
-    HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE = 5, // Heuristic policy: not applicable
+    // The call is well-formed but the plugin has nothing to supply.
+    HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE = 5,
     HIPDNN_PLUGIN_STATUS_NOT_INITIALIZED = 6, // Object not initialized
 } hipdnnPluginStatus_t;
 
@@ -52,6 +53,18 @@ typedef enum
     HIPDNN_PLUGIN_TYPE_ENGINE = 1, // Plugin with engines
     HIPDNN_PLUGIN_TYPE_HEURISTIC = 2, // Plugin with heuristic policies
 } hipdnnPluginType_t;
+
+/**
+ * @brief Prediction work an engine is asked to perform.
+ *
+ * Engine predictions must not enumerate configurations or invoke the configuration
+ * predictor. Neither kind may benchmark, tune, or execute the operation graph.
+ */
+typedef enum
+{
+    HIPDNN_ENGINE_PREDICTION_ENGINE = 0, ///< Predict ordinary engine execution with tuning off.
+    HIPDNN_ENGINE_PREDICTION_CONFIGURATION = 1, ///< Select and predict an exact configuration.
+} hipdnnEnginePredictionKind_t;
 
 /**
  * @brief Structure for describing a constant data buffer.

@@ -22,6 +22,7 @@
 *
 * ************************************************************************ */
 #include "hipsparse_routine.hpp"
+#include "utility.hpp"
 
 constexpr const char* hipsparse_routine::s_routine_names[hipsparse_routine::num_routines];
 
@@ -45,7 +46,7 @@ hipsparse_routine::hipsparse_routine(const char* function)
         std::cerr << "//    - " << str << std::endl;
     }
 
-    throw HIPSPARSE_STATUS_INVALID_VALUE;
+    throw_hipsparse_error("hipsparse_routine", HIPSPARSE_STATUS_INVALID_VALUE);
 }
 
 hipsparse_routine::hipsparse_routine()
@@ -71,7 +72,7 @@ hipsparse_routine& hipsparse_routine::operator()(const char* function)
         std::cerr << "//    - " << str << std::endl;
     }
 
-    throw HIPSPARSE_STATUS_INVALID_VALUE;
+    throw_hipsparse_error("hipsparse_routine", HIPSPARSE_STATUS_INVALID_VALUE);
 }
 
 constexpr hipsparse_routine::value_type hipsparse_routine::all_routines[];
@@ -235,7 +236,9 @@ constexpr const char* hipsparse_routine::to_string() const
 #include "testing_spmv_csr.hpp"
 #include "testing_spmv_sell.hpp"
 #include "testing_spsm_coo.hpp"
+#include "testing_spsm_csc.hpp"
 #include "testing_spsm_csr.hpp"
+#include "testing_spsv_csc.hpp"
 #include "testing_spsv_csr.hpp"
 
 bool hipsparse_routine::is_routine_supported(hipsparse_routine::value_type FNAME)
@@ -266,6 +269,8 @@ bool hipsparse_routine::is_routine_supported(hipsparse_routine::value_type FNAME
         return routine_support::is_csrmv_supported();
     case csrsv:
         return routine_support::is_csrsv_supported();
+    case cscsv:
+        return routine_support::is_cscsv_supported();
     case gemvi:
         return routine_support::is_gemvi_supported();
     case hybmv:
@@ -285,6 +290,8 @@ bool hipsparse_routine::is_routine_supported(hipsparse_routine::value_type FNAME
         return routine_support::is_coosm_supported();
     case csrsm:
         return routine_support::is_csrsm_supported();
+    case cscsm:
+        return routine_support::is_cscsm_supported();
     case gemmi:
         return routine_support::is_gemmi_supported();
     // Extra
@@ -392,6 +399,9 @@ void hipsparse_routine::print_routine_support_info(hipsparse_routine::value_type
     case csrsv:
         routine_support::print_csrsv_support_warning();
         break;
+    case cscsv:
+        routine_support::print_cscsv_support_warning();
+        break;
     case gemvi:
         routine_support::print_gemvi_support_warning();
         break;
@@ -419,6 +429,9 @@ void hipsparse_routine::print_routine_support_info(hipsparse_routine::value_type
         break;
     case csrsm:
         routine_support::print_csrsm_support_warning();
+        break;
+    case cscsm:
+        routine_support::print_cscsm_support_warning();
         break;
     case gemmi:
         routine_support::print_gemmi_support_warning();
@@ -525,89 +538,95 @@ hipsparseStatus_t hipsparse_routine::dispatch_call(const Arguments& arg)
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
-#define DEFINE_CASE_T_X(value, testingf)       \
-    case value:                                \
-    {                                          \
-        try                                    \
-        {                                      \
-            testingf<T>(arg);                  \
-            return HIPSPARSE_STATUS_SUCCESS;   \
-        }                                      \
-        catch(const hipsparseStatus_t& status) \
-        {                                      \
-            return status;                     \
-        }                                      \
+#define DEFINE_CASE_T_X(value, testingf)            \
+    case value:                                     \
+    {                                               \
+        try                                         \
+        {                                           \
+            testingf<T>(arg);                       \
+            return HIPSPARSE_STATUS_SUCCESS;        \
+        }                                           \
+        catch(const std::exception& e)              \
+        {                                           \
+            std::cerr << e.what() << std::endl;     \
+            return HIPSPARSE_STATUS_INTERNAL_ERROR; \
+        }                                           \
     }
 
-#define DEFINE_CASE_IT_X(value, testingf)      \
-    case value:                                \
-    {                                          \
-        try                                    \
-        {                                      \
-            testingf<I, T>(arg);               \
-            return HIPSPARSE_STATUS_SUCCESS;   \
-        }                                      \
-        catch(const hipsparseStatus_t& status) \
-        {                                      \
-            return status;                     \
-        }                                      \
+#define DEFINE_CASE_IT_X(value, testingf)           \
+    case value:                                     \
+    {                                               \
+        try                                         \
+        {                                           \
+            testingf<I, T>(arg);                    \
+            return HIPSPARSE_STATUS_SUCCESS;        \
+        }                                           \
+        catch(const std::exception& e)              \
+        {                                           \
+            std::cerr << e.what() << std::endl;     \
+            return HIPSPARSE_STATUS_INTERNAL_ERROR; \
+        }                                           \
     }
 
-#define DEFINE_CASE_IJT_X(value, testingf)     \
-    case value:                                \
-    {                                          \
-        try                                    \
-        {                                      \
-            testingf<I, J, T>(arg);            \
-            return HIPSPARSE_STATUS_SUCCESS;   \
-        }                                      \
-        catch(const hipsparseStatus_t& status) \
-        {                                      \
-            return status;                     \
-        }                                      \
+#define DEFINE_CASE_IJT_X(value, testingf)          \
+    case value:                                     \
+    {                                               \
+        try                                         \
+        {                                           \
+            testingf<I, J, T>(arg);                 \
+            return HIPSPARSE_STATUS_SUCCESS;        \
+        }                                           \
+        catch(const std::exception& e)              \
+        {                                           \
+            std::cerr << e.what() << std::endl;     \
+            return HIPSPARSE_STATUS_INTERNAL_ERROR; \
+        }                                           \
     }
 
-#define DEFINE_CASE_IXYT_X(value, testingf)    \
-    case value:                                \
-    {                                          \
-        try                                    \
-        {                                      \
-            testingf<I, T, T, T>(arg);         \
-            return HIPSPARSE_STATUS_SUCCESS;   \
-        }                                      \
-        catch(const hipsparseStatus_t& status) \
-        {                                      \
-            return status;                     \
-        }                                      \
+#define DEFINE_CASE_IXYT_X(value, testingf)         \
+    case value:                                     \
+    {                                               \
+        try                                         \
+        {                                           \
+            testingf<I, T, T, T>(arg);              \
+            return HIPSPARSE_STATUS_SUCCESS;        \
+        }                                           \
+        catch(const std::exception& e)              \
+        {                                           \
+            std::cerr << e.what() << std::endl;     \
+            return HIPSPARSE_STATUS_INTERNAL_ERROR; \
+        }                                           \
     }
 
-#define DEFINE_CASE_IAXYT_X(value, testingf)   \
-    case value:                                \
-    {                                          \
-        try                                    \
-        {                                      \
-            testingf<I, T, T, T, T>(arg);      \
-            return HIPSPARSE_STATUS_SUCCESS;   \
-        }                                      \
-        catch(const hipsparseStatus_t& status) \
-        {                                      \
-            return status;                     \
-        }                                      \
+#define DEFINE_CASE_IAXYT_X(value, testingf)        \
+    case value:                                     \
+    {                                               \
+        try                                         \
+        {                                           \
+            testingf<I, T, T, T, T>(arg);           \
+            return HIPSPARSE_STATUS_SUCCESS;        \
+        }                                           \
+        catch(const std::exception& e)              \
+        {                                           \
+            std::cerr << e.what() << std::endl;     \
+            return HIPSPARSE_STATUS_INTERNAL_ERROR; \
+        }                                           \
     }
 #define DEFINE_CASE_IABCT_X(value, testingf) DEFINE_CASE_IAXYT_X(value, testingf)
 
-#define DEFINE_CASE_IJAXYT_X(value, testingf)  \
-    case value:                                \
-    {                                          \
-        try                                    \
-        {                                      \
-            testingf<I, J, T, T, T, T>(arg);   \
-            return HIPSPARSE_STATUS_SUCCESS;   \
-        }                                      \
-        catch(const hipsparseStatus_t& status) \
-        {                                      \
-            return status;                     \
-        }                                      \
+#define DEFINE_CASE_IJAXYT_X(value, testingf)       \
+    case value:                                     \
+    {                                               \
+        try                                         \
+        {                                           \
+            testingf<I, J, T, T, T, T>(arg);        \
+            return HIPSPARSE_STATUS_SUCCESS;        \
+        }                                           \
+        catch(const std::exception& e)              \
+        {                                           \
+            std::cerr << e.what() << std::endl;     \
+            return HIPSPARSE_STATUS_INTERNAL_ERROR; \
+        }                                           \
     }
 #define DEFINE_CASE_IJABCT_X(value, testingf) DEFINE_CASE_IJAXYT_X(value, testingf)
 
@@ -618,37 +637,39 @@ hipsparseStatus_t hipsparse_routine::dispatch_call(const Arguments& arg)
 #define IS_T_COMPLEX_FLOAT (std::is_same<T, hipComplex>())
 #define IS_T_COMPLEX_DOUBLE (std::is_same<T, hipDoubleComplex>())
 
-#define DEFINE_CASE_T_REAL_ONLY(value)              \
-    case value:                                     \
-    {                                               \
-        if(IS_T_FLOAT)                              \
-        {                                           \
-            try                                     \
-            {                                       \
-                testing_##value<float>(arg);        \
-                return HIPSPARSE_STATUS_SUCCESS;    \
-            }                                       \
-            catch(const hipsparseStatus_t& status)  \
-            {                                       \
-                return status;                      \
-            }                                       \
-        }                                           \
-        else if(IS_T_DOUBLE)                        \
-        {                                           \
-            try                                     \
-            {                                       \
-                testing_##value<double>(arg);       \
-                return HIPSPARSE_STATUS_SUCCESS;    \
-            }                                       \
-            catch(const hipsparseStatus_t& status)  \
-            {                                       \
-                return status;                      \
-            }                                       \
-        }                                           \
-        else                                        \
-        {                                           \
-            return HIPSPARSE_STATUS_INTERNAL_ERROR; \
-        }                                           \
+#define DEFINE_CASE_T_REAL_ONLY(value)                  \
+    case value:                                         \
+    {                                                   \
+        if(IS_T_FLOAT)                                  \
+        {                                               \
+            try                                         \
+            {                                           \
+                testing_##value<float>(arg);            \
+                return HIPSPARSE_STATUS_SUCCESS;        \
+            }                                           \
+            catch(const std::exception& e)              \
+            {                                           \
+                std::cerr << e.what() << std::endl;     \
+                return HIPSPARSE_STATUS_INTERNAL_ERROR; \
+            }                                           \
+        }                                               \
+        else if(IS_T_DOUBLE)                            \
+        {                                               \
+            try                                         \
+            {                                           \
+                testing_##value<double>(arg);           \
+                return HIPSPARSE_STATUS_SUCCESS;        \
+            }                                           \
+            catch(const std::exception& e)              \
+            {                                           \
+                std::cerr << e.what() << std::endl;     \
+                return HIPSPARSE_STATUS_INTERNAL_ERROR; \
+            }                                           \
+        }                                               \
+        else                                            \
+        {                                               \
+            return HIPSPARSE_STATUS_INTERNAL_ERROR;     \
+        }                                               \
     }
 
 #define DEFINE_CASE_T_REAL_VS_COMPLEX(value, rtestingf, ctestingf) \
@@ -677,9 +698,10 @@ hipsparseStatus_t hipsparse_routine::dispatch_call(const Arguments& arg)
                 return HIPSPARSE_STATUS_INTERNAL_ERROR;            \
             }                                                      \
         }                                                          \
-        catch(const hipsparseStatus_t& status)                     \
+        catch(const std::exception& e)                             \
         {                                                          \
-            return status;                                         \
+            std::cerr << e.what() << std::endl;                    \
+            return HIPSPARSE_STATUS_INTERNAL_ERROR;                \
         }                                                          \
     }
 
@@ -699,6 +721,7 @@ hipsparseStatus_t hipsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_IABCT_X(coomv, testing_spmv_coo);
         DEFINE_CASE_IJABCT_X(csrmv, testing_spmv_csr);
         DEFINE_CASE_IJT_X(csrsv, testing_spsv_csr);
+        DEFINE_CASE_IJT_X(cscsv, testing_spsv_csc);
         DEFINE_CASE_T(gemvi);
         DEFINE_CASE_T(hybmv);
 
@@ -710,6 +733,7 @@ hipsparseStatus_t hipsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_IJT_X(csrmm, testing_spmm_csr);
         DEFINE_CASE_IT_X(coosm, testing_spsm_coo);
         DEFINE_CASE_IJT_X(csrsm, testing_spsm_csr);
+        DEFINE_CASE_IJT_X(cscsm, testing_spsm_csc);
         DEFINE_CASE_T(gemmi);
 
         // Extra

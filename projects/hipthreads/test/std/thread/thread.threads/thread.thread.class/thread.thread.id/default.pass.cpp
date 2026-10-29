@@ -10,7 +10,7 @@
 
 // <thread>
 
-// class thread::id
+// class wthread::id
 
 // id();
 
@@ -22,8 +22,8 @@
 
 int main(int, char**)
 {
-    hip::thread::id id;
-    assert(id == hip::thread::id());
+    hip::wthread::id id;
+    assert(id == hip::wthread::id());
 
   return 0;
 }

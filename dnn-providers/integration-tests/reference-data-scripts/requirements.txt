@@ -1,0 +1,7 @@
+# Reference data generation scripts require PyTorch.
+#
+# Install a ROCm-enabled wheel matching your system ROCm version, e.g.:
+#   ROCm 7.x:  pip install --index-url https://download.pytorch.org/whl/rocm7.0 torch
+# or a CPU-only wheel for local development:
+#   pip install torch
+torch

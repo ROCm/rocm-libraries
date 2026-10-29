@@ -139,14 +139,17 @@ int main() {
     auto image_d = thrust::make_unique<uint8_t[]>(nx * ny * 3);
 
     {
-        hip::thread world_constructor([=] __device__ () { new (world) hittable_list(random_scene()); });
+        // Use list-initialization {} instead of direct-initialization () here:
+        // on Windows the clang HIP front-end mis-parses `Type name(device_lambda)`
+        // as a declaration and rejects the __device__ specifier (ROCM-25863).
+        hip::wthread world_constructor{[=] __device__ () { new (world) hittable_list(random_scene()); }};
         world_constructor.join();
 
         const int k_threads = 4096;
-        std::vector<hip::thread> threads(k_threads);
+        std::vector<hip::wthread> threads(k_threads);
         for (int t = 0; t < k_threads; ++t) {
             // Each thread will start at its index 't' and jump by 'k_threads' to get its next tile.
-            threads[t] = hip::thread([=, image = image_d.get_raw()] __device__ () {
+            threads[t] = hip::wthread([=, image = image_d.get_raw()] __device__ () {
                 // Each thread processes a strided range of tiles.
                 for (int tile_idx = t; tile_idx < total_tiles; tile_idx += k_threads) {
                     int tile_x = tile_idx % tiles_x;
@@ -182,7 +185,7 @@ int main() {
             threads[t].join();
         }
 
-        hip::thread([=] __device__ () { world->~hittable_list(); }).join();
+        hip::wthread([=] __device__ () { world->~hittable_list(); }).join();
     }
 
     thrust::device_free(dev_ptr_world);

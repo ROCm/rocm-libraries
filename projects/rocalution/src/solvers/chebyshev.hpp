@@ -34,11 +34,7 @@ namespace rocalution
 
     /** \ingroup solver_module
   * \class Chebyshev
-  * \brief Chebyshev Iteration Scheme
-  * \details
-  * The Chebyshev Iteration scheme (also known as acceleration scheme) is similar to the
-  * CG method but requires minimum and maximum eigenvalues of the operator.
-  * \cite templates
+  * \brief Chebyshev iteration (acceleration) scheme.
   *
   * \tparam OperatorType - can be LocalMatrix, GlobalMatrix or LocalStencil
   * \tparam VectorType - can be LocalVector or GlobalVector

@@ -1,0 +1,37 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// See graph.fbs for the semantics of these annotations.
+attribute "cache_uid";
+attribute "work_data_dependent";
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+enum MoeGroupedMatmulMode : byte {
+    NONE = 0,
+    GATHER = 1,
+    SCATTER = 2,
+}
+
+table MoeGroupedMatmulAttributes {
+    // Required input tensor UIDs
+    token_tensor_uid:              long (cache_uid);
+    weight_tensor_uid:             long (cache_uid);
+    // Group boundaries: rows outside every [offset[g], offset[g+1]) range are never
+    // multiplied, so the values decide how many rows are computed.
+    first_token_offset_tensor_uid: long (cache_uid, work_data_dependent);
+
+    // Optional input tensor UIDs
+    // Not work_data_dependent: they pick each routed row's source/destination, not how
+    // many rows are routed -- that count is fixed by first_token_offset and the dims
+    // (CpuFpReferenceMoeGroupedMatmul.hpp).
+    token_index_tensor_uid:        long = null (cache_uid);
+    token_ks_tensor_uid:           long = null (cache_uid);
+
+    // Required output tensor UID
+    output_tensor_uid:             long (cache_uid);
+
+    // Routing attributes
+    mode: MoeGroupedMatmulMode = NONE;
+    top_k: int = 0;
+}

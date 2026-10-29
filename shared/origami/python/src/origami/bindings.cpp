@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/map.h>
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
@@ -25,7 +26,10 @@ NB_MODULE(origami, m) {
       .value("gfx950", hardware_t::architecture_t::gfx950)
       .value("gfx1200", hardware_t::architecture_t::gfx1200)
       .value("gfx1201", hardware_t::architecture_t::gfx1201)
+      .value("gfx1170", hardware_t::architecture_t::gfx1170)
+      .value("gfx1171", hardware_t::architecture_t::gfx1171)
       .value("gfx1100", hardware_t::architecture_t::gfx1100)
+      .value("gfx1101", hardware_t::architecture_t::gfx1101)
       .value("gfx1150", hardware_t::architecture_t::gfx1150)
       .value("gfx1151", hardware_t::architecture_t::gfx1151)
       .value("gfx1152", hardware_t::architecture_t::gfx1152)
@@ -87,6 +91,16 @@ NB_MODULE(origami, m) {
 
   m.def("int_to_reduction_t", &origami::int_to_reduction_t, "Convert int to reduction_t.");
 
+  nanobind::enum_<origami::hybrid_mode_t>(m, "hybrid_mode_t")
+      .value("static_", origami::hybrid_mode_t::static_)
+      .value("dynamic", origami::hybrid_mode_t::dynamic)
+      .value("none", origami::hybrid_mode_t::none)
+      .export_values();
+
+  m.def("hybrid_mode_to_string",
+        &origami::hybrid_mode_to_string,
+        "Convert hybrid_mode_t to string.");
+
   nanobind::enum_<origami::prediction_modes_t>(m, "prediction_modes_t")
       .value("estimation", origami::prediction_modes_t::estimation)
       .value("simulation", origami::prediction_modes_t::simulation)
@@ -132,6 +146,7 @@ NB_MODULE(origami, m) {
       .def_rw("num_loads_coalesced_a", &origami::tensile_params_t::num_loads_coalesced_a)
       .def_rw("num_loads_coalesced_b", &origami::tensile_params_t::num_loads_coalesced_b)
       .def_rw("wave_num", &origami::tensile_params_t::wave_num)
+      .def_rw("wavefront_size", &origami::tensile_params_t::wavefront_size)
       .def_rw("wave_group_m", &origami::tensile_params_t::wave_group_m)
       .def_rw("wave_group_n", &origami::tensile_params_t::wave_group_n)
       .def_rw("prefetch_global_read", &origami::tensile_params_t::prefetch_global_read)
@@ -143,7 +158,13 @@ NB_MODULE(origami, m) {
               &origami::tensile_params_t::workgroup_mapping_xcc_group)
       .def_rw("global_split_u_coalesced", &origami::tensile_params_t::global_split_u_coalesced)
       .def_rw("global_split_u_wgm_round_robin",
-              &origami::tensile_params_t::global_split_u_wgm_round_robin);
+              &origami::tensile_params_t::global_split_u_wgm_round_robin)
+      .def_rw("one_lds_buffer", &origami::tensile_params_t::one_lds_buffer)
+      .def_rw("source_swap", &origami::tensile_params_t::source_swap)
+      .def_rw("unroll_major_lds_a", &origami::tensile_params_t::unroll_major_lds_a)
+      .def_rw("unroll_major_lds_b", &origami::tensile_params_t::unroll_major_lds_b)
+      .def_rw("lds_transpose_read_a", &origami::tensile_params_t::lds_transpose_read_a)
+      .def_rw("lds_transpose_read_b", &origami::tensile_params_t::lds_transpose_read_b);
 
   nanobind::class_<origami::config_t>(m, "config_t")
       .def(nanobind::init<>())
@@ -155,6 +176,11 @@ NB_MODULE(origami, m) {
       .def_rw("workgroup_mapping", &origami::config_t::workgroup_mapping)
       .def_rw("cache_hints_a", &origami::config_t::cache_hints_a)
       .def_rw("cache_hints_b", &origami::config_t::cache_hints_b)
+      .def_rw("cache_hints_d", &origami::config_t::cache_hints_d)
+      .def_rw("non_temporal_a_available", &origami::config_t::non_temporal_a_available)
+      .def_rw("non_temporal_b_available", &origami::config_t::non_temporal_b_available)
+      .def_rw("stream_k", &origami::config_t::stream_k)
+      .def_rw("index", &origami::config_t::index)
       .def_rw("workspace_size", &origami::config_t::workspace_size)
       .def_rw("workspace_size_per_elem_c", &origami::config_t::workspace_size_per_elem_c)
       .def_rw("reduction_strategy", &origami::config_t::reduction_strategy)
@@ -165,6 +191,7 @@ NB_MODULE(origami, m) {
       .def_rw("gwvw_d", &origami::config_t::gwvw_d)
       .def_rw("vector_width_a", &origami::config_t::vector_width_a)
       .def_rw("vector_width_b", &origami::config_t::vector_width_b)
+      .def_rw("cluster_dim", &origami::config_t::cluster_dim)
       // Tensile-specific parameters accessed via variant backend
       .def("tensile",
            static_cast<origami::tensile_params_t& (origami::config_t::*)()>(
@@ -202,11 +229,13 @@ NB_MODULE(origami, m) {
       .def_rw("splitting_factor", &origami::gemm::context_t::splitting_factor)
       .def_rw("num_wgs", &origami::gemm::context_t::num_wgs)
       .def_rw("num_timesteps", &origami::gemm::context_t::num_timesteps)
+      .def_rw("tile_schedule", &origami::gemm::context_t::tile_schedule)
       .def_rw("active_cus", &origami::gemm::context_t::active_cus)
       .def_rw("mem_bw_limited", &origami::gemm::context_t::mem_bw_limited)
       .def_rw("write_mem_bw_limited", &origami::gemm::context_t::write_mem_bw_limited)
       .def_rw("tile_elements", &origami::gemm::context_t::tile_elements)
       .def_rw("output_tile_bytes", &origami::gemm::context_t::output_tile_bytes)
+      .def_rw("wave_group", &origami::gemm::context_t::wave_group)
       .def_rw("wgm", &origami::gemm::context_t::wgm);
 
   nanobind::class_<origami::problem_t>(m, "problem_t")
@@ -233,17 +262,33 @@ NB_MODULE(origami, m) {
 
   nanobind::class_<hardware_t>(m, "hardware_t")
       .def(nanobind::init<hardware_t::architecture_t,
-                          size_t,                                 // N_CU
-                          size_t,                                 // lds_capacity
-                          size_t,                                 // rf_capacity
-                          size_t,                                 // NUM_XCD
-                          double,                                 // mem1_perf_ratio
-                          double,                                 // mem2_perf_ratio
-                          double,                                 // mem3_perf_ratio
-                          size_t,                                 // L2_capacity
-                          double,                                 // compute_clock_ghz
-                          size_t,                                 // parallel_mi_cu
-                          std::tuple<double, double, double>>())  // mem_bw_per_wg_coefficients
+                          size_t,                              // N_CU
+                          size_t,                              // lds_capacity
+                          size_t,                              // rf_capacity
+                          size_t,                              // NUM_XCD
+                          double,                              // mem1_perf_ratio
+                          double,                              // mem2_perf_ratio
+                          double,                              // mem3_perf_ratio
+                          size_t,                              // L2_capacity
+                          double,                              // compute_clock_ghz
+                          size_t,                              // parallel_mi_cu
+                          std::tuple<double, double, double>,  // mem_bw_per_wg_coefficients
+                          std::optional<int>>(),               // pci_chip_id
+           nanobind::arg("arch"),
+           nanobind::arg("N_CU"),
+           nanobind::arg("lds_capacity"),
+           nanobind::arg("rf_capacity"),
+           nanobind::arg("NUM_XCD"),
+           nanobind::arg("mem1_perf_ratio"),
+           nanobind::arg("mem2_perf_ratio"),
+           nanobind::arg("mem3_perf_ratio"),
+           nanobind::arg("L2_capacity"),
+           nanobind::arg("compute_clock_ghz"),
+           nanobind::arg("parallel_mi_cu"),
+           nanobind::arg("mem_bw_per_wg_coefficients"),
+           nanobind::arg("pci_chip_id") = nanobind::none(),
+           "Construct hardware from architecture and measured ratios. "
+           "pci_chip_id is optional (default None); Origami does not query HIP for it.")
       .def("print", &hardware_t::print)
       .def("get_valid_matrix_instructions",
            &hardware_t::get_valid_matrix_instructions,
@@ -251,6 +296,9 @@ NB_MODULE(origami, m) {
       .def("get_recommended_matrix_instruction",
            &hardware_t::get_recommended_matrix_instruction,
            "Get recommended matrix instruction dimension (highest throughput) for a given datatype")
+      .def("wavefront_size",
+           &hardware_t::wavefront_size,
+           "Threads per wavefront for this architecture (32 on gfx1250, 64 elsewhere)")
       .def_rw("N_CU", &hardware_t::N_CU)
       .def_rw("lds_capacity", &hardware_t::lds_capacity)
       .def_rw("rf_capacity", &hardware_t::rf_capacity)
@@ -262,22 +310,28 @@ NB_MODULE(origami, m) {
       .def_rw("compute_clock_ghz", &hardware_t::compute_clock_ghz)
       .def_rw("parallel_mi_cu", &hardware_t::parallel_mi_cu)
       .def_rw("mem_bw_per_wg_coefficients", &hardware_t::mem_bw_per_wg_coefficients)
-      .def_rw("NUM_XCD", &hardware_t::NUM_XCD);
+      .def_rw("NUM_XCD", &hardware_t::NUM_XCD)
+      .def_rw("pci_chip_id", &hardware_t::pci_chip_id);
 
   m.def("get_hardware_for_device",
         static_cast<hardware_t (*)(int)>(&hardware_t::get_hardware_for_device),
+        nanobind::arg("device_id"),
         "This gets a hardware object for a device.");
 
-  // Needs named arguments
-  m.def("get_hardware_for_arch",
-        &hardware_t::get_hardware_for_arch,
-        nanobind::arg("arch"),
-        nanobind::arg("N_CU"),
-        nanobind::arg("lds_capacity"),
-        nanobind::arg("rf_capacity"),
-        nanobind::arg("L2_capacity"),
-        nanobind::arg("compute_clock_khz"),
-        "Create hardware object for a specific architecture with specified parameters.");
+  // Needs named arguments; optional pci_chip_id for gfx950 memory model row (e.g. 0x75a8)
+  m.def(
+      "get_hardware_for_arch",
+      &hardware_t::get_hardware_for_arch,
+      nanobind::arg("arch"),
+      nanobind::arg("N_CU"),
+      nanobind::arg("lds_capacity"),
+      nanobind::arg("rf_capacity"),
+      nanobind::arg("L2_capacity"),
+      nanobind::arg("compute_clock_khz"),
+      nanobind::arg("pci_chip_id") = nanobind::none(),
+      "Create hardware object for a specific architecture with specified parameters."
+      "For gfx950, optional pci_chip_id selects the microbenchmark memory-constant row "
+      "(0x75a8 -> id75a8; absent or other values -> id75a0).");
   m.def("datatype_to_bits", &origami::datatype_to_bits, "Return the number of bits in a datatype");
   m.def("string_to_datatype",
         &origami::string_to_datatype,
@@ -319,9 +373,9 @@ NB_MODULE(origami, m) {
   m.def("calculate_output_utilization",
         &origami::gemm::calculate_output_utilization,
         "Calculate the output utilization ratio");
-  m.def("round_elements_to_128B",
-        &origami::gemm::round_elements_to_128B,
-        "Round elements to 128B alignment");
+  m.def("round_elements_to_NB",
+        &origami::gemm::round_elements_to_NB,
+        "Round elements up to a multiple of transaction_bytes");
   m.def("predict_workgroup_mapping",
         &origami::gemm::predict_workgroup_mapping,
         "Fast WGM prediction based on last-XCD L2 cost minimization");
@@ -362,6 +416,13 @@ NB_MODULE(origami, m) {
   m.def("compute_mt_compute_latency",
         &origami::gemm::compute_mt_compute_latency,
         "Compute the latency to process a single macro-tile");
+  m.def("compute_local_read_latency",
+        &origami::gemm::compute_local_read_latency,
+        nanobind::arg("problem"),
+        nanobind::arg("hardware"),
+        nanobind::arg("config"),
+        nanobind::arg("full_width") = false,
+        "Compute the LDS read time of one K-iteration of a macro-tile");
   m.def("estimate_l2_hit", &origami::gemm::estimate_l2_hit, "Estimate L2 hit rate");
   m.def("estimate_mall_hit", &origami::gemm::estimate_mall_hit, "Estimate MALL hit rate");
   m.def("compute_l2_hit_rate_global",
@@ -378,6 +439,9 @@ NB_MODULE(origami, m) {
         "Compute latency per K-complete MT wave");
   m.def("compute_total_latency",
         &origami::gemm::compute_total_latency,
+        nanobind::arg("problem"),
+        nanobind::arg("hardware"),
+        nanobind::arg("config"),
         "Compute total latency (uses Formocast when config.prediction_mode == simulation)");
 
   // Attention functions
@@ -461,7 +525,7 @@ NB_MODULE(origami, m) {
         return origami::gemm::estimate_cache_hit_rates(problem, hardware, config, context);
       },
       "Estimate per-operand cache hit rates as "
-      "(H_mem_l1_A, H_mem_l1_B, H_mem_l2_A, H_mem_l2_B, H_mem_mall_A, H_mem_mall_B) "
+      "(H_mem_l2_A, H_mem_l2_B, H_mem_mall_A, H_mem_mall_B) "
       "using the analytical model (auto-creates context)");
   m.def(
       "compute_memory_latency",

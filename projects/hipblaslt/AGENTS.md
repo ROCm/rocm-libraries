@@ -18,7 +18,7 @@ When authoring, reviewing, or pre-merge-gating a hipBLASLt pull request, use the
 |------|---------|
 | `library/include/hipblaslt/` | Public C/C++ headers (`hipblaslt.h`, `hipblaslt-ext.hpp`, etc.) |
 | `library/src/amd_detail/` | hipBLASLt API implementation (thin layer over rocblaslt) |
-| `library/src/amd_detail/rocblaslt/` | Internal GEMM dispatch, handle/aux, Tensile host integration (`tensile_host.cpp`), user-driven tuning, transform ops, legacy rocRoller kernels under `src/rocroller/` |
+| `library/src/amd_detail/rocblaslt/` | Internal GEMM dispatch, handle/aux, TensileLite host integration (`tensile_host.cpp`), user-driven tuning, transform ops, legacy rocRoller kernels under `src/rocroller/` |
 | `tensilelite/` | Kernel generator + runtime (Python + C++/Nanobind). |
 | `clients/tests/` | gtest binary (`hipblaslt-test`) driven by YAML in `clients/tests/data/` (`matmul_gtest.yaml`, `auxiliary_gtest.yaml`, `smoke_gtest.yaml`, `rocroller_gtest.yaml`, …) |
 | `clients/bench/` | Benchmark binary (`hipblaslt-bench`) |
@@ -26,7 +26,7 @@ When authoring, reviewing, or pre-merge-gating a hipBLASLt pull request, use the
 | `library/include/hipblaslt/hipblaslt_{float8,bfloat6,e5m3,e8,float4,float6,xfloat32}.h` | Custom narrow types |
 | `tasks.py` | Top-level invoke tasks — primary build entry point (`invoke build`) |
 
-The flow at runtime is: user call → `hipblaslt.cpp` → `rocblaslt_mat.cpp` → `tensile_host.cpp` → TensileLite host (`tensilelite/src/`, `tensilelite/include/`) → loaded `.hsaco`/`.co` from device library. The Tensile path is what new work uses; a small set of pre-existing custom kernels under `library/src/amd_detail/rocblaslt/src/rocroller/` still ships alongside (gated by `HIPBLASLT_ENABLE_ROCROLLER`, ON by default; pass `--skip-rocroller` to `invoke build` to drop it).
+The flow at runtime is: user call → `hipblaslt.cpp` → `rocblaslt_mat.cpp` → `tensile_host.cpp` → TensileLite host (`tensilelite/src/`, `tensilelite/include/`) → loaded `.hsaco`/`.co` from device library. The TensileLite path is what new work uses; a small set of pre-existing custom kernels under `library/src/amd_detail/rocblaslt/src/rocroller/` still ships alongside (gated by `HIPBLASLT_ENABLE_ROCROLLER`, ON by default; pass `--skip-rocroller` to `invoke build` to drop it).
 
 ## Build
 
@@ -38,7 +38,7 @@ invoke build -ca gfx942 -d     # add --install-deps on first run
 invoke --help build            # full flag list
 ```
 
-Useful flags (selected): `-d` install deps, `-n` install package after build, `-c` clients, `-d/-r/-k` Debug/RelWithDebInfo/RelWithDebInfo (default Release), `--clean`, `-a/--architecture` GPU target(s), `--skip-rocroller`, `-y/--legacy-hipblas-direct` (older-ROCm direct-hipBLAS API path), `-t/--no-tensile` for client-only, `-z/--no-lazy-load`, `-f/--logic-filter` to scope TensileLite logic dirs (massively faster device-lib build).
+Useful flags (selected): `-d` install deps, `-n` install package after build, `-c` clients, `-d/-r/-k` Debug/RelWithDebInfo/RelWithDebInfo (default Release), `--clean`, `-a/--architecture` GPU target(s), `--skip-rocroller`, `-y/--legacy-hipblas-direct` (older-ROCm direct-hipBLAS API path), `-t/--no-tensile` for client-only, `-z/--no-lazy-load`, `-f/--logic-filter` to scope TensileLite logic dirs (massively faster device-lib build), `--fortran-compiler` for `--clients` (path or name; default: `FC`, else `CMAKE_Fortran_COMPILER`, else auto-detect ROCm flang, else detected `gfortran`; exits if none found).
 
 `install.sh` is a deprecated compatibility wrapper that just shells out to `invoke build`; new instructions and tooling should call `invoke build` directly.
 
@@ -104,13 +104,17 @@ JIRA ID : <JIRA key or N/A>
 <outcome of the test plan: passing suites, benchmark numbers, before/after>
 
 ## Submission Checklist
-- [ ] Look over the contributing guidelines at https://github.com/ROCm/ROCm/blob/develop/CONTRIBUTING.md#pull-requests.
+- [ ] Look over the contributing guidelines at https://github.com/ROCm/TheRock/blob/main/GOVERNANCE.md#pull-requests.
 
 ## Risk level
 <None/Low/Medium/High, with a short justification>
 ```
 
 Use the `users/<github-username>/<branch-name>` branch convention and base PRs on `develop`.
+
+For what to put in **Test Plan**/**Test Result** — which suites gate a PR, which are informational,
+and which run nowhere yet — see [`TESTING.md`](TESTING.md) (TensileLite specifics are in
+[`tensilelite/TESTING.md`](tensilelite/TESTING.md)).
 
 ## When working in `tensilelite/`
 

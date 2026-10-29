@@ -6,6 +6,9 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 
+#include <stdexcept>
+#include <unordered_map>
+
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using hipdnn_flatbuffers_sdk::utilities::extractValueFromTensorValue;
 
@@ -108,4 +111,69 @@ TEST(TestFlatbufferUtils, IsPassByValueTensorTrueForRuntimeUserSupplied)
 TEST(TestFlatbufferUtils, IsPassByValueTensorFalseForNullptr)
 {
     EXPECT_FALSE(isPassByValueTensor(nullptr));
+}
+
+namespace
+{
+
+// Builds a scalar FLOAT TensorAttributesT with the given pass-by-value state.
+// When withValue is true a baked 2.0f default is set; otherwise the value union
+// is left empty (pure runtime user-supplied).
+TensorAttributesT makeScalarAttr(int64_t uid, bool isRuntimePassByValue, bool withValue)
+{
+    TensorAttributesT attr;
+    attr.uid = uid;
+    attr.name = "scalar";
+    attr.data_type = DataType::FLOAT;
+    attr.dims = {1};
+    attr.strides = {1};
+    attr.is_runtime_pass_by_value = isRuntimePassByValue;
+    if(withValue)
+    {
+        attr.value.Set(Float32Value(2.0f));
+    }
+    return attr;
+}
+
+} // namespace
+
+using hipdnn_flatbuffers_sdk::utilities::resolveDoubleScalarFromVariantPack;
+using hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack;
+
+TEST(TestFlatbufferUtils, ResolveScalarBakedValueIgnoresPack)
+{
+    auto attr = makeScalarAttr(7, /*isRuntimePassByValue=*/false, /*withValue=*/true);
+    float differing = 99.0f;
+    const std::unordered_map<int64_t, void*> pack{{7, &differing}};
+    EXPECT_DOUBLE_EQ(resolveDoubleScalarFromVariantPack(attr, pack, "Epsilon"), 2.0);
+}
+
+TEST(TestFlatbufferUtils, ResolveScalarRuntimeWithDefaultIgnoresPack)
+{
+    auto attr = makeScalarAttr(7, /*isRuntimePassByValue=*/true, /*withValue=*/true);
+    float differing = 99.0f;
+    const std::unordered_map<int64_t, void*> pack{{7, &differing}};
+    EXPECT_DOUBLE_EQ(resolveDoubleScalarFromVariantPack(attr, pack, "Epsilon"), 2.0);
+}
+
+TEST(TestFlatbufferUtils, ResolvePureRuntimeScalarReadsPack)
+{
+    auto attr = makeScalarAttr(7, /*isRuntimePassByValue=*/true, /*withValue=*/false);
+    float hostValue = 1e-5f;
+    const std::unordered_map<int64_t, void*> pack{{7, &hostValue}};
+    EXPECT_FLOAT_EQ(resolveScalarFromVariantPack<float>(attr, pack, "Epsilon"), 1e-5f);
+}
+
+TEST(TestFlatbufferUtils, ResolvePureRuntimeScalarMissingSlotThrows)
+{
+    auto attr = makeScalarAttr(7, /*isRuntimePassByValue=*/true, /*withValue=*/false);
+    const std::unordered_map<int64_t, void*> pack; // no slot for uid 7
+    EXPECT_THROW(resolveScalarFromVariantPack<float>(attr, pack, "Epsilon"), std::runtime_error);
+}
+
+TEST(TestFlatbufferUtils, ResolvePureRuntimeScalarNullPointerThrows)
+{
+    auto attr = makeScalarAttr(7, /*isRuntimePassByValue=*/true, /*withValue=*/false);
+    const std::unordered_map<int64_t, void*> pack{{7, nullptr}};
+    EXPECT_THROW(resolveScalarFromVariantPack<float>(attr, pack, "Epsilon"), std::runtime_error);
 }

@@ -18,6 +18,7 @@ test_categories:
       - "*"
     exclude:
       - "*multi_gpu*"
+      - "hipfftXtSuite*"
     extra_args:
       - "--test_prob"
       - "0.02"
@@ -37,6 +38,7 @@ test_categories:
     description: "Multi-GPU only - hipfft-test *multi_gpu* (multi-GPU runner)"
     test_patterns:
       - "*multi_gpu*"
+      - "hipfftXtSuite*"
     exclude:
     extra_args:
       - "--test_prob"
@@ -44,6 +46,17 @@ test_categories:
     labels:
       - "multigpu_comprehensive"
       - "multigpu_full"
+
+  ffm-quick:
+    description: "Small test suite for simulation tests"
+    test_patterns:
+      - "*"
+    exclude:
+    extra_args:
+      - "--simulation=quick"
+    labels:
+      - "ffm-quick"
+      - "ffm-full" # alias to "ffm-quick" for now
 
 execution_settings:
   timeout_multiplier: 1
@@ -53,3 +66,4 @@ execution_settings:
     comprehensive: 14400 # 4 hours
     full: 43200          # 12 hours
     multigpu_tests: 3600 # 1 hour
+    ffm-quick: 7200      # 2 hours

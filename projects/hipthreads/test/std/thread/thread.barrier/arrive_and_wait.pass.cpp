@@ -23,7 +23,7 @@ int main(int, char**)
 {
   ::std::barrier<> b(2);
 
-  hip::thread t = support::make_test_thread([&](){
+  hip::wthread t = support::make_test_thread([&](){
     for(int i = 0; i < 10; ++i)
       b.arrive_and_wait();
   });

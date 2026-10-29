@@ -22,6 +22,10 @@ _BACKEND_FRAGMENT_TEMPLATES: tuple[tuple[str, str], ...] = (
     ("fragments/operation_type_enum.j2", "operation_type_enum.txt"),
     ("fragments/node_unpack_override.j2", "node_unpack_override.txt"),
     ("fragments/packer_name_addition.j2", "packer_name_addition.txt"),
+    ("fragments/fbs_tensor_fields.j2", "fbs_tensor_fields.txt"),
+    ("fragments/node_flops_overload.j2", "node_flops_overload.txt"),
+    ("fragments/logical_flops_case.j2", "logical_flops_case.txt"),
+    ("fragments/work_model_test_case.j2", "work_model_test_case.txt"),
 )
 
 BACKEND_FRAGMENT_FILENAMES: tuple[str, ...] = tuple(
@@ -47,6 +51,13 @@ class DescriptorGenerator:
 
         lines.append(f"# Descriptor Lifting Additions for {cn}")
         lines.append(f"# Add these changes to the existing {cn}.hpp/.cpp files.")
+        lines.append("")
+        if config.frontend.generate_node:
+            lines.append(
+                "# Node source is generated from the default node.hpp.j2 template."
+            )
+        else:
+            lines.append("# Node source and unit tests are handwritten.")
         lines.append("")
 
         # --- HPP additions ---
@@ -220,7 +231,7 @@ class DescriptorGenerator:
             out_path.parent.mkdir(parents=True, exist_ok=True)
             content = self._render_template(template_name, config)
             out_path.write_text(content)
-            written.append(str(rel_path))
+            written.append(rel_path.as_posix())
 
         fragments_dir = output_dir / "fragments"
         fragments_dir.mkdir(parents=True, exist_ok=True)
@@ -251,36 +262,40 @@ class DescriptorGenerator:
         """Render frontend templates and write to output_dir. Returns list of written files."""
         written = []
 
-        # Frontend file templates
         file_templates = {
             "attributes.hpp.j2": Path("frontend/include/hipdnn_frontend/attributes")
             / config.attributes_header_filename,
-            "node.hpp.j2": Path("frontend/include/hipdnn_frontend/node")
-            / config.node_header_filename,
         }
+        if config.frontend.generate_node:
+            file_templates["node.hpp.j2"] = (
+                Path("frontend/include/hipdnn_frontend/node")
+                / config.node_header_filename
+            )
 
         for template_name, rel_path in file_templates.items():
             out_path = output_dir / rel_path
             out_path.parent.mkdir(parents=True, exist_ok=True)
             content = self._render_template(template_name, config)
             out_path.write_text(content)
-            written.append(str(rel_path))
+            written.append(rel_path.as_posix())
 
-        # Frontend test templates
         test_templates = {
             "test_attributes.cpp.j2": Path("frontend/tests")
             / config.test_attributes_filename,
-            "test_node.cpp.j2": Path("frontend/tests") / config.test_node_filename,
             "test_frontend_graph.cpp.j2": Path("frontend/tests")
             / config.test_frontend_graph_filename,
         }
+        if config.frontend.generate_node:
+            test_templates["test_node.cpp.j2"] = (
+                Path("frontend/tests") / config.test_node_filename
+            )
 
         for template_name, rel_path in test_templates.items():
             out_path = output_dir / rel_path
             out_path.parent.mkdir(parents=True, exist_ok=True)
             content = self._render_template(template_name, config)
             out_path.write_text(content)
-            written.append(str(rel_path))
+            written.append(rel_path.as_posix())
 
         # Frontend fragment templates
         fragment_templates = {
@@ -360,7 +375,7 @@ class DescriptorGenerator:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         content = self._render_template("constants.hpp.j2", config)
         out_path.write_text(content)
-        return [str(rel_path)]
+        return [rel_path.as_posix()]
 
     def _render_template(self, template_name: str, config: OperationConfig) -> str:
         try:

@@ -25,7 +25,7 @@
 import os
 import copy
 import yaml
-from Tensile.Utilities.ConditionalImports import yamlDumper, yamlLoader
+from Tensile.Utilities.ConditionalImports import SafeLoader, yamlDumper
 import math
 
 class BenchmarkSplitter(object):
@@ -40,7 +40,7 @@ class BenchmarkSplitter(object):
     @staticmethod
     def __readConfigFile(benchmarkConfigFile):
         with open(benchmarkConfigFile) as f:
-            data = yaml.load(f, yamlLoader)
+            data = yaml.load(f, SafeLoader)
         return data
 
     # data: a loaded .yaml file

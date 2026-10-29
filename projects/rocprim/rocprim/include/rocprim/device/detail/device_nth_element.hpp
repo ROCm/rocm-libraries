@@ -324,14 +324,12 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
 
 template<class TargetConfig>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
-    find_nth_element_bucket_kernel_impl(unsigned int*                      buckets,
+    find_nth_element_bucket_kernel_impl(unsigned int*                buckets,
                                         n_th_element_iteration_data* nth_element_data,
                                         bool*                        equality_buckets,
                                         const unsigned int           rank)
-
 {
-    constexpr nth_element_config_params params = TargetConfig::params;
-
+    constexpr nth_element_config_params params      = TargetConfig::params;
     constexpr unsigned int num_buckets = params.number_of_buckets;
 
     using block_scan_buckets = block_scan<unsigned int,
@@ -341,35 +339,26 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                                           1,
                                           TargetConfig::wavefront>;
 
-    ROCPRIM_SHARED_MEMORY struct
-    {
-        typename block_scan_buckets::storage_type scan;
-        unsigned int                              bucket_offsets[num_buckets];
-    } storage;
+    ROCPRIM_SHARED_MEMORY
+    typename block_scan_buckets::storage_type scan_storage;
 
-    unsigned int bucket_size = buckets[threadIdx.x];
+    const unsigned int bucket_idx  = threadIdx.x;
+    const unsigned int bucket_size = buckets[bucket_idx];
+
     unsigned int bucket_offset;
-    // Calculate the global offset of the buckets based on bucket sizes
-    block_scan_buckets().exclusive_scan(bucket_size, bucket_offset, 0, storage.scan);
 
-    storage.bucket_offsets[threadIdx.x] = bucket_offset;
+    // Compute the starting offset of each bucket from the bucket sizes.
+    block_scan_buckets().exclusive_scan(bucket_size, bucket_offset, 0, scan_storage);
 
-    syncthreads();
+    const unsigned int bucket_end = bucket_offset + bucket_size;
 
-    unsigned int num_buckets_before;
-
-    // Find in which bucket the nth element sits
-    bool in_nth = storage.bucket_offsets[threadIdx.x] <= rank;
-    block_scan_buckets().inclusive_scan(in_nth, num_buckets_before, storage.scan);
-
-    if(threadIdx.x == (num_buckets - 1))
+    // The target bucket is the one containing rank in the range [bucket_offset, bucket_end).
+    if(rank >= bucket_offset && rank < bucket_end)
     {
-        // Store nth_element data
-        unsigned int nth_element          = num_buckets_before - 1;
-        nth_element_data->offset          = storage.bucket_offsets[nth_element];
-        nth_element_data->size            = buckets[nth_element];
-        nth_element_data->equality_bucket = equality_buckets[nth_element];
-        nth_element_data->bucket_idx      = nth_element;
+        nth_element_data->offset          = bucket_offset;
+        nth_element_data->size            = bucket_size;
+        nth_element_data->equality_bucket = equality_buckets[bucket_idx];
+        nth_element_data->bucket_idx      = bucket_idx;
     }
 }
 
@@ -742,7 +731,7 @@ hipError_t
         unsigned int bucket_size     = h_nth_element_data.size;
         bool         equality_bucket = h_nth_element_data.equality_bucket;
 
-        // If all values are the same it is already sorted
+        // If the selected nth bucket is an equality bucket, the nth-element condition is already satisfied.
         if(equality_bucket)
         {
             return hipSuccess;

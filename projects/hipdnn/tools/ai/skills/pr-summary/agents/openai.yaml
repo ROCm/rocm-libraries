@@ -1,4 +1,4 @@
 interface:
-  display_name: "PR Summary"
-  short_description: "Draft structured PR descriptions"
-  default_prompt: "Use $pr-summary to draft or revise a concise PR body with risk assessment, blast-radius/ASIC coverage, testing summary, testing checklist, and technical changes."
+  display_name: "PR Summary (deprecated)"
+  short_description: "Deprecated — use hipdnn-pr-quality"
+  default_prompt: "DEPRECATED: pr-summary has been replaced by $hipdnn-pr-quality. First tell the user this skill is deprecated, then use $hipdnn-pr-quality (author assist) to draft or revise the PR title and body."

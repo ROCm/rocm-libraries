@@ -33,9 +33,88 @@
 
 #include <Tensile/hip/HipUtils.hpp>
 
+#include <algorithm>
 #include <csignal>
 #include <cstddef>
 #include <thread>
+
+namespace {
+    // Computes total bytes read/written for a GEMM problem instance (A/B reads + D writes),
+    // plus additional traffic from optional tensors (C when beta!=0, E, bias, scaling tensors, MX scales).
+    // Used for approximate bandwidth reporting in the client logger.
+    using namespace TensileLite;
+    double computeByteRWForGEMM(const ContractionProblemGemm& gemm)
+    {
+        double totalBytes = 0.0;
+
+        size_t M = gemm.freeSizeA(0);
+        size_t N = gemm.freeSizeB(0);
+        size_t K = gemm.boundSize(0);
+
+        // Compute total batch size.
+        size_t numBatches = 1;
+        for(size_t i = 0; i < gemm.batchIndices().size(); ++i)
+            numBatches *= gemm.batchSize(i);
+
+        auto aDtypeInfo = DataTypeInfo::Get(gemm.a().dataType());
+        auto bDtypeInfo = DataTypeInfo::Get(gemm.b().dataType());
+        auto dDtypeInfo = DataTypeInfo::Get(gemm.d().dataType());
+
+        auto bytesA = multiplyElementSize(M * K * numBatches, aDtypeInfo.elementSize);
+        auto bytesB = multiplyElementSize(K * N * numBatches, bDtypeInfo.elementSize);
+        auto bytesD = multiplyElementSize(M * N * numBatches, dDtypeInfo.elementSize);
+
+        // Add bytesC if beta is enabled.
+        if(gemm.beta() != 0.0)
+        {
+            auto cDtypeInfo = DataTypeInfo::Get(gemm.c().dataType());
+            // Accumulate read bytes from C into totalBytes.
+            totalBytes += multiplyElementSize(M * N * numBatches, cDtypeInfo.elementSize);
+        }
+
+        // Add E tensor bytes if enabled.
+        if(gemm.useE())
+        {
+          auto eDtypeInfo = DataTypeInfo::Get(gemm.e().dataType());
+          totalBytes += multiplyElementSize(M * N * numBatches, eDtypeInfo.elementSize);
+        }
+
+        // Add bias vector bytes if enabled.
+        if(gemm.useBias() != 0)
+            totalBytes += gemm.bias().totalAllocatedBytes();
+
+        // Add scale tensor bytes if enabled.
+        if(!gemm.useScaleAB().empty())
+        {
+            totalBytes += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALEA].totalAllocatedBytes();
+            totalBytes += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALEB].totalAllocatedBytes();
+        }
+
+        if(gemm.useScaleCD())
+        {
+            totalBytes += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALEC].totalAllocatedBytes();
+            totalBytes += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALED].totalAllocatedBytes();
+        }
+
+        if(gemm.useScaleAlphaVec() != 0)
+            totalBytes += gemm.scaleAlphaVec().totalAllocatedBytes();
+
+
+        // Add MX scale tensor bytes if dtype is MX.
+        if(gemm.mxTypeA() != rocisa::DataType::None && gemm.mxBlockA() > 0)
+        {
+            bytesA += gemm.mxsa().totalAllocatedBytes();
+        }
+        if(gemm.mxTypeB() != rocisa::DataType::None && gemm.mxBlockB() > 0)
+        {
+            bytesB += gemm.mxsb().totalAllocatedBytes();
+        }
+
+        totalBytes += bytesA + bytesB + bytesD;
+        return totalBytes;
+    }
+}
+
 
 namespace TensileLite
 {
@@ -43,9 +122,10 @@ namespace TensileLite
     {
         static_assert(BenchmarkTimer::clock::is_steady, "Clock must be steady.");
 
-        BenchmarkTimer::BenchmarkTimer(po::variables_map const& args,
-                                       Hardware const&          hardware,
-                                       float                    flushTimeUs)
+        BenchmarkTimer::BenchmarkTimer(po::variables_map const&                    args,
+                                       Hardware const&                             hardware,
+                                       float                                       flushTimeUs,
+                                       std::vector<std::shared_ptr<DeviceContext>> devices)
             : m_numWarmups(args["num-warmups"].as<int>())
             , m_syncAfterWarmups(args["sync-after-warmups"].as<bool>())
             , m_numBenchmarks(args["num-benchmarks"].as<int>())
@@ -66,6 +146,7 @@ namespace TensileLite
             , m_skiprun_from_map(0)
             , m_numSolutionSkip(0)
             , m_prob_sol_map(args["prob-sol-map"].as<prob_sol_map>())
+            , m_devices(std::move(devices))
         {
         }
 
@@ -164,6 +245,7 @@ namespace TensileLite
             double timePerEnqueue_us;
             double gflops;
             double gflopsPerCu;
+            double bandwidthGbps = 0.0;
 
             {
                 ScopedTimer timer("post_solution_perf_calc");
@@ -195,6 +277,28 @@ namespace TensileLite
                 int    tiles       = pp.granularities.tilesPerCu * perf.CUs;
                 int    usedCus     = std::min(tiles, perf.CUs);
                 gflopsPerCu = gflops / usedCus;
+
+                if(!sol_is_skipped)
+                {
+                    double totalBytes = 0.0;
+                    if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
+                    {
+                        totalBytes = computeByteRWForGEMM(*problem);
+                    }
+                    else if(auto problem = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
+                    {
+                        for (const auto &gemm : problem->gemms)
+                            totalBytes += computeByteRWForGEMM(gemm);
+                    }
+                    else
+                    {
+                        throw std::runtime_error(
+                            "[BenchmarkTimer] Failed to cast problem to any ContractionProblem.");
+                    }
+
+                    // Calculate total GB/s bandwidth from timePerEnqueue_us and update the report.
+                    bandwidthGbps = (totalBytes / timePerEnqueue_us) / (double)1e3;
+                }
             }
 
             {
@@ -202,6 +306,7 @@ namespace TensileLite
                 m_reporter->report(ResultKey::TimeUS, timePerEnqueue_us);
                 m_reporter->report(ResultKey::SpeedGFlopsPerCu, gflopsPerCu);
                 m_reporter->report(ResultKey::SpeedGFlops, gflops);
+                m_reporter->report(ResultKey::GbpsBW, bandwidthGbps);
             }
 
             m_timeInSolution        = double_millis::zero();
@@ -234,8 +339,7 @@ namespace TensileLite
         }
 
         void BenchmarkTimer::postWarmup(TimingEvents const& startEvents,
-                                        TimingEvents const& stopEvents,
-                                        hipStream_t const&  stream)
+                                        TimingEvents const& stopEvents)
         {
             // no need to do the warmup test when:
             // 1. skip_from_map (When restore-from-log) or
@@ -246,15 +350,20 @@ namespace TensileLite
             double_millis totalTime(0.0);
 
             // Skip the first warmup event (cold start) when multiple warmups are available
-            size_t warmupStartIdx = startEvents->size() == 1 ? 0 : 1;
-            float enqTime = 0.0f;
-            HIP_CHECK_EXC(hipEventSynchronize(stopEvents->back().back()));
-            for(size_t i = warmupStartIdx; i < startEvents->size(); i++)
+            size_t warmupStartIdx = startEvents.numInvocations() == 1 ? 0 : 1;
+            for(size_t d = 0; d < stopEvents.numCards(); d++)
+                HIP_CHECK_EXC(hipEventSynchronize(stopEvents.card(d).back().back()));
+            for(size_t i = warmupStartIdx; i < startEvents.numInvocations(); i++)
             {
-                HIP_CHECK_EXC(hipEventElapsedTime(
-                    &enqTime, startEvents->at(i).front(), stopEvents->at(i).back()));
-
-                totalTime += double_millis(enqTime);
+                float launchMs = 0.0f;
+                for(size_t d = 0; d < startEvents.numCards(); d++)
+                {
+                    float enqTime = 0.0f;
+                    HIP_CHECK_EXC(hipEventElapsedTime(
+                        &enqTime, startEvents.card(d)[i].front(), stopEvents.card(d)[i].back()));
+                    launchMs = std::max(launchMs, enqTime);
+                }
+                totalTime += double_millis(launchMs);
             }
             if(totalTime < m_currentBestWarmUpTime)
                 m_currentBestWarmUpTime = totalTime;
@@ -267,14 +376,16 @@ namespace TensileLite
             }
         }
 
-        void BenchmarkTimer::validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                             TimingEvents const&            startEvents,
-                                             TimingEvents const&            stopEvents)
+        void BenchmarkTimer::validateWarmups(std::vector<size_t> const& slots,
+                                             TimingEvents const&        startEvents,
+                                             TimingEvents const&        stopEvents)
         {
-            if(m_syncAfterWarmups && (stopEvents->size() > 0) && (stopEvents->back().size() > 0))
+            if(m_syncAfterWarmups && stopEvents.numInvocations() > 0)
             {
                 ScopedTimer timer("validate_gpu_sync");
-                HIP_CHECK_EXC(hipEventSynchronize(stopEvents->back().back()));
+                for(size_t d = 0; d < stopEvents.numCards(); d++)
+                    if(!stopEvents.card(d).back().empty())
+                        HIP_CHECK_EXC(hipEventSynchronize(stopEvents.card(d).back().back()));
             }
         }
 
@@ -331,74 +442,78 @@ namespace TensileLite
             m_curNumEnqueuesPerSync = count;
         }
 
-        void BenchmarkTimer::preEnqueues(hipStream_t const& stream)
+        void BenchmarkTimer::preEnqueues()
         {
             if(!m_useGPUTimer)
             {
-                HIP_CHECK_EXC(hipDeviceSynchronize());
+                forEachDevice(m_devices,
+                              [](DeviceContext&) { HIP_CHECK_EXC(hipDeviceSynchronize()); });
                 m_startTime = clock::now();
             }
             else
             {
-                static_cast<void>(hipEventCreate(&start));
-                static_cast<void>(hipEventCreate(&stop));
-                static_cast<void>(hipEventRecord(start, stream));
+                m_start.assign(m_devices.size(), nullptr);
+                m_stop.assign(m_devices.size(), nullptr);
+                for(size_t d = 0; d < m_devices.size(); d++)
+                {
+                    ScopedDevice device(m_devices[d]->deviceId);
+                    HIP_CHECK_EXC(hipEventCreate(&m_start[d]));
+                    HIP_CHECK_EXC(hipEventCreate(&m_stop[d]));
+                    HIP_CHECK_EXC(hipEventRecord(m_start[d], m_devices[d]->stream));
+                }
             }
         }
 
         void BenchmarkTimer::postEnqueues(TimingEvents const& startEvents,
-                                          TimingEvents const& stopEvents,
-                                          hipStream_t const&  stream)
+                                          TimingEvents const& stopEvents)
         {
             if(!m_useGPUTimer)
             {
-                HIP_CHECK_EXC(hipDeviceSynchronize());
+                forEachDevice(m_devices,
+                              [](DeviceContext&) { HIP_CHECK_EXC(hipDeviceSynchronize()); });
                 m_endTime = clock::now();
             }
             else
             {
-                static_cast<void>(hipEventRecord(stop, stream));
-                static_cast<void>(hipEventSynchronize(stop));
+                // Surfaces kernel faults, which would otherwise yield bogus timings.
+                for(size_t d = 0; d < m_devices.size(); d++)
+                {
+                    ScopedDevice device(m_devices[d]->deviceId);
+                    HIP_CHECK_EXC(hipEventRecord(m_stop[d], m_devices[d]->stream));
+                }
+                for(auto stop : m_stop)
+                    HIP_CHECK_EXC(hipEventSynchronize(stop));
             }
         }
 
-        void BenchmarkTimer::validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                              TimingEvents const&            startEvents,
-                                              TimingEvents const&            stopEvents)
+        double BenchmarkTimer::takeBatchTimeMs()
         {
-            double_millis totalTime(0.0);
+            if(!m_useGPUTimer)
+                return double_millis(m_endTime - m_startTime).count();
 
-            if(m_useGPUTimer)
+            float maxMs = 0.0f;
+            for(size_t d = 0; d < m_devices.size(); d++)
             {
-                if((start == nullptr) && (stop == nullptr))
-                {
-                    float enqTime = 0.0f;
-                    HIP_CHECK_EXC(hipEventSynchronize(stopEvents->back().back()));
-                    for(size_t i = 0; i < startEvents->size(); i++)
-                    {
-                        HIP_CHECK_EXC(hipEventElapsedTime(
-                            &enqTime, startEvents->at(i).front(), stopEvents->at(i).back()));
+                float eventMs = 0.0f;
+                HIP_CHECK_EXC(hipEventElapsedTime(&eventMs, m_start[d], m_stop[d]));
+                maxMs = std::max(maxMs, eventMs);
+                HIP_CHECK_EXC(hipEventDestroy(m_start[d]));
+                HIP_CHECK_EXC(hipEventDestroy(m_stop[d]));
+            }
+            m_start.clear();
+            m_stop.clear();
+            return maxMs;
+        }
 
-                        totalTime += double_millis(enqTime);
-                    }
-                }
-                else
-                {
-                    float eventMs = 0.0f;
-                    static_cast<void>(hipEventElapsedTime(&eventMs, start, stop));
-                    totalTime = double_millis(eventMs);
-                    static_cast<void>(hipEventDestroy(start));
-                    static_cast<void>(hipEventDestroy(stop));
-                }
-            }
-            else
-            {
-                totalTime = double_millis(m_endTime - m_startTime);
-            }
+        void BenchmarkTimer::validateEnqueues(std::vector<size_t> const& slots,
+                                              TimingEvents const&        startEvents,
+                                              TimingEvents const&        stopEvents)
+        {
+            double_millis totalTime(takeBatchTimeMs());
 
             m_timeInSolution += totalTime;
             m_totalGPUTime += totalTime;
-            m_numEnqueuesInSolution += startEvents->size();
+            m_numEnqueuesInSolution += startEvents.numInvocations();
 
             if(m_sleepPercent > 0)
             {

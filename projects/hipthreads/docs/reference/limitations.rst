@@ -9,22 +9,22 @@ Limitations
 ******************************************
 
 hipThreads presents a standard-library-like interface, but GPU hardware imposes constraints that have no counterpart on the CPU.
-The rules below are not compile-time errors; ignoring them causes deadlocks, crashes, or undefined behavior at run time.
-For background on *why* these apply, see the :ref:`execution model <execution-model>`.
+The rules are not compile-time errors. Ignoring them causes deadlocks, crashes, or undefined behavior at run time.
+For background on why these apply, see the :ref:`execution model <execution-model>`.
 
 No synchronous HIP calls while threads are alive
-================================================
+=================================================
 
-Creating a ``hip::thread`` launches a persistent scheduler kernel that stays resident until the last thread is destroyed.
-Synchronous HIP calls such as ``hipDeviceSynchronize``, synchronous ``hipMemcpy``, or ``thrust::copy`` wait for *all* GPU work, including the scheduler, and therefore deadlock.
+Creating a ``hip::wthread`` launches a persistent scheduler kernel that stays resident until the last wthread is destroyed.
+Synchronous HIP calls such as ``hipDeviceSynchronize()``, synchronous ``hipMemcpy()``, or ``thrust::copy()`` wait for all GPU work, including the scheduler, and therefore deadlock.
 
-* Use asynchronous APIs (``hipMemcpyAsync``, ``hipMemsetAsync``) instead.
-* Or wrap your ``hip::thread`` objects in a scoped block ``{ ... }`` so they are joined and the scheduler is torn down before any synchronous call.
+- Use asynchronous APIs such as ``hipMemcpyAsync()`` and ``hipMemsetAsync()`` instead.
+- Or wrap your ``hip::wthread`` objects in a scoped block so they are joined and the scheduler is torn down before any synchronous call.
 
 Callables must be ``__device__`` extended lambdas
 =================================================
 
-A ``hip::thread`` constructed on the host cannot accept host function pointers or ordinary host lambdas.
+A ``hip::wthread`` constructed on the host cannot accept host function pointers or ordinary host lambdas.
 
 * Pass extended lambdas annotated with ``__device__``.
 * Host code cannot reference a ``__device__`` function directly.
@@ -33,7 +33,7 @@ A ``hip::thread`` constructed on the host cannot accept host function pointers o
 Restrictions on the callable and its arguments
 ==============================================
 
-The constraints on the callable and its arguments depend on where the ``hip::thread`` is constructed.
+The constraints on the callable and its arguments depend on where the ``hip::wthread`` is constructed.
 
 **Constructing on the host.**
 The callable and arguments are transferred to the device by a bitwise copy (``memcpy``), not by invoking a copy constructor.
@@ -50,13 +50,14 @@ In addition:
 **Constructing on the device.**
 No host-to-device transfer happens — the work node is allocated and constructed directly in device memory — so the requirement is relaxed.
 The callable and arguments only need to be **trivially destructible** (any non-trivial copy constructor still runs normally).
-The trivial-destructor requirement remains because ``hip::thread`` erases the callable's concrete type and cannot invoke a non-trivial destructor when the work completes.
+The trivial-destructor requirement remains because ``hip::wthread`` erases the callable's concrete type and cannot invoke a non-trivial destructor when the work completes.
 In addition:
 
 * GPU threads have private stacks.
   Never capture by reference (``[&]``) a variable that lives on the launching thread's stack; shared data must live in heap or global memory.
+  Those stacks are also small by default, which affects what a callable can keep in local variables; see :ref:`the execution model <execution-model>`.
 * Do not capture a pointer or reference to shared memory (LDS, ``__shared__``).
-  Shared memory is private to a single block/workgroup, but ``hip::thread``s may run in different blocks, so such an address is meaningless to another thread.
+  Shared memory is private to a single block/workgroup, but ``hip::wthread``s may run in different blocks, so such an address is meaningless to another thread.
   Shared data must live in global device memory (for example, memory from ``hipMalloc``).
 
 No true blocking or preemption
@@ -73,20 +74,20 @@ GPU synchronization primitives emulate their CPU counterparts rather than reprod
 Concurrency is bounded by ``hardware_concurrency()``
 ====================================================
 
-The persistent scheduler runs a fixed number of execution slots ("vcores"), equal to ``hip::thread::hardware_concurrency()``.
+The persistent scheduler runs a fixed number of execution slots ("vcores"), equal to ``hip::wthread::hardware_concurrency()``.
 Each slot runs one work item to completion before pulling the next ready item from the queue.
 The number of slots can be tuned; see :ref:`how to tune scheduler concurrency <tune-scheduler-concurrency>`.
 
-If you spawn more ``hip::thread`` s than there are slots, the excess threads do not run immediately.
-They sit in the work queue and only start once a running thread finishes and frees its slot.
+If you spawn more ``hip::wthread`` s than there are slots, the excess threads do not run immediately.
+They sit in the work queue and only start once a running wthread finishes and frees its slot.
 This has two consequences:
 
-* ``hip::thread`` construction is not a guarantee that the work has started — only that it has been queued.
+* ``hip::wthread`` construction is not a guarantee that the work has started — only that it has been queued.
 * Designs that assume all spawned threads make progress simultaneously can deadlock.
-  If every slot is occupied by a thread that is blocked waiting on a not-yet-started thread (for example on a ``mutex`` or ``condition_variable``), the waited-for thread can never be scheduled.
+  If every slot is occupied by a wthread that is blocked waiting on a not-yet-started wthread (for example on a ``mutex`` or ``condition_variable``), the waited-for wthread can never be scheduled.
   Keep the number of mutually dependent threads at or below ``hardware_concurrency()``, or structure the work so that queued threads are not prerequisites for running ones.
 
-Note that ``hip::this_thread::pseudo_yield`` runs another ready work item nested inside the caller, so a yielding thread can let queued work progress — but it still holds its own slot until it returns (see :ref:`the execution model <execution-model>`).
+Note that ``hip::this_thread::pseudo_yield`` runs another ready work item nested inside the caller, so a yielding wthread can let queued work progress — but it still holds its own slot until it returns (see :ref:`the execution model <execution-model>`).
 
 Yield-loops deadlock
 ====================
@@ -112,17 +113,17 @@ Guidelines:
 Static storage duration is unsupported
 ======================================
 
-Defining a ``hip::thread`` with static storage duration is undefined behavior.
+Defining a ``hip::wthread`` with static storage duration is undefined behavior.
 
-Creating the first ``hip::thread`` automatically launches the persistent scheduler kernel, and destroying the last one tears it down (see the :ref:`execution model <execution-model>`).
-A ``hip::thread`` at static storage duration breaks this lifecycle: its constructor would run during static initialization, before ``main`` and before the HIP runtime is guaranteed to be ready to launch the scheduler, and its destructor would run during static teardown, after ``main`` when the runtime may already have been shut down.
+Creating the first ``hip::wthread`` automatically launches the persistent scheduler kernel, and destroying the last one tears it down (see the :ref:`execution model <execution-model>`).
+A ``hip::wthread`` at static storage duration breaks this lifecycle: its constructor would run during static initialization, before ``main`` and before the HIP runtime is guaranteed to be ready to launch the scheduler, and its destructor would run during static teardown, after ``main`` when the runtime may already have been shut down.
 In both cases the automatic launch and teardown cannot run correctly.
-Give every ``hip::thread`` automatic (block-scope) or dynamic storage duration instead.
+Give every ``hip::wthread`` automatic (block-scope) or dynamic storage duration instead.
 
 A single function cannot create threads from both host and device
 =================================================================
 
-Constructing a ``hip::thread`` inside a ``__host__ __device__`` function is currently unsupported when that function can be called from the host.
+Constructing a ``hip::wthread`` inside a ``__host__ __device__`` function is currently unsupported when that function can be called from the host.
 
 Unsupported example:
 
@@ -130,7 +131,7 @@ Unsupported example:
 
    __host__ __device__ void f()
    {
-       hip::thread t(1, [] __device__() {});
+       hip::wthread t(1, [] __device__() {});
        t.join();
    }
 
@@ -162,17 +163,29 @@ Applications should use separate host-only and device-only functions instead:
 
    __host__ void f_host()
    {
-       hip::thread t(1, Work{});
+       hip::wthread t(1, Work{});
        t.join();
    }
 
    __device__ void f_device()
    {
-       hip::thread t(1, Work{});
+       hip::wthread t(1, Work{});
        t.join();
    }
 
-Avoid placing the ``hip::thread`` construction itself in a shared ``__host__ __device__`` function.
+Avoid placing the ``hip::wthread`` construction itself in a shared ``__host__ __device__`` function.
+
+
+Multi-GPU systems are not supported
+====================================
+  
+hipThreads assumes a single GPU for the life of the process.
+
+``hip::wthread::hardware_concurrency()`` reports the current device correctly (it honors ``hipSetDevice``), but the persistent scheduler itself does not. The first ``hip::wthread`` you create binds the scheduler kernel and its stream to whichever device is current at that moment, and there is no mechanism to run a second scheduler on another device or to migrate work between GPUs.
+
+* Do not call ``hipSetDevice`` to switch devices after constructing your first ``hip::wthread``. The scheduler stays bound to the original device regardless.
+* On a multi-GPU system, select the intended device with ``hipSetDevice`` *before* creating any ``hip::wthread``, and confine all wthread-based work in that process to that one device.
+* ``HSA_CU_MASK`` and compute-partitioned (CPX/SPX) execution are also not accounted for: the scheduler sizes itself from the device's full compute-unit count regardless of any mask or partition restricting what the process can actually use.
 
 Unsupported standard library facilities
 =======================================

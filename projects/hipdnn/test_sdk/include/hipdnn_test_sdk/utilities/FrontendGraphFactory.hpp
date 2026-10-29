@@ -605,7 +605,7 @@ public:
             .set_resample_mode(hipdnn_frontend::ResampleMode::AVGPOOL_EXCLUDE_PADDING)
             .set_padding_mode(hipdnn_frontend::PaddingMode::ZERO_PAD);
 
-        auto yAttr = graphObj.resample_fwd(xTensorAttr, resampleAttrs);
+        auto yAttr = graphObj.resample(xTensorAttr, resampleAttrs)[0];
         yAttr->set_output(true);
 
         return graphObj;

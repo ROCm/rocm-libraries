@@ -50,7 +50,7 @@ protected:
         attrs.set_stride(toVec(K_RESAMPLE_FWD_STRIDE));
         attrs.set_window(toVec(K_RESAMPLE_FWD_WINDOW));
 
-        auto y = graph->resample_fwd(x, attrs);
+        auto y = graph->resample(x, attrs)[0];
         y->set_uid(K_RESAMPLE_FWD_TENSOR_Y_UID).set_output(true).set_name("y");
 
         return graph;
@@ -291,7 +291,7 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, GenerateIndexPreservedInLiftingR
     ASSERT_NE(opNode, nullptr) << "Expected a ResampleFwdNode";
 
     ASSERT_TRUE(opNode->attributes.get_generate_index().has_value());
-    EXPECT_EQ(opNode->attributes.get_generate_index().value(), true);
+    EXPECT_TRUE(opNode->attributes.get_generate_index().value());
 
     // Verify tensor dims and strides
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -330,7 +330,7 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, ResampleFwdAutoAssignedUidsPrese
     attrs.set_stride(toVec(K_RESAMPLE_FWD_STRIDE));
     attrs.set_window(toVec(K_RESAMPLE_FWD_WINDOW));
 
-    auto y = graph->resample_fwd(x, attrs);
+    auto y = graph->resample(x, attrs)[0];
     y->set_output(true).set_name("y");
 
     auto result = graph->validate();

@@ -23,20 +23,14 @@
 #pragma once
 
 #include <memory>
-#include <vector>
 
 #include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
 class Pass;
-class Function;
 
 /// Removes all existing s_delay_alu instructions.
 /// Run before InsertDelayAlu to recompute optimal placements after scheduling.
-/// When \p functions is non-empty, stripping spans that whole-kernel list
-/// (entry function plus callable functions); otherwise only the single Function the
-/// pipeline runs it on.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createRemoveDelayAluPass(
-    std::vector<Function*> functions = {});
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createRemoveDelayAluPass();
 
 }  // namespace stinkytofu

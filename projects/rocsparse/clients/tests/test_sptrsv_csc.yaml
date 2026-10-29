@@ -65,31 +65,11 @@ Tests:
   diag: *all_rocsparse_diag_type
   uplo: *all_rocsparse_fill_mode
   baseA: [rocsparse_index_base_zero]
-  apol: *all_rocsparse_analysis_policy
+  apol: [rocsparse_analysis_policy_reuse]
   sptrsv_alg: [rocsparse_sptrsv_alg_default]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
   formatA: [rocsparse_format_csc]
-
-# Batched CSC triangular solve (see testing_sptrsv.cpp for the batched pattern).
-- name: sptrsv_csc_batched
-  category: pre_checkin
-  function: sptrsv_csc
-  indextype: *i32i32_i64i32_i64i64
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_checkin
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
-  diag: *all_rocsparse_diag_type
-  uplo: *all_rocsparse_fill_mode
-  baseA: [rocsparse_index_base_zero]
-  apol: *all_rocsparse_analysis_policy
-  sptrsv_alg: [rocsparse_sptrsv_alg_default]
-  matrix: [rocsparse_matrix_random]
-  matrix_type: [rocsparse_matrix_type_general]
-  formatA: [rocsparse_format_csc]
-  batch_count: [3, 17]
-  batch_count_A: [0, 1]
 
 - name: sptrsv_csc_file
   category: pre_checkin
@@ -161,23 +141,6 @@ Tests:
   matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
   formatA: [rocsparse_format_csc]
 
-- name: sptrsv_csc_batched
-  category: quick
-  function: sptrsv_csc
-  indextype: *i64
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
-  alpha_alphai: *alpha_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_lower]
-  baseA: [rocsparse_index_base_zero]
-  sptrsv_alg: [rocsparse_sptrsv_alg_default]
-  matrix: [rocsparse_matrix_random]
-  matrix_type: [rocsparse_matrix_type_general]
-  formatA: [rocsparse_format_csc]
-  batch_count: [2, 4]
-
 - name: sptrsv_csc_file
   category: quick
   function: sptrsv_csc
@@ -213,23 +176,22 @@ Tests:
   matrix_type: [rocsparse_matrix_type_general]
   formatA: [rocsparse_format_csc]
 
-- name: sptrsv_csc_batched
+- name: sptrsv_csc
   category: nightly
   function: sptrsv_csc
-  indextype: *i64i32
+  indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_nightly
-  alpha_alphai: *alpha_range_nightly
-  transA: [rocsparse_operation_none]
-  diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_lower]
+  M_N: *M_N_range_checkin
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  diag: *all_rocsparse_diag_type
+  uplo: *all_rocsparse_fill_mode
   baseA: [rocsparse_index_base_zero]
+  apol: [rocsparse_analysis_policy_force]
   sptrsv_alg: [rocsparse_sptrsv_alg_default]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
   formatA: [rocsparse_format_csc]
-  batch_count: [2, 4, 17]
-  batch_count_A: [0, 1]
 
 - name: sptrsv_csc_file
   category: nightly

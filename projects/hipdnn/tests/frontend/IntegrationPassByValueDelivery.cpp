@@ -35,6 +35,7 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/utilities/GraphExecuteTestKit.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
 #include <hipdnn_test_sdk/utilities/LiftingTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -103,7 +104,6 @@ protected:
 
         Tensor<float> xTensor(dims);
         Tensor<float> scaleTensor(scaleDims);
-        Tensor<float> yTensor(dims);
         xTensor.fillWithValue(1.0f);
         scaleTensor.fillWithValue(1.0f);
 
@@ -135,14 +135,10 @@ protected:
         result = graph.build(_handle);
         EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-        // Deliver the host scalar as a HOST pointer in the variant pack, matching
-        // the frontend contract for a pure runtime pass-by-value tensor.
-        float hostEpsilon = hostEpsilonValue;
-        std::unordered_map<int64_t, void*> variantPack;
-        variantPack[x->get_uid()] = xTensor.memory().deviceData();
-        variantPack[scale->get_uid()] = scaleTensor.memory().deviceData();
-        variantPack[y->get_uid()] = yTensor.memory().deviceData();
-        variantPack[epsilon->get_uid()] = &hostEpsilon;
+        // Exercise the shared frontend harness: ordinary tensors use device
+        // storage while the runtime pass-by-value epsilon uses host storage.
+        const hipdnn_test_sdk::utilities::GraphTensorBundle tensorBundle(graph, hostEpsilonValue);
+        auto variantPack = tensorBundle.variantPack();
 
         result = graph.execute(_handle, variantPack, nullptr);
         EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;

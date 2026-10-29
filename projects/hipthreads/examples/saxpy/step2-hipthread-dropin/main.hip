@@ -39,8 +39,8 @@ int main() {
     thrust::copy(y_host.begin(), y_host.end(), y.get());
 
     decltype(std::chrono::steady_clock::now()) start;
-    { // hip::thread scope starts here
-        std::vector<hip::thread> threads(hip::thread::hardware_concurrency());
+    { // hip::wthread scope starts here
+        std::vector<hip::wthread> threads(hip::wthread::hardware_concurrency());
 
         // Make sure any async work is done before we 'start the clock'
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -49,7 +49,7 @@ int main() {
             size_t chunk_size = (i < N % threads.size()) ? (N / threads.size() + 1) : (N / threads.size());
             size_t offset =     (i < N % threads.size()) ? (i * chunk_size)         : (i * chunk_size + N % threads.size());
             
-            threads[i] = hip::thread(
+            threads[i] = hip::wthread(
                 [] __device__(uint32_t n, float a, const float *x, float *y) {
                     for (uint32_t i = 0; i < n; ++i) {
                         float t = x[i];
@@ -65,7 +65,7 @@ int main() {
         for (auto &t : threads) {
             t.join();
         }
-    } // hip::thread scope ends here
+    } // hip::wthread scope ends here
     auto finished = std::chrono::steady_clock::now();
     
     // Copy results back from GPU to host if necessary

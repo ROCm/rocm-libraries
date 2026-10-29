@@ -8,9 +8,9 @@
 
 // <thread>
 
-// class thread
+// class wthread
 
-// thread(const thread&) = delete;
+// wthread(const wthread&) = delete;
 
 #include <hip/thread>
 
@@ -18,7 +18,7 @@
 
 int main(int, char**)
 {
-    hip::thread t0; (void)t0;
-    hip::thread t1(t0); (void)t1;
+    hip::wthread t0; (void)t0;
+    hip::wthread t1(t0); (void)t1;
     return 0;
 }

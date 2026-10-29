@@ -26,6 +26,7 @@
 #include "rocsparse-complex-types.h"
 #include "rocsparse_common.hpp"
 #include "rocsparse_floating_data_t.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_numeric_boost.hpp"
 #include "rocsparse_utility.hpp"
 
@@ -33,15 +34,17 @@ namespace rocsparse
 {
     // ILDLT(0) hash-based device kernel.
     //
-    // For real types, computes A ≈ L D L^T (LDL-transpose).
-    // For complex types, computes A ≈ L D L^H (LDL-conjugate-transpose, Hermitian).
-    //
+    // Computes A ≈ L D L^H (Hermitian; L D L^T for real types), L unit lower triangular, D real.
     // For row i:
-    //   D_i = real(A_{ii} - sum_{k<i} |L_{ik}|^2 * D_k)   (D is always real for Hermitian A)
-    //   L_{ij} = (A_{ij} - sum_{k<j} L_{ik} * D_k * conj(L_{jk})) / D_j   (off-diagonal)
+    //   D_i    = real(A_{ii}) - sum_{k<i} |L_{ik}|^2 * D_k
+    //   L_{ij} = (A_{ij} - sum_{k<j} L_{ik} * D_k * conj(L_{jk})) / D_j   (j < i)
     //
-    // The diagonal D is stored as floating_data_t<T> (real scalar) in a separate dense array.
-    // csr_val stores the strictly lower-triangular entries of L (unit diagonal implicit).
+    // D is real (floating_data_t<T>), stored on the otherwise-unused diagonal slot of L (its unit
+    // diagonal is implicit); csr_val holds the strictly lower-triangular entries of L. Copying D
+    // out to an optional user vector is a separate step (see csrildlt0_copy_diag).
+    //
+    // A is assumed Hermitian: only its lower triangle is read and the imaginary part of the
+    // diagonal is ignored (D is taken as real(A_ii)). Non-Hermitian input is not detected.
     template <uint32_t BLOCKSIZE,
               uint32_t WFSIZE,
               uint32_t HASH,
@@ -52,7 +55,6 @@ namespace rocsparse
                                                     const I* __restrict__ csr_row_ptr,
                                                     const J* __restrict__ csr_col_ind,
                                                     T* csr_val,
-                                                    floating_data_t<T>* __restrict__ diag,
                                                     const I* __restrict__ csr_diag_ind,
                                                     int32_t* __restrict__ done,
                                                     const J* __restrict__ map,
@@ -103,7 +105,7 @@ namespace rocsparse
         I row_begin = csr_row_ptr[row] - idx_base;
         I row_end   = csr_row_ptr[row + 1] - idx_base;
 
-        // Accumulate: sum_{k<i} |L_{ik}|^2 * D_k  (for diagonal update D_i, always real)
+        // Diagonal accumulator: sum_{k<i} |L_{ik}|^2 * D_k (real)
         floating_data_t<T> diag_sum = static_cast<floating_data_t<T>>(0);
 
         // Fill hash table with column indices of the current row
@@ -136,19 +138,17 @@ namespace rocsparse
         // Loop over strictly lower-triangular columns of current row (j < i)
         for(I j = row_begin; j < row_diag; ++j)
         {
-            // Column index j (< row)
             J local_col = csr_col_ind[j] - idx_base;
 
-            // Current value L_{row, local_col} (will be updated in-place)
-            T local_val = csr_val[j];
+            // Corresponding L value (updated below)
+            T local_val = rocsparse::load_done_row_data(&csr_val[j]);
 
-            // Beginning of row local_col
             I local_begin = csr_row_ptr[local_col] - idx_base;
 
-            // Diagonal position of row local_col
-            I local_diag = csr_diag_ind[local_col];
+            const I local_diag_pos = csr_diag_ind[local_col];
+            I       local_diag     = local_diag_pos;
 
-            // Accumulate: sum_{k<local_col} L_{row,k} * D_k * L_{local_col,k}
+            // Local row sum
             T local_sum = static_cast<T>(0);
 
             if(local_diag == -1)
@@ -157,23 +157,27 @@ namespace rocsparse
             }
 
             // Spin until row local_col is done
-            while(!__hip_atomic_load(&done[local_col], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT))
+            while(
+                !rocsparse::atomic_load(&done[local_col], __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE))
                 ;
 
-            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            rocsparse::acquire_done_rows();
 
-            // Load D_{local_col} from the diagonal array (real scalar)
-            floating_data_t<T> d_j = diag[local_col];
+            // Load D_{local_col} (real scalar); a missing diagonal entry means a zero pivot.
+            floating_data_t<T> d_j
+                = (local_diag_pos >= 0)
+                      ? rocsparse::real(rocsparse::load_done_row_data(&csr_val[local_diag_pos]))
+                      : static_cast<floating_data_t<T>>(0);
 
             if(d_j == static_cast<floating_data_t<T>>(0))
             {
                 break;
             }
 
-            // Reciprocal of D_{local_col} for computing L_{row, local_col}
+            // Reciprocal of the pivot
             floating_data_t<T> inv_d_j = static_cast<floating_data_t<T>>(1) / d_j;
 
-            // Loop over k < local_col to compute sum_{k<j} L_{row,k} * D_k * L_{j,k}
+            // Accumulate the k < local_col contributions via hash lookups
             for(I k = local_begin + lid; k < local_diag; k += WFSIZE)
             {
                 J key  = csr_col_ind[k];
@@ -187,15 +191,18 @@ namespace rocsparse
                     }
                     else if(table[hash] == key)
                     {
-                        // L_{row,k} is at data[hash], L_{j,k} is at csr_val[k]
-                        // D_k is at diag[key] (real scalar)
                         // Update: L_{row,k} * D_k * conj(L_{j,k})
                         I                  idx_row_k = data[hash];
-                        floating_data_t<T> d_k       = diag[key - idx_base];
-                        local_sum
-                            = rocsparse::fma(csr_val[idx_row_k],
-                                             static_cast<T>(d_k) * rocsparse::conj(csr_val[k]),
-                                             local_sum);
+                        const I            dk_pos    = csr_diag_ind[key - idx_base];
+                        floating_data_t<T> d_k
+                            = (dk_pos >= 0)
+                                  ? rocsparse::real(rocsparse::load_done_row_data(&csr_val[dk_pos]))
+                                  : static_cast<floating_data_t<T>>(0);
+                        local_sum = rocsparse::fma(
+                            rocsparse::load_done_row_data(&csr_val[idx_row_k]),
+                            static_cast<T>(d_k)
+                                * rocsparse::conj(rocsparse::load_done_row_data(&csr_val[k])),
+                            local_sum);
                         break;
                     }
                     else
@@ -209,10 +216,9 @@ namespace rocsparse
 
             if(lid == WFSIZE - 1)
             {
-                // L_{row, local_col} = (A_{row, local_col} - sum) / D_{local_col}
-                local_val  = (local_val - local_sum) * inv_d_j;
-                csr_val[j] = local_val;
-                // Accumulate |L_{row,j}|^2 * D_j = (re^2 + im^2) * D_j for the diagonal update (real)
+                local_val = (local_val - local_sum) * inv_d_j;
+                rocsparse::store_done_row_data(&csr_val[j], local_val);
+                // |L_{row,j}|^2 * D_j accumulated into the (real) diagonal update
                 const floating_data_t<T> re_l = rocsparse::real(local_val);
                 const floating_data_t<T> im_l = rocsparse::imag(local_val);
                 diag_sum = rocsparse::fma(rocsparse::fma(re_l, re_l, im_l * im_l), d_j, diag_sum);
@@ -224,11 +230,10 @@ namespace rocsparse
         {
             if(row_diag >= 0)
             {
-                // D_i = real(A_{ii}) - sum_{k<i} |L_{ik}|^2 * D_k
-                // For Hermitian A, A_{ii} is real; take real part to handle floating-point noise.
-                floating_data_t<T> d_i = rocsparse::real(csr_val[row_diag]) - diag_sum;
+                // D_i = real(A_{ii}) - diag_sum; A is Hermitian so the diagonal is taken real.
+                floating_data_t<T> d_i
+                    = rocsparse::real(rocsparse::load_done_row_data(&csr_val[row_diag])) - diag_sum;
 
-                // Check for singular pivot
                 if(rocsparse::abs(d_i) <= tol)
                 {
                     rocsparse::atomic_min(singular_pivot, (row + idx_base));
@@ -239,9 +244,8 @@ namespace rocsparse
                     d_i = boost_val;
                 }
 
-                // Store D_i (real scalar); zero the diagonal slot in csr_val (unit diagonal)
-                diag[row]         = d_i;
-                csr_val[row_diag] = static_cast<T>(0);
+                // Publish D_i before the done flag below so dependent rows can read it.
+                rocsparse::store_done_row_data(&csr_val[row_diag], static_cast<T>(d_i));
 
                 if(d_i == static_cast<floating_data_t<T>>(0))
                 {
@@ -252,7 +256,7 @@ namespace rocsparse
 
         if(lid == WFSIZE - 1)
         {
-            __hip_atomic_store(&done[row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::set_done_flag(&done[row], 1);
         }
     }
 
@@ -263,13 +267,12 @@ namespace rocsparse
               typename I,
               typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrildlt0_kernel_hash(J m,
+    void csrildlt0_kernel_hash(J       m,
+                               int64_t batch_count,
                                const I* __restrict__ csr_row_ptr,
                                const J* __restrict__ csr_col_ind,
                                T*      csr_val,
                                int64_t csr_val_stride,
-                               floating_data_t<T>* __restrict__ diag,
-                               int64_t diag_stride,
                                const I* __restrict__ csr_diag_ind,
                                int32_t* __restrict__ done,
                                int64_t done_stride,
@@ -309,23 +312,25 @@ namespace rocsparse
 
         ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(boost, is_boost_val_host_mode, boost_val);
 
-        const auto batch_index = hipBlockIdx_y;
-        rocsparse::csrildlt0_device_hash<BLOCKSIZE, WFSIZE, HASH>(
-            m,
-            csr_row_ptr,
-            csr_col_ind,
-            csr_val + batch_index * csr_val_stride,
-            diag + batch_index * diag_stride, // floating_data_t<T>* stride in real elements
-            csr_diag_ind,
-            done + batch_index * done_stride,
-            map,
-            zero_pivot + batch_index * zero_pivot_stride,
-            singular_pivot + batch_index * singular_pivot_stride,
-            tolerance,
-            idx_base,
-            boost,
-            b_tol,
-            boost_val);
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
+        {
+            rocsparse::csrildlt0_device_hash<BLOCKSIZE, WFSIZE, HASH>(
+                m,
+                csr_row_ptr,
+                csr_col_ind,
+                rocsparse::load_pointer(csr_val, batch_index, csr_val_stride),
+                csr_diag_ind,
+                rocsparse::load_pointer(done, batch_index, done_stride),
+                map,
+                rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
+                rocsparse::load_pointer(singular_pivot, batch_index, singular_pivot_stride),
+                tolerance,
+                idx_base,
+                boost,
+                b_tol,
+                boost_val);
+        }
     }
 
     template <uint32_t BLOCKSIZE,
@@ -345,8 +350,10 @@ namespace rocsparse
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
+        // A zero value stride aliases every instance onto the same values.
+        const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
         const dim3    csrildlt0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1,
-                                    A->batch_count);
+                                    rocsparse::get_grid_size_y(handle, A_batch_count));
         const dim3    csrildlt0_threads(BLOCKSIZE);
 
         auto numeric_exact = csrildlt0_info->get_singularity_numeric_exact();
@@ -382,12 +389,11 @@ namespace rocsparse
             0,
             handle->stream,
             static_cast<J>(A->rows),
+            A_batch_count,
             reinterpret_cast<const I*>(A->const_row_data),
             reinterpret_cast<const J*>(A->const_col_data),
             reinterpret_cast<T*>(A->val_data),
             A->batch_stride,
-            reinterpret_cast<floating_data_t<T>*>(diag),
-            static_cast<int64_t>(A->rows),
             reinterpret_cast<const I*>(trm_info->get_diag_ind()),
             done_array,
             done_array_stride,
@@ -408,6 +414,13 @@ namespace rocsparse
             (boost_tol_pointer_mode == rocsparse_pointer_mode_host),
             ROCSPARSE_SCALAR_HOST_DEVICE_PERMISSIVE_ARGUMENT(boost_val_pointer_mode, boost_val_ptr),
             (boost_val_pointer_mode == rocsparse_pointer_mode_host));
+
+        // Copy the real diagonal D out to the optional user vector once the factorization is done.
+        if(diag != nullptr)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(
+                (rocsparse::csrildlt0_copy_diag<T, I, J>(handle, csrildlt0_info, A, diag)));
+        }
 
         return rocsparse_status_success;
     }

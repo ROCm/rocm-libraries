@@ -120,9 +120,9 @@ namespace rocsparse
 template <typename T>
 rocsparse_status
     rocsparse::prune_csr2csr_buffer_size_template(rocsparse_handle          handle, //0
-                                                  rocsparse_int             m, //1
-                                                  rocsparse_int             n, //2
-                                                  rocsparse_int             nnz_A, //3
+                                                  int64_t                   m, //1
+                                                  int64_t                   n, //2
+                                                  int64_t                   nnz_A, //3
                                                   const rocsparse_mat_descr csr_descr_A, //4
                                                   const T*                  csr_val_A, //5
                                                   const rocsparse_int*      csr_row_ptr_A, //6
@@ -172,20 +172,6 @@ rocsparse_status
                        rocsparse_status_requires_sorted_storage);
 
     ROCSPARSE_CHECKARG_ARRAY(11, m, csr_row_ptr_C);
-    //
-    //    if (csr_val_C == nullptr || csr_col_ind_C == nullptr)
-    //      {
-    //	int64_t nnz_C;
-    //	RETURN_IF_ROCSPARSE_ERROR(rocsparse::calculate_nnz(m,
-    //							  rocsparse::get_indextype<rocsparse_int>(),
-    //							  csr_row_ptr_C,
-    //							  &nnz_C,
-    //							  handle->stream));
-    //
-    //	ROCSPARSE_CHECKARG_ARRAY(10,nnz_C, csr_val_C);
-    //	ROCSPARSE_CHECKARG_ARRAY(12,nnz_C, csr_col_ind_C);
-    //      }
-    //
     ROCSPARSE_CHECKARG_POINTER(13, buffer_size);
 
     *buffer_size = 0;
@@ -194,9 +180,9 @@ rocsparse_status
 
 template <typename T>
 rocsparse_status rocsparse::prune_csr2csr_nnz_template(rocsparse_handle          handle, //0
-                                                       rocsparse_int             m, //1
-                                                       rocsparse_int             n, //2
-                                                       rocsparse_int             nnz_A, //3
+                                                       int64_t                   m, //1
+                                                       int64_t                   n, //2
+                                                       int64_t                   nnz_A, //3
                                                        const rocsparse_mat_descr csr_descr_A, //4
                                                        const T*                  csr_val_A, //5
                                                        const rocsparse_int*      csr_row_ptr_A, //6
@@ -332,9 +318,9 @@ namespace rocsparse
 {
     template <typename T>
     rocsparse_status prune_csr2csr_template(rocsparse_handle          handle, //0
-                                            rocsparse_int             m, //1
-                                            rocsparse_int             n, //2
-                                            rocsparse_int             nnz_A, //3
+                                            int64_t                   m, //1
+                                            int64_t                   n, //2
+                                            int64_t                   nnz_A, //3
                                             const rocsparse_mat_descr csr_descr_A, //4
                                             const T*                  csr_val_A, //5
                                             const rocsparse_int*      csr_row_ptr_A, //6

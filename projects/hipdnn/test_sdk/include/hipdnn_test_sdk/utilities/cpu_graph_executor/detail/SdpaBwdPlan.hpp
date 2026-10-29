@@ -29,7 +29,7 @@ struct SdpaBwdParams
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dqAttributes,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dkAttributes,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dvAttributes,
-                  std::optional<float> attnScaleValue,
+                  std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scale,
                   int64_t leftBound,
                   int64_t rightBound,
                   bool topLeftAlignment,
@@ -44,7 +44,7 @@ struct SdpaBwdParams
         , dqTensor(unpackTensorAttributes(dqAttributes))
         , dkTensor(unpackTensorAttributes(dkAttributes))
         , dvTensor(unpackTensorAttributes(dvAttributes))
-        , attnScaleValue(attnScaleValue)
+        , scaleTensor(std::move(scale))
         , leftBound(leftBound)
         , rightBound(rightBound)
         , topLeftAlignment(topLeftAlignment)
@@ -63,7 +63,7 @@ struct SdpaBwdParams
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT dqTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT dkTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT dvTensor;
-    std::optional<float> attnScaleValue;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scaleTensor;
     int64_t leftBound;
     int64_t rightBound;
     bool topLeftAlignment;
@@ -77,7 +77,8 @@ template <typename QDataType,
           typename DODataType,
           typename DQDataType,
           typename DKDataType,
-          typename DVDataType>
+          typename DVDataType,
+          typename Mask = float>
 class SdpaBwdPlan : public IGraphNodePlanExecutor
 {
 public:
@@ -112,11 +113,18 @@ public:
         auto shallowDVTensor = createShallowTensor<DVDataType>(
             _params.dvTensor, variantPack.at(_params.dvTensor.uid));
 
-        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowAttnMaskTensor;
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<Mask>> shallowAttnMaskTensor;
         if(_params.attnMaskTensor.has_value())
         {
-            shallowAttnMaskTensor = createShallowTensor<float>(
+            shallowAttnMaskTensor = createShallowTensor<Mask>(
                 *_params.attnMaskTensor, variantPack.at(_params.attnMaskTensor->uid));
+        }
+
+        std::optional<float> effectiveScale;
+        if(_params.scaleTensor.has_value())
+        {
+            effectiveScale = hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<float>(
+                _params.scaleTensor.value(), variantPack, "SDPA scale");
         }
 
         utilities::CpuFpReferenceSdpa::backward<QDataType,
@@ -127,20 +135,21 @@ public:
                                                 DQDataType,
                                                 DKDataType,
                                                 DVDataType,
-                                                float>(*shallowQTensor,
-                                                       *shallowKTensor,
-                                                       *shallowVTensor,
-                                                       *shallowOTensor,
-                                                       *shallowDOTensor,
-                                                       *shallowDQTensor,
-                                                       *shallowDKTensor,
-                                                       *shallowDVTensor,
-                                                       _params.attnScaleValue,
-                                                       shallowStatsTensor.get(),
-                                                       shallowAttnMaskTensor.get(),
-                                                       _params.leftBound,
-                                                       _params.rightBound,
-                                                       _params.topLeftAlignment);
+                                                float,
+                                                Mask>(*shallowQTensor,
+                                                      *shallowKTensor,
+                                                      *shallowVTensor,
+                                                      *shallowOTensor,
+                                                      *shallowDOTensor,
+                                                      *shallowDQTensor,
+                                                      *shallowDKTensor,
+                                                      *shallowDVTensor,
+                                                      effectiveScale,
+                                                      shallowStatsTensor.get(),
+                                                      shallowAttnMaskTensor.get(),
+                                                      _params.leftBound,
+                                                      _params.rightBound,
+                                                      _params.topLeftAlignment);
     }
 
 private:
@@ -154,7 +163,9 @@ template <hipdnn_flatbuffers_sdk::data_objects::DataType QDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType DODataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType DQDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType DKDataTypeEnum,
-          hipdnn_flatbuffers_sdk::data_objects::DataType DVDataTypeEnum>
+          hipdnn_flatbuffers_sdk::data_objects::DataType DVDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType MaskDataTypeEnum
+          = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET>
 class SdpaBwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
@@ -166,6 +177,7 @@ public:
     using DQDataType = utilities::DataTypeToNative<DQDataTypeEnum>;
     using DKDataType = utilities::DataTypeToNative<DKDataTypeEnum>;
     using DVDataType = utilities::DataTypeToNative<DVDataTypeEnum>;
+    using MaskType = utilities::MaskDataTypeToNative<MaskDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_flatbuffers_sdk::data_objects::Node& node,
@@ -197,6 +209,26 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dq_tensor_uid(), DQDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dk_tensor_uid(), DKDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dv_tensor_uid(), DVDataTypeEnum);
+
+        // The builder's mask dtype must match the graph: UNSET builds only mask-free graphs,
+        // every other builder only graphs whose mask tensor has exactly that dtype.
+        if constexpr(MaskDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
+        {
+            if(nodeAttributes->attn_mask_tensor_uid().has_value())
+            {
+                return false;
+            }
+        }
+        else
+        {
+            if(!nodeAttributes->attn_mask_tensor_uid().has_value())
+            {
+                return false;
+            }
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->attn_mask_tensor_uid().value());
+            CHECK_TENSOR_TYPE(
+                tensorMap, nodeAttributes->attn_mask_tensor_uid().value(), MaskDataTypeEnum);
+        }
 
         // Unsupported: variable sequence lengths
         if(nodeAttributes->seq_len_q_tensor_uid().has_value()
@@ -242,6 +274,11 @@ public:
                                       ? tensorMap.at(nodeAttributes->attn_mask_tensor_uid().value())
                                       : nullptr;
 
+        const auto* scalePtr = nodeAttributes->scale_tensor_uid().has_value()
+                                   ? tensorMap.at(nodeAttributes->scale_tensor_uid().value())
+                                   : nullptr;
+        auto scale = foldSdpaScale(scalePtr, attnScaleValue);
+
         auto [leftBound, rightBound, isTopLeft]
             = extractDiagonalBandParams(*nodeAttributes, "SdpaBwdPlan");
 
@@ -254,7 +291,7 @@ public:
                              *tensorMap.at(nodeAttributes->dq_tensor_uid()),
                              *tensorMap.at(nodeAttributes->dk_tensor_uid()),
                              *tensorMap.at(nodeAttributes->dv_tensor_uid()),
-                             attnScaleValue,
+                             std::move(scale),
                              leftBound,
                              rightBound,
                              isTopLeft,
@@ -267,7 +304,8 @@ public:
                                             DODataType,
                                             DQDataType,
                                             DKDataType,
-                                            DVDataType>>(std::move(params));
+                                            DVDataType,
+                                            MaskType>>(std::move(params));
     }
 };
 

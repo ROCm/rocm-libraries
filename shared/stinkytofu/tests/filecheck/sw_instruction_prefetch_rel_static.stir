@@ -1,0 +1,91 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --SwInstructionPrefetchRelStaticPass --AccumulateInstructionSizeDebugPass 2>&1
+#
+# SwInstructionPrefetchRelStaticPass: PC-rel grid P(k) = 32640 + k*4096.
+# AccumulateInstructionSizeDebugPass prints global `total=` after prefetch insert.
+#
+# Grid: P(0) = 128*255 = 32640, step = 32*128 = 4096.
+# Each case uses .align padding to reach the anchor byte without huge IR.
+
+#--- Block end < P(0): no software prefetch
+# CHECK-LABEL: [AccumulateInstructionSizePass] total size = 8 bytes
+# CHECK-NOT: s_prefetch_inst_pc_rel
+
+st.func @below_p0() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- P(0)=32640: 8 B WMMA anchor. XNACK s_wait_xcnt 0 (4 B) precedes the prefetch.
+# CHECK-LABEL: [.align 32632 padding=
+# CHECK: {{.*}}total=32636 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=32644 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=32652 bytes{{.*}}v_wmma_f32_16x16x32_bf16
+# CHECK: [AccumulateInstructionSizePass] total size = 32652 bytes
+
+st.func @at_p0_k0_wmma() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.asm_directive"(".align", "32632")
+  a[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[8:15], v[16:23], a[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+}
+
+#--- P(0)=32640: kernel-style v_cmp + 4 B s_set anchor. XNACK s_wait_xcnt 0 (4 B) precedes the
+# prefetch (cmp ends 32636, wait 32640, prefetch 32648, set 32652).
+# CHECK-LABEL: [.align 32628 padding=
+# CHECK: {{.*}}total=32636 bytes{{.*}}v_cmp_ge_i32
+# CHECK: {{.*}}total=32640 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=32648 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=32652 bytes{{.*}}s_set_vgpr_msb
+# CHECK: [AccumulateInstructionSizePass] total size = 32652 bytes
+
+st.func @at_p0_k0_cmp_set() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.asm_directive"(".align", "32628")
+  s66 = "st.v_cmp_ge_i32"(v549, s12) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_set_vgpr_msb"(130) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- P(2)=40832: 12 B buffer_store anchor. XNACK s_wait_xcnt 0 (4 B) precedes the prefetch.
+# CHECK-LABEL: [.align 40820 padding=
+# CHECK: {{.*}}total=40824 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=40832 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=40844 bytes{{.*}}buffer_store_b128
+# CHECK: [AccumulateInstructionSizePass] total size = 40844 bytes
+
+st.func @at_p2_k2_buffer_store() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.asm_directive"(".align", "40820")
+  "st.buffer_store_b128"(v[624:627], v525, s[16:19], 0) { issueCycles = 1, latencyCycles = 1, mod.mubuf = { offen = true, offset12 = 608, glc = false, slc = false, nt = false, lds = false, scope = "SCOPE_CU" } }
+}
+
+#--- P(4)=49024. XNACK s_wait_xcnt 0 (4 B) precedes the prefetch.
+# CHECK-LABEL: [.align 49020 padding=
+# CHECK: {{.*}}total=49024 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=49032 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=49040 bytes{{.*}}ds_bpermute_b32
+# CHECK: [AccumulateInstructionSizePass] total size = 49044 bytes
+
+st.func @at_p4_k4_ds_bpermute() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.asm_directive"(".align", "49020")
+  v39 = "st.ds_bpermute_b32"(v32, v39) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 8, gds = false } }
+  v40 = "st.v_mov_b32"(v9) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- P(11)=77696: 8 B v_add_lshl anchor. XNACK s_wait_xcnt 0 (4 B) precedes the prefetch.
+# CHECK-LABEL: [.align 77688 padding=
+# CHECK: {{.*}}total=77692 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=77700 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=77708 bytes{{.*}}v_add_lshl_u32
+# CHECK: [AccumulateInstructionSizePass] total size = 77708 bytes
+
+st.func @at_p11_k11_add_lshl() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.asm_directive"(".align", "77688")
+  v914 = "st.v_add_lshl_u32"(v515, v516, 2) { issueCycles = 1, latencyCycles = 5 }
+}

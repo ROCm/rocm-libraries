@@ -10,7 +10,7 @@
 
 // <thread>
 
-// class thread
+// class wthread
 
 // bool joinable() const;
 
@@ -51,7 +51,7 @@ int main(int, char**)
     {
     #ifdef __HIP_DEVICE_COMPILE__
         G g;
-        hip::thread t0 = support::make_test_thread(g);
+        hip::wthread t0 = support::make_test_thread(g);
         assert(t0.joinable());
         t0.join();
         assert(!t0.joinable());

@@ -15,16 +15,25 @@ find_package(Threads REQUIRED)
 add_executable(
     hipdnn_test_sdk_tests
     main.cpp
+    utilities/TestAsanDefaultSuppressions.cpp
     utilities/TestCpuFpReferenceBatchnorm.cpp
+    utilities/TestComparisonReport.cpp
     utilities/TestCpuFpReferenceBatchnormWithVariance.cpp
     utilities/TestCpuFpReferenceBlockScaleDequantize.cpp
+    utilities/TestCpuFpReferenceBlockScaleQuantize.cpp
     utilities/TestCpuFpReferenceRMSNorm.cpp
+    utilities/TestCpuFpReferenceResampleFwd.cpp
+    utilities/TestCpuFpReferenceResampleBwd.cpp
     utilities/TestCpuFpReferenceSdpa.cpp
+    utilities/TestCpuFpReferenceSdpaRagged.cpp
     utilities/TestCpuFpReferenceConvolution.cpp
     utilities/TestCpuFpReferenceLayernorm.cpp
     utilities/TestCpuFpReferenceLayernormBackward.cpp
     utilities/TestCpuFpReferenceMatmul.cpp
+    utilities/TestCpuFpReferenceMoeGroupedMatmul.cpp
+    utilities/TestCpuFpReferenceMoeGroupedMatmulBwd.cpp
     utilities/TestCpuFpReferenceReduction.cpp
+    utilities/TestCpuFpReferenceInputValidation.cpp
     utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
     utilities/TestCpuFpReferenceUtilities.cpp
     utilities/TestCpuFpReferenceValidation.cpp
@@ -47,11 +56,14 @@ add_executable(
     utilities/TestLogRecorder.cpp
     utilities/TestScopedDirectory.cpp
     utilities/TestScopedEnvironmentVariableSetter.cpp
+    utilities/TestScratchDirectory.cpp
     utilities/TestSeeds.cpp
     utilities/TestTensorDiff.cpp
     utilities/TestVectorLoggingUtils.cpp
     utilities/cpu_graph_executor/TestBlockScaleDequantizePlan.cpp
     utilities/cpu_graph_executor/TestBlockScaleDequantizeSignatureKey.cpp
+    utilities/cpu_graph_executor/TestBlockScaleQuantizePlan.cpp
+    utilities/cpu_graph_executor/TestBlockScaleQuantizeSignatureKey.cpp
     utilities/cpu_graph_executor/TestBatchnormBwdPlan.cpp
     utilities/cpu_graph_executor/TestBatchnormBwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestBatchnormFwdInferencePlan.cpp
@@ -74,6 +86,10 @@ add_executable(
     utilities/cpu_graph_executor/TestLayernormFpropSignatureKey.cpp
     utilities/cpu_graph_executor/TestMatmulPlan.cpp
     utilities/cpu_graph_executor/TestMatmulSignatureKey.cpp
+    utilities/cpu_graph_executor/TestMoeGroupedMatmulPlan.cpp
+    utilities/cpu_graph_executor/TestMoeGroupedMatmulSignatureKey.cpp
+    utilities/cpu_graph_executor/TestMoeGroupedMatmulBwdPlan.cpp
+    utilities/cpu_graph_executor/TestMoeGroupedMatmulBwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestPointwiseOperationsCpuGraphExecutor.cpp
     utilities/cpu_graph_executor/TestGraphTensorBundle.cpp
     utilities/cpu_graph_executor/TestPlanRegistrySignatureKey.cpp
@@ -81,12 +97,18 @@ add_executable(
     utilities/cpu_graph_executor/TestPointwiseSignatureKey.cpp
     utilities/cpu_graph_executor/TestReductionPlan.cpp
     utilities/cpu_graph_executor/TestReductionSignatureKey.cpp
+    utilities/cpu_graph_executor/TestResampleFwdPlan.cpp
+    utilities/cpu_graph_executor/TestResampleFwdSignatureKey.cpp
+    utilities/cpu_graph_executor/TestResampleBwdPlan.cpp
+    utilities/cpu_graph_executor/TestResampleBwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdPlan.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestRMSNormBwdPlan.cpp
     utilities/cpu_graph_executor/TestRMSNormBwdSignatureKey.cpp
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaFwdPlan.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaFwdSignatureKey.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaBwdPlan.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaBwdSignatureKey.cpp>
     TestVersion.cpp
 )
 

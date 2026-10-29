@@ -14,7 +14,6 @@
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend/Logging.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -96,9 +95,6 @@ public:
 protected:
     void runGraphTest() override
     {
-        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-        SKIP_IF_ASAN();
-
         const auto& testCase = this->GetParam();
         const auto& [layout, convTestCase] = testCase;
 
@@ -119,16 +115,16 @@ protected:
         GraphTensorBundle gpuBundle;
         GraphTensorBundle refBundle;
         this->generateBundles(graphObj, refBundle, gpuBundle);
-        this->synthesis().setGlobalSeed(convTestCase.seed);
+        this->inputFillRecipes().setGlobalSeed(convTestCase.seed);
         auto gpuInit = this->initializeBundle(graphObj, gpuBundle);
         if(!gpuInit.filled)
         {
-            GTEST_SKIP() << "Cannot synthesize GPU inputs: " << gpuInit.reason;
+            GTEST_SKIP() << "Cannot fill GPU inputs: " << gpuInit.reason;
         }
         auto refInit = this->initializeBundle(graphObj, refBundle);
         if(!refInit.filled)
         {
-            GTEST_SKIP() << "Cannot synthesize ref inputs: " << refInit.reason;
+            GTEST_SKIP() << "Cannot fill ref inputs: " << refInit.reason;
         }
 
         // Finalize a plan on the original graph, then compute the reference.
@@ -205,9 +201,16 @@ protected:
         }
 
         const float tolerance = this->getTolerance(graphObj, outputs.y);
-        auto validator = createAllCloseValidator(
-            frontendToSdkDataType(outputs.y->get_data_type()), tolerance, tolerance);
-        ASSERT_TRUE(validator->allClose(*refTensor, *gpuTensor))
+        const auto site = resolveValidationSite(TestConfig::get().getValidatorDevice(),
+                                                referenceUsesDevice ? ValidationSite::DEVICE
+                                                                    : ValidationSite::HOST);
+        auto selection
+            = bundle::makeValidator(frontendToSdkDataType(outputs.y->get_data_type()),
+                                    bundle::tensorLabel(yUid, outputs.y->get_name()),
+                                    bundle::ComparisonTolerance::allClose(tolerance, tolerance),
+                                    site);
+        ASSERT_NE(selection.validator, nullptr) << selection.error;
+        ASSERT_TRUE(selection.validator->allClose(*refTensor, *gpuTensor))
             << "Mismatch in output tensor after serialize round-trip (uid: " << yUid << ")";
     }
 };
@@ -227,3 +230,18 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationConvFwdSerializeRoundTripFp32,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(test_conv_common::getConvTestCases4D())));
+
+// 1D layout tests (NCL, NLC)
+using IntegrationConvFwdSerializeRoundTrip1dFp32 = ConvForwardSerializeRoundTrip<float>;
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationConvFwdSerializeRoundTrip1dFp32);
+TEST_P(IntegrationConvFwdSerializeRoundTrip1dFp32, SerializeRoundTripExecutesCorrectly)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationConvFwdSerializeRoundTrip1dFp32,
+    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                     testing::ValuesIn(test_conv_common::getConvTestCases3D())));

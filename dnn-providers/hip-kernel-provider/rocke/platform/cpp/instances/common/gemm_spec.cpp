@@ -201,6 +201,7 @@ rocke_gemm_universal_spec_t rocke_gemm_universal_spec_default(void)
     s.trait.emit_sched_hints_set = false; /* Python None (arch-resolved) */
     s.trait.emit_sched_hints = false;
     s.trait.split_k = 1; /* default 1 (single-K-pass body) */
+    s.trait.cshuffle_no_alias = false; /* default: alias cshuffle C onto A/B */
 
     /* DataSpec defaults. */
     s.data.dtype_a = "fp16"; /* default "fp16" */
@@ -257,8 +258,8 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     char part_pipe[128];
     char part_spk[32];
     const char* parts[5];
-    const char* flag_names[8];
-    int flag_on[8];
+    const char* flag_names[9];
+    int flag_on[9];
     const rocke_gemm_tile_spec_t* t;
     const rocke_gemm_trait_spec_t* tr;
 
@@ -293,6 +294,7 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     /* Python flag key f"spk{tr.split_k}" (dynamic name; on when split_k > 1). */
     snprintf(part_spk, sizeof(part_spk), "spk%d", tr->split_k);
     flag_names[7] = part_spk;
+    flag_names[8] = "noalc";
 
     flag_on[0] = (tr->pad_m || tr->pad_n || tr->pad_k) ? 1 : 0;
     flag_on[1] = tr->persistent ? 1 : 0;
@@ -302,8 +304,9 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     flag_on[5] = tr->dtl_prefetch ? 1 : 0;
     flag_on[6] = tr->active_tile_skip ? 1 : 0;
     flag_on[7] = (tr->split_k > 1) ? 1 : 0;
+    flag_on[8] = tr->cshuffle_no_alias ? 1 : 0;
 
-    return rocke_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 8, out, out_cap, NULL);
+    return rocke_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 9, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -412,7 +415,8 @@ static const rocke_type_t*
                                          "fp32",
                                          t->warp_tile_m,
                                          t->warp_tile_n,
-                                         t->warp_tile_k);
+                                         t->warp_tile_k,
+                                         nullptr);
 }
 
 /* _ab_lds_plan(spec, arch) -> (ab_single, db, two_buf). Pure ints/bools. */
@@ -622,6 +626,32 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         if(spec->trait.chiplet_swizzle)
         {
             CK_GEMM_REJECT("WMMA path does not support chiplet_swizzle on %s", arch);
+        }
+    }
+
+    /* DirectToLDS: the emitter bakes a fixed per-lane chunk width into the
+     * kernel at build time, capped at the arch's own buffer_load_lds width
+     * (ArchTarget.async_lds_max_dwords). Asking for a wider one than the arch
+     * has is not a build-time error -- the AMDGPU backend aborts the whole
+     * process -- so an arch with too little width to satisfy tile_k, or none
+     * at all, must be rejected here. */
+    if(spec->trait.direct_to_lds)
+    {
+        int dtl_max_dwords = rocke_archtarget_async_lds_max_dwords(target);
+        int dtl_halves;
+        if(dtl_max_dwords < 1)
+        {
+            CK_GEMM_REJECT("direct_to_lds: %s has no DRAM->LDS DMA instruction", arch);
+        }
+        dtl_halves = (dtl_max_dwords > 4 ? 4 : dtl_max_dwords) * 2;
+        if((t->tile_k % dtl_halves) != 0)
+        {
+            CK_GEMM_REJECT("direct_to_lds requires tile_k %% %d == 0 (got %d) with "
+                           "%d dword(s)/lane on %s",
+                           dtl_halves,
+                           t->tile_k,
+                           dtl_max_dwords,
+                           arch);
         }
     }
 

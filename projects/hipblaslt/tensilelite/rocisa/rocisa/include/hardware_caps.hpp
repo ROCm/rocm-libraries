@@ -24,6 +24,7 @@
 #include <array>
 #include <iostream>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -47,6 +48,8 @@ inline bool tryAssembler(const IsaVersion&  isaVersion,
     {
         cmd.push_back(o);
     }
+    // Assemble only: linking writes a.out into the working directory, which may be read-only.
+    cmd.insert(cmd.end(), {"-c", "-o", nullDevicePath()});
     cmd.push_back("-");
     std::vector<char*> args(cmd.size());
     std::transform(cmd.begin(), cmd.end(), args.begin(), [](auto& str) { return &str[0]; });
@@ -65,6 +68,10 @@ inline bool tryAssembler(const IsaVersion&  isaVersion,
         std::cout << "return code: " << rcode << std::endl;
     }
 
+    // 127 means the assembler could not be executed at all (e.g. missing binary),
+    // which is not the same as the assembler rejecting this particular ISA/instruction.
+    if(rcode == 127)
+        throw std::runtime_error("Assembler not found or not executable: " + assemblerPath);
     if(rcode != 0)
         return false;
     return true;
@@ -269,6 +276,9 @@ inline std::map<std::string, int>
     rv["v_pk_mul_f32"] = tryAssembler(
         isaVersion, assemblerPath, "v_pk_mul_f32 v[20:21], v[18:19], v[20:21]", isDebug);
 
+    rv["v_pk_fma_f32"] = tryAssembler(
+        isaVersion, assemblerPath, "v_pk_fma_f32 v[0:1], v[2:3], v[4:5], v[6:7]", isDebug);
+
     rv["v_mad_mix_f32"]
         = tryAssembler(isaVersion,
                        assemblerPath,
@@ -342,6 +352,10 @@ inline std::map<std::string, int>
                                               assemblerPath,
                                               "v_cvt_scalef32_pk8_bf8_f32 v[0:1], v[2:9], s0",
                                               isDebug);
+    rv["HasVMaximumMinimumF32"] = tryAssembler(isaVersion,
+                                               assemblerPath,
+                                               "v_maximumminimum_f32 v0, v1, v2, v3",
+                                               isDebug);
 
     rv["HasLDSTrB64B16"] = tryAssembler(
         isaVersion, assemblerPath, "ds_read_b64_tr_b16 v[0:1], v0 offset: 0", isDebug);
@@ -382,6 +396,17 @@ inline std::map<std::string, int>
           || tryAssembler(isaVersion,
                           assemblerPath,
                           "buffer_atomic_add_f32 v0, v1, s[0:3], null offen offset:0",
+                          isDebug);
+    // Packed 2xBF16 atomic add (gfx950 / gfx1250+). gfx950 takes the literal 0
+    // soffset form, gfx1250 requires null, so probe both as HasAtomicAdd does.
+    rv["HasAtomicPkAddBF16"]
+        = tryAssembler(isaVersion,
+                       assemblerPath,
+                       "buffer_atomic_pk_add_bf16 v0, v1, s[0:3], 0 offen offset:0",
+                       isDebug)
+          || tryAssembler(isaVersion,
+                          assemblerPath,
+                          "buffer_atomic_pk_add_bf16 v0, v1, s[0:3], null offen offset:0",
                           isDebug);
     rv["HasGLCModifier"]
         = tryAssembler(isaVersion,
@@ -556,26 +581,70 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
         deviceLDS = 327680;
 
     rv["DeviceLDS"]          = deviceLDS;
+    // LDS allocation granule: a workgroup occupies a whole number of granules, so this
+    // rounding can cost a resident workgroup at a boundary. gfx11 allocates 1024 bytes
+    // at a time, other targets 256. TODO: gfx10/gfx12 might also need a different
+    // granularity.
+    rv["LdsGranularity"]     = isaVersion[0] == 11 ? 1024 : 256;
     rv["CMPXWritesSGPR"]     = checkNotInList(isaVersion[0], {10, 11, 12});
     rv["HasWave32"]          = checkInList(isaVersion[0], {10, 11, 12});
+    // GFX12.5 always uses wave32 and reserves the descriptor's wave-size selector.
+    // Keep HasWave32 for solution selection and validation.
+    rv["HasWavefrontSize32Directive"]
+        = rv["HasWave32"] && !(isaVersion[0] == 12 && isaVersion[1] == 5);
     rv["HasSchedMode"]       = checkInList(isaVersion[0], {12});
     rv["HasAccCD"]           = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     // Max concurrent waves per SIMD: 8 for ArchAccUnifiedRegs (gfx90a/gfx942/gfx950), 10 otherwise.
-    rv["MaxWavesPerSimd"]    = rv["ArchAccUnifiedRegs"] ? 8 : 10;
+    if(rv["ArchAccUnifiedRegs"])
+        rv["MaxWavesPerSimd"] = 8;
+    else if(isaVersion[0] == 11 || (isaVersion[0] == 12 && isaVersion[1] != 5))
+        rv["MaxWavesPerSimd"] = 16;
+    else
+        rv["MaxWavesPerSimd"] = 10;
     rv["CrosslaneWait"]      = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
     rv["TransOpWait"]        = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["SDWAWait"]           = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["VgprBank"]           = checkInList(isaVersion[0], {10, 11, 12});
-    rv["DSLow16NotPreserve"] = isaVersion[0] == 12;
+    rv["DSLow16NotPreserve"] = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}});
     rv["WorkGroupIdFromTTM"] = isaVersion[0] == 12;
     rv["NoSDWA"]             = checkInList(isaVersion[0], {11, 12});
-    rv["VOP3ByteSel"]        = isaVersion[0] == 12;
-    rv["HasFP8_OCP"]         = isaVersion[0] == 12;
+    rv["VOP3ByteSel"]        = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}});
+    rv["HasFP8_OCP"]         = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}});
     rv["HasWmmaArbStallBit"] = isaVersion[0] == 12 && isaVersion[1] == 5;
+    // Bit position of DISABLE_XDL_ARB_STALL within SCHED_MODE (HWREG 26).
+    // -1 where the field does not exist; 0 would alias DEP_MODE's LSB.
+    int arbStallBit = -1;
+    if(checkInList(isaVersion, {{12, 5, 0}}))
+        arbStallBit = 2;
+    rv["WmmaArbStallBitOffset"] = arbStallBit;
     rv["HasF32XEmulation"]   = checkInList(isaVersion, {{9, 5, 0}, {12, 5, 0}});
+    // F32X (xf32/TF32) emulation Inf handling. The 3xBF16 split makes an Inf
+    // input produce Inf - Inf = NaN in the low-bits residual, so an extra
+    // v_cmp_class Inf guard is required to keep Inf inputs producing Inf. This is
+    // a hardware/platform behavior decision (not a perf-tuning knob), so it lives
+    // in the arch caps: enabled only on archs that require correct Inf handling
+    // under emulation. gfx950's MFMA emulation path leaves it off (the guard adds
+    // VALU ops in the pack path and regresses perf ~10%+).
+    rv["F32XEmulationInfSupport"] = checkInList(isaVersion, {{12, 5, 0}});
     rv["MaxSgprPreload"]     = checkInList(isaVersion, {{12, 5, 0}}) ? 32 : 16;
     rv["SgprPreloadPad"]     = checkInList(isaVersion, {{9, 5, 0}}) || checkInList(isaVersion, {{9, 0, 10}}) || (isaVersion[0] == 9 && isaVersion[1] == 4);
+    // Separation a consumer must leave after an MFMA before reading its ACC.
+    //
+    // This is the *result* latency, not the issue latency: issue latency says
+    // when the next instruction may issue (miIssueLatency, 1 quad-cycle here),
+    // while this says when the result becomes readable. getMFMAIssueLatency
+    // returns both; its first element, matrixInstM / mi_divisor, is this one,
+    // in quad-cycles -- 16/4 = 4 for the gfx950 16x16 MFMA, so 16 cycles. The
+    // value below is in cycles rather than quad-cycles.
+    //
+    // 17, not 16, because the result is readable strictly *after* those 16
+    // cycles elapse; against a >= comparison that threshold is 17.
+    //
+    // Keyed on the architecture, but derived for matrixInstM == 16. The 32x32
+    // shapes have a longer result latency, so a consumer that can see them
+    // must not use this as-is.
+    rv["MfmaToAccReadLatency"] = checkInList(isaVersion, {{9, 5, 0}}) ? 17 : 0;
 
     // True on archs whose MFMA-scale path can consume a swizzled MX scale
     // layout: gfx950 (HostPreSwizzle via the subtile path) and gfx1250
@@ -591,15 +660,33 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     // the flag load.
     rv["HasInvWbDevFences"]            = checkInList(isaVersion, {{12, 5, 0}});
 
+    // gfx950 splits L2 across 8 XCDs. StreamK partial-tile fixup needs
+    // VMEM flags with glc+slc and waitcnt fences for cross-XCD coherence;
+    // gfx1250 uses HasInvWbDevFences (global_wb / global_inv) instead.
+    rv["HasXCDSplitL2"]                = checkInList(isaVersion, {{9, 5, 0}});
+
     // XNACK-replay drain. When set, in-flight VMEM ops can be replayed and
     // therefore reorder w.r.t. a subsequent volatile/atomic VMEM. An
     // `s_wait_xcnt 0` must precede the volatile/atomic VMEM op.
     rv["RequiresXCntForVolatileVMEM"]  = checkInList(isaVersion, {{12, 5, 0}});
+    rv["EnableXnackReplay"]            = checkInList(isaVersion, {{12, 5, 0}});
     rv["DefaultScopeIsCULocal"]        = checkInList(isaVersion, {{12, 5, 0}});
 
     // LDS bank geometry — used for swizzle/rotation in subtile-based tiling.
     rv["LDSBankCount"] = 64;
     rv["LDSBankWidth"] = 4; // bytes per bank
+
+    // Per-XCD work-queue count baked into StreamK dynamic-queue kernels. Single
+    // codegen-side mirror of origami get_default_num_xcds(): gfx942/gfx950 bake
+    // 8 (the MI300X value), every other arch 1. gfx942 covers BOTH MI300X (8
+    // XCDs) and MI300A (6 XCDs), which codegen cannot tell apart, so it always
+    // bakes 8; the host guard rejects a device whose runtime NUM_XCD != this
+    // baked value (so MI300A's 6 is excluded at runtime). Power-of-two keeps the
+    // StreamK queue masking (AND/shift) valid.
+    rv["NumXCD"] = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}}) ? 8 : 1;
+
+    // Per-queue counter stride = L2 cache-line size (uniform 128B on supported archs).
+    rv["CacheLineBytes"] = 128;
 
     return rv;
 }
@@ -610,33 +697,30 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
     std::map<std::string, int> rv;
     // 1024 vgpr
     rv["MaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 256;
-    // max allowed is 112 out of 112 , 6 is used by hardware 4 SGPRs are wasted
-    rv["MaxSgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 106 : 102;
+    // Highest addressable SGPR index plus one. gfx8/gfx9 stop at s101 (102); every
+    // RDNA target (gfx10, gfx11, gfx12) addresses s0-s105 (106).
+    rv["MaxSgpr"] = isaVersion[0] >= 10 ? 106 : 102;
     rv["PhysicalMaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 512;
-    rv["PhysicalMaxSgpr"]   = 800;
+    // gfx11 (RDNA) does not have an SGPR-file occupancy limit; use a large value so it never binds.
+    // TODO: gfx10/gfx12 are RDNA too and carry the same phantom limit.
+    rv["PhysicalMaxSgpr"]   = isaVersion[0] == 11 ? 1696 : 800;
     rv["maxLDSConstOffset"] = 65536;
     rv["GlobalPrefetchSize"] = 256;
 
     if(isaVersion[0] == 10)
         rv["PhysicalMaxVgprCU"] = 1024 * 32;
     else if(isaVersion[0] == 11)
-        // Code path for gfx11XX
-        if(isaVersion[1] == 5)
-        {
-            // Code path for gfx115X
-            if(isaVersion[2] == 0 || isaVersion[2] == 2 || isaVersion[2] == 3)
-                // gfx1150, gfx1152, gfx1153
-                rv["PhysicalMaxVgprCU"] = 2 /*two SIMDs per CU*/ * 1024 * 32;
-            if(isaVersion[2] == 1)
-                // gfx1151
-                rv["PhysicalMaxVgprCU"] = 2 /*two SIMDs per CU*/ * 1536 * 32;
-        }
-        else if(isaVersion[2] == 2)
-            rv["PhysicalMaxVgprCU"] = 1024 * 32;
-        else
-            rv["PhysicalMaxVgprCU"] = 2 * 1536 * 32;
+    {
+        // Code path for gfx11XX (RDNA3, two SIMDs per CU, wave32).
+        // gfx1100, gfx1101 and gfx1151 have a 1536-VGPR file per SIMD; every
+        // other gfx11 part (e.g. gfx1102, gfx1103, gfx115X, gfx117X) has 1024.
+        const bool has1536Vgpr = (isaVersion[1] == 0 && (isaVersion[2] == 0 || isaVersion[2] == 1))
+                                 || (isaVersion[1] == 5 && isaVersion[2] == 1);
+        const int vgprPerSimd = has1536Vgpr ? 1536 : 1024;
+        rv["PhysicalMaxVgprCU"] = 2 /*two SIMDs per CU*/ * vgprPerSimd * 32;
+    }
     else if(isaVersion[0] == 12)
-        rv["PhysicalMaxVgprCU"] = isaVersion[1] == 5? 4096 * 32 : 1536 * 32;
+        rv["PhysicalMaxVgprCU"] = isaVersion[1] == 5? 4096 * 32 : 2 * 1536 * 32;
     else if(isaVersion[0] == 9)
         if(archCaps["ArchAccUnifiedRegs"])
             rv["PhysicalMaxVgprCU"] = 2048 * 64;

@@ -23,14 +23,35 @@
 * ************************************************************************ */
 #pragma once
 #include "rocsparse_arguments.hpp"
+#include <rocsparse/rocsparse-config.h>
 
 // clang-format off
-#ifdef ROCSPARSE_WITH_ILDLT0
 #define ROCSPARSE_FOREACH_ROUTINE_ILDLT0    \
 ROCSPARSE_DO_ROUTINE(spildlt0)
+
+#ifdef ROCSPARSE_WITH_SPSORT
+#define ROCSPARSE_FOREACH_ROUTINE_SPSORT    \
+ROCSPARSE_DO_ROUTINE(spsort_coo)				\
+ROCSPARSE_DO_ROUTINE(spsort_csr)				\
+ROCSPARSE_DO_ROUTINE(spsort_csc)
 #else
-#define ROCSPARSE_FOREACH_ROUTINE_ILDLT0
+#define ROCSPARSE_FOREACH_ROUTINE_SPSORT
 #endif
+
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+#define ROCSPARSE_FOREACH_ROUTINE_DNMAT_COPY_DATA    \
+ROCSPARSE_DO_ROUTINE(dnmat_copy_data)
+#else
+#define ROCSPARSE_FOREACH_ROUTINE_DNMAT_COPY_DATA
+#endif
+
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+#define ROCSPARSE_FOREACH_ROUTINE_DNMAT_TRANSPOSE    \
+ROCSPARSE_DO_ROUTINE(dnmat_transpose)
+#else
+#define ROCSPARSE_FOREACH_ROUTINE_DNMAT_TRANSPOSE
+#endif
+
 
 #define ROCSPARSE_FOREACH_ROUTINE			\
 ROCSPARSE_DO_ROUTINE(axpyi)						\
@@ -57,6 +78,7 @@ ROCSPARSE_DO_ROUTINE(coomm)					\
 ROCSPARSE_DO_ROUTINE(coomm_batched)					\
 ROCSPARSE_DO_ROUTINE(coomv)					\
 ROCSPARSE_DO_ROUTINE(coosort)					\
+ROCSPARSE_FOREACH_ROUTINE_SPSORT				\
 ROCSPARSE_DO_ROUTINE(coosv)					\
 ROCSPARSE_DO_ROUTINE(coomv_aos)					\
 ROCSPARSE_DO_ROUTINE(coosm)					\
@@ -81,13 +103,17 @@ ROCSPARSE_DO_ROUTINE(csrmm_batched)					\
 ROCSPARSE_DO_ROUTINE(cscmm)					\
 ROCSPARSE_DO_ROUTINE(cscmm_batched)					\
 ROCSPARSE_DO_ROUTINE(csrsm)					\
+ROCSPARSE_DO_ROUTINE(cscsm)					\
 ROCSPARSE_DO_ROUTINE(csrsort)					\
 ROCSPARSE_DO_ROUTINE(csrsv)					\
 ROCSPARSE_DO_ROUTINE(cscsv)					\
+ROCSPARSE_DO_ROUTINE(ellsv)					\
 ROCSPARSE_DO_ROUTINE(csritsv)					\
 ROCSPARSE_DO_ROUTINE(spitsv_csr)				\
 ROCSPARSE_DO_ROUTINE(spic0)				\
 ROCSPARSE_FOREACH_ROUTINE_ILDLT0			\
+ROCSPARSE_FOREACH_ROUTINE_DNMAT_COPY_DATA		\
+ROCSPARSE_FOREACH_ROUTINE_DNMAT_TRANSPOSE		\
 ROCSPARSE_DO_ROUTINE(spilu0)				\
 ROCSPARSE_DO_ROUTINE(sptrsv)				\
 ROCSPARSE_DO_ROUTINE(csr2dense)					\
@@ -136,6 +162,11 @@ ROCSPARSE_DO_ROUTINE(prune_dense2csr_by_percentage)		\
 ROCSPARSE_DO_ROUTINE(roti)					\
 ROCSPARSE_DO_ROUTINE(sctr)					\
 ROCSPARSE_DO_ROUTINE(sddmm)					\
+ROCSPARSE_DO_ROUTINE(sddmm_batched_ell)				\
+ROCSPARSE_DO_ROUTINE(sddmm_batched_coo)				\
+ROCSPARSE_DO_ROUTINE(sddmm_batched_coo_aos)			\
+ROCSPARSE_DO_ROUTINE(sddmm_batched_csr)				\
+ROCSPARSE_DO_ROUTINE(sddmm_batched_csc)				\
 ROCSPARSE_DO_ROUTINE(sparse_to_dense_coo)			\
 ROCSPARSE_DO_ROUTINE(sparse_to_dense_csc)			\
 ROCSPARSE_DO_ROUTINE(sparse_to_dense_csr)			\

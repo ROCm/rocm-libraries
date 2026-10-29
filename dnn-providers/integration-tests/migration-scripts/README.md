@@ -40,6 +40,20 @@ VERIFIED at behavior level — every C++ PASS has a bundle that also PASSes
 graph can round-trip perfectly on disk yet fail to run — Hop D is what makes
 "turn off the C++ tests, lose nothing" a checked fact rather than a hope.
 
+### Quick path: convert one existing C++ test (no full pipeline needed)
+
+Hops B–D (`place_bundles.py`, `verify_migration.py`, `diff_coverage.py`) exist
+to migrate a whole suite in bulk with a byte- and behavior-level proof. For
+**one** test, capture it and import each graph with `import_graph.py`. The
+commands, and the metadata and support-sidecar steps that a finished bundle
+needs, are in [Adding Tests — From an existing C++ graph test](../docs/adding-tests.md#from-an-existing-c-graph-test).
+
+Use the full pipeline below instead when migrating many tests/suites at
+once and you want the Hop C/D byte- and behavior-level proof that nothing
+was lost. The pipeline writes only graphs and case metadata. Every bundle that
+it places still needs a support sidecar (see
+[Updating support claims](../docs/adding-tests.md#updating-support-claims)).
+
 ## How to Run
 
 ### Prerequisites
@@ -47,13 +61,13 @@ graph can round-trip perfectly on disk yet fail to run — Hop D is what makes
 Build the integration test binary (no GPU required for Layers 1-3):
 
 ```bash
-cmake --build build --target integration_tests
+cmake --build build --target hipdnn_integration_tests
 ```
 
 ### Automated: Full pipeline
 
 ```bash
-migration-scripts/run_capture_pipeline.sh build/bin/integration_tests
+migration-scripts/run_capture_pipeline.sh build/bin/hipdnn_integration_tests
 ```
 
 This runs Hops A–D plus the supporting checks in sequence. Pass
@@ -64,7 +78,7 @@ This runs Hops A–D plus the supporting checks in sequence. Pass
 #### Step 1: Census — see what exists
 
 ```bash
-python3 migration-scripts/census.py build/bin/integration_tests
+python3 migration-scripts/census.py build/bin/hipdnn_integration_tests
 ```
 
 Runs `--gtest_list_tests` and classifies every test case as `graph`
@@ -73,7 +87,7 @@ Runs `--gtest_list_tests` and classifies every test case as `graph`
 #### Step 2: Capture (Hop A) — serialize C++ graphs as JSON
 
 ```bash
-./build/bin/integration_tests --capture-bundles captured_bundles \
+./build/bin/hipdnn_integration_tests --capture-bundles captured_bundles \
     --gtest_filter='*IntegrationGpu*'
 ```
 
@@ -94,12 +108,18 @@ captured_bundles/{SuiteName}/{CaseName}/{CaseName}.meta.json
 ```bash
 python3 migration-scripts/place_bundles.py \
     --capture-dir captured_bundles \
-    --output-dir dnn-providers/integration-tests/integration_test_bundles
+    --output-dir dnn-providers/integration-tests/integration-test-bundles
 ```
 
 Groups captured graphs by **structure** (node types + wiring + tensor
 set). Graphs sharing the same topology collapse into one template+sweep.
 Use `find_case.py` to query cases by any parameter (see below).
+
+Writing over an existing tree keeps the hand-written cases of each existing
+`sweep.json` (cases whose metadata has `"generator": "manual"`, such as the
+runtime pass-by-value cases). No capture reproduces them. If one no longer fits
+the regenerated template, the run fails and leaves that sweep unchanged; move or
+fix the case by hand.
 
 #### Step 4: Verify (Hop C) — reconcile everything
 
@@ -107,7 +127,7 @@ Use `find_case.py` to query cases by any parameter (see below).
 python3 migration-scripts/verify_migration.py \
     --census census.json \
     --capture-dir captured_bundles \
-    --bundle-dir integration_test_bundles
+    --bundle-dir integration-test-bundles
 ```
 
 Three-way reconciliation: census count == captured count == placed count,
@@ -117,13 +137,17 @@ plus per-case byte-exact comparison of graph AND metadata (seed, inputs).
 
 ```bash
 python3 migration-scripts/import_graph.py \
-    --graph path/to/graph.json \
-    --bundle-dir integration_test_bundles/ \
-    --meta reference_source="c++ integration suite: Suite.Case"
+    --graph captured_bundles/Suite/Case/Case.json \
+    --bundle-dir integration-test-bundles/
 ```
 
-Dedup-aware placement. Default: skip exact duplicates. `--strict` exits
-non-zero on dup (CI mode). `--force` appends regardless.
+Dedup-aware placement. Default: skip exact duplicates. Metadata and the tier
+come from the graph's `.meta.json` sidecar; an unusable sidecar fails the
+import. `--strict` (CI mode) also exits non-zero on a duplicate or on a
+`--seed`/`--meta`/`--tier` value that contradicts the sidecar. `--force`
+appends regardless. For behavior and
+output, see
+[Adding Tests — From a graph you already have](../docs/adding-tests.md#from-a-graph-you-already-have).
 
 ## Searching and Running Bundles
 
@@ -191,43 +215,9 @@ Use `find_case.py --id abc123 --detail` to see what a hashed case contains.
 
 ### Adding new test cases
 
-New tests should be added directly as bundle cases — no C++ needed.
-
-**Using import_graph.py (recommended):**
-
-```bash
-python3 migration-scripts/import_graph.py \
-    --graph new_conv.json \
-    --bundle-dir integration_test_bundles/
-```
-
-What happens:
-
-1. The script computes the graph's skeleton hash and finds matching
-   topologies in the bundle tree.
-2. **Duplicate?** If an identical case already exists (same graph +
-   seed + inputs), it reports `DUPLICATE` and skips. No manual check
-   needed.
-3. **New case for existing topology?** Appends to that sweep. The case
-   id is auto-generated: `{shape}_{dtype}_{layout}_{attrs}[_{hash6}]`.
-4. **New topology?** Creates a new template+sweep directory.
-5. The auto-generated id is printed to stderr so you see what the test
-   will be called in gtest output:
-
-```
-  appended case '1_16_3_3_bfp16_nhwc_dil1x1_prepad1x1_postpad1x1' to
-    integration_test_bundles/quick/ConvolutionFwd/Default/sweep.json
-```
-
-That case id is the gtest name — it appears in CI logs, `--gtest_filter`,
-and `find_case.py` queries. You never need to invent or assign it.
-
-**Manually editing sweep.json:**
-
-Add a new entry to the `"cases"` array with `"values"` and `"metadata"`.
-Set `"id"` to a descriptive name following the pattern
-`{shape}_{dtype}_{layout}[_{attrs}]`, or run `import_graph.py` to have
-it assigned automatically.
+Add new tests as bundle cases with `import_graph.py`. C++ is not needed. You
+do not need to write cases by hand. See
+[Adding Tests](../docs/adding-tests.md#add-a-bundle).
 
 The migration pipeline (`run_capture_pipeline.sh`) is a one-time
 conversion tool. Going forward, the bundle tree is the source of truth.
@@ -249,7 +239,7 @@ integration tests provably loses no coverage for graph+GPU-plugin tests.
 ```bash
 python3 migration-scripts/diff_coverage.py \
     --cpp /tmp/cpp.json --bundle /tmp/bundle.json \
-    --bundle-dir integration_test_bundles
+    --bundle-dir integration-test-bundles
 ```
 
 ## Field Mapping — What Gets Bundled and Where
@@ -261,10 +251,40 @@ python3 migration-scripts/diff_coverage.py \
 | Tensor strides | `generateStrides()` | sweep `values.tensors[uid].strides` | Per-case |
 | data_type | `getDataTypeEnumFromType<T>()` | sweep `values.tensors[uid].data_type` | Per-case |
 | Node attrs | `ConvFpropAttributes` etc. | sweep `values.attributes.<key>` | Per-case, only if varies |
-| Seed | `synthesis().setGlobalSeed()` | sweep `case.metadata.seed` | Per-case metadata |
-| Distribution/range | `SynthesisConfig.fills()` | sweep `case.metadata.inputs.{uid}` | Per-case metadata |
-| Per-op defaults | `SynthesizeInputs.cpp` | **NOT stored** | Re-derived from topology |
+| Seed | `inputFillRecipes().setGlobalSeed()` | sweep `case.metadata.seed` | Per-case metadata |
+| Distribution/range | `InputFillRecipes.fills()` | sweep `case.metadata.inputs.{uid}` | Per-case metadata |
+| Per-op defaults | `FillInputs.cpp` | **NOT stored** | Re-derived from topology |
 | Provenance | (new) | sweep `case.metadata.reference_source` | Per-case metadata |
+
+## Re-tiering existing cases
+
+To change which tier a case lives in (never what the case is), describe the
+target placement in an assignment file and let `retier_bundles.py` apply it:
+
+```bash
+# Start from "everything stays where it is", then edit proposed_tier.
+python3 retier_bundles.py --bundle-dir integration-test-bundles/ \
+    --write-identity assignments.json
+
+python3 retier_bundles.py --bundle-dir integration-test-bundles/ \
+    --assignments assignments.json            # dry run: plan + checks, no writes
+python3 retier_bundles.py --bundle-dir integration-test-bundles/ \
+    --assignments assignments.json --apply
+```
+
+Every case must be assigned (an unassigned case would otherwise vanish) and two
+cases with one id may not land in the same sweep. After `--apply` the tool
+re-reads the tree and checks, per case, that the expanded graph, metadata,
+`tensor_patches`, golden pointer and per-engine support claims are identical to
+before; it exits non-zero if not. Topologies whose `graph.template.json` differs
+between tiers are unified to the template with the most `${case.*}`
+placeholders, and moved cases gain the matching explicit `attributes`.
+
+Two things the tool cannot see: names that code refers to by tier
+(`quick_<Op>_...` in gtest filters, TOML `filters`, `knownReferenceGaps`, the
+`ffm-quick` ids in the provider YAMLs) and the `golden`/`dvc` data itself (only
+the pointers move). Grep for the case ids you moved and re-run
+`ctest -N -L <tier>` afterwards.
 
 ## Scripts
 
@@ -275,6 +295,7 @@ python3 migration-scripts/diff_coverage.py \
 | `place_bundles.py` | Convert captured bundles into template+sweep format (Hop B) |
 | `verify_migration.py` | Reconcile census ↔ capture ↔ sweep, byte-diff graphs + metadata (Hop C) |
 | `import_graph.py` | Import a single graph with duplicate detection |
+| `retier_bundles.py` | Move existing cases between tiers, proving every case is unchanged |
 | `find_case.py` | Query cases by op, dtype, layout, shape, input range, or id |
 | `diff_coverage.py` | Differential coverage: assert `pass_set_bundle ⊇ pass_set_cpp` (Hop D) |
 | `run_capture_pipeline.sh` | Orchestrate all hops + verification layers |

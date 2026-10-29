@@ -303,7 +303,6 @@ class TestFeatureParity:
         kern = case["kernel"]
 
         py_features = fe.extract(prob, kern)
-
         manual = _compute_features_manually(
             prob["m"],
             prob["n"],

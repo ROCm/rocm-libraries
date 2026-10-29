@@ -108,7 +108,7 @@ class TestDensePipeSupportGates(unittest.TestCase):
                 for c in attention_candidates()
                 if c.name == "attention_gfx942_dense_pipe"
             )
-            ok, why = candidate.supports(_gfx942_fp16(arch="gfx950"))
+            ok, why = candidate.admits(_gfx942_fp16(arch="gfx950"))
             self.assertFalse(ok)
             self.assertIn("gfx942", why)
 
@@ -119,7 +119,7 @@ class TestDensePipeSupportGates(unittest.TestCase):
                 for c in attention_candidates()
                 if c.name == "attention_gfx942_dense_pipe"
             )
-            ok, why = candidate.supports(_gfx942_fp16(dtype="bf16"))
+            ok, why = candidate.admits(_gfx942_fp16(dtype="bf16"))
             self.assertFalse(ok)
             self.assertIn("fp16", why)
 
@@ -134,19 +134,42 @@ class TestDensePipeSupportGates(unittest.TestCase):
             req = _gfx942_fp16(
                 batch=1, nhead_q=16, nhead_k=16, seqlen_q=1, seqlen_k=8192
             )
-            ok, why = candidate.supports(req)
+            ok, why = candidate.admits(req)
             self.assertFalse(ok)
             self.assertIn("3D", why)
 
-    def test_rejects_sliding_window(self):
+    def test_admits_d128_sliding_window(self):
+        # D128 sliding-window prefill rides the non-ring wide flash path (SW mask
+        # + windowed KV-skip live in the emitter, and the sliced-K ring is forced
+        # off for D128 SW), so ``_enable_gfx942_fp16_flash`` admits it.
         with _Gfx942Arch():
             candidate = next(
                 c
                 for c in attention_candidates()
                 if c.name == "attention_gfx942_dense_pipe"
             )
-            ok, why = candidate.supports(
+            ok, why = candidate.admits(
                 _gfx942_fp16(seqlen_q=512, seqlen_k=4096, sliding_window=256)
+            )
+            self.assertTrue(ok, why)
+
+    def test_rejects_d64_sliding_window(self):
+        # Only D128 gained the sliding-window carve-out; D64 SW has no emitter
+        # path and must still be turned down by the fp16-flash gate.
+        with _Gfx942Arch():
+            candidate = next(
+                c
+                for c in attention_candidates()
+                if c.name == "attention_gfx942_dense_pipe"
+            )
+            ok, why = candidate.admits(
+                _gfx942_fp16(
+                    seqlen_q=512,
+                    seqlen_k=4096,
+                    hdim_q=64,
+                    hdim_v=64,
+                    sliding_window=256,
+                )
             )
             self.assertFalse(ok)
             self.assertIn("flash not eligible", why)
@@ -178,6 +201,14 @@ class TestDensePipeRouting(unittest.TestCase):
             )
         self.assertEqual(r.candidate.spec_id, "gfx942_dense_pipe")
 
+    def test_bottom_right_preserves_dense_pipe_selection(self):
+        with _Gfx942Arch():
+            result = dispatch_attention(
+                _gfx942_fp16(seqlen_k=1024, mask_type=2, num_cus=120)
+            )
+        self.assertEqual(result.candidate.spec_id, "gfx942_dense_pipe")
+        self.assertEqual(result.spec.path, "2d")
+
     def test_gqa_short_context_does_not_route_dense_pipe(self):
         # GQA (nhead_q > nhead_k) short-context -> narrow path still wins;
         # dense_pipe support() must reject because fp16-flash is disabled for
@@ -191,7 +222,7 @@ class TestDensePipeRouting(unittest.TestCase):
             req = _gfx942_fp16(
                 batch=2, nhead_q=32, nhead_k=8, seqlen_q=512, seqlen_k=512
             )
-            ok, _ = candidate.supports(req)
+            ok, _ = candidate.admits(req)
         self.assertFalse(ok)
 
     def test_spec_records_correct_dims(self):
@@ -254,26 +285,28 @@ class TestBf16FlashGate(unittest.TestCase):
 
     def test_bf16_flash_on_by_default_long_context(self):
         with _Gfx942Arch():
-            self.assertTrue(au._enable_gfx942_bf16_flash(self._bf16_problem()))
+            self.assertTrue(
+                au._enable_gfx942_bf16_flash(self._bf16_problem(), "gfx942")
+            )
 
     def test_bf16_flash_short_context_disabled_mha(self):
         # MHA short-context (q=512<=768): small_q_narrow applies -> bf16 flash off.
         # Unlike fp16, bf16 D128 ring is not yet validated so MHA also uses narrowpath.
         with _Gfx942Arch():
             p = self._bf16_problem(seqlen_q=512, seqlen_k=512)
-            self.assertFalse(au._enable_gfx942_bf16_flash(p))
+            self.assertFalse(au._enable_gfx942_bf16_flash(p, "gfx942"))
 
     def test_bf16_flash_short_context_disabled_gqa(self):
         # GQA short-context: small_q_narrow -> bf16 flash off.
         with _Gfx942Arch():
             p = self._bf16_problem(seqlen_q=512, seqlen_k=512, nhead_q=32, nhead_k=8)
-            self.assertFalse(au._enable_gfx942_bf16_flash(p))
+            self.assertFalse(au._enable_gfx942_bf16_flash(p, "gfx942"))
 
     def test_bf16_flash_long_context_gqa_enabled(self):
         # GQA long-context (q>768): small_q_narrow off -> bf16 flash on.
         with _Gfx942Arch():
             p = self._bf16_problem(seqlen_q=2048, seqlen_k=2048, nhead_q=32, nhead_k=8)
-            self.assertTrue(au._enable_gfx942_bf16_flash(p))
+            self.assertTrue(au._enable_gfx942_bf16_flash(p, "gfx942"))
 
     def test_bf16_ring_enabled_for_d64_prefill(self):
         # D64 ring is default-on for bf16 prefill.
@@ -289,18 +322,43 @@ class TestBf16FlashGate(unittest.TestCase):
                 max_seqlen_k=2048,
                 dtype="bf16",
             )
-            self.assertTrue(au._enable_gfx942_flash_k_sliced_ring(p))
+            self.assertTrue(au._enable_gfx942_flash_k_sliced_ring(p, "gfx942"))
 
     def test_bf16_ring_disabled_for_d128(self):
-        # D128 bf16 ring is excluded (kernel generator bug).
+        # D128 bf16 stays OFF the ring, and the reason is performance rather
+        # than correctness. The depth-3 slot-reuse bug that originally excluded
+        # D128 was fixed two ways (the drain-on-reuse fence, now unconditional,
+        # and the depth-2 ring), so a correct bf16 D128 ring exists -- it is
+        # just slower than the non-ring T=64 flash path at the production
+        # block_size=64. fp16 D128 takes the depth-2 ring; bf16 does not.
         with _Gfx942Arch():
             p = self._bf16_problem(seqlen_q=2048, seqlen_k=2048)
-            self.assertFalse(au._enable_gfx942_flash_k_sliced_ring(p))
+            self.assertFalse(au._enable_gfx942_flash_k_sliced_ring(p, "gfx942"))
+
+    def test_fp16_ring_enabled_for_d128_at_depth_2(self):
+        # The other half of the same routing decision, pinned so the two
+        # dtypes cannot silently converge: fp16 D128 does take the ring, and
+        # specifically the depth-2 schedule (k%2 avoids slot reuse in the
+        # k_groups=4 live set).
+        with _Gfx942Arch():
+            p = au.UnifiedAttentionProblem(
+                total_q=2 * 2048,
+                num_seqs=2,
+                num_query_heads=16,
+                num_kv_heads=16,
+                head_size=128,
+                block_size=16,
+                max_seqlen_q=2048,
+                max_seqlen_k=2048,
+                dtype="fp16",
+            )
+            self.assertTrue(au._enable_gfx942_flash_k_sliced_ring(p, "gfx942"))
+            self.assertEqual(au._select_gfx942_flash_ring_depth(p, "gfx942"), 2)
 
     def test_bf16_mask_limit_enabled_for_prefill(self):
         with _Gfx942Arch():
             p = self._bf16_problem(seqlen_q=2048, seqlen_k=2048)
-            self.assertTrue(au._enable_gfx942_flash_mask_limit(p))
+            self.assertTrue(au._enable_gfx942_flash_mask_limit(p, "gfx942"))
 
     def test_bf16_q_direct_enabled_for_d64(self):
         # q_direct is unblocked for bf16 D64.
@@ -316,13 +374,13 @@ class TestBf16FlashGate(unittest.TestCase):
                 max_seqlen_k=2048,
                 dtype="bf16",
             )
-            self.assertTrue(au._enable_gfx942_flash_q_direct(p))
+            self.assertTrue(au._enable_gfx942_flash_q_direct(p, "gfx942"))
 
     def test_bf16_q_direct_disabled_for_d128(self):
         # q_direct is D64-only.
         with _Gfx942Arch():
             p = self._bf16_problem(seqlen_q=2048, seqlen_k=2048)
-            self.assertFalse(au._enable_gfx942_flash_q_direct(p))
+            self.assertFalse(au._enable_gfx942_flash_q_direct(p, "gfx942"))
 
 
 class TestFp16FlashGate(unittest.TestCase):
@@ -343,31 +401,35 @@ class TestFp16FlashGate(unittest.TestCase):
 
     def test_mha_long_context_flash_enabled(self):
         with _Gfx942Arch():
-            self.assertTrue(au._enable_gfx942_fp16_flash(self._fp16_problem()))
+            self.assertTrue(
+                au._enable_gfx942_fp16_flash(self._fp16_problem(), "gfx942")
+            )
 
     def test_mha_short_context_flash_enabled(self):
         # Key behaviour from the commit: MHA short-context no longer excluded.
         with _Gfx942Arch():
             p = self._fp16_problem(seqlen_q=512, seqlen_k=512)
-            self.assertTrue(au._enable_gfx942_fp16_flash(p))
+            self.assertTrue(au._enable_gfx942_fp16_flash(p, "gfx942"))
 
     def test_gqa_short_context_flash_disabled(self):
         # GQA (nhead_q > nhead_k) at short context: narrow wins -> flash off.
         with _Gfx942Arch():
             p = self._fp16_problem(seqlen_q=512, seqlen_k=512, nhead_q=32, nhead_k=8)
-            self.assertFalse(au._enable_gfx942_fp16_flash(p))
+            self.assertFalse(au._enable_gfx942_fp16_flash(p, "gfx942"))
 
     def test_gqa_long_context_flash_enabled(self):
         # Long context: narrow path not triggered -> flash on for GQA too.
         with _Gfx942Arch():
             p = self._fp16_problem(seqlen_q=2048, seqlen_k=2048, nhead_q=32, nhead_k=8)
-            self.assertTrue(au._enable_gfx942_fp16_flash(p))
+            self.assertTrue(au._enable_gfx942_fp16_flash(p, "gfx942"))
 
     def test_flash_off_for_non_gfx942(self):
         old = au._RESOLVED_ATTENTION_ARCH
         au._RESOLVED_ATTENTION_ARCH = "gfx950"
         try:
-            self.assertFalse(au._enable_gfx942_fp16_flash(self._fp16_problem()))
+            self.assertFalse(
+                au._enable_gfx942_fp16_flash(self._fp16_problem(), "gfx950")
+            )
         finally:
             au._RESOLVED_ATTENTION_ARCH = old
 
@@ -384,7 +446,7 @@ class TestFp16FlashGate(unittest.TestCase):
                 max_seqlen_k=2048,
                 dtype="bf16",
             )
-            self.assertFalse(au._enable_gfx942_fp16_flash(p))
+            self.assertFalse(au._enable_gfx942_fp16_flash(p, "gfx942"))
 
 
 if __name__ == "__main__":

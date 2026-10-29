@@ -24,8 +24,13 @@
 
 #pragma once
 
+#include "rocsparse-complex-types.h"
 #include "rocsparse-types.h"
+#include "rocsparse_common.hpp"
 #include "rocsparse_csrildlt0_info.hpp"
+#include "rocsparse_floating_data_t.hpp"
+#include "rocsparse_grid.hpp"
+#include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {
@@ -35,4 +40,76 @@ namespace rocsparse
                                                           void*                    diag,
                                                           size_t                   buffer_size,
                                                           void*                    buffer);
+
+    // Gather the real diagonal D out of the factor.
+    //
+    // After the ILDLT(0) factorization, each D_i is stored in-place on the (implicit unit)
+    // diagonal of the L factor, i.e. at csr_val[csr_diag_ind[i]]. This kernel copies that
+    // diagonal into the user-provided dense vector diag[]. A missing diagonal entry
+    // (csr_diag_ind[i] < 0) corresponds to a zero pivot and is reported as 0.
+    template <uint32_t BLOCKSIZE, typename T, typename I, typename J>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void csrildlt0_copy_diag_kernel(J       m,
+                                    int64_t batch_count,
+                                    const T* __restrict__ csr_val,
+                                    int64_t csr_val_stride,
+                                    const I* __restrict__ csr_diag_ind,
+                                    floating_data_t<T>* __restrict__ diag,
+                                    int64_t diag_stride)
+    {
+        const J row = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        if(row >= m)
+        {
+            return;
+        }
+
+        const I diag_pos = csr_diag_ind[row];
+
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
+        {
+            rocsparse::load_pointer(diag, batch_index, diag_stride)[row]
+                = (diag_pos >= 0) ? rocsparse::real(
+                      rocsparse::load_pointer(csr_val, batch_index, csr_val_stride)[diag_pos])
+                                  : static_cast<floating_data_t<T>>(0);
+        }
+    }
+
+    // Copy the real diagonal D into the optional user-provided vector once the factorization
+    // has completed. Does nothing when diag is null. Runs on handle->stream, after the
+    // factorization kernel, so csr_val already holds the final diagonal.
+    template <typename T, typename I, typename J>
+    rocsparse_status csrildlt0_copy_diag(rocsparse_handle         handle,
+                                         rocsparse_csrildlt0_info csrildlt0_info,
+                                         rocsparse_spmat_descr    A,
+                                         void*                    diag)
+    {
+        if(diag == nullptr)
+        {
+            return rocsparse_status_success;
+        }
+
+        auto trm_info = csrildlt0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+
+        static constexpr uint32_t BLOCKSIZE = 256;
+        const dim3                blocks((A->rows - 1) / BLOCKSIZE + 1,
+                          rocsparse::get_grid_size_y(handle, A->batch_count));
+        const dim3                threads(BLOCKSIZE);
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csrildlt0_copy_diag_kernel<BLOCKSIZE, T, I, J>),
+            blocks,
+            threads,
+            0,
+            handle->stream,
+            static_cast<J>(A->rows),
+            A->batch_count,
+            reinterpret_cast<const T*>(A->val_data),
+            A->batch_stride,
+            reinterpret_cast<const I*>(trm_info->get_diag_ind()),
+            reinterpret_cast<floating_data_t<T>*>(diag),
+            static_cast<int64_t>(A->rows));
+
+        return rocsparse_status_success;
+    }
 }

@@ -27,6 +27,9 @@
 #include "rocsparse_clients_matrices_dir.hpp"
 #include "rocsparse_enum.hpp"
 #include "rocsparse_importer_format_t.hpp"
+
+#include <algorithm>
+
 rocsparse_arguments_config::rocsparse_arguments_config()
 {
     //
@@ -69,7 +72,7 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->beta            = static_cast<double>(0);
         this->betai           = static_cast<double>(0);
         this->threshold       = static_cast<double>(0);
-        this->percentage      = static_cast<double>(0);
+        this->percentage      = static_cast<double>(50);
         this->transA          = static_cast<rocsparse_operation>(0);
         this->transB          = static_cast<rocsparse_operation>(0);
         this->baseA           = static_cast<rocsparse_index_base>(0);
@@ -100,6 +103,8 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->spitsv_alg           = rocsparse_spitsv_alg_default;
         this->spsm_alg             = rocsparse_spsm_alg_default;
         this->sptrsm_alg           = rocsparse_sptrsm_alg_default;
+        this->solve_mode           = rocsparse_solve_mode_triangular;
+        this->diagonal_modifier    = rocsparse_diagonal_modifier_none;
         this->spmm_alg             = rocsparse_spmm_alg_default;
         this->spgemm_alg           = rocsparse_spgemm_alg_default;
         this->spgeam_alg           = rocsparse_spgeam_alg_default;
@@ -107,6 +112,11 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->dense_to_sparse_alg  = rocsparse_dense_to_sparse_alg_default;
         this->gtsv_interleaved_alg = static_cast<rocsparse_gtsv_interleaved_alg>(0);
         this->gpsv_interleaved_alg = static_cast<rocsparse_gpsv_interleaved_alg>(0);
+#if defined(ROCSPARSE_WITH_SPSORT)
+        this->spsort_alg = rocsparse_spsort_alg_default;
+#else
+        this->spsort_alg = 0;
+#endif
 
         this->matrix                              = static_cast<rocsparse_matrix_init>(0);
         this->matrix_init_kind                    = static_cast<rocsparse_matrix_init_kind>(0);
@@ -117,6 +127,8 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->nfreeiter                           = static_cast<rocsparse_int>(0);
         this->nmaxiter                            = static_cast<rocsparse_int>(0);
         this->denseld                             = static_cast<int64_t>(0);
+        this->pad_A                               = static_cast<int64_t>(0);
+        this->pad_B                               = static_cast<int64_t>(0);
         this->batch_count                         = static_cast<rocsparse_int>(0);
         this->batch_count_A                       = static_cast<rocsparse_int>(0);
         this->batch_count_B                       = static_cast<rocsparse_int>(0);
@@ -138,6 +150,8 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->call_stage_analysis                 = true;
         this->convert_to_int                      = false;
         this->integer_based_manufactured_solution = false;
+        this->offsets_batch_stride_zero_A         = false;
+        this->offsets_batch_stride_zero_B         = false;
         this->filename[0]                         = '\0';
         this->function[0]                         = '\0';
         this->name[0]                             = '\0';
@@ -267,7 +281,7 @@ void rocsparse_arguments_config::set_description(options_description& desc)
      value<double>(&this->threshold)->default_value(1.0), "specifies the scalar threshold")
 
     ("percentage",
-     value<double>(&this->percentage)->default_value(0.0), "specifies the scalar percentage")
+     value<double>(&this->percentage)->default_value(50.0), "specifies the scalar percentage")
 
     ("transposeA",
      value<char>(&this->b_transA)->default_value('N'),
@@ -332,14 +346,14 @@ void rocsparse_arguments_config::set_description(options_description& desc)
      "SPARSE function to test. Options:\n"
      "  Level1: axpyi, doti, dotci, gthr, gthrz, roti, sctr\n"
      "  Level2: bsrmv, bsrxmv, bsrsv, coomv, coomv_aos, csrmv, csrmv_managed, csritsv, csrsv, cscsv, coosv, ellmv, hybmv, gebsrmv, gemvi, sellmv\n"
-     "  Level3: bsrmm, bsrsm, gebsrmm, csrmm, csrmm_batched, coomm, coomm_batched, cscmm, cscmm_batched, csrsm, coosm, gemmi, sddmm\n"
+     "  Level3: bsrmm, bsrsm, gebsrmm, csrmm, csrmm_batched, coomm, coomm_batched, cscmm, cscmm_batched, csrsm, cscsm, coosm, gemmi, sddmm, sddmm_batched_csr, sddmm_batched_csc, sddmm_batched_coo, sddmm_batched_coo_aos, sddmm_batched_ell, \n"
      "  Extra: bsrgeam, bsrgemm, csrgeam, csrgemm, csrgemm_reuse\n"
      "  Preconditioner: bsric0, bsrilu0, csric0, csrilu0, csritilu0, gtsv, gtsv_no_pivot, gtsv_no_pivot_strided_batch, gtsv_interleaved_batch, gpsv_interleaved_batch\n"
      "  Conversion: csr2coo, csr2csc, gebsr2gebsc, csr2ell, csr2hyb, csr2bsr, csr2gebsr\n"
      "              coo2csr, ell2csr, hyb2csr, dense2csr, dense2coo, prune_dense2csr, prune_dense2csr_by_percentage, dense2csc\n"
      "              csr2dense, csc2dense, coo2dense, bsr2csr, gebsr2csr, gebsr2gebsr, csr2csr_compress, prune_csr2csr, prune_csr2csr_by_percentage\n"
      "              sparse_to_dense_coo, sparse_to_dense_csr, sparse_to_dense_csc, dense_to_sparse_coo, dense_to_sparse_csr, dense_to_sparse_csc, sparse_to_sparse, extract\n"
-     "  Sorting: cscsort, csrsort, coosort\n"
+     "  Sorting: cscsort, csrsort, coosort, spsort_coo, spsort_csr, spsort_csc\n"
      "  Misc: identity, inverse_permutation, nnz\n"
      "  Util: check_matrix_csr, check_matrix_csc, check_matrix_coo, check_matrix_gebsr, check_matrix_gebsc, check_matrix_ell, check_matrix_hyb")
 
@@ -426,6 +440,14 @@ void rocsparse_arguments_config::set_description(options_description& desc)
      value<rocsparse_int>(&this->batch_stride)->default_value(128),
      "Indicates the batch stride for batched routines.")
 
+    ("pad_A",
+     value<int64_t>(&this->pad_A)->default_value(0),
+     "Indicates the number of unused elements between the batches of the sparse A matrix in rocsparse_spsort.")
+
+    ("pad_B",
+     value<int64_t>(&this->pad_B)->default_value(0),
+     "Indicates the number of unused elements between the batches of the sparse B matrix in rocsparse_spsort.")
+
 #ifdef ROCSPARSE_WITH_MEMSTAT
     ("memstat-report",
      value<std::string>(&this->b_memory_report_filename)->default_value("rocsparse_bench_memstat.json"),
@@ -452,11 +474,23 @@ void rocsparse_arguments_config::set_description(options_description& desc)
       value<rocsparse_int>(&this->b_gtsv_interleaved_alg)->default_value(rocsparse_gtsv_interleaved_alg_default),
       "Indicates what algorithm to use when running rocsparse_gtsv_interleaved_batch. Possibly choices are thomas: 1, lu: 2, qr: 3 (default:3)")
 
+#if defined(ROCSPARSE_WITH_SPSORT)
+    ("spsort_alg",
+      value<rocsparse_int>(&this->b_spsort_alg)->default_value(rocsparse_spsort_alg_default),
+      "Indicates what algorithm to use when running rocsparse_spsort. Possibly choices are rocsparse_spsort_alg_default: 0, rocsparse_spsort_alg_radix_sort: 1 (default: 0)")
+#endif
+
       ("sparsity-pattern-statistics",
        "enable sparsity pattern statistics: min,max and median of the number of non-zeros per row and per column of the sparsity pattern of the matrix A will be part of benchmarking results.")
 
       ("no-stage-analysis",
-       "disable the stage analysis in algorithms where it applies.");
+       "disable the stage analysis in algorithms where it applies.")
+
+      ("offsets-batch-stride-zero-A",
+       "the batches of the sparse A matrix share one row or column pointer array in rocsparse_spsort.")
+
+      ("offsets-batch-stride-zero-B",
+       "the batches of the sparse B matrix share one row or column pointer array in rocsparse_spsort.");
     // clang-format on
 }
 
@@ -471,6 +505,9 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
         std::cout << desc << std::endl;
         return -2;
     }
+
+    // Percentage represents a value in the range [0, 100], so clamp it.
+    this->percentage = std::max(0.0, std::min(this->percentage, 100.0));
 
     if(this->b_dir != rocsparse_direction_row && this->b_dir != rocsparse_direction_column)
     {
@@ -555,6 +592,15 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
         return -1;
     }
 
+#if defined(ROCSPARSE_WITH_SPSORT)
+    if(this->b_spsort_alg != rocsparse_spsort_alg_default
+       && this->b_spsort_alg != rocsparse_spsort_alg_radix_sort)
+    {
+        std::cerr << "Invalid value for --spsort_alg" << std::endl;
+        return -1;
+    }
+#endif
+
     if(this->b_gtsv_interleaved_alg != rocsparse_gtsv_interleaved_alg_default
        && this->b_gtsv_interleaved_alg != rocsparse_gtsv_interleaved_alg_thomas
        && this->b_gtsv_interleaved_alg != rocsparse_gtsv_interleaved_alg_lu
@@ -572,6 +618,16 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
     if(vm.count("no-stage-analysis"))
     {
         this->call_stage_analysis = false;
+    }
+
+    if(vm.count("offsets-batch-stride-zero-A"))
+    {
+        this->offsets_batch_stride_zero_A = true;
+    }
+
+    if(vm.count("offsets-batch-stride-zero-B"))
+    {
+        this->offsets_batch_stride_zero_B = true;
     }
 
     if(this->b_transA == 'N')
@@ -636,6 +692,9 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
     this->spmm_alg             = (rocsparse_spmm_alg)this->b_spmm_alg;
     this->sddmm_alg            = (rocsparse_sddmm_alg)this->b_sddmm_alg;
     this->gtsv_interleaved_alg = (rocsparse_gtsv_interleaved_alg)this->b_gtsv_interleaved_alg;
+#if defined(ROCSPARSE_WITH_SPSORT)
+    this->spsort_alg = (rocsparse_spsort_alg)this->b_spsort_alg;
+#endif
 
 #ifdef ROCSPARSE_WITH_MEMSTAT
     rocsparse_status status = rocsparse_memstat_report(this->b_memory_report_filename.c_str());

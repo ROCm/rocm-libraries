@@ -12,10 +12,12 @@
  *
  * Binds strictly to rocke/ir.h (frozen IR) and the shared helpers declared in
  * rocke/lower_hip_internal.h (defined in bucket 0). Shared helpers (rocke_h_emit*,
- * rocke_h_name, rocke_h_type_to_hip, rocke_h_hip_scalar, rocke_h_vec_prefix,
+ * rocke_h_name, rocke_h_type_to_hip, rocke_h_require_hip_scalar, rocke_h_vec_prefix,
  * rocke_h_smem_set_storage/_storage, rocke_h_fail, rocke_h_live) are NOT defined here.
  */
+#include "rocke/dtypes.h"
 #include "rocke/lower_hip_internal.h"
+#include "rocke/lower_llvm_internal.h" /* rocke_ll_backend_for: the target's buffer word3 */
 
 #include <stdint.h>
 #include <string.h>
@@ -76,6 +78,26 @@ static const char* mem_attr_str(const rocke_op_t* op, const char* key, const cha
     return s ? s : dflt;
 }
 
+/* Python _nontemporal: 1 when the op carries nontemporal=True, 0 when the attr
+ * is absent/false, -1 when it is not a bool (rejected, not coerced). */
+static int mem_nontemporal(const rocke_op_t* op)
+{
+    const rocke_attr_value_t* v = rocke_attr_get(&op->attrs, "nontemporal");
+    if(!v)
+        return 0;
+    if(v->kind != ROCKE_ATTR_BOOL)
+        return -1;
+    return v->u.b ? 1 : 0;
+}
+
+/* Python STREAMING_ARCHS (rocke/core/ir.py): the targets whose STREAMING
+ * lowering is validated. Other admitted targets map the nontemporal builtins
+ * to different cache bits or are unverified, so the hint is rejected there. */
+static bool mem_streaming_arch(const char* gfx)
+{
+    return gfx && (strcmp(gfx, "gfx942") == 0 || strcmp(gfx, "gfx950") == 0);
+}
+
 /* ================================ LDS alloc =============================== */
 
 /* Python _op_tile_smem_alloc */
@@ -105,14 +127,7 @@ static rocke_status_t _op_tile_smem_alloc(rocke_h_lowerer_t* lw, const rocke_op_
         return rocke_h_fail(lw, ROCKE_ERR_TYPE, "tile.smem_alloc: result is not an smem type");
     }
 
-    elem = rocke_h_hip_scalar(st->elem ? st->elem->name : "");
-    if(!elem)
-    {
-        return rocke_h_fail(lw,
-                            ROCKE_ERR_KEY,
-                            "tile.smem_alloc: no HIP type for elem '%s'",
-                            st->elem ? st->elem->name : "(null)");
-    }
+    elem = rocke_h_require_hip_scalar(lw, st->elem ? st->elem->name : NULL);
     nice = rocke_h_name(lw, res);
 
     /* dims = "][".join(str(d) for d in st.shape) */
@@ -194,7 +209,7 @@ static rocke_status_t _op_tile_smem_store_vN(rocke_h_lowerer_t* lw, const rocke_
     }
     idx_str = mem_idx_join(lw, &op->operands[1], op->num_operands - 2);
     elem_name = mem_attr_str(op, "elem_type", "f16");
-    prefix = rocke_h_vec_prefix(elem_name, /*full_map=*/true);
+    prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "smem_store_vN");
     rocke_h_emitf(lw,
                   "*reinterpret_cast<%s%lld*>(&%s[%s]) = %s;",
                   prefix,
@@ -324,7 +339,9 @@ static rocke_status_t _op_tile_smem_load_vN(rocke_h_lowerer_t* lw, const rocke_o
     smem = op->operands[0];
     n = mem_attr_int(op, "vec", 0);
     elem_name = mem_attr_str(op, "elem_type", "f16");
-    prefix = rocke_h_vec_prefix(elem_name, /*full_map=*/false);
+    /* Full map, like Python _smem_vec_prefix: an f32/i32/i8 LDS vector load must
+     * not be reinterpreted through the f16 view. */
+    prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "smem_load_vN");
     storage = mem_storage_of(lw, smem);
     if(!storage)
     {
@@ -332,6 +349,21 @@ static rocke_status_t _op_tile_smem_load_vN(rocke_h_lowerer_t* lw, const rocke_o
     }
     idx_str = mem_idx_join(lw, &op->operands[1], op->num_operands - 1);
     res = rocke_h_name(lw, op->results[0]);
+    const int64_t byte_count = n * (rocke_dtype_info(elem_name)->encoded_bits / 8);
+    if(byte_count & (byte_count - 1))
+    {
+        /* Clang pads vector objects; copy only the actual LDS payload. */
+        rocke_h_emitf(lw,
+                      "%s%lld %s; __builtin_memcpy(&%s, &%s[%s], %lld);",
+                      prefix,
+                      (long long)n,
+                      res,
+                      res,
+                      storage,
+                      idx_str,
+                      (long long)byte_count);
+        return lw->status;
+    }
     rocke_h_emitf(lw,
                   "%s%lld %s = *reinterpret_cast<const %s%lld*>(&%s[%s]);",
                   prefix,
@@ -526,10 +558,49 @@ static rocke_status_t _op_memref_global_load_vN(rocke_h_lowerer_t* lw, const roc
     idx = op->operands[1];
     vec = mem_attr_int(op, "vec", 0);
     elem_name = mem_attr_str(op, "elem_type", "f16");
-    prefix = rocke_h_vec_prefix(elem_name, /*full_map=*/false);
+    prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "global_load_vN");
     res = rocke_h_name(lw, op->results[0]);
+    const int64_t byte_count = vec * (rocke_dtype_info(elem_name)->encoded_bits / 8);
+    const int64_t align = mem_attr_int(op, "align", vec * 2);
+    if(align <= 0 || (align & (align - 1)))
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "global_load_vN: alignment must be a positive power of two");
+    const int nontemporal = mem_nontemporal(op);
+    if(nontemporal < 0)
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "memref.global_load_vN: nontemporal attr must be a bool");
+    if(nontemporal && !mem_streaming_arch(lw->arch.gfx))
+        return rocke_h_fail(
+            lw,
+            ROCKE_ERR_VALUE,
+            "memref.global_load_vN: temporal_hint STREAMING requires gfx942 or gfx950, got %s",
+            lw->arch.gfx ? lw->arch.gfx : "(unknown)");
+    if(align < byte_count || (byte_count & (byte_count - 1)))
+    {
+        if(nontemporal)
+            return rocke_h_fail(lw,
+                                ROCKE_ERR_NOTIMPL,
+                                "global_load_vN: the HIP backend does not yet lower "
+                                "nontemporal on the memcpy path (under-aligned or "
+                                "non-power-of-two payload)");
+        /* Copy only the payload, not vector padding, with the IR's alignment. */
+        rocke_h_emitf(
+            lw,
+            "%s%lld %s; __builtin_memcpy(&%s, __builtin_assume_aligned(%s + %s, %lld), %lld);",
+            prefix,
+            (long long)vec,
+            res,
+            res,
+            rocke_h_name(lw, ptr),
+            rocke_h_name(lw, idx),
+            (long long)align,
+            (long long)byte_count);
+        return lw->status;
+    }
     rocke_h_emitf(lw,
-                  "%s%lld %s = *reinterpret_cast<const %s%lld*>(%s + %s);",
+                  nontemporal ? "%s%lld %s = __builtin_nontemporal_load(reinterpret_cast<const "
+                                "%s%lld*>(%s + %s));"
+                              : "%s%lld %s = *reinterpret_cast<const %s%lld*>(%s + %s);",
                   prefix,
                   (long long)vec,
                   res,
@@ -601,7 +672,50 @@ static rocke_status_t _op_memref_global_store_vN(rocke_h_lowerer_t* lw, const ro
     val = op->operands[2];
     n = mem_attr_int(op, "vec", 0);
     elem_name = mem_attr_str(op, "elem_type", "f16");
-    prefix = rocke_h_vec_prefix(elem_name, /*full_map=*/false);
+    prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "global_store_vN");
+    const int64_t byte_count = n * (rocke_dtype_info(elem_name)->encoded_bits / 8);
+    const int64_t align = mem_attr_int(op, "align", byte_count);
+    if(align <= 0 || (align & (align - 1)))
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "global_store_vN: alignment must be a positive power of two");
+    const int nontemporal = mem_nontemporal(op);
+    if(nontemporal < 0)
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "memref.global_store_vN: nontemporal attr must be a bool");
+    if(nontemporal && !mem_streaming_arch(lw->arch.gfx))
+        return rocke_h_fail(
+            lw,
+            ROCKE_ERR_VALUE,
+            "memref.global_store_vN: temporal_hint STREAMING requires gfx942 or gfx950, got %s",
+            lw->arch.gfx ? lw->arch.gfx : "(unknown)");
+    if(align < byte_count || (byte_count & (byte_count - 1)))
+    {
+        if(nontemporal)
+            return rocke_h_fail(lw,
+                                ROCKE_ERR_NOTIMPL,
+                                "global_store_vN: the HIP backend does not yet lower "
+                                "nontemporal on the memcpy path (under-aligned or "
+                                "non-power-of-two payload)");
+        rocke_h_emitf(lw,
+                      "__builtin_memcpy(__builtin_assume_aligned(%s + %s, %lld), &%s, %lld);",
+                      rocke_h_name(lw, ptr),
+                      rocke_h_name(lw, idx),
+                      (long long)align,
+                      rocke_h_name(lw, val),
+                      (long long)byte_count);
+        return lw->status;
+    }
+    if(nontemporal)
+    {
+        rocke_h_emitf(lw,
+                      "__builtin_nontemporal_store(%s, reinterpret_cast<%s%lld*>(%s + %s));",
+                      rocke_h_name(lw, val),
+                      prefix,
+                      (long long)n,
+                      rocke_h_name(lw, ptr),
+                      rocke_h_name(lw, idx));
+        return lw->status;
+    }
     rocke_h_emitf(lw,
                   "*reinterpret_cast<%s%lld*>(%s + %s) = %s;",
                   prefix,
@@ -639,6 +753,129 @@ static rocke_status_t _op_memref_global_atomic_add(rocke_h_lowerer_t* lw, const 
                   rocke_h_name(lw, ptr),
                   rocke_h_name(lw, idx),
                   rocke_h_name(lw, val));
+    return lw->status;
+}
+
+/* ir._FENCE_SCOPES / _FENCE_ORDERINGS / _FLAG_STORE_ORDERINGS. */
+static const char* const k_hip_sync_scopes[] = {"workgroup", "agent", "system", NULL};
+static const char* const k_hip_fence_orderings[]
+    = {"acquire", "release", "acq_rel", "seq_cst", NULL};
+static const char* const k_hip_flag_store_orderings[] = {"monotonic", "release", "seq_cst", NULL};
+
+/* Python ir._sync_attr: the lowerer may run on unverified IR, so a missing or
+ * unknown scope / ordering is rejected rather than defaulted. */
+static const char* hip_sync_attr(rocke_h_lowerer_t* lw,
+                                 const rocke_op_t* op,
+                                 const char* key,
+                                 const char* const* allowed)
+{
+    const char* s = rocke_attr_get_str(&op->attrs, key);
+    if(!s)
+    {
+        rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "%s: %s attribute missing or not a string", op->name, key);
+    }
+    for(const char* const* a = allowed; *a; ++a)
+    {
+        if(!strcmp(s, *a))
+        {
+            return s;
+        }
+    }
+    rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s: unknown %s '%s'", op->name, key, s);
+}
+
+/* Python _HIP_ATOMIC_ORDER / _HIP_FENCE_SCOPE / _HIP_MEMORY_SCOPE, applied to
+ * values hip_sync_attr already accepted. */
+static const char* hip_atomic_order(const char* o)
+{
+    if(!strcmp(o, "monotonic"))
+        return "__ATOMIC_RELAXED";
+    if(!strcmp(o, "acquire"))
+        return "__ATOMIC_ACQUIRE";
+    if(!strcmp(o, "release"))
+        return "__ATOMIC_RELEASE";
+    if(!strcmp(o, "acq_rel"))
+        return "__ATOMIC_ACQ_REL";
+    return "__ATOMIC_SEQ_CST";
+}
+
+static const char* hip_fence_scope(const char* s)
+{
+    if(!strcmp(s, "workgroup"))
+        return "workgroup";
+    if(!strcmp(s, "agent"))
+        return "agent";
+    return "";
+}
+
+static const char* hip_memory_scope(const char* s)
+{
+    if(!strcmp(s, "workgroup"))
+        return "__HIP_MEMORY_SCOPE_WORKGROUP";
+    if(!strcmp(s, "agent"))
+        return "__HIP_MEMORY_SCOPE_AGENT";
+    return "__HIP_MEMORY_SCOPE_SYSTEM";
+}
+
+/* Python _op_memref_fence */
+static rocke_status_t _op_memref_fence(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const char *scp, *ord;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    scp = hip_sync_attr(lw, op, "scope", k_hip_sync_scopes);
+    ord = hip_sync_attr(lw, op, "ordering", k_hip_fence_orderings);
+    rocke_h_emitf(
+        lw, "__builtin_amdgcn_fence(%s, \"%s\");", hip_atomic_order(ord), hip_fence_scope(scp));
+    return lw->status;
+}
+
+/* Python _op_memref_global_flag_store */
+static rocke_status_t _op_memref_global_flag_store(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const char *scp, *ord;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(op->num_operands < 3)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.global_flag_store: too few operands");
+    }
+    scp = hip_sync_attr(lw, op, "scope", k_hip_sync_scopes);
+    ord = hip_sync_attr(lw, op, "ordering", k_hip_flag_store_orderings);
+    rocke_h_emitf(lw,
+                  "__hip_atomic_store(&%s[%s], %s, %s, %s);",
+                  rocke_h_name(lw, op->operands[0]),
+                  rocke_h_name(lw, op->operands[1]),
+                  rocke_h_name(lw, op->operands[2]),
+                  hip_atomic_order(ord),
+                  hip_memory_scope(scp));
+    return lw->status;
+}
+
+/* Python _op_memref_global_flag_wait_eq */
+static rocke_status_t _op_memref_global_flag_wait_eq(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const char* scp;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(op->num_operands < 3)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.global_flag_wait_eq: too few operands");
+    }
+    scp = hip_sync_attr(lw, op, "scope", k_hip_sync_scopes);
+    rocke_h_emitf(lw,
+                  "while (__hip_atomic_load(&%s[%s], __ATOMIC_ACQUIRE, %s) != %s) {}",
+                  rocke_h_name(lw, op->operands[0]),
+                  rocke_h_name(lw, op->operands[1]),
+                  hip_memory_scope(scp),
+                  rocke_h_name(lw, op->operands[2]));
     return lw->status;
 }
 
@@ -684,6 +921,33 @@ static rocke_status_t _op_memref_global_atomic_add_pk_bf16(rocke_h_lowerer_t* lw
     val = op->operands[2];
     rocke_h_emitf(lw,
                   "bf16x2 %s = __builtin_amdgcn_global_atomic_fadd_v2bf16("
+                  "%s + %s, %s);",
+                  rocke_h_name(lw, op->results[0]),
+                  rocke_h_name(lw, ptr),
+                  rocke_h_name(lw, idx),
+                  rocke_h_name(lw, val));
+    return lw->status;
+}
+
+/* Python _op_memref_global_atomic_add_pk_f16 */
+static rocke_status_t _op_memref_global_atomic_add_pk_f16(rocke_h_lowerer_t* lw,
+                                                          const rocke_op_t* op)
+{
+    rocke_value_t *ptr, *idx, *val;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(op->num_operands < 3 || op->num_results < 1)
+    {
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "memref.global_atomic_add_pk_f16: bad operand/result count");
+    }
+    ptr = op->operands[0];
+    idx = op->operands[1];
+    val = op->operands[2];
+    rocke_h_emitf(lw,
+                  "half2 %s = __builtin_amdgcn_global_atomic_fadd_v2f16("
                   "%s + %s, %s);",
                   rocke_h_name(lw, op->results[0]),
                   rocke_h_name(lw, ptr),
@@ -765,14 +1029,24 @@ static rocke_status_t _op_tile_buffer_rsrc(rocke_h_lowerer_t* lw, const rocke_op
     }
     ptr = op->operands[0];
     num_bytes = op->operands[1];
+    /* The flags word is the rsrc DWORD3, whose format / out-of-bounds encoding
+     * is ISA-specific. Take it from the target's ISA backend, the same source
+     * the LLVM lowerer's tile.buffer_rsrc reads, so both routes agree. */
+    rocke_status_t backend_status = ROCKE_OK;
+    const rocke_isa_backend_t* backend = rocke_ll_backend_for(lw->arch.gfx, &backend_status);
+    if(backend == NULL)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_KEY, "no ISA backend registered for '%s'", lw->arch.gfx);
+    }
     rocke_h_emitf(lw,
                   "rsrc_t %s = __builtin_amdgcn_make_buffer_rsrc("
                   "(void*)%s, /*stride=*/(short)0, "
                   "/*num_records=*/(int)%s, "
-                  "/*flags=*/(int)0x00027000);",
+                  "/*flags=*/(int)0x%08X);",
                   rocke_h_name(lw, op->results[0]),
                   rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, num_bytes));
+                  rocke_h_name(lw, num_bytes),
+                  (unsigned)backend->buffer_rsrc_word3);
     return lw->status;
 }
 
@@ -903,7 +1177,15 @@ static rocke_status_t _op_tile_buffer_load_vN(rocke_h_lowerer_t* lw, const rocke
     soffset = op->operands[2];
     dwords = mem_attr_int(op, "dwords", 0);
     elem = mem_attr_str(op, "elem_type", "f16");
-    prefix = rocke_h_vec_prefix(elem, /*full_map=*/false);
+    /* Python _op_tile_buffer_load_vN indexes a 4-entry map ({f16,bf16,f32,i32})
+     * and raises KeyError otherwise, so f32/i32 must not resolve to "f16x". */
+    if(strcmp(elem, "f16") != 0 && strcmp(elem, "bf16") != 0 && strcmp(elem, "f32") != 0
+       && strcmp(elem, "i32") != 0)
+    {
+        return rocke_h_fail(
+            lw, ROCKE_ERR_KEY, "tile.buffer_load_vN: unsupported element type '%s'", elem);
+    }
+    prefix = rocke_h_vec_prefix(elem, /*full_map=*/true);
     n = (strcmp(elem, "f16") == 0 || strcmp(elem, "bf16") == 0) ? dwords * 2 : dwords;
     if(dwords == 1)
     {
@@ -942,6 +1224,54 @@ static rocke_status_t _op_tile_buffer_load_vN(rocke_h_lowerer_t* lw, const rocke
                   res,
                   tmp,
                   (long long)dwords * 4);
+    return lw->status;
+}
+
+/* Python _op_tile_buffer_load (dtype-generic scalar): 2-byte elements (f16,
+ * bf16) through the b16 builtin, 4-byte ones (f32, i32) through the b32 one,
+ * memcpy into the scalar result. */
+static rocke_status_t _op_tile_buffer_load(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    rocke_value_t *rsrc, *voffset, *soffset;
+    const char *res, *tmp, *elem, *hip_t;
+    bool narrow;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(op->num_operands < 3 || op->num_results < 1)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.buffer_load: bad operand/result count");
+    }
+    rsrc = op->operands[0];
+    voffset = op->operands[1];
+    soffset = op->operands[2];
+    elem = mem_attr_str(op, "elem_type", "");
+    if(strcmp(elem, "f16") != 0 && strcmp(elem, "bf16") != 0 && strcmp(elem, "f32") != 0
+       && strcmp(elem, "i32") != 0)
+    {
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "tile.buffer_load: unsupported elem_type '%s'", elem);
+    }
+    hip_t = rocke_h_require_hip_scalar(lw, elem);
+    if(!hip_t)
+    {
+        return lw->status;
+    }
+    narrow = strcmp(elem, "f16") == 0 || strcmp(elem, "bf16") == 0;
+    res = rocke_h_name(lw, op->results[0]);
+    tmp = rocke_arena_printf(&lw->b->arena, "_bl_%s", res);
+    rocke_h_emitf(lw,
+                  "%s %s = (%s)__builtin_amdgcn_raw_buffer_load_%s(%s, %s, %s, 0);",
+                  narrow ? "unsigned short" : "unsigned int",
+                  tmp,
+                  narrow ? "unsigned short" : "unsigned int",
+                  narrow ? "b16" : "b32",
+                  rocke_h_name(lw, rsrc),
+                  rocke_h_name(lw, voffset),
+                  rocke_h_name(lw, soffset));
+    rocke_h_emitf(
+        lw, "%s %s; __builtin_memcpy(&%s, &%s, %d);", hip_t, res, res, tmp, narrow ? 2 : 4);
     return lw->status;
 }
 
@@ -1426,6 +1756,10 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mem(void)
            {ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD, _op_memref_global_atomic_add},
            {ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_F32, _op_memref_global_atomic_add_f32},
            {ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_BF16, _op_memref_global_atomic_add_pk_bf16},
+           {ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_F16, _op_memref_global_atomic_add_pk_f16},
+           {ROCKE_OP_MEMREF_FENCE, _op_memref_fence},
+           {ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE, _op_memref_global_flag_store},
+           {ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ, _op_memref_global_flag_wait_eq},
            {ROCKE_OP_MEMREF_COOPERATIVE_GLOBAL_STORE, _op_memref_cooperative_global_store},
            /* global pointer arithmetic + buffer rsrc */
            {ROCKE_OP_TILE_GLOBAL_PTR_ADD, _op_tile_global_ptr_add},
@@ -1434,6 +1768,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mem(void)
            {ROCKE_OP_TILE_BUFFER_LOAD_F16, _op_tile_buffer_load_f16},
            {ROCKE_OP_TILE_BUFFER_LOAD_VN_F16, _op_tile_buffer_load_vN_f16},
            {ROCKE_OP_TILE_BUFFER_LOAD_VN, _op_tile_buffer_load_vN},
+           {ROCKE_OP_TILE_BUFFER_LOAD, _op_tile_buffer_load},
            {ROCKE_OP_TILE_BUFFER_STORE_F16, _op_tile_buffer_store_f16},
            {ROCKE_OP_TILE_BUFFER_STORE_VN_F16, _op_tile_buffer_store_vN_f16},
            {ROCKE_OP_TILE_BUFFER_LOAD_BF16, _op_tile_buffer_load_bf16},

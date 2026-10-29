@@ -15,6 +15,7 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/Batchnorm/TestBatchnormCommon.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/Batchnorm/TestBatchnormApplicabilityChecks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/Layernorm/TestLayernormPlanBuilder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/Layernorm/TestLayernormBwdPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/Layernorm/TestLayernormFwdPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/Layernorm/TestLayernormApplicabilityChecks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/TestPlanUtils.cpp
@@ -23,5 +24,9 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/RMSnorm/TestRMSnormBwdPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/RMSnorm/TestRMSnormBwdPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/RMSnorm/TestRMSnormApplicabilityChecks.cpp
-
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/Resample/TestResampleApplicabilityChecks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/Resample/TestResamplePlanBuilder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/Resample/TestResampleFwdPlan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/Resample/TestResampleBwdPlan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/Resample/TestResampleBwdPlanBuilder.cpp
 )

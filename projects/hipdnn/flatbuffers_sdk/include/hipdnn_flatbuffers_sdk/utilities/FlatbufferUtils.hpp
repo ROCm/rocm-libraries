@@ -3,12 +3,14 @@
 
 #pragma once
 
+#include <cstring>
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -173,6 +175,82 @@ inline double extractDoubleFromTensorValue(const data_objects::TensorAttributes*
                                            const char* paramName)
 {
     return extractValueFromTensorValue<double>(tensorAttr, paramName);
+}
+
+/// @brief Reads a host scalar of `dataType` from `hostPtr` and returns it as
+/// TargetType. Mirrors resolveScalarOperand's dtype switch
+/// (DOUBLE/FLOAT/HALF/BFLOAT16/INT32/INT64/BOOLEAN). Throws std::runtime_error
+/// on UNSET/unsupported dtype or a null pointer.
+template <typename TargetType>
+TargetType
+    readHostScalarAs(const void* hostPtr, data_objects::DataType dataType, const char* paramName)
+{
+    if(hostPtr == nullptr)
+    {
+        throw std::runtime_error(std::string(paramName) + " host scalar pointer is null");
+    }
+
+    auto readAs = [hostPtr](auto typeTag) -> TargetType {
+        using SourceType = decltype(typeTag);
+        SourceType value;
+        std::memcpy(&value, hostPtr, sizeof(SourceType));
+        return static_cast<TargetType>(value);
+    };
+
+    switch(dataType)
+    {
+    case data_objects::DataType::DOUBLE:
+        return readAs(double{});
+    case data_objects::DataType::FLOAT:
+        return readAs(float{});
+    case data_objects::DataType::HALF:
+        return readAs(hipdnn_data_sdk::types::half{});
+    case data_objects::DataType::BFLOAT16:
+        return readAs(hipdnn_data_sdk::types::bfloat16{});
+    case data_objects::DataType::INT32:
+        return readAs(int32_t{});
+    case data_objects::DataType::INT64:
+        return readAs(int64_t{});
+    case data_objects::DataType::BOOLEAN:
+        return readAs(bool{});
+    case data_objects::DataType::UNSET:
+        throw std::runtime_error(std::string(paramName) + " tensor has UNSET data type");
+    default:
+        throw std::runtime_error(std::string(paramName) + " has unsupported data type");
+    }
+}
+
+/// @brief Resolution seam mirroring resolveScalarOperand: a pure runtime
+/// pass-by-value scalar (is_runtime_pass_by_value with no baked value) reads its
+/// host value from the variant-pack slot for its uid; every other tensor (baked
+/// compile-time constant or runtime-with-default) returns the baked graph value
+/// and ignores the pack. Throws std::runtime_error if a pure-runtime scalar's
+/// pack slot is missing or null.
+template <typename TargetType>
+TargetType resolveScalarFromVariantPack(const data_objects::TensorAttributesT& tensorAttr,
+                                        const std::unordered_map<int64_t, void*>& variantPack,
+                                        const char* paramName)
+{
+    if(tensorAttr.is_runtime_pass_by_value && tensorAttr.value.value == nullptr)
+    {
+        auto it = variantPack.find(tensorAttr.uid);
+        if(it == variantPack.end() || it->second == nullptr)
+        {
+            throw std::runtime_error(
+                std::string(paramName)
+                + " runtime pass-by-value tensor missing host value in variant pack");
+        }
+        return readHostScalarAs<TargetType>(it->second, tensorAttr.data_type, paramName);
+    }
+    return extractValueFromTensorValue<TargetType>(tensorAttr, paramName);
+}
+
+inline double
+    resolveDoubleScalarFromVariantPack(const data_objects::TensorAttributesT& tensorAttr,
+                                       const std::unordered_map<int64_t, void*>& variantPack,
+                                       const char* paramName)
+{
+    return resolveScalarFromVariantPack<double>(tensorAttr, variantPack, paramName);
 }
 
 /// @brief Reads the runtime pass-by-value flag off a serialized tensor table.

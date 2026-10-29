@@ -15,16 +15,18 @@ set(SUPPORTED_ARCHITECTURES
     "gfx1151"
     "gfx1152"
     "gfx1153"
+    "gfx1170"
+    "gfx1171"
     "gfx1200"
     "gfx1201"
     "gfx1250"
+    "gfx1250-strict"
     "gfx908:xnack+"
     "gfx908:xnack-"
     "gfx90a:xnack+"
     "gfx90a:xnack-"
     "gfx942:xnack+"
     "gfx950:xnack+"
-    "gfx1250:xnack+"
 )
 
 # Base architectures - used when "all" is specified for GPU_TARGETS
@@ -36,18 +38,19 @@ set(BASE_ARCHITECTURES)
 # gfx10XX architectures (e.g., gfx1010, gfx1011, gfx1030, etc...) are technically supported by tensilelite,
 # but are NOT included in the default "all" build in hipBLASLt. This is because "extops" builds are not supported
 # for legacy devices. Including these architectures would result in build failures or incomplete feature support.
-if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
-    # For address sanitizer builds, "all" is just the architectures that
+if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN")
+    # For device address sanitizer builds, "all" is just the architectures that
     # support xnack+.
     set(BASE_ARCHITECTURES
         "gfx908:xnack+"
         "gfx90a:xnack+"
         "gfx942:xnack+"
         "gfx950:xnack+"
-        "gfx1250:xnack+"
+        "gfx1250"
+        "gfx1250-strict"
         )
 else()
-    # For non address sanitizer builds, "all" is non-xnack architectures.
+    # Host-only ASAN and non-sanitized builds use the regular architecture list.
     set(BASE_ARCHITECTURES
         "gfx908"
         "gfx90a"
@@ -60,9 +63,12 @@ else()
         "gfx1151"
         "gfx1152"
         "gfx1153"
+        "gfx1170"
+        "gfx1171"
         "gfx1200"
         "gfx1201"
-        "gfx1250")
+        "gfx1250"
+        "gfx1250-strict")
 endif()
 
 # Validate that all BASE_ARCHITECTURES are in the SUPPORTED_ARCHITECTURES list
@@ -102,7 +108,7 @@ function(tensilelite_get_supported_architectures output_var)
 endfunction()
 
 function(tensilelite_sanitizer_requires_xnack output_var)
-    if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+    if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN")
         set(${output_var} ON PARENT_SCOPE)
     else()
         set(${output_var} OFF PARENT_SCOPE)
@@ -110,7 +116,7 @@ function(tensilelite_sanitizer_requires_xnack output_var)
 endfunction()
 
 function(tensilelite_offload_target output_var arch)
-    set(_xnack_capable gfx908 gfx90a gfx942 gfx950 gfx1250)
+    set(_xnack_capable gfx908 gfx90a gfx942 gfx950) #gfx1250 support xnack_any so don't need to explicit ":xnack+"
     set(_target "${arch}")
     tensilelite_sanitizer_requires_xnack(_requires_xnack)
     if(_requires_xnack AND NOT "${arch}" MATCHES ":" AND "${arch}" IN_LIST _xnack_capable)

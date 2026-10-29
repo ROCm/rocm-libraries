@@ -1,17 +1,29 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-# Support both standalone (scikit-build-core / tox) and subdirectory
-# (hipblaslt CMake) builds.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     cmake_minimum_required(VERSION 3.25)
 
-    include(${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/modules/default_amdclang.cmake)
+endif()
 
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    cmake_path(GET CMAKE_CURRENT_LIST_DIR PARENT_PATH _rocisa_tensilelite_dir)
+    cmake_path(GET _rocisa_tensilelite_dir PARENT_PATH _rocisa_hipblaslt_dir)
+    cmake_path(GET _rocisa_hipblaslt_dir PARENT_PATH _rocisa_projects_dir)
+    cmake_path(GET _rocisa_projects_dir PARENT_PATH ROCM_LIBRARIES_ROOT)
+    cmake_path(NORMAL_PATH ROCM_LIBRARIES_ROOT)
+endif()
+
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    include("${ROCM_LIBRARIES_ROOT}/cmake/modules/default_amdclang.cmake")
     project(rocisa LANGUAGES CXX)
     set(ROCISA_STANDALONE ON)
 else()
     set(ROCISA_STANDALONE OFF)
+endif()
+
+if(ROCISA_STANDALONE)
+    option(BUILD_SHARED_LIBS "Build libraries as shared by default." ON)
 endif()
 
 option(ROCISA_USE_STABLE_ABI
@@ -19,6 +31,19 @@ option(ROCISA_USE_STABLE_ABI
        OFF)
 
 option(ROCISA_ENABLE_COVERAGE "Enable code coverage instrumentation for rocisa" OFF)
+
+# Compiles StinkyTofu's example HelloWorldPass plugin directly into _rocisa (LLVM-style
+# static-plugin pattern: object code linked into the host, registered via an explicit
+# call rather than dlopen). This is independent of whether stinkytofu itself was built
+# shared or static, and of whether it was found via find_package or add_subdirectory —
+# see the rocisa.registerExamplePlugin() binding below. Used to exercise the compiled-in
+# plugin path from test_pass_plugin.py regardless of stinkytofu's own build config.
+# Named after the single plugin it embeds: it does not enable StinkyTofu's example
+# suite (that is stinkytofu's own STINKYTOFU_BUILD_EXAMPLES).
+option(ROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN
+    "Compile StinkyTofu's example HelloWorldPass plugin directly into rocisa (for testing static stinkytofu builds)"
+    OFF)
+mark_as_advanced(ROCISA_USE_STABLE_ABI ROCISA_ENABLE_COVERAGE ROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -35,18 +60,17 @@ target_include_directories(rocisa-cpp
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 )
 
-# Build the Python extension when bundling deps (hipblaslt subdir build)
-# or when building standalone.
-if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
+block()
+    # nanobind requires Python to be found first.
+    if(ROCISA_USE_STABLE_ABI)
+        find_package(Python 3.12 COMPONENTS Interpreter Development.Module Development.SABIModule REQUIRED)
+    else()
+        find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
+    endif()
+
     if(ROCISA_STANDALONE)
         # scikit-build-core pre-installs nanobind (from build-system.requires)
         # and injects its CMake path, so find_package works without FetchContent.
-        # nanobind requires Python to be found first.
-        if(ROCISA_USE_STABLE_ABI)
-            find_package(Python 3.12 COMPONENTS Interpreter Development.Module Development.SABIModule REQUIRED)
-        else()
-            find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
-        endif()
         find_package(nanobind REQUIRED CONFIG)
     else()
         include(FetchContent)
@@ -56,9 +80,6 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
           GIT_TAG        9b3afa9dbdc23641daf26fadef7743e7127ff92f # v2.6.1
         )
         FetchContent_MakeAvailable(nanobind)
-        if(ROCISA_USE_STABLE_ABI)
-            find_package(Python 3.12 COMPONENTS Interpreter Development.Module Development.SABIModule REQUIRED)
-        endif()
     endif()
 
     # HIP is required to build _rocisa (via hip::host).  Set the search prefix
@@ -70,14 +91,17 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
     find_package(hip REQUIRED)
 
-    # Locate origami: prefer the monorepo sibling, fall back to installed package.
-    if(NOT TARGET roc::origami)
-        set(_origami_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/origami")
-        if(IS_DIRECTORY "${_origami_sibling}")
-            add_subdirectory("${_origami_sibling}" origami EXCLUDE_FROM_ALL)
-        else()
-            find_package(origami REQUIRED)
-        endif()
+    if(ROCISA_STANDALONE)
+        # The standalone wheel owns a private static Origami copy. Nested
+        # builds receive roc::origami from their parent provider.
+        block()
+            set(ORIGAMI_BUILD_SHARED_LIBS OFF)
+            add_subdirectory(
+                "${ROCM_LIBRARIES_ROOT}/shared/origami"
+                origami
+                EXCLUDE_FROM_ALL
+            )
+        endblock()
     endif()
 
     set(ROCISAINST_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/instruction.cpp"
@@ -129,28 +153,39 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         target_link_options(_rocisa PRIVATE -fprofile-instr-generate)
     endif()
 
-    # Locate stinkytofu: prefer installed package, fall back to monorepo sibling.
-    if(NOT TARGET stinkytofu::stinkytofu)
-        find_package(stinkytofu QUIET)
-        if(NOT stinkytofu_FOUND)
-            set(_stinkytofu_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
-            if(IS_DIRECTORY "${_stinkytofu_sibling}")
-                set(STINKYTOFU_ENABLE_WERROR ON)
-                add_subdirectory("${_stinkytofu_sibling}" stinkytofu EXCLUDE_FROM_ALL)
-                set(_stinkytofu_from_subdirectory TRUE)
-            else()
-                message(FATAL_ERROR "stinkytofu not found via find_package or sibling directory")
-            endif()
-        endif()
+    set(_stinkytofu_src_dir "${ROCM_LIBRARIES_ROOT}/shared/stinkytofu")
+    set(_stinkytofu_from_subdirectory OFF)
+
+    if(ROCISA_STANDALONE)
+        set(STINKYTOFU_ENABLE_WERROR ON)
+        # gfx1250 codegen imports this module. TheRock publishes one generic
+        # artifact shared by every GPU family, so a gfx942-only build that
+        # skips it removes the module from the tree FFM actually runs.
+        set(STINKYTOFU_BUILD_PYTHON ON)
+        add_subdirectory("${_stinkytofu_src_dir}" stinkytofu EXCLUDE_FROM_ALL)
+        set(_stinkytofu_from_subdirectory TRUE)
+    else()
+        block(SCOPE_FOR VARIABLES)
+            set(BUILD_SHARED_LIBS OFF)
+            set(CMAKE_SKIP_INSTALL_RULES ON)
+            set(STINKYTOFU_ENABLE_WERROR ON)
+            # See the standalone branch: every family build has to ship the module.
+            set(STINKYTOFU_BUILD_PYTHON ON)
+            add_subdirectory("${_stinkytofu_src_dir}" stinkytofu EXCLUDE_FROM_ALL)
+        endblock()
+        set(_stinkytofu_from_subdirectory TRUE)
     endif()
 
-    if(NOT DEFINED _stinkytofu_from_subdirectory)
-        get_target_property(_st_imported stinkytofu::stinkytofu IMPORTED)
-        if(_st_imported)
-            set(_stinkytofu_from_subdirectory FALSE)
-        else()
-            set(_stinkytofu_from_subdirectory TRUE)
-        endif()
+    # A static stinkytofu is linked straight into _rocisa, so none of the runtime-loading
+    # machinery below applies to it: nothing to vendor into the wheel, no RPATH to point
+    # at it, no DLL to copy, and no dlopen'able example plugin. Read the target type
+    # rather than BUILD_SHARED_LIBS so this is also right for an imported (find_package)
+    # stinkytofu, whose type is independent of this build's BUILD_SHARED_LIBS.
+    get_target_property(_st_target_type stinkytofu::stinkytofu TYPE)
+    if(_st_target_type STREQUAL "SHARED_LIBRARY")
+        set(_stinkytofu_shared TRUE)
+    else()
+        set(_stinkytofu_shared FALSE)
     endif()
 
     target_link_libraries(_rocisa PUBLIC roc::origami)
@@ -161,11 +196,25 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     # define init_stinkytofu), so they compile into _rocisa, not libstinkytofu.
     # rocisa owns them directly here rather than relying on stinkytofu to inject
     # them, so the de-bundled (find_package) build links them too.
-    set(_stinkytofu_src_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
     target_sources(_rocisa PRIVATE
         "${_stinkytofu_src_dir}/src/conversion/rocisa/AllHwMappings.cpp"
         "${_stinkytofu_src_dir}/src/conversion/rocisa/ToStinkyTofuUtils.cpp"
     )
+
+    # Compile StinkyTofu's example HelloWorldPass plugin straight into _rocisa, same
+    # rationale as the conversion glue above: this bypasses whatever CMake target
+    # topology stinkytofu itself used (static/shared, find_package/add_subdirectory),
+    # so rocisa.registerExamplePlugin() (bound in ToStinkyTofuUtils.cpp) is available
+    # uniformly. Separate from stinkytofu's own STINKYTOFU_BUILD_EXAMPLES option.
+    if(ROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN)
+        target_sources(_rocisa PRIVATE
+            "${_stinkytofu_src_dir}/examples/plugins/HelloWorldPass.cpp"
+        )
+        target_include_directories(_rocisa PRIVATE
+            "${_stinkytofu_src_dir}/examples/plugins"
+        )
+        target_compile_definitions(_rocisa PRIVATE ROCISA_HAVE_HELLOWORLD_STATIC_PLUGIN)
+    endif()
 
     if(_stinkytofu_from_subdirectory)
         # Source-built stinkytofu via add_subdirectory: generated headers are in
@@ -178,6 +227,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     # dev build, where libstinkytofu lives in a temp install prefix off the
     # loader's default search path.
     option(ROCISA_INCLUDE_BUILD_INFO "Install _build_info.py for staleness detection" OFF)
+    mark_as_advanced(ROCISA_INCLUDE_BUILD_INFO)
 
     # Directory containing libstinkytofu, resolved by CMake for the active
     # config. $<TARGET_FILE_DIR:...> handles both the add_subdirectory target
@@ -188,12 +238,8 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/rocisa"
         BUILD_RPATH "${_st_lib_dir}"
     )
-    if(_stinkytofu_from_subdirectory)
-        # Source-built sibling: no installed libstinkytofu exists, so the wheel carries
-        # its own copy next to _rocisa and loads it from there.
+    if(ROCISA_STANDALONE AND _stinkytofu_shared)
         set_target_properties(_rocisa PROPERTIES INSTALL_RPATH "$ORIGIN")
-        # Windows has no RPATH; copy stinkytofu.dll next to _rocisa.pyd so the loader
-        # finds it at runtime.
         if(WIN32)
             add_custom_command(TARGET _rocisa POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -201,13 +247,6 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
                     $<TARGET_FILE_DIR:_rocisa>
             )
         endif()
-    elseif(ROCISA_INCLUDE_BUILD_INFO)
-        # Dev/editable find_package build: libstinkytofu is installed to a temp
-        # prefix off the loader's default search path, so bake its dir into the
-        # install RPATH from the link line. Gated on the dev-build signal so
-        # released ROCm builds stay RPATH-free and rely on libstinkytofu being
-        # resident in rocm/lib.
-        set_target_properties(_rocisa PROPERTIES INSTALL_RPATH_USE_LINK_PATH ON)
     endif()
     # In a released build, installed stinkytofu is a standard ROCm library on the
     # loader's search path (like libyaml behind PyYAML); _rocisa's DT_NEEDED
@@ -249,12 +288,77 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         )
     endif()
 
+    # Stage the standalone stinkytofu Python module next to _rocisa so it
+    # resolves from the build tree at runtime.
+    if(TARGET stinkytofu_python)
+        add_dependencies(_rocisa stinkytofu_python)
+
+        set_target_properties(stinkytofu_python PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu"
+            BUILD_RPATH "$ORIGIN"
+            INSTALL_RPATH "$ORIGIN"
+        )
+
+        configure_file(
+            "${_stinkytofu_src_dir}/python_module/stinkytofu/__init__.py"
+            "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/__init__.py"
+            COPYONLY
+        )
+        # The staged _build_info.py drives the standalone _stinkytofu.so guard.
+        configure_file(
+            "${_stinkytofu_src_dir}/python_module/stinkytofu/_build_info.py.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/_build_info.py"
+            @ONLY
+        )
+
+        # Stage intrinsics.st.bc next to _stinkytofu.so for runtime loading.
+        if(TARGET intrinsics_compiled)
+            add_dependencies(_rocisa intrinsics_compiled)
+
+            set(_intrinsics_bc_src "${CMAKE_BINARY_DIR}/intrinsics.st.bc")
+            set(_intrinsics_bc_dst "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/intrinsics.st.bc")
+            add_custom_command(
+                OUTPUT "${_intrinsics_bc_dst}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_intrinsics_bc_src}" "${_intrinsics_bc_dst}"
+                DEPENDS intrinsics_compiled "${_intrinsics_bc_src}"
+                COMMENT "Staging intrinsics.st.bc next to _stinkytofu.so"
+                VERBATIM
+            )
+            add_custom_target(rocisa_stage_intrinsics ALL
+                DEPENDS "${_intrinsics_bc_dst}")
+            add_dependencies(_rocisa rocisa_stage_intrinsics)
+        endif()
+
+        # Stage the adaptor as a sibling of rocisa/ and stinkytofu/ so
+        # `import rocisa_stinkytofu_adaptor` resolves from the same PYTHONPATH
+        # root (build/tensilelite/rocisa). Copy the inner package directory;
+        # the source tree wraps it in an extra path component.
+        set(_adaptor_src
+            "${CMAKE_CURRENT_SOURCE_DIR}/../rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor")
+        set(_adaptor_dst "${CMAKE_CURRENT_BINARY_DIR}/rocisa_stinkytofu_adaptor")
+        file(GLOB _adaptor_py CONFIGURE_DEPENDS "${_adaptor_src}/*.py")
+        add_custom_command(
+            OUTPUT "${_adaptor_dst}/__init__.py"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    "${_adaptor_src}" "${_adaptor_dst}"
+            DEPENDS ${_adaptor_py}
+            COMMENT "Staging rocisa_stinkytofu_adaptor next to rocisa"
+            VERBATIM
+        )
+        add_custom_target(rocisa_stage_adaptor ALL
+            DEPENDS "${_adaptor_dst}/__init__.py")
+        add_dependencies(_rocisa rocisa_stage_adaptor)
+    endif()
+
     if(ROCISA_STANDALONE)
         # scikit-build-core wheel install rules: place _rocisa and __init__.py into the
         # rocisa/ package directory in the wheel.
         install(TARGETS _rocisa DESTINATION rocisa)
-        if(_stinkytofu_from_subdirectory)
+        if(_stinkytofu_shared)
             # Source-built: vendor libstinkytofu into the wheel — no installed copy exists.
+            # A static stinkytofu is already inside _rocisa, and TARGET_SONAME_FILE below
+            # is only valid for SHARED targets.
             install(FILES $<TARGET_FILE:stinkytofu::stinkytofu> DESTINATION rocisa)
             if(NOT WIN32)
                 install(FILES $<TARGET_SONAME_FILE:stinkytofu::stinkytofu> DESTINATION rocisa)
@@ -262,6 +366,54 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         endif()
         # Installed stinkytofu ships in its own ROCm package; it is not bundled here.
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py" DESTINATION rocisa)
+    endif()
+
+    if(NOT ROCISA_STANDALONE)
+        set(_rocisa_install_dir "${CMAKE_INSTALL_LIBDIR}/hipblaslt/rocisa")
+        # TheRock computes install RPATHs relative to this target location.
+        set_property(TARGET _rocisa PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
+            "${_rocisa_install_dir}")
+        install(TARGETS _rocisa DESTINATION "${_rocisa_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
+        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"
+            DESTINATION "${_rocisa_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
+
+        # Ship the standalone stinkytofu backend as siblings of rocisa/ in the
+        # installed Python root (lib/hipblaslt). The block above only stages it
+        # into the *build tree*; downstream projects that codegen against the
+        # *installed* tensilelite -- e.g. hipSPARSELt's THEROCK build, which
+        # pulls hipBLASLt via find_package rather than add_subdirectory -- import
+        # from this install layout. Without these rules import stinkytofu fails
+        # there, rocisa/__init__.py silently falls back to native, and the
+        # per-ISA guard in TensileCreateLibrary/Run.py refuses to emit gfx1250
+        # kernels. STINKYTOFU_BUILD_PYTHON is on for every GPU family, because
+        # TheRock's generic artifact is shared and a family that skips the
+        # module removes it for the gfx1250 FFM run.
+        if(TARGET stinkytofu_python)
+            set(_stinkytofu_install_dir "${CMAKE_INSTALL_LIBDIR}/hipblaslt/stinkytofu")
+            set(_adaptor_install_dir "${CMAKE_INSTALL_LIBDIR}/hipblaslt/rocisa_stinkytofu_adaptor")
+            # _stinkytofu.so statically embeds libstinkytofu in the integrated
+            # build (stinkytofu is configured with BUILD_SHARED_LIBS OFF), so its
+            # INSTALL_RPATH of $ORIGIN is self-sufficient; mirror _rocisa's
+            # TheRock RPATH origin so packaging rewrites it consistently.
+            set_property(TARGET stinkytofu_python PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
+                "${_stinkytofu_install_dir}")
+            install(TARGETS stinkytofu_python
+                LIBRARY DESTINATION "${_stinkytofu_install_dir}"
+                COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
+            install(FILES "${_stinkytofu_src_dir}/python_module/stinkytofu/__init__.py"
+                DESTINATION "${_stinkytofu_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
+            # intrinsics.st.bc is loaded at runtime from next to _stinkytofu.so.
+            if(TARGET intrinsics_compiled)
+                install(FILES "${CMAKE_BINARY_DIR}/intrinsics.st.bc"
+                    DESTINATION "${_stinkytofu_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
+            endif()
+            # The adaptor is a pure-Python package; install the inner package
+            # directory so `import rocisa_stinkytofu_adaptor` resolves.
+            install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor/"
+                DESTINATION "${_adaptor_install_dir}"
+                COMPONENT ${TENSILELITE_DEVEL_COMPONENT}
+                FILES_MATCHING PATTERN "*.py")
+        endif()
     endif()
 
     # Example plugin — the target only exists when stinkytofu is configured with
@@ -277,10 +429,10 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     # No INSTALL_RPATH is needed: on Linux the plugin has no DT_NEEDED on libstinkytofu (it
     # is headers-only) and the host is already resident when loadPlugin() dlopens it.
     # Only installable for shared builds (MODULE target); static builds use OBJECT.
-    if(TARGET stinkytofu-plugin-helloworld AND BUILD_SHARED_LIBS AND _stinkytofu_from_subdirectory)
+    if(ROCISA_STANDALONE AND TARGET stinkytofu-plugin-helloworld AND _stinkytofu_shared)
         set_target_properties(stinkytofu-plugin-helloworld PROPERTIES EXCLUDE_FROM_ALL FALSE)
         add_dependencies(_rocisa stinkytofu-plugin-helloworld)
         install(TARGETS stinkytofu-plugin-helloworld
             DESTINATION "rocisa/${STINKYTOFU_PLUGIN_INSTALL_RELDIR}")
     endif()
-endif()
+endblock()

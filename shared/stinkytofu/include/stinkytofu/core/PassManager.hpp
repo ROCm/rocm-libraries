@@ -41,6 +41,9 @@
 
 namespace stinkytofu {
 class PassContext;
+// Deliberately forward-declared, not included: HWModel.hpp reaches HazardRules.hpp
+// and from there the asm IR, which does not belong in every PassManager consumer.
+struct HWModel;
 
 //----------------------------------------------------------------------
 // BasicBlock Filter Support
@@ -114,7 +117,9 @@ class STINKYTOFU_EXPORT PassContext {
     PassFeatureConfig passConfig;
     AsmCapsConfig asmCapsConfig;
     bool enableRemarks_ = false;
-    uint32_t wavefrontSize = 0;  ///< Computed from gemmConfig.arch
+    bool analysisFailed_ = false;
+    uint32_t wavefrontSize = 0;         ///< Computed from gemmConfig.arch
+    const HWModel* hwModel_ = nullptr;  ///< Computed from gemmConfig.arch
 
     // Global BasicBlock filter applied to all StinkyInstPass instances.
     // By default, all BasicBlocks are processed.
@@ -133,6 +138,19 @@ class STINKYTOFU_EXPORT PassContext {
     uint32_t getWavefrontSize() const {
         return wavefrontSize;
     }
+
+    /// Physical hardware facts for this context's architecture (derived, not
+    /// user-configurable). Defined out of line so this header need not include
+    /// HWModel.hpp, which would pull the asm IR into every PassManager consumer.
+    ///
+    /// Safe to call on a PassContext that never had setGemmTileConfig() called:
+    /// many unit tests construct a bare `PassContext ctx;` and then run a pass
+    /// against it. Those get the default model rather than a null dereference,
+    /// matching how getWavefrontSize() returns 0 instead of failing. Contexts the
+    /// pipeline builds are always configured first - setGemmTileConfig() is what
+    /// caches the pointer, and it aborts outright on an arch it cannot read - so
+    /// the fallback exists for those bare test contexts, not for production paths.
+    const HWModel& getHWModel() const;
 
     void setPassFeatureConfig(const PassFeatureConfig& config) {
         passConfig = config;
@@ -156,6 +174,16 @@ class STINKYTOFU_EXPORT PassContext {
 
     bool getRemarksEnabled() const {
         return enableRemarks_;
+    }
+
+    /// Set by analysis/verification passes that detect a failure the driver should
+    /// surface as a non-zero exit code, instead of aborting the process themselves.
+    void setAnalysisFailed(bool failed = true) {
+        analysisFailed_ = failed;
+    }
+
+    bool getAnalysisFailed() const {
+        return analysisFailed_;
     }
 
     /// Set global BasicBlock filter for all StinkyInstPass instances.

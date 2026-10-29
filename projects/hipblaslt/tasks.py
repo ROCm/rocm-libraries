@@ -71,7 +71,6 @@ def _supported_distros():
         sys.exit(2)
 
 
-
 def _setup_msvc_env():
     """Initialize the full MSVC build environment from vcvarsall.bat."""
     if "VSINSTALLDIR" in os.environ:
@@ -143,7 +142,7 @@ def _setup_msvc_env():
 def _setup_clang_shims(build_subdir: Path):
     """Create clang.exe/clang++.exe hardlinks pointing to amdclang equivalents.
 
-    Tensile's toolchain validator looks for 'clang.exe' / 'clang++.exe' by name.
+    TensileLite's toolchain validator looks for 'clang.exe' / 'clang++.exe' by name.
     The ROCm Windows SDK ships these as 'amdclang.exe' / 'amdclang++.exe'.
     We create hardlinks in a shims directory and prepend it to PATH.
     """
@@ -166,7 +165,6 @@ def _setup_clang_shims(build_subdir: Path):
                 shutil.copy2(target, link)  # fallback: copy
         print(f"clang shim: {alias} -> {target}")
     os.environ["PATH"] = str(shims_dir) + os.pathsep + os.environ.get("PATH", "")
-
 
 
 def _rmtree(path: Path):
@@ -314,6 +312,106 @@ def _install_blis(c, build_dir: Path):
         symlink.symlink_to("libblis-mt.a")
 
 
+# Clients need a Fortran compiler only for enable_language(Fortran) + LAPACK;
+# hipBLASLt itself has no Fortran TUs. Prefer an absolute path so CMake does
+# not search PATH and pick a different flang/gfortran than the one we selected.
+_ROCM_FLANG_RELPATHS = (
+    ("llvm", "bin", "flang"),
+    ("bin", "amdflang"),
+    ("bin", "flang"),
+    ("lib", "llvm", "bin", "flang"),  # Windows ROCm SDK; unused if the files above exist
+)
+
+
+def _is_real_compiler_binary(path: Path) -> bool:
+    """True if path is an existing executable file (including a symlink to one)."""
+    try:
+        if not path.is_file():
+            return False
+    except OSError:
+        return False
+    if sys.platform == "win32":
+        return True
+    return os.access(path, os.X_OK)
+
+
+def _fortran_file_if_present(path: Path):
+    candidates = [path]
+    if sys.platform == "win32" and path.suffix.lower() != ".exe":
+        candidates.append(path.with_name(path.name + ".exe"))
+    for cand in candidates:
+        if _is_real_compiler_binary(cand):
+            return cand
+    return None
+
+
+def _absolute_fortran(path: Path) -> str:
+    # Keep symlink identity (e.g. /opt/rocm/llvm/bin/flang); do not resolve to
+    # lib/llvm/bin/flang-N, which is a less stable name to put in the cache.
+    return path.absolute().as_posix()
+
+
+def _expand_fortran_spec(spec: str) -> str:
+    """Turn a path or command name into a CMake compiler value."""
+    spec = spec.strip()
+    if not spec:
+        return spec
+    found = _fortran_file_if_present(Path(spec))
+    if found:
+        return _absolute_fortran(found)
+    which = shutil.which(spec)
+    if which:
+        found = _fortran_file_if_present(Path(which))
+        if found:
+            return _absolute_fortran(found)
+    return spec
+
+
+def _autodetect_rocm_flang(rocm: Path):
+    for rel in _ROCM_FLANG_RELPATHS:
+        found = _fortran_file_if_present(rocm.joinpath(*rel))
+        if found:
+            return found
+    return None
+
+
+def _fortran_on_path(name: str):
+    which = shutil.which(name)
+    if not which:
+        return None
+    return _fortran_file_if_present(Path(which))
+
+
+def _resolve_fortran_compiler(explicit, rocm: Path):
+    """Pick CMAKE_Fortran_COMPILER when --clients is set.
+
+    Order: --fortran-compiler, FC, CMAKE_Fortran_COMPILER, ROCm flang, PATH
+    flang, then a detected gfortran. Exit if none of those exist.
+    """
+    if explicit and str(explicit).strip():
+        return _expand_fortran_spec(str(explicit)), "--fortran-compiler"
+    fc = os.environ.get("FC", "").strip()
+    if fc:
+        return _expand_fortran_spec(fc), "FC"
+    cmake_fc = os.environ.get("CMAKE_Fortran_COMPILER", "").strip()
+    if cmake_fc:
+        return _expand_fortran_spec(cmake_fc), "CMAKE_Fortran_COMPILER"
+    found = _autodetect_rocm_flang(rocm)
+    if found:
+        return _absolute_fortran(found), "auto-detected ROCm flang"
+    found = _fortran_on_path("flang")
+    if found:
+        return _absolute_fortran(found), "auto-detected flang on PATH"
+    found = _fortran_on_path("gfortran")
+    if found:
+        return _absolute_fortran(found), "fallback gfortran"
+    print(
+        "No Fortran compiler found for --clients. "
+        "Install ROCm flang or gfortran, or pass --fortran-compiler with a path."
+    )
+    sys.exit(1)
+
+
 # ---------------------------------------------------------------------------
 # invoke tasks
 # ---------------------------------------------------------------------------
@@ -336,13 +434,15 @@ def _install_blis(c, build_dir: Path):
         "gprof": "Enable GNU gprof profiling (requires --static).",
         "no_tensile": "Build without the Tensile GEMM backend.",
         "tensile_logic": "Path for HIPBLASLT_LIBLOGIC_PATH.",
-        "tensile_threads": "Parallel build threads for TensileLite (default: nproc).",
+        "tensile_threads": "Parallel build threads for TensileLite (default: --jobs, or nproc if --jobs is also unset).",
         "tensile_verbose": "TensileLite verbosity level.",
         "no_lazy_load": "Disable lazy library loading.",
         "no_msgpack": "Use YAML backend instead of msgpack.",
         "no_compress": "Don't compress TensileLite assembly objects.",
         "keep_build_tmp": "Keep the temporary build artifacts.",
         "experimental": "Include 'Experimental' logic directories.",
+        "emit_occupancy_probe": "Emit the CU-occupancy probe in StreamK hybrid kernels.",
+        "gemm_a2a_fusion": "Build experimental fused GEMM + all-to-all support.",
         "logic_filter": "Logic YAML filter (e.g. 'gfx942/Equality/*').",
         "legacy_hipblas_direct": "Enable legacy HIPBLAS_DIRECT mode.",
         "disable_marker": "Disable hipBLASLt markers.",
@@ -353,6 +453,13 @@ def _install_blis(c, build_dir: Path):
         "build_dir": "Override the build directory.",
         "rocm_path": "Override the ROCm installation path.",
         "clean": "Remove the build directory before configuring (default: incremental).",
+        "fortran_compiler": (
+            "Fortran compiler for --clients (path or name: flang, gfortran, "
+            "/opt/rocm/llvm/bin/flang). Default: FC, else CMAKE_Fortran_COMPILER, "
+            "else auto-detect ROCm flang ({rocm}/llvm/bin/flang, {rocm}/bin/amdflang, "
+            "{rocm}/bin/flang, then PATH flang, then PATH gfortran). "
+            "Exits if none of those are found. Ignored without --clients."
+        ),
     }
 )
 def build(
@@ -390,6 +497,9 @@ def build(
     build_dir=None,
     rocm_path=None,
     clean=False,
+    fortran_compiler=None,
+    gemm_a2a_fusion=False,
+    emit_occupancy_probe=False,
 ):
     _supported_distros()
 
@@ -414,7 +524,7 @@ def build(
     rocm_s = rocm.as_posix()
 
     if tensile_threads is None:
-        tensile_threads = os.cpu_count()
+        tensile_threads = jobs
     jobs = jobs or os.cpu_count()
 
     # Determine build type
@@ -459,6 +569,13 @@ def build(
     # RocRoller
     use_rocroller = not skip_rocroller and not (distro == "rhel" and version_id == "9.1")
 
+    # Clients-only: same value is forwarded to the deps cmake (netlib LAPACK)
+    # and the hipBLASLt configure. Not resolved when clients are off.
+    fortran_cmake = None
+    if clients:
+        fortran_cmake, fortran_why = _resolve_fortran_compiler(fortran_compiler, rocm)
+        print(f"Fortran compiler: {fortran_cmake} ({fortran_why})")
+
     # ---------------------------------------------------------------------------
     # Dependencies
     # ---------------------------------------------------------------------------
@@ -466,6 +583,7 @@ def build(
         _install_system_deps(
             c, distro, version_major, clients, use_system_packages,
             no_msgpack, use_rocroller, legacy_hipblas_direct, bld,
+            fortran_compiler=fortran_cmake,
         )
 
     # ---------------------------------------------------------------------------
@@ -487,7 +605,13 @@ def build(
     if codecoverage:
         cmake_opts.append("-DHIPBLASLT_ENABLE_COVERAGE=ON")
     if static:
-        cmake_opts.append("-DHIPBLASLT_BUILD_SHARED_LIBS=OFF")
+        cmake_opts.extend(
+            [
+                "-DHIPBLASLT_BUILD_SHARED_LIBS=OFF",
+                "-DTENSILELITE_BUILD_SHARED_LIBS=OFF",
+                "-DORIGAMI_BUILD_SHARED_LIBS=OFF",
+            ]
+        )
     if gprof:
         cmake_opts += ["-DCMAKE_CXX_FLAGS=-pg", "-DCMAKE_C_FLAGS=-pg"]
     if not use_rocroller:
@@ -503,17 +627,20 @@ def build(
         new_cxx_flags = f"{(existing_cxx_flags + ' ').lstrip()}-DNOMINMAX --rocm-path={rocm_s}"
         cmake_opts.append(f'"-DCMAKE_CXX_FLAGS={new_cxx_flags}"')
 
-    # Tensile options
+    # TensileLite options
     if no_tensile:
         cmake_opts.append("-DHIPBLASLT_ENABLE_DEVICE=OFF")
     else:
         if tensile_logic:
             logic_path = tensile_logic if Path(tensile_logic).is_absolute() else str(ROOT_PATH / tensile_logic)
             cmake_opts.append(f"-DHIPBLASLT_LIBLOGIC_PATH={logic_path}")
-        if tensile_threads != os.cpu_count():
+        if tensile_threads is not None:
             cmake_opts.append(f"-DTENSILELITE_BUILD_PARALLEL_LEVEL={tensile_threads}")
 
     cmake_opts.append(f"-DHIPBLASLT_ENABLE_YAML={'OFF' if not no_msgpack else 'ON'}")
+    cmake_opts.append(
+        f"-DHIPBLASLT_ENABLE_GEMM_A2A_FUSION={'ON' if gemm_a2a_fusion else 'OFF'}"
+    )
 
     if build_type != "Release":
         cmake_opts.append("-DTENSILELITE_ASM_DEBUG=ON")
@@ -525,6 +652,8 @@ def build(
         cmake_opts.append("-DTENSILELITE_NO_COMPRESS=ON")
     if experimental:
         cmake_opts.append("-DTENSILELITE_EXPERIMENTAL=ON")
+    if emit_occupancy_probe:
+        cmake_opts.append("-DTENSILELITE_EMIT_OCCUPANCY_PROBE=ON")
     if disable_marker:
         cmake_opts.append("-DHIPBLASLT_ENABLE_MARKER=OFF")
     if not enable_asm_comments:
@@ -564,7 +693,7 @@ def build(
             print("Could not find amdclang++/amdclang on PATH. Ensure ROCm SDK is installed.")
             sys.exit(1)
         # Lowercase the filename: shutil.which returns the filesystem case (e.g. .EXE),
-        # but Tensile's validator compares against lowercase extensions (.exe).
+        # but TensileLite's validator compares against lowercase extensions (.exe).
         def _normalized(p: str) -> str:
             pp = Path(p)
             return (pp.parent / pp.name.lower()).as_posix()
@@ -617,7 +746,7 @@ def build(
         f"-DCMAKE_C_COMPILER={ccompiler}",
     ]
     if clients:
-        compiler_opts.append("-DCMAKE_Fortran_COMPILER=gfortran")
+        compiler_opts.append(f"-DCMAKE_Fortran_COMPILER={fortran_cmake}")
     if sys.platform == "win32":
         _setup_msvc_env()
         # Set ROCm env vars AFTER vcvarsall so it doesn't overwrite them.
@@ -669,13 +798,13 @@ def build(
         with c.cd(str(build_subdir)):
             c.run("make package")
         if distro == "ubuntu":
-            _elevate(c, f"dpkg -i {build_subdir}/hipblaslt[-_]*.deb")
+            _elevate(c, f"dpkg -i {build_subdir}/hipblaslt[-_]*.deb {build_subdir}/tensilelite-host[-_]*.deb {build_subdir}/origami-static[-_]*.deb")
         elif distro in ("centos", "rhel", "almalinux"):
-            _elevate(c, f"rpm --nodeps -U {build_subdir}/hipblaslt-*.rpm")
+            _elevate(c, f"rpm --nodeps -U {build_subdir}/hipblaslt-*.rpm {build_subdir}/tensilelite-host-*.rpm {build_subdir}/origami-static-*.rpm")
         elif distro == "fedora":
-            _elevate(c, f"dnf install {build_subdir}/hipblaslt-*.rpm")
+            _elevate(c, f"dnf install {build_subdir}/hipblaslt-*.rpm {build_subdir}/tensilelite-host-*.rpm {build_subdir}/origami-static-*.rpm")
         elif distro in ("sles", "opensuse-leap"):
-            _elevate(c, f"zypper -n --no-gpg-checks install {build_subdir}/hipblaslt-*.rpm")
+            _elevate(c, f"zypper -n --no-gpg-checks install {build_subdir}/hipblaslt-*.rpm {build_subdir}/tensilelite-host-*.rpm {build_subdir}/origami-static-*.rpm")
 
 
 # ---------------------------------------------------------------------------
@@ -685,6 +814,7 @@ def build(
 def _install_system_deps(
     c, distro, version_major, build_clients, use_system_packages,
     no_msgpack, use_rocroller, legacy_hipblas_direct, bld: Path,
+    fortran_compiler=None,
 ):
     tensile_msgpack_backend = not no_msgpack
 
@@ -794,10 +924,14 @@ def _install_system_deps(
     deps_prefix.mkdir(parents=True, exist_ok=True)
     print(f"\033[32mBuilding \033[33mgoogletest\033[32m from source into {deps_prefix}\033[0m")
     with c.cd(str(deps_dir)):
+        fortran_opt = ""
+        if fortran_compiler:
+            fortran_opt = f" -DCMAKE_Fortran_COMPILER={fortran_compiler}"
         c.run(
             f"cmake -DCMAKE_INSTALL_PREFIX={deps_prefix.as_posix()}"
             f" -DCMAKE_INSTALL_LIBDIR=lib"
             f" -DBUILD_LAPACK={build_lapack}"
+            f"{fortran_opt}"
             f" {ROOT_PATH}/deps"
         )
         c.run(f"make -j{os.cpu_count()}")

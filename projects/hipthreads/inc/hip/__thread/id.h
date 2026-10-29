@@ -20,7 +20,7 @@
  * @ingroup thread
  *
  * Provides cuda::__thread_id, a trivially copyable identifier for a GPU fiber
- * produced by cuda::this_thread::get_id() and cuda::thread::get_id(). 
+ * produced by cuda::this_thread::get_id() and cuda::wthread::get_id(). 
  * Semantics mirror (a subset of) std::thread::id:
  *
  *  - Default constructed id compares equal only to other default ids.
@@ -35,7 +35,7 @@
  *  - Equality of ids implies they refer (or referred) to the same logical
  *    execution context; inequality does not guarantee concurrency.
  *  - API is in flux. It may change in the future so all fibers in the same
- *    `hip::thread` share the same id. A "sub-ID" may be introduced instead for
+ *    `hip::wthread` share the same id. A "sub-ID" may be introduced instead for
  *    identifying individual fibers.
  */
 
@@ -50,7 +50,7 @@ __device__ _LIBHIPTHREADS_HIDE_FROM_ABI __thread_id get_id() _NOEXCEPT;
 } // namespace this_thread
 
 namespace internal {
-  class thread;
+  class wthread;
   struct WorkNode_Header;
   struct ThreadData;
 }
@@ -72,7 +72,7 @@ namespace cuda {
  * constructed id (value 0) represents “no thread” and is always ordered
  * before any non‑default id. Instances are obtained via:
  *  - cuda::this_thread::get_id()
- *  - cuda::thread::get_id()
+ *  - cuda::wthread::get_id()
  *
  * Ordering:
  *  - All non‑zero ids are ordered by underlying integral value.
@@ -120,7 +120,7 @@ private:
   __host__ __device__ _LIBHIPTHREADS_HIDE_FROM_ABI friend underlying_type __get_underlying_id(const __thread_id __id) { return __id.__id_; }
 
   friend __device__ __thread_id this_thread::get_id() _NOEXCEPT;
-  friend class internal::thread;
+  friend class internal::wthread;
   friend struct internal::ThreadData;
 };
 
@@ -174,10 +174,10 @@ operator<<(::std::basic_ostream<_CharT, _Traits>& __os, hip::__thread_id __id) {
   //
   // [thread.thread.id]/2
   //   The text representation for the character type charT of an
-  //   object of type thread::id is an unspecified sequence of charT
-  //   such that, for two objects of type thread::id x and y, if
-  //   x == y is true, the thread::id objects have the same text
-  //   representation, and if x != y is true, the thread::id objects
+  //   object of type wthread::id is an unspecified sequence of charT
+  //   such that, for two objects of type wthread::id x and y, if
+  //   x == y is true, the wthread::id objects have the same text
+  //   representation, and if x != y is true, the wthread::id objects
   //   have distinct text representations.
   //
   // Since various flags in the output stream can affect how the

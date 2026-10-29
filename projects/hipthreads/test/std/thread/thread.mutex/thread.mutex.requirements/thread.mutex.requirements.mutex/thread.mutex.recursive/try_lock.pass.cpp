@@ -25,7 +25,7 @@
 
 bool is_lockable(::std::recursive_mutex& m) {
   bool did_lock;
-  hip::thread t = support::make_test_thread([&] {
+  hip::wthread t = support::make_test_thread([&] {
     did_lock = m.try_lock();
     if (did_lock)
       m.unlock(); // undo side effects
@@ -66,7 +66,7 @@ int main(int, char**) {
     ::std::recursive_mutex m;
     m.lock();
 
-    hip::thread t = support::make_test_thread([&] {
+    hip::wthread t = support::make_test_thread([&] {
       for (int i = 0; i != 10; ++i) {
         bool succeeded = m.try_lock();
         assert(!succeeded);

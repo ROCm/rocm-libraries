@@ -26,8 +26,11 @@ returns ``1`` for anything that already fills the device, and honors the
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
+
+from .spec import ceil_div
 
 # gfx950 (MI350X) compute-unit count: 8 XCDs * 32 CUs. This is the number of
 # CTAs needed to give every CU one resident block; the heuristic targets it as
@@ -37,6 +40,132 @@ from dataclasses import dataclass
 GFX950_NUM_XCDS = 8
 GFX950_CU_PER_XCD = 32
 GFX950_TARGET_CTAS = GFX950_NUM_XCDS * GFX950_CU_PER_XCD  # 256
+
+# Per-arch CU counts for the wgrad split-K heuristic.
+# Mirrors CK's ``get_num_cus()`` but as a static table so it works without a
+# live device.  Keys match the ``gfx`` strings returned by ``ArchTarget``.
+_ARCH_NUM_CUS: dict[str, int] = {
+    "gfx942": 304,  # MI300X: 8 XCDs * 38 CUs
+    "gfx950": 256,  # MI350X: 8 XCDs * 32 CUs
+    "gfx1151": 64,  # RDNA gfx1151 (WMMA)
+}
+_DEFAULT_NUM_CUS = 256
+
+# Assumed waves-per-CU for a 256-thread wgrad kernel (conservative; CK uses
+# hipOccupancyMaxActiveBlocksPerMultiprocessor which we cannot call at build
+# time).  2 is the safe lower bound for the LDS-heavy wgrad tile shapes.
+WGRAD_ASSUMED_WAVES_PER_CU = 2
+
+# XCD (accelerator-complex-die) count per arch. Workgroups are handed to XCDs
+# round-robin by flat workgroup id, so this is the modulus a grouped launch has
+# to stay aligned to -- see the snap in select_split_k_wgrad. RDNA parts have a
+# single shader-engine group and want no snap at all.
+_ARCH_NUM_XCDS: dict[str, int] = {
+    "gfx942": 8,
+    "gfx950": 8,
+    "gfx1151": 1,
+}
+_DEFAULT_NUM_XCDS = 1
+
+
+@dataclass(frozen=True)
+class WgradSplitPolicy:
+    """Per-arch wgrad split-K degree policy, replacing the CK formulas.
+
+    The degree is ``min(target / CTAs-at-split_k=1, wg_K / min_slice_k, cap)``:
+
+    * ``target_ctas`` / ``grouped_target_ctas`` -- the launch size the degree
+      fills to. A grouped launch fills best at a higher CTA count because its
+      per-group tiles are small.
+    * ``min_slice_k`` -- the shallowest K-slice worth a CTA; shallower slices pay
+      the fixed per-CTA cost and one more atomic pass for little work.
+    * ``max_degree`` / ``max_degree_by_dtype`` -- the cap, overridable per dW
+      dtype. A packed 16-bit atomic rounds the running sum in dW on every add,
+      so with same-sign partials the relative error grows with the degree, up
+      to about ``degree * 2**-(fraction bits + 1)`` (see
+      :func:`atomic_rounding_degree_cap`). A 16-bit dtype's cap keeps that
+      bound under the 5e-2 tolerance the wgrad suite verifies against.
+      A cap of 1 turns the automatic split off for that dtype; an explicit
+      degree still launches it. The general cap is for fp32 dW, whose atomic
+      rounding is negligible at any degree here.
+    """
+
+    target_ctas: int
+    grouped_target_ctas: int
+    min_slice_k: int
+    max_degree: int
+    max_degree_by_dtype: tuple[tuple[str, int], ...] = ()
+
+    def degree_cap(self, dtype_d: str) -> int:
+        return dict(self.max_degree_by_dtype).get(dtype_d, self.max_degree)
+
+
+# Normalized error the wgrad correctness suite verifies dW against.
+WGRAD_TOLERANCE = 5e-2
+
+
+def atomic_rounding_degree_cap(fraction_bits: int, tol: float = WGRAD_TOLERANCE) -> int:
+    """Largest split-K degree whose 16-bit atomic rounding stays within ``tol``.
+
+    A dtype with ``fraction_bits`` explicit fraction bits has unit roundoff
+    ``u = 2**-(fraction_bits + 1)`` under round-to-nearest (``2**-8`` for bf16,
+    ``2**-11`` for fp16). A degree-``d`` split rounds each of its ``d`` partials
+    to the dtype and then adds ``d - 1`` of them into the running sum in dW,
+    so with same-sign partials the relative error is bounded by
+    ``gamma_d = d*u / (1 - d*u)``. Returns the largest ``d`` with
+    ``gamma_d <= tol`` (at least 1).
+    """
+    u = 2.0 ** -(fraction_bits + 1)
+    degree = 1
+    while (degree + 1) * u < 1 and (degree + 1) * u / (1 - (degree + 1) * u) <= tol:
+        degree += 1
+    return degree
+
+
+# Arches whose wgrad split-K degree comes from a fitted policy rather than the
+# CK formulas, whose fill targets leave these devices mostly idle. Fitted on
+# gfx1250 bf16/fp16 wgrad.
+#
+# The bf16 cap is an accuracy bound, not a throughput fit: bf16 has 7 fraction
+# bits, so its unit roundoff is 2**-8 and 12 same-sign partials stay within
+# gamma_12 ~= 4.9e-2 of the exact sum, under the 5e-2 tolerance. Higher degrees
+# are faster on small-channel shapes with a deep reduction, but all-positive
+# inputs then exceed that tolerance (at 16, one 1.0 partial followed by fifteen
+# 2**-8 ones rounds back to 1.0, a 5.5% error).
+#
+# fp16 is not split automatically (cap 1). Its packed atomic does not scale
+# like bf16's here: the best degree ranges from 16 on a tiny dW down to no
+# split at all, where every degree is slower than split_k=1 on a mid-size
+# dW, and no single cap avoids that loss. An explicit split_k still uses it.
+_WGRAD_SPLIT_POLICY: dict[str, WgradSplitPolicy] = {
+    "gfx1250": WgradSplitPolicy(
+        target_ctas=2048,
+        grouped_target_ctas=4096,
+        min_slice_k=2048,
+        max_degree=128,
+        max_degree_by_dtype=(("bf16", atomic_rounding_degree_cap(7)), ("fp16", 1)),
+    ),
+}
+
+# Occupancy target for the *grouped* wgrad path, in WAVES per CU.
+#
+# ``WGRAD_ASSUMED_WAVES_PER_CU`` above is really a blocks-per-CU proxy pinned at
+# 2 regardless of block size, which under-counts a small-block tile by the wave
+# ratio: a 64-thread tile at 2 blocks/CU occupies 2 waves of a CU that holds far
+# more. Ungrouped shapes never noticed because their base grid is large enough
+# that the degree is small either way; a grouped shape has a base grid of 1-2
+# tiles, so the whole degree comes from this constant.
+#
+# Sizing in waves and dividing by the tile's own waves-per-block makes the
+# target block-size-invariant. The value is fitted on gfx950 across the grouped
+# wgrad shapes in library/benchmarks; 32 and 64 both fit measurably worse.
+# Treat it as gfx950-calibrated -- gfx942 inherits it untested.
+WGRAD_TARGET_WAVES_PER_CU = 16
+
+# gridDim.z is a 16-bit field in the HSA dispatch packet. Grouped wgrad rides
+# ``groups * split_k`` on z, so the degree has a hard ceiling; exceeding it fails
+# the launch with hipErrorInvalidValue rather than anything diagnosable.
+MAX_GRID_DIM_Z = 65535
 
 # Empirically (gfx950 decode-GEMM split-K sweep) the launch + atomic-reduce
 # overhead floor sits near a per-slice K-depth of ~512 elements. Splitting K so
@@ -64,10 +193,6 @@ class SplitKDecision:
     base_grid: int
     target_ctas: int
     reason: str
-
-
-def _ceil_div(a: int, b: int) -> int:
-    return (int(a) + int(b) - 1) // int(b)
 
 
 def _largest_valid_split_k(K: int, tile_k: int, cap: int) -> int:
@@ -162,8 +287,8 @@ def select_split_k(
     env = os.environ if env is None else env
     mode, forced = _parse_env_override(env)
 
-    m_tiles = _ceil_div(M, tile_m)
-    n_tiles = _ceil_div(N, tile_n)
+    m_tiles = ceil_div(int(M), int(tile_m))
+    n_tiles = ceil_div(int(N), int(tile_n))
     base_grid = m_tiles * n_tiles * max(1, int(batch))
     max_split = max(1, K // tile_k)
 
@@ -207,4 +332,162 @@ def select_split_k(
         target_ctas,
         f"grid {base_grid} << target {target_ctas}; "
         f"K-depth target -> split_k {chosen} (slice K={K // chosen})",
+    )
+
+
+def select_split_k_wgrad(
+    *,
+    wg_M: int,
+    wg_N: int,
+    wg_K: int,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    arch: str = "gfx950",
+    waves_per_cu: int = WGRAD_ASSUMED_WAVES_PER_CU,
+    groups: int = 1,
+    block_size: int = 256,
+    dtype_d: str | None = None,
+) -> SplitKDecision:
+    """Pick a split-K degree for a wgrad GEMM, mirroring CK's formula.
+
+    ``dtype_d`` is the dW dtype. On an arch with a :class:`WgradSplitPolicy`
+    it selects the policy (whose cap depends on it) in place of the CK
+    formulas below; ``waves_per_cu`` and ``block_size`` then do not apply.
+    Callers that pass none -- dgrad among them -- always get the CK formulas.
+
+    Conv callers resolve split-K through a resolver that uses the split-K cost
+    model (:mod:`rocke.helpers.split_k_planner`) where an arch has one and falls
+    back to this function where it does not.
+
+    CK's ``calculate_optimal_k_batch`` (``split_k_utils.hpp``) computes::
+
+        grid_size    = ceil(M / tile_m) * ceil(N / tile_n)   [* batch, but batch=1 for wgrad]
+        max_capacity = max_occupancy_per_cu * num_cus
+        split_k      = floor(max_capacity / grid_size)       clamped to [1, wg_K]
+
+    We cannot call ``hipOccupancyMaxActiveBlocksPerMultiprocessor`` at Python
+    build time, so ``max_occupancy_per_cu`` is approximated by
+    ``waves_per_cu`` (default: ``WGRAD_ASSUMED_WAVES_PER_CU = 2``), and
+    ``num_cus`` is looked up from the static ``_ARCH_NUM_CUS`` table.
+
+    The resulting ``split_k`` is the raw CK value; it is NOT snapped to a
+    valid K-divisor because :class:`WgradConvSpec` pads K_wg to the next
+    multiple of ``tile_k * split_k``, so any positive degree is legal.
+
+    ``groups`` selects between two branches.
+
+    ``groups <= 1`` (the default, and every dgrad resolution) takes the legacy
+    expression above, unchanged. That is deliberate: dgrad resolves through
+    this function too, without ``groups``. Keeping the ungrouped answer
+    bit-for-bit means a grouped-wgrad retune cannot perturb dgrad.
+
+    ``groups > 1`` corrects two things the CK formula gets wrong for a grouped
+    wgrad, both of which only bite once the per-group GEMM is tiny:
+
+    * **The base grid omitted the groups factor.** ``base_grid`` is one group's
+      tile count, but the launch is ``base_grid * groups * split_k`` CTAs. A
+      depthwise shape has ``base_grid == 1``, so the formula sized the degree
+      for a single CTA and asked for hundreds -- past ``MAX_GRID_DIM_Z`` on the
+      way. Multiplying it in is necessary but *not sufficient*: on its own it
+      drives the degree to 1, which is worse still, because...
+    * **...the capacity was a blocks-per-CU constant.** See
+      ``WGRAD_TARGET_WAVES_PER_CU``. Sizing the target in waves and dividing by
+      the tile's waves-per-block makes it block-size-invariant, which is what
+      lets the groups term land on a sensible degree instead of collapsing it.
+
+    Then the degree is snapped so that ``base_grid * split_k`` -- the flat
+    workgroup-id stride between consecutive conv groups, given the launch
+    ``(base_grid_x, base_grid_y, groups * split_k)`` and the kernel's
+    ``z = group * split_k + slice`` decode -- is a multiple of the XCD count.
+    Groups that share an NHWC cache line otherwise scatter across XCD L2s and
+    each line gets fetched once per XCD. The snap is a no-op at ``groups == 1``,
+    and measurably inert on shapes whose channel count is small enough that one
+    cache line spans every group.
+
+    The floor division is load-bearing: total CTAs must stay *at or under*
+    capacity. Rounding up instead crosses a CTA-quantisation cliff.
+    """
+    num_cus = _ARCH_NUM_CUS.get(arch, _DEFAULT_NUM_CUS)
+    max_capacity = waves_per_cu * num_cus
+
+    m_tiles = ceil_div(int(wg_M), int(tile_m))
+    n_tiles = ceil_div(int(wg_N), int(tile_n))
+    base_grid = m_tiles * n_tiles
+
+    if base_grid <= 0:
+        return SplitKDecision(1, base_grid, max_capacity, "empty grid")
+
+    policy = _WGRAD_SPLIT_POLICY.get(arch) if dtype_d is not None else None
+    if policy is not None:
+        if isinstance(groups, bool) or not isinstance(groups, int) or groups < 1:
+            raise ValueError(f"groups must be a positive integer (got {groups!r})")
+        n_groups = groups
+        target = policy.grouped_target_ctas if n_groups > 1 else policy.target_ctas
+        grid_no_split = base_grid * n_groups
+        # Every bound is folded into one cap, so nothing applied after it can
+        # raise the degree past any of them.
+        cap = min(
+            wg_K // policy.min_slice_k,
+            policy.degree_cap(dtype_d),
+            MAX_GRID_DIM_Z // n_groups,
+        )
+        split_k = max(1, min(target // grid_no_split, cap))
+        return SplitKDecision(
+            split_k,
+            base_grid,
+            target,
+            f"{arch} wgrad policy ({dtype_d}): min(floor({target} / "
+            f"{grid_no_split}), floor({wg_K} / {policy.min_slice_k}), "
+            f"{policy.degree_cap(dtype_d)}) = {split_k}",
+        )
+
+    if groups <= 1:
+        split_k = max(1, int(max_capacity // base_grid))
+        split_k = min(split_k, wg_K)
+
+        return SplitKDecision(
+            split_k,
+            base_grid,
+            max_capacity,
+            f"CK formula: floor({max_capacity} / {base_grid}) = {split_k} "
+            f"(num_cus={num_cus} waves_per_cu={waves_per_cu})",
+        )
+
+    wave_size = 32 if arch.startswith(("gfx10", "gfx11", "gfx12")) else 64
+    waves_per_block = max(1, int(block_size) // wave_size)
+    blocks_per_cu = max(1, WGRAD_TARGET_WAVES_PER_CU // waves_per_block)
+    capacity = blocks_per_cu * num_cus
+
+    # The real CTA count at split_k == 1, groups included.
+    grid_no_split = base_grid * int(groups)
+    split_k = max(1, capacity // grid_no_split)
+
+    # Clamp BEFORE snapping. A clamp applied afterwards can land the degree off
+    # a multiple of the step and undo the alignment: a shallow wg_K, or a large
+    # group count against the z limit, pulls the snapped value straight back
+    # down to an arbitrary number.
+    cap = max(1, min(wg_K, MAX_GRID_DIM_Z // int(groups)))
+    split_k = min(split_k, cap)
+
+    xcds = _ARCH_NUM_XCDS.get(arch, _DEFAULT_NUM_XCDS)
+    step = xcds // math.gcd(base_grid, xcds) if xcds > 1 else 1
+    if step > 1:
+        # Snap down to keep the CTA count under capacity; snap up only when the
+        # degree is below one full step, where there is nothing to round down to.
+        snapped = (split_k // step) * step or step
+        # When the cap is itself below one step the stride cannot be aligned at
+        # all; keep the legal degree rather than exceeding the cap for it.
+        if snapped <= cap:
+            split_k = snapped
+
+    split_k = max(1, min(split_k, cap))
+
+    return SplitKDecision(
+        split_k,
+        base_grid,
+        capacity,
+        f"grouped CK formula: floor({capacity} / ({base_grid} * {groups})) "
+        f"snapped to a multiple of {step} = {split_k} "
+        f"(num_cus={num_cus} waves_per_block={waves_per_block} xcds={xcds})",
     )

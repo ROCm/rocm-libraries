@@ -353,13 +353,24 @@ TEST_F(HwInstDescTest, SWMMA_XDL_F32_16x16x64_BF16) {
 }
 
 // ---------------------------------------------------------------------------
-// Non-XDL SWMMAC: v_swmmac_f32_16x16x32_bf16
+// gfx12's SWMMAC (16x16x32, and 16x16x64 iu4) executes as an illegal
+// instruction on gfx1250, so neither stepping may define it.
 // ---------------------------------------------------------------------------
-TEST_F(HwInstDescTest, SWMMA_NonXDL_F32_16x16x32_BF16) {
-    auto* desc = getDescByMnemonic("v_swmmac_f32_16x16x32_bf16");
-    ASSERT_NE(desc, nullptr);
-    EXPECT_TRUE(desc->has(IF_SWMMA));
-    EXPECT_FALSE(desc->has(IF_WMMA_XDL));
+TEST_F(HwInstDescTest, SWMMA_Gfx12Only_NotDefined) {
+    for (const char* name : {"gfx1250", "gfx1250v0"}) {
+        const auto* info = ArchHelper::getInstance().getArchInfo(name);
+        ASSERT_NE(info, nullptr) << name;
+        const auto& map = info->getMnemonicToIsaOpcodeMap();
+        for (const char* mnemonic :
+             {"v_swmmac_bf16_16x16x32_bf16", "v_swmmac_f16_16x16x32_f16",
+              "v_swmmac_f32_16x16x32_bf16", "v_swmmac_f32_16x16x32_f16",
+              "v_swmmac_f32_16x16x32_bf8_bf8", "v_swmmac_f32_16x16x32_bf8_fp8",
+              "v_swmmac_f32_16x16x32_fp8_bf8", "v_swmmac_f32_16x16x32_fp8_fp8",
+              "v_swmmac_i32_16x16x32_iu4", "v_swmmac_i32_16x16x32_iu8",
+              "v_swmmac_i32_16x16x64_iu4"}) {
+            EXPECT_EQ(map.count(mnemonic), 0u) << name << " " << mnemonic;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -458,6 +469,103 @@ TEST_F(HwInstDescTest, VOP3_2SRC_Commutative_InheritsVALU) {
     ASSERT_NE(desc, nullptr);
     EXPECT_TRUE(desc->has(IF_VALU));
     EXPECT_TRUE(desc->has(IF_Commutative));
+}
+
+// ---------------------------------------------------------------------------
+// VOP3_2SRC shifts: v_lshrrev_b64 / v_lshlrev_b16 (AIHPBLAS-4142)
+//
+// These are 2-source VALU shifts (dst, shiftAmount, value). They were once
+// declared under the 4-field VOP3 format (dst+src0+src1+src2); because a
+// partial .operand_fields override inherits all base-format fields, the VOP3
+// base left a PHANTOM third source (src2) in each descriptor. The
+// StinkyIRVerifier read that phantom field and reported a missing operand
+// src[2] (e.g. under PrefetchGL2 codegen on gfx1250). They now live under the
+// 3-field VOP3_2SRC format, so the descriptor exposes exactly dst/src0/src1
+// with no phantom src2. These tests would FAIL on the pre-fix descriptor
+// (fields.size() == 4 with a trailing src2) and PASS post-fix.
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, VOP3_2SRC_VLshrrevB64_NoPhantomSrc2) {
+    auto* desc = getDescByMnemonic("v_lshrrev_b64");
+    ASSERT_NE(desc, nullptr);
+    // VOP3_2SRC inherits MC_VOP3 microcode from its parent format.
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VOP3);
+
+    auto fields = desc->operandFields;
+    // Exactly 3 fields: dst + 2 sources. No phantom src2.
+    ASSERT_EQ(fields.size(), 3u);
+
+    // D0: 64-bit VGPR destination (size overridden from format default 32).
+    EXPECT_TRUE(fields[0].isDest);
+    EXPECT_EQ(fields[0].encodeField, EncodeField::vdst);
+    EXPECT_EQ(fields[0].fieldType, FieldType::vgpr);
+    EXPECT_EQ(fields[0].fieldSizeBits, 64u);
+
+    // S0: 32-bit shift amount (format default, not overridden).
+    EXPECT_FALSE(fields[1].isDest);
+    EXPECT_EQ(fields[1].encodeField, EncodeField::src0);
+    EXPECT_EQ(fields[1].fieldType, FieldType::src);
+    EXPECT_EQ(fields[1].fieldSizeBits, 32u);
+
+    // S1: 64-bit value operand (size overridden from format default 32).
+    EXPECT_FALSE(fields[2].isDest);
+    EXPECT_EQ(fields[2].encodeField, EncodeField::src1);
+    EXPECT_EQ(fields[2].fieldType, FieldType::src);
+    EXPECT_EQ(fields[2].fieldSizeBits, 64u);
+
+    // No field may be a third source (src2): that was the phantom operand.
+    for (const auto& f : fields) {
+        EXPECT_NE(f.encodeField, EncodeField::src2) << "v_lshrrev_b64 must not carry a src2 field";
+    }
+}
+
+TEST_F(HwInstDescTest, VOP3_2SRC_VLshlrevB16_NoPhantomSrc2) {
+    auto* desc = getDescByMnemonic("v_lshlrev_b16");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VOP3);
+
+    auto fields = desc->operandFields;
+    // Exactly 3 fields: dst + 2 sources. No phantom src2.
+    ASSERT_EQ(fields.size(), 3u);
+
+    // D0: 16-bit VGPR destination.
+    EXPECT_TRUE(fields[0].isDest);
+    EXPECT_EQ(fields[0].encodeField, EncodeField::vdst);
+    EXPECT_EQ(fields[0].fieldType, FieldType::vgpr);
+    EXPECT_EQ(fields[0].fieldSizeBits, 16u);
+
+    // S0 / S1: both 16-bit source operands.
+    EXPECT_FALSE(fields[1].isDest);
+    EXPECT_EQ(fields[1].encodeField, EncodeField::src0);
+    EXPECT_EQ(fields[1].fieldType, FieldType::src);
+    EXPECT_EQ(fields[1].fieldSizeBits, 16u);
+
+    EXPECT_FALSE(fields[2].isDest);
+    EXPECT_EQ(fields[2].encodeField, EncodeField::src1);
+    EXPECT_EQ(fields[2].fieldType, FieldType::src);
+    EXPECT_EQ(fields[2].fieldSizeBits, 16u);
+
+    for (const auto& f : fields) {
+        EXPECT_NE(f.encodeField, EncodeField::src2) << "v_lshlrev_b16 must not carry a src2 field";
+    }
+}
+
+// Regression guard: a genuine 3-source VOP3 op must KEEP its src2. This ensures
+// the phantom-src2 fix did not strip src2 from real 3-operand instructions.
+// v_lshl_add_u32 = (src0 << src1) + src2, declared under the 4-field VOP3 format.
+TEST_F(HwInstDescTest, VOP3_VLshlAddU32_HasSrc2) {
+    auto* desc = getDescByMnemonic("v_lshl_add_u32");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VOP3);
+
+    auto fields = desc->operandFields;
+    // dst + src0 + src1 + src2 = 4 fields.
+    ASSERT_EQ(fields.size(), 4u);
+
+    EXPECT_TRUE(fields[0].isDest);
+    EXPECT_EQ(fields[0].encodeField, EncodeField::vdst);
+
+    EXPECT_FALSE(fields[3].isDest);
+    EXPECT_EQ(fields[3].encodeField, EncodeField::src2);
 }
 
 // ---------------------------------------------------------------------------

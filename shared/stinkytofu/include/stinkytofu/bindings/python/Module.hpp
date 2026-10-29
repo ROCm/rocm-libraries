@@ -38,53 +38,123 @@
 /*
  * @brief Define the options for the ModuleOptions struct
  * @note This macro is used to define the options for the ModuleOptions struct
- * @note SwPrefetchScratchSgpr: -1 disables SwPrefetchInsertionPass; >=0 runs and uses that scratch.
- *        StinkyAsmModule sets EnableSwPrefetchInsertion = (SwPrefetchScratchSgpr != -1) in its
- * constructor.
+ * @note EnableSwInstructionPrefetchRelStatic: Tensile `SwInstructionPrefetch`
+ * YAML → Gfx1250 SwInstructionPrefetchRelStaticPass (`s_prefetch_inst_pc_rel 0,
+ * null, 31`; no scratch SGPR). Mutually exclusive with
+ * EnableSwInstructionPrefetchAbs.
+ * @note EnableSwInstructionPrefetchAbs: Tensile `SwInstructionPrefetch` YAML
+ * bitmask resolving to Absolute (value 2, or Auto(-1) on gfx1250 non-Stream-K)
+ * → Gfx1250 SwInstructionPrefetchAbsStaticPass /
+ * SwInstructionPrefetchAbsDynamicPass
+ *        (`s_prefetch_inst`; requires SwInstructionPrefetchAbsBaseSgpr >= 0).
+ *        Mutually exclusive with EnableSwInstructionPrefetchRelStatic.
+ * @note SwInstructionPrefetchAbsBaseSgpr: low index of the reserved 3-SGPR
+ * abs-prefetch base (even-aligned pair s[base:base+1] + scratch s[base+2]),
+ * auto-allocated in Tensile `_initKernel`. -1 = not reserved / pass no-ops
+ * (also -1 for Stream-K). After SGPR compact this reservation no longer
+ * describes the kernel, so the passes ignore the index and pick their own
+ * block: one emitted at kernel entry reuses registers from inside the kernel's
+ * range, one emitted mid-kernel takes registers above every index the kernel
+ * names.
+ * @note RegisterAllocation: the mode of Tensile `StinkyTofuRegisterAllocation`,
+ * 0 off, 1 shadow, 2 apply, 3 force. RegisterAllocationConfig is the rest of
+ * that parameter, in its canonical spelling (RegisterAllocationConfig.hpp);
+ * empty means every default at this mode.
+ * @note RegisterAllocationDump: Tensile `StinkyTofuRegisterAllocationDump`.
+ * Writes what allocation saw and did -- the IR before the lift, the SSA form,
+ * its live ranges, and each attempt's placement table -- to
+ * <outputDir>/<kernel>/ra/, or ./<kernel>/ra/ without an output directory.
+ * @note TimePasses: print a per-pass wall-time report to stderr after the
+ * pipeline runs (Tensile `StinkyTofuTimePasses`, stinkytofu-opt
+ * `--time-passes`).
  */
-#define MODULE_OPTIONS_LIST(X)           \
-    X(DebugLevel, int)                   \
-    X(OptLevel, int)                     \
-    X(TileA0, int)                       \
-    X(TileB0, int)                       \
-    X(TileM0, int)                       \
-    X(NumGRA, uint32_t)                  \
-    X(NumGRB, uint32_t)                  \
-    X(NumGRM, uint32_t)                  \
-    X(wavefrontSize, int)                \
-    X(SubGroup0, int)                    \
-    X(SubGroup1, int)                    \
-    X(WaveGroup0, int)                   \
-    X(WaveGroup1, int)                   \
-    X(VectorWidthA, int)                 \
-    X(VectorWidthB, int)                 \
-    X(GlobalReadVectorWidthA, int)       \
-    X(GlobalReadVectorWidthB, int)       \
-    X(DirectToLdsA, bool)                \
-    X(DirectToLdsB, bool)                \
-    X(UseSgprForGRO, int)                \
-    X(PrintBeforePass, std::string)      \
-    X(PrintAfterPass, std::string)       \
-    X(DebugPass, std::string)            \
-    X(VerifyEach, bool)                  \
-    X(EnableRemarks, bool)               \
-    X(EnableWaitCntInsertion, bool)      \
-    X(EnableLoopCarriedTokenDeps, bool)  \
-    X(EnableESM2, bool)                  \
-    X(VgprMsbMode, int)                  \
-    X(EnableSwPrefetchInsertion, bool)   \
-    X(SwPrefetchScratchSgpr, int)        \
-    X(ClusterBarrier, bool)              \
-    X(PrefetchGlobalRead, int)           \
-    X(PrefetchLocalRead, int)            \
-    X(RemoveInstructions, std::string)   \
-    X(CloneList, std::vector<CloneSpec>) \
-    X(DsReadQueueDepth, int)             \
-    X(DsReadDrainLatency, int)           \
-    X(DsReadPerWmma, int)                \
-    X(GlobalReadQueueDepth, int)         \
-    X(GlobalReadDrainLatency, int)       \
-    X(DsReadOrder, int)
+#define MODULE_OPTIONS_LIST(X)                    \
+    X(DebugLevel, int)                            \
+    X(OptLevel, int)                              \
+    X(TileA0, int)                                \
+    X(TileB0, int)                                \
+    X(TileM0, int)                                \
+    X(NumGRA, uint32_t)                           \
+    X(NumGRB, uint32_t)                           \
+    X(NumGRM, uint32_t)                           \
+    X(wavefrontSize, int)                         \
+    X(SubGroup0, int)                             \
+    X(SubGroup1, int)                             \
+    X(WaveGroup0, int)                            \
+    X(WaveGroup1, int)                            \
+    X(VectorWidthA, int)                          \
+    X(VectorWidthB, int)                          \
+    X(GlobalReadVectorWidthA, int)                \
+    X(GlobalReadVectorWidthB, int)                \
+    X(DirectToLdsA, bool)                         \
+    X(DirectToLdsB, bool)                         \
+    X(UseSgprForGRO, int)                         \
+    X(PrintBeforePass, std::string)               \
+    X(PrintAfterPass, std::string)                \
+    X(DebugPass, std::string)                     \
+    X(PassOrderSnapshotJson, std::string)         \
+    X(VerifyEach, bool)                           \
+    X(TimePasses, bool)                           \
+    X(EnableRemarks, bool)                        \
+    X(EnableWaitCntInsertion, bool)               \
+    X(EnableLoopCarriedTokenDeps, bool)           \
+    X(EnableESM2, bool)                           \
+    X(EnableESM2TrackValuVsrc, bool)              \
+    X(VgprMsbMode, int)                           \
+    X(RequiresXCntForVolatileVMEM, bool)          \
+    X(EnableXnackReplay, bool)                    \
+    X(EnableSwInstructionPrefetchRelStatic, bool) \
+    X(EnableSwInstructionPrefetchAbs, bool)       \
+    X(SwInstructionPrefetchAbsBaseSgpr, int)      \
+    X(ClusterBarrier, bool)                       \
+    X(ClusterBarrierSplitWaveLoop, bool)          \
+    X(StreamKMulticast, bool)                     \
+    X(TDMLoadWaveSync, bool)                      \
+    X(PrefetchGlobalRead, int)                    \
+    X(PrefetchLocalRead, int)                     \
+    X(UnrollLoopCopies, int)                      \
+    X(RegisterAllocation, int)                    \
+    X(RegisterAllocationConfig, std::string)      \
+    X(RegisterAllocationDump, bool)               \
+    X(RemoveInstructions, std::string)            \
+    X(CloneList, std::vector<CloneSpec>)          \
+    X(DsReadQueueDepth, int)                      \
+    X(DsReadDrainLatency, int)                    \
+    X(TensorLoadWmmaSpace, int)                   \
+    X(WmmaRefillMode, int)                        \
+    X(WmmaBatchSize, int)                         \
+    X(WmmaRefillToCycles, int)                    \
+    X(GlobalReadQueueDepth, int)                  \
+    X(GlobalReadDrainLatency, int)                \
+    X(DsReadOrder, int)                           \
+    X(ArchName, std::string)
+
+// Scheduling knobs below default to -1 (= unset), except LockDsReadOrder, EvenSpreadFillers,
+// WaitAluHoldStrictCount, PrefetchLeadWmmas and PrefetchLeadMinStageWmmas, which
+// have fixed defaults and
+// are not resolved by the heuristics. Gfx1250Backend resolves unset
+// knobs via SchedulingKnobHeuristics before DAG scheduling / cluster-barrier insertion (user value
+// wins; degenerate main-loop IR falls back to the static default). See
+// SchedulingKnobHeuristics.hpp.
+// ReduceClusterBarrierPerLoop: <0 unset, 0 = a Rule 3 handshake on every loop
+// trigger, >0 = one handshake per enclosing loop. propose() currently leaves it off.
+#define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                                                       \
+    X(LockDsReadOrder, bool, true)                                                                 \
+    X(EvenSpreadFillers, bool, true)                                                               \
+    X(WaitAluHoldStrictCount, int, 2)     /* hold s_wait_alu count <= N to next barrier wait */    \
+    X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */    \
+    X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                     \
+    X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                    \
+    X(WmmaBarrierCoverCycles, int, -1)    /* cover kept for a barrier; < 0 = automatic */          \
+    X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */                 \
+    X(DsBatchWmmas, int, 4)               /* WMMAs per ds_load pacing batch */                     \
+    X(DsCatchUpPace, int, 2)              /* extra ds_loads per batch when behind the even line */ \
+    X(WmmaQueueDepth, int, 8)             /* WMMAs the matrix pipe buffers; 1 = queue model off */ \
+    X(WmmaQueueCoverCycles, int, 56) /* queued WMMA cover kept (8 WMMAs of 8-14 cycles ~ 50-56) */ \
+    X(DsReadCyclesPerLoad, int, 6)   /* LDS return rate (cycles per ds_load); 0 = off */           \
+    X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
+    X(ReduceClusterBarrierPerLoop, int, -1)                                                        \
+    X(TensorLoadDsLoadGapCycles, int, 64)
 
 namespace stinkytofu {
 /**
@@ -96,12 +166,13 @@ namespace stinkytofu {
  * This class provides a container for assembly instructions generated by
  * lowering passes or directly created through the StinkyTofu IR builders.
  *
- * Note: This class is planned for deprecation in favor of using Function/BasicBlock
- * directly, but is currently needed for compatibility with existing Python bindings
- * and rocisa conversion utilities.
+ * Note: This class is planned for deprecation in favor of using
+ * Function/BasicBlock directly, but is currently needed for compatibility with
+ * existing Python bindings and rocisa conversion utilities.
  *
  * Architecture:
- *   LogicalModule (high-level IR) -> Lowering Passes -> StinkyAsmModule (assembly IR)
+ *   LogicalModule (high-level IR) -> Lowering Passes -> StinkyAsmModule
+ * (assembly IR)
  *
  * Example usage:
  * @code
@@ -125,6 +196,14 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
 #define GEN_MEMBER_OPTION(name, type) type name{};
         MODULE_OPTIONS_LIST(GEN_MEMBER_OPTION)
 #undef GEN_MEMBER_OPTION
+#define GEN_MEMBER_OPTION_WITH_DEFAULT(name, type, value) type name = value;
+        MODULE_OPTIONS_WITH_DEFAULTS_LIST(GEN_MEMBER_OPTION_WITH_DEFAULT)
+#undef GEN_MEMBER_OPTION_WITH_DEFAULT
+
+        /// True when register allocation renumbers the kernel's SGPRs: the
+        /// mode applies and the configuration allocates scalars. A pass after
+        /// allocation that found SGPRs by the producer's numbering asks this.
+        bool sgprsCompacted() const;
     };
 
     /**
@@ -156,23 +235,27 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
     std::string getName() const;
 
     /**
-     * @brief Set the name used for output files (e.g. aggregated_instruction_cost.txt).
-     * When set, Backend writes <outputName>_aggregated_instruction_cost.txt so it matches
-     * the full kernel name (e.g. .o basename). When empty, getName() is used.
+     * @brief Set the name used for output files (e.g.
+     * aggregated_instruction_cost.txt). When set, Backend writes
+     * <outputName>_aggregated_instruction_cost.txt so it matches the full kernel
+     * name (e.g. .o basename). When empty, getName() is used.
      * @param name Full kernel name for output file basename
      */
     void setOutputName(const std::string& name);
 
     /**
-     * @brief Get the output file basename (cost file, etc.). Empty means use getName().
+     * @brief Get the output file basename (cost file, etc.). Empty means use
+     * getName().
      * @return Output name string, or empty to use module name
      */
     std::string getOutputName() const;
 
     /**
      * @brief Set the directory for output files (e.g. cost file).
-     * When set, Backend writes to <outputDir>/<kernel_full_name>/aggregated_instruction_cost.txt
-     * (e.g. comparison_output/1024_vgpr_gfx1250/<full_name>/). When empty, files go to cwd.
+     * When set, Backend writes to
+     * <outputDir>/<kernel_full_name>/aggregated_instruction_cost.txt (e.g.
+     * comparison_output/1024_vgpr_gfx1250/<full_name>/). When empty, files go to
+     * cwd.
      * @param dir Path such as "comparison_output/1024_vgpr_gfx1250"
      */
     void setOutputDir(const std::string& dir);
@@ -207,6 +290,17 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
     std::optional<uint64_t> getMetaDataU64(const std::string& key) const;
 
     /**
+     * @brief Write uint64 metadata on the underlying Function.
+     *
+     * Occupancy-aware passes (InsertDelayAluPass) read
+     * kSigTotalVgprsMetaKey from here. toStinkyTofuModule stamps it; the
+     * logical-IR binding stamps the same key through this setter.
+     * @param key Metadata key
+     * @param value Metadata value
+     */
+    void setMetaDataU64(const std::string& key, uint64_t value);
+
+    /**
      * @brief Get the underlying Function
      *
      * This provides access to the internal Function representation.
@@ -233,7 +327,8 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
     const Function* getFunction(std::string_view name) const;
 
     /**
-     * @brief Return all Functions in emission order: entry first, then callable functions.
+     * @brief Return all Functions in emission order: entry first, then callable
+     * functions.
      */
     std::vector<Function*> getFunctions();
     std::vector<const Function*> getFunctions() const;
@@ -265,6 +360,19 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
     findGroupRange(const std::string& groupName) const;
 
     /**
+     * @brief Clear every group whose boundary instruction lives in \p blocks
+     *
+     * Bounds are raw nodes, so this must run before the delete, not after:
+     * reading a freed node to ask whether it is still listed is undefined. A
+     * group that loses a boundary is cleared, so findGroupRange() reports
+     * nothing rather than a dead range.
+     *
+     * @param blocks Blocks the caller is about to delete
+     * @return Names of the groups cleared, sorted, for the caller to report
+     */
+    std::vector<std::string> invalidateGroupsInBlocks(const std::vector<BasicBlock*>& blocks);
+
+    /**
      * @brief Update the group ranges
      * @param groups Group names if exists to update
      * @param instsCountBefore Number of instructions before updating
@@ -280,6 +388,17 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
      */
     void setGroupRange(const std::string& groupName, IntrusiveListIterator<IRBase> first,
                        IntrusiveListIterator<IRBase> last);
+
+    /**
+     * @brief Move a group endpoint off a node that is about to be deleted.
+     *
+     * ScopeAdaptor erases TEXTBLOCK comments while extracting a region. Another
+     * group's stored first/last may be that comment (an epilogue anchor can sit
+     * inside an earlier noLoadLoopBody span). Point the endpoint at a neighbor
+     * that stays alive: \p ifFirst when this node is the group's first, \p ifLast
+     * when it is the group's last. A null replacement leaves that side unchanged.
+     */
+    void retargetGroupEndpoint(IRBase* from, IRBase* ifFirst, IRBase* ifLast);
 
     /**
      * @brief Get the ModuleOptions

@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12")
+if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12|amdgcnspirv")
 
     add_custom_target(test_ck_tile_grouped_gemm)
 
@@ -62,6 +62,21 @@ if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12")
         add_gtest_executable(test_ck_tile_grouped_gemm_int8 test_grouped_gemm_int8.cpp)
         if(TARGET test_ck_tile_grouped_gemm_int8)
             add_dependencies(test_ck_tile_grouped_gemm test_ck_tile_grouped_gemm_int8)
+        endif()
+    endif()
+
+    # TDM (tensor data mover) grouped GEMM pipelines (CompTDMV1 / CompTDMV2 with
+    # TdmEpilogue) are gfx1250-only. The kernel static_asserts non-persistent,
+    # non-cluster launch and no D tensors; split-K is rejected at runtime.
+    if(GPU_TARGETS MATCHES "gfx125")
+        add_gtest_executable(test_ck_tile_grouped_gemm_tdm_wmma test_grouped_gemm_tdm_wmma.cpp)
+        if(TARGET test_ck_tile_grouped_gemm_tdm_wmma)
+            ck_tile_restrict_archs(test_ck_tile_grouped_gemm_tdm_wmma "^gfx125")
+            if(CK_USE_OCP_FP8)
+                target_compile_options(test_ck_tile_grouped_gemm_tdm_wmma
+                    PRIVATE -DCK_TILE_USE_OCP_FP8)
+            endif()
+            add_dependencies(test_ck_tile_grouped_gemm test_ck_tile_grouped_gemm_tdm_wmma)
         endif()
     endif()
 endif()

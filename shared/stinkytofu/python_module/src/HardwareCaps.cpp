@@ -9,6 +9,7 @@
 
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/ComgrProbe.hpp"
+#include "stinkytofu/hardware/HwReg.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
 
 namespace stinkytofu {
@@ -42,6 +43,13 @@ bool checkMajorIn(uint32_t major, std::initializer_list<uint32_t> list) {
 
 bool checkMajorNotIn(uint32_t major, std::initializer_list<uint32_t> list) {
     return !checkMajorIn(major, list);
+}
+
+// Bit position of DISABLE_XDL_ARB_STALL, read from HwReg so it has one source of truth.
+// -1 where the field does not exist; 0 would alias DEP_MODE's LSB.
+int arbStallBitOffset(GfxArchID archID) {
+    auto field = HwReg::schedModeDisableXdlArbStall(archID);
+    return field.size ? static_cast<int>(field.offset) : -1;
 }
 
 // ── asmCaps ──────────────────────────────────────────────────────────────
@@ -126,6 +134,7 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
     rv["v_pk_fmac_f16"] = tryAsm(isaName, ws, "v_pk_fma_f16 v47, v36, v34");
     rv["v_pk_add_f32"] = hasMnemonic(m, "v_pk_add_f32");
     rv["v_pk_mul_f32"] = hasMnemonic(m, "v_pk_mul_f32");
+    rv["v_pk_fma_f32"] = hasMnemonic(m, "v_pk_fma_f32");
     rv["v_mad_mix_f32"] = hasMnemonic(m, "v_mad_mix_f32");
     rv["v_fma_mix_f32"] = hasMnemonic(m, "v_fma_mix_f32");
     rv["v_dot2_f32_f16"] = hasMnemonic(m, "v_dot2_f32_f16");
@@ -162,7 +171,37 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
 
     rv["v_prng_b32"] = hasMnemonic(m, "v_prng_b32");
 
+    // FP8 stochastic-rounding pk8 conversion with scale: gated by PackData for
+    // gwvw%8==0 stores (mirrors rocisa hardware_caps.hpp HasScaleSRPk8Cvt,
+    // which probes "v_cvt_scalef32_sr_pk8_fp8_f32 v[0:1], v[0:7], v0, 1.0").
+    rv["HasScaleSRPk8Cvt"] =
+        tryAsm(isaName, ws, "v_cvt_scalef32_sr_pk8_fp8_f32 v[0:1], v[0:7], v0, 1.0");
+
+    // Non-SR pk8 f32->fp8/bf8 conversion with scale: PackData uses these for
+    // gwvw%8==0 stores (mirrors rocisa hardware_caps.hpp HasCvtScalePk8*F32).
+    rv["HasCvtScalePk8Fp8F32"] =
+        tryAsm(isaName, ws, "v_cvt_scalef32_pk8_fp8_f32 v[0:1], v[2:9], s0");
+    rv["HasCvtScalePk8Bf8F32"] =
+        tryAsm(isaName, ws, "v_cvt_scalef32_pk8_bf8_f32 v[0:1], v[2:9], s0");
+
+    // NaN-propagating f32 clamp. PackData fp8 pk8 saturation uses this to pick
+    // v_pk_fma_f32 + v_maximumminimum_f32 over cmp_class/med3/cndmask
+    // (mirrors rocisa hardware_caps.hpp HasVMaximumMinimumF32).
+    rv["HasVMaximumMinimumF32"] = tryAsm(isaName, ws, "v_maximumminimum_f32 v0, v1, v2, v3");
+
+    // v_movrelsd_2_b32: indirect-VGPR-write move used by CompactLoopStore
+    // (mirrors rocisa hardware_caps.hpp HasMovRelsD2B32).
+    rv["HasMovRelsD2B32"] = hasMnemonic(m, "v_movrelsd_2_b32");
+
     rv["HasAtomicAdd"] = hasAnyMnemonic(m, {"buffer_atomic_add_f32"});
+    // Packed 2xBF16 atomic add gating GSU AtomicDest for a BF16 D
+    // (mirrors rocisa hardware_caps.hpp HasAtomicPkAddBF16).
+    rv["HasAtomicPkAddBF16"] = hasAnyMnemonic(m, {"buffer_atomic_pk_add_bf16"});
+
+    // Scalar-memory atomics (s_atomic_*): false on gfx12/gfx1250. The GSU and
+    // StreamK paths gate on asmCaps["HasSAtomic"] (mirrors rocisa
+    // hardware_caps.hpp which probes "s_atomic_dec s11, s[0:1]").
+    rv["HasSAtomic"] = tryAsm(isaName, ws, "s_atomic_dec s11, s[0:1]");
 
     // Modifier caps: test the actual modifier syntax via comgr
     rv["HasGLCModifier"] =
@@ -183,12 +222,29 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
          "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0, scope:SCOPE_DEV"});
     rv["HasNTModifier"] =
         tryAsm(isaName, ws, "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0, offen offset:0, nt");
+    // gfx1250 temporal-hint (th:) and non-volatile (nv) modifiers replace the
+    // legacy nt bit on buffer/global/flat memory ops.
+    rv["HasTHModifier"] = tryAsmAny(
+        isaName, ws,
+        {"buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0 offen offset:0 th:TH_LOAD_NT",
+         "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0 th:TH_LOAD_NT"});
+    rv["HasNVModifier"] =
+        tryAsmAny(isaName, ws,
+                  {"buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0 offen offset:0 nv",
+                   "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0 nv"});
+    rv["HasGlobalPrefetch"] =
+        tryAsm(isaName, ws, "global_prefetch_b8 v[0:1], off scope:SCOPE_SE th:TH_LOAD_NT");
     rv["HasMUBUFConst"] = tryAsmAny(isaName, ws,
                                     {"buffer_load_dword v40, v36, s[24:27], 1 offen offset:0",
                                      "buffer_load_b32 v40, v36, s[24:27], 1 offen offset:0"});
     rv["HasSCMPK"] = hasMnemonic(m, "s_cmpk_gt_u32");
 
     rv["HasNewBarrier"] = hasMnemonic(m, "s_barrier_wait");
+    rv["HasClusterBarrier"] = tryAsm(isaName, ws, "s_barrier_wait -3");
+    rv["HasWMMA_AccImmZero"] =
+        tryAsm(isaName, ws, "v_wmma_f32_16x16x32_bf16 v[0:7], v[8:15], v[8:15], 0");
+    rv["s_add_u64"] = tryAsm(isaName, ws, "s_add_u64 s[0:1], s[0:1], s[2:3]");
+    rv["v_add_nc_u64"] = tryAsm(isaName, ws, "v_add_nc_u64 v[0:1], v[2:3], v[4:5]");
     rv["HasTDM"] = hasMnemonic(m, "tensor_load_to_lds");
 
     rv["s_delay_alu"] = hasMnemonic(m, "s_delay_alu");
@@ -232,7 +288,7 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
 }
 
 // ── archCaps ─────────────────────────────────────────────────────────────
-std::map<std::string, int> initArchCaps(const IsaVersion& v) {
+std::map<std::string, int> initArchCaps(const IsaVersion& v, GfxArchID archID) {
     std::map<std::string, int> rv;
 
     rv["HasEccHalf"] =
@@ -245,12 +301,22 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v) {
     else if (checkInList(v, {{12, 5, 0}}))
         deviceLDS = 327680;
     rv["DeviceLDS"] = deviceLDS;
+    // LDS allocation granule: a workgroup occupies a whole number of granules, so this
+    // rounding can cost a resident workgroup at a boundary. gfx11 allocates 1024 bytes
+    // at a time, other targets 256. Keep in lock-step with rocisa hardware_caps.hpp
+    // (KernelWriterAssembly.getOccupancy indexes archCaps["LdsGranularity"]).
+    // TODO: gfx10/gfx12 might also need a different granularity.
+    rv["LdsGranularity"] = v[0] == 11 ? 1024 : 256;
 
     rv["CMPXWritesSGPR"] = checkMajorNotIn(v[0], {10, 11, 12});
     rv["HasWave32"] = checkMajorIn(v[0], {10, 11, 12});
+    // GFX12.5 always uses wave32 and reserves the descriptor's wave-size selector.
+    // Keep this separate from HasWave32, as in rocisa hardware_caps.hpp.
+    rv["HasWavefrontSize32Directive"] = rv["HasWave32"] && !(v[0] == 12 && v[1] == 5);
     rv["HasSchedMode"] = checkMajorIn(v[0], {12});
     rv["HasAccCD"] = checkInList(v, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(v, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
+    rv["MaxWavesPerSimd"] = rv["ArchAccUnifiedRegs"] ? 8 : 10;
     rv["CrosslaneWait"] = checkInList(v, {{9, 4, 2}, {9, 5, 0}});
     rv["TransOpWait"] = checkInList(v, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["SDWAWait"] = checkInList(v, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
@@ -261,17 +327,38 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v) {
     rv["VOP3ByteSel"] = v[0] == 12;
     rv["HasFP8_OCP"] = v[0] == 12;
     rv["HasWmmaArbStallBit"] = v[0] == 12 && v[1] == 5;
+    rv["WmmaArbStallBitOffset"] = arbStallBitOffset(archID);
     rv["HasF32XEmulation"] = checkInList(v, {{9, 5, 0}, {12, 5, 0}});
+    // F32X emulation Inf guard (v_cmp_class). The 3xBF16 split turns Inf into
+    // Inf - Inf = NaN unless the pack path substitutes a finite high part.
+    // gfx950 leaves it off: the extra VALU in the MFMA pack path regresses perf.
+    // Keep in lock-step with rocisa hardware_caps.hpp.
+    rv["F32XEmulationInfSupport"] = checkInList(v, {{12, 5, 0}});
     rv["MaxSgprPreload"] = checkInList(v, {{12, 5, 0}}) ? 32 : 16;
     rv["SgprPreloadPad"] =
         checkInList(v, {{9, 5, 0}}) || checkInList(v, {{9, 0, 10}}) || (v[0] == 9 && v[1] == 4);
     rv["HasMXScaleSwizzle"] = checkInList(v, {{9, 5, 0}, {12, 5, 0}});
     rv["HasInvWbDevFences"] = checkInList(v, {{12, 5, 0}});
     rv["RequiresXCntForVolatileVMEM"] = checkInList(v, {{12, 5, 0}});
+    rv["EnableXnackReplay"] = checkInList(v, {{12, 5, 0}});
     rv["DefaultScopeIsCULocal"] = checkInList(v, {{12, 5, 0}});
 
     rv["LDSBankCount"] = 64;
     rv["LDSBankWidth"] = 4;
+
+    // Per-XCD work-queue count baked into StreamK dynamic-queue kernels. Single
+    // codegen-side mirror of origami get_default_num_xcds(): gfx942/gfx950 bake
+    // 8 (the MI300X value), every other arch 1. gfx942 covers BOTH MI300X (8
+    // XCDs) and MI300A (6 XCDs), which codegen cannot tell apart, so it always
+    // bakes 8; the host guard rejects a device whose runtime NUM_XCD != this
+    // baked value (so MI300A's 6 is excluded at runtime). Power-of-two keeps the
+    // StreamK queue masking (AND/shift) valid. Kept in sync with rocisa
+    // hardware_caps.hpp.
+    rv["NumXCD"] = checkInList(v, {{9, 4, 2}, {9, 5, 0}}) ? 8 : 1;
+
+    // Per-queue counter stride = L2 cache-line size (uniform 128B on supported
+    // archs). Kept in sync with rocisa hardware_caps.hpp.
+    rv["CacheLineBytes"] = 128;
 
     return rv;
 }
@@ -282,9 +369,15 @@ std::map<std::string, int> initRegCaps(const IsaVersion& v,
     std::map<std::string, int> rv;
 
     rv["MaxVgpr"] = (v[0] == 12 && v[1] == 5) ? 1024 : 256;
-    rv["MaxSgpr"] = (v[0] == 12 && v[1] == 5) ? 106 : 102;
+    // Highest addressable SGPR index plus one. gfx8/gfx9 stop at s101 (102); every
+    // RDNA target (gfx10, gfx11, gfx12) addresses s0-s105 (106). Keep in lock-step
+    // with rocisa hardware_caps.hpp.
+    rv["MaxSgpr"] = v[0] >= 10 ? 106 : 102;
     rv["PhysicalMaxVgpr"] = (v[0] == 12 && v[1] == 5) ? 1024 : 512;
-    rv["PhysicalMaxSgpr"] = 800;
+    // gfx11 (RDNA) does not have an SGPR-file occupancy limit; use a large value so it
+    // never binds. Keep in lock-step with rocisa hardware_caps.hpp
+    // TODO: gfx10/gfx12 are RDNA too and carry the same phantom limit.
+    rv["PhysicalMaxSgpr"] = v[0] == 11 ? 1696 : 800;
     rv["maxLDSConstOffset"] = 65536;
 
     if (v[0] == 10) {
@@ -309,6 +402,8 @@ std::map<std::string, int> initRegCaps(const IsaVersion& v,
     } else {
         rv["PhysicalMaxVgprCU"] = 0;
     }
+
+    rv["GlobalPrefetchSize"] = 256;
 
     return rv;
 }
@@ -337,6 +432,12 @@ CacheEntry g_hwcapsCache[kMaxArchs];
 }  // namespace
 
 HardwareCapsResult HardwareCaps::query(uint32_t major, uint32_t minor, uint32_t stepping) {
+    // Resolve by ISA tuple first. ``getGfxArchID`` asserts on unknown triples;
+    // callers such as ``caps.getCaps`` must get an empty result instead of
+    // aborting the Python interpreter.
+    const auto* info = ArchHelper::getInstance().getArchInfo(major, minor, stepping);
+    if (!info) return {};
+
     auto archID = getGfxArchID(major, minor, stepping);
     auto idx = static_cast<size_t>(archID);
     if (idx >= kMaxArchs) return {};
@@ -350,7 +451,7 @@ HardwareCapsResult HardwareCaps::query(uint32_t major, uint32_t minor, uint32_t 
         const auto& mnemonicMap = info->getMnemonicToIsaOpcodeMap();
 
         entry.result.asmCaps = initAsmCaps(v, mnemonicMap, archID, info);
-        entry.result.archCaps = initArchCaps(v);
+        entry.result.archCaps = initArchCaps(v, archID);
         entry.result.regCaps = initRegCaps(v, entry.result.archCaps);
         entry.result.asmBugs = initAsmBugs(entry.result.asmCaps);
     });

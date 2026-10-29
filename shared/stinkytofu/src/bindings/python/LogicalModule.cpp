@@ -30,6 +30,13 @@ namespace stinkytofu {
 struct PyLogicalModule::Impl {
     std::string name;
     std::vector<std::shared_ptr<LogicalInstruction>> instructions;
+    std::vector<SetDirectiveEntry> setDirectives;
+    std::vector<ConditionalDirectiveEntry> conditionalDirectives;
+    std::vector<LabelEntry> labels;
+    std::vector<TextBlockEntry> textBlocks;
+    std::vector<GroupMarkerEntry> groupMarkers;
+    std::vector<CallableMarkerEntry> callableMarkers;
+    size_t globalOrder = 0;
 
     Impl(const std::string& name) : name(name) {}
 
@@ -76,6 +83,77 @@ bool PyLogicalModule::removeInstruction(LogicalInstruction* inst) {
 
 size_t PyLogicalModule::size() const {
     return pImpl->instructions.size();
+}
+
+void PyLogicalModule::addSetDirective(const std::string& symbol, const std::string& value) {
+    pImpl->setDirectives.push_back(
+        SetDirectiveEntry{pImpl->instructions.size(), pImpl->globalOrder++, symbol, value});
+}
+
+const std::vector<SetDirectiveEntry>& PyLogicalModule::getSetDirectives() const {
+    return pImpl->setDirectives;
+}
+
+void PyLogicalModule::addIfDirective(const std::string& condition) {
+    pImpl->conditionalDirectives.push_back(ConditionalDirectiveEntry{
+        pImpl->instructions.size(), pImpl->globalOrder++, ConditionalDirectiveKind::IF, condition});
+}
+
+void PyLogicalModule::addEndifDirective(const std::string& comment) {
+    pImpl->conditionalDirectives.push_back(
+        ConditionalDirectiveEntry{pImpl->instructions.size(), pImpl->globalOrder++,
+                                  ConditionalDirectiveKind::ENDIF, comment});
+}
+
+const std::vector<ConditionalDirectiveEntry>& PyLogicalModule::getConditionalDirectives() const {
+    return pImpl->conditionalDirectives;
+}
+
+void PyLogicalModule::addLabel(const std::string& labelName, uint16_t alignment,
+                               const std::string& comment) {
+    pImpl->labels.push_back(LabelEntry{pImpl->instructions.size(), pImpl->globalOrder++, labelName,
+                                       alignment, comment});
+}
+
+const std::vector<LabelEntry>& PyLogicalModule::getLabels() const {
+    return pImpl->labels;
+}
+
+void PyLogicalModule::addTextBlock(const std::string& text) {
+    pImpl->textBlocks.push_back(
+        TextBlockEntry{pImpl->instructions.size(), pImpl->globalOrder++, text});
+}
+
+const std::vector<TextBlockEntry>& PyLogicalModule::getTextBlocks() const {
+    return pImpl->textBlocks;
+}
+
+void PyLogicalModule::beginGroup(const std::string& name) {
+    pImpl->groupMarkers.push_back(
+        GroupMarkerEntry{pImpl->instructions.size(), pImpl->globalOrder++, name, true});
+}
+
+void PyLogicalModule::endGroup(const std::string& name) {
+    pImpl->groupMarkers.push_back(
+        GroupMarkerEntry{pImpl->instructions.size(), pImpl->globalOrder++, name, false});
+}
+
+const std::vector<GroupMarkerEntry>& PyLogicalModule::getGroupMarkers() const {
+    return pImpl->groupMarkers;
+}
+
+void PyLogicalModule::beginCallable(const std::string& name) {
+    pImpl->callableMarkers.push_back(
+        CallableMarkerEntry{pImpl->instructions.size(), pImpl->globalOrder++, name, true});
+}
+
+void PyLogicalModule::endCallable(const std::string& name) {
+    pImpl->callableMarkers.push_back(
+        CallableMarkerEntry{pImpl->instructions.size(), pImpl->globalOrder++, name, false});
+}
+
+const std::vector<CallableMarkerEntry>& PyLogicalModule::getCallableMarkers() const {
+    return pImpl->callableMarkers;
 }
 
 void PyLogicalModule::dump(std::ostream& out) const {

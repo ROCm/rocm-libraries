@@ -151,8 +151,7 @@ protected:
                 {
                     return;
                 }
-                bundle.tensors.insert(
-                    {tensorAttr->get_uid(), createTensorFromAttribute(*tensorAttr)});
+                bundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
             };
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {

@@ -17,6 +17,7 @@
  */
 typedef enum
 {
+    HIPDNN_PADDING_NOT_SET = 0, ///< Padding mode is not specified
     HIPDNN_PADDING_NEG_INF_PAD = 1, ///< Pad with negative infinity
     HIPDNN_PADDING_ZERO_PAD = 2 ///< Pad with zeros
 } hipdnnPaddingMode_t;

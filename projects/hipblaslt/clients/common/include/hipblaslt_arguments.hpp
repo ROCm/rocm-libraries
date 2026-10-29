@@ -109,8 +109,16 @@ struct Arguments
     int64_t ldd[MAX_SUPPORTED_NUM_PROBLEMS];
     int64_t lde[MAX_SUPPORTED_NUM_PROBLEMS];
 
+    int64_t a2a_extent;
+
     int32_t batch_count;
     int32_t batch_mode;
+
+    // Batch offset support for general batched GEMM
+    int64_t batch_offset_a;
+    int64_t batch_offset_b;
+    int64_t batch_offset_c;
+    int64_t batch_offset_d;
 
     int32_t iters;
     int32_t cold_iters;
@@ -146,8 +154,8 @@ struct Arguments
 
     // the gpu arch string after "gfx" for which the test is valid,
     // it represents a regular expression.
-    char gpu_arch[16];
-    char gpu_arch_exclude[16];
+    char gpu_arch[32];
+    char gpu_arch_exclude[32];
 
     // memory padding for testing write out of bounds
     uint32_t pad;
@@ -159,12 +167,27 @@ struct Arguments
 
     // bytes
     uint8_t devices;
+    uint8_t a2a_world;
 
     int8_t norm_check;
     int8_t allclose_check;
     int8_t unit_check;
     int8_t ulp_check;
-    int8_t timing;
+    int8_t fast_check;
+    // fast_check: operand to place across a 4 GiB boundary (a, b, c, d, bias,
+    // scale_alpha_vec, workspace), and the bytes before the boundary (0 = middle)
+    char   placement[16];
+    size_t placement_offset;
+    // fast_check: launches and checks per solution; the self-test iteration whose result
+    // is corrupted on purpose (-1 = none); and whether the case needs Stream-K solutions
+    int32_t fast_check_repeat;
+    int32_t fast_check_inject;
+    int8_t  requires_streamk;
+    // integer_exact value pattern: '' (standard), ternary or sparse_k (hipblaslt_init.hpp)
+    char    integer_exact_pattern[16];
+    // skip, rather than fail, when the library offers no solution (size-threshold sweeps)
+    int8_t  allow_no_solution;
+    int8_t  timing;
 
     char transA;
     char transB;
@@ -180,6 +203,9 @@ struct Arguments
     int32_t                  bias_stride; // Stride within bias vector for strided batch cases where each batch has unique bias value.
     hipblaslt_scaling_format scaleA;
     hipblaslt_scaling_format scaleB;
+    // hipblasLtInt4Encoding_t for the w4a16 path; ignored unless scaleA is a
+    // w4a16 group-scale mode.
+    int32_t                  int4_encoding;
     bool                     scaleC;
     bool                     scaleD;
     bool                     scaleE;
@@ -200,11 +226,13 @@ struct Arguments
     bool    use_ext;
     bool    use_ext_setproblem;
     int     algo_method; // 0 for getheuristic, 1 for get all algos, 2 for algo index
-    int     api_method; // 0 for c, 1 for mix, 2 for cpp
+    int     api_method; // 0 for c, 1 for mix, 2 for cpp, 3 for the grouped C API
     bool    use_user_args;
     int32_t rotating;
     bool    use_gpu_timer;
     float   skip_slow_solution_ratio;
+    // -1 inherits the handle. 0/1 set HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT.
+    int32_t uniform_summation_order;
     // tuning
     int32_t gsu_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
     int32_t wgm_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
@@ -250,8 +278,13 @@ struct Arguments
     OPER(ldc) SEP                    \
     OPER(ldd) SEP                    \
     OPER(lde) SEP                    \
+    OPER(a2a_extent) SEP             \
     OPER(batch_count) SEP            \
     OPER(batch_mode) SEP             \
+    OPER(batch_offset_a) SEP         \
+    OPER(batch_offset_b) SEP         \
+    OPER(batch_offset_c) SEP         \
+    OPER(batch_offset_d) SEP         \
     OPER(iters) SEP                  \
     OPER(cold_iters) SEP             \
     OPER(warmup_time) SEP            \
@@ -284,10 +317,19 @@ struct Arguments
     OPER(threads) SEP                \
     OPER(streams) SEP                \
     OPER(devices) SEP                \
+    OPER(a2a_world) SEP              \
     OPER(norm_check) SEP             \
     OPER(allclose_check) SEP         \
     OPER(unit_check) SEP             \
     OPER(ulp_check) SEP              \
+    OPER(fast_check) SEP             \
+    OPER(placement) SEP              \
+    OPER(placement_offset) SEP       \
+    OPER(fast_check_repeat) SEP      \
+    OPER(fast_check_inject) SEP      \
+    OPER(requires_streamk) SEP       \
+    OPER(integer_exact_pattern) SEP  \
+    OPER(allow_no_solution) SEP      \
     OPER(timing) SEP                 \
     OPER(transA) SEP                 \
     OPER(transB) SEP                 \
@@ -301,6 +343,7 @@ struct Arguments
     OPER(bias_stride) SEP            \
     OPER(scaleA) SEP                 \
     OPER(scaleB) SEP                 \
+    OPER(int4_encoding) SEP          \
     OPER(scaleC) SEP                 \
     OPER(scaleD) SEP                 \
     OPER(scaleE) SEP                 \
@@ -324,6 +367,7 @@ struct Arguments
     OPER(rotating) SEP               \
     OPER(use_gpu_timer) SEP          \
     OPER(skip_slow_solution_ratio) SEP\
+    OPER(uniform_summation_order) SEP\
     OPER(gsu_vector) SEP             \
     OPER(wgm_vector) SEP             \
     OPER(print_solution_found) SEP   \
@@ -684,12 +728,6 @@ enum hipblaslt_argument : int
     FOR_EACH_ARGUMENT(CREATE_ENUM, )
 };
 #undef CREATE_ENUM
-
-#if __clang__
-#define HIPBLASLT_CLANG_STATIC static
-#else
-#define HIPBLASLT_CLANG_STATIC
-#endif
 
 // ArgumentsHelper contains a templated lambda apply<> where there is a template
 // specialization for each line in the CPP macro FOR_EACH_ARGUMENT. For example,

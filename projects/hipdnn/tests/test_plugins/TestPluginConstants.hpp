@@ -59,6 +59,47 @@ inline const std::string& testExecuteFailsPluginPath()
     return s_testExecuteFailsPluginPath;
 }
 
+#ifdef TEST_NO_SOLVER_PLUGIN_NAME
+inline const std::string& testNoSolverPluginPath()
+{
+    static const std::string s_testNoSolverPluginPath
+        = getTestCustomFilepathForPlugin(TEST_NO_SOLVER_PLUGIN_NAME);
+    return s_testNoSolverPluginPath;
+}
+#endif
+
+#ifdef TEST_RESOURCE_FAIL_PLUGIN_NAME
+inline const std::string& testResourceFailPluginPath()
+{
+    static const std::string s_testResourceFailPluginPath
+        = getTestCustomFilepathForPlugin(TEST_RESOURCE_FAIL_PLUGIN_NAME);
+    return s_testResourceFailPluginPath;
+}
+#endif
+
+// The hashed-name plugin is consumed only by the frontend engine-filtering
+// integration tests, so only targets that define TEST_HASHED_NAME_PLUGIN_NAME get
+// this accessor.
+#ifdef TEST_HASHED_NAME_PLUGIN_NAME
+inline const std::string& testHashedNamePluginPath()
+{
+    static const std::string s_testHashedNamePluginPath
+        = getTestCustomFilepathForPlugin(TEST_HASHED_NAME_PLUGIN_NAME);
+    return s_testHashedNamePluginPath;
+}
+#endif
+
+// The mismatched-name plugin is consumed only by the backend plugin-loading
+// integration tests, so the accessor is guarded the same way.
+#ifdef TEST_MISMATCHED_NAME_PLUGIN_NAME
+inline const std::string& testMismatchedNamePluginPath()
+{
+    static const std::string s_testMismatchedNamePluginPath
+        = getTestCustomFilepathForPlugin(TEST_MISMATCHED_NAME_PLUGIN_NAME);
+    return s_testMismatchedNamePluginPath;
+}
+#endif
+
 inline const std::string& testNoApplicableEnginesAPluginPath()
 {
     static const std::string s_testNoApplicableEnginesPluginPath

@@ -200,6 +200,12 @@ class TestAsmCapsVsCompiler:
             self._asm("v_cvt_f16_fp8 v[0], v[1] byte_sel:2")
         )
 
+    def test_has_v_maximumminimum_f32(self):
+        asm = self._caps()
+        assert asm["HasVMaximumMinimumF32"] == int(
+            self._asm("v_maximumminimum_f32 v0, v1, v2, v3")
+        )
+
     # -- Wait count limits (derived from instruction support) --
 
     def test_separate_vmcnt_and_limits(self):
@@ -217,6 +223,33 @@ class TestAsmCapsVsCompiler:
         if asm["HasXcnt"]:
             assert asm["MaxXcnt"] == 63
 
+    def test_has_th_modifier(self):
+        asm = self._caps()
+        expected = int(
+            self._asm_any(
+                "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0 offen offset:0 th:TH_LOAD_NT",
+                "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0 th:TH_LOAD_NT",
+            )
+        )
+        assert asm["HasTHModifier"] == expected
+
+    def test_has_nv_modifier(self):
+        asm = self._caps()
+        expected = int(
+            self._asm_any(
+                "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0 offen offset:0 nv",
+                "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0 nv",
+            )
+        )
+        assert asm["HasNVModifier"] == expected
+
+    def test_has_global_prefetch(self):
+        asm = self._caps()
+        expected = int(
+            self._asm("global_prefetch_b8 v[0:1], off scope:SCOPE_SE th:TH_LOAD_NT")
+        )
+        assert asm["HasGlobalPrefetch"] == expected
+
 
 class TestArchCaps:
     """Verify archCaps values for gfx1250 are correct based on ISA version checks."""
@@ -228,10 +261,14 @@ class TestArchCaps:
         assert arch["NoSDWA"] == 1
         assert arch["HasEccHalf"] == 1
         assert arch["DeviceLDS"] == 327680
+        assert arch["LdsGranularity"] == 256
         assert arch["CMPXWritesSGPR"] == 0
         assert arch["HasInvWbDevFences"] == 1
         assert arch["MaxSgprPreload"] == 32
         assert arch["LDSBankCount"] == 64
+        assert arch["WmmaArbStallBitOffset"] == 2
+        assert arch["HasF32XEmulation"] == 1
+        assert arch["F32XEmulationInfSupport"] == 1
 
 
 class TestRegCaps:
@@ -243,3 +280,4 @@ class TestRegCaps:
         assert reg["MaxSgpr"] == 106
         assert reg["PhysicalMaxVgpr"] == 1024
         assert reg["PhysicalMaxVgprCU"] == 4096 * 32
+        assert reg["PhysicalMaxSgpr"] == 800
