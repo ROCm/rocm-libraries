@@ -5,7 +5,6 @@
  * rocke.core.lower_llvm. Defines the externs declared in
  * rocke/lower_llvm_internal.h:
  *
- *   - ROCKE_LL_DATALAYOUT / ROCKE_LL_TRIPLE          (Python _DATALAYOUT / _TRIPLE)
  *   - ROCKE_LL_INTRINSIC_DECLS[]   (+ _COUNT)      (Python _INTRINSIC_DECLS)
  *   - ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[]  (+ _COUNT)
  *                                                (Python ..._LLVM22_OVERRIDES)
@@ -25,63 +24,6 @@
 
 namespace ckc
 {
-
-/* ---------------------------------------------------------------------- */
-/* datalayout / triple (Python _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22 /   */
-/* _DATALAYOUT_LLVM23 / _TRIPLE). The AMDGPU datalayout is FLAVOR-KEYED:    */
-/* two fields drift across LLVM flavors:                                    */
-/*   * buffer-resource address space (p8, the 128-bit buffer descriptor --   */
-/*     NOT the p7 fat pointer) gained an index-width field:                  */
-/*       LLVM 20 (ROCm 7.0/7.1):  e-...-p8:128:128-...                       */
-/*       LLVM 22 (ROCm 7.2):      e-...-p8:128:128:128:48-...                */
-/*   * ELF symbol-mangling spec (m:e): absent in LLVM 20 and LLVM 22,        */
-/*     present in LLVM 23 (ROCm 7.13+, AMD clang 23.0.0git):                 */
-/*       LLVM 20 / 22:  e-p:64:64-...                                        */
-/*       LLVM 23:       e-m:e-p:64:64-...                                    */
-/* Pick via rocke_ll_datalayout_for_flavor, mirroring _datalayout_for_flavor.*/
-/* ---------------------------------------------------------------------- */
-
-const char* const ROCKE_LL_DATALAYOUT_LLVM20
-    = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-      "-p7:160:256:256:32-p8:128:128-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32"
-      "-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-      "-n32:64-S32-A5-G1-ni:7:8:9";
-
-const char* const ROCKE_LL_DATALAYOUT_LLVM22
-    = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-      "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
-      "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-      "-n32:64-S32-A5-G1-ni:7:8:9";
-
-/* Layout emitted for rocKE's llvm23 flavor: the llvm22 layout plus the ELF
- * symbol-mangling spec m:e and address spaces p10-p15 (upstream 5bf967cb132b).
- * Older compiler builds may omit p10-p15; see Python _DATALAYOUT_LLVM23 for the
- * full rationale. Must stay byte-identical with it. */
-const char* const ROCKE_LL_DATALAYOUT_LLVM23
-    = "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-      "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-p10:32:32-p11:32:32"
-      "-p12:32:32-p13:32:32-p14:32:32-p15:32:32-i64:64-v16:16-v24:32"
-      "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-      "-n32:64-S32-A5-G1-ni:7:8:9";
-
-/* Back-compat alias: callers that have not yet been flavor-threaded see the
- * LLVM20 form (the historical hardcoded value). New code keys on the flavor
- * via rocke_ll_datalayout_for_flavor / rocke_isa_datalayout. */
-const char* const ROCKE_LL_DATALAYOUT = ROCKE_LL_DATALAYOUT_LLVM20;
-
-const char* const ROCKE_LL_TRIPLE = "amdgcn-amd-amdhsa";
-
-/* Python _datalayout_for_flavor: LLVM20 returns the legacy p8 layout, LLVM23
- * returns its own m:e form, and anything else (incl. an unexpected value)
- * degrades to the modern LLVM22 form. */
-const char* rocke_ll_datalayout_for_flavor(rocke_llvm_flavor_t flavor)
-{
-    if(flavor == ROCKE_LLVM_FLAVOR_LLVM20)
-        return ROCKE_LL_DATALAYOUT_LLVM20;
-    if(flavor == ROCKE_LLVM_FLAVOR_LLVM23)
-        return ROCKE_LL_DATALAYOUT_LLVM23;
-    return ROCKE_LL_DATALAYOUT_LLVM22;
-}
 
 /* ---------------------------------------------------------------------- */
 /* The base (LLVM20) intrinsic-declaration table (Python _INTRINSIC_DECLS) */
@@ -590,13 +532,14 @@ const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT
  * mirroring the Python _Lowerer choosing which OVERRIDES dict to .update(). */
 const rocke_ll_decl_t* rocke_ll_flavor_overrides(rocke_llvm_flavor_t flavor, int* out_count)
 {
-    if(flavor == ROCKE_LLVM_FLAVOR_LLVM22)
+    const rocke_ll_emission_profile_t* profile = rocke_ll_emission_profile(flavor);
+    if(profile && profile->declarations == ROCKE_LL_DECLARATION_ABI_LLVM22)
     {
         if(out_count)
             *out_count = ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
         return ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES;
     }
-    if(flavor == ROCKE_LLVM_FLAVOR_LLVM23)
+    if(profile && profile->declarations == ROCKE_LL_DECLARATION_ABI_LLVM23)
     {
         if(out_count)
             *out_count = ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;

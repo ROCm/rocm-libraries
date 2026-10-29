@@ -35,6 +35,8 @@ set(TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME "test_incompatible_version_plugin")
 set(TEST_HASHED_NAME_PLUGIN_NAME "test_hashed_name_plugin")
 set(TEST_LYING_ENGINE_NAME_PLUGIN_NAME "test_lying_engine_name_plugin")
 set(TEST_MISMATCHED_NAME_PLUGIN_NAME "test_mismatched_name_plugin")
+set(TEST_NO_SOLVER_PLUGIN_NAME "test_no_solver_plugin")
+set(TEST_RESOURCE_FAIL_PLUGIN_NAME "test_resource_fail_plugin")
 
 # Override-execute fake plugin names
 set(HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET "test_override_implementing_plugin")
