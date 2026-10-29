@@ -142,3 +142,27 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 - Do not post to GitHub or Jira on someone's behalf without showing them the exact text first.
 - Do not skip, disable, or weaken a test just to turn CI green.
 - When you move, rename, or delete files, search `.github/`, tox files, and `CODEOWNERS` for the old paths and update them in the same PR. CI path filters and trigger maps do not follow a rename on their own.
+
+## Cursor Cloud specific instructions
+
+Cloud Agent VMs have no AMD GPU and no ROCm install. GPU library builds use [TheRock](https://github.com/ROCm/TheRock) or a ROCm toolchain on a GPU runner. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+On this image, build and test [HostNumerics](shared/hostnumerics/README.md). It is the CPU-only component and does not need HIP. The environment install provides:
+
+- `g++`, Clang 18 (`/usr/bin/c++`), `clang-tidy-18`, CMake, Ninja, ccache, and GoogleTest 1.14 (`libgtest-dev`). `libstdc++-14-dev` is installed so Clang can link `libstdc++`.
+- A Python 3.12 virtualenv at `/opt/cursor/venvs/hostnumerics` with `nanobind==3.0.1`, NumPy, and `pre-commit`. `pre-commit` is on `PATH` at `/usr/local/bin/pre-commit`. Hook environments are cached by `pre-commit install-hooks` during install.
+
+From the repository root, use that interpreter. `HOSTNUMERICS_ENABLE_FETCH=OFF` uses the image GoogleTest. The rest of the flow is in [shared/hostnumerics/docs/build_and_test.md](shared/hostnumerics/docs/build_and_test.md).
+
+```shell
+cmake -S shared/hostnumerics -B /tmp/hostnumerics-build -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DPython_EXECUTABLE=/opt/cursor/venvs/hostnumerics/bin/python \
+  -DHOSTNUMERICS_BUILD_TESTING=ON \
+  -DHOSTNUMERICS_BUILD_PYTHON=ON \
+  -DHOSTNUMERICS_ENABLE_FETCH=OFF
+cmake --build /tmp/hostnumerics-build --parallel
+ctest --test-dir /tmp/hostnumerics-build --output-on-failure
+```
+
+Repo-wide lint is `pre-commit run --files <changed files>`.
