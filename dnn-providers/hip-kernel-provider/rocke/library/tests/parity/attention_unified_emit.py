@@ -7,13 +7,18 @@
 # by argv[1]: configs 0-5 build a UnifiedAttention2DSpec via
 # build_unified_attention_2d; configs 6-7 build the scalar split-3D reduce
 # (build_unified_attention_reduce, 8 segments) of the problem named in
-# _REDUCE_CONFIGS. Prints lower_kernel_to_llvm(arch='gfx950') to stdout so it
-# can be byte-compared with the C emitter attention_unified_emit.c.
+# _REDUCE_CONFIGS; configs 8-10 build the scalar split-3D segment kernel
+# (build_unified_attention_3d, 8 segments) of the problem named in
+# _SEGMENT_CONFIGS (config 10 with a sliding window). Prints
+# lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared with
+# the C emitter attention_unified_emit.c.
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
     UnifiedAttention2DSpec,
+    UnifiedAttention3DSpec,
     UnifiedAttentionReduceSpec,
     build_unified_attention_2d,
+    build_unified_attention_3d,
     build_unified_attention_reduce,
 )
 from _emit_common import run_emit
@@ -105,14 +110,24 @@ _CONFIGS = {
 
 # Reduce config index -> the 2D config whose problem it reduces.
 _REDUCE_CONFIGS = {6: 2, 7: 1}
-_REDUCE_SEGMENTS = 8
+_NUM_SEGMENTS = 8
+
+# Segment config index -> the 2D config whose problem the split-3D segment kernel
+# runs. Both engines build the segment kernel for the default (bottom-right
+# causal) mask, which every 2D config uses; config 10 (problem 3) adds a sliding
+# window.
+_SEGMENT_CONFIGS = {8: 2, 9: 1, 10: 3}
 
 
 def _kernel(idx: int):
     if idx in _REDUCE_CONFIGS:
         problem = UnifiedAttentionProblem(**_CONFIGS[_REDUCE_CONFIGS[idx]])
-        spec = UnifiedAttentionReduceSpec(problem, num_segments=_REDUCE_SEGMENTS)
+        spec = UnifiedAttentionReduceSpec(problem, num_segments=_NUM_SEGMENTS)
         return build_unified_attention_reduce(spec)
+    if idx in _SEGMENT_CONFIGS:
+        problem = UnifiedAttentionProblem(**_CONFIGS[_SEGMENT_CONFIGS[idx]])
+        spec = UnifiedAttention3DSpec(problem=problem, num_segments=_NUM_SEGMENTS)
+        return build_unified_attention_3d(spec)
     if idx not in _CONFIGS:
         raise SystemExit(f"unknown config index {idx}")
     problem = UnifiedAttentionProblem(**_CONFIGS[idx])

@@ -230,7 +230,11 @@ rocke_status_t
 
     {
         const char* parts[6] = {hbuf, kvbuf, dbuf, bbuf, segbuf, p->dtype ? p->dtype : ""};
-        return rocke_kernel_name_join(prefix, parts, 6, NULL, NULL, 0, out, out_cap, NULL);
+        /* flags={"tl":..., "rb":..., "sw":sliding_window>0}; this builder supports
+         * only the default mask, so only "sw" can be set. */
+        const char* flag_names[1] = {"sw"};
+        int flag_on[1] = {p->sliding_window > 0 ? 1 : 0};
+        return rocke_kernel_name_join(prefix, parts, 6, flag_names, flag_on, 1, out, out_cap, NULL);
     }
 }
 
