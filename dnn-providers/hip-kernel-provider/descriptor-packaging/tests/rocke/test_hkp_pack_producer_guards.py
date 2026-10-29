@@ -22,6 +22,7 @@ from hkp_pack.rocke_compile import (
     _module_from_source,
     _require_spec_arch_signature,
     _resolve_spec_class,
+    _resolve_support_predicate,
     build_spec,
     rocke_compile_arch,
 )
@@ -338,6 +339,33 @@ def test_every_shipped_rocke_builder_passes_the_pack_time_predicate_check():
             )
         except HkpPackError as exc:
             pytest.fail(f"{source}:{builder} @ {arch} ({target}): {exc}")
+
+
+@pytest.mark.skipif(not _HAS_ROCKE_LIBRARY, reason="rocke/library not in this tree")
+def test_fastkv_register_p_builder_packs_through_its_spec_predicate():
+    """The gfx950 fastKV register-P builder resolves its spec-first predicate by
+    alias; the predicate accepts the experiment's spec and refuses one the
+    builder would raise on."""
+    module = import_module("kernels.gfx950.attention_tiled_2d_fastkv_regp")
+    builder = "build_unified_attention_2d_fastkv_register_p"
+    name, _ = _resolve_support_predicate(module, builder)
+    assert name == "supports_fastkv_register_p_2d_spec"
+    spec = module.make_fastkv_register_p_spec(
+        module.UnifiedAttention2DTiledSpec(
+            head_size=64,
+            block_size=32,
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype="bf16",
+            use_sinks=False,
+            sliding_window=0,
+            has_softcap=False,
+        )
+    )
+    _check_support_predicate(module, builder, spec, "gfx950")
+    no_fast_desc = dataclasses.replace(spec, use_fast_paged_kv_desc=False)
+    with pytest.raises(HkpPackError, match="use_fast_paged_kv_desc"):
+        _check_support_predicate(module, builder, no_fast_desc, "gfx950")
 
 
 # --- C. Literal validation --------------------------------------------------
