@@ -914,9 +914,6 @@ class KernelComponentFactoryGfx12(KernelComponentFactoryBase):
             return None
 
 
-QR_TDM_SPLITKV_HDIMS = [32, 64, 128, 256]
-
-
 class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
     arch = ArchTrait("gfx125")
 
@@ -935,15 +932,14 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
             # BUILD_TESTING filter keeps split-kv to *_nbias* in the dispatch
             # api while still building them. Like fmha_fwd.py it pads both
             # sequence lengths together and both head dims together.
-            if hdim in QR_TDM_SPLITKV_HDIMS:
-                for mask, pagedkv, sink in itertools.product(
-                    get_mask_map(mask_impl).keys(), ["t", "f"], ["t", "f"]
-                ):
-                    #                             vlayout spad skpad dpad dvpad logits bias lse squant pagedkv sink mask
-                    pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "f", "f", "f", "no", "t", squant, pagedkv, sink, mask))  # fmt: skip
-                    pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "t", "t", "f", "no", "t", squant, pagedkv, sink, mask))  # fmt: skip
+            for mask, pagedkv, sink in itertools.product(
+                get_mask_map(mask_impl).keys(), ["t", "f"], ["t", "f"]
+            ):
+                #                             vlayout spad skpad dpad dvpad logits bias lse squant pagedkv sink mask
+                pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "f", "f", "f", "no", "t", squant, pagedkv, sink, mask))  # fmt: skip
+                pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "t", "t", "f", "no", "t", squant, pagedkv, sink, mask))  # fmt: skip
             # qr: fallback for everything qr_tdm leaves out. Its three dpad == f
-            # entries only accept a head dim of exactly 128, and there qr_tdm's
+            # entries only accept the bucket's exact head dim, and there qr_tdm's
             # own dpad == f entry wins every time -- its sequence predicates are
             # unconditionally true while theirs are not -- so they are skipped
             # for the traits qr_tdm emits. The head-dim padded entry stays: it
@@ -955,7 +951,7 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 ["t", "f"],
                 ["t", "f"],
             ):
-                if not (hdim in QR_TDM_SPLITKV_HDIMS and logits == "f" and bias == "no"):
+                if not (logits == "f" and bias == "no"):
                     pipelines.append(Pipeline("qr", "row", "f", "t", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
                     pipelines.append(Pipeline("qr", "row", "t", "f", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
                     pipelines.append(Pipeline("qr", "row", "t", "t", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
