@@ -82,8 +82,11 @@ them:
 
 .. code:: cmake
 
-    find_package(hipdnn_frontend CONFIG REQUIRED COMPONENTS cudnn_compatibility)
+    find_package(hipdnn_frontend 0.5 CONFIG REQUIRED COMPONENTS cudnn_compatibility)
     target_link_libraries(my_app PRIVATE hipdnn_frontend)
+
+The v0.x builders were introduced in ``hipdnn_frontend`` 0.5; code that uses only the v9 graph API
+can request an earlier version.
 
 The shim is source compatible only: rebuild your code against it. Its C entry points take HIP types
 (for example, ``cudnnSetStream`` takes a ``hipStream_t``), so CUDA runtime calls in your source still
@@ -98,7 +101,9 @@ Replace the cuDNN include and alias the namespace:
     namespace cudnn_frontend = hipdnn_frontend::compatibility::cudnn_frontend;
 
 Upstream declares a global ``json`` alias for ``nlohmann::json``; the shim declares it as
-``cudnn_frontend::json``. Code that names a bare ``json`` adds ``using json = cudnn_frontend::json;``.
+``cudnn_frontend::json``. Code that names a bare ``json`` adds ``using json = nlohmann::json;``,
+which compiles against both NVIDIA's header and the shim. ``cudnn_frontend::json`` exists only in
+the shim, so an alias to it belongs inside the ROCm branch of single-source code.
 
 See the samples in `samples/cudnn_shim <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn/samples/cudnn_shim>`_.
 The shim's behavior differs from cuDNN in places. See

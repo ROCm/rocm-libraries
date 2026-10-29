@@ -1,12 +1,14 @@
 # RFC: cuDNN v8 shim for hipDNN
 
 - **Authors**: Mitch Ousdahl
-- **Status**: Implemented
+- **Status**: In progress
 - **Status notes**: The v0.x builders, their `detail/v8` core and the C types, `cudnnBackendExecute`
   and `cudnnGetLastErrorString` ship in `frontend/include/hipdnn_compatibility/cudnn/` behind
-  `HIPDNN_ENABLE_CUDNN_COMPATIBILITY` (#13970), with v8 GPU samples, the legacy-sample corpus and a
-  local PyTorch compile probe. The backend descriptor C API is not provided, and no PyTorch build runs
-  on the shim end to end. Plain ReLU after a matmul needs the hipBLASLt provider change of #14363.
+  `HIPDNN_ENABLE_CUDNN_COMPATIBILITY` (default `OFF`, #13970), with v8 GPU samples, the legacy-sample
+  corpus and a local PyTorch compile probe. The backend descriptor C API is not provided, and no
+  PyTorch build runs on the shim end to end. Plain ReLU after a matmul needs the hipBLASLt provider
+  change of #14363, and CI does not yet run the matmul, layer-norm and resample samples numerically
+  (see the Roadmap).
 - **Last verified**: 2026-10-27 against `develop` (ef0a22719e9)
 - **Follows**: [RFC 0012: cuDNN shim for hipDNN](./0012_CuDNN_Shim.md) §9
 - **Amends**: RFC 0012 §1 ("Not"), §4.2 (v9-only translation units), §4.3 (aliasing of
@@ -200,7 +202,7 @@ runs no heuristics and needs no GPU.
 | alignment ≥ 16 | not set (16 is hipDNN's default; cuDNN's value is a lower bound) |
 | alignment < 16 | forwarded; needs plugin API ≥ 1.3.0, which no provider reports yet |
 | by-value | runtime pass-by-value tensor ([RFC 0016](./0016_RuntimePassByValueTensors.md)); `BAD_PARAM` on a virtual tensor |
-| constant value | `HIPDNN_ATTR_TENSOR_VALUE_EXT`; bytes copied at `TensorBuilder::build()`. The value's size must equal the data type's element size; `BAD_PARAM` otherwise and on a virtual tensor |
+| constant value | `HIPDNN_ATTR_TENSOR_VALUE_EXT`; bytes copied at `TensorBuilder::build()`. The value's size must equal the data type's element size, except that a wider integer whose value fits an `INT8`, `UINT8`, `INT32` or `BOOLEAN` tensor is stored as one element; `BAD_PARAM` otherwise and on a virtual tensor |
 | ragged offset | forwarded; needs plugin API ≥ 1.3.0 |
 | vector count > 1, reordering | `NOT_SUPPORTED` (a count ≤ 1 is not sent, as upstream) |
 
@@ -212,7 +214,7 @@ runs no heuristics and needs no GPU.
 | Pointwise | pointwise | X→IN_0, B→IN_1, T→IN_2, Y→OUT_0; backward: DY→IN_0, X→IN_1, DX→OUT_0 |
 | Matmul | matmul | padding value, M/N/K overrides → `NOT_SUPPORTED` |
 | Reduction | reduction | |
-| Resample fwd / bwd | resample | fractional values, NEAREST, BILINEAR, `EDGE_VAL_PAD` padding, backward X/Y, a forward index tensor outside MAXPOOL → `NOT_SUPPORTED` |
+| Resample fwd / bwd | resample | fractional values, NEAREST, BILINEAR, `EDGE_VAL_PAD` padding, backward X/Y, an index tensor outside MAXPOOL → `NOT_SUPPORTED` |
 | Norm fwd / bwd | batch / layer / RMS norm | by `NORM_MODE`; compute type FLOAT; exp. avg. factor → momentum; instance, group, ada-layer, peer stats → `NOT_SUPPORTED` |
 | Gen-stats, BN finalize, BN bwd weights, RNG, reshape, paged cache load | — | upstream's slot checks, then `NOT_SUPPORTED` |
 
@@ -221,12 +223,15 @@ runs no heuristics and needs no GPU.
 - **Pointwise defaults are not forwarded.** Upstream sets every parameter of the mode, including
   defaults; MIOpen rejects a fusion if a lower-clip slope is present at all. Plain ReLU therefore
   reaches hipDNN with no parameters, as from the v9 API, and relies on the providers reading an unset
-  lower clip as 0 (§9 R9). Non-default values are narrowed to float, so an infinite clip saturates; a
-  NaN clip is `BAD_PARAM`.
+  lower clip as 0 (§9 R9). Non-default values are narrowed to float, so an infinite lower clip
+  saturates; an upper clip at or above `FLT_MAX` clips nothing and is not sent. A NaN clip is
+  `BAD_PARAM`.
 - **Alpha / beta.** Alpha ≠ 1 or beta ≠ 0 on any op → `NOT_SUPPORTED`. No hipDNN engine accepts the
   alternative (an extra scalar multiply). A pointwise alpha2 is checked only on modes with a B input
   and on activation-backward modes; cuDNN ignores it on one-input forward modes.
-- **Store and ignore:** NaN propagation (hipDNN has no equivalent).
+- **Store and ignore:** NaN propagation (hipDNN has no equivalent); the epsilon of batch-norm
+  inference, batch-norm backward and RMS-norm backward (hipDNN's operations take inverse variance or
+  saved statistics instead; see `KNOWN_DIVERGENCES.md`).
 - **`NOT_SUPPORTED` when set:** dynamic shapes, override shapes.
 
 ### 3.5 Engine selection
@@ -302,7 +307,9 @@ runs no heuristics and needs no GPU.
   in plan tags and serialized autotune results, so renumbering would break persisted data. Removing a
   whole enum retires its values.
 - `DescriptorType_t`, `NormMode_t` and `RngDistribution_t` are shim-owned rather than aliased (RFC
-  0012 §4.3): hipDNN has no counterpart. They become aliases if hipDNN adds one.
+  0012 §4.3): hipDNN has no counterpart. They can become aliases only at a `hipdnn_frontend` major
+  version, and only of a hipDNN enum that has every enumerator the shim declares, because the change
+  alters the parameter types of public builder setters and helpers (RFC 0012 §4.8).
 - `CUDNN_VERSION` stays 92200 and the frontend pin 1.24.0. Ported headers `static_assert` the pin so a
   bump forces a re-diff.
 - `cudnnBackendInitialize` is not provided (deprecated; nothing calls it).
@@ -318,7 +325,8 @@ runs no heuristics and needs no GPU.
   lists them per header for upstream re-diffs. Other edits:
   - namespace and include paths;
   - upstream's global `json` alias is declared in the shim namespace as `cudnn_frontend::json`, so it
-    cannot collide with a consumer's own `json`;
+    does not collide with a consumer's own global `json` unless `using namespace cudnn_frontend;` is
+    in scope and the consumer's alias names a different type; such code names its alias as `::json`;
   - error messages name the builder and the rule, not attribute enums;
   - private members that only held backend descriptors (knob-info and knob-choice arrays) removed;
   - CUDA event timing → hipDNN's profiling-control descriptor on the handle's stream;
@@ -341,15 +349,19 @@ runs no heuristics and needs no GPU.
   - The errata `check_shape` reads the fifth element of its dimension array, which a 4-D tensor never
     writes; the shim's is zero.
   - `time_sorted_plan` collects timed plans in a `std::set` ordered by time, which keeps only one of
-    several plans with equal times; the shim uses a `std::multiset`. Upstream also ignores its CUDA
-    event errors and keeps the previous or initial time of 0, which ranks an unmeasured plan first; the
-    shim gives a plan whose timing fails on any run the time `FLT_MAX`, so it sorts after every
-    measured plan.
+    several plans with equal times; the shim uses a `std::multiset`. Upstream also ignores the status
+    of each timed execution and its CUDA event errors, and keeps the span or the previous or initial
+    time of 0, which can rank an unmeasured plan first; the shim gives a plan whose timed execution or
+    timing fails on any run the time `FLT_MAX`, so it sorts after every measured plan.
   - `cudnnFindPlanAndCache` reads the front of the sorted plans even when none ran; the shim fails with
     `NOT_SUPPORTED` (a thrown `cudnnException`, or under `NV_CUDNN_DISABLE_EXCEPTION` an unbuilt plan
     whose status is `BAD_PARAM`).
-  - A successful descriptor-builder `build()` after a failed one keeps the earlier status. The shim's
-    descriptor builders share one `build()` tail, `detail::v8::buildDescriptor`, which resets it.
+  - A successful descriptor-builder `build()` after a failed one keeps the earlier status, and
+    `TensorBuilder_v8::build` refuses to run again after a failure past its prechecks ("already
+    pointing to something"). The shim's descriptor builders share one `build()` tail,
+    `detail::v8::buildDescriptor`, which resets the status; `TensorBuilder` keeps its ragged offset
+    and constant in the builder, so a fixed builder builds again, and only a builder that already
+    built a tensor is `BAD_PARAM`.
   - `get_raw_desc()` dereferences a null pointer after a `build()` that failed before creating it
     (reachable under `NV_CUDNN_DISABLE_EXCEPTION`); the shim returns null.
   - `get_heuristics_list(std::vector<HeurMode_t>, ...)` throws `std::out_of_range` for
@@ -444,9 +456,9 @@ Each phase builds and is tested on its own. Each adds its own `KNOWN_DIVERGENCES
 | Compile-only targets | JSON-off builds; `find_plan.h`, `get_plan.h` and `EngineConfigGenerator.h` alone, under each JSON opt-out; logging and SDPA off; the public surface pins as C++20 |
 | Integration, real backend, no GPU | Every lowered operation passes hipDNN's descriptor validation |
 | Integration, test plugins, GPU | Engine enumeration, plans, execute (including on another handle), knobs, multiple engines, plan search |
-| GPU samples (`samples/cudnn_shim/*V8.cpp`; MIOpen, hipBLASLt) | Numerical results against a CPU reference for conv fprop / dgrad / wgrad, conv + bias + ReLU, pointwise ReLU, matmul + bias + activation, batch norm forward training and backward, layer norm forward and backward, reduction, and resample forward and backward. Each test fails when fewer variants run than its `--require-ran` floor. Variants with no engine are skipped: reduction (no provider), layer norm and resample (hip-kernel-provider only, which the CI samples jobs do not install), `CUDNN_CONVOLUTION` mode and asymmetric padding (MIOpen rejects them), matmul on gfx115x. Overhead (§2) is reported under ctest label `perf`. The v8 samples reject `--engine-id` and `--engine-name` |
+| GPU samples (`samples/cudnn_shim/*V8.cpp`; MIOpen, hipBLASLt, hip-kernel) | Numerical results against a CPU reference for conv fprop / dgrad / wgrad, conv + bias + ReLU, pointwise ReLU, matmul + bias + activation, batch norm forward training and backward, layer norm forward and backward, and resample forward and backward. Each test fails when fewer variants run than its `--require-ran` floor or when a variant named by `--require-variant` (the fp32 NCHW variants of every sample with a non-zero floor) does not run. Variants with no engine are skipped: matmul (hipBLASLt only; none on gfx115x under Windows), layer norm and resample (hip-kernel-provider only), `CUDNN_CONVOLUTION` mode and asymmetric padding (MIOpen rejects them). The reduction sample is built but no provider runs reduction, so it always reports Skipped. TheRock's hipdnn-samples job loads only the MIOpen provider, so CI skips matmul, layer norm and resample (their floors are 0) until a TheRock change that loads the hipBLASLt and hip-kernel providers reaches this repository's pin; until then manual gfx942 runs cover them. Overhead (§2) is reported under ctest label `perf`. The v8 samples reject `--engine-id` and `--engine-name` |
 | v9 sample corpus | Existing v9 behavior unchanged |
-| NVIDIA legacy samples | Source compatibility; each case is judged against its manifest tier: `RUN_CLEAN`, `XFAIL_RUN`, or `VACUOUS`, which must run without crashing and is reported as skipped ([Reference §5](./0021_CuDNN_V8_Shim_Reference.md#5-legacy-sample-catalogue)). The corpus is pinned by commit; configure fails with E22 on any other |
+| NVIDIA legacy samples | Source compatibility; each case is judged against its manifest tier: `RUN_CLEAN`, `XFAIL_RUN`, or `VACUOUS`, which must run without crashing and is reported as skipped ([Reference §5](./0021_CuDNN_V8_Shim_Reference.md#5-legacy-sample-catalogue)). The corpus is pinned by commit: configure fails with E22 when a git checkout is at any other commit; a supplied corpus that is not a readable git checkout only warns, and the E20 version check still applies |
 | PyTorch compile check | `Conv_v8.cpp` and the quantized cuDNN files compile with the PyTorch tree's flags, `AT_CUDNN_ENABLED()` forced on and two header substitutions: `ATen/cudnn/Descriptors.h` truncated before its v7 descriptor wrappers (they need the v7 C API the shim lacks) and `ATen/cudnn/Handle.h` replaced by the hipDNN integration header |
 
 ## 8. Future Considerations

@@ -53,4 +53,4 @@ Update the status, the notes, and the verification date in the same change that 
 | [0018](./0018_UniversalMatchDescriptor.md) | Universal match descriptor (UMD criteria) | In progress |
 | [0019](./0019_UniversalHeuristicDescriptor.md) | Universal heuristic descriptor (UHD) | In progress |
 | [0020](./0020_UniversalEngineDescriptor.md) | Universal engine descriptor (UED) | In progress |
-| [0021](./0021_CuDNN_V8_Shim.md) | cuDNN v8 shim (reference: [0021 reference](./0021_CuDNN_V8_Shim_Reference.md)) | Implemented |
+| [0021](./0021_CuDNN_V8_Shim.md) | cuDNN v8 shim (reference: [0021 reference](./0021_CuDNN_V8_Shim_Reference.md)) | In progress |

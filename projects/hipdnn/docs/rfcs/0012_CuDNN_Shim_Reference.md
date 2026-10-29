@@ -423,7 +423,8 @@ defaults match upstream (logging off) — no decision needed.
 
 ## 6. The `<cudnn.h>` / v0.x umbrella-header problem
 
-The shim provides **source-level** compatibility for cuDNN frontend v9 only.
+The shim provides **source-level** compatibility for the cuDNN frontend v9
+graph API (this RFC) and the v0.x builders ([RFC 0021](./0021_CuDNN_V8_Shim.md)).
 Explicitly out of scope:
 
 - **ABI compatibility**: a `.so`/`.dll` built against real cuDNN cannot be
@@ -477,7 +478,7 @@ v0.x headers and the `_v8` aliases, which
 - `cudnnHandle_t` — aliased: `using cudnnHandle_t = ::hipdnnHandle_t;`
 - `cudnnStatus_t` enum (mapped to `hipdnnStatus_t`)
 - `cudnnDataType_t`, `cudnnTensorFormat_t`, `cudnnConvolutionMode_t`,
-  `cudnnReduceTensorOp_t`, `cudnnNormFwdPhase_t`, `cudnnBackendHeurMode_t`,
+  `cudnnReduceTensorOp_t`, `cudnnBackendNormFwdPhase_t`, `cudnnBackendHeurMode_t`,
   `cudnnBackendNumericalNote_t`, `cudnnBackendBehaviorNote_t`,
   `cudnnBackendDescriptorType_t`
 

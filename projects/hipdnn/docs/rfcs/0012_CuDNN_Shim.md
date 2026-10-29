@@ -254,7 +254,7 @@ that include real cuDNN FE elsewhere in the same translation unit.
 
 cuDNN FE uses two parallel type families. **C-API types** (`cudnnHandle_t`,
 `cudnnStatus_t`, `cudnnDataType_t`, `cudnnTensorFormat_t`,
-`cudnnConvolutionMode_t`, `cudnnReduceTensorOp_t`, `cudnnNormFwdPhase_t`,
+`cudnnConvolutionMode_t`, `cudnnReduceTensorOp_t`, `cudnnBackendNormFwdPhase_t`,
 `cudnnBackendHeurMode_t`, `cudnnBackendNumericalNote_t`,
 `cudnnBackendBehaviorNote_t`, `cudnnBackendDescriptorType_t`, ...) come from
 `<cudnn.h>`, which `cudnn_frontend.h` includes (`cudnn_frontend.h:106`).
@@ -270,8 +270,8 @@ cuDNN FE uses two parallel type families. **C-API types** (`cudnnHandle_t`,
 
 | Family | Symbol | Shim mapping |
 |--------|--------|--------------|
-| C-API (`<cudnn.h>`) | `cudnnHandle_t` | Alias declared in the shim's stub `cudnn.h`: `using cudnnHandle_t = hipdnn_frontend::hipdnnHandle_t;` — see §4.7. |
-| C-API | `cudnnStatus_t`, `cudnnTensorFormat_t`, `cudnnConvolutionMode_t`, `cudnnDataType_t`, `cudnnBackend*_t` | Defined in the shim's stub `cudnn.h` (see §4.7), mapped to hipDNN equivalents on the way through |
+| C-API (`<cudnn.h>`) | `cudnnHandle_t` | Alias of the hipDNN handle, declared in `detail/c_types.h` (reached through `cudnn.h`): `using cudnnHandle_t = ::hipdnnHandle_t;` — see §4.7. |
+| C-API | `cudnnStatus_t`, `cudnnTensorFormat_t`, `cudnnConvolutionMode_t`, `cudnnDataType_t`, `cudnnBackend*_t` | Declared in `cudnn_status.h` and `detail/c_types.h`, reached through `cudnn.h` (see §4.7), mapped to hipDNN equivalents on the way through |
 | FE namespace | `cudnn_frontend::DataType_t` | **Aliased** to `hipdnn_frontend::DataType_t`. cuDNN has 20 values incl. FP8/FP4/INT4 variants; any the hipDNN enum is missing are added to it so the alias stays a name-superset (§4.3) |
 | FE namespace | `cudnn_frontend::HeurMode_t` | **Aliased** to `hipdnn_frontend::HeurMode_t` — values `A`, `B`, `FALLBACK`, `OPENSOURCE` (added on the hipDNN side if missing). See §4.5 for runtime behavior |
 | FE namespace | `cudnn_frontend::PointwiseMode_t` | **Aliased** to `hipdnn_frontend::PointwiseMode_t` |
@@ -624,7 +624,7 @@ refers to in its own method signatures:
   `using cudnnHandle_t = ::hipdnnHandle_t;`
 - `cudnnStatus_t`
 - `cudnnDataType_t`, `cudnnTensorFormat_t`, `cudnnConvolutionMode_t`,
-  `cudnnReduceTensorOp_t`, `cudnnNormFwdPhase_t`,
+  `cudnnReduceTensorOp_t`, `cudnnBackendNormFwdPhase_t`,
   `cudnnBackendHeurMode_t`, `cudnnBackendNumericalNote_t`,
   `cudnnBackendBehaviorNote_t`, `cudnnBackendDescriptorType_t`
 
@@ -869,7 +869,7 @@ hipDNN-native PyTorch that ships in 2027.
 - Ship the stub `cudnn.h` (per §4.7) covering the C-API types referenced by
   the v9 graph API (`cudnnHandle_t`, `cudnnStatus_t`, `cudnnDataType_t`,
   `cudnnTensorFormat_t`, `cudnnConvolutionMode_t`, `cudnnReduceTensorOp_t`,
-  `cudnnNormFwdPhase_t`, `cudnnBackendHeurMode_t`,
+  `cudnnBackendNormFwdPhase_t`, `cudnnBackendHeurMode_t`,
   `cudnnBackendNumericalNote_t`, `cudnnBackendBehaviorNote_t`,
   `cudnnBackendDescriptorType_t`) **and** the small set of C entry points
   needed for init / error handling / version checks and for building the
@@ -880,8 +880,9 @@ hipDNN-native PyTorch that ships in 2027.
   APIs, etc.) stays out of scope.
 - Unit tests for status translation (round-trip every status value).
 
-Not yet built: the C-API enum types in the stub `cudnn.h` other than
-`cudnnHandle_t` and `cudnnStatus_t`.
+The C-API types and enums are declared in `detail/c_types.h`, which `cudnn.h`
+includes through `cudnn_graph.h` (§4.7, [RFC 0021](./0021_CuDNN_V8_Shim.md)
+§3.7); a translation unit that declares its own copies of them must drop them.
 
 **Exit criterion**: a v9-only translation unit — a hand-written test file
 that uses only `cudnn_frontend::graph::*` and the C-API types listed
@@ -1090,7 +1091,10 @@ shim.
 `projects/hipdnn/tests/cudnn_samples/` (#12124) implements this check:
 
 - At configure time it clones the cuDNN FE corpus pinned in `manifest.json`
-  (`v1.24.0`), or uses `HIPDNN_CUDNN_SAMPLES_CORPUS_DIR`.
+  (`v1.24.0`), or uses `HIPDNN_CUDNN_SAMPLES_CORPUS_DIR`. With
+  `-DALLOW_FETCH_DEPS=OFF` it fetches nothing: configuration fails (E28)
+  unless `HIPDNN_CUDNN_SAMPLES_CORPUS_DIR` is set and a Catch2 package or
+  `FETCHCONTENT_SOURCE_DIR_CATCH2` is available.
 - It builds those samples against the installed shim.
 - When hipDNN is built without `HIPDNN_ENABLE_CUDNN_COMPATIBILITY`, it
   registers one skipped test and builds no samples.
