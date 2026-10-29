@@ -43,7 +43,7 @@ def test_production_variants_derive_from_the_dispatched_tile():
         names=("fused", "precomputed", "simple"),
     )
 
-    assert result.candidate.spec_id == "kda_w512"
+    assert result.candidate.spec_id == "kda_nw1_wtk16_bpv4"
     fused = variants["fused"]
     raw = variants["precomputed"]
     simple = variants["simple"]

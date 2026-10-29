@@ -818,6 +818,39 @@ TEST_F(DAGSchedulerPassTest, NonOverlappingBarrierPairStaysTogether) {
     EXPECT_EQ(wmmasBetween(beforeSignal, beforeWait), 0) << scheduleOrder(*bb);
 }
 
+// The latest matching ds_load does not overlap any WMMA, so lastOverlap is 0.
+// An earlier ds_load on the same token overwrites a VGPR read by WMMA 12, so
+// that WMMA is its register-DAG parent. The parent index plus the Step 4 drain
+// budget is larger than the overlap threshold, and the barrier
+// stays behind the WMMAs that follow that parent. A second barrier whose ds_load
+// has no WMMA parent keeps the smaller threshold and issues earlier.
+TEST_F(DAGSchedulerPassTest, BarrierAfterUsesParentWmmaWhenItExceedsDrainThreshold) {
+    bb->addSuccessor(bb);
+
+    createMovableDsLoad(/*destReg=*/400, /*addrReg=*/800, /*ldsToken=*/7);
+    auto [earlySignal, earlyWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/7);
+    (void)earlyWait;
+
+    for (int i = 0; i < 12; ++i) {
+        const int src = (i == 11) ? 0 : 3000 + i * 16;
+        createWmmaF32_16x16x16_bf16(/*destStart=*/1100 + i * 16, /*src0Start=*/src);
+    }
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/810, /*ldsToken=*/3);
+    StinkyInstruction* afterParentWmma =
+        createWmmaF32_16x16x16_bf16(/*destStart=*/1400, /*src0Start=*/4000);
+    for (int i = 0; i < 3; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/1420 + i * 16, /*src0Start=*/4020 + i * 16);
+    createMovableDsLoad(/*destReg=*/64, /*addrReg=*/820, /*ldsToken=*/3);
+    auto [lateSignal, lateWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/3);
+    (void)lateWait;
+    createUnrelatedDsLoads(20);
+
+    runPassWithUnrollGemm(/*dsSpread=*/false);
+
+    EXPECT_LT(positionOf(*bb, earlySignal), positionOf(*bb, afterParentWmma)) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, afterParentWmma), positionOf(*bb, lateSignal)) << scheduleOrder(*bb);
+}
+
 TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWithoutBeforeGroup) {
     bb->addSuccessor(bb);
 

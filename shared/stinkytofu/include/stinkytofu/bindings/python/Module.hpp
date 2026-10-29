@@ -290,6 +290,17 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
     std::optional<uint64_t> getMetaDataU64(const std::string& key) const;
 
     /**
+     * @brief Write uint64 metadata on the underlying Function.
+     *
+     * Occupancy-aware passes (InsertDelayAluPass) read
+     * kSigTotalVgprsMetaKey from here. toStinkyTofuModule stamps it; the
+     * logical-IR binding stamps the same key through this setter.
+     * @param key Metadata key
+     * @param value Metadata value
+     */
+    void setMetaDataU64(const std::string& key, uint64_t value);
+
+    /**
      * @brief Get the underlying Function
      *
      * This provides access to the internal Function representation.
@@ -377,6 +388,17 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
      */
     void setGroupRange(const std::string& groupName, IntrusiveListIterator<IRBase> first,
                        IntrusiveListIterator<IRBase> last);
+
+    /**
+     * @brief Move a group endpoint off a node that is about to be deleted.
+     *
+     * ScopeAdaptor erases TEXTBLOCK comments while extracting a region. Another
+     * group's stored first/last may be that comment (an epilogue anchor can sit
+     * inside an earlier noLoadLoopBody span). Point the endpoint at a neighbor
+     * that stays alive: \p ifFirst when this node is the group's first, \p ifLast
+     * when it is the group's last. A null replacement leaves that side unchanged.
+     */
+    void retargetGroupEndpoint(IRBase* from, IRBase* ifFirst, IRBase* ifLast);
 
     /**
      * @brief Get the ModuleOptions

@@ -141,7 +141,7 @@ def _assert_dispatch_result_matches_fp32(harness, result, batch, launchers):
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
 
-    spec = result.spec
+    spec = result.spec.kernel_spec
     key = result.kernel_id.compile_key
     if key not in launchers:
         artifact = compile_kernel(result.build(), arch=ARCH)
@@ -180,8 +180,11 @@ def _assert_dispatch_result_matches_fp32(harness, result, batch, launchers):
 
 @requires_gfx950
 def test_all_registry_candidates_are_correct(harness, request):
-    """Every legal default-D128 registry candidate matches the FP32 oracle."""
-    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
+    """Every legal default-D128 GDN-gate tile's base configuration (no knobs,
+    what ``auto`` runs on it) matches the FP32 oracle. KDA tiles and the knob
+    configurations are covered by the knob suite (every configured tile, both
+    gate kinds) and the pinned-dispatch suite."""
+    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_bases
 
     batches = (
         [request.config.getoption("--gdn-batch")]
@@ -192,7 +195,7 @@ def test_all_registry_candidates_are_correct(harness, request):
     launchers = {}
     owners = {}  # compile_key -> every spec_id that used it, across ALL batches
     for batch in batches:
-        results = dispatch_gdn_decode_all(GdnDecodeRequest(batch=batch, arch=ARCH))
+        results = dispatch_gdn_decode_bases(GdnDecodeRequest(batch=batch, arch=ARCH))
         if selected_id:
             results = tuple(
                 result for result in results if result.candidate.spec_id == selected_id
@@ -215,10 +218,11 @@ def test_all_registry_candidates_are_correct(harness, request):
 
 @requires_gfx950
 def test_all_d64_registry_candidates_are_correct(harness):
-    """Every explicitly selectable D64 tile is proven on device, not only auto."""
-    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
+    """Every explicitly selectable D64 tile (base configuration) is proven on
+    device, not only auto."""
+    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_bases
 
-    results = dispatch_gdn_decode_all(
+    results = dispatch_gdn_decode_bases(
         GdnDecodeRequest(batch=1, arch=ARCH, head_k_dim=64, head_v_dim=64)
     )
     assert len(results) == 20
@@ -241,14 +245,15 @@ def test_dispatcher_auto_smoke(harness):
         kernel_name=artifact.kernel_name,
         signature=result.signature,
     )
-    inputs = harness["make_inputs"](result.spec, batch)
-    ref_out, ref_state = harness["ref_fp32"](result.spec, inputs)
+    spec = result.spec.kernel_spec
+    inputs = harness["make_inputs"](spec, batch)
+    ref_out, ref_state = harness["ref_fp32"](spec, inputs)
     written = inputs["write_indices"].long()
     untouched = torch.ones(inputs["state"].shape[0], dtype=torch.bool, device="cuda")
     untouched[written] = False
     assert untouched.any()
     before = inputs["state"].clone()
-    values, _ = harness["prepare"](result.spec, inputs, batch)
+    values, _ = harness["prepare"](spec, inputs, batch)
     cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
     with no_fence():
         launcher(values, config=cfg)
@@ -452,7 +457,9 @@ def test_fallback_head_dim_geometry_is_numerically_correct(harness):
     unverified geometry would be out of scope."""
     from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
 
-    spec = dispatch_gdn_decode(GdnDecodeRequest(batch=1, head_k_dim=64, arch=ARCH)).spec
+    spec = dispatch_gdn_decode(
+        GdnDecodeRequest(batch=1, head_k_dim=64, arch=ARCH)
+    ).spec.kernel_spec
     assert spec.head_k_dim == 64
     out_err, state_err = harness["check"](spec, 1)
     assert max(out_err, state_err) <= harness["TOL"]
@@ -482,9 +489,10 @@ def test_end_to_end_through_the_dispatch_result(harness):
         signature=result.signature,
     )
 
-    inp = harness["make_inputs"](result.spec, batch)
-    ref_out, ref_state = harness["ref_fp32"](result.spec, inp)
-    values, _ = harness["prepare"](result.spec, inp, batch)
+    spec = result.spec.kernel_spec
+    inp = harness["make_inputs"](spec, batch)
+    ref_out, ref_state = harness["ref_fp32"](spec, inp)
+    values, _ = harness["prepare"](spec, inp, batch)
     cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
     with no_fence():
         launcher(values, config=cfg)
@@ -521,57 +529,150 @@ def _check_dispatched_launch(
     ``relative_state`` takes the state error relative to ``max(1, |ref|)``,
     as ``out_error`` does for the fused output, for requests whose state
     grows past the range an absolute ``TOL`` was sized for."""
-    from builders.gfx950.gdn.gdn_decode import out_error, ref_conv_state_after
     from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
-    from rocke.helpers.compile import compile_kernel
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
 
-    tol = harness["TOL"]
     launchers = {}
     for batch in (5, 64):
         result = dispatch_gdn_decode(
             GdnDecodeRequest(batch=batch, arch=ARCH, **request)
         )
-        spec = result.spec
+        spec = result.spec.kernel_spec
         for field, value in request.items():
             assert getattr(spec, field) == value, (field, getattr(spec, field))
         if expect_tile is not None:
             tile = (spec.num_warps, spec.warp_threads_k, spec.blocks_per_v_dim)
             assert tile == expect_tile, tile
-        key = result.kernel_id.compile_key
-        if key not in launchers:
-            artifact = compile_kernel(result.build(), arch=ARCH)
-            launchers[key] = KernelLauncher(
-                hsaco=artifact.hsaco,
-                kernel_name=artifact.kernel_name,
-                signature=result.signature,
-            )
-        launcher = launchers[key]
-        inp = harness["make_inputs"](spec, batch)
-        ref_out, ref_state = harness["ref_fp32"](spec, inp)
-        values, _ = harness["prepare"](spec, inp, batch)
-        cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
-        with no_fence():
-            launcher(values, config=cfg)
-        torch.cuda.synchronize()
+        _launch_dispatched(
+            harness, result, batch, launchers, relative_state=relative_state
+        )
 
-        written = inp["write_indices"].long()
-        untouched = torch.ones(inp["state"].shape[0], dtype=torch.bool, device="cuda")
-        untouched[written] = False
-        assert untouched.any()
-        pools = [("state", ref_state)]
-        if spec.fuse_conv:
-            pools.append(("conv_state", ref_conv_state_after(spec, inp)))
-        out_err = out_error(spec, values["out"], ref_out)
-        assert out_err <= tol, (spec.kernel_name(), batch, out_err)
-        for name, want in pools:
-            # prepare() cloned each pool, so inp[name] is the pre-launch copy.
-            diff = (values[name].float()[written] - want).abs()
-            if relative_state and name == "state":
-                diff = diff / want.abs().clamp(min=1.0)
-            err = diff.max().item()
-            assert err <= tol, (spec.kernel_name(), batch, name, err)
-            assert torch.equal(values[name][untouched], inp[name][untouched]), name
+
+def _launch_dispatched(harness, result, batch, launchers, relative_state=False):
+    """Compile (cached by ``compile_key``) and launch one dispatch result from
+    what it hands back, and check the output, the written state and conv
+    state, and every untouched page of both pools against the fp32 reference
+    (``relative_state`` as for :func:`_check_dispatched_launch`).
+    """
+    from builders.gfx950.gdn.gdn_decode import out_error, ref_conv_state_after
+    from rocke.helpers.compile import compile_kernel
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
+
+    tol = harness["TOL"]
+    spec = result.spec.kernel_spec
+    key = result.kernel_id.compile_key
+    if key not in launchers:
+        kernel = result.build()
+        assert kernel.name == spec.kernel_name()
+        artifact = compile_kernel(kernel, arch=ARCH)
+        launchers[key] = KernelLauncher(
+            hsaco=artifact.hsaco,
+            kernel_name=artifact.kernel_name,
+            signature=result.signature,
+        )
+    launcher = launchers[key]
+    inp = harness["make_inputs"](spec, batch)
+    ref_out, ref_state = harness["ref_fp32"](spec, inp)
+    values, _ = harness["prepare"](spec, inp, batch)
+    cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
+    with no_fence():
+        launcher(values, config=cfg)
+    torch.cuda.synchronize()
+
+    written = inp["write_indices"].long()
+    untouched = torch.ones(inp["state"].shape[0], dtype=torch.bool, device="cuda")
+    untouched[written] = False
+    assert untouched.any()
+    pools = [("state", ref_state)]
+    if spec.fuse_conv:
+        pools.append(("conv_state", ref_conv_state_after(spec, inp)))
+    out_err = out_error(spec, values["out"], ref_out)
+    assert out_err <= tol, (spec.kernel_name(), batch, out_err)
+    for name, want in pools:
+        # prepare() cloned each pool, so inp[name] is the pre-launch copy.
+        diff = (values[name].float()[written] - want).abs()
+        if relative_state and name == "state":
+            diff = diff / want.abs().clamp(min=1.0)
+        err = diff.max().item()
+        assert err <= tol, (spec.kernel_name(), batch, name, err)
+        assert torch.equal(values[name][untouched], inp[name][untouched]), name
+
+
+def _pinned_samples(results):
+    """A few configurations of one tile's knob space: its base, the one with
+    every in-scope knob on (``waves_per_eu`` 4 included), and two from the
+    middle of the walk."""
+
+    def turned_on(result):
+        return sum(1 for _, value in result.spec.knobs if value not in (False, 0))
+
+    picks = [
+        results[0],
+        max(results, key=turned_on),
+        results[len(results) // 3],
+        results[(2 * len(results)) // 3],
+    ]
+    unique = {}
+    for result in picks:
+        unique.setdefault(result.spec.tuning_id, result)
+    return tuple(unique.values())
+
+
+@requires_gfx950
+@pytest.mark.parametrize("gate", ["gdn", "kda"])
+@pytest.mark.parametrize("state_dtype", ["bf16", "f32"])
+@pytest.mark.parametrize("fused", [False, True], ids=["plain", "cv_rn"])
+def test_pinned_tuning_id_reaches_the_launch(harness, gate, state_dtype, fused):
+    """A stored ``(spec_id, tuning_id, tuning_knobs)`` pin replays its exact
+    configuration through ``dispatch_gdn_decode`` and that kernel is correct.
+
+    Per mode (gate kind x plain / conv + norm x state width), on the auto
+    tile: the base configuration, the configuration with every in-scope knob
+    on, and two more from the knob walk, each pinned from the request its
+    ``dispatch_gdn_decode_all`` result carries, re-dispatched, and launched
+    against the fp32 reference.
+    """
+    from dispatch.gdn import (
+        GdnDecodeRequest,
+        dispatch_gdn_decode,
+        dispatch_gdn_decode_all,
+    )
+
+    batch = 5
+    request = GdnDecodeRequest(
+        batch=batch,
+        arch=ARCH,
+        gate_kind=gate,
+        num_k_heads=16,
+        num_v_heads=16,
+        state_dtype=state_dtype,
+        fuse_conv=fused,
+        fuse_out_norm=fused,
+    )
+    spec_id = dispatch_gdn_decode(request).candidate.spec_id
+    results = tuple(
+        result
+        for result in dispatch_gdn_decode_all(request)
+        if result.candidate.spec_id == spec_id
+    )
+    samples = _pinned_samples(results)
+    assert len(samples) == 4, [s.spec.tuning_id for s in samples]
+    everything = max(
+        samples,
+        key=lambda r: sum(1 for _, v in r.spec.knobs if v not in (False, 0)),
+    )
+    knobs = dict(everything.spec.knobs)
+    assert knobs.get("waves_per_eu") == 4 and knobs.get("dpp_reduce") is True
+    if fused:
+        assert knobs.get("conv_once") and knobs.get("norm_gate_once")
+        assert knobs.get("out_lds")
+    launchers = {}
+    for stored in samples:
+        pin = stored.request
+        assert (pin.spec_id, pin.tuning_id) == (spec_id, stored.spec.tuning_id)
+        replayed = dispatch_gdn_decode(pin)
+        assert replayed.spec == stored.spec
+        assert replayed.spec.kernel_name() == stored.spec.kernel_name()
+        _launch_dispatched(harness, replayed, batch, launchers)
 
 
 @requires_gfx950

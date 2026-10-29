@@ -207,6 +207,17 @@ int main(int argc, char** argv)
                       << censusArch << "', root='" << censusRoot << "'.\n";
             return 1;
         }
+        // The entry names the shard relative to its own directory, which climbs out of the
+        // test tree and back down (census/<arch>/../../../../arch_content/...). Windows
+        // resolves every file under it as that directory plus the climb, so a deep install
+        // passed MAX_PATH on the longest descriptor path while the shard itself sat well
+        // within it. Hand the loader the absolute, normalized root instead.
+        const auto absoluteRoot = std::filesystem::absolute(censusRoot, error).lexically_normal();
+        if(!error)
+        {
+            hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_DIR",
+                                               absoluteRoot.string().c_str());
+        }
 
         const auto* unitTest = testing::UnitTest::GetInstance();
         const testing::TestSuite* suite = nullptr;
