@@ -44,7 +44,7 @@ def test_qualification_bounds_all_enabled_references(
             "files": payload_digests(baseline / "source"),
         },
     )
-    target = get_adapter("gfx942")
+    target = get_adapter("gfx942", "dense")
     case = Case("fp16", 2, 2, 1, False, True, sequence_length=2)
     monkeypatch.setattr(target, "CASES", (case,))
     measured = {}
@@ -82,11 +82,19 @@ def test_qualification_bounds_all_enabled_references(
     bundle = tmp_path / "bundle"
     if with_torch and torch_bound >= case.tolerance:
         with pytest.raises(ValueError, match="no comparison budget"):
-            cli.qualify(baseline, bundle, 3, torch_reference="cpu")
+            cli.qualify(baseline, bundle, 3, variant="dense", torch_reference="cpu")
         assert not (bundle / "qualification-lock.json").exists()
         return
-    cli.qualify(baseline, bundle, 3, torch_reference="cpu" if with_torch else None)
-    manifest = cli.load_bundle(bundle, bundle / "qualification-lock.json")
+    cli.qualify(
+        baseline,
+        bundle,
+        3,
+        variant="dense",
+        torch_reference="cpu" if with_torch else None,
+    )
+    manifest = cli.load_bundle(
+        bundle, bundle / "qualification-lock.json", variant="dense"
+    )
     # New SDPA manifests record their variant but, as published ones, no operation.
     assert manifest["variant"] == "dense"
     assert "operation" not in manifest
@@ -96,7 +104,9 @@ def test_qualification_bounds_all_enabled_references(
         bundle, bundle / "qualification-lock.json", operation="sdpa", variant="dense"
     )
     lock = json.loads((bundle / "qualification-lock.json").read_text())
-    assert lock["cohort_sha256"] == cli.OPERATION.enrolled_cohort_digest("gfx942")
+    assert lock["cohort_sha256"] == cli.OPERATION.enrolled_cohort_digest(
+        "gfx942", "dense"
+    )
     entry = manifest["cases"][case.id]
     assert entry["budget"]["baseline_error_bound"] == (
         max(measured["bound"], torch_bound) if with_torch else measured["bound"]
@@ -122,7 +132,7 @@ def test_qualification_bounds_all_enabled_references(
         entry["torch_reference"]["results"]["float32"]["numpy_distance_upper"] = 0
         write_json(bundle / "manifest.json", manifest)
         with pytest.raises(ValueError, match="pinned lock"):
-            cli.load_bundle(bundle, bundle / "qualification-lock.json")
+            cli.load_bundle(bundle, bundle / "qualification-lock.json", variant="dense")
 
 
 def test_ordinary_qualification_does_not_import_torch():
@@ -145,5 +155,7 @@ def test_requested_torch_fails_before_creating_output(tmp_path, monkeypatch):
     monkeypatch.setattr(torch_reference, "validate_device", unavailable)
     output = tmp_path / "bundle"
     with pytest.raises(ImportError, match="Torch is absent"):
-        cli.qualify(tmp_path / "missing", output, 3, torch_reference="cpu")
+        cli.qualify(
+            tmp_path / "missing", output, 3, variant="dense", torch_reference="cpu"
+        )
     assert not output.exists()

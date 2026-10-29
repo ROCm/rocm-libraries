@@ -218,7 +218,7 @@ def test_independent_sdpa_matches_analytic_uniform_attention(causal):
     assert actual.dtype == np.float64
 
 
-def _bundle(tmp_path, architecture="gfx942", variant=None):
+def _bundle(tmp_path, architecture="gfx942", variant="dense"):
     target = get_adapter(architecture, variant)
     payload = tmp_path / "payload"
     payload.mkdir()
@@ -262,13 +262,13 @@ def _lock(tmp_path, manifest):
 
 def test_corrupt_artifact_and_changed_manifest_are_rejected(tmp_path):
     manifest = _bundle(tmp_path)
-    assert load_bundle(tmp_path, tmp_path / "lock.json") == manifest
+    assert load_bundle(tmp_path, tmp_path / "lock.json", variant="dense") == manifest
     (tmp_path / "payload/fixture").write_bytes(b"changed artifact")
     with pytest.raises(ValueError, match="payload"):
-        load_bundle(tmp_path, tmp_path / "lock.json")
+        load_bundle(tmp_path, tmp_path / "lock.json", variant="dense")
     (tmp_path / "manifest.json").write_text("{}")
     with pytest.raises(ValueError, match="pinned lock"):
-        load_bundle(tmp_path, tmp_path / "lock.json")
+        load_bundle(tmp_path, tmp_path / "lock.json", variant="dense")
 
 
 @pytest.mark.parametrize(
@@ -287,7 +287,7 @@ def test_even_a_new_lock_cannot_silently_change_the_test_contract(tmp_path, chan
         entry["comparison_limit"] = budget.comparison_limit
     _lock(tmp_path, manifest)
     with pytest.raises(ValueError, match="cohort|contract|tolerance"):
-        load_bundle(tmp_path, tmp_path / "lock.json")
+        load_bundle(tmp_path, tmp_path / "lock.json", variant="dense")
 
 
 def test_case_ids_name_batch_and_sequence_length():
@@ -325,7 +325,7 @@ def test_bundle_must_record_the_enrolled_cohort_one_to_one(tmp_path, change):
         expected = rf"records case {case.id} more than once: copy, {case.id}$"
     _lock(tmp_path, manifest)
     with pytest.raises(ValueError, match=expected):
-        load_bundle(tmp_path, tmp_path / "lock.json")
+        load_bundle(tmp_path, tmp_path / "lock.json", variant="dense")
 
 
 def _published_id(case):
@@ -426,7 +426,7 @@ def test_unknown_old_output_cannot_inherit_a_qualified_bound(tmp_path, monkeypat
 
     monkeypatch.setattr(common_cli, "run_worker", worker)
     with pytest.raises(AssertionError, match="reference qualification failure"):
-        verify_case(CASES[0], bundle=tmp_path, manifest=manifest)
+        verify_case(CASES[0], bundle=tmp_path, manifest=manifest, variant="dense")
     assert calls == ["replay"]
 
 
@@ -469,10 +469,9 @@ def test_worker_prefers_selected_library_over_test_packages(tmp_path, monkeypatc
 
 def test_architecture_enrollment_and_locks():
     assert ARCHITECTURES == ("gfx942", "gfx950", "gfx1151", "gfx1200", "gfx1201")
-    assert variants("gfx942") == ("dense",)
-    assert get_adapter("gfx942").CASES == CASES
+    assert "dense" in variants("gfx942")
+    assert get_adapter("gfx942", "dense").CASES == CASES
     assert baseline_lock("gfx942", "dense").is_file()
-    assert baseline_lock("gfx942") == baseline_lock("gfx942", "dense")
     for unsupported in ("gfx1100", "gfx1250", "../gfx942"):
         with pytest.raises(ValueError, match="not enrolled"):
             get_adapter(unsupported)
@@ -483,7 +482,9 @@ def test_bundle_cannot_be_used_for_a_different_architecture(tmp_path):
     manifest["cases"][CASES[0].id]["device_target"] = "gfx950:sramecc+:xnack-"
     _lock(tmp_path, manifest)
     with pytest.raises(ValueError, match="different architecture"):
-        load_bundle(tmp_path, tmp_path / "lock.json", architecture="gfx942")
+        load_bundle(
+            tmp_path, tmp_path / "lock.json", architecture="gfx942", variant="dense"
+        )
 
 
 @pytest.mark.parametrize("architecture", ["gfx1200", "gfx1201"])
@@ -495,7 +496,7 @@ def test_generic_wmma_bundle_keeps_processor_qualification(
     tmp_path, architecture, change
 ):
     """Generic compilation must not transfer a certificate between processors."""
-    manifest = _bundle(tmp_path, architecture)
+    manifest = _bundle(tmp_path, architecture, "wmma")
     entry = next(iter(manifest["cases"].values()))
     if change == "other-processor":
         entry["device_target"] = "gfx1201" if architecture == "gfx1200" else "gfx1200"
@@ -508,14 +509,24 @@ def test_generic_wmma_bundle_keeps_processor_qualification(
     _lock(tmp_path, manifest)
     if change is None:
         assert (
-            load_bundle(tmp_path, tmp_path / "lock.json", architecture=architecture)
+            load_bundle(
+                tmp_path,
+                tmp_path / "lock.json",
+                architecture=architecture,
+                variant="wmma",
+            )
             == manifest
         )
     else:
         with pytest.raises(
             ValueError, match="different architecture|different compiler target"
         ):
-            load_bundle(tmp_path, tmp_path / "lock.json", architecture=architecture)
+            load_bundle(
+                tmp_path,
+                tmp_path / "lock.json",
+                architecture=architecture,
+                variant="wmma",
+            )
 
 
 @pytest.mark.parametrize("architecture", ["gfx1200", "gfx1201"])
@@ -523,7 +534,7 @@ def test_generic_wmma_bundle_keeps_processor_qualification(
 def test_generic_wmma_replay_requires_qualified_processor(
     tmp_path, monkeypatch, architecture, mismatch
 ):
-    manifest = _bundle(tmp_path, architecture)
+    manifest = _bundle(tmp_path, architecture, "wmma")
     case = get_adapter(architecture, "wmma").CASES[0]
     entry = manifest["cases"][case.id]
     entry["input_digests"] = {
@@ -547,6 +558,7 @@ def test_generic_wmma_replay_requires_qualified_processor(
             bundle=tmp_path,
             manifest=manifest,
             architecture=architecture,
+            variant="wmma",
             current_root=tmp_path,
         )
 
@@ -558,7 +570,7 @@ def test_generated_input_mismatch_prevents_any_worker(tmp_path, monkeypatch):
         common_cli, "run_worker", lambda *args, **kwargs: calls.append(args)
     )
     with pytest.raises(ValueError, match="generated SDPA input digest mismatch"):
-        verify_case(CASES[0], bundle=tmp_path, manifest=manifest)
+        verify_case(CASES[0], bundle=tmp_path, manifest=manifest, variant="dense")
     assert not calls
 
 
@@ -570,10 +582,12 @@ def test_declared_operation_must_be_sdpa(tmp_path, declared):
     manifest["operation"] = declared
     _lock(tmp_path, manifest)
     if declared == "sdpa":
-        assert load_bundle(tmp_path, tmp_path / "lock.json") == manifest
+        assert (
+            load_bundle(tmp_path, tmp_path / "lock.json", variant="dense") == manifest
+        )
     else:
         with pytest.raises(ValueError, match="wrong reference operation"):
-            load_bundle(tmp_path, tmp_path / "lock.json")
+            load_bundle(tmp_path, tmp_path / "lock.json", variant="dense")
 
 
 def test_changed_generator_contract_is_rejected(tmp_path):
@@ -581,7 +595,7 @@ def test_changed_generator_contract_is_rejected(tmp_path):
     manifest["input_generation"] = dict(INPUT_GENERATOR, seed=1)
     _lock(tmp_path, manifest)
     with pytest.raises(ValueError, match="generator contract"):
-        load_bundle(tmp_path, tmp_path / "lock.json")
+        load_bundle(tmp_path, tmp_path / "lock.json", variant="dense")
 
 
 @pytest.mark.parametrize("fail", [False, True])
@@ -621,6 +635,7 @@ def test_generated_inputs_are_temporary_and_shared_by_both_workers(
                 bundle=tmp_path,
                 manifest=manifest,
                 current_root=tmp_path,
+                variant="dense",
                 repetitions=1,
             )
         assert len(paths) == 1
@@ -630,6 +645,7 @@ def test_generated_inputs_are_temporary_and_shared_by_both_workers(
             bundle=tmp_path,
             manifest=manifest,
             current_root=tmp_path,
+            variant="dense",
             repetitions=1,
         )
         assert len(paths) == 2 and paths[0] == paths[1]

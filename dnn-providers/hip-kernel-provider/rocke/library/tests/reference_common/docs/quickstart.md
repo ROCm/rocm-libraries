@@ -211,19 +211,17 @@ must fit the shared harness limits listed under
 | `<operation>_reference/implementations/<variant>.py` | The family's launch, export, and replay mechanics that its adapters share. The module name is the variant's name: it matches `^[a-z][a-z0-9_]*$` and does not start with `gfx`. New manifests record it and a rename needs requalification, so treat it as permanent once published |
 | `<operation>_reference/architectures/<arch>/<variant>/__init__.py` | The adapter for each enrolled processor that runs the family, with its own `CASES`, as for [an architecture](#i-want-to-add-an-architecture). The processor package must not import it |
 | `<operation>_reference/worker.py` | Bind the family's frozen replay arguments in `replay_values` if its exported kernels record a replay ABI that the worker does not bind yet |
-| `test_<operation>_reference_contract.py` | Checks of the adapter's dispatch properties. On an architecture with several variants, `get_adapter(arch)` without a variant is ambiguous, so name the variant in those tests and in other host tests that call it, such as `test_sdpa_torch_reference.py` |
-| `test_reference_common.py` | Only when the architecture had one variant until now. Some shared tests still assume one variant per architecture: they call `resolve_variant(arch)` or `get_adapter(arch)` without a variant, for every architecture or for the operation's first, `ARCHITECTURES[0]`. Make them name a variant or loop over `variants(arch)` |
+| `test_<operation>_reference_contract.py` | Checks of the adapter's dispatch properties, naming the new variant, as `get_adapter(arch, variant)` |
 
 Then:
 
 1. **Check it without a GPU.** `cases --arch` lists the new variant beside the
    others and `status` reports it unpublished. Run the host checks from the
    [first recipe](#i-changed-a-covered-kernel), and for SDPA also
-   `library/tests/test_sdpa_torch_reference.py`, which needs no Torch. On an
-   architecture that had one variant, the tests that assume one fail, most
-   with `needs a selected reference variant`, until you update them as in the
-   table; then the host checks pass, including
-   `test_enrolled_variants_follow_the_layout_rules`.
+   `library/tests/test_sdpa_torch_reference.py`, which needs no Torch. The
+   existing host tests need no edit; the checks that run for every variant,
+   including `test_enrolled_variants_follow_the_layout_rules`, cover the new
+   one.
 2. **Qualify, verify, and publish it** on each processor that enrolls it
    through [steps 2 to 5](gpu-reference-workflow.md#2-prepare-reproducible-qualification-inputs),
    passing `--variant` and `--rocke-reference-variant`. Commit the reviewed

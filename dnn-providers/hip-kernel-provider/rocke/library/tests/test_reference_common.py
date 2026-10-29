@@ -207,6 +207,25 @@ def _another_operation(operation):
     return next(other for other in OPERATIONS if other != operation)
 
 
+# The families each enrolled architecture published before variants existed. A
+# check of shared plumbing uses one of these cohorts as its data, so a new
+# variant, under any name and with any cohort, does not change what it checks.
+_INCUMBENT_FAMILIES = ("dense", "implicit_gemm_fwd", "wmma")
+
+
+def _variant(registry, architecture):
+    """The variant whose real cohort a check of shared plumbing uses.
+
+    Such a check needs one cohort, not every variant, so it names this one
+    rather than rely on the default that a second variant makes ambiguous: the
+    architecture's incumbent family, else, for an architecture enrolled after
+    variants existed, its first variant. Checks of each variant's own cohort
+    run for every enrolled or published variant instead.
+    """
+    enrolled = registry.variants(architecture)
+    return next((name for name in _INCUMBENT_FAMILIES if name in enrolled), enrolled[0])
+
+
 @pytest.mark.parametrize("operation", OPERATIONS)
 def test_common_cli_round_trip_without_site_packages(tmp_path, operation):
     bundle, lock = _fixture(tmp_path, operation)
@@ -1149,7 +1168,7 @@ def test_reference_fixture_selects_explicit_paths(
     from rocke.runtime import hip_module
 
     gpu_tests = import_module(f"test_{operation}_pinned_reference")
-    variant = gpu_tests.OPERATION.architectures.resolve_variant(architecture)
+    variant = _variant(gpu_tests.OPERATION.architectures, architecture)
     options = {
         "--rocke-reference-operation": operation if candidate else None,
         "--rocke-reference-bundle": tmp_path if candidate else None,
@@ -1236,7 +1255,8 @@ def second_variant(tmp_path, monkeypatch, operation):
     """The operation with a synthetic second variant, enrolled under tmp_path.
 
     ``fictional_reference.architectures`` copies the operation's registry
-    module and enrolls its first two processors. The first enrolls ``wide``,
+    module and enrolls its first two processors, or its only processor and a
+    borrowed second one. The first enrolls ``wide``,
     with the first processor's real cases, and ``narrow``, without the first
     of them; the second enrolls ``wide`` with the same cases, so the two
     ``wide`` slots share a cohort. A variant is published once a test writes
@@ -1249,8 +1269,16 @@ def second_variant(tmp_path, monkeypatch, operation):
 
     spec = import_module(f"{operation}_reference.cli").OPERATION
     real = Path(spec.architectures.__file__).resolve().parent
-    first, second = spec.architectures.ARCHITECTURES[:2]
-    cases = spec.architectures.get_adapter(first).__name__
+    enrolled = spec.architectures.ARCHITECTURES
+    first = enrolled[0]
+    # An operation that enrolls one processor borrows a second processor name.
+    second = (
+        enrolled[1]
+        if len(enrolled) > 1
+        else "gfx942" if first != "gfx942" else "gfx950"
+    )
+    cases = spec.architectures.get_adapter(first, _variant(spec.architectures, first))
+    cases = cases.__name__
     root = tmp_path / "fictional_reference/architectures"
     root.mkdir(parents=True)
     (root.parent / "__init__.py").touch()
@@ -1258,7 +1286,7 @@ def second_variant(tmp_path, monkeypatch, operation):
     (root / "registry.json").write_text(json.dumps([first, second]))
     for architecture in (first, second):
         (root / architecture).mkdir()
-        shutil.copy(real / architecture / "__init__.py", root / architecture)
+        (root / architecture / "__init__.py").write_text(f'NAME = "{architecture}"\n')
     for slot, cohort in (
         (f"{first}/narrow", "CASES = CASES[1:]\n"),
         (f"{first}/wide", ""),
@@ -1546,7 +1574,7 @@ def test_reference_missing_bundle_fails_only_when_selected(
         gpu_tests, "default_bundle_path", lambda *args, **kwargs: missing
     )
     tests = _relocate(monkeypatch, tmp_path, operation, layout)
-    variant = spec.architectures.resolve_variant(architecture)
+    variant = _variant(spec.architectures, architecture)
     # A published pair has a committed lock and, in a source checkout, a DVC
     # pointer beside the default bundle. The test decides which pairs those
     # are, so publishing another architecture cannot remove a case.
@@ -1638,7 +1666,7 @@ def test_reference_fixture_explains_an_archive_passed_as_the_bundle(
     fixture = gpu_tests.reference_bundle.__wrapped__(
         SimpleNamespace(getoption=options.get)
     )
-    variant = registry.resolve_variant(architecture)
+    variant = _variant(registry, architecture)
     with closing(fixture):
         outcome, message = _outcome(lambda: next(fixture)(architecture, variant))
     assert outcome == "fail"
@@ -1692,7 +1720,7 @@ def test_recovery_hint_shows_windows_paths_as_typed(tmp_path, monkeypatch, opera
 
     spec = import_module(f"{operation}_reference.cli").OPERATION
     tests = _relocate(monkeypatch, tmp_path, operation, "source")
-    variant = spec.architectures.resolve_variant("gfx942")
+    variant = _variant(spec.architectures, "gfx942")
     _track(tests, operation, "gfx942", variant)
     here = Path(__file__).parent.resolve()
     root = PureWindowsPath("D:/build root/rocke $1")
@@ -1705,7 +1733,7 @@ def test_recovery_hint_shows_windows_paths_as_typed(tmp_path, monkeypatch, opera
         return str(installed.joinpath(*path.relative_to(here).parts))
 
     monkeypatch.setattr(common_cli, "_shown", shown)
-    hint = spec.bundle_hint("gfx942", tmp_path / "missing")
+    hint = spec.bundle_hint("gfx942", tmp_path / "missing", variant=variant)
     archive = root / "rocke/library/tests/reference_bundles" / operation
     archive /= f"gfx942/{variant}.tar.gz"
     lock = installed / f"{operation}_reference/architectures/gfx942"
@@ -1851,7 +1879,7 @@ def test_reference_worker_imports_an_adapter_only_in_source_mode(
     worker = import_module(f"{operation}_reference.worker")
     registry = import_module(f"{operation}_reference.architectures")
     architecture = registry.ARCHITECTURES[0]
-    variant = registry.resolve_variant(architecture)
+    variant = _variant(registry, architecture)
     targets = []
     monkeypatch.setattr(
         worker, "run_case", lambda operation, target, *args: targets.append(target)
@@ -2349,10 +2377,13 @@ def test_legacy_budget_limits_are_preserved_and_policy_is_validated(
 
     cli = import_module(f"{operation}_reference.cli")
     fixtures = import_module(f"test_{operation}_reference_contract")
+    variant = _variant(cli.OPERATION.architectures, "gfx942")
     manifest = (
-        fixtures._bundle(tmp_path) if operation == "sdpa" else fixtures._manifest()
+        fixtures._bundle(tmp_path, variant=variant)
+        if operation == "sdpa"
+        else fixtures._manifest(variant)
     )
-    cli.OPERATION.validate_cases(manifest, "gfx942")
+    cli.OPERATION.validate_cases(manifest, "gfx942", variant)
     manifest.pop("budget_policy")
     for entry in manifest["cases"].values():
         budget = ErrorBudget(
@@ -2362,13 +2393,13 @@ def test_legacy_budget_limits_are_preserved_and_policy_is_validated(
         )
         entry["budget"] = asdict(budget)
         entry["comparison_limit"] = budget.comparison_limit
-    cli.OPERATION.validate_cases(manifest, "gfx942")
+    cli.OPERATION.validate_cases(manifest, "gfx942", variant)
     manifest["budget_policy"] = "max-reference-bound-v1"
     with pytest.raises(ValueError, match="budget changed"):
-        cli.OPERATION.validate_cases(manifest, "gfx942")
+        cli.OPERATION.validate_cases(manifest, "gfx942", variant)
     manifest["budget_policy"] = "unknown"
     with pytest.raises(ValueError, match="unsupported reference budget policy"):
-        cli.OPERATION.validate_cases(manifest, "gfx942")
+        cli.OPERATION.validate_cases(manifest, "gfx942", variant)
 
 
 def test_manifest_cases_match_by_contract_and_ids_cannot_collide():
@@ -2440,7 +2471,8 @@ def _qualified_cohort(tmp_path, operation, index=0):
 
     spec = import_module(f"{operation}_reference.cli").OPERATION
     architecture = spec.architectures.ARCHITECTURES[index]
-    target = spec.architectures.get_adapter(architecture)
+    variant = _variant(spec.architectures, architecture)
+    target = spec.architectures.get_adapter(architecture, variant)
     bundle = tmp_path / "bundle"
     (bundle / "payload").mkdir(parents=True)
     (bundle / "payload/kernel.hsaco").write_bytes(b"host cohort fixture")
@@ -2500,11 +2532,16 @@ def test_cases_command_lists_each_cohort_without_gpu_or_torch(tmp_path, operatio
     script = Path(__file__).with_name(f"run_{operation}_reference.py")
     spec = import_module(f"{operation}_reference.cli").OPERATION
     registry = spec.architectures
-    for architecture in registry.ARCHITECTURES:
-        variant = registry.resolve_variant(architecture)
+    slots = [
+        (name, variant)
+        for name in registry.ARCHITECTURES
+        for variant in registry.variants(name)
+    ]
+    for architecture, variant in slots:
         cases = registry.get_adapter(architecture, variant).CASES
+        selected = ["--arch", architecture, "--variant", variant]
         result = subprocess.run(
-            [sys.executable, str(script), "cases", "--arch", architecture, "--json"],
+            [sys.executable, str(script), "cases", *selected, "--json"],
             check=False,
             env=env,
             capture_output=True,
@@ -2526,7 +2563,7 @@ def test_cases_command_lists_each_cohort_without_gpu_or_torch(tmp_path, operatio
             case.tolerance for case in cases
         ]
     result = subprocess.run(
-        [sys.executable, str(script), "cases", "--arch", architecture],
+        [sys.executable, str(script), "cases", *selected],
         check=False,
         env=env,
         capture_output=True,
@@ -2698,13 +2735,16 @@ def test_diff_reports_every_difference_that_verification_rejects(
     from dataclasses import asdict
 
     spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
-    target = spec.architectures.get_adapter(architecture)
+    variant = _variant(spec.architectures, architecture)
+    selected = {"architecture": architecture, "variant": variant}
+    target = spec.architectures.get_adapter(architecture, variant)
     cases = target.CASES
     source = bundle
     if form == "archive":
         source = tmp_path / f"{architecture}.tar.gz"
         pack(bundle, source, lock, operation=operation)
-    command = ["diff", "--arch", architecture, "--bundle", str(source)]
+    command = ["diff", "--arch", architecture, "--variant", variant]
+    command += ["--bundle", str(source)]
     spec.main([*command, "--lock", str(lock)])
     output = capsys.readouterr().out
     assert f"all {len(cases)} enrolled cases match" in output
@@ -2739,15 +2779,19 @@ def test_diff_reports_every_difference_that_verification_rejects(
         "library/tests/reference_common/docs/gpu-reference-workflow.md",
     ):
         assert expected in output
-    assert len(spec.diff_bundle(source, lock, architecture=architecture)) == 4
+    assert len(spec.diff_bundle(source, lock, **selected)) == 4
     # diff reports exactly what verification refuses to run.
     with pytest.raises(ValueError):
-        spec.load_bundle(bundle, lock, architecture=architecture)
+        spec.load_bundle(bundle, lock, **selected)
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
 def test_diff_authenticates_an_archive_before_reading_it(tmp_path, operation):
     spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    selected = {
+        "architecture": architecture,
+        "variant": _variant(spec.architectures, architecture),
+    }
     archive = tmp_path / "bundle.tar.gz"
     pack(bundle, archive, lock, operation=operation)
     other = tmp_path / "other-lock.json"
@@ -2755,7 +2799,7 @@ def test_diff_authenticates_an_archive_before_reading_it(tmp_path, operation):
         json.dumps(dict(json.loads(lock.read_text()), manifest_sha256="0" * 64))
     )
     with pytest.raises(ValueError, match="does not match the pinned lock"):
-        spec.diff_bundle(archive, other, architecture=architecture)
+        spec.diff_bundle(archive, other, **selected)
     unsafe = tmp_path / "unsafe.tar.gz"
     with tarfile.open(unsafe, "w:gz") as tar:
         tar.addfile(
@@ -2763,7 +2807,7 @@ def test_diff_authenticates_an_archive_before_reading_it(tmp_path, operation):
             io.BytesIO(),
         )
     with pytest.raises(ValueError, match="invalid .* archive member"):
-        spec.diff_bundle(unsafe, lock, architecture=architecture)
+        spec.diff_bundle(unsafe, lock, **selected)
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -2774,6 +2818,8 @@ def test_diff_defaults_to_the_published_bundle_and_committed_lock(
     from reference_common import cli as common_cli
 
     spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    variant = _variant(spec.architectures, architecture)
+    diff = ["diff", "--arch", architecture, "--variant", variant]
     published = tmp_path / "published" / architecture
     published.parent.mkdir()
     if fetched == "archive":
@@ -2793,11 +2839,11 @@ def test_diff_defaults_to_the_published_bundle_and_committed_lock(
     )
     if fetched is None:
         with pytest.raises(SystemExit) as exit:
-            spec.main(["diff", "--arch", architecture])
+            spec.main(diff)
         assert exit.value.code == 2
         assert "fetch the archive with DVC or pass --bundle" in capsys.readouterr().err
     else:
-        spec.main(["diff", "--arch", architecture])
+        spec.main(diff)
         output = capsys.readouterr().out
         assert "enrolled cases match" in output
         assert output.rstrip().endswith(
@@ -2805,9 +2851,8 @@ def test_diff_defaults_to_the_published_bundle_and_committed_lock(
         )
     lock.unlink()
     with pytest.raises(SystemExit) as exit:
-        spec.main(["diff", "--arch", architecture])
+        spec.main(diff)
     assert exit.value.code == 2
-    variant = spec.architectures.resolve_variant(architecture)
     assert f"{architecture} {variant} has no published" in capsys.readouterr().err
 
 
@@ -2917,6 +2962,7 @@ def test_diff_reports_an_unusable_bundle_once_with_status_2(
         source = bundle
         expected = "payload has missing, modified, or extra files"
     command = ["diff", "--arch", architecture, "--bundle", str(source)]
+    command += ["--variant", _variant(spec.architectures, architecture)]
     with pytest.raises(SystemExit) as exit:
         spec.main([*command, "--lock", str(lock)])
     assert exit.value.code == 2
@@ -2938,7 +2984,7 @@ def test_bundle_commands_accept_only_the_selected_declared_variant(
     that declares another variant as unusable, before any case runs.
     """
     spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
-    variant = spec.architectures.resolve_variant(architecture)
+    variant = _variant(spec.architectures, architecture)
     if declared is not None:
         recorded = variant if declared == "selected" else declared
         manifest = json.loads((bundle / "manifest.json").read_text())
@@ -2960,7 +3006,7 @@ def test_bundle_commands_accept_only_the_selected_declared_variant(
         with pytest.raises(SystemExit) as exit:
             spec.main(
                 [command, "--arch", architecture, "--bundle", str(source)]
-                + ["--lock", str(lock)]
+                + ["--lock", str(lock), "--variant", selected["variant"]]
             )
         assert exit.value.code == 2
         output = capsys.readouterr()
@@ -2988,7 +3034,7 @@ def test_bundle_commands_check_the_cohort_that_the_lock_pins(
     lock.write_text(json.dumps(pinned))
     selected = {
         "architecture": architecture,
-        "variant": spec.architectures.resolve_variant(architecture),
+        "variant": _variant(spec.architectures, architecture),
     }
     archive = tmp_path / "bundle.tar.gz"
     pack(bundle, archive, lock, operation=operation)
@@ -3001,7 +3047,7 @@ def test_bundle_commands_check_the_cohort_that_the_lock_pins(
         with pytest.raises(SystemExit) as exit:
             spec.main(
                 [command, "--arch", architecture, "--bundle", str(source)]
-                + ["--lock", str(lock)]
+                + ["--lock", str(lock), "--variant", selected["variant"]]
             )
         assert exit.value.code == 2
         output = capsys.readouterr()
@@ -3017,7 +3063,8 @@ def test_bundle_commands_say_how_to_provide_the_rocke_platform(
     """Matching recorded device targets needs rocKE; its absence is not a crash."""
     import os
 
-    _, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    variant = _variant(spec.architectures, architecture)
     stub = tmp_path / "without-rocke"
     stub.mkdir()
     (stub / "rocke.py").write_text(
@@ -3027,7 +3074,7 @@ def test_bundle_commands_say_how_to_provide_the_rocke_platform(
     script = Path(__file__).with_name(f"run_{operation}_reference.py")
     result = subprocess.run(
         [sys.executable, str(script), command, "--arch", architecture]
-        + ["--bundle", str(bundle), "--lock", str(lock)],
+        + ["--variant", variant, "--bundle", str(bundle), "--lock", str(lock)],
         check=False,
         env=env,
         capture_output=True,
@@ -3547,7 +3594,7 @@ def test_locked_cohort_check_names_the_lock_and_the_requalification(
 
     spec = import_module(f"{operation}_reference.cli").OPERATION
     architecture = spec.architectures.ARCHITECTURES[0]
-    variant = spec.architectures.resolve_variant(architecture)
+    variant = _variant(spec.architectures, architecture)
     target = spec.architectures.get_adapter(architecture, variant)
     lock = tmp_path / "baseline_lock.json"
     monkeypatch.setattr(
@@ -3616,7 +3663,7 @@ def test_published_cohort_check_names_unqualified_cases(
     from reference_common.paths import default_bundle_path
 
     registry = import_module(f"{operation}_reference.architectures")
-    variant = registry.resolve_variant(registry.ARCHITECTURES[0])
+    variant = _variant(registry, registry.ARCHITECTURES[0])
     target = registry.get_adapter(registry.ARCHITECTURES[0], variant)
     cases = target.CASES
     # The bundle was qualified before the author enrolled the last case.
@@ -4141,7 +4188,7 @@ def test_baseline_preparation_check_names_what_failed(tmp_path, operation, broke
 
     registry = import_module(f"{operation}_reference.architectures")
     architecture = registry.ARCHITECTURES[0]
-    variant = registry.resolve_variant(architecture)
+    variant = _variant(registry, architecture)
     cases = registry.get_adapter(architecture, variant).CASES
     # A stand-in baseline whose production packages no longer match the adapter.
     source = tmp_path / "source"
@@ -4226,7 +4273,9 @@ def test_verify_explains_how_to_unpack_an_archive(tmp_path, capsys, operation):
     spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
     archive = tmp_path / f"{architecture}.tar.gz"
     pack(bundle, archive, lock, operation=operation)
-    command = ["verify", "--arch", architecture, "--lock", str(lock), "--bundle"]
+    variant = _variant(spec.architectures, architecture)
+    command = ["verify", "--arch", architecture, "--variant", variant]
+    command += ["--lock", str(lock), "--bundle"]
     with pytest.raises(SystemExit) as exit:
         spec.main([*command, str(archive)])
     assert exit.value.code == 2
@@ -4237,13 +4286,15 @@ def test_verify_explains_how_to_unpack_an_archive(tmp_path, capsys, operation):
     (extract,) = _commands(error)
     args = _unpacked(extract)
     assert (args.command, args.operation) == ("unpack", operation)
-    assert args.variant == spec.architectures.resolve_variant(architecture)
+    assert args.variant == variant
     assert _same(args.archive, archive) and _same(args.lock, lock)
     passed = _passed(error, "--bundle")
     assert _same(passed, tmp_path / architecture) and _same(args.bundle, passed)
     # The suggested command extracts and authenticates a usable bundle.
     subprocess.run([sys.executable, *extract], check=True, capture_output=True)
-    assert spec.load_bundle(Path(passed), lock, architecture=architecture)
+    assert spec.load_bundle(
+        Path(passed), lock, architecture=architecture, variant=variant
+    )
     with pytest.raises(SystemExit) as exit:
         spec.main([*command, str(tmp_path / "missing")])
     assert exit.value.code == 2
@@ -4260,16 +4311,18 @@ def test_verify_reports_an_unusable_lock_or_bundle_once(
     archive = tmp_path / f"{architecture}.tar.gz"
     pack(bundle, archive, lock, operation=operation)
 
+    variant = _variant(spec.architectures, architecture)
+
     def refused(*args):
+        selected = ["--arch", architecture, "--variant", variant]
         with pytest.raises(SystemExit) as exit:
-            spec.main(["verify", "--arch", architecture, "--bundle", *map(str, args)])
+            spec.main(["verify", *selected, "--bundle", *map(str, args)])
         assert exit.value.code == 2
         output = capsys.readouterr()
         assert "Traceback" not in output.err
         return output.err
 
     # An architecture with no published bundle has no committed lock.
-    variant = spec.architectures.resolve_variant(architecture)
     unpublished = (tmp_path / "unpublished/baseline_lock.json").resolve()
     monkeypatch.setattr(
         spec.architectures, "baseline_lock", lambda name, variant=None: unpublished
@@ -4284,7 +4337,7 @@ def test_verify_reports_an_unusable_lock_or_bundle_once(
         assert "artifact.py" not in error
     assert f"lock not found: {unpublished}" in refused(bundle, "--lock", unpublished)
     # load_bundle rejects a cohort the bundle does not record and stale data.
-    target = spec.architectures.get_adapter(architecture)
+    target = spec.architectures.get_adapter(architecture, variant)
     cases = target.CASES
     monkeypatch.setattr(target, "CASES", cases[1:])
     error = refused(bundle, "--lock", lock)
@@ -4303,7 +4356,8 @@ def test_verify_subset_runs_selected_cases_and_says_it_is_partial(
     from reference_common.cli import ReferenceOperation
 
     spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
-    cases = spec.architectures.get_adapter(architecture).CASES
+    variant = _variant(spec.architectures, architecture)
+    cases = spec.architectures.get_adapter(architecture, variant).CASES
     ran = []
 
     def verify_case(self, case, **kwargs):
@@ -4313,8 +4367,8 @@ def test_verify_subset_runs_selected_cases_and_says_it_is_partial(
         return {"case": case.id}
 
     monkeypatch.setattr(ReferenceOperation, "verify_case", verify_case)
-    command = ["verify", "--arch", architecture, "--bundle", str(bundle)]
-    command += ["--lock", str(lock)]
+    command = ["verify", "--arch", architecture, "--variant", variant]
+    command += ["--bundle", str(bundle), "--lock", str(lock)]
     spec.main([*command, "--case", cases[2].id, "--case", cases[0].id])
     assert ran == [cases[0].id, cases[2].id]
     output = capsys.readouterr().out
@@ -4329,7 +4383,6 @@ def test_verify_subset_runs_selected_cases_and_says_it_is_partial(
     with pytest.raises(SystemExit) as exit:
         spec.main([*command, "--case", "unenrolled"])
     assert exit.value.code == 2
-    variant = spec.architectures.resolve_variant(architecture)
     error = capsys.readouterr().err
     assert f"not enrolled for {architecture} {variant}: unenrolled" in error
     assert error.endswith(f"cases --arch {architecture} --variant {variant}\n")
@@ -4386,6 +4439,7 @@ def test_operation_without_torch_offers_no_torch_cross_check(tmp_path, operation
             tmp_path / "bundle",
             2,
             spec.architectures.ARCHITECTURES[0],
+            variant=_variant(spec.architectures, spec.architectures.ARCHITECTURES[0]),
             torch_reference="cpu",
         )
     assert not (tmp_path / "bundle").exists()
@@ -4398,7 +4452,9 @@ def _verifiable_case(monkeypatch, operation, index=0):
 
     spec = import_module(f"{operation}_reference.cli").OPERATION
     architecture = spec.architectures.ARCHITECTURES[index]
-    target = spec.architectures.get_adapter(architecture)
+    target = spec.architectures.get_adapter(
+        architecture, _variant(spec.architectures, architecture)
+    )
     case = target.CASES[0]
     monkeypatch.setattr(target, "CASES", (case,))
     inputs = spec.contract.make_inputs(case)
@@ -4465,6 +4521,7 @@ def test_verification_failures_name_side_values_cause_and_next_step(
             manifest=manifest,
             current_root=current_root,
             architecture=architecture,
+            variant=_variant(spec.architectures, architecture),
         )
     message = str(error.value)
     problem = message.splitlines()[0]
@@ -4516,7 +4573,7 @@ def test_verification_failures_name_side_values_cause_and_next_step(
         script, *arguments = _arguments(rerun)[1:]
         assert _same(script, Path(__file__).with_name(f"run_{operation}_reference.py"))
         args = spec._parser().parse_args(arguments)
-        variant = spec.architectures.resolve_variant(architecture)
+        variant = _variant(spec.architectures, architecture)
         assert (args.command, args.arch, args.variant, args.cases, args.lock) == (
             "verify",
             architecture,
@@ -4565,6 +4622,7 @@ def test_worker_failures_say_which_side_failed_and_keep_the_log(
             manifest=manifest,
             current_root=tmp_path,
             architecture=architecture,
+            variant=_variant(spec.architectures, architecture),
         )
     message = str(error.value)
     side = "frozen baseline (replay)" if mode == "replay" else "current kernel (source)"
@@ -4574,7 +4632,7 @@ def test_worker_failures_say_which_side_failed_and_keep_the_log(
     assert f"\n  see {_TRIAGE_DOC}\n" in message
     assert message.endswith(log)
     # Only the current side points at the adapter that calls production APIs.
-    variant = spec.architectures.resolve_variant(architecture)
+    variant = _variant(spec.architectures, architecture)
     adapter = (
         f"library/tests/{operation}_reference/architectures/{architecture}/"
         f"{variant}/__init__.py"
@@ -4644,7 +4702,7 @@ def test_rejected_bundles_say_how_to_replace_them(
     tmp_path, monkeypatch, operation, index, layout, problem
 ):
     spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation, index)
-    variant = spec.architectures.resolve_variant(architecture)
+    variant = _variant(spec.architectures, architecture)
     tests = _relocate(monkeypatch, tmp_path, operation, layout)
     if layout == "source":
         pointer = _track(tests, operation, architecture, variant)
@@ -4687,7 +4745,12 @@ def test_rejected_bundles_say_how_to_replace_them(
         paths += [archive]
         key = None
     with pytest.raises(ValueError) as error:
-        spec.load_bundle(bundle, lock if candidate else None, architecture=architecture)
+        spec.load_bundle(
+            bundle,
+            lock if candidate else None,
+            architecture=architecture,
+            variant=variant,
+        )
     message = str(error.value)
     first = message.splitlines()[0]
     assert all(_mentions(first, path) for path in paths)
@@ -4720,7 +4783,9 @@ def test_rejected_bundles_say_how_to_replace_them(
         assert _same(passed, tmp_path / architecture) and _same(args.bundle, passed)
         unpack(args.archive, args.bundle, args.lock, operation=args.operation)
         selected = lock if candidate else None
-        assert spec.load_bundle(Path(passed), selected, architecture=architecture)
+        assert spec.load_bundle(
+            Path(passed), selected, architecture=architecture, variant=variant
+        )
     elif layout == "installed":
         # Installation does not replace a directory either, and needs no fetch.
         assert commands == [] and "dvc pull" not in message
@@ -4885,9 +4950,10 @@ def test_rerun_command_repeats_the_failing_bundle_and_lock(
         }
 
     monkeypatch.setattr(common_cli, "run_worker", worker)
+    variant = _variant(spec.architectures, architecture)
     selected = {
         None: None,
-        "committed": spec.architectures.baseline_lock(architecture),
+        "committed": spec.architectures.baseline_lock(architecture, variant),
         "candidate": tmp_path / "qualification-lock.json",
     }[lock]
     bundle = tmp_path / "bundle"
@@ -4898,6 +4964,7 @@ def test_rerun_command_repeats_the_failing_bundle_and_lock(
             manifest=manifest,
             lock=selected,
             architecture=architecture,
+            variant=variant,
         )
     (rerun,) = re.findall(r"rerun only this case with `([^`]+)`", str(error.value))
     python, script, *arguments = _arguments(rerun)
@@ -4911,7 +4978,7 @@ def test_rerun_command_repeats_the_failing_bundle_and_lock(
     assert (args.command, args.arch, args.cases) == ("verify", architecture, [case.id])
     # The variant is named even as the default, so another variant cannot make
     # the command ambiguous.
-    assert args.variant == spec.architectures.resolve_variant(architecture)
+    assert args.variant == variant
     assert args.bundle.resolve() == bundle.resolve()
     # The committed lock is the default, so only a candidate lock is repeated.
     if lock == "candidate":
@@ -4933,7 +5000,7 @@ def test_pinned_correctness_verifies_with_the_selected_lock(
     gpu_tests = import_module(f"test_{operation}_pinned_reference")
     registry = gpu_tests.OPERATION.architectures
     architecture = registry.ARCHITECTURES[0]
-    variant = registry.resolve_variant(architecture)
+    variant = _variant(registry, architecture)
     target = registry.get_adapter(architecture, variant)
     lock = tmp_path / "qualification-lock.json" if candidate else None
     calls = []
@@ -4979,7 +5046,7 @@ def test_pinned_correctness_failures_show_the_reported_values(
     gpu_tests = import_module(f"test_{operation}_pinned_reference")
     registry = gpu_tests.OPERATION.architectures
     architecture = registry.ARCHITECTURES[0]
-    variant = registry.resolve_variant(architecture)
+    variant = _variant(registry, architecture)
     target = registry.get_adapter(architecture, variant)
     monkeypatch.setattr(
         ReferenceOperation, "verify_case", lambda self, case, **kwargs: report

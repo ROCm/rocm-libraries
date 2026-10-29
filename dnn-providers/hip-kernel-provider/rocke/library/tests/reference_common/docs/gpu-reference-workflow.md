@@ -167,13 +167,9 @@ published name as permanent: new manifests record their variant, and staging and
 verification reject a manifest under another variant's name, so a rename needs
 requalification. If the family's exported kernels record a replay ABI that the
 operation's `worker.py` does not bind yet, extend its `replay_values`; published
-bundles keep their own frozen worker. Some shared tests in
-`test_reference_common.py`, some contract tests, and
-`test_sdpa_torch_reference.py` still assume one variant per architecture: they
-call `resolve_variant(arch)` or `get_adapter(arch)` without a variant. Giving
-an architecture a second variant makes them fail, most with
-`needs a selected reference variant`; in the same change, make them name a
-variant or loop over `variants(arch)`.
+bundles keep their own frozen worker. Host tests name the variant that they
+check, or run for every enrolled or published variant, so a new variant needs
+no edit to existing host tests.
 
 For a new architecture, add it to the operation's `architectures/registry.json`
 so offline tools can load its variant adapters. This enables qualification only;
@@ -626,7 +622,7 @@ do not overlap. These still do:
 
 | Pull requests | What overlaps | Resolution |
 |---|---|---|
-| Two on different variants | Disjoint files, unless a host test or document lists the variants explicitly. Today a pull request that gives an architecture a second variant also edits `test_reference_common.py` and the operation's other host tests, such as its contract tests, until the tests that assume one variant per architecture are parametrized by variant | Merge in either order; where both edited those tests, keep both updates. Prefer tests parametrized over the enrolled variants and docs that point to `cases` and `status` |
+| Two on different variants | Disjoint files, except where both add to a shared file: a replay ABI in the operation's `worker.py`, checks in its contract tests, or text in its guide | Merge in either order and keep both additions |
 | Two on the same variant | Its lock and DVC pointer conflict, as intended | Rebase onto the one merged first, keep the union of both cohorts, and requalify. Configuration and host tests reject a lock, pointer, or `CASES` taken from different qualifications; review must check that neither pull request's cases were dropped |
 | One editing the shared WMMA cohort | Every published WMMA variant's lock, whose cohort digest no longer matches | Requalify each, or first [give a processor its own tuple](quickstart.md#i-want-to-change-a-shared-cohort-on-one-processor) to decouple it |
 | One adding an architecture | That operation's `architectures/registry.json` and its `set(ROCKE_PUBLISHED_<OPERATION>_ARCHITECTURES ...)` line | Rebase and keep both entries |
@@ -651,7 +647,7 @@ rows for the kernel author implicate a kernel change.
 | `reference archive missing`, `reference staging failed`, `No qualified ... baseline lock`, `has no publication list` during CMake configuration | A published archive was not fetched or does not match its lock, or the publication lists, locks, and operation packages disagree | Whoever configures the build, or the author of the publication change | Fetch every published archive before configuring ([step 6](#6-validate-installation-and-provider-selection)). List an architecture only with a published variant, and give each operation package a list and an `operation.json` |
 | `is a pre-variant baseline lock`, `is a pre-variant DVC pointer` during CMake configuration | A lock or pointer sits at its path from before variants, such as after merging a branch opened earlier | Author of the merge | If the branch changed the file, move it into its variant as the message says, replacing the file there; otherwise delete it. See the [migration note](README.md#migrating-from-the-per-architecture-layout) |
 | `has no adapter`, `has no DVC pointer`, `tracks an archive that no lock publishes`, `does not list`, `does not enroll`, `publishes the invalid variant name`, `is the only ignore file` during CMake configuration | A variant's lock, adapter, pointer, and publication entry were not committed together, or its name breaks the naming rule; a listed architecture is missing from its operation's `registry.json`; or `dvc add` wrote a nested `.gitignore` | Author of the publication change | Commit the variant's lock, pointer, and adapter together and list its architecture, enrolled in `registry.json`, or remove the partial files; delete the nested ignore file |
-| `needs a selected reference variant`, `reference variant is not enrolled` | The architecture has several variants and none was selected, or the name is not one of them. In a host test, the test assumes one variant per architecture | Whoever runs the command, or the author who added the variant | Pass `--variant` to the command line or `--rocke-reference-variant` to pytest, with a variant the message lists. Make such a host test name a variant or loop over `variants(arch)` |
+| `needs a selected reference variant`, `reference variant is not enrolled` | The architecture has several variants and none was selected, or the name is not one of them. In a host test, the test did not name the variant it checks | Whoever runs the command, or the author who added the variant | Pass `--variant` to the command line or `--rocke-reference-variant` to pytest, with a variant the message lists. Make such a host test name a variant or loop over `variants(arch)` |
 | `wrong reference variant`, `bundle variant` | The bundle was qualified for another variant than its lock or selection | Whoever passed the bundle, or the author of the lock change | Pass the variant's own bundle with the lock from its qualification; never move a lock or archive between variants |
 | `reference is unpublished`, `reference variant is published` | An enrolled variant without a committed lock was selected, or the selected architecture publishes no variant | Whoever runs the test | Pass a qualified candidate bundle and its `qualification-lock.json`, or select a published variant |
 | `does not cover the complete enrolled cohort`, `the enrolled cases differ from`, `tolerance or budget changed`, `different compiler target` | The adapter's `CASES`, a shared cohort, the operation's `Case` fields, or the adapter's `COMPILER_TARGET` changed without a replacement bundle | Author of that change | Revert an unintended change. Otherwise [requalify the complete cohort](#decide-what-must-change) and publish its archive, lock, and DVC pointer. `diff` lists every difference |
