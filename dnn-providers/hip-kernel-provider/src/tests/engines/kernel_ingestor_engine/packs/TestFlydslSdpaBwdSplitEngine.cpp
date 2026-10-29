@@ -24,12 +24,14 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
 
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdVerdictTable.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -55,43 +57,6 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
 using data_objects::DataType;
 using Slot = FlydslSdpaBwdSplitSlot;
-
-PackSymbols splitSymbols(Slot slot)
-{
-    switch(slot)
-    {
-    case Slot::PREP:
-        return {"hipkernel:flydsl_sdpa_bwd_split",
-                "hipkernel.flydsl_sdpa_bwd_split.graph_match",
-                "",
-                "hipkernel.flydsl_sdpa_bwd_split.prep.kernel_match",
-                "",
-                "hipkernel.flydsl_sdpa_bwd_split.prep.dispatch",
-                "",
-                "",
-                ""};
-    case Slot::DKDV:
-        return {"hipkernel:flydsl_sdpa_bwd_split",
-                "hipkernel.flydsl_sdpa_bwd_split.graph_match",
-                "",
-                "hipkernel.flydsl_sdpa_bwd_split.dkdv.kernel_match",
-                "",
-                "hipkernel.flydsl_sdpa_bwd_split.dkdv.dispatch",
-                "",
-                "",
-                ""};
-    default:
-        return {"hipkernel:flydsl_sdpa_bwd_split",
-                "hipkernel.flydsl_sdpa_bwd_split.graph_match",
-                "",
-                "hipkernel.flydsl_sdpa_bwd_split.dq.kernel_match",
-                "",
-                "hipkernel.flydsl_sdpa_bwd_split.dq.dispatch",
-                "",
-                "",
-                ""};
-    }
-}
 
 /// The dq slot's multi-launch dispatch, over the same graph match and kernel match.
 const PackSymbols DQ_REDUCE{"hipkernel:flydsl_sdpa_bwd_split",
@@ -1962,6 +1927,88 @@ TEST(TestFlydslSdpaBwdSplitGfx11Rows,
     {
         EXPECT_FALSE(servingRows(slot, top, gfx11Rows(slot)).empty());
     }
+}
+
+TEST(TestFlydslSdpaBwdSplitGfx11Rows, EveryTableClassHasUniqueEnrolledKnobTuplesInEverySlot)
+{
+    // The classes of the verdict table's served rows: dtype, mask form, dropout, bias form and
+    // dBias, and the rungs max(Dqk, Dv) (dkdv, dq) and Dv (prep) route to.
+    const auto rungOf = [](int64_t headDim) {
+        return *std::find_if(
+            GFX11_RUNGS.begin(), GFX11_RUNGS.end(), [&](auto tile) { return tile >= headDim; });
+    };
+    using ClassKey = std::
+        tuple<std::string, std::string, bool, int64_t, std::string, int64_t, int64_t, int64_t>;
+    std::map<ClassKey, VerdictRow> classes;
+    for(const auto& row : loadVerdictRows())
+    {
+        if(!row.served)
+        {
+            continue;
+        }
+        const bool windowed = row.windowLeft != -1 || row.windowRight != -1;
+        classes.emplace(ClassKey{row.dtype,
+                                 row.mask,
+                                 windowed,
+                                 row.dropout,
+                                 row.bias,
+                                 row.dbias,
+                                 rungOf(std::max(row.dqk, row.dv)),
+                                 rungOf(row.dv)},
+                        row);
+    }
+    ASSERT_FALSE(classes.empty());
+
+    // A gfx11-shaped catalog per slot, as H3's rows write it.
+    std::array<std::vector<KernelDefinition>, 3> catalog;
+    for(size_t slot = 0; slot < SLOTS.size(); ++slot)
+    {
+        for(const auto& row : gfx11Rows(SLOTS[slot]))
+        {
+            catalog[slot].push_back(makeRow(SLOTS[slot], row));
+        }
+    }
+
+    std::vector<std::string> failures;
+    for(const auto& [key, row] : classes)
+    {
+        const GraphFixture fixture(buildSdpaBwdGraph(specOfRow(row)));
+        const auto context = fixture.context();
+        const auto bound = matchesGraph(splitSymbols(Slot::PREP), context);
+        if(!bound.has_value())
+        {
+            failures.push_back(row.id + ": graph_match declined a served row's graph");
+            continue;
+        }
+        for(size_t slot = 0; slot < SLOTS.size(); ++slot)
+        {
+            std::vector<const KernelDefinition*> matched;
+            for(const auto& kernel : catalog[slot])
+            {
+                if(matchesKernel(splitSymbols(SLOTS[slot]), context, kernel, *bound))
+                {
+                    matched.push_back(&kernel);
+                }
+            }
+            const std::string label = slotName(SLOTS[slot]);
+            if(matched.empty())
+            {
+                failures.push_back(row.id + " " + label + ": no row of the catalog serves it");
+            }
+            else if(const auto pair = ambiguousEnrolledTuple(matched, enrolledKnobs(label)))
+            {
+                failures.push_back(row.id + " " + label + ": ambiguous tuple between "
+                                   + std::to_string(matched.size()) + " rows");
+            }
+        }
+    }
+    std::string report;
+    for(const auto& failure : failures)
+    {
+        report += "\n  " + failure;
+    }
+    EXPECT_TRUE(failures.empty()) << failures.size() << " of " << classes.size()
+                                  << " classes:" << report;
 }
 
 } // namespace

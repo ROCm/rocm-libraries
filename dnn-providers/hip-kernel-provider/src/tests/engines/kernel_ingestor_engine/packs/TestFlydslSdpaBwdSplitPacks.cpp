@@ -17,11 +17,17 @@
 #include <variant>
 #include <vector>
 
+#include <fstream>
+#include <iostream>
+#include <sstream>
+
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdVerdictTable.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -42,6 +48,11 @@
  *   16..256 times three dtypes, bk form only, no sink). The 66 dq rows that serve a dB-storing
  *   bias are a multi-launch pack: its `sources` hold the dQ kernel and the dBias reduce kernel
  *   as two code objects, the reduce one of three companions shared by dtype.
+ *
+ * Two cases hold the gfx11 shard to the verdict table (flydsl/tests/data/sdpa_bwd_gfx11_verdicts.csv):
+ * every row's graph is run through graph_match and every slot's kernel_match over the installed
+ * rows, and the served rows' slot catalogs are checked for unique enrolled knob tuples. A gfx950
+ * entry does not read the table.
  *
  * Every case opens by reading loadedSet(), none skips and none touches a device, so an empty
  * shard fails here instead of passing silently. The seam suite, over rows written in the test,
@@ -102,6 +113,9 @@ struct SplitContent
     const char* dkdvGrid;
     /// Whether prep's `floor` is the numeric rung below its tile (rather than a label).
     bool prepFloorIsRungBelow;
+    /// The content directory name of the verdict table's arch family (the manifests the table's
+    /// hashes name); nullptr where the table does not apply.
+    const char* verdictContent;
 };
 
 const SplitContent GFX950_CONTENT{
@@ -117,7 +131,8 @@ const SplitContent GFX950_CONTENT{
     "fmha_bwd_dbias_reduce_f32_gfx950_kernel_1",
     0,
     "kheads_by_kvblocks_by_seqs",
-    false};
+    false,
+    nullptr};
 
 const SplitContent GFX11_CONTENT{
     {{{"prep", 33, 11, 11, 11}, {"dkdv", 198, 66, 66, 66}, {"dq", 198, 66, 66, 66}}},
@@ -132,7 +147,8 @@ const SplitContent GFX11_CONTENT{
     "fmha_bwd_dbias_reduce_f32_gfx11_kernel_0",
     3,
     "kvblocks_by_kheads_by_seqs",
-    true};
+    true,
+    "gfx11-generic"};
 
 /// The inventory for the architecture the census entry names; the architecture is never read
 /// from the descriptors being counted. nullptr for an architecture the engine has no
@@ -523,6 +539,348 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryKernelDeclaresItsSlotsSignature)
     }
     // One argument list serves every reduce launch of the shard.
     EXPECT_EQ(reduceShapes.size(), content().reduceInSources ? 1U : 0U);
+}
+
+// ---------------------------------------------------------------------------
+// The verdict table over the installed gfx11 shard
+// ---------------------------------------------------------------------------
+
+constexpr std::array<FlydslSdpaBwdSplitSlot, 3> SLOT_ORDER{
+    FlydslSdpaBwdSplitSlot::PREP, FlydslSdpaBwdSplitSlot::DKDV, FlydslSdpaBwdSplitSlot::DQ};
+
+/// The spec hashes of a content directory's manifests, which name the objects the table's
+/// `prep`, `dkdv`, `dq` and `reduce` columns cite: instance name to hash per slot, and the
+/// dBias reduce companions' code-object digests to hash.
+struct ManifestHashes
+{
+    std::array<std::map<std::string, std::string>, 3> hashOfName;
+    std::array<std::map<std::string, std::string>, 3> nameOfHash;
+    std::map<std::string, std::string> companionHashOfDigest;
+};
+
+ManifestHashes loadManifestHashes(const std::string& content)
+{
+    ManifestHashes hashes;
+    const std::array<const char*, 3> ops{"sdpa_bwd_prep", "sdpa_bwd_dkdv", "sdpa_bwd_dq"};
+    for(size_t slot = 0; slot < ops.size(); ++slot)
+    {
+        const std::string path
+            = (verdictDataRoot() / ops[slot] / content / "manifest.json").string();
+        std::ifstream in(path);
+        if(!in.good())
+        {
+            throw std::runtime_error("cannot open the manifest " + path);
+        }
+        const auto manifest = nlohmann::json::parse(in);
+        for(const auto& instance : manifest.at("instances"))
+        {
+            const std::string name = instance.at("name");
+            const std::string hash = instance.at("spec_hash");
+            hashes.hashOfName[slot][name] = hash;
+            hashes.nameOfHash[slot][hash] = name;
+        }
+        for(const auto& companion : manifest.value("companions", nlohmann::json::array()))
+        {
+            hashes.companionHashOfDigest[companion.at("sha256")] = companion.at("hash");
+        }
+    }
+    return hashes;
+}
+
+/// What the engine says about one table row over the installed shard.
+struct RowMatch
+{
+    /// Whether graph_match binds the graph.
+    bool graphAccepted = false;
+    /// The shared matcher's decline cause, when it declines.
+    std::optional<std::string> sharedCause;
+    /// Per slot, the installed kernels whose kernel_match serves the graph.
+    std::array<std::vector<const KernelDefinition*>, 3> matched;
+};
+
+/// Every kernel the installed shard ships for each slot, across the slot's packs, as the
+/// definitions the engine's matchers read.
+std::array<std::vector<KernelDefinition>, 3> installedKernels(const DescriptorSet& set)
+{
+    std::array<std::vector<KernelDefinition>, 3> kernels;
+    for(size_t slot = 0; slot < SLOT_ORDER.size(); ++slot)
+    {
+        for(const auto& pack : slotOf(set, slotName(SLOT_ORDER[slot])).packs)
+        {
+            for(const auto& kernel : pack.kernels)
+            {
+                kernels[slot].push_back(KernelDefinition{kernel.id,
+                                                         pack.id,
+                                                         pack.dispatchId,
+                                                         kernel.source,
+                                                         kernel.metadata,
+                                                         kernel.priority,
+                                                         kernel.arch,
+                                                         kernel.originDirectory,
+                                                         kernel.name,
+                                                         kernel.treeRoot,
+                                                         kernel.sources});
+            }
+        }
+    }
+    return kernels;
+}
+
+RowMatch matchRow(const VerdictRow& row,
+                  const std::string& arch,
+                  const std::array<std::vector<KernelDefinition>, 3>& installed)
+{
+    DeviceProperties properties;
+    properties.gcnArchName = arch;
+    properties.warpSize = 32;
+    const GraphFixture fixture(buildSdpaBwdGraph(specOfRow(row)), properties);
+    const auto context = fixture.context();
+
+    RowMatch result;
+    const auto bound = matchesGraph(splitSymbols(SLOT_ORDER[0]), context);
+    result.graphAccepted = bound.has_value();
+    if(!bound.has_value())
+    {
+        const auto shared
+            = flydsl_sdpa_bwd::matchSdpaBackward(context, flydsl_sdpa_bwd::MatchOptions{true});
+        if(const auto* decline = std::get_if<flydsl_sdpa_bwd::Decline>(&shared))
+        {
+            result.sharedCause = decline->cause;
+        }
+        return result;
+    }
+    for(size_t slot = 0; slot < SLOT_ORDER.size(); ++slot)
+    {
+        const auto symbols = splitSymbols(SLOT_ORDER[slot]);
+        for(const auto& kernel : installed[slot])
+        {
+            if(matchesKernel(symbols, context, kernel, *bound))
+            {
+                result.matched[slot].push_back(&kernel);
+            }
+        }
+    }
+    return result;
+}
+
+/// The matches of every row of the verdict table over the installed shard, computed once for
+/// the cases of one process.
+struct TableMatches
+{
+    std::vector<VerdictRow> rows;
+    std::vector<RowMatch> matches;
+    ManifestHashes hashes;
+    /// What `matches` points into.
+    std::array<std::vector<KernelDefinition>, 3> installed;
+};
+
+const TableMatches& tableMatches(const std::string& arch, const char* content)
+{
+    static const TableMatches table = [&] {
+        TableMatches built;
+        built.rows = loadVerdictRows();
+        built.hashes = loadManifestHashes(content);
+        built.installed = installedKernels(loadedSet(ENGINE_NAME));
+        built.matches.reserve(built.rows.size());
+        for(const auto& row : built.rows)
+        {
+            built.matches.push_back(matchRow(row, arch, built.installed));
+        }
+        return built;
+    }();
+    return table;
+}
+
+std::string namesOf(const std::vector<const KernelDefinition*>& kernels, size_t limit = 4)
+{
+    std::string text;
+    for(size_t index = 0; index < kernels.size() && index < limit; ++index)
+    {
+        text += (index == 0 ? "" : ", ") + kernels[index]->name;
+    }
+    return kernels.size() > limit ? text + ", ..." : text;
+}
+
+/// Why the engine's verdict on @p row disagrees with the table, or nullopt when it agrees.
+std::optional<std::string>
+    verdictDisagreement(const VerdictRow& row, const RowMatch& match, const ManifestHashes& hashes)
+{
+    if(row.served)
+    {
+        if(!match.graphAccepted)
+        {
+            return "table says served; graph_match declined ["
+                   + match.sharedCause.value_or("no shared-matcher decline (SP-WS)") + "]";
+        }
+        const std::array<const std::string*, 3> expected{&row.prep, &row.dkdv, &row.dq};
+        for(size_t slot = 0; slot < SLOT_ORDER.size(); ++slot)
+        {
+            const std::string slotLabel = slotName(SLOT_ORDER[slot]);
+            const auto name = hashes.nameOfHash[slot].find(*expected[slot]);
+            if(name == hashes.nameOfHash[slot].end())
+            {
+                return slotLabel + " hash " + *expected[slot] + " is not in the manifest";
+            }
+            const auto serving
+                = std::find_if(match.matched[slot].begin(),
+                               match.matched[slot].end(),
+                               [&](const auto* kernel) { return kernel->name == name->second; });
+            if(serving == match.matched[slot].end())
+            {
+                return slotLabel + " " + *expected[slot] + " (" + name->second + ") is not served; "
+                       + std::to_string(match.matched[slot].size())
+                       + " matched: " + namesOf(match.matched[slot]);
+            }
+            if(slotLabel == "dq" && !row.reduce.empty())
+            {
+                const auto companion = (*serving)->sources.find(REDUCE_LAUNCH);
+                if(companion == (*serving)->sources.end())
+                {
+                    return "dq " + name->second + " has no " + REDUCE_LAUNCH
+                           + " launch for the reduce companion " + row.reduce;
+                }
+                const auto hash = hashes.companionHashOfDigest.find(companion->second.sha256);
+                if(hash == hashes.companionHashOfDigest.end() || hash->second != row.reduce)
+                {
+                    return "dq " + name->second + " names reduce companion "
+                           + (hash == hashes.companionHashOfDigest.end() ? "<not in manifest>"
+                                                                         : hash->second)
+                           + ", table says " + row.reduce;
+                }
+            }
+        }
+        return std::nullopt;
+    }
+
+    if(row.rule == NO_ROW_RULE)
+    {
+        if(!match.graphAccepted)
+        {
+            return "table says no_row (graph_match accepts); graph_match declined ["
+                   + match.sharedCause.value_or("no shared-matcher decline (SP-WS)") + "]";
+        }
+        const bool anyEmpty = std::any_of(match.matched.begin(),
+                                          match.matched.end(),
+                                          [](const auto& kernels) { return kernels.empty(); });
+        if(!anyEmpty)
+        {
+            return "table says no_row; every slot has a matching row";
+        }
+        return std::nullopt;
+    }
+
+    const auto cause = ruleCauses().find(row.rule);
+    if(cause == ruleCauses().end())
+    {
+        return "table rule " + row.rule + " has no cause mapping";
+    }
+    if(match.graphAccepted)
+    {
+        return "table says declined " + row.rule + " [" + cause->second + "]; graph_match accepted";
+    }
+    if(!match.sharedCause.has_value())
+    {
+        return "table says declined " + row.rule + " [" + cause->second
+               + "]; graph_match declined without a shared-matcher decline (SP-WS)";
+    }
+    if(*match.sharedCause != cause->second)
+    {
+        return "table says " + row.rule + " [" + cause->second + "]; the engine declines ["
+               + *match.sharedCause + "]";
+    }
+    return std::nullopt;
+}
+
+TEST_F(TestFlydslSdpaBwdSplitPacks, EveryVerdictRowIsServedOrDeclinedAsTheTableSays)
+{
+    if(content().verdictContent == nullptr)
+    {
+        // The table is gfx11-generic content's: this architecture's shard is held to its own
+        // inventory by the cases above.
+        SUCCEED();
+        return;
+    }
+    const auto& table = tableMatches(arch(), content().verdictContent);
+    ASSERT_FALSE(table.rows.empty());
+
+    size_t served = 0;
+    size_t declined = 0;
+    size_t noRow = 0;
+    std::vector<std::string> failures;
+    for(size_t index = 0; index < table.rows.size(); ++index)
+    {
+        const auto& row = table.rows[index];
+        served += row.served ? 1 : 0;
+        noRow += (!row.served && row.rule == NO_ROW_RULE) ? 1 : 0;
+        declined += (!row.served && row.rule != NO_ROW_RULE) ? 1 : 0;
+        if(const auto why = verdictDisagreement(row, table.matches[index], table.hashes))
+        {
+            failures.push_back(row.id + ": " + *why);
+        }
+    }
+
+    std::cout << "verdict rows " << table.rows.size() << " on " << arch() << ": served " << served
+              << ", declined " << declined << ", no_row " << noRow << ", skipped 0, disagreeing "
+              << failures.size() << std::endl;
+    std::ostringstream report;
+    for(const auto& failure : failures)
+    {
+        report << "\n  " << failure;
+    }
+    EXPECT_TRUE(failures.empty()) << failures.size()
+                                  << " rows disagree with the table:" << report.str();
+}
+
+TEST_F(TestFlydslSdpaBwdSplitPacks, EveryServedRowsSlotCatalogsHaveUniqueEnrolledKnobTuples)
+{
+    if(content().verdictContent == nullptr)
+    {
+        SUCCEED();
+        return;
+    }
+    const auto& set = loadedSet(ENGINE_NAME);
+    std::array<std::vector<std::string>, 3> knobs;
+    for(size_t slot = 0; slot < SLOT_ORDER.size(); ++slot)
+    {
+        const std::string label = slotName(SLOT_ORDER[slot]);
+        const auto declared
+            = std::find_if(set.engine.slots.begin(),
+                           set.engine.slots.end(),
+                           [&](const auto& candidate) { return candidate.name == label; });
+        ASSERT_NE(declared, set.engine.slots.end()) << label;
+        knobs[slot] = declared->knobs;
+        EXPECT_EQ(enrolledKnobs(label), declared->knobs)
+            << label << ": the engine descriptor's enrolled knobs changed; update enrolledKnobs()";
+    }
+
+    const auto& table = tableMatches(arch(), content().verdictContent);
+    size_t checked = 0;
+    std::vector<std::string> failures;
+    for(size_t index = 0; index < table.rows.size(); ++index)
+    {
+        if(!table.rows[index].served)
+        {
+            continue;
+        }
+        ++checked;
+        for(size_t slot = 0; slot < SLOT_ORDER.size(); ++slot)
+        {
+            if(const auto pair
+               = ambiguousEnrolledTuple(table.matches[index].matched[slot], knobs[slot]))
+            {
+                failures.push_back(table.rows[index].id + " " + slotName(SLOT_ORDER[slot]) + ": "
+                                   + *pair);
+            }
+        }
+    }
+    std::cout << "enrolled-tuple check over " << checked << " served rows on " << arch() << ": "
+              << failures.size() << " ambiguous" << std::endl;
+    std::ostringstream report;
+    for(const auto& failure : failures)
+    {
+        report << "\n  " << failure;
+    }
+    EXPECT_TRUE(failures.empty()) << failures.size() << " ambiguous slot catalogs:" << report.str();
 }
 
 } // namespace
