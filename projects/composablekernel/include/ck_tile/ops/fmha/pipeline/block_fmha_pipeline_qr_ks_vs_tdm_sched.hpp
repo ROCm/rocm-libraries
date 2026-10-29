@@ -482,7 +482,19 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         constexpr bool kUseCountdownLoop = !kHasSink &&
                                            BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
                                            !(Geometry::kHeadDimQK == 192 && Geometry::kN == 128);
-        static_assert(!Policy::template UseCountdownLoop<Problem>() || kUseCountdownLoop);
+        static_assert(!Policy::template UseCountdownLoop<Problem>() || kUseCountdownLoop,
+                      "every instance the shared policy puts on the countdown loop must keep it");
+        // The V TDM issue recomputes its clamped global stride locally (fewer long-lived SGPRs).
+        // Tied to the countdown loop for BF16 N128/V128: D128 with and without a mask. D192 N128
+        // is excluded with the countdown loop; without the countdown loop it was not measured.
+        constexpr bool kRematerializeVStride =
+            kUseCountdownLoop && kN0 == 128 && kN1 == 128 && std::is_same_v<VDataType, bf16_t>;
+        // Form every LDS read base of a tile once, before the WMMA streams (see begin_iteration).
+        // D192 only: the D64 read-first placement already forms its addresses ahead of the reads
+        // (no measurable change), the D128 lead-first placement is not wired for prepared PV
+        // bases, and masked D192 N128 runs out of VGPRs (scratch spills in the tile loop).
+        constexpr bool kEarlyLdsBases = !Policy::kLeadFirstLoad && Geometry::kHeadDimQK == 192 &&
+                                        (Geometry::kN == 64 || !FmhaMask::IsMasking);
         bool even_buffer           = true;
         index_t i_total_loops      = 0;
         index_t remaining_loops    = num_total_loop;
@@ -526,6 +538,10 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                             KDataType* __restrict__ v_lds_write_ptr,
                             KDataType* __restrict__ v_lds_read_ptr) {
             FmhaTdmPreparedKRead::Address qk_stage0_base{};
+            // kEarlyLdsBases: the QK tail stage's V access-0 base (the PV V stages are constant
+            // row offsets of it) and the last PV stage's next-K access-0 base.
+            [[maybe_unused]] FmhaTdmPreparedKRead::Address qk_v0_base{};
+            [[maybe_unused]] FmhaTdmPreparedKRead::Address pv_k0_base{};
 
             decltype(load_tile_transpose(v_lds_read_window)) v_tile;
             [[maybe_unused]] float pv_output_scale_m0 = 1.0f;
@@ -589,8 +605,34 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                     rescale_fragment(ordinal);
                 };
 
-                Policy::template RunPvScheduledStageWithWmma<decltype(stage)::value, Mode>(
-                    next_b_block_tensor, b_lds_window, emit_wmma, emit_rescale);
+                // With N64 the last stage's next-K reads are not affine reads, so that stage has
+                // no prepared base and takes the ordinary path.
+                if constexpr(kEarlyLdsBases && (decltype(stage)::value < Geometry::kPvStages - 1 ||
+                                                Geometry::kN == 128))
+                {
+                    constexpr index_t kStage = decltype(stage)::value;
+                    // V stage s reads rows [(s+1)*kK1, (s+2)*kK1) of the buffer the QK tail
+                    // stage started on; the row offset folds into the ds_load immediates.
+                    FmhaTdmPreparedKRead::Address base = pv_k0_base;
+                    if constexpr(kStage < Geometry::kPvStages - 1)
+                    {
+                        base = qk_v0_base;
+                        base.byte_address +=
+                            (kStage + 1) * kK1 * Policy::kVPhysicalStride * sizeof(VDataType);
+                    }
+                    Policy::template RunPvScheduledStageWithWmma<kStage, Mode>(
+                        next_b_block_tensor,
+                        b_lds_window,
+                        emit_wmma,
+                        emit_rescale,
+                        &base,
+                        bool_constant<true>{});
+                }
+                else
+                {
+                    Policy::template RunPvScheduledStageWithWmma<decltype(stage)::value, Mode>(
+                        next_b_block_tensor, b_lds_window, emit_wmma, emit_rescale);
+                }
             };
 
             auto run_pv = [&](const auto& p_tile) {
@@ -632,6 +674,28 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                     Policy::template MakeKSuRegTileDistribution<Problem>());
                 next_su_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
                 qk_stage0_base = FmhaTdmPreparedKRead::Prepare<0>(next_su_window);
+                if constexpr(kEarlyLdsBases)
+                {
+                    // Form the tile's remaining LDS read bases here, ahead of every WMMA, and
+                    // keep each in a VGPR: otherwise the compiler recomputes them next to their
+                    // first read, where the VALU-write -> LDS-read wait must also drain the
+                    // WMMA issued in between.
+                    qk_v0_base = FmhaTdmPreparedKRead::Prepare<0>(v_lds_read_window);
+                    asm volatile("" : "+v"(qk_stage0_base.byte_address));
+                    asm volatile("" : "+v"(qk_v0_base.byte_address));
+                    // With N64 the next-K reads of the last PV stage are not affine reads.
+                    if constexpr(Geometry::kN == 128)
+                    {
+                        auto pv_k_window = make_tile_window(
+                            k_lds_read_view,
+                            make_tuple(number<Geometry::kQkSuColumns>{}, number<kQKHeaddim>{}),
+                            {0, 0},
+                            Policy::template MakeKSuRegTileDistribution<Problem>());
+                        pv_k_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
+                        pv_k0_base = FmhaTdmPreparedKRead::Prepare<0>(pv_k_window);
+                        asm volatile("" : "+v"(pv_k0_base.byte_address));
+                    }
+                }
                 __builtin_amdgcn_sched_barrier(0);
 
                 // Reuse the V LDS buffer only after the preceding reads have completed.
@@ -645,8 +709,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                 }
                 move_tile_window(v_dram_window, {kN0, 0});
                 v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
-                if constexpr(kUseCountdownLoop && kN0 == 128 && kN1 == 128 &&
-                             std::is_same_v<VDataType, bf16_t>)
+                if constexpr(kRematerializeVStride)
                 {
                     v_dram_window.tdm_load_to_lds(
                         tdm_config_v,
@@ -691,6 +754,18 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                             &qk_stage0_base);
 
                         k_su_tile = k_su_tile_next;
+                    }
+                    else if constexpr(kEarlyLdsBases)
+                    {
+                        Policy::template RunQkScheduledStage<Geometry::kQkStages - 1, Mode>(
+                            gemm_0_su,
+                            s_acc_su,
+                            q_tile,
+                            k_su_tile,
+                            v_tile,
+                            v_lds_read_window,
+                            &qk_v0_base,
+                            bool_constant<true>{});
                     }
                     else
                     {
@@ -779,8 +854,9 @@ struct BlockFmhaPipelineQRKSVSTdmSched
 
                     if constexpr(FmhaMask::IsMasking)
                     {
-                        // The two predicates stay separate to keep each one cheap: a fused
-                        // predicate evaluates the mask compares on the KV-tail tile as well.
+                        // Under masking the edge test also covers the KV tail (the tile range is
+                        // rounded up to a tile), so only the mask predicate can fire; the two
+                        // predicates stay separate to keep each one cheap.
                         if(__builtin_expect(need_split_check, false))
                         {
                             set_tile_if(s_acc,
