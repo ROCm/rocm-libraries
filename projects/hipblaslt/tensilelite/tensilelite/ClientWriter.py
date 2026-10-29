@@ -42,7 +42,7 @@ from . import ROOT_PATH
 from . import LibraryIO
 from .Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
-from .Common.Architectures import archNamesByIsa, isaToGfx
+from .Common.Architectures import archNamesByIsa, baseArchName, isaToGfx, withoutPredicate
 from .Common.GlobalParameters import globalParameters
 from .Common.TimingInstrumentation import timing_context
 from .TensileCreateLibrary import copyStaticFiles, libraryDir
@@ -140,11 +140,9 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   else:
     env["PYTHONPATH"] = module_path
 
-  # The rebuild is a fresh process whose only statement of what to build is
-  # `--architecture=`, so it must carry any distinction the ISA cannot express.
-  # `gfxName` already is that name -- the caller resolved it for this same ISA --
-  # and resolving it a second time here would be a second place to keep right.
-  createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), gfxName)
+  createLibraryScript = getBuildClientLibraryScript(
+      clientLibraryPath, libraryLogicPath, str(assembler.path),
+      rebuildTargetGfx(gfxName, archNames))
   subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
   # The re-spawned build wrote its code objects into the subtree named for the
   # architecture it was asked for -- the same name just passed to it -- so they
@@ -308,6 +306,30 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
     printWarning("ClientWriter Benchmark Process exited with code %u" % process.returncode)
 
   return process.returncode
+
+
+def rebuildTargetGfx(gfxName, archNames):
+  """What to put after ``--architecture=`` when re-spawning TensileCreateLibrary.
+
+  That rebuild is a fresh process whose only statement of what to build is this
+  string, so it must carry every distinction the ISA cannot express. ``gfxName``
+  carries one of them, the stepping, but it is a bare name and the xnack mode is
+  the other: a qualifier reaches a build only by selecting ARCH_CAP_OVERRIDES,
+  which the subprocess does from this string alone. Handed the bare name, it
+  benchmarks xnack--tuned kernels and then rebuilds the shipped library with
+  replay on -- with the drains the benchmarked kernels did not have.
+
+  So the qualifier is restored from the request that produced ``gfxName`` in the
+  first place. The predicate is not: it selects hardware, says nothing about what
+  goes into a code object, and is not this process's to forward.
+
+  Falls back to ``gfxName`` when no request names that architecture, which is
+  every unqualified build.
+  """
+  return next(
+      (withoutPredicate(a) for a in (archNames or []) if baseArchName(a) == gfxName),
+      gfxName,
+  )
 
 
 def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, targetGfx):
