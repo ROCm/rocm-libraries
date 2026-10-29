@@ -1133,7 +1133,7 @@ void SBCCNode::SetupGridParam_internal(GridParam& gp)
     gp.set_stockham_grid(DivRoundingUp(length[1], bwd) * product(length.begin() + 2, length.end())
                              * batch,
                          wgs,
-                         deviceProp.maxGridSize[1]);
+                         deviceProp);
 }
 
 std::vector<size_t> SBCCNode::CollapsibleDims()
@@ -1287,7 +1287,7 @@ void SBRCNode::SetupGridParam_internal(GridParam& gp)
     gp.set_stockham_grid(DivRoundingUp(length[1], bwd) * product(length.begin() + 2, length.end())
                              * batch,
                          wgs,
-                         deviceProp.maxGridSize[1]);
+                         deviceProp);
 }
 
 SBRC_TRANSPOSE_TYPE SBRCNode::sbrc_transpose_type(unsigned int blockWidth) const
@@ -1407,7 +1407,7 @@ void SBCRNode::SetupGridParam_internal(GridParam& gp)
     gp.set_stockham_grid(DivRoundingUp(length[1], bwd) * product(length.begin() + 2, length.end())
                              * batch,
                          wgs,
-                         deviceProp.maxGridSize[1]);
+                         deviceProp);
 
     return;
 }
