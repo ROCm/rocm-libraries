@@ -17,13 +17,14 @@ define_property(GLOBAL PROPERTY KERNELTIDY_TARGETS)
 
 # hiprtc_runtime_header(<out-var>)
 #
-#   Extract the hipRTC pre-include header from libhiprtc-builtins.so into the build tree
+#   Extract the hipRTC pre-include header from libhiprtc-builtins into the build tree
 #   and set <out-var> to its path. hipRTC embeds the header its online compiler prepends
-#   to every program in an ELF section. Dumping it is how clang-tidy sees the same
-#   declarations the real compile sees, without checking in a copy that goes stale on
-#   every ROCm bump.
+#   to every program and exports it, with its length, as data symbols. Dumping it is how
+#   clang-tidy sees the same declarations the real compile sees, without checking in a
+#   copy that goes stale on every ROCm bump.
 #
-#   Linux only: the header lives in an ELF section, so there is nothing to dump elsewhere.
+#   Linux only for now: kernel clang-tidy does not run on Windows, and whether the Windows
+#   hipRTC builtins library exports the same symbols is unverified.
 #   <out-var> is left empty when the header cannot be produced; callers must handle that.
 function(hiprtc_runtime_header out_var)
     set(${out_var} "" PARENT_SCOPE)
@@ -36,29 +37,17 @@ function(hiprtc_runtime_header out_var)
     find_library(HIPRTC_BUILTINS_LIBRARY
                  NAMES hiprtc-builtins
                  HINTS "${ROCM_PATH}/lib" /opt/rocm/lib
-                 DOC "libhiprtc-builtins.so, which carries the .hipRTC_header section")
+                 DOC "hipRTC builtins library, which exports the __hipRTC_header text")
+    find_package(Python3 QUIET COMPONENTS Interpreter)
 
-    # The ROCm llvm-objcopy is the one matched to the .so; CMAKE_OBJCOPY (GNU binutils)
-    # understands --dump-section too and is a fine fallback.
-    find_program(HIPRTC_OBJCOPY_EXE
-                 NAMES llvm-objcopy objcopy
-                 HINTS "${ROCM_PATH}/llvm/bin" /opt/rocm/llvm/bin)
-    if(NOT HIPRTC_OBJCOPY_EXE)
-        set(HIPRTC_OBJCOPY_EXE "${CMAKE_OBJCOPY}")
-    endif()
-
-    # The dumped section ends in a line of raw bytes (the section's terminator, which is
-    # not part of the header text) that clang rejects, so it is stripped below. sed edits
-    # the file in place, which keeps this to one extra command and no temporary file.
-    find_program(HIPRTC_SED_EXE NAMES sed)
-
-    if(NOT HIPRTC_BUILTINS_LIBRARY OR NOT HIPRTC_OBJCOPY_EXE OR NOT HIPRTC_SED_EXE)
-        message(WARNING "libhiprtc-builtins.so, sed, or objcopy not found; "
+    if(NOT HIPRTC_BUILTINS_LIBRARY OR NOT Python3_Interpreter_FOUND)
+        message(WARNING "hipRTC builtins library or Python 3 interpreter not found; "
                         "the hipRTC runtime header will not be generated.")
         return()
     endif()
 
     set(_header "${CMAKE_BINARY_DIR}/hiprtc/hiprtc_runtime.h")
+    set(_dump_script "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/dump_hiprtc_header.py")
 
     # One generator for the whole build: the header is identical for every consumer, and a
     # second OUTPUT rule for the same file is an error.
@@ -66,13 +55,8 @@ function(hiprtc_runtime_header out_var)
         add_custom_command(
             OUTPUT ${_header}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/hiprtc"
-            # objcopy always wants an output object; /dev/null discards it, we only want
-            # the dumped section.
-            COMMAND ${HIPRTC_OBJCOPY_EXE}
-                    --dump-section .hipRTC_header=${_header}
-                    ${HIPRTC_BUILTINS_LIBRARY} /dev/null
-            COMMAND ${HIPRTC_SED_EXE} -i "$d" ${_header}
-            DEPENDS ${HIPRTC_BUILTINS_LIBRARY}
+            COMMAND ${Python3_EXECUTABLE} ${_dump_script} ${HIPRTC_BUILTINS_LIBRARY} ${_header}
+            DEPENDS ${HIPRTC_BUILTINS_LIBRARY} ${_dump_script}
             COMMENT "Extracting hipRTC runtime header from ${HIPRTC_BUILTINS_LIBRARY}"
             VERBATIM)
         add_custom_target(hiprtc_runtime_header
