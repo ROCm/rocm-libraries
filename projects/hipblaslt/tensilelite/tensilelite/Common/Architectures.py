@@ -133,9 +133,17 @@ def _targetIdAccepted(compiler: str, targetId: str) -> bool:
 
 
 def _withoutXnack(spec: str) -> str:
-    """``spec`` with every xnack qualifier removed, the others kept in order."""
+    """``spec`` with the xnack qualifier removed, the others kept in order.
+
+    Matched exactly, not by prefix. ``compilerTargetOf`` drops the xnack token
+    only to reach a target the compiler will take, and leaves anything it does
+    not understand for the compiler to refuse; a prefix match breaks that by
+    also eating ``xnack-typo``, so a misspelling would come back as bare
+    ``gfx1250`` -- accepted, and built with replay left on, which is neither
+    what was asked for nor an error anyone sees.
+    """
     base, _, qualifiers = spec.partition(":")
-    kept = [q for q in qualifiers.split(":") if q and not q.startswith("xnack")]
+    kept = [q for q in qualifiers.split(":") if q and q not in ("xnack+", "xnack-")]
     return ":".join([base, *kept]) if kept else base
 
 
@@ -438,6 +446,48 @@ def withoutPredicate(spec: str) -> str:
     is found whether or not the caller attached a predicate.
     """
     return spec.split("[")[0].strip()
+
+
+# The target-ID qualifiers a spec may carry, grouped by the feature each settles.
+# A feature is settled once; a spec naming one twice either contradicts itself
+# (gfx1250:xnack-:xnack+) or repeats itself, and neither has an answer to pick.
+_TARGET_ID_FEATURES = {"xnack+": "xnack", "xnack-": "xnack",
+                       "sramecc+": "sramecc", "sramecc-": "sramecc"}
+
+
+def verifyTargetIdQualifiers(spec: str) -> None:
+    """Raises unless every qualifier on ``spec`` is one a target ID can carry.
+
+    A misspelled qualifier is rejected rather than ignored. Nothing downstream
+    can catch it: the capability layer finds its entry by the whole qualified
+    name, so ``gfx1250:xnack--`` simply misses the ``gfx1250:xnack-`` override
+    and the build runs with replay left on -- the opposite of what was asked
+    for, and silently, because the base name is still valid and every later
+    stage strips the qualifier anyway.
+
+    Predicates are not qualifiers and are removed first.
+
+    Raises:
+        ValueError: on an unknown qualifier, or on two that settle one feature.
+    """
+    _, _, qualifiers = withoutPredicate(spec).partition(":")
+    if not qualifiers:
+        return
+    seen = set()
+    for qualifier in qualifiers.split(":"):
+        feature = _TARGET_ID_FEATURES.get(qualifier)
+        if feature is None:
+            raise ValueError(
+                f"Unknown target ID qualifier {qualifier!r} in {spec!r}; "
+                f"supported: {', '.join(sorted(_TARGET_ID_FEATURES))}."
+            )
+        if feature in seen:
+            raise ValueError(
+                f"Repeated {feature} qualifier {qualifier!r} in {spec!r}; "
+                "a target ID settles each feature at most once."
+            )
+        seen.add(feature)
+
 
 def archMacroNames(isa: IsaVersion) -> List[str]:
     """The macros clang predefines for every architecture sharing an ISA.
