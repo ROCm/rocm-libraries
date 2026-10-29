@@ -327,6 +327,7 @@ class TestKernelIdentityPrefetchAddr(unittest.TestCase):
         del fields["prefetch_regs"], fields["lds_kpack"], fields["xcd_remap"], fields["sep_addr"]  # wgrad knobs, off
         del fields["tapk_prefetch"], fields["tapk_xhalo"], fields["b_kpack"]  # dgrad knobs, off
         del fields["reg_prefetch"], fields["lds_xor"]  # fwd K-loop knobs, off
+        del fields["split_addr_k_decode"]
         legacy = hashlib.sha1(
             json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()

@@ -43,7 +43,12 @@ Per direction, on top of that:
   with the plain loop as its fallback) and the two together; the
   ``uniform_k_decode`` + ``reg_prefetch`` = 1 loop also in the XCD-contiguous
   tile orders of :data:`CACHE_FWD_XCD_REMAP` (``xcd_remap``) and on
-  XOR-swizzled unpadded LDS tiles (``lds_xor``, tile_k >= 32). Plus
+  XOR-swizzled unpadded LDS tiles (``lds_xor``, tile_k >= 32). The plain
+  and ``unroll_k`` loops are also built with ``prefetch_regs`` (register-
+  staged prefetch); the single-tile ones (plain, ``prefetch_regs``) on the
+  cshuffle epilogue also as the split-K binary (``split_k`` recorded as 2,
+  degree swept at launch), and the 3-D sync-load ones also with
+  ``split_addr_k_decode`` (per-tile decode, cpg % tile_k == 0 only). Plus
   group-merged depthwise kernels (``group_merge`` in 4..64, cshuffle, plain
   and ``unroll_k`` loops, load widths derived by the builder, on the tile
   subset the ``CACHE_FWD_GROUP_MERGE_*`` constants allow), served only to
@@ -188,6 +193,18 @@ CACHE_MAX_ACC_REGS = 256
 CACHE_VECS: Tuple[int, ...] = (1, 2, 4, 8)
 CACHE_PIPELINES: Tuple[str, ...] = ("mem", "compv3", "compv4", "wavelet", "basic")
 CACHE_EPILOGUES: Tuple[str, ...] = ("default", "cshuffle")
+# Forward split-K (ImplicitGemmConvSpec.split_k): 1 is the classic kernel, 2
+# marks the split binary (the degree is a kernarg, swept at launch). Built on
+# the cshuffle epilogue and the single-tile K loops only (plain and
+# prefetch_regs), which is what the split binary supports.
+CACHE_FWD_SPLIT_KS: Tuple[int, ...] = (1, 2)
+# Forward per-tile reduction decode of the split-addressing path
+# (ImplicitGemmConvSpec.split_addr_k_decode), 3-D sync-load binaries only.
+CACHE_FWD_SPLIT_ADDR_K_DECODE: Tuple[bool, ...] = (False, True)
+# Forward K-loop register prefetch (ImplicitGemmConvSpec.prefetch_regs): both
+# values are built, on the plain and the unroll_k sync drivers, so the cache
+# offers the prefetching loop next to the classic one.
+CACHE_FWD_PREFETCH_REGS: Tuple[bool, ...] = (False, True)
 
 # Pipeline names that emit exactly the code of another one, so the AOT cache
 # skips them (the JIT sweep shares CACHE_PIPELINES and still walks them).
@@ -538,12 +555,26 @@ def _fwd_k_loops(pipeline: str, arch: Optional[str] = None) -> List[dict]:
     string, so it is only emitted once per geometry instead of as identical
     binaries under different pipeline labels.
 
+    The register-staged prefetch loop (``prefetch_regs``,
+    :data:`CACHE_FWD_PREFETCH_REGS`) is built on both sync drivers:
+    single-buffered and, with ``unroll_k``, ping-pong. These and the plain
+    loops also get the split-K and ``split_addr_k_decode`` variants
+    (:func:`_fwd_small_spatial_variants`).
+
     ``reg_prefetch`` (the next tile's global reads in flight across the
     MFMAs; one or two LDS buffers) and ``uniform_k_decode`` (per-tile filter-tap
     decode, with the plain loop kept as the fallback for cpg % tile_k != 0)
     are built on the wave64 MFMA pipelines, alone and together.
     """
-    k_loops = [dict(unroll_k=False, async_dma=False), dict(unroll_k=True, async_dma=False)]
+    k_loops = [
+        dict(
+            unroll_k=unroll,
+            async_dma=False,
+            **({"prefetch_regs": True} if pfr else {}),
+        )
+        for pfr in CACHE_FWD_PREFETCH_REGS
+        for unroll in (False, True)
+    ]
     if pipeline == "mem":
         k_loops.append(dict(unroll_k=False, async_dma=True))
     if pipeline != "wavelet":
@@ -579,6 +610,45 @@ def _fwd_k_loops(pipeline: str, arch: Optional[str] = None) -> List[dict]:
                 )
             )
     return k_loops
+
+
+def _fwd_split_addr_k_decodes(caps: dict, async_dma: bool) -> Tuple[bool, ...]:
+    """Forward ``split_addr_k_decode`` values built for one variant: both on
+    the 3-D sync-load binaries (the per-tile decode serves only problems with
+    cpg % tile_k == 0, so the per-element binary stays for the rest), the
+    per-element decode alone elsewhere."""
+    if caps.get("is_3d", False) and not async_dma:
+        return CACHE_FWD_SPLIT_ADDR_K_DECODE
+    return (False,)
+
+
+def _fwd_small_spatial_variants(
+    kloop: dict, epilogue: str, caps: dict
+) -> List[Tuple[int, bool]]:
+    """``(split_k, split_addr_k_decode)`` pairs built on one forward K loop.
+
+    Only the plain and ``prefetch_regs`` loops take them; the
+    ``uniform_k_decode`` / ``reg_prefetch`` loops are a K-loop family of
+    their own (the spec rejects the combination).
+    """
+    if kloop.get("uniform_k_decode") or kloop.get("reg_prefetch"):
+        return [(1, False)]
+    unroll_k = kloop.get("unroll_k", False)
+    async_dma = kloop.get("async_dma", False)
+    return list(
+        itertools.product(
+            _fwd_split_ks(epilogue, unroll_k, async_dma),
+            _fwd_split_addr_k_decodes(caps, async_dma),
+        )
+    )
+
+
+def _fwd_split_ks(epilogue: str, unroll_k: bool, async_dma: bool) -> Tuple[int, ...]:
+    """Forward split-K values built for one K-loop driver (see
+    :data:`CACHE_FWD_SPLIT_KS`)."""
+    if epilogue != "cshuffle" or unroll_k or async_dma:
+        return (1,)
+    return CACHE_FWD_SPLIT_KS
 
 
 def _wgrad_two_stages(split_k: int) -> Tuple[bool, ...]:
@@ -771,24 +841,35 @@ def _fwd_jobs(
                     vector_size_c=vec_c,
                     **kloop,
                 )
-                yield BuildJob(
-                    identity=KernelIdentity(
-                        arch=arch,
+                for split_k, sakd in _fwd_small_spatial_variants(kloop, epilogue, caps):
+                    job_cfg = dict(cfg, split_k=split_k) if split_k > 1 else cfg
+                    if sakd:
+                        job_cfg = dict(job_cfg, split_addr_k_decode=True)
+                    # The identity's prefetch_regs is an int shared with
+                    # wgrad (fwd's bool True is 1).
+                    id_cfg = (
+                        dict(job_cfg, prefetch_regs=1)
+                        if job_cfg.get("prefetch_regs")
+                        else job_cfg
+                    )
+                    yield BuildJob(
+                        identity=KernelIdentity(
+                            arch=arch,
+                            direction="fwd",
+                            algorithm="implicit_gemm",
+                            llvm_flavor=flavor,
+                            dtype_a=da,
+                            dtype_b=db,
+                            dtype_d=dd,
+                            grouped=grouped,
+                            is_3d=caps.get("is_3d", False),
+                            **_async_chunks(job_cfg, (da, db, dd), caps, arch),
+                            **id_cfg,
+                        ),
                         direction="fwd",
-                        algorithm="implicit_gemm",
-                        llvm_flavor=flavor,
-                        dtype_a=da,
-                        dtype_b=db,
-                        dtype_d=dd,
-                        grouped=grouped,
-                        is_3d=caps.get("is_3d", False),
-                        **_async_chunks(cfg, (da, db, dd), caps, arch),
-                        **cfg,
-                    ),
-                    direction="fwd",
-                    spec_kwargs=cfg,
-                    caps=caps,
-                )
+                        spec_kwargs=job_cfg,
+                        caps=caps,
+                    )
         yield from _fwd_merged_jobs(
             arch,
             da,
@@ -1704,7 +1785,11 @@ def count_jobs(
             if not _aot_pipeline(direction, pipeline):
                 continue
             if direction == "fwd":
-                total += vecs * len(_fwd_k_loops(pipeline, target.gfx)) * layouts
+                total += vecs * sum(
+                    len(_fwd_small_spatial_variants(kl, geo[7], caps))
+                    for kl in _fwd_k_loops(pipeline, target.gfx)
+                    for caps in _layout_caps()
+                )
                 if _fwd_merged_geometry(geo):
                     total += len(_FWD_GROUP_MERGES) * len(_fwd_merged_k_loops())
             elif direction == "wgrad":

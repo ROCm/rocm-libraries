@@ -478,11 +478,16 @@ class ConvArgs:
     # ---- the ABI ----
 
     def arg_names(
-        self, *, two_stage: bool = False, streamk: Optional[str] = None
+        self,
+        *,
+        two_stage: bool = False,
+        streamk: Optional[str] = None,
+        split_k: bool = False,
     ) -> List[ArgSpec]:
         """The ordered kernarg ABI of the kernel these args launch.
 
-        ``streamk`` is the stream-K reduction of a stream-K wgrad kernel.
+        ``streamk`` is the stream-K reduction of a stream-K wgrad kernel;
+        ``split_k`` selects the fwd split-K binary's ABI.
         """
         if self.algorithm == "direct":
             if two_stage or streamk is not None:
@@ -493,6 +498,7 @@ class ConvArgs:
             is_3d=self.geom.is_3d,
             two_stage=two_stage,
             streamk=streamk,
+            split_k=split_k,
         )
 
     # ---- GEMM view (implicit GEMM only) ----
@@ -622,10 +628,10 @@ class ConvArgs:
 
     def _variant_values(self, split_k: int) -> Dict[str, int]:
         """Scalars whose meaning depends on the variant, not just the name."""
-        if self.algorithm == "direct" or self.direction != "wgrad":
+        if self.algorithm == "direct" or self.direction == "dgrad":
             if split_k != 1:
                 raise ValueError(
-                    f"split_k={split_k}: only implicit-GEMM wgrad splits the "
+                    f"split_k={split_k}: only implicit-GEMM wgrad/fwd split the "
                     f"reduction ({self.algorithm} {self.direction} has no "
                     f"split-K arguments)"
                 )
@@ -638,6 +644,16 @@ class ConvArgs:
             # The tail past wg_K reads zero through the descriptor's bounds,
             # which is what lets all ``split_k`` slices share one uniform
             # bound computation.
+            values["ks"] = ceil_div(self.gemm_k, self.tile_k * split_k) * self.tile_k
+            values["ks_count"] = split_k
+        elif self.direction == "fwd" and split_k > 1:
+            if self.tile_k <= 0:
+                raise ValueError(
+                    "fwd split-K launch args need the kernel's tile_k: the slice "
+                    "width is a whole number of K tiles"
+                )
+            # Same slice rule as wgrad: whole tiles, the tail past K_gemm
+            # zero-filled by the descriptor bounds.
             values["ks"] = ceil_div(self.gemm_k, self.tile_k * split_k) * self.tile_k
             values["ks_count"] = split_k
         return values
@@ -742,6 +758,11 @@ class ConvArgs:
         abi = self.arg_names(
             two_stage=ws_ptr is not None and streamk is None,
             streamk=streamk.reduction if streamk is not None else None,
+            # A fwd split-K binary is launched at a degree > 1 only (degree 1
+            # is the separate unsplit binary), so the degree selects its ABI.
+            split_k=self.direction == "fwd"
+            and self.algorithm == "implicit_gemm"
+            and split_k > 1,
         )
         names = [n for n, _ in abi]
         values: Dict[str, int] = dict(

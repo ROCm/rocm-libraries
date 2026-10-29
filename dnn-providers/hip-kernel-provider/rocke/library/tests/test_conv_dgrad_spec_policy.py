@@ -360,6 +360,7 @@ class TestTapOuterKIdentity(unittest.TestCase):
             "sep_addr",
             "reg_prefetch",
             "lds_xor",
+            "split_addr_k_decode",
         ):
             del fields[name]
         del fields["streamk"], fields["streamk_reduction"]

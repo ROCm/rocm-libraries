@@ -702,6 +702,7 @@ class CShuffleEpilogue:
         dw_ptr: Value,
         wg_N: Value,
         bounds: Optional[Tuple[Value, Value]] = None,
+        col_offset: Optional[Value] = None,
     ) -> None:
         """Split-K variant: cshuffle scatter + barrier, then atomic-adds into dW.
 
@@ -723,6 +724,9 @@ class CShuffleEpilogue:
         ``dw_ptr``  — pointer to the dW global buffer (not a buffer-resource).
         ``wg_N``    — i32 SSA value: wgrad GEMM-N (row stride of dW in elements).
         ``bounds``  — (M, N) i32 pair for OOB guard; same contract as :meth:`store`.
+        ``col_offset`` — optional i32 added to every destination offset after
+        the bounds check (e.g. a conv group's output-channel slab base when
+        ``wg_N`` is the full row stride). ``None`` emits nothing.
 
         The caller must zero-initialise dW before launch (atomic-adds only,
         no unconditional store).
@@ -894,6 +898,8 @@ class CShuffleEpilogue:
                                 0,
                             )
                             c_off = b.add(b.mul(m_val, wg_N), n_val)
+                            if col_offset is not None:
+                                c_off = b.add(c_off, col_offset)
                             b.global_atomic_add(dw_ptr, c_off, v_f32)
                     else:
                         c_smem_col = b.add(col, b.const_i32(s))
@@ -902,6 +908,8 @@ class CShuffleEpilogue:
                             0,
                         )
                         c_off = b.add(b.mul(m_val, wg_N), n_val)
+                        if col_offset is not None:
+                            c_off = b.add(c_off, col_offset)
                         b.global_atomic_add(dw_ptr, c_off, v_f32)
             else:
                 # Paired pk_atomic for bf16/fp16: sv/2 pairs per thread.
@@ -922,6 +930,8 @@ class CShuffleEpilogue:
                     smem_col_e = b.add(col, b.const_i32(2 * p))
                     smem_col_o = b.add(col, b.const_i32(2 * p + 1))
                     c_off_even = b.add(b.mul(m_val, wg_N), n_even)
+                    if col_offset is not None:
+                        c_off_even = b.add(c_off_even, col_offset)
 
                     def _emit_pair(
                         _cs=c_smem,

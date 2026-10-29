@@ -55,6 +55,7 @@ This module re-exports the shared helpers to keep existing callers stable.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field, replace as dc_replace
 from typing import Callable, List, Optional, Sequence, Tuple
 
@@ -327,6 +328,34 @@ class ImplicitGemmConvSpec:
     # Default 1 emits no merge-specific IR and keeps the kernel name. (The
     # cshuffle store width derived from kpg is a separate Gm=1 change.)
     group_merge: int = 1
+    # Register-staged global prefetch (CK's "prefetch stage 2"): the next K
+    # tile's global loads are issued into registers *before* the current
+    # tile's ds_read + MFMA work and written to LDS after it, so the DRAM/L2
+    # latency hides behind the MFMAs of the same wave instead of only behind
+    # other resident workgroups. Without it, every load phase fuses
+    # buffer_load -> s_waitcnt -> ds_write and the wave stalls on the load.
+    # With ``unroll_k`` the next tile goes to the alternate LDS buffer (one
+    # barrier per tile); without it a single buffer is reused behind a second
+    # barrier (half the A/B LDS, so more resident workgroups). Costs the
+    # registers of one A + B tile slice per thread. Sync-load path only.
+    prefetch_regs: bool = False
+    # Split-K over the reduction (Z*Y*X*cpg). ``split_k > 1`` builds the
+    # split binary: the degree is a launch parameter (``ks`` = slice width, a
+    # multiple of tile_k, and ``ks_count`` = number of slices, appended to the
+    # kernargs), gridDim.z = groups * ks_count, and every slice atomic-adds its
+    # partial tile into D, which the caller zeroes first. For problems whose
+    # output has too few tiles to fill the device (small spatial extent, long
+    # reduction). 1 (default) builds the classic kernel, unchanged.
+    split_k: int = 1
+    # Decode the reduction index once per K tile on the 3-D split-addressing
+    # path instead of once per loaded element: when cpg % tile_k == 0 a tile
+    # never straddles a filter tap, so (z, y, x) and the tile's first channel
+    # come from the wave-uniform tile origin (scalar ALU) and each element
+    # only adds its column. Unlike ``uniform_k_decode`` (below) the binary
+    # carries no fallback loop: it is only correct for problems with
+    # cpg % tile_k == 0 (the AOT cache checks it per problem). Pairs with the
+    # ``prefetch_regs`` / ``split_k`` loops.
+    split_addr_k_decode: bool = False
 
     # Per-tile reduction decode (the forward counterpart of
     # ``DgradConvSpec.uniform_k_decode``). When cpg is a multiple of tile_k
@@ -465,6 +494,9 @@ class ImplicitGemmConvSpec:
                 f"rpf{self.reg_prefetch}": self.reg_prefetch > 0,
                 f"xcd{self.xcd_remap}": self.xcd_remap > 0,
                 "lxor": self.lds_xor,
+                "pfr": self.prefetch_regs,
+                "spk": self.split_k > 1,
+                "sakd": self.split_addr_k_decode,
                 # Gm changes the emitted body, so it must reach the symbol:
                 # without it two degrees collide on one name and the compile
                 # cache hands the second the first's binary.
@@ -522,6 +554,26 @@ class ImplicitGemmConvSpec:
         _kl_why = _fwd_kloop_conflict(self)
         if _kl_why:
             raise ValueError(_kl_why)
+        _spk_why = fwd_split_k_conflict(self)
+        if _spk_why:
+            raise ValueError(_spk_why)
+        if self.split_addr_k_decode:
+            p_ = self.problem
+            if not p_.is_3d or p_.is_pointwise or self.group_merge > 1:
+                raise ValueError(
+                    "split_addr_k_decode is built on the 3-D split-addressing path "
+                    "(no pointwise, no group_merge)"
+                )
+            if p_.cpg % self.tile_k:
+                raise ValueError(
+                    f"split_addr_k_decode needs cpg % tile_k == 0 (a K tile must not "
+                    f"straddle a filter tap); cpg={p_.cpg}, tile_k={self.tile_k}"
+                )
+        if self.prefetch_regs and (self.async_dma or self.pipeline == "wavelet"):
+            raise ValueError(
+                "prefetch_regs stages the sync loader's registers; async_dma and "
+                "the wavelet pipeline have their own load path"
+            )
 
     def effective_lds_layout(self) -> LdsLayout:
         if self.lds_layout is not None:
@@ -576,6 +628,13 @@ def _fwd_kloop_conflict(spec: "ImplicitGemmConvSpec") -> str:
         return f"reg_prefetch must be 0, 1 or 2, got {spec.reg_prefetch}"
     if not (spec.uniform_k_decode or spec.reg_prefetch):
         return ""
+    # The small-spatial K loop (prefetch_regs, split_addr_k_decode, split_k)
+    # is a separate driver; the two are not combined.
+    if spec.prefetch_regs or spec.split_addr_k_decode or spec.split_k > 1:
+        return (
+            "uniform_k_decode/reg_prefetch do not combine with prefetch_regs, "
+            "split_addr_k_decode or split_k; set one K-loop family"
+        )
     if spec.async_dma:
         return "uniform_k_decode/reg_prefetch rewrite the synchronous K loop; async_dma has its own"
     if spec.pipeline == "wavelet" or spec.wave_size != 64:
@@ -721,6 +780,37 @@ def is_valid_spec_for_problem(
         )
 
     return True, "ok"
+
+
+def fwd_split_k_conflict(spec: "ImplicitGemmConvSpec") -> str:
+    """Why ``spec.split_k`` cannot be honoured, or ``""`` if it can.
+
+    The split binary reduces through packed atomics out of the cshuffle tile
+    (:meth:`CShuffleEpilogue.atomic_store`), so it needs that epilogue, the
+    wave64 MFMA path, and a K loop that starts at an arbitrary tile: the
+    plain loop or the single-buffer ``prefetch_regs`` loop. (The ``unroll_k``
+    loops step two tiles and would run a slice of odd length into the next
+    slice.) A 16-bit D pairs adjacent output channels, so kpg must be even.
+    """
+    if spec.split_k == 1:
+        return ""
+    if spec.split_k < 1:
+        return f"split_k must be >= 1 (got {spec.split_k})"
+    if spec.wave_size != 64 or spec.pipeline == "wavelet":
+        return "fwd split_k > 1 is the wave64 MFMA path only"
+    if spec.epilogue != "cshuffle":
+        return "fwd split_k > 1 needs the cshuffle epilogue (atomic store)"
+    if spec.unroll_k or spec.async_dma:
+        return "fwd split_k > 1 needs the single-tile K loop (no unroll_k / async_dma)"
+    if spec.group_merge > 1:
+        return "fwd split_k > 1 does not support group_merge"
+    if spec.data.dtype_d not in ("fp32", "bf16", "fp16"):
+        return f"fwd split_k > 1 needs dtype_d fp32/bf16/fp16 (got {spec.data.dtype_d})"
+    if spec.data.dtype_d != "fp32" and spec.problem.kpg % 2:
+        return f"fwd split_k > 1 with a 16-bit D needs even kpg (got {spec.problem.kpg})"
+    if spec.acc_epilogue.tag():
+        return "fwd split_k > 1 does not support an accumulator epilogue"
+    return ""
 
 
 def implicit_gemm_lds_bytes(spec: ImplicitGemmConvSpec) -> Tuple[int, int, int, bool]:
@@ -936,6 +1026,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         for flag, label in (
             (spec.async_dma, "async_dma"),
             (spec.unroll_k, "unroll_k"),
+            (spec.prefetch_regs, "prefetch_regs"),
             (spec.chiplet_swizzle, "chiplet_swizzle"),
         ):
             if flag:
@@ -1229,8 +1320,14 @@ def _build_implicit_gemm_conv_impl(
     Bp = b.param(
         "B", PtrType(ir_dtype_b, "global"), noalias=True, readonly=True, align=16
     )
+    _split = spec.split_k > 1
     D = b.param(
-        "D", PtrType(ir_dtype_d, "global"), noalias=True, writeonly=True, align=16
+        "D",
+        PtrType(ir_dtype_d, "global"),
+        noalias=True,
+        # The split binary atomic-adds into D (read-modify-write).
+        writeonly=not _split,
+        align=16,
     )
     extra_context = extra_params(b) if extra_params is not None else None
     A_bytes = b.param("A_bytes", I32)
@@ -1247,6 +1344,10 @@ def _build_implicit_gemm_conv_impl(
     # The block is emitted straight from the ordered ABI list so the kernel's
     # parameter order and conv_args_signature() cannot drift apart.
     params = emit_param_block(b, conv_fwd_problem_block(is_3d=p.is_3d))
+    if _split:
+        # Split-K launch block, appended after the problem block (conv_abi).
+        p_ks = b.param("ks", I32)
+        p_ks_count = b.param("ks_count", I32)
     p_N = params["p_N"]
     p_Hi = params["p_Hi"]
     p_Wi = params["p_Wi"]
@@ -1420,8 +1521,17 @@ def _build_implicit_gemm_conv_impl(
     # every group count Gm divides, so the build-time problem's count cannot
     # decide whether block_id_z is needed.
     grouped = p.groups > 1 or merged
+    if _split:
+        # gridDim.z = groups * ks_count: group = z / ks_count, slice = z % ks_count.
+        _z = b.block_id_z()
+        _slice = b.mod(_z, p_ks_count)
+        k_lo = b.mul(_slice, p_ks)
+        k_hi = b.add(k_lo, p_ks)
+    else:
+        k_lo = c0
+        k_hi = c_K_gemm
     if grouped:
-        group_idx = b.block_id_z()
+        group_idx = b.div(b.block_id_z(), p_ks_count) if _split else b.block_id_z()
         # Merged: the base advances by the merged kpg, which is Gm exactly
         # (depthwise only), so it is the build-time constant, not p_kpg.
         k_out_group_base = b.mul(group_idx, c_gm if merged else p_kpg)
@@ -1557,6 +1667,8 @@ def _build_implicit_gemm_conv_impl(
             else b_.add(block_m_off_v, row)
         )
         if split_ab:
+            if p.is_3d:
+                return a_offset_split3(b_, m_val, k_decode3_at(b_, col))
             return a_offset_split(b_, m_val, k_val)
         return A_desc.offset(b_, m=m_val, k=k_val, **_a_group_kw)
 
@@ -1610,6 +1722,8 @@ def _build_implicit_gemm_conv_impl(
             c_ok = b_.cmp_lt(kg, _c_C_ir)
             return off, b_.land(k_ok, c_ok)
         if split_ab:
+            if p.is_3d:
+                return b_offset_split3(b_, k_out, k_decode3_at(b_, col))
             return b_offset_split(b_, k_out, kg)
         return B_desc.offset(b_, k_out=k_out, k_gemm=kg)
 
@@ -1691,8 +1805,25 @@ def _build_implicit_gemm_conv_impl(
     # axis. The k decode's remainder products and B's filter strides (both
     # bounded by the reduction extent) use 24-bit multiplies; the host enforces
     # the bound (conv_args.MUL24_REDUCTION_LIMIT).
-    split_ab = not p.is_pointwise and not p.is_3d and a_mhw_index_fn is None
-    if split_ab:
+    split_ab = not p.is_pointwise and a_mhw_index_fn is None and not (
+        p.is_3d and merged
+    )
+    if split_ab and p.is_3d:
+        # 3-D: the same row/k split with the depth axis added. A K tile moves
+        # only the k part (one 24-bit decode of k into (z, y, x, c) per load
+        # plus three stride steps); the (n, do, ho, wo) magic divisions and
+        # the (di, hi, wi) origin are per loader row and hoisted.
+        s_di = params["p_A_stride_di"]
+        s_hi = params["p_A_stride_hi"]
+        s_wi = params["p_A_stride_wi"]
+        neg_pD = b.sub(c0, p_pD)
+        neg_pH = b.sub(c0, p_pH)
+        neg_pW = b.sub(c0, p_pW)
+        a_zstep = b.mul(p_dD, s_di)
+        a_ystep = b.mul(p_dH, s_hi)
+        a_xstep = b.mul(p_dW, s_wi)
+        a_group_base = b.mul(group_idx, p_cpg) if grouped else None
+    elif split_ab:
         s_hi = params["p_A_stride_hi"]
         s_wi = params["p_A_stride_wi"]
         neg_pH = b.sub(c0, p_pH)
@@ -1740,6 +1871,121 @@ def _build_implicit_gemm_conv_impl(
             u24=True,
         )
         return y, x, c
+
+    def k_decode3(b_: IRBuilder, k_val: Value) -> Tuple[Value, Value, Value, Value]:
+        """3-D k -> (z, y, x, c) through the runtime magic pairs for cpg, X, Y."""
+        q_c, c = magic_divmod(
+            b_,
+            k_val,
+            params["p_magic_k_cpg_mult"],
+            params["p_magic_k_cpg_shift"],
+            p_cpg,
+            u24=True,
+        )
+        q_x, x = magic_divmod(
+            b_,
+            q_c,
+            params["p_magic_k_X_mult"],
+            params["p_magic_k_X_shift"],
+            p_X,
+            u24=True,
+        )
+        z, y = magic_divmod(
+            b_,
+            q_x,
+            params["p_magic_k_Y_mult"],
+            params["p_magic_k_Y_shift"],
+            p_Y,
+            u24=True,
+        )
+        return z, y, x, c
+
+    def k_decode3_at(b_: IRBuilder, col: Value) -> Tuple[Value, Value, Value, Value]:
+        """``(z, y, x, c)`` of reduction index ``k_off + col`` of the current tile.
+
+        With ``split_addr_k_decode`` the tile lies inside one filter tap
+        (cpg % tile_k == 0, a host-checked precondition), so the tap is
+        decoded once from the wave-uniform tile origin -- scalar work -- and
+        the channel is the origin's plus ``col``. Otherwise every element
+        decodes its own index.
+        """
+        k_off = k_off_capture[0]
+        if spec.split_addr_k_decode:
+            z, y, x, c_t = k_decode3(b_, k_off)
+            return z, y, x, b_.add(c_t, col)
+        return k_decode3(b_, b_.add(k_off, col))
+
+    def a_offset_split3(b_: IRBuilder, m_val: Value, zyxc):
+        # Row part: m -> (n, do, ho, wo), the (di, hi, wi) origin and the base.
+        q_wo, wo = magic_divmod(
+            b_,
+            m_val,
+            params["p_magic_m_Wo_mult"],
+            params["p_magic_m_Wo_shift"],
+            p_Wo,
+        )
+        q_ho, ho = magic_divmod(
+            b_,
+            q_wo,
+            params["p_magic_m_Ho_mult"],
+            params["p_magic_m_Ho_shift"],
+            p_Ho,
+        )
+        n, do_ = magic_divmod(
+            b_,
+            q_ho,
+            params["p_magic_m_Do_mult"],
+            params["p_magic_m_Do_shift"],
+            p_Do,
+        )
+        di0 = b_.add(b_.mul(do_, p_sD), neg_pD)
+        hi0 = b_.add(b_.mul(ho, p_sH), neg_pH)
+        wi0 = b_.add(b_.mul(wo, p_sW), neg_pW)
+        base = b_.add(
+            b_.add(
+                b_.add(b_.mul(n, params["p_A_stride_n"]), b_.mul(di0, s_di)),
+                b_.mul(hi0, s_hi),
+            ),
+            b_.mul(wi0, s_wi),
+        )
+        if grouped:
+            base = b_.add(base, a_group_base)
+        # k part.
+        z, y, x, c = zyxc
+        di = b_.add(di0, b_.mul(z, p_dD))
+        hi = b_.add(hi0, b_.mul(y, p_dH))
+        wi = b_.add(wi0, b_.mul(x, p_dW))
+        ok = b_.land(
+            b_.land(
+                b_.land(b_.cmp_ge(di, c0), b_.cmp_lt(di, p_Di)),
+                b_.land(b_.cmp_ge(hi, c0), b_.cmp_lt(hi, p_Hi)),
+            ),
+            b_.land(b_.cmp_ge(wi, c0), b_.cmp_lt(wi, p_Wi)),
+        )
+        ok = b_.land(ok, b_.cmp_lt(z, p_Z))
+        off = b_.add(
+            b_.add(
+                b_.add(b_.add(base, b_.mul(z, a_zstep)), b_.mul(y, a_ystep)),
+                b_.mul(x, a_xstep),
+            ),
+            c,
+        )
+        return off, ok
+
+    def b_offset_split3(b_: IRBuilder, k_out: Value, zyxc):
+        base = b_.mul(k_out, params["p_B_stride_k"])
+        z, y, x, c = zyxc
+        off = b_.add(
+            b_.add(
+                b_.add(
+                    b_.add(base, mul_u24(b_, z, params["p_B_stride_z"])),
+                    mul_u24(b_, y, params["p_B_stride_y"]),
+                ),
+                mul_u24(b_, x, params["p_B_stride_x"]),
+            ),
+            c,
+        )
+        return off, b_.cmp_lt(z, p_Z)
 
     def a_offset_split(b_: IRBuilder, m_val: Value, k_val: Value):
         # Row part: m -> (n, ho, wo), the (hi, wi) origin and the base offset.
@@ -1962,7 +2208,8 @@ def _build_implicit_gemm_conv_impl(
 
         new_accs: List[Value] = list(iter_vars)
 
-        for kk in range(k_atoms):
+        def load_frags(kk: int):
+            """The A rows and B columns one kk step of MFMAs consumes."""
             col_base = b.add(
                 b.mul(k_blk, b.const_i32(a_per_lane)),
                 b.const_i32(kk * spec.warp_tile_k),
@@ -2012,6 +2259,26 @@ def _build_implicit_gemm_conv_impl(
                         smem_dtype=_smem_dtype,
                     )
                 )
+            return a_rows, b_cols
+
+        # ``prefetch_regs`` kernels also pipeline the LDS fragment reads one kk
+        # step ahead: step kk+1's ds_reads issue before step kk's MFMAs, so the
+        # LDS latency hides behind them instead of an lgkmcnt(0) wait per step.
+        # Off by default (ROCKE_FWD_LDS_AHEAD=1 enables it): the measured
+        # prefetch_regs kernels were built without it.
+        _lds_ahead = (
+            spec.prefetch_regs
+            and a_operand_override is None
+            and os.environ.get("ROCKE_FWD_LDS_AHEAD", "0") == "1"
+        )
+        frags = load_frags(0) if _lds_ahead else None
+        for kk in range(k_atoms):
+            if _lds_ahead:
+                a_rows, b_cols = frags
+                if kk + 1 < k_atoms:
+                    frags = load_frags(kk + 1)
+            else:
+                a_rows, b_cols = load_frags(kk)
 
             flat = 0
             for mi in range(mfmas_m):
@@ -2082,7 +2349,13 @@ def _build_implicit_gemm_conv_impl(
         # Merged: g is the merged group and the merged kpg is Gm, so the same
         # expression yields k_out = merged_group*Gm + g_n.
         _k_out_grp_base = (
-            b.mul(b.block_id_z(), c_gm if merged else p_kpg) if grouped else None
+            (
+                b.mul(group_idx, p_kpg)
+                if _split
+                else b.mul(b.block_id_z(), c_gm if merged else p_kpg)
+            )
+            if grouped
+            else None
         )
 
         def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
@@ -2123,6 +2396,19 @@ def _build_implicit_gemm_conv_impl(
             # the A/B LDS that the cshuffle store then reuses, so a single
             # barrier before the store leaves the re-read racing them.
             epi = dc_replace(epi, war_barriers=(2 if spec.pipeline == "wavelet" else 1))
+            if _split:
+                # Each K slice adds its partial tile into the zeroed D. D's
+                # row (output position) stride is the total K; the group's
+                # output-channel slab starts at group * kpg.
+                epi.atomic_store(
+                    b,
+                    accs=final_accs_in,
+                    dw_ptr=D,
+                    wg_N=p_K,
+                    bounds=(p_M, c_N_bound),
+                    col_offset=_k_out_grp_base,
+                )
+                return
             epi.store(
                 b,
                 accs=final_accs_in,
@@ -2549,8 +2835,67 @@ def _build_implicit_gemm_conv_impl(
         fb_lo = b.select(uk_ok, c_K_gemm, c0)
         return run_loop(fb_lo, c_K_gemm, uk_accs, state0, plain_fetch, plain_adv, "fb")
 
+    def emit_fetch_phase(k_off: Value) -> Tuple[list, list]:
+        """Global -> registers for one K tile (``prefetch_regs``)."""
+        k_off_capture[0] = k_off
+        a_regs = a_sync_loader.fetch(b, tid=tid, descriptor=a_descriptor, rsrc=a_rsrc)
+        b_regs = b_sync_loader.fetch(b, tid=tid, descriptor=b_descriptor, rsrc=b_rsrc)
+        # Pin the loads ahead of the MFMA phase: left free, the backend sinks
+        # them next to their ds_write consumers and the latency is exposed
+        # again.
+        b.sched_barrier(0)
+        return a_regs, b_regs
+
+    def emit_store_phase(regs: Tuple[list, list], A_dst: Value, B_dst: Value) -> None:
+        """Registers -> LDS for a tile fetched by :func:`emit_fetch_phase`."""
+        b.sched_barrier(0)
+        a_sync_loader.store_fetched(b, smem_dst=A_dst, fetched=regs[0])
+        b_sync_loader.store_fetched(b, smem_dst=B_dst, fetched=regs[1])
+
     if spec.uniform_k_decode or spec.reg_prefetch:
         final_accs = _emit_fwd_kloops()
+    elif spec.prefetch_regs and a_load_override is None:
+        # Register-staged prefetch. Tile t+1 is fetched into registers before
+        # tile t's MFMAs and stored to LDS after them, so the load latency
+        # overlaps the MFMAs of the issuing wave. As in the unroll_k loop, the
+        # fetch past the last tile addresses k >= K_gemm, which the descriptor
+        # bounds turn into zero-filled loads, so no tail guard is needed.
+        emit_load_phase(k_lo, A_smem, B_smem)
+        b.sync()
+        if spec.unroll_k:
+            # Ping-pong: one barrier per tile publishes the stored tile and
+            # retires the reads of the buffer the next store overwrites.
+            c_2block_k = b.const_i32(2 * block_k)
+            for_op = b.scf_for_iter(
+                c0, c_K_gemm, c_2block_k, accs, iv_name="k_unroll"
+            )
+            with for_op as (k_unroll, iter_accs):
+                k_odd = b.add(k_unroll, c_block_k)
+                k_nxt_pair = b.add(k_unroll, c_2block_k)
+                regs = emit_fetch_phase(k_odd)
+                k_off_capture[0] = k_unroll
+                accs_a = emit_mfma_phase(A_smem, B_smem, list(iter_accs))
+                emit_store_phase(regs, A_smem2, B_smem2)
+                b.sync()
+                regs = emit_fetch_phase(k_nxt_pair)
+                k_off_capture[0] = k_odd
+                accs_b = emit_mfma_phase(A_smem2, B_smem2, accs_a)
+                emit_store_phase(regs, A_smem, B_smem)
+                b.sync()
+                b.scf_yield(*accs_b)
+        else:
+            # Single buffer: the store waits behind a barrier that retires
+            # every wave's reads of the current tile.
+            for_op = b.scf_for_iter(k_lo, k_hi, c_block_k, accs, iv_name="k0")
+            with for_op as (k0, iter_vars):
+                regs = emit_fetch_phase(b.add(k0, c_block_k))
+                k_off_capture[0] = k0
+                new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars))
+                b.sync()
+                emit_store_phase(regs, A_smem, B_smem)
+                b.sync()
+                b.scf_yield(*new_accs)
+        final_accs = for_op.results
     elif spec.unroll_k:
         # Double-buffered K-loop software pipeline.
         #
@@ -2605,7 +2950,7 @@ def _build_implicit_gemm_conv_impl(
         final_accs = for_op.results
     elif not spec.async_dma:
         # mem / compv3 / compv4 / basic: all use scf_for_iter — only bound changes to runtime.
-        for_op = b.scf_for_iter(c0, c_K_gemm, c_block_k, accs, iv_name="k0")
+        for_op = b.scf_for_iter(k_lo, k_hi, c_block_k, accs, iv_name="k0")
         with for_op as (k0, iter_vars):
             emit_load_phase(k0, A_smem, B_smem)
             b.sync()
