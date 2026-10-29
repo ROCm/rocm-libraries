@@ -4,11 +4,12 @@
 #ifndef HIPDNN_PLUGIN_SDK_VERSION_H
 #define HIPDNN_PLUGIN_SDK_VERSION_H
 
+// MAJOR/MINOR/PATCH live in version_number.h, which carries no git hash and so
+// stays untouched across commits. Include that instead when the numbers are enough.
+#include <hipdnn_plugin_sdk/version_number.h>
+
 // clang-format off
 // NOLINTBEGIN(modernize-macro-to-enum)
-#define HIPDNN_PLUGIN_SDK_VERSION_MAJOR @HIPDNN_PLUGIN_SDK_VERSION_MAJOR@
-#define HIPDNN_PLUGIN_SDK_VERSION_MINOR @HIPDNN_PLUGIN_SDK_VERSION_MINOR@
-#define HIPDNN_PLUGIN_SDK_VERSION_PATCH @HIPDNN_PLUGIN_SDK_VERSION_PATCH@
 #define HIPDNN_PLUGIN_SDK_VERSION_TWEAK "@HIPDNN_PLUGIN_SDK_VERSION_TWEAK@"
 #define HIPDNN_PLUGIN_SDK_VERSION_STRING "@HIPDNN_PLUGIN_SDK_VERSION_STRING@"
 // NOLINTEND(modernize-macro-to-enum)

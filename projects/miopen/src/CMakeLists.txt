@@ -41,6 +41,67 @@ endif()
 # This is incremented when the ABI to the library changes
 set( MIOpen_SOVERSION 1.0 )
 
+# Embed a Windows VERSIONINFO resource into a DLL target. No resource-compiler
+# availability guard is needed here: cmake/ResourceCompiler.cmake already fails configuration if no
+# usable resource compiler was found, so by the time this runs CMAKE_RC_COMPILER is guaranteed good.
+#
+#   target            DLL target to attach the resource to.
+#   file_description  VERSIONINFO FileDescription field.
+#   internal_name     VERSIONINFO InternalName; also names the generated .rc and is used verbatim
+#                     for OriginalFilename as "${internal_name}.dll". Callers that override a
+#                     target's OUTPUT_NAME must pass a matching internal_name or the recorded
+#                     OriginalFilename will be wrong.
+#
+# Callable from any directory: add_custom_command(TARGET) below resolves in the caller's scope,
+# which is where ${target} is defined.
+function(miopen_embed_version_resource target file_description internal_name)
+    # Shared libraries only. ${_MIOPEN_IMPL_TARGET} is declared without an explicit SHARED, so it
+    # follows BUILD_SHARED_LIBS and becomes a static archive under -DBUILD_SHARED_LIBS=OFF or
+    # -DMIOPEN_EMBED_BUILD=ON (which forces it off). A VERSIONINFO resource in a static archive is
+    # meaningless -- the linker does not propagate it into the consuming binary -- and the
+    # POST_BUILD check below would be handed a .lib, which has no version resource to read, and
+    # would fail the build. Executables are skipped for a different reason: MIOpen.rc.in hardcodes
+    # FILETYPE VFT_DLL, so the resource would be wrong for one.
+    get_target_property(_type ${target} TYPE)
+    if(NOT WIN32 OR NOT _type MATCHES "^(SHARED|MODULE)_LIBRARY$")
+        return()
+    endif()
+    # Derived here rather than at directory scope so the function is self-contained and renders the
+    # same copyright year regardless of which directory calls it.
+    string(TIMESTAMP MIOPEN_COPYRIGHT_YEAR "%Y")
+    # rocm_setup_version leaves MIOpen_VERSION_TWEAK as "<short-sha>[-dirty]". Carrying the commit
+    # hash in the StringFileInfo strings is deliberate and matches hipDNN (RFC 0005); the binary
+    # FILEVERSION/PRODUCTVERSION fields are four 16-bit integers and keep 0. The "-dirty" marker is
+    # dropped so the DLL's bytes do not depend on working-tree cleanliness, which would make builds
+    # non-reproducible and could ship "-dirty" in a release artifact's metadata.
+    string(REGEX REPLACE "-dirty$" "" MIOPEN_RC_VERSION_TWEAK "${MIOpen_VERSION_TWEAK}")
+    set(MIOPEN_RC_FILE_DESCRIPTION "${file_description}")
+    set(MIOPEN_RC_INTERNAL_NAME "${internal_name}")
+    set(MIOPEN_RC_ORIGINAL_FILENAME "${internal_name}.dll")
+    configure_file(
+        "${PROJECT_SOURCE_DIR}/src/MIOpen.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/${internal_name}.rc"
+        @ONLY
+    )
+    target_sources(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/${internal_name}.rc")
+
+    # Verify the resource actually landed in the linked DLL. Done at build time rather than as a
+    # test so it also covers BUILD_TESTING=OFF release builds and rides along on the existing
+    # Windows build job without needing a GPU test machine. The target only exists when
+    # MIOPEN_VALIDATE_VERSIONINFO is ON and we are not cross-compiling (see the top-level
+    # CMakeLists.txt), so this guard carries that gating without repeating it.
+    if(TARGET win_versioninfo_check)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND win_versioninfo_check
+                    "${MIOpen_VERSION_MAJOR}.${MIOpen_VERSION_MINOR}.${MIOpen_VERSION_PATCH}"
+                    "$<TARGET_FILE:${target}>"
+            COMMENT "Verifying VERSIONINFO in $<TARGET_FILE_NAME:${target}>"
+            VERBATIM
+        )
+        add_dependencies(${target} win_versioninfo_check)
+    endif()
+endfunction()
+
 # Generate source that embeds the given kernel files as initializer data.
 function(add_kernels FILE_NAME VAR_PREFIX VAR_SUFFIX KERNEL_FILES)
     set(INIT_KERNELS_LIST)
@@ -207,6 +268,7 @@ set( MIOpen_Source
     solver/conv/conv_asm_implicit_gemm_wrw_v4r1_dynamic.cpp
     solver/conv/conv_bin_wino3x3U.cpp
     solver/conv/conv_bin_winoRxS.cpp
+    solver/conv/conv_direct_depthwise_fwd_2d.cpp
     solver/conv/conv_direct_naive_conv.cpp
     solver/conv/conv_direct_naive_conv_bwd.cpp
     solver/conv/conv_direct_naive_conv_fwd.cpp
@@ -507,6 +569,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/hip_math_ops.hpp
         kernels/inst_wrappers.inc
         kernels/miopen_cstdint.hpp
+        kernels/miopen_initializer_list.hpp
         kernels/miopen_limits.hpp
         kernels/miopen_math.hpp
         kernels/miopen_rocrand.hpp
@@ -526,10 +589,12 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_gfx11_1024vgprs_fp16_fp16acc_f2x3_c16_stride1.inc
         kernels/winograd/Conv_Winograd_Fury_v4_6_0_gfx12_1536vgprs_fp16_fp32acc_f2x3_c16_stride1.inc
         kernels/winograd/Conv_Winograd_Fury_v4_6_0_gfx12_1536vgprs_fp16_fp32acc_f2x3_c32_stride1.inc
+        kernels/winograd/Conv_Winograd_Fury_v4_7_0_gfx117_1024vgprs_fp16_fp16acc_f2x3_c16_stride1.inc
         kernels/winograd/Conv_Winograd_Fury_v2_X_X_X_metadata.inc
         kernels/winograd/Conv_Winograd_Rage_v4_6_1_gfx12x_fp16_fp32acc_f2x3_stride1.inc
         kernels/winograd/Conv_Winograd_Rage_v4_6_1_gfx94x_gfx95x_fp16_fp32acc_f2x3_stride1.inc
         kernels/winograd/Conv_Winograd_Rage_v4_9_1_gfx12x_fp16_fp32acc_f2x3_stride1.inc
+        kernels/winograd/Conv_Winograd_Rage_v4_11_0_gfx117x_fp16_fp32acc_f2x3_stride1.inc
         kernels/winograd/Conv_Winograd_Rage_v4_9_1_gfx94x_fp16_fp32acc_f2x3_stride1.inc
         kernels/winograd/Conv_Winograd_Rage_v4_9_1_gfx95x_fp16_fp32acc_f2x3_stride1.inc
         kernels/winograd/Conv_Winograd_Rage_v4_X_X_metadata.inc
@@ -548,6 +613,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         ${GPU_REFERENCE_KERNEL_ASM}
         ${GPU_BATCHED_TRANSPOSE_KERNEL_HIP}
         ${GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_SOURCE}
+        kernels/miopen_conv2d_depthwise_fwd.cpp
         kernels/miopen_conv3d_depthwise_fwd.cpp
         kernels/MIOpenAdam.cpp
         kernels/MIOpenAddLayerNorm.cpp
@@ -672,8 +738,10 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_fp16_fp16acc_f2x3_c32_stride1.s
         kernels/winograd/Conv_Winograd_Fury_v4_6_0_fp16_fp32acc_f2x3_c16_stride1.s
         kernels/winograd/Conv_Winograd_Fury_v4_6_0_fp16_fp32acc_f2x3_c32_stride1.s
+        kernels/winograd/Conv_Winograd_Fury_v4_7_0_fp16_fp16acc_f2x3_c16_stride1.s
         kernels/winograd/Conv_Winograd_Rage_v4_6_1_fp16_fp32acc_f2x3_stride1.s
         kernels/winograd/Conv_Winograd_Rage_v4_9_1_fp16_fp32acc_f2x3_stride1.s
+        kernels/winograd/Conv_Winograd_Rage_v4_11_0_fp16_fp32acc_f2x3_stride1.s
         kernels/xform_data.s
         kernels/xform_filter.s
         kernels/xform_bidirect_winograd_data.s
@@ -888,6 +956,8 @@ else()
         )
 endif()
 
+miopen_embed_version_resource(${_MIOPEN_IMPL_TARGET} "MIOpen Library" "${_MIOPEN_IMPL_TARGET}")
+
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     # Rename the private library's public C entry points to their _impl form by
     # force-including the redefinition header into every private source. The
@@ -912,6 +982,27 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         ${PROJECT_SOURCE_DIR}/src/private/wrapper.cpp
         ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
     target_link_libraries(MIOpen PUBLIC ${_MIOPEN_IMPL_TARGET})
+    miopen_embed_version_resource(MIOpen "MIOpen Public Wrapper" MIOpen)
+
+    # The hipDNN side of the seam. hipdnn_frontend_dynamic is the header-only
+    # frontend configured to dlopen the backend at first use, so libMIOpen.so
+    # carries no DT_NEEDED entry for libhipdnn_backend.so and a machine without
+    # hipDNN installed still loads MIOpen. Linking hipdnn_frontend instead would
+    # make the backend a hard load-time dependency of every MIOpen consumer.
+    # In a superbuild hipDNN is already part of the build graph; its generated
+    # package config re-creates these targets as imported ones, which collides.
+    if(NOT TARGET hipdnn_frontend_dynamic)
+        find_package(hipdnn_frontend REQUIRED)
+    else()
+        # An in-tree target's headers arrive as -I, so MIOpen's -Werror set gets
+        # applied to them. An installed hipDNN arrives as -isystem and does not.
+        set_target_properties(hipdnn_frontend_dynamic PROPERTIES SYSTEM TRUE)
+    endif()
+    target_sources(MIOpen PRIVATE
+        ${PROJECT_SOURCE_DIR}/src/private/hipdnn_conv.cpp
+        ${PROJECT_SOURCE_DIR}/src/private/hipdnn_graph.cpp
+        ${PROJECT_SOURCE_DIR}/src/private/hipdnn_types.cpp)
+    target_link_libraries(MIOpen PRIVATE hipdnn_frontend_dynamic)
 
     # Deliberately excludes src/include: the wrapper must see only the public
     # header and its own _impl declarations. Without that restriction a stub
@@ -925,6 +1016,12 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_BINARY_DIR}/include
         ${CMAKE_BINARY_DIR}/include)
+
+    # Added here because the rocm_install_targets(INCLUDE ...) call below only
+    # adds the include path as a side effect of installing. PUBLIC so in-tree
+    # consumers, such as forwarding_failure_probe, find hipdnn_forwarding.h.
+    target_include_directories(MIOpen PUBLIC
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include_wrapper>)
 
     # The wrapper's only dependency is the private library, so every symbol it
     # references must resolve at link time. This turns "new API added, stub
@@ -960,9 +1057,21 @@ endif()
 # sub-compile only, so host code keeps UBSan. Applied as a target option on the MIOpen library
 # only, not a directory-wide add_compile_options, so it does not touch host tools, tests,
 # driver, or fin. SHELL: keeps the two tokens together and un-deduplicated.
+#
+# The same opt-out is needed at link time. These shared libraries link with --hip-link, and the
+# device toolchain otherwise inherits the host -fsanitize=undefined. Since LLVM #219973, clang then
+# links the host-side libclang_rt.ubsan_offload.a into the shared library. That archive references
+# sanitizer_common internals (e.g. __sanitizer::SanitizerToolName) that only the static
+# ubsan_standalone runtime of the executable defines and that the executable does not export, so
+# every consumer fails to load with "undefined symbol: _ZN11__sanitizer17SanitizerToolNameE".
+# The link option is per-target, not add_link_options: links without --hip-link (host tools)
+# would reject the unused -Xarch_device argument under -Werror.
 if(MIOPEN_DISABLE_DEVICE_UBSAN)
     target_compile_options(${_MIOPEN_IMPL_TARGET} PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_device -fno-sanitize=undefined>")
+    foreach(_miopen_lib IN LISTS _MIOPEN_INSTALL_TARGETS)
+        target_link_options(${_miopen_lib} PRIVATE "SHELL:-Xarch_device -fno-sanitize=undefined")
+    endforeach()
 endif()
 
 # Add dependency on inlined rocrand header if it was created
@@ -1171,6 +1280,13 @@ set(MIOPEN_CXX_HEADER_PATH)
 if(MIOPEN_INSTALL_CXX_HEADERS)
 set(MIOPEN_CXX_HEADER_PATH ${PROJECT_SOURCE_DIR}/src/include)
 endif()
+# Installs hipdnn_forwarding.h. rocm_install_targets also adds the directory to
+# the include path of every target it installs, MIOpen_private included, but
+# MIOpen does not rely on that: it gets the path from its own include above.
+set(MIOPEN_WRAPPER_HEADER_PATH)
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+set(MIOPEN_WRAPPER_HEADER_PATH ${PROJECT_SOURCE_DIR}/include_wrapper)
+endif()
 
 rocm_install_targets(
   TARGETS ${_MIOPEN_INSTALL_TARGETS}
@@ -1178,6 +1294,7 @@ rocm_install_targets(
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_BINARY_DIR}/include
     ${MIOPEN_CXX_HEADER_PATH}
+    ${MIOPEN_WRAPPER_HEADER_PATH}
 )
 
 rocm_export_targets(

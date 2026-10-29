@@ -74,8 +74,8 @@ namespace hipblaslt_ext
          *  \brief This function sets the maximum workspace size.
          *
          *  @param[in]
-         *  workspaceBytes  Set the maximum workspace size in bytes. Above ``UINT32_MAX``
-         *  (4 GiB - 1), algoGetHeuristic returns HIPBLAS_STATUS_INVALID_VALUE.
+         *  workspaceBytes  Set the maximum workspace size in bytes. algoGetHeuristic clamps
+         *  values above ``UINT32_MAX`` (4 GiB - 1) to ``UINT32_MAX``.
          */
         HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);
 
@@ -109,11 +109,15 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setStreamKTileSchedulingMode(hipblasLtStreamKTileSchedulingMode_t mode);
 
         /*! \ingroup library_module
-         *  \brief Enable uniform summation order for this Gemm.
+         *  \brief Set uniform summation order mode for this Gemm. Defaults to ``-1``.
+         *
+         *  \details
+         *  The mode is tri-state: a caller can use the uniform summation order (``1``),
+         *  disable the uniform summation order (``0``), or inherit the handle request (``-1``).
          *
          *  See ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``.
          */
-        HIPBLASLT_EXPORT void setUniformSummationOrder(bool value);
+        HIPBLASLT_EXPORT void setUniformSummationOrder(int32_t value);
 
         /*! \ingroup library_module
          *  \brief This function returns the maximum workspace size that was set.
@@ -131,9 +135,11 @@ namespace hipblaslt_ext
 
         /*! \ingroup library_module
          *  \brief Return the uniform-summation-order request set via
-         *  ``setUniformSummationOrder``. Defaults to ``false``.
+         *  ``setUniformSummationOrder``. Defaults to ``-1``.
+         *
+         *  \retval int32_t Returns the set uniform summation order mode.
          */
-        HIPBLASLT_EXPORT bool getUniformSummationOrder() const;
+        HIPBLASLT_EXPORT int32_t getUniformSummationOrder() const;
 
     private:
         friend GemmInstance;
@@ -186,6 +192,9 @@ namespace hipblaslt_ext
             setTypeCompute(hipblasComputeType_t type); //!< Set the compute data type.
         HIPBLASLT_EXPORT void setOrderA(hipblasLtOrder_t order); //!< Set the A matrix data order.
         HIPBLASLT_EXPORT void setOrderB(hipblasLtOrder_t order); //!< Set the B matrix data order.
+        //! Set the int4 encoding of A (C API: HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT).
+        //! Throws std::invalid_argument for values outside hipblasLtInt4Encoding_t.
+        HIPBLASLT_EXPORT void setInt4EncodingA(hipblasLtInt4Encoding_t encoding);
 
         HIPBLASLT_EXPORT hipblasOperation_t   getOpA() const; //!< The A matrix transpose.
         HIPBLASLT_EXPORT hipblasOperation_t   getOpB() const; //!< The B matrix transpose.
@@ -196,6 +205,8 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT hipblasComputeType_t getTypeCompute() const; //!< The compute data type.
         HIPBLASLT_EXPORT hipblasLtOrder_t     getOrderA() const; //!< The A matrix data order.
         HIPBLASLT_EXPORT hipblasLtOrder_t     getOrderB() const; //!< The B matrix data order.
+        HIPBLASLT_EXPORT hipblasLtInt4Encoding_t
+            getInt4EncodingA() const; //!< How the int4 weights in A are encoded.
     };
 
     [[deprecated("GemmProblemTypeV2 is deprecated, use GemmProblemType instead.")]]
@@ -324,7 +335,7 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setScaleC(const void* scaleC); //!< Set the scale C input pointer.
         HIPBLASLT_EXPORT void setScaleD(const void* scaleD); //!< Set the scale D input pointer.
         HIPBLASLT_EXPORT void
-            setScaleAux(const void* scaleAux); //!< Set the scale aux input pointer.
+            setScaleAux(const void* scaleAux); //!< Not supported; setProblem refuses non-NULL.
         HIPBLASLT_EXPORT void setScaleAlphaVec(
             const void* scaleAlphaVec); //!< Set the scaleAlpha vector input pointer.
         HIPBLASLT_EXPORT void setAux(const void* aux); //!< Set the aux input pointer.
@@ -490,8 +501,8 @@ namespace hipblaslt_ext
          *  \brief This function sets the maximum workspace size.
          *
          *  @param[in]
-         *  workspaceBytes  Sets the maximum workspace size in bytes. Above ``UINT32_MAX``
-         *  (4 GiB - 1), initialize returns HIPBLAS_STATUS_INVALID_VALUE.
+         *  workspaceBytes  Sets the maximum workspace size in bytes. initialize clamps
+         *  values above ``UINT32_MAX`` (4 GiB - 1) to ``UINT32_MAX``.
          */
         HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);
 
@@ -612,7 +623,7 @@ namespace hipblaslt_ext
 
         size_t  m_workspace_bytes        = 0;
         int32_t m_streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF;
-        bool    m_uniform_summation_order = false;
+        int32_t m_uniform_summation_order = -1;
     };
 
     /*! \ingroup types_module

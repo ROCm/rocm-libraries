@@ -49,7 +49,7 @@ public:
 
         auto resampleFwdFunc = [&](const std::vector<int64_t>& yIndices) {
             auto result = mode == hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL
-                              ? static_cast<ComputeDataType>(std::numeric_limits<float>::lowest())
+                              ? std::numeric_limits<ComputeDataType>::lowest()
                               : static_cast<ComputeDataType>(0);
             int64_t validCount = 0;
             auto selectedIndex = static_cast<IndexDataType>(-1);

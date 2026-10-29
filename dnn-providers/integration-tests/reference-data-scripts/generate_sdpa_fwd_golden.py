@@ -13,8 +13,10 @@ Supported, fully composable operation axes:
   - dtype:        bf16, fp16, fp8 (FP8_E4M3 inputs, BF16 output, per-tensor descale)
   - head dim:     hd128, hd192 (via --q-dims / --v-dims)
   - causal mask:  none, top_left, bottom_right
-  - sliding window: --window-left / --window-right
-  - GROUP mode:   --variable-seq-lens + --seq-lens-q / --seq-lens-kv
+  - sliding window: --left-bound (cuDNN / graph convention) or --window-left
+                    (FlashAttention convention), and --window-right
+  - GROUP mode:   --seq-lens-q / --seq-lens-kv (actual per-batch valid lengths)
+  - ragged:       --ragged-offsets (RFC 0014 packed BSHD; requires --layout bshd)
   - LSE output:   --stats (adds tensor uid=4)
 
 Any combination of the above may be applied in a single invocation (e.g. fp8 +
@@ -57,7 +59,25 @@ from torch.nn.attention import SDPBackend, sdpa_kernel
 # 1.3.0 — With no --attn-scale, the scale is 1.0 (no scaling), matching how hipDNN
 #         reads an unset attn_scale_value; it was 1/sqrt(D_qk). Bundles that pass
 #         --attn-scale are unchanged.
-GENERATOR_VERSION = "1.3.0"
+# 1.4.0 — Added --layout {bhsd,bshd} (Q/K/V/O only, default bhsd)
+#         Added --ragged-offsets (packed RFC-0014 BSHD; requires --layout bshd)
+#         seq_len tensors emit actual per-batch counts [B,1,1,1] (RFC 0014), not
+#         cumulative; mode derived from --seq-lens-*/--ragged-offsets (no
+#         --variable-seq-lens)
+#         Ragged primaries keep logical dims [B,H,S,D] with BSHD strides, like
+#         every other SDPA tensor; the sequence axis is SDPA_SEQ_AXIS (2)
+#         Ragged offsets step in TOKEN units (not elements); Q/O share one aux
+#         offset tensor and K/V share another (uids 10/11 only); each ragged
+#         primary emits ragged_offset_multiplier = strides[SDPA_SEQ_AXIS] (H*D)
+#         to scale tokens to elements
+#         ragged+seq-lens packs each block with small trailing padding so
+#         ragged_offset spacing differs from seq_lens; a config with no such
+#         headroom is rejected. The in-block O pad rows hold the NaN sentinel
+#         (RFC 0014 §4.11.4) because kernels may leave them undefined
+#         mma_core_mode is "unset" for bf16/fp16 and "fp8_e4m3" for fp8 (never
+#         "float"); it is the MMA operand precision, and a float request on
+#         16-bit or fp8 inputs is a mismatch that ASM_SDPA_ENGINE declines (see #12844)
+GENERATOR_VERSION = "1.4.0"
 
 DTYPE_MAP = {
     "bf16": {"torch": torch.bfloat16, "json": "bfloat16", "bytes": 2},
@@ -84,6 +104,22 @@ UID_SEQ_LEN_KV = 6
 UID_DESCALE_Q = 7
 UID_DESCALE_K = 8
 UID_DESCALE_V = 9
+UID_RAGGED_OFFSET_QO = 10
+UID_RAGGED_OFFSET_KV = 11
+
+# Physical stride order per memory layout. The value at position i is the rank of
+# dim i (0 = fastest-varying/unit stride). Logical dims stay [B, H, S, D]; only
+# the strides change, so BSHD swaps the H and S ranks relative to BHSD.
+LAYOUT_STRIDE_ORDER = {"bhsd": [3, 2, 1, 0], "bshd": [3, 1, 2, 0]}
+
+# Sequence axis of the logical [B, H, S, D] dims (cuDNN convention).
+SDPA_SEQ_AXIS = 2
+
+# Extra trailing sequence rows added to each ragged block beyond its valid
+# seq_len (capped at S_max). This makes ragged_offset spacing differ from
+# seq_lens so a bundle can catch a kernel that derives lengths from the offsets
+# instead of reading the seq_len tensor (RFC 0014 §2.3 padding).
+RAGGED_PAD_ROWS = 8
 
 
 def compute_contiguous_strides(dims):
@@ -96,13 +132,91 @@ def compute_contiguous_strides(dims):
     return strides
 
 
+def compute_strides(dims, layout="bhsd"):
+    """Strides for the given layout. bhsd matches compute_contiguous_strides."""
+    order = LAYOUT_STRIDE_ORDER.get(layout)
+    if order is None or len(dims) != len(order):
+        raise ValueError(f"no stride order for layout {layout!r} at rank {len(dims)}")
+    stride = [1] * len(dims)
+    acc = 1
+    for idx in sorted(range(len(dims)), key=lambda i: order[i]):
+        stride[idx] = acc
+        acc *= dims[idx]
+    return stride
+
+
+def to_physical_layout(tensor, layout):
+    """Reorder a rank-4 BHSD tensor to physical BSHD byte order when requested."""
+    if layout == "bshd" and tensor.dim() == 4:
+        return tensor.transpose(1, 2).contiguous()  # physical [B, S, H, D]
+    return tensor
+
+
+def pack_ragged(tensor_bhsd, seq_lens):
+    """Pack a [B, H, S, D] tensor into ragged BSHD: concat valid [S_b, H, D] slices.
+
+    Each batch contributes only its first seq_lens[b] sequence rows, concatenated
+    with no padding along the sequence axis (RFC 0014 packed layout).
+    """
+    slices = [
+        tensor_bhsd[b].transpose(0, 1)[: seq_lens[b]]  # [S_b, H, D]
+        for b in range(tensor_bhsd.shape[0])
+    ]
+    return torch.cat(slices, dim=0).contiguous()  # [total_tokens, H, D]
+
+
+def ragged_offsets(physical_lens):
+    """Token-unit start positions [B+1, 1, 1, 1] int32 for a packed BSHD buffer.
+
+    Offsets step by physical_lens[b] tokens so ragged_offset[B] equals the total
+    packed token count. A token is head-dim independent; each primary's own
+    ragged_offset_multiplier scales tokens to elements, so this aux is shared
+    across Q/O and across K/V even when D_qk != D_v.
+    """
+    offsets = [0]
+    for s in physical_lens:
+        offsets.append(offsets[-1] + s)
+    return torch.tensor(offsets, dtype=torch.int32).reshape(len(offsets), 1, 1, 1)
+
+
+def physical_seqlens(valid_lens, s_max):
+    """Physical (packed) block rows per batch: valid length plus a small trailing
+    padding, capped at s_max. The padding makes ragged_offset spacing exceed the
+    valid seq_lens while staying within the padded dense block (RFC 0014).
+    """
+    return [min(s_max, v + RAGGED_PAD_ROWS) for v in valid_lens]
+
+
+def left_bound_from_window_left(window_left):
+    """Map a FlashAttention-style window_size_left to hipDNN's left_bound.
+
+    hipDNN follows cuDNN: left_bound = L keeps the L keys ending at the diagonal,
+    diagonal included. FlashAttention's window_size_left = W keeps W + 1 keys, so
+    the same window is left_bound = W + 1.
+    """
+    return window_left + 1
+
+
+def window_left_from_left_bound(left_bound):
+    """Map hipDNN's (cuDNN) left_bound to FlashAttention's window_size_left.
+
+    The inverse of left_bound_from_window_left: L keys including the diagonal is
+    L - 1 keys before it. -1 (unbounded) stays -1.
+    """
+    return -1 if left_bound == -1 else left_bound - 1
+
+
 def build_mask(s_q, s_kv, causal, window_left, window_right):
     """Construct a boolean keep-mask [S_q, S_kv] for the given causal/window config.
 
     Returns None when no masking applies (the dense attention case), so callers
     can take the fast PyTorch path. The mask is True where attention is allowed.
-    The bound math matches the CPU reference executor's leftBound/rightBound +
-    topLeftAlignment semantics so golden output is reproducible on the CPU side.
+
+    window_left / window_right follow FlashAttention's window_size_left/right:
+    window_left = W keeps the W keys before the diagonal plus the diagonal itself
+    (W + 1 keys). The graph's cuDNN-semantics left_bound for that window is W + 1
+    (see left_bound_from_window_left), so the CPU reference executor reproduces
+    this mask.
 
     causal:
       - "none":          no causal constraint
@@ -189,14 +303,6 @@ def quantize_fp8_per_tensor(t):
     return fp8, scale.reshape(1), dequant
 
 
-def cumulative_seqlens(seq_lens):
-    """Build the cumulative seq-start pointer array [0, s0, s0+s1, ...] (int32)."""
-    cu = [0]
-    for s in seq_lens:
-        cu.append(cu[-1] + s)
-    return torch.tensor(cu, dtype=torch.int32)
-
-
 def save_tensor_bin(tensor, path):
     t = tensor.contiguous().cpu()
     if t.dtype in (torch.bfloat16, torch.float16, FP8_TORCH_DTYPE):
@@ -219,31 +325,39 @@ def build_graph_json(
     causal="none",
     window_left=-1,
     window_right=-1,
-    group_mode=False,
+    emit_seq_lens=False,
     fp8=False,
     o_dtype_str=None,
+    layout="bhsd",
+    ragged=False,
 ):
     B, H_q, S_q = q_dims[0], q_dims[1], q_dims[2]
     qkv_dtype = FP8_JSON_DTYPE if fp8 else dtype_str
     o_dtype = o_dtype_str if o_dtype_str is not None else dtype_str
 
     tensors = []
-    for uid, name, dims, dt in [
-        (UID_Q, "Q", q_dims, qkv_dtype),
-        (UID_K, "K", k_dims, qkv_dtype),
-        (UID_V, "V", v_dims, qkv_dtype),
-        (UID_O, "O", o_dims, o_dtype),
-    ]:
-        tensors.append(
-            {
-                "uid": uid,
-                "name": name,
-                "dims": dims,
-                "strides": compute_contiguous_strides(dims),
-                "data_type": dt,
-                "virtual": False,
-            }
-        )
+    primaries = [
+        (UID_Q, "Q", q_dims, qkv_dtype, UID_RAGGED_OFFSET_QO),
+        (UID_K, "K", k_dims, qkv_dtype, UID_RAGGED_OFFSET_KV),
+        (UID_V, "V", v_dims, qkv_dtype, UID_RAGGED_OFFSET_KV),
+        (UID_O, "O", o_dims, o_dtype, UID_RAGGED_OFFSET_QO),
+    ]
+    for uid, name, dims, dt, ragged_offset_uid in primaries:
+        # Ragged primaries declare padded logical dims [B, H, S_max, D] with BSHD
+        # strides; the packed .bin is sized by ragged_offset[B].
+        strides = compute_strides(dims, layout)
+        entry = {
+            "uid": uid,
+            "name": name,
+            "dims": dims,
+            "strides": strides,
+            "data_type": dt,
+            "virtual": False,
+        }
+        if ragged:
+            entry["ragged_offset_tensor_uid"] = ragged_offset_uid
+            entry["ragged_offset_multiplier"] = strides[SDPA_SEQ_AXIS]
+        tensors.append(entry)
 
     if stats:
         lse_dims = [B, H_q, S_q, 1]
@@ -258,14 +372,14 @@ def build_graph_json(
             }
         )
 
-    if group_mode:
+    if emit_seq_lens:
         for uid, name in [(UID_SEQ_LEN_Q, "SeqLenQ"), (UID_SEQ_LEN_KV, "SeqLenKv")]:
             tensors.append(
                 {
                     "uid": uid,
                     "name": name,
-                    "dims": [B + 1],
-                    "strides": [1],
+                    "dims": [B, 1, 1, 1],
+                    "strides": [1, 1, 1, 1],
                     "data_type": "int32",
                     "virtual": False,
                 }
@@ -288,6 +402,22 @@ def build_graph_json(
                 }
             )
 
+    if ragged:
+        for uid, name in [
+            (UID_RAGGED_OFFSET_QO, "RaggedOffsetQ"),
+            (UID_RAGGED_OFFSET_KV, "RaggedOffsetK"),
+        ]:
+            tensors.append(
+                {
+                    "uid": uid,
+                    "name": name,
+                    "dims": [B + 1, 1, 1, 1],
+                    "strides": [1, 1, 1, 1],
+                    "data_type": "int32",
+                    "virtual": False,
+                }
+            )
+
     # Causal / window -> bounds + diagonal alignment (non-deprecated path).
     diagonal_alignment = "BOTTOM_RIGHT" if causal == "bottom_right" else "TOP_LEFT"
     left_bound = None
@@ -296,7 +426,7 @@ def build_graph_json(
         left_bound = -1
         right_bound = 0
     if window_left >= 0:
-        left_bound = window_left
+        left_bound = left_bound_from_window_left(window_left)
     if window_right >= 0:
         right_bound = window_right
 
@@ -312,8 +442,8 @@ def build_graph_json(
                     "v_tensor_uid": UID_V,
                     "attn_mask_tensor_uid": None,
                     "scale_tensor_uid": None,
-                    "seq_len_q_tensor_uid": UID_SEQ_LEN_Q if group_mode else None,
-                    "seq_len_kv_tensor_uid": UID_SEQ_LEN_KV if group_mode else None,
+                    "seq_len_q_tensor_uid": UID_SEQ_LEN_Q if emit_seq_lens else None,
+                    "seq_len_kv_tensor_uid": UID_SEQ_LEN_KV if emit_seq_lens else None,
                     "seed_tensor_uid": None,
                     "offset_tensor_uid": None,
                     "dropout_mask_tensor_uid": None,
@@ -350,7 +480,7 @@ def build_graph_json(
                     "right_bound": right_bound,
                     "max_seq_len_kv": None,
                     "diagonal_alignment": diagonal_alignment,
-                    "mma_core_mode": "float",
+                    "mma_core_mode": "fp8_e4m3" if fp8 else "unset",
                     "implementation": "AUTO",
                 },
             }
@@ -420,6 +550,9 @@ def build_meta_json(config, pytorch_version):
             "stats": config["stats"],
             "scale": config["scale"],
             "gqa_ratio": config["q_dims"][1] // config["v_dims"][1],
+            "layout": config["layout"],
+            "ragged": config["ragged"],
+            "ragged_physical_lens": config["ragged_physical_lens"],
         },
     }
 
@@ -556,7 +689,7 @@ def _validate_group_args(B, seq_lens_q, seq_lens_kv, S_q, S_kv):
     errors = []
     if seq_lens_q is None or seq_lens_kv is None:
         errors.append(
-            "--variable-seq-lens requires both --seq-lens-q and --seq-lens-kv"
+            "variable/ragged seq-len modes require both --seq-lens-q and --seq-lens-kv"
         )
         return errors
     if len(seq_lens_q) != B or len(seq_lens_kv) != B:
@@ -623,7 +756,6 @@ def generate_forward_bundle(
     causal="none",
     window_left=-1,
     window_right=-1,
-    variable_seq_lens=False,
     seq_lens_q=None,
     seq_lens_kv=None,
     stats=False,
@@ -632,11 +764,17 @@ def generate_forward_bundle(
     max_val=1.0,
     attn_scale=None,
     validate=False,
+    layout="bhsd",
+    ragged=False,
 ):
     B, H_q, S_q, D_qk = q_dims
     B_v, H_kv, S_kv, D_v = v_dims
     k_dims = [B, H_kv, S_kv, D_qk]
     o_dims = [B, H_q, S_q, D_v]
+
+    # Mode is derived: GROUP when both seq-lens are given, RAGGED when
+    # --ragged-offsets is set; the two may combine (ragged + seq-lens).
+    has_seq_lens = seq_lens_q is not None and seq_lens_kv is not None
 
     is_fp8 = dtype == "fp8"
     if not is_fp8 and dtype not in DTYPE_MAP:
@@ -670,8 +808,30 @@ def generate_forward_bundle(
         errors.append(f"H_q ({H_q}) must be divisible by H_kv ({H_kv})")
     if min_val >= max_val:
         errors.append(f"--min ({min_val}) must be less than --max ({max_val})")
-    if variable_seq_lens:
-        errors += _validate_group_args(B, seq_lens_q, seq_lens_kv, S_q, S_kv)
+    if (seq_lens_q is None) != (seq_lens_kv is None):
+        errors.append(
+            "--seq-lens-q and --seq-lens-kv must be provided together (got only one)"
+        )
+    if has_seq_lens:
+        group_errors = _validate_group_args(B, seq_lens_q, seq_lens_kv, S_q, S_kv)
+        errors += group_errors
+        if (
+            ragged
+            and not group_errors
+            and physical_seqlens(seq_lens_q, S_q) == seq_lens_q
+            and physical_seqlens(seq_lens_kv, S_kv) == seq_lens_kv
+        ):
+            errors.append(
+                "--ragged-offsets with --seq-lens-q/--seq-lens-kv needs headroom: "
+                "every seq_len equals S_max, so ragged_offset spacing would equal "
+                "seq_lens and a length-from-offsets regression could not be caught "
+                "(use a max seq_len < S_max)"
+            )
+    if ragged and layout != "bshd":
+        errors.append(
+            "--ragged-offsets requires --layout bshd (RFC 0014 packed memory is "
+            "sequence-outermost within a batch, with a single sequence stride)"
+        )
     if errors:
         for e in errors:
             print(f"ERROR: {e}", file=sys.stderr)
@@ -689,8 +849,9 @@ def generate_forward_bundle(
     print(f"  H_q={H_q}, H_kv={H_kv}, GQA ratio={H_q // H_kv}")
     print(
         f"  causal={causal}, window=({window_left},{window_right}), "
-        f"group={variable_seq_lens}, stats={stats}"
+        f"group={has_seq_lens and not ragged}, stats={stats}"
     )
+    print(f"  layout={layout}, ragged={ragged}")
     print(f"  Scale: {attn_scale:.10f}, Seed: {seed}")
 
     rng = torch.Generator().manual_seed(seed)
@@ -718,7 +879,7 @@ def generate_forward_bundle(
     keep_mask = build_mask(S_q, S_kv, causal, window_left, window_right)
 
     try:
-        if variable_seq_lens:
+        if has_seq_lens:
             O, lse = _compute_group_forward(
                 Q_compute,
                 K_compute,
@@ -750,31 +911,74 @@ def generate_forward_bundle(
     assert not torch.isnan(O).any(), "NaN in O"
     assert not torch.isinf(O).any(), "Inf in O"
 
-    # Write raw tensor data as .bin files (one per tensor UID)
-    tensor_list = [
-        ("Q", Q_store, UID_Q),
-        ("K", K_store, UID_K),
-        ("V", V_store, UID_V),
-        ("O", O, UID_O),
-    ]
-    if lse is not None:
-        tensor_list.append(("LSE", lse, UID_LSE))
-    if variable_seq_lens:
-        tensor_list.append(("SeqLenQ", cumulative_seqlens(seq_lens_q), UID_SEQ_LEN_Q))
-        tensor_list.append(
-            ("SeqLenKv", cumulative_seqlens(seq_lens_kv), UID_SEQ_LEN_KV)
-        )
-    if is_fp8:
-        tensor_list.append(("DescaleQ", descale_q, UID_DESCALE_Q))
-        tensor_list.append(("DescaleK", descale_k, UID_DESCALE_K))
-        tensor_list.append(("DescaleV", descale_v, UID_DESCALE_V))
+    # Physical (packed) block rows per batch drive both pack_ragged and the
+    # ragged_offset aux tensors so ragged_offset[B] matches the packed buffer
+    # size. When seq-lens are present they add small trailing padding (capped at
+    # S_max); without seq-lens the blocks are the full dense S_max (uniform).
+    valid_q = seq_lens_q if has_seq_lens else [S_q] * B
+    valid_kv = seq_lens_kv if has_seq_lens else [S_kv] * B
+    physical_q = physical_seqlens(valid_q, S_q) if ragged else None
+    physical_kv = physical_seqlens(valid_kv, S_kv) if ragged else None
+    if ragged and has_seq_lens:
+        # RFC 0014 §4.11.4 sentinel: kernels may leave in-block pad rows
+        # undefined, so comparators skip NaN golden positions.
+        for b in range(B):
+            O[b, :, valid_q[b] : physical_q[b], :] = float("nan")
 
-    for name, tensor, uid in tensor_list:
+    # Write raw tensor data as .bin files (one per tensor UID). Q/K/V/O are
+    # packed (ragged) or reordered to physical BSHD bytes (bshd layout); LSE,
+    # seq-lens, descales, and ragged offsets keep their contiguous layout.
+    primary_inputs = [
+        ("Q", Q_store, UID_Q, physical_q),
+        ("K", K_store, UID_K, physical_kv),
+        ("V", V_store, UID_V, physical_kv),
+        ("O", O, UID_O, physical_q),
+    ]
+    tensor_list = []
+    for name, tensor, uid, physical_lens in primary_inputs:
+        logical_shape = list(tensor.shape)
+        stored = (
+            pack_ragged(tensor, physical_lens)
+            if ragged
+            else to_physical_layout(tensor, layout)
+        )
+        tensor_list.append((name, stored, uid, logical_shape))
+
+    if lse is not None:
+        tensor_list.append(("LSE", lse, UID_LSE, list(lse.shape)))
+    if has_seq_lens:
+        for name, uid, lens in [
+            ("SeqLenQ", UID_SEQ_LEN_Q, seq_lens_q),
+            ("SeqLenKv", UID_SEQ_LEN_KV, seq_lens_kv),
+        ]:
+            seq_len_t = torch.tensor(lens, dtype=torch.int32).reshape(
+                len(lens), 1, 1, 1
+            )
+            tensor_list.append((name, seq_len_t, uid, list(seq_len_t.shape)))
+    if is_fp8:
+        tensor_list.append(
+            ("DescaleQ", descale_q, UID_DESCALE_Q, list(descale_q.shape))
+        )
+        tensor_list.append(
+            ("DescaleK", descale_k, UID_DESCALE_K, list(descale_k.shape))
+        )
+        tensor_list.append(
+            ("DescaleV", descale_v, UID_DESCALE_V, list(descale_v.shape))
+        )
+    if ragged:
+        for name, uid, physical_lens in [
+            ("RaggedOffsetQ", UID_RAGGED_OFFSET_QO, physical_q),
+            ("RaggedOffsetK", UID_RAGGED_OFFSET_KV, physical_kv),
+        ]:
+            offsets = ragged_offsets(physical_lens)
+            tensor_list.append((name, offsets, uid, list(offsets.shape)))
+
+    for name, tensor, uid, logical_shape in tensor_list:
         bin_path = f"{base_filename}.tensor{uid}.bin"
         save_tensor_bin(tensor, bin_path)
         size_kb = os.path.getsize(bin_path) / 1024
         print(
-            f"  {name} (uid={uid}): {list(tensor.shape)} {tensor.dtype} -> {size_kb:.1f} KB"
+            f"  {name} (uid={uid}): {logical_shape} {tensor.dtype} -> {size_kb:.1f} KB"
         )
 
     # Write graph JSON (operation definition: node type, tensor metadata, attributes)
@@ -789,9 +993,11 @@ def generate_forward_bundle(
         causal=causal,
         window_left=window_left,
         window_right=window_right,
-        group_mode=variable_seq_lens,
+        emit_seq_lens=has_seq_lens,
         fp8=is_fp8,
         o_dtype_str=o_json,
+        layout=layout,
+        ragged=ragged,
     )
     json_path = f"{base_filename}.json"
     with open(json_path, "w") as f:
@@ -811,7 +1017,7 @@ def generate_forward_bundle(
         "causal": causal,
         "window_left": window_left,
         "window_right": window_right,
-        "group_mode": variable_seq_lens,
+        "group_mode": has_seq_lens and not ragged,
         "seq_lens_q": seq_lens_q,
         "seq_lens_kv": seq_lens_kv,
         "stats": stats,
@@ -820,6 +1026,11 @@ def generate_forward_bundle(
         "max_val": max_val,
         "scale": attn_scale,
         "precision_note": precision_note,
+        "layout": layout,
+        "ragged": ragged,
+        "ragged_physical_lens": (
+            {"q": physical_q, "kv": physical_kv} if ragged else None
+        ),
     }
     meta_json = build_meta_json(config, torch.__version__)
     meta_path = f"{base_filename}.meta.json"
@@ -830,10 +1041,10 @@ def generate_forward_bundle(
 
     # Optional: cross-check golden output against AITER GPU kernel (dense float only)
     if validate:
-        if variable_seq_lens or is_fp8:
+        if has_seq_lens or is_fp8 or ragged:
             print(
                 "  Validation: SKIPPED (AITER cross-check only covers dense float "
-                "BATCH mode; GROUP/FP8 are validated by the CPU reference)"
+                "BATCH mode)"
             )
         else:
             ok = validate_against_aiter(
@@ -889,11 +1100,25 @@ def main():
         help="Causal mask type. bottom_right maps to AITER mask=2; top_left is "
         "reference-only (no AITER kernel) (default: none)",
     )
-    parser.add_argument(
+    # Two names for the same bound, one per convention, so a value is never read in the
+    # wrong one: --left-bound is the graph's (cuDNN) left_bound, --window-left is
+    # FlashAttention's window_size_left (what --validate passes to AITER).
+    left = parser.add_mutually_exclusive_group()
+    left.add_argument(
+        "--left-bound",
+        type=int,
+        default=None,
+        help="Sliding window left bound in the graph's (cuDNN) convention: L keeps the L "
+        "keys ending at the diagonal, diagonal included. Written to the graph unchanged. "
+        "Positive or -1 (unbounded); 0 is rejected, as hipDNN rejects it",
+    )
+    left.add_argument(
         "--window-left",
         type=int,
         default=-1,
-        help="Sliding window left bound, -1 = unbounded (default: -1)",
+        help="Sliding window left size in FlashAttention's window_size_left convention "
+        "(W keeps the W keys before the diagonal plus the diagonal; written to the graph "
+        "as left_bound = W + 1), -1 = unbounded (default: -1)",
     )
     parser.add_argument(
         "--window-right",
@@ -902,29 +1127,41 @@ def main():
         help="Sliding window right bound, -1 = unbounded (default: -1)",
     )
     parser.add_argument(
-        "--variable-seq-lens",
-        action="store_true",
-        help="Enable GROUP mode (variable per-batch sequence lengths). Requires "
-        "--seq-lens-q and --seq-lens-kv.",
-    )
-    parser.add_argument(
         "--seq-lens-q",
         nargs="+",
         type=int,
         default=None,
-        help="Per-batch query lengths (GROUP mode). Must have B entries.",
+        help="Per-batch query lengths (enables GROUP mode). Must have B entries; "
+        "requires --seq-lens-kv.",
     )
     parser.add_argument(
         "--seq-lens-kv",
         nargs="+",
         type=int,
         default=None,
-        help="Per-batch key/value lengths (GROUP mode). Must have B entries.",
+        help="Per-batch key/value lengths (enables GROUP mode). Must have B "
+        "entries; requires --seq-lens-q.",
     )
     parser.add_argument(
         "--stats",
         action="store_true",
         help="Enable LSE output tensor (uid=4, shape [B, H_q, S_q, 1], dtype FP32)",
+    )
+    parser.add_argument(
+        "--layout",
+        default="bhsd",
+        choices=["bhsd", "bshd"],
+        help="Physical memory layout of Q/K/V/O (stride order only; logical dims "
+        "stay [B,H,S,D]). bshd stores bytes in [B,S,H,D] order (default: bhsd)",
+    )
+    parser.add_argument(
+        "--ragged-offsets",
+        action="store_true",
+        dest="ragged",
+        help="Emit a packed RFC-0014 ragged bundle (BSHD) with a ragged_offset aux "
+        "tensor per primary. Requires --layout bshd. Optional --seq-lens-q/"
+        "--seq-lens-kv add compact per-batch padding (needs max seq_len < S_max); "
+        "without them blocks are full uniform S_max.",
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--min", type=float, default=-1.0, dest="min_val")
@@ -947,6 +1184,12 @@ def main():
     )
     args = parser.parse_args()
 
+    window_left = args.window_left
+    if args.left_bound is not None:
+        if args.left_bound == 0 or args.left_bound < -1:
+            parser.error("--left-bound must be positive or -1 (unbounded)")
+        window_left = window_left_from_left_bound(args.left_bound)
+
     if args.install_aiter:
         install_aiter()
 
@@ -956,9 +1199,8 @@ def main():
         v_dims=args.v_dims,
         dtype=args.dtype,
         causal=args.causal,
-        window_left=args.window_left,
+        window_left=window_left,
         window_right=args.window_right,
-        variable_seq_lens=args.variable_seq_lens,
         seq_lens_q=args.seq_lens_q,
         seq_lens_kv=args.seq_lens_kv,
         stats=args.stats,
@@ -967,6 +1209,8 @@ def main():
         max_val=args.max_val,
         attn_scale=args.attn_scale,
         validate=args.validate,
+        layout=args.layout,
+        ragged=args.ragged,
     )
     print("\nDone.")
 

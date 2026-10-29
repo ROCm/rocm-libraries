@@ -11,9 +11,12 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <hipdnn_data_sdk/utilities/StallGate.hpp>
+#include <memory>
 #include <string>
 #include <thread>
+#include <type_traits>
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
@@ -266,6 +269,19 @@ protected:
         return false;
     }
 
+    // A measured span holds device work, so its elapsed time must not be negative. On
+    // Windows, hipEventElapsedTime can return a negative value for a short span
+    // (https://github.com/ROCm/rocm-systems/issues/12925), so check only that the value
+    // is finite there. Restore the sign check on Windows when the runtime fix ships.
+    static bool isValidElapsed(float elapsedMs)
+    {
+#if defined(_WIN32)
+        return std::isfinite(elapsedMs);
+#else
+        return elapsedMs >= 0.0f;
+#endif
+    }
+
     std::unique_ptr<NiceMock<MockHandle>> _mockHandle = nullptr;
     hipStream_t _testStream = nullptr;
     void* _timingScratch = nullptr;
@@ -288,7 +304,7 @@ TEST_F(TestGpuProfilingControlDescriptor, HappyPathCompletesLifecycle)
     ASSERT_NO_THROW(desc->getAttribute(
         HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, &elementCount, &elapsed));
     EXPECT_EQ(elementCount, 1);
-    EXPECT_GE(elapsed, 0.0f);
+    EXPECT_TRUE(isValidElapsed(elapsed)) << "elapsed=" << elapsed << " ms";
 }
 
 TEST_F(TestGpuProfilingControlDescriptor, RebindingCannotChangeTheTimingContext)
@@ -479,8 +495,8 @@ TEST_F(TestGpuProfilingControlDescriptor, StallGateExcludesHostSubmissionDelay)
     // Reported unconditionally: a timing bound that flakes in CI is not diagnosable
     // without the two numbers that produced it.
     GTEST_LOG_(INFO) << "unstalled=" << unstalledMs << " ms, stalled=" << stalledMs << " ms";
-    EXPECT_GE(unstalledMs, 0.0f) << "unstalled timing returned an invalid elapsed value";
-    EXPECT_GE(stalledMs, 0.0f) << "stalled timing returned an invalid elapsed value";
+    EXPECT_TRUE(isValidElapsed(unstalledMs)) << "unstalledMs=" << unstalledMs << " ms";
+    EXPECT_TRUE(isValidElapsed(stalledMs)) << "stalledMs=" << stalledMs << " ms";
 
 #if !defined(_WIN32)
     // The 20 ms host sleep lands inside the unstalled span on Linux. Windows/PAL
@@ -603,6 +619,85 @@ TEST_F(TestGpuProfilingControlDescriptor, WatchdogDoesNotFireOnNormalRelease)
     }
 }
 
+// A second arm while the first wait is live must decline without touching the signal:
+// rewriting it could release or re-stall the first stream behind its caller's back.
+TEST_F(TestGpuProfilingControlDescriptor, StallGateDeclinesArmWhileArmed)
+{
+    if(!stallGateAvailable())
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    hipdnn_data_sdk::utilities::StallGate gate(std::chrono::milliseconds(5000));
+    ASSERT_TRUE(gate.arm(_testStream));
+    hipEvent_t queued = nullptr;
+    ASSERT_EQ(hipEventCreate(&queued), hipSuccess);
+    const hipdnn_backend::HipEventGuard queuedGuard(queued);
+    ASSERT_EQ(hipEventRecord(queued, _testStream), hipSuccess);
+
+    EXPECT_FALSE(gate.arm(_testStream));
+    EXPECT_EQ(gate.lastError(), hipSuccess);
+    ASSERT_NE(gate.lastOperation(), nullptr);
+    EXPECT_STREQ(gate.lastOperation(), "StallGate::arm(already armed)");
+    EXPECT_EQ(hipEventQuery(queued), hipErrorNotReady)
+        << "a declined arm released the wait that is still armed";
+
+    gate.release();
+    ASSERT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
+    EXPECT_FALSE(gate.timedOut());
+}
+
+// The signal belongs to the gate's device, so a stream on another device must be declined
+// before anything is enqueued. This is a decline, not a HIP failure.
+TEST_F(TestGpuProfilingControlDescriptor, StallGateDeclinesStreamOnAnotherDevice)
+{
+    int deviceCount = 0;
+    ASSERT_EQ(hipGetDeviceCount(&deviceCount), hipSuccess);
+    if(deviceCount < 2)
+    {
+        GTEST_SKIP() << "Needs at least two devices";
+    }
+    if(!stallGateAvailable())
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    int device = 0;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    const int otherDevice = device == 0 ? 1 : 0;
+    hipdnn_data_sdk::utilities::StallGate gate;
+    ASSERT_TRUE(gate.isUsable());
+
+    // Restore the device and own the stream before any assertion can return early, so a
+    // failure here cannot leak the stream or leave later tests on the wrong device.
+    const auto switchStatus = hipSetDevice(otherDevice);
+    hipStream_t rawStream = nullptr;
+    const auto createStatus
+        = switchStatus == hipSuccess ? hipStreamCreate(&rawStream) : switchStatus;
+    const auto restoreStatus = hipSetDevice(device);
+    const std::unique_ptr<std::remove_pointer_t<hipStream_t>, void (*)(hipStream_t)> otherStream(
+        rawStream, [](hipStream_t stream) {
+            if(stream != nullptr)
+            {
+                static_cast<void>(hipStreamDestroy(stream));
+            }
+        });
+    ASSERT_EQ(restoreStatus, hipSuccess);
+    ASSERT_EQ(createStatus, hipSuccess);
+
+    EXPECT_FALSE(gate.arm(otherStream.get()));
+    EXPECT_EQ(gate.lastError(), hipSuccess);
+    ASSERT_NE(gate.lastOperation(), nullptr);
+    EXPECT_STREQ(gate.lastOperation(), "hipStreamGetDevice");
+    // Nothing was enqueued on the foreign stream, so it drains without a release.
+    EXPECT_EQ(hipStreamSynchronize(otherStream.get()), hipSuccess);
+
+    // The decline left the gate reusable on its own device.
+    ASSERT_TRUE(gate.arm(_testStream));
+    gate.release();
+    ASSERT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
+}
+
 // A watchdog release must be visible through the public descriptor, so an external
 // caller can discard the sample instead of averaging a timeout into its results.
 TEST_F(TestGpuProfilingControlDescriptor, TimedOutAttributeIsFalseForAHealthyMeasurement)
@@ -661,7 +756,7 @@ TEST_F(TestGpuProfilingControlDescriptor, FinalizeReleasesUnreleasedStall)
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
         HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, &elementCount, &elapsed));
-    EXPECT_GE(elapsed, 0.0f);
+    EXPECT_TRUE(isValidElapsed(elapsed)) << "elapsed=" << elapsed << " ms";
 }
 
 // finalize() must release an armed gate before any precondition check can throw, not
@@ -870,7 +965,7 @@ TEST_F(TestGpuProfilingControlDescriptor, ResetAfterSuccessfulMeasurementAllowsR
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
         HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, &elementCount, &elapsed));
-    EXPECT_GE(elapsed, 0.0f);
+    EXPECT_TRUE(isValidElapsed(elapsed)) << "elapsed=" << elapsed << " ms";
 }
 
 // The staleness this guards against: STALL_TIMED_OUT_EXT is latched at finalize(), not

@@ -5,6 +5,8 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include "compilation/KpackModuleCache.hpp"
+
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
@@ -18,6 +20,12 @@ const std::vector<IngestorPack>& ingestorPacks()
         {GFX950_ATTENTION_DENSE_ENGINE_NAME,
          &registerGfx950AttentionDenseSymbols,
          &resetGfx950AttentionDenseModuleCache},
+        {"hipkernel:Gfx1151WmmaAttention",
+         &registerGfx1151WmmaAttentionSymbols,
+         &resetGfx1151WmmaAttentionModuleCache},
+        {"hipkernel:Gfx1151WmmaAttentionDecode",
+         &registerGfx1151WmmaAttentionDecodeSymbols,
+         &resetGfx1151WmmaAttentionDecodeModuleCache},
     };
     return s_packs;
 }
@@ -33,6 +41,7 @@ void resetIngestorModuleCachesForTesting()
             pack.resetModuleCache();
         }
     }
+    compilation::SharedKpackArchives::resetForTesting();
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

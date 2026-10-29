@@ -43,8 +43,11 @@ params). Correctness rests entirely on the key.
 | 3 | `attention_gfx950_dense_grid` | gfx950 | `gfx950_dense.py` | dense grid body (`algorithm=attention_dense_grid`, `spec_id=gfx950_dense_grid`, opt-in) |
 | 3 | `attention_gfx950_dense_persist` | gfx950 | `gfx950_dense.py` | dense persistent body (`algorithm=attention_dense_persist`, opt-in) |
 | 3 | `attention_gfx950_dense_persist_widedma` | gfx950 | `gfx950_dense.py` | persistent body + wide DMA, D128 (`algorithm=attention_dense_persist`, opt-in) |
+| 4 | `attention_rdna_wmma_decode` | gfx11-generic, gfx1151, gfx12-generic, gfx1201 | `gfx1151.py` | FP16/BF16 split-KV GQA-packed decode (+ merge kernel); unpinned only when `rdna_attention_use_decode` picks it (`algorithm=wmma_fmha_decode`) |
 | 5 | `attention_gfx942_dense_pipe` | gfx942 | `gfx942_unified.py` | fp16 2D prefill flash |
 | 5 | `attention_gfx950_d256` | gfx950 | `gfx950_unified.py` | bf16 D256 2D prefill |
+| 5 | `attention_rdna_wmma_prefill` | gfx11-generic, gfx1151, gfx12-generic, gfx1201 | `gfx1151.py` | FP16/BF16 multi-wave prefill: dense/ragged/paged, score features, bias and OCP FP8 KV (`algorithm=wmma_fmha_fwd_v2`) |
+| 5 | `attention_{arch}_wmma_{prefill,decode}` | one RDNA arch each | `gfx1151.py` | tuned RDNA WMMA knob spaces (`wmma` / `wmma_decode` paths); opt-in |
 | 5 | `attention_gfx1250_wmma` | gfx1250 | `gfx1250.py` | fp16 WMMA FMHA forward (opt-in only) |
 | 5 | `attention_d256_decode` | gfx942, gfx950 | `generic.py` | bf16 D256 3D decode |
 | 10 | `attention_unified_2d` | all | `generic.py` | generic 2D prefill fallback |
@@ -131,8 +134,8 @@ a pinned request selects.
 Every spec a tuning candidate hands out comes from one canonicalize step,
 the shared `rocke.dispatch.tuning.KnobSpace.canonicalize` (attention's
 subclasses are `DenseSpace` in `dense_rules.py` and `UnifiedSpace` in
-`unified_rules.py`, both through `WavesPerEuSpace` in `waves.py`), whether it
-was swept, sampled, pinned by knobs, or found by id. Knob values are first
+`unified_rules.py`, both through the shared `tuning.WavesPerEuSpace`), whether
+it was swept, sampled, pinned by knobs, or found by id. Knob values are first
 converted to the type their axis declares (`True` / `1` name one
 configuration). Knobs that compile to the default are dropped (default
 values, restated policies, knobs the body does not read, a gfx950 KQ pad the
@@ -163,10 +166,13 @@ template and its DS-read count, each on its own axis), exp2 and PV-loop
 codegen, the tile (`block_m` 128/256, `block_n` 32/64/128; `ragged` follows
 it), the O store width, `num_persistent` (symbolic policies such as
 `gqa_pair` and CU multiples, resolved per problem and per `block_m`),
-`persist_decode`, and `interleave`. `production` sets every applicable knob
-to each legal value one at a time from the default spec, pairing a value with
-its prerequisite when it is illegal alone, and repeats that pass at each
-`block_m` (the query tile changes what every other knob does); `full` walks
+`persist_decode`, `interleave`, and `nonpersist_decode` (the grid body's
+block order; both decode axes take their values from the decode registries in
+`kernels/common/attention_dense_decode.py`). `production` sets every
+applicable knob to each legal value one at a time from the default spec,
+pairing a value with its prerequisite when it is illegal alone, and repeats
+that pass at each `block_m` (the query tile changes what every other knob
+does); `full` walks
 or samples the pruned product. The kernel's
 spec validator is the only legality gate. An explicit value equal to its
 policy, or a knob the body does not read for that spec, re-emits the same IR
@@ -180,8 +186,9 @@ gfx942 dense uses the same walk over `_GFX942_DENSE_AXES`
 knob there alongside `block_m` and `block_n`, and the persistent-only knobs
 are pruned per spec. Its knobs are the K row and
 V row pads, the D64 K group pad, the conflict-free-V store and its swizzle,
-exp2, `iglp` / `iglp_mode`, the PV fence mask, `pv_priority`,
-`pv_loop_order`, the bf16 O store width, and `causal_diag_split`. The
+the persistent and non-persistent block orders, exp2, `iglp` / `iglp_mode`,
+the PV fence mask, `pv_priority`, `pv_loop_order`, the bf16 O store width,
+and `causal_diag_split`. The
 LDS-saving knobs lead as enablers so an over-budget tile can still reach the
 setting that fits. Untunable here: `lds_num_buffers` (only 1 is implemented)
 and `lazy_rescale` (the body never reads it).
@@ -211,13 +218,13 @@ priority-30 tuning catalog). Both dense modules build their candidates with
 `candidate.make_tuning_candidate`; an arch module supplies only its base spec,
 validator, variants and features. The family-neutral machinery (axis
 helpers, the walk and sampler, `config_key` / `tuning_id`, `KnobSpace`,
-`make_tuned_candidate`, the conformance kit) is `rocke.dispatch.tuning` in the
-platform, and names no kernel field; attention keeps only its data and rules:
-`axes.py` (knob axes, production stacks, held-out knobs), `dense_rules.py` /
-`unified_rules.py` (the `KnobSpace` subclasses), `waves.py` (`waves_per_eu`
-as their outer knob: the WPE values and `WavesPerEuSpace`, which sets the
-outer knob and the `_wpe{N}` id stem), and `candidate.py` (the two
-factories).
+`WavesPerEuSpace` -- `waves_per_eu` as an outer knob and its `_wpe{N}` id
+stem, the one kernel field it names --, `make_tuned_candidate`, the
+conformance kit) is `rocke.dispatch.tuning` in the platform; attention keeps
+only its data and rules: `axes.py` (knob axes, production stacks, held-out
+knobs), `dense_rules.py` / `unified_rules.py` (the `KnobSpace` subclasses),
+`waves.py` (the WPE values each sweep level tries), and `candidate.py` (the
+two factories).
 `tests/dispatch/attention/test_tuning_contract.py` runs the conformance kit.
 
 **Adding a tuned family** (any operator, not only attention): follow the
@@ -260,6 +267,22 @@ Follow the `_make_d256_decode_candidate()` pattern in `generic.py`:
 4. **Register** it from that module's `register(route, execution)`. A new arch module
    also needs one line in `__init__.py` to join the assembly loop.
 
+   Attention has two registries; see
+   [Two registries](attention/README.md#two-registries) for which one a
+   candidate goes on. Route-only registration hides a candidate from the
+   sweeps (`registered_attention_combos` / `attention_sweep_space` /
+   `dispatch_attention_all`); `dispatch_attention` and the live benches still
+   see it. Give a sweep-only candidate `opt_in=True` and a `sweep_space` that
+   returns every variant.
+
+   A new operator family (not a new attention candidate) also exposes the three
+   sweep entry points over its registry: `registered_<family>_combos`,
+   `<family>_sweep_space`, and `dispatch_<family>_all`, each short-circuiting on
+   request errors before delegating to `CandidateRegistry.combos` /
+   `sweep_space` / `dispatch_all`. Copy
+   `platform/python/rocke/dispatch/families/norm.py`. This is a
+   [Definition of Done](../../KERNEL_AUTHORING.md#a-new-kernel-family) item.
+
    Point `build` at the real builder if the candidate has one. The unified
    paths do not: they return an `AttentionSpec` naming a *path*, and no builder
    consumes that. A standalone kernel like `attention_gfx1250_wmma` returns its
@@ -269,7 +292,9 @@ Follow the `_make_d256_decode_candidate()` pattern in `generic.py`:
 5. **Add CPU-only dispatch tests** in
    `tests/dispatch/attention/test_<name>_wiring.py`. Cover: registration,
    spec_id, algorithm, priority ordering, rejection gates (wrong arch/dtype/
-   cohort/path), and routing for each target arch. Use `_PinnedArch` context
+   cohort/path), routing for each target arch, and sweep visibility — an
+   opt-in candidate shows up in `registered_attention_combos(req)` but not in
+   `dispatch_attention(req)` under `algorithm="auto"`. Use `_PinnedArch` context
    manager to avoid GPU dependency. Call `candidate.admits(req)`, not
    `candidate._supports(req)` — the latter skips the capability prefilter and is
    no longer a complete verdict, which is what the underscore is there to say.
@@ -446,6 +471,83 @@ is a drop-in via the ranker seam once a scoring signal exists.
 
 See the worked example:
 `benchmarks/gfx942/attention/decode/TUNING_D256.md`
+
+## Attention backward: registry, routing and tuning
+
+`attention_bwd/` is the dispatcher of the SDPA backward families (general,
+dense, unified; design doc `platform/dsl_docs/instances/attention_bwd.md`,
+sections 8 and 9). It is Python-only: the C++ engine has no backward (design
+doc 0.3, the C++-engine waiver).
+
+* **Knob registry** (`tuning_common.py`). Every `AttnBwdSpec` tuning field,
+  every plan runtime value (`RUNTIME_KNOBS`), every prep / convert tuning
+  value (`AUX_KNOBS`) and every split-dQ kernel value (`DQ_KNOBS`) is one
+  `KnobAxis` with `choices[0]` the default, its lever family, the funnel stage
+  that owns it, its kind (`compile` / `runtime`), its sweep level and its
+  numerics class. Values the kernel's emission check (`_not_built`) or the
+  plan refuses are registered as `not_built`; values a device probe has not
+  cleared are `gated`; neither is ever emitted. `backward_tuning_axes(arch,
+  level)` lists the axes and `backward_spec_legality(spec, arch)` is the
+  legality (the family validator, the known-wrong values, then the emission
+  check). Spec fields the plan derives from a runtime value (`static_scale`
+  from `scale_placement`, `lb_interleave` and `lb_mirror` from `lb_order`,
+  `xcd_remap` from `xcd_chunk` with the request's `num_xcds`) are plan-owned
+  family-7 axes and are never enumerated on their own; the sweep's candidate
+  spec mirrors the plan's derivation. `asm_tail_nop` starts at the per-target
+  ISA floor (`ASM_TAIL_NOP_FLOOR`). A new backward knob is a defaulted spec
+  field (or a plan value) plus one axis here;
+  `tests/dispatch/attention_bwd/test_tuning_registry.py` fails if a field has
+  no axis.
+* **Known-wrong values** (`BWD_KNOWN_WRONG_KNOBS`, the analogue of the
+  forward's `KNOWN_WRONG_KNOBS`): per target, knob values that build but are
+  known to be wrong, held out of every sweep level, the legality verdicts,
+  the tuned tables and the candidates. Empty today (no backward value is
+  known wrong); `test_known_wrong_knobs.py` checks that every level excludes
+  an entry.
+* **Dense and unified registries.** `dense_tuning.py` (one `KnobAxis` per
+  dense-only spec field, the shared body's knobs reused from the general
+  registry through `body_knobs`, the tuned dense table `DENSE_BWD_TUNED`) and
+  `unified_tuning.py` (the unified family's axes, `unified_spec_legality`, the
+  tuned page-tile table `UNIFIED_TUNED_PAGE_TILES`, checked at import).
+* **Tuned tables** (`gfx942_tuning.py`, `gfx950_tuning.py`; checks in
+  `tuned_tables.py`). `GENERAL_TUNED_TABLE` and `DENSE_TUNED` hold measured
+  winners (a key enters only when one configuration passed the bench's
+  confirm stage on every measured cell of the key); every entry is checked
+  when the routing is imported (registered values, plannable on
+  representative requests of its key). `GENERAL_PERF_STATUS` /
+  `DENSE_PERF_STATUS` are **empty by policy**: a per-class label derived from
+  a comparison with another backend is a performance claim and stays out of
+  the repository, so every class reads `unverified` and the status is
+  information only (it never declines, routes or tunes). The derivation of
+  the entries is in the design doc, 9.3.
+* **Routing** (`routing.py`). `plan_attention_bwd`: an accepted request goes
+  to the dense family when it is dense-eligible and its key is in the tuned
+  dense table, else to the general family; `route=` forces one for gate runs.
+  `routed_policy()` is the shipped policy plus the tuned tables and the dense
+  pack; it serves every request the predicate accepts and the plan builds.
+  `plan_attention_bwd_unified` is the separate rocKE paged-KV entry.
+* **Candidates and ranker** (`registry.py`, the forward dispatcher's shape on
+  `rocke.dispatch.core`). One `KernelCandidate` per (family, arch) in
+  `ATTENTION_BWD_REGISTRY` (`general` on every declared target, `dense` on
+  gfx942 / gfx950, `unified` on the validated targets), each with a
+  `Capability` and the family's exact predicate; `attention_bwd_ranker` puts
+  a candidate with a tuned entry for the request first (so the dense family
+  wins exactly where `routing.attention_bwd_route` sends the request), then
+  the registered order. Entry points: `dispatch_attention_bwd`,
+  `dispatch_attention_bwd_all`, `launch_attention_bwd`, `run_attention_bwd`.
+
+**Production status: dormant.** Like the forward registry, the backward
+dispatcher is not load-bearing for production yet: no provider calls it (the
+hip-kernel-provider serves rocKE kernels through the C++ engine, which has no
+backward), so hipDNN backward requests go to the provider's other engines.
+Its callers are the CPU tests (`tests/dispatch/attention_bwd/test_registry.py`,
+`test_serving_policy.py`, which plans every accepted case with the shipped
+policy and no override). Follow-up: a provider backward
+engine that calls `run_attention_bwd` (with the C++ port of the backward, or a
+Python-serving path).
+
+`tests/test_attention_bwd_dispatch.py` checks that every accepted case-table
+request gets exactly one family and never the dense one when ineligible.
 
 ## Testing (CPU-only, no GPU)
 

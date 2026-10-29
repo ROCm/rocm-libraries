@@ -9,8 +9,14 @@
 #include <cstdint>
 #include <string>
 
-// Process-wide CLI knobs that hipblaslt-bench forwards into the matmul
-// descriptor without going through the YAML-backed Arguments struct.
+struct Arguments;
+
+// Process-wide CLI knobs that hipblaslt-bench reads directly instead of through
+// the YAML-backed Arguments struct.
+//
+// cotenant_cus is the workgroup count of a busy kernel kept resident on a separate
+// stream during timed runs (0 disables it); cotenant_max_occupancy caps its
+// workgroups per CU through LDS reservation.
 //
 // sm_count_target maps to HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET and
 // streamk_tile_scheduling_mode maps to HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT
@@ -21,8 +27,14 @@
 //
 // uniform_summation_order maps to HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT
 // as {0=off, 1=on} and follows the same convention.
+//
+// verification_failures counts the -v checks of D that failed: one per gemm, per solution,
+// for each of the norm and allclose checks. With verify_strict set, verification_exit_code
+// turns a run that would exit 0 into exit code 2 when any check failed.
 namespace hipblaslt_bench_options
 {
+    int32_t&     cotenant_cus();
+    int32_t&     cotenant_max_occupancy();
     int32_t&     sm_count_target();
     int32_t&     streamk_tile_scheduling_mode();
     std::string& streamk_tile_scheduling_mode_str();
@@ -31,4 +43,8 @@ namespace hipblaslt_bench_options
                                             std::string legacy);
     int32_t&     uniform_summation_order();
     std::string& uniform_summation_order_str();
+    bool&        verify_strict();
+    int64_t&     verification_failures();
+    int          verification_exit_code(int ret);
+    void         apply_strict_verification(Arguments& arg);
 }

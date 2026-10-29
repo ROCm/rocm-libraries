@@ -477,6 +477,14 @@ Processor _rocblas_handle::getActiveArch()
     {
         return Processor::gfx1153;
     }
+    else if(deviceString.find("gfx1170") != std::string::npos)
+    {
+        return Processor::gfx1170;
+    }
+    else if(deviceString.find("gfx1171") != std::string::npos)
+    {
+        return Processor::gfx1171;
+    }
     else if(deviceString.find("gfx1200") != std::string::npos)
     {
         return Processor::gfx1200;
@@ -976,7 +984,9 @@ void _rocblas_handle::init_logging()
         layer_mode = static_cast<rocblas_layer_mode>(strtol(str_layer_mode, 0, 0));
 
         // open log_trace file
-        if(layer_mode & (rocblas_layer_mode_log_trace | rocblas_layer_mode_log_internal))
+        if(layer_mode
+           & (rocblas_layer_mode_log_trace | rocblas_layer_mode_log_internal
+              | rocblas_layer_mode_log_kernel_select))
             log_trace_os = open_log_stream("ROCBLAS_LOG_TRACE_PATH");
 
         // open log_bench file

@@ -10,6 +10,15 @@ import pytest
 from benchmarks.gfx950.gdn import benchmark_kda_decode as bench
 
 
+def test_main_reports_unavailable_device_backend(monkeypatch, capsys):
+    monkeypatch.setattr(bench, "_load_device_backend", lambda: False)
+
+    assert bench.main([]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "requires ROCm torch and a visible HIP device\n"
+
+
 def test_parse_variants_accepts_known_names_and_deduplicates():
     assert bench.parse_variants("fused,precomputed,fused,simple") == (
         "fused",
@@ -34,12 +43,12 @@ def test_production_variants_derive_from_the_dispatched_tile():
         names=("fused", "precomputed", "simple"),
     )
 
-    assert result.candidate.spec_id == "kda_w512"
+    assert result.candidate.spec_id == "kda_nw1_wtk16_bpv8"
     fused = variants["fused"]
     raw = variants["precomputed"]
     simple = variants["simple"]
     tile = (fused.num_warps, fused.warp_threads_k, fused.blocks_per_v_dim)
-    assert tile == (1, 16, 4)
+    assert tile == (1, 16, 8)
     assert (raw.num_warps, raw.warp_threads_k, raw.blocks_per_v_dim) == tile
     assert raw.fuse_gate is False
     assert simple.simple is True

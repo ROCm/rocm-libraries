@@ -28,7 +28,7 @@
 #include <hipdnn_plugin_sdk/PluginHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginLastErrorManager.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <hipdnn_plugin_sdk/version.h>
+#include <hipdnn_plugin_sdk/version_number.h>
 
 struct HipdnnEnginePluginHandle
 {
@@ -403,6 +403,12 @@ public:
     {
         HIPDNN_PLUGIN_LOG_INFO("executeGraph called");
     }
+
+    // Called from CreateExecutionContext once the engine is known to be usable.
+    // Derived classes override this to simulate a plugin that accepts a graph in
+    // GetApplicableEngineIds but then fails to build a plan for it (e.g. no solver,
+    // out of memory).
+    virtual void onCreateExecutionContext() const {}
 
     /// Returns the calling thread's mutable last-call record for this plugin.
     virtual TestPluginLastCallRecord& lastCallRecord() const
@@ -877,6 +883,8 @@ public:
                     HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                     "No engines available - cannot create execution context");
             }
+
+            getInstance()->onCreateExecutionContext();
 
             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(
                 opGraph->ptr, opGraph->size);

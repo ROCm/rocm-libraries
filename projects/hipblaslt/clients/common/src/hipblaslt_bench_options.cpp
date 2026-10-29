@@ -11,6 +11,18 @@
 
 namespace hipblaslt_bench_options
 {
+    int32_t& cotenant_cus()
+    {
+        static int32_t v = 0;
+        return v;
+    }
+
+    int32_t& cotenant_max_occupancy()
+    {
+        static int32_t v = 1;
+        return v;
+    }
+
     int32_t& sm_count_target()
     {
         static int32_t v = 0;
@@ -75,4 +87,24 @@ namespace hipblaslt_bench_options
         static std::string v;
         return v;
     }
+
+    bool& verify_strict()
+    {
+        static bool v = false;
+        return v;
+    }
+
+    int64_t& verification_failures()
+    {
+        static int64_t v = 0;
+        return v;
+    }
+
+    int verification_exit_code(int ret)
+    {
+        if(ret != 0 || !verify_strict() || verification_failures() == 0)
+            return ret;
+        return 2;
+    }
+
 }

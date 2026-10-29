@@ -133,16 +133,33 @@ static rocke_value_t* rocke_conv_d_addr(rocke_ir_builder_t* b,
     return off;
 }
 
-/* Pointwise D-address closure: flat offset = m * kpg + n, always valid.
+/* Pointwise D-address closure: flat offset = m * K + k_out, always valid.
  * Python: def d_addr(b_, m_val, n_val):
+ *             if grouped:
+ *                 k_out = b_.add(k_out_group_base, n_val)
+ *                 return b_.add(b_.mul(m_val, p_K), k_out), _always_valid_d
  *             return b_.add(b_.mul(m_val, p_kpg), n_val), _always_valid_d
  * where _always_valid_d is ONE const_i32(1) hoisted before the K-loop; every
  * store reuses it, so a fresh constant per call would shift every SSA id. */
 typedef struct rocke_conv_d_addr_pw_ctx
 {
-    rocke_value_t* c_K; /* p_kpg */
+    rocke_value_t* pitch; /* p_kpg ungrouped (== K), p_K grouped */
+    rocke_value_t* k_out_group_base; /* g*kpg, NULL when ungrouped */
     rocke_value_t* valid; /* the hoisted _always_valid_d */
 } rocke_conv_d_addr_pw_ctx_t;
+
+/* The pointwise D offset: m * pitch + (k_out_group_base + n) grouped, else
+ * m * pitch + n. Python emits the group add before the row multiply. */
+static rocke_value_t* rocke_conv_d_off_pointwise(rocke_ir_builder_t* b,
+                                                 rocke_value_t* m_val,
+                                                 rocke_value_t* n_val,
+                                                 rocke_value_t* pitch,
+                                                 rocke_value_t* k_out_group_base)
+{
+    rocke_value_t* k_out
+        = (k_out_group_base != NULL) ? rocke_b_add(b, k_out_group_base, n_val) : n_val;
+    return rocke_b_add(b, rocke_b_mul(b, m_val, pitch), k_out);
+}
 
 static rocke_value_t* rocke_conv_d_addr_pointwise(rocke_ir_builder_t* b,
                                                   rocke_value_t* m_global,
@@ -151,7 +168,8 @@ static rocke_value_t* rocke_conv_d_addr_pointwise(rocke_ir_builder_t* b,
                                                   void* user)
 {
     const rocke_conv_d_addr_pw_ctx_t* pw = (const rocke_conv_d_addr_pw_ctx_t*)user;
-    rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, m_global, pw->c_K), n_global);
+    rocke_value_t* off
+        = rocke_conv_d_off_pointwise(b, m_global, n_global, pw->pitch, pw->k_out_group_base);
     if(out_valid != NULL)
         *out_valid = pw->valid;
     return off;
@@ -170,7 +188,7 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
                                      int num_accs,
                                      const rocke_warp_grid_t* grid,
                                      rocke_value_t* d_rsrc,
-                                     rocke_value_t* ir_c_K_pw,
+                                     rocke_value_t* ir_d_pitch_pw,
                                      rocke_value_t* always_valid_d,
                                      const rocke_tensor_descriptor_t* D_desc,
                                      rocke_value_t* k_out_group_base,
@@ -178,6 +196,11 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
                                      rocke_value_t* bound_n)
 {
     const rocke_conv_problem_t* p = &spec->problem;
+    /* Under group_merge the N coord *is* the merged group index and every one
+     * of its Gm values is a real output at a consecutive NHWC channel -- there
+     * is no diagonal to gather here, because the mask was spent on the B load.
+     * The caller passes the merged group base and N bound; the store itself is
+     * untouched and dense. */
     rocke_direct_epilogue_t epi;
 
     epi.atom = rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
@@ -192,7 +215,8 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
     if(rocke_conv_problem_is_pointwise(p))
     {
         rocke_conv_d_addr_pw_ctx_t pw;
-        pw.c_K = ir_c_K_pw;
+        pw.pitch = ir_d_pitch_pw;
+        pw.k_out_group_base = k_out_group_base;
         pw.valid = always_valid_d;
         rocke_direct_epilogue_store(b,
                                     &epi,
@@ -244,13 +268,15 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                           rocke_value_t* block_n_off,
                                           rocke_value_t* d_rsrc,
                                           rocke_value_t* c0,
-                                          rocke_value_t* ir_c_K_pw,
+                                          rocke_value_t* ir_d_pitch_pw,
                                           const rocke_tensor_descriptor_t* D_desc,
                                           rocke_value_t* k_out_group_base,
                                           rocke_value_t* bound_m,
                                           rocke_value_t* bound_n)
 {
     const rocke_conv_problem_t* p = &spec->problem;
+    /* Under group_merge the caller passes the merged N bound (Gm) as bound_n
+     * and the merged group's k_out base, as for the other epilogues. */
     int mfmas_m = rocke_implicit_gemm_conv_spec_mfmas_per_warp_m(spec);
     int mfmas_n = rocke_implicit_gemm_conv_spec_mfmas_per_warp_n(spec);
     const char* dtype_d = spec->dtype_d;
@@ -273,8 +299,8 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
     rocke_value_t* c_M = bound_m;
     rocke_value_t* c_N = bound_n;
     bool _is_pointwise = rocke_conv_problem_is_pointwise(p);
-    /* Pointwise: no descriptor; the flat D offset uses the kpg kernarg. */
-    rocke_value_t* c_K_wmma = _is_pointwise ? ir_c_K_pw : NULL;
+    /* Pointwise: no descriptor; the flat D offset uses the D row pitch. */
+    rocke_value_t* c_K_wmma = _is_pointwise ? ir_d_pitch_pw : NULL;
     /* c_map = op.c_layout() */
     const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
 
@@ -341,11 +367,12 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                 v_f32 = rocke_b_vec_extract(b, acc, i);
 
                 /* d_off_elems, _ = D_desc.offset(b, m=m_val, k_out=k_out)
-                 * Pointwise fast path: flat offset = m * kpg + n.
+                 * Pointwise fast path: flat offset = m * pitch + k_out.
                  * Grouped conv: k_out = k_out_group_base + n_val (else n_val). */
                 if(_is_pointwise)
                 {
-                    d_off_elems = rocke_b_add(b, rocke_b_mul(b, m_val, c_K_wmma), n_val);
+                    d_off_elems
+                        = rocke_conv_d_off_pointwise(b, m_val, n_val, c_K_wmma, k_out_group_base);
                 }
                 else
                 {
@@ -396,7 +423,7 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        int num_accs,
                                        const rocke_warp_grid_t* grid,
                                        rocke_value_t* d_rsrc,
-                                       rocke_value_t* ir_c_K_pw,
+                                       rocke_value_t* ir_d_pitch_pw,
                                        rocke_value_t* always_valid_d,
                                        const rocke_mmaop_t* op,
                                        const rocke_tensor_descriptor_t* D_desc,
@@ -405,6 +432,13 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        rocke_value_t* bound_n)
 {
     const rocke_conv_problem_t* p = &spec->problem;
+    /* This is the epilogue group_merge actually ships on (the validator rejects
+     * `default` once the merged store vector exceeds 1). Merging is a strictly
+     * better fit for it than CK's arrangement: because the diagonal mask was
+     * spent on the B load, all Gm N-lanes hold real outputs at consecutive
+     * stride-1 output channels, so the LDS-staged wide store is fully dense. */
+    rocke_conv_problem_t merged;
+    rocke_implicit_gemm_conv_spec_merged_problem(spec, &merged);
     int max_store_vec;
     if(spec->has_vector_size_c)
     {
@@ -413,8 +447,15 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
     else
     {
         /* Mirror Python default_vector_sizes(cpg, kpg, dtype_d)[2] (depends only on kpg):
-         * largest power-of-two dividing kpg (fp32: max 4, otherwise max 8). */
-        int kpg = rocke_conv_problem_kpg(p);
+         * largest power-of-two dividing kpg (fp32: max 4, otherwise max 8).
+         *
+         * The merged problem here is the store-side half of the win: merged kpg
+         * is Gm, so this goes from 1 to min(Gm, 8). It must agree with the
+         * identical computation in the validator (the build glue's default
+         * epilogue gate), which is why both read the merged problem -- if they
+         * diverge the validator admits a spec whose epilogue it would have
+         * rejected. */
+        int kpg = rocke_conv_problem_kpg(&merged);
         bool is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
         if(is_fp32_d)
             max_store_vec = (kpg % 4 == 0) ? 4 : (kpg % 2 == 0) ? 2 : 1;
@@ -444,7 +485,8 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
     if(rocke_conv_problem_is_pointwise(p))
     {
         rocke_conv_d_addr_pw_ctx_t pw;
-        pw.c_K = ir_c_K_pw;
+        pw.pitch = ir_d_pitch_pw;
+        pw.k_out_group_base = k_out_group_base;
         pw.valid = always_valid_d;
         rocke_cshuffle_epilogue_store(b,
                                       &epi,
@@ -501,6 +543,9 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                    ctx->extra_context,
                                    ctx->ov->user);
     }
+    /* The store's N bound is Python's c_N_bound: kpg, or kpg*Gm == Gm under
+     * merge (the true kpg, 1 on depthwise, would clamp away Gm-1 of every Gm
+     * real outputs). */
     /* elif spec.epilogue == "cshuffle": */
     else if(spec->epilogue != NULL && strcmp(spec->epilogue, "cshuffle") == 0)
     {
@@ -510,13 +555,13 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                           num_accs,
                                           &ctx->grid,
                                           ctx->d_rsrc,
-                                          ctx->ir_c_K_pw,
+                                          ctx->ir_d_pitch_pw,
                                           ctx->ir_always_valid_d,
                                           ctx->op,
                                           ctx->D_desc,
                                           ctx->d_k_out_group_base,
                                           ctx->p_M,
-                                          ctx->p_kpg);
+                                          ctx->merged ? ctx->c_gm : ctx->p_kpg);
     }
     /* elif op.family == "wmma": */
     else if(ctx->op != NULL && ctx->op->family != NULL && strcmp(ctx->op->family, "wmma") == 0)
@@ -533,11 +578,11 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                              ctx->block_n_off_v,
                                              ctx->d_rsrc,
                                              ctx->c0,
-                                             ctx->ir_c_K_pw,
+                                             ctx->ir_d_pitch_pw,
                                              ctx->D_desc,
                                              ctx->d_k_out_group_base,
                                              ctx->p_M,
-                                             ctx->p_kpg);
+                                             ctx->merged ? ctx->c_gm : ctx->p_kpg);
     }
     /* else: */
     else
@@ -548,11 +593,11 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                         num_accs,
                                         &ctx->grid,
                                         ctx->d_rsrc,
-                                        ctx->ir_c_K_pw,
+                                        ctx->ir_d_pitch_pw,
                                         ctx->ir_always_valid_d,
                                         ctx->D_desc,
                                         ctx->d_k_out_group_base,
                                         ctx->p_M,
-                                        ctx->p_kpg);
+                                        ctx->merged ? ctx->c_gm : ctx->p_kpg);
     }
 }

@@ -294,6 +294,16 @@ typedef struct _rocsparse_spilu0_descr* rocsparse_spilu0_descr;
  */
 typedef struct _rocsparse_spildlt0_descr* rocsparse_spildlt0_descr;
 
+#if defined(ROCSPARSE_WITH_SPSORT)
+/*! \ingroup types_module
+ * \brief \p rocsparse_spsort_descr is a structure holding the rocSPARSE spsort
+ * descriptor data. It must be initialized using
+ * the rocsparse_spsort_descr_create() routine. It should be destroyed at the
+ * end using rocsparse_spsort_descr_destroy().
+ */
+typedef struct _rocsparse_spsort_descr* rocsparse_spsort_descr;
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -964,7 +974,11 @@ typedef enum rocsparse_spmm_alg_
 typedef enum rocsparse_sddmm_alg_
 {
     rocsparse_sddmm_alg_default = 0, /**< Default sddmm algorithm for the given format. */
-    rocsparse_sddmm_alg_dense   = 1 /**< Sddmm algorithm using dense blas operations. */
+    rocsparse_sddmm_alg_dense
+    [[deprecated("rocsparse_sddmm_alg_dense is deprecated and will be removed "
+                 "in a future release. Use rocsparse_sddmm_alg_default "
+                 "instead.")]]
+    = 1 /**< Sddmm algorithm using dense blas operations. \deprecated This algorithm will be removed in a future release. Use \ref rocsparse_sddmm_alg_default instead. */
 } rocsparse_sddmm_alg;
 
 /*! \ingroup types_module
@@ -1084,10 +1098,8 @@ typedef enum rocsparse_sptrsv_input_
     rocsparse_sptrsv_input_compute_datatype, /**< Select compute datatype \ref rocsparse_datatype for input on a SpTRSV descriptor. */
     rocsparse_sptrsv_input_scalar_alpha, /**< Select scalar alpha pointer for input on a SpTRSV descriptor. */
     rocsparse_sptrsv_input_analysis_policy, /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSV descriptor. */
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
     rocsparse_sptrsv_input_solve_mode, /**< Select the solve mode \ref rocsparse_solve_mode for input on a SpTRSV descriptor. */
     rocsparse_sptrsv_input_diagonal_modifier /**< Select the diagonal modifier \ref rocsparse_diagonal_modifier for input on a SpTRSV descriptor. */
-#endif
 } rocsparse_sptrsv_input;
 
 /*! \ingroup types_module
@@ -1142,10 +1154,8 @@ typedef enum rocsparse_sptrsm_input_
     rocsparse_sptrsm_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on a SpTRSM descriptor. */
     rocsparse_sptrsm_input_scalar_alpha, /**< Select scalar alpha pointer for input on a SpTRSM descriptor. This datatype is used as the compute type. */
     rocsparse_sptrsm_input_analysis_policy, /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSM descriptor. */
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
     rocsparse_sptrsm_input_solve_mode, /**< Select the solve mode \ref rocsparse_solve_mode for input on a SpTRSM descriptor. */
     rocsparse_sptrsm_input_diagonal_modifier /**< Select the diagonal modifier \ref rocsparse_diagonal_modifier for input on a SpTRSM descriptor. */
-#endif
 } rocsparse_sptrsm_input;
 
 /*! \ingroup types_module
@@ -1157,6 +1167,11 @@ typedef enum rocsparse_sptrsm_input_
 typedef enum rocsparse_sptrsm_output_
 {
     rocsparse_sptrsm_output_zero_pivot_position /**< Get zero pivot \p int64_t based position for output from the SpTRSM descriptor and synchronously return zero_pivot. */
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+    ,
+    rocsparse_sptrsm_output_singularity, /**< Get the type of \ref rocsparse_singularity detected during SpTRSM calculation for output from the SpTRSM descriptor. */
+    rocsparse_sptrsm_output_singularity_position /**< Get the singularity \p int64_t based position for output from the SpTRSM descriptor. */
+#endif
 } rocsparse_sptrsm_output;
 
 /*! \ingroup types_module
@@ -1385,6 +1400,46 @@ typedef enum rocsparse_spgeam_alg_
 {
     rocsparse_spgeam_alg_default = 0 /**< Default SpGEAM algorithm for the given format. */
 } rocsparse_spgeam_alg;
+
+#if defined(ROCSPARSE_WITH_SPSORT)
+/*! \ingroup types_module
+ *  \brief List of SpSort algorithms.
+ *
+ *  \details
+ *  This is a list of supported \ref rocsparse_spsort_alg types that are used to sort a sparse
+ *  matrix.
+ */
+typedef enum rocsparse_spsort_alg_
+{
+    rocsparse_spsort_alg_default    = 0, /**< Default SpSort algorithm (radix sort). */
+    rocsparse_spsort_alg_radix_sort = 1, /**< Radix sort based SpSort algorithm. */
+} rocsparse_spsort_alg;
+
+/*! \ingroup types_module
+  *  \brief List of inputs to the SpSort descriptor.
+  *
+  *  \details
+  *  This is a list of possible inputs to the SpSort descriptor.
+  */
+typedef enum rocsparse_spsort_input_
+{
+    rocsparse_spsort_input_alg, /**< Select algorithm \ref rocsparse_spsort_alg for input on a SpSort descriptor. */
+    rocsparse_spsort_input_direction, /**< Select sorting direction \ref rocsparse_direction for input on a SpSort descriptor. Only used by the COO format. */
+} rocsparse_spsort_input;
+
+/*! \ingroup types_module
+  *  \brief List of SpSort stages.
+  *
+  *  \details
+  *  This is a list of possible stages during SpSort computation. The stages must be executed
+  *  in the order \ref rocsparse_spsort_stage_analysis, then \ref rocsparse_spsort_stage_compute.
+  */
+typedef enum rocsparse_spsort_stage_
+{
+    rocsparse_spsort_stage_analysis, /**< Analysis of the data. */
+    rocsparse_spsort_stage_compute /**< Performs the actual SpSort computation. */
+} rocsparse_spsort_stage;
+#endif
 
 /*! \ingroup types_module
  *  \brief List of gpsv algorithms.

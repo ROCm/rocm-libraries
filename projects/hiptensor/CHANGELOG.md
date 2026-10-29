@@ -2,7 +2,23 @@
 
 Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hiptensor](https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html).
 
-## hipTensor 2.5.0
+## hipTensor 2.6.0 for ROCm 10.3
+
+### Added
+* Added support for the following new GPU targets:
+  * gfx11-7: gfx1170, gfx1171.
+* Added fp64 support to hiptensorPermute for ranks 2-6.
+* Added bf16 support to hiptensorPermute for ranks 2-6, with a bf16 or fp32 scalar type.
+* Added bf16 support to `hiptensorElementwiseTrinaryExecute` for ranks 2-6, with a bf16 or fp32 scalar type, and fp32 scalar support for fp16 tensors. Trinary now accepts the same data type combinations as `hiptensorElementwiseBinaryExecute`.
+
+### Changed
+* Changed `hiptensorPermute` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when the output tensor's data type differs from the input tensor's. Previously the mismatch passed validation and the call failed with `HIPTENSOR_STATUS_INTERNAL_ERROR` because no kernel matched.
+* Changed `hiptensorElementwiseTrinaryExecute` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when the data type of D differs from that of C, matching `hiptensorElementwiseBinaryExecute`. Previously the mismatch failed later with `HIPTENSOR_STATUS_INTERNAL_ERROR`.
+
+### Resolved issues
+* Fixed `hiptensorElementwiseBinaryExecute` and `hiptensorReduce` treating the alpha, beta, and gamma scalars as 0 when the compute descriptor is `HIPTENSOR_COMPUTE_DESC_16BF`.
+
+## hipTensor 2.5.0 for ROCm 10.2
 
 ### Added
 * Added broadcast support to the elementwise operations. An input tensor of `hiptensorCreatePermutation`, `hiptensorCreateElementwiseBinary`, and `hiptensorCreateElementwiseTrinary` may now carry a subset of the output tensor's modes, in which case it's broadcast along the modes it lacks. For example, `A` with modes `{n}` can be combined with `B`, `C`, and `D` with modes `{m,n}`.
@@ -10,6 +26,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 
 ### Changed
 * Changed `hiptensorCreatePermutation`, `hiptensorCreateElementwiseBinary`, and `hiptensorCreateElementwiseTrinary` to return `HIPTENSOR_STATUS_INVALID_VALUE` when a mode shared by an input tensor and the output tensor has a different extent in each, and `HIPTENSOR_STATUS_NOT_SUPPORTED` when a mode is repeated within one tensor. An input tensor that carries a mode the output tensor doesn't carry is still rejected with `HIPTENSOR_STATUS_NOT_SUPPORTED`, since that would have to be reduced away rather than broadcast.
+* Changed `libhiptensor.so` to export symbols with hidden visibility by default, so only the documented public C API is exposed. Internal C++ classes and Composable Kernel template instantiations that were previously visible are now local to the library. Code that relied on those undocumented internal symbols will no longer find them.
 
 ### Resolved issues
 * Fixed `hiptensorPermute` and the element-wise binary/trinary execute paths ignoring user-supplied output tensor strides, which caused the output to always be written contiguously regardless of the strides set on the output descriptor.

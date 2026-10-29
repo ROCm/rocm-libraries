@@ -5,6 +5,8 @@ if(NOT HIPSPARSE_ENABLE_HOST)
     find_package(hipsparse REQUIRED)
 endif()
 
+include(hipsparse_gtest)
+
 add_subdirectory(common)
 
 if(HIPSPARSE_ENABLE_SAMPLES)
