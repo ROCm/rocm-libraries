@@ -96,9 +96,23 @@ if(SUPPORT_MPI)
   list(APPEND SOURCE ${UTILS_MPI_SOURCES})
 endif()
 
+# Compile the host sources once, so that the library and the unit tests can
+# both link the same object files
+add_library(rocalution_objects OBJECT ${SOURCE})
+target_include_directories(rocalution_objects PUBLIC $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>)
+if(BUILD_SHARED_LIBS)
+  set_target_properties(rocalution_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  target_compile_definitions(rocalution_objects PRIVATE rocalution_EXPORTS)
+endif()
+
 # Create rocALUTION host library
-add_library(rocalution ${SOURCE} ${PUBLIC_HEADERS})
+add_library(rocalution ${PUBLIC_HEADERS})
 add_library(roc::rocalution ALIAS rocalution)
+set_target_properties(rocalution PROPERTIES LINKER_LANGUAGE CXX)
+
+# Setting LINK_LIBRARIES directly keeps the object library out of the
+# exported interface of a static build
+set_property(TARGET rocalution APPEND PROPERTY LINK_LIBRARIES rocalution_objects)
 
 # Add Windows version resource to library
 if(WIN32 AND BUILD_SHARED_LIBS)
@@ -118,29 +132,33 @@ if(SUPPORT_OMP)
     # to the OpenMP::OpenMP_CXX target when using LLVM Clang with GNU-compatible
     # front-end (i.e., `clang++`, not `clang-cl`) targeting the MSVC ABI.
     # Work around that issue by manually linking to libomp.
+    target_link_libraries(rocalution_objects PUBLIC OpenMP::OpenMP_CXX libomp)
     target_link_libraries(rocalution PRIVATE OpenMP::OpenMP_CXX libomp)
   else()
+    target_link_libraries(rocalution_objects PUBLIC OpenMP::OpenMP_CXX)
     target_link_libraries(rocalution PRIVATE OpenMP::OpenMP_CXX)
   endif()
   list(APPEND package_depends PACKAGE OpenMP)
 endif()
 
 if(SUPPORT_MPI)
+  target_link_libraries(rocalution_objects PUBLIC MPI::MPI_CXX)
   target_link_libraries(rocalution PUBLIC MPI::MPI_CXX)
   list(APPEND static_depends PACKAGE MPI)
 endif()
 
-# Target compile definitions
+# Target compile definitions. They are PUBLIC on the object library because
+# code that includes the internal headers must see the same definitions.
 if(SUPPORT_MPI)
-  target_compile_definitions(rocalution PRIVATE SUPPORT_MULTINODE)
+  target_compile_definitions(rocalution_objects PUBLIC SUPPORT_MULTINODE)
 endif()
 
 if(BUILD_SUPPORT_COMPLEX)
-  target_compile_definitions(rocalution PRIVATE SUPPORT_COMPLEX)
+  target_compile_definitions(rocalution_objects PUBLIC SUPPORT_COMPLEX)
 endif()
 
 if(SUPPORT_HIP)
-  target_compile_definitions(rocalution PRIVATE SUPPORT_HIP)
+  target_compile_definitions(rocalution_objects PUBLIC SUPPORT_HIP)
   list(APPEND package_depends PACKAGE HIP)
 endif()
 
@@ -148,7 +166,7 @@ endif()
 rocm_set_soversion(rocalution "1.0")
 set_target_properties(rocalution PROPERTIES DEBUG_POSTFIX "-d")
 if(WIN32)
-  set_target_properties(rocalution PROPERTIES CXX_VISIBILITY_PRESET "hidden" VISIBILITY_INLINES_HIDDEN ON)
+  set_target_properties(rocalution_objects PROPERTIES CXX_VISIBILITY_PRESET "hidden" VISIBILITY_INLINES_HIDDEN ON)
 endif()
 
 # Generate export header
@@ -162,10 +180,10 @@ endif()
 
 # Set compile options
 list(APPEND CMAKE_HOST_FLAGS "-O3")
-target_compile_options(rocalution PRIVATE ${CMAKE_HOST_FLAGS})
+target_compile_options(rocalution_objects PRIVATE ${CMAKE_HOST_FLAGS})
 
 if(BUILD_CODE_COVERAGE)
-  target_compile_options(rocalution PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  target_compile_options(rocalution_objects PRIVATE -fprofile-instr-generate -fcoverage-mapping)
   target_link_options(rocalution PRIVATE -u__llvm_profile_runtime)
   target_link_libraries(rocalution PRIVATE ${ROCALUTION_PROFILE_RUNTIME})
 endif()
@@ -250,6 +268,7 @@ if(SUPPORT_HIP)
   list(APPEND static_depends PACKAGE rocprim)
   list(APPEND static_depends PACKAGE rocrand)
 
+  target_link_libraries(rocalution_objects PUBLIC hip::host)
   target_link_libraries(rocalution PRIVATE rocalution_hip hip::host)
 endif()
 
