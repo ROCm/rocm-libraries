@@ -3,14 +3,18 @@
 
 # NOTE: FrontendGraphEngineRunner.cpp, ReferenceExecutorPool.cpp and
 # HarnessDependencies.cpp are deliberately absent. They are the only places that
-# touch the frontend Graph, a hipdnnHandle_t, or a real reference executor, so
-# leaving them out makes "these unit tests never reach an engine or a device" a
-# link-time guarantee rather than a convention. GoldenDataRegistration.cpp is absent
-# for the same reason: it registers gtest tests and reaches the shared reference
-# executors. Its decisions live in GoldenDataPlan.cpp and GoldenOutputProbe.cpp,
-# which are linked and tested here.
+# touch the frontend Graph or a hipdnnHandle_t, or hand the harness a pooled reference
+# executor. CpuReferenceGraphExecutorAdapter.cpp and ReferenceGraphExecutorFactory.cpp
+# ARE linked: the direct executor tests construct reference executors themselves.
+# Leaving the pool, HarnessDependencies.cpp and GoldenDataRegistration.cpp out keeps
+# "harness code paths cannot get a pooled executor" a link-time guarantee rather than
+# a convention. GoldenDataRegistration.cpp is absent for the same reason: it registers
+# gtest tests and reaches the shared reference executors. Its decisions live in
+# GoldenDataPlan.cpp and GoldenOutputProbe.cpp, which are linked and tested here.
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
+    ../src/harness/CpuReferenceGraphExecutorAdapter.cpp
+    ../src/harness/ReferenceGraphExecutorFactory.cpp
     ../src/harness/bundle/GraphSession.cpp
     ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
     ../src/harness/bundle/OutputComparison.cpp

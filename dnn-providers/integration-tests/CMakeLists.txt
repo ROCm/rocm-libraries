@@ -223,7 +223,9 @@ set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 
 add_executable(${INTEGRATION_TESTS_EXE}
     src/main.cpp
+    src/harness/CpuReferenceGraphExecutorAdapter.cpp
     src/harness/ReferenceExecutorPool.cpp
+    src/harness/ReferenceGraphExecutorFactory.cpp
     src/harness/bundle/FrontendGraphEngineRunner.cpp
     src/harness/bundle/GraphSession.cpp
     src/harness/bundle/HarnessDependencies.cpp
@@ -255,6 +257,7 @@ set(GOLDEN_DATA_TESTS_EXE hipdnn_golden_data_tests)
 
 add_executable(${GOLDEN_DATA_TESTS_EXE}
     src/golden_data_main.cpp
+    src/harness/CpuReferenceGraphExecutorAdapter.cpp
     src/harness/ReferenceExecutorPool.cpp
     src/harness/bundle/GraphSession.cpp
     src/harness/bundle/OutputComparison.cpp
