@@ -914,9 +914,6 @@ class KernelComponentFactoryGfx12(KernelComponentFactoryBase):
             return None
 
 
-# Head dims qr_tdm takes over on gfx125 split-kv. Every one of them measures
-# faster than qr, by 1.3x to 4.9x depending on grid and seqlen_k -- qr
-# saturates as seqlen_k grows while this path keeps scaling.
 QR_TDM_SPLITKV_HDIMS = [32, 64, 128, 256]
 
 
