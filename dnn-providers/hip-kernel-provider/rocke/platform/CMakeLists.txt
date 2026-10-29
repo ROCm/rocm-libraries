@@ -772,6 +772,8 @@ if(ROCKE_INSTALL_TESTS)
 
       # Each installed architecture retains its own GPU CTest result, which
       # covers every variant installed for it, so its timeout scales with them.
+      # library/tests/reference_common/docs/gpu-reference-workflow.md records
+      # this trade-off and when to register one CTest per variant instead.
       foreach(_arch IN LISTS _ROCKE_${_operation_upper}_INSTALLED_ARCHITECTURES)
         list(LENGTH _ROCKE_${_operation_upper}_${_arch}_INSTALLED_VARIANTS _variant_count)
         math(EXPR _timeout "300 * ${_variant_count}")

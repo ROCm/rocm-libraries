@@ -581,8 +581,29 @@ selects both by pattern for a lowercase operation name and a `gfx` processor, so
 it needs no edit; verify that the real provider selector includes the new
 entries. An architecture's entry runs every variant installed for it, with test
 ids `<arch>-<variant>-<case>` and a timeout of five minutes per installed
-variant, so adding cases or another variant to a published architecture uses
-its existing entry. Preserve explicit architecture selection and check that
+variant, so adding cases to a published architecture uses its existing entry.
+
+One entry per architecture is a trade-off. It keeps the CTest names, and the
+name shape that the provider category patterns match, as they were before
+variants existed, and pytest still reports each result under its
+`<arch>-<variant>-<case>` id. With one variant per architecture it costs
+nothing. With two or more, it gives up isolation at the CTest level: one
+variant's failure fails the whole entry; a variant whose kernel hangs reaches
+the worker's five-minute request timeout case after case, so it can use the
+entry's whole timeout and leave the other variants unrun; and a CTest exclusion
+or category can select only the whole architecture. The scaled timeout only
+keeps an entry that runs several variants from timing out before they finish.
+So an architecture's entry runs at most two variants of an operation. Before an
+architecture publishes a third, or as soon as one variant needs its own
+exclusion or category, give each installed variant its own
+`rocke_<operation>_gpu_<arch>_<variant>_pytest` entry that passes
+`--rocke-reference-variant <variant>`, with a timeout longer than the request
+timeout so that a hang still reports which worker hung and its log. The provider
+category patterns do not match that name, so the change that registers these
+entries also extends them and updates the `ctest -R` selectors in these
+documents. After it, a new variant needs no CMake or category edit.
+
+Preserve explicit architecture selection and check that
 expected GPU cases did not skip; a passing empty selection proves nothing.
 When an architecture is selected but publishes no variant, the suite fails
 rather than passing empty.
@@ -639,7 +660,7 @@ do not overlap. These still do:
 
 | Pull requests | What overlaps | Resolution |
 |---|---|---|
-| Two on different variants | Disjoint files, except where both add to a shared file: a replay ABI in the operation's `worker.py`, checks in its contract tests, or text in its guide | Merge in either order and keep both additions |
+| Two on different variants | Disjoint files, except where both add to a shared file: a replay ABI in the operation's `worker.py`, checks in its contract tests, or text in its guide | Merge in either order and keep both additions. If both publish on one architecture that already publishes a variant, the one merged second publishes a third, which first needs [one GPU CTest per variant](#enroll-provider-test-selection) |
 | Two on the same variant | Its lock and DVC pointer conflict, as intended | Rebase onto the one merged first, keep the union of both cohorts, and requalify. Configuration and host tests reject a lock, pointer, or `CASES` taken from different qualifications; review must check that neither pull request's cases were dropped |
 | One editing the shared WMMA cohort | Every published WMMA variant's lock, whose cohort digest no longer matches | Requalify each, or first [give a processor its own tuple](quickstart.md#i-want-to-change-a-shared-cohort-on-one-processor) to decouple it |
 | One adding an architecture | That operation's `architectures/registry.json`, its `set(ROCKE_PUBLISHED_<OPERATION>_ARCHITECTURES ...)` line, and the processor lists in its own contract tests | Rebase and keep both entries |

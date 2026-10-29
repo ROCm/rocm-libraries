@@ -232,12 +232,18 @@ Then:
    passing `--variant` and `--rocke-reference-variant`. Commit the reviewed
    lock as `<operation>_reference/architectures/<arch>/<variant>/baseline_lock.json`
    with its pointer, `reference_bundles/<operation>/<arch>/<variant>.tar.gz.dvc`.
+   On an architecture that already publishes two variants of the operation,
+   publish a third only once each variant has its own GPU CTest, as below.
 
 An architecture already listed in `PublishedGpuReferences.cmake` installs the
 new variant without a CMake edit. Its existing `rocke_<operation>_gpu_<arch>_pytest`
-CTest runs it with the other variants, with a timeout of five minutes per
-installed variant. Publishing a variant on an unlisted architecture also lists
-the architecture, as below. Once an architecture has several variants, the
+CTest runs it with the other variants under one verdict, with a timeout of five
+minutes per installed variant. That entry runs at most two variants: before an
+architecture publishes a third, or once one variant needs its own exclusion or
+category, each variant gets its own GPU CTest, as
+[provider test selection](gpu-reference-workflow.md#enroll-provider-test-selection)
+explains. Publishing a variant on an unlisted architecture also lists the
+architecture, as below. Once an architecture has several variants, the
 command line needs `--variant` for it, and pytest's bundle and lock overrides
 need `--rocke-reference-variant`.
 
