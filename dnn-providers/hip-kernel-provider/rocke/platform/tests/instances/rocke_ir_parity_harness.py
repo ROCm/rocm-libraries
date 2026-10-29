@@ -1902,6 +1902,35 @@ def cases():
                 "sliding_window": 256,
             },
         ),
+        # Paged varlen: packed sequences with per-sequence Q/KV tails (bounded Q
+        # loads, zeroed V tail rows, guarded store). sq500 adds maxima that are no
+        # tile multiple, which the varlen body takes instead of the ragged one.
+        (
+            "paged_varlen_causal_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 96,
+            },
+        ),
+        (
+            "paged_varlen_swa_fp16_d64_sq500",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "seqlen_q": 500,
+                "seqlen_kv": 500,
+                "head_size": 64,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 96,
+                "sliding_window": 256,
+            },
+        ),
         # --- Attention band: the cuDNN (left = sliding_window, right = right_bound)
         # band on the top-left diagonal. causal=False is the unbounded right side.
         # Non-causal (left-only) window: default + persistent grids.

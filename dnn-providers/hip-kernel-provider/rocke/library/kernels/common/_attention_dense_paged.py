@@ -63,15 +63,16 @@ def paged_tile_check(block_size: int, block_m: int, block_n: int) -> tuple[bool,
 
 
 def paged_seq_setup(b, bt, kv_lens, bt_stride, block_size: int):
-    """Return ``(seq_base, n_pages)``: the sequence's block-table row offset and its
-    live page count ``ceil(kv_lens[bt] / block_size)``, which bounds every lookup."""
+    """Return ``(seq_base, n_pages, kv_len)``: the sequence's block-table row offset,
+    its live page count ``ceil(kv_lens[bt] / block_size)``, which bounds every
+    lookup, and ``kv_lens[bt]`` itself."""
     seq_base = b.mul(bt, bt_stride)
     kv_len = b.global_load_i32(kv_lens, bt)
     n_pages = b.div(
         b.add(kv_len, b.const_i32(block_size - 1)),
         b.const_i32(block_size),
     )
-    return seq_base, n_pages
+    return seq_base, n_pages, kv_len
 
 
 def paged_wave_row_base(b, block_tables, seq_base, n_pages, wave_key0, block_size: int):
@@ -102,21 +103,47 @@ def paged_kv_row(b, row_base, key, block_size: int):
     return b.add(row_base, b.land(key, b.const_i32(block_size - 1)))
 
 
-def validate_paged_launch(spec, k, v, block_tables, kv_lens, validate_paged: bool):
+def paged_v_tail_offset(b, voff_bytes, key, kv_len):
+    """V copy byte offset of logical key ``key``, out of range past ``kv_len``.
+
+    Keys past the sequence's end read stale rows of its last page, or block 0 past
+    its last page, which may hold anything. Their scores are masked, but P = 0 times
+    a NaN V row is still NaN in P*V, so V must be zero there: an offset past the
+    buffer bound makes the async copy write zeros into LDS. K needs no such offset,
+    since the causal select replaces a stale key's score.
+    """
+    return b.select(b.cmp_lt(key, kv_len), voff_bytes, b.const_i32(0x7FFFFFFF))
+
+
+def validate_paged_launch(
+    spec,
+    k,
+    v,
+    block_tables,
+    kv_lens,
+    validate_paged: bool,
+    *,
+    q=None,
+    out=None,
+    cu_seqlens_q=None,
+):
     """Host checks of a paged dense launch, before compile/launch.
 
     Always (metadata only), as the unified binding checks its paged inputs:
     ``block_tables`` [batch, >= pages] and ``kv_lens`` [batch] are int32 tensors with
     unit inner stride on the K/V device, and the K/V caches are contiguous GPU tensors
     on one device with the spec's shape. The kernel bakes the cache layout and takes
-    the buffer bound from the spec (:func:`paged_cache_bytes`), so a strided view or
-    a smaller cache would be read at the wrong addresses or past the allocation. With
-    ``validate_paged`` the table contents are checked too (device->host copies; pass
-    False on the hot path): every block id the kernel dereferences must be in
-    ``[0, num_kv_blocks)``, and ``kv_lens[i]`` must equal ``seqlen_kv``, since the
-    kernel visits all ``seqlen_kv`` keys. Without ``validate_paged`` nothing checks
-    either: the caller guarantees both, and a violation reads wrong pages without a
-    fault.
+    the buffer bound from the spec (:func:`paged_cache_bytes`), so a strided view or a
+    smaller cache would be read at the wrong addresses or past the allocation. Paged varlen also needs
+    packed contiguous ``q``/``out`` [total_q, Hq, D] and an int32 ``cu_seqlens_q``
+    [batch + 1] there. With ``validate_paged`` the contents are checked too
+    (device->host copies; pass False on the hot path): every block id the kernel
+    dereferences must be in ``[0, num_kv_blocks)``. A single sequence needs
+    ``kv_lens[0] == seqlen_kv``, since the kernel visits all ``seqlen_kv`` keys;
+    paged varlen needs ``cu_seqlens_q`` to span the packed Q in order, and each
+    sequence ``q_len == kv_len`` within the spec maxima.
+    Without ``validate_paged`` nothing checks the contents: the caller guarantees
+    them, and a violation reads wrong pages without a fault.
     """
     if type(validate_paged) is not bool:
         raise ValueError(
@@ -128,6 +155,8 @@ def validate_paged_launch(spec, k, v, block_tables, kv_lens, validate_paged: boo
         raise ValueError("block_tables/kv_lens provided but spec.paged is False")
     if not spec.paged:
         return
+    if spec.varlen and cu_seqlens_q is None:
+        raise ValueError("paged varlen requires cu_seqlens_q (int32 [batch+1])")
     n_pages = -(-spec.seqlen_kv // spec.block_size)
     bt_shape = tuple(block_tables.shape)
     if len(bt_shape) != 2 or bt_shape[0] != spec.batch or bt_shape[1] < n_pages:
@@ -140,17 +169,16 @@ def validate_paged_launch(spec, k, v, block_tables, kv_lens, validate_paged: boo
         raise ValueError(
             f"paged kv_lens shape {kv_lens_shape} must be [batch={spec.batch}]"
         )
-    for name, t in (("block_tables", block_tables), ("kv_lens", kv_lens)):
-        if str(t.dtype) != "torch.int32":
-            raise ValueError(f"paged {name} dtype must be int32, got {t.dtype}")
-        if not t.is_cuda:
-            raise ValueError(f"paged {name} must be a GPU tensor")
-        if str(t.device) != str(k.device):
+    metadata = [("block_tables", block_tables), ("kv_lens", kv_lens)]
+    if spec.varlen:
+        cu_shape = tuple(cu_seqlens_q.shape)
+        if cu_shape != (spec.batch + 1,):
             raise ValueError(
-                f"paged {name} must be on the K/V device {k.device}, got {t.device}"
+                f"paged cu_seqlens_q shape {cu_shape} must be [batch+1={spec.batch + 1}]"
             )
-        if t.stride(-1) != 1:
-            raise ValueError(f"paged {name} innermost stride must be 1")
+        metadata.append(("cu_seqlens_q", cu_seqlens_q))
+    for name, t in metadata:
+        check_paged_metadata(name, t, k.device)
     if not bt_shape[1] <= block_tables.stride(0) <= 0x7FFF_FFFF:
         raise ValueError(
             "paged block_tables row stride must be non-overlapping and fit int32"
@@ -179,25 +207,110 @@ def validate_paged_launch(spec, k, v, block_tables, kv_lens, validate_paged: boo
                 f"paged {name} cache dtype {t.dtype} must be {want_dtype} (spec dtype "
                 f"{spec.dtype}): the buffer bound assumes its element size"
             )
+    if spec.varlen:
+        _check_packed_queries(spec, q, out, k.device)
     if not validate_paged:
         return
-    # One copy per tensor, not per row: every row uses n_pages (kv_len == seqlen_kv).
+    # One copy per tensor, not per row.
     used_rows = block_tables[:, :n_pages].tolist()
-    for i, (kv_len, used) in enumerate(zip(kv_lens.tolist(), used_rows)):
-        kv_len = int(kv_len)
-        if kv_len != spec.seqlen_kv:
-            raise ValueError(
-                f"paged kv_lens[{i}]={kv_len} != seqlen_kv={spec.seqlen_kv}; the "
-                "kernel reads all seqlen_kv tiles, so a shorter kv_len leaves "
-                "uncovered tiles reading page 0 -> silently wrong output"
-            )
-        for block_id in used:
+    kv_values = [int(kv_len) for kv_len in kv_lens.tolist()]
+    if spec.varlen:
+        q_lens = _packed_query_lengths(spec, cu_seqlens_q.tolist(), int(q.shape[0]))
+    for i, (kv_len, used) in enumerate(zip(kv_values, used_rows)):
+        if not spec.varlen:
+            if kv_len != spec.seqlen_kv:
+                raise ValueError(
+                    f"paged kv_lens[{i}]={kv_len} != seqlen_kv={spec.seqlen_kv}; the "
+                    "kernel reads all seqlen_kv tiles, so a shorter kv_len leaves "
+                    "uncovered tiles reading page 0 -> silently wrong output"
+                )
+            live_pages = n_pages
+        else:
+            if not 0 <= kv_len <= spec.seqlen_kv:
+                raise ValueError(
+                    f"paged kv_lens[{i}]={kv_len} outside [0, seqlen_kv="
+                    f"{spec.seqlen_kv}]: the table holds only that many keys"
+                )
+            if q_lens[i] != kv_len:
+                raise ValueError(
+                    f"paged varlen sequence {i}: q_len={q_lens[i]} != "
+                    f"kv_lens[{i}]={kv_len}; the kernel aligns each sequence's "
+                    "causal diagonal at the top left, which is only right for "
+                    "q_len == kv_len"
+                )
+            # Columns past the sequence's own pages are never read: any value.
+            live_pages = -(-kv_len // spec.block_size)
+        for block_id in used[:live_pages]:
             if not 0 <= int(block_id) < spec.num_kv_blocks:
                 raise ValueError(
                     f"paged block_tables[{i}] physical block id {int(block_id)} "
                     f"outside [0, num_kv_blocks={spec.num_kv_blocks}); a "
                     "malformed entry reads a wrong page -> silently wrong output"
                 )
+
+
+def check_paged_metadata(name: str, t, device) -> None:
+    """Structural rules of one int32 metadata tensor; the dense binding also
+    applies them to a ``cu_seqlens_q`` it drops before the runner."""
+    if str(t.dtype) != "torch.int32":
+        raise ValueError(f"paged {name} dtype must be int32, got {t.dtype}")
+    if not t.is_cuda:
+        raise ValueError(f"paged {name} must be a GPU tensor")
+    if str(t.device) != str(device):
+        raise ValueError(
+            f"paged {name} must be on the K/V device {device}, got {t.device}"
+        )
+    if t.stride(-1) != 1:
+        raise ValueError(f"paged {name} innermost stride must be 1")
+
+
+def _check_packed_queries(spec, q, out, device) -> None:
+    """Packed Q/out of a paged varlen launch: the kernel addresses both as
+    contiguous [total_q, Hq, D] and bounds Q reads by ``cu_seqlens_q[batch]``."""
+    if q is None or out is None:
+        raise ValueError("paged varlen validation needs q and out")
+    q_shape = tuple(q.shape)
+    if (
+        len(q_shape) != 3
+        or q_shape[1:] != (spec.num_query_heads, spec.head_size)
+        or q_shape[0] > spec.batch * spec.seqlen_q
+    ):
+        raise ValueError(
+            f"paged varlen q shape {q_shape} must be packed [total_q <= batch*"
+            f"seqlen_q={spec.batch * spec.seqlen_q}, {spec.num_query_heads}, "
+            f"{spec.head_size}]"
+        )
+    if tuple(out.shape) != q_shape:
+        raise ValueError(
+            f"paged varlen out shape {tuple(out.shape)} must equal q shape {q_shape}"
+        )
+    for name, t in (("q", q), ("out", out)):
+        if not t.is_contiguous():
+            raise ValueError(f"paged varlen {name} must be contiguous")
+        if str(t.device) != str(device):
+            raise ValueError(
+                f"paged varlen {name} must be on the K/V device {device}, "
+                f"got {t.device}"
+            )
+
+
+def _packed_query_lengths(spec, offsets, total_q: int) -> list:
+    """Per-sequence query lengths of ``cu_seqlens_q``; rejects offsets that do not
+    span the packed Q in order or exceed ``seqlen_q``."""
+    offsets = [int(x) for x in offsets]
+    if offsets[0] != 0 or offsets[-1] != total_q:
+        raise ValueError(
+            f"paged cu_seqlens_q must start at 0 and end at total_q={total_q}, "
+            f"got {offsets[0]} .. {offsets[-1]}"
+        )
+    lengths = [stop - start for start, stop in zip(offsets, offsets[1:])]
+    for i, length in enumerate(lengths):
+        if not 0 <= length <= spec.seqlen_q:
+            raise ValueError(
+                f"paged cu_seqlens_q sequence {i} length {length} outside "
+                f"[0, seqlen_q={spec.seqlen_q}] (offsets must be monotone)"
+            )
+    return lengths
 
 
 def paged_launch_args(block_tables, kv_lens) -> dict:

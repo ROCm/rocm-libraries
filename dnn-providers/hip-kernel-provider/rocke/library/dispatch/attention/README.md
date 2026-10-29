@@ -157,13 +157,31 @@ starts on the default grid). It takes the same tile as a contiguous request wher
 its pages fit that tile (whole pages per KV tile, each wave's rows in one page),
 else the default 256×64 tile. The paged kernel bakes the cache extent, so binding
 retargets `num_kv_blocks` from `k.shape[0]`; `block_tables` and `kv_lens` come
-in with the tensors. The request carries no cache size, so a cache past the 2 GiB
-i32 limit is refused at binding, not at selection. As for the unified path, the
-structural checks always run, and `unsafe_skip_paged_value_validation=True` skips
-only the runner's synchronized value checks. It is only for trusted callers that
-guarantee the dense kernel's contract themselves: `kv_lens[i] == seqlen_kv` and
-every used block id in `[0, num_kv_blocks)`; the kernel does not mask keys past
-`kv_lens`. The cohort is the kernel's own `supports_attention_dense`.
+in with the tensors. The request carries no cache size, so a cache past the
+2 GiB i32 limit is refused at binding, not at selection.
+
+`q`/`out` may be packed `[total_q, Hq, D]` with `cu_seqlens_q`, as for the
+unified path. A request with `batch > 1` builds a varlen spec: its lengths are
+the maxima, and each sequence's query and KV lengths must be equal. One sequence
+takes the varlen body too when the single-sequence body cannot bound its tails:
+keys ending inside a KV tile (that body would read the padded keys from stale
+page rows, the varlen body zeroes them), or queries ending inside a Q tile where
+the single-sequence body has no ragged form (gfx950 with a sliding window).
+gfx942 has no paged varlen body yet and refuses these requests. For one
+sequence `cu_seqlens_q` is optional, and `[1, Sq, Hq, D]` is
+accepted as well; the binding builds `cu_seqlens_q` when the varlen body needs
+it. Selection checks the Q extent from the spec maxima (`batch` × the longest
+length), since the request carries no packed size, so a batch with one long
+sequence can be refused although its packed Q is small.
+
+As for the unified path, the structural checks always run, and
+`unsafe_skip_paged_value_validation=True` skips only the runner's synchronized
+value checks. It is only for trusted callers that guarantee the dense kernel's
+contract themselves: block ids in `[0, num_kv_blocks)` over each sequence's
+first `ceil(kv_len / block_size)` table columns, and `kv_lens[0] == seqlen_kv` on the single-sequence body
+(it does not mask keys past `kv_lens`), or `cu_seqlens_q` spanning the packed Q in
+order with `q_len == kv_len <= seqlen_kv` per sequence on the varlen body. The
+cohort is the kernel's own `supports_attention_dense`.
 
 Unified variant names are `attention_{arch}_u{path}_{variant_id}`, for example
 `attention_gfx950_u2d_narrow_nw1_mw16_t1xb_llvm` (the `spec_id` drops the

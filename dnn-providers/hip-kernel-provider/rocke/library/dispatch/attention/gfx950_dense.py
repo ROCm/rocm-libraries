@@ -36,6 +36,7 @@ from .dense_rules import (
     dense_kv_segments,
     dense_paged_fields,
     dense_paged_tile_fits,
+    dense_paged_varlen,
     dense_wave_segments,
 )
 
@@ -182,13 +183,30 @@ def _default_block_m(req: AttentionRequest, variant: Gfx950DenseVariant) -> int:
     return bm // 2 if work <= _DEFAULT_NUM_PERSISTENT else bm
 
 
+def _paged_varlen(
+    batch: int, sq: int, sk: int, window: int, block_m: int, block_n: int
+) -> bool:
+    """Whether a paged problem takes the varlen body on this tile."""
+    # The ragged body refuses a sliding window; the paged varlen body takes it.
+    return dense_paged_varlen(batch, sk, block_n) or (
+        window > 0 and _is_ragged(sq, sk, block_m, block_n)
+    )
+
+
 def _derived(base, knobs: Mapping[str, object]) -> Mapping[str, object]:
-    """``ragged`` for the tile the knobs choose: non-tile-multiple lengths take
-    the on-chip ragged path."""
+    """``ragged`` and paged ``varlen`` for the tile the knobs choose: lengths that
+    are not tile multiples take the on-chip ragged path, or the paged varlen body
+    where the tail needs it."""
     block_m = int(knobs.get("block_m", base.block_m))
     block_n = int(knobs.get("block_n", base.block_n))
-    ragged = _is_ragged(int(base.seqlen_q), int(base.seqlen_kv), block_m, block_n)
-    return {"ragged": ragged}
+    sq, sk = int(base.seqlen_q), int(base.seqlen_kv)
+    varlen = base.varlen
+    if base.paged:
+        varlen = _paged_varlen(
+            int(base.batch), sq, sk, int(base.sliding_window), block_m, block_n
+        )
+    ragged = _is_ragged(sq, sk, block_m, block_n)
+    return {"ragged": ragged and not varlen, "varlen": varlen}
 
 
 def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
@@ -240,7 +258,11 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
     # The sliding-window tile keeps its own geometry; otherwise the shared tile,
     # halved on an under-filled wide-DMA grid.
     bm = int(geometry["block_m"]) if window_tile else _default_block_m(req, variant)
-    ragged = _is_ragged(sq, sk, bm, bn)
+    paged = dense_paged_fields(req, bn)
+    if paged and _paged_varlen(int(req.batch), sq, sk, window, bm, bn):
+        paged["varlen"] = True
+    # Paged varlen handles each sequence's tails itself; its lengths are maxima.
+    ragged = _is_ragged(sq, sk, bm, bn) and not paged.get("varlen")
     kv_segments = 1
     if (
         moving_bottom_right
@@ -315,7 +337,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         right_bound=right_bound,
         kv_segments=kv_segments,
         use_additive_bias=use_bias,
-        **dense_paged_fields(req),
+        **paged,
         kv_storage_dtype="fp8e4m3" if req.use_fp8 else None,
     )
 

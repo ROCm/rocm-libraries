@@ -250,7 +250,7 @@ def tuned_base_spec(req: AttentionRequest):
     head_size = int(req.hdim_q)
     # The persistent grid measured ahead at D128 for every batch and mask; at
     # D64 the non-persistent grid did. Paged K/V runs on the default grid.
-    paged = bool(dense_paged_fields(req))
+    paged = bool(dense_paged_fields(req, _DENSE_BLOCK_N))
     spec = _make_spec(
         req,
         _default_block_m(req),
@@ -368,8 +368,12 @@ def _make_spec(
     mask_type = _parse_attention_mask_type(req.mask_type)
     # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
     # not a block_m/block_n multiple). Cross-attention ragged is left to the
-    # validator.
-    ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
+    # validator. Paged varlen handles each sequence's tails itself; its lengths
+    # are maxima.
+    paged = dense_paged_fields(req, bn)
+    ragged = (
+        (sq == sk) and ((sq % bm != 0) or (sk % bn != 0)) and not paged.get("varlen")
+    )
     # Bottom-right causal with seqlen_q != seqlen_k: the same predicate the router
     # matches against ``features`` below, so a band this body cannot shift (a
     # bottom-right window) reaches ``supports_attention_dense`` and is rejected
@@ -414,7 +418,7 @@ def _make_spec(
         causal_diag_split=diag_split,
         window_wave_skip=window_wave_skip,
         use_additive_bias=req.use_attn_bias,
-        **dense_paged_fields(req),
+        **paged,
     )
 
 

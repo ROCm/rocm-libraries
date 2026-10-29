@@ -5,6 +5,7 @@
 only)."""
 
 import dataclasses
+import math
 from types import SimpleNamespace
 from unittest import mock
 
@@ -14,6 +15,7 @@ from ..._dense_paged_stand_ins import CacheStandIn, I32DeviceTensor, pinned
 from dispatch.attention import (
     AttentionRequest,
     dispatch_attention,
+    tuning_spec_with_knobs,
 )
 
 _PAGED_SPEC_IDS = {
@@ -21,6 +23,8 @@ _PAGED_SPEC_IDS = {
     "gfx950": ("gfx950_dense_grid", "gfx950_dense_qbminor"),
 }
 _CASES = [(arch, sid) for arch, ids in _PAGED_SPEC_IDS.items() for sid in ids]
+# gfx942 has no paged varlen body yet.
+_VARLEN_CASES = [(arch, sid) for arch, sid in _CASES if arch == "gfx950"]
 _SQ, _HQ, _HKV, _D, _BS = 2048, 16, 4, 128, 16
 
 
@@ -62,45 +66,131 @@ def test_paged_request_builds_a_paged_spec(arch, spec_id, overrides):
     assert spec.paged and spec.block_size == _BS
     assert spec.num_kv_blocks == _SQ // _BS  # the smallest cache, until binding
     assert not spec.persistent
+    assert not spec.varlen  # whole KV tiles keep the single-sequence kernel
 
 
 @pytest.mark.parametrize(
     "spec_id", ["gfx950_dense_persist", "gfx950_dense_persist_widedma"]
 )
-def test_persistent_variants_decline_paged(spec_id):
+@pytest.mark.parametrize("batch", [1, 3], ids=["single_seq", "multi_seq"])
+def test_persistent_variants_decline_paged(spec_id, batch):
     with pytest.raises(ValueError, match="layout_paged"):
-        dispatch_attention(pinned(_request("gfx950"), spec_id))
+        dispatch_attention(pinned(_request("gfx950", batch=batch), spec_id))
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)
 @pytest.mark.parametrize(
     "overrides,error",
     [
-        (dict(batch=2), "batch>1"),
         (dict(mask_type=0, sliding_window=0), "causal-only"),
-        (dict(seqlen_q=1000, seqlen_k=1000, sliding_window=0), "whole KV tiles"),
+        (
+            dict(seqlen_q=512, seqlen_k=1000),
+            "seqlen_q must equal seqlen_kv, got 512 != 1000",
+        ),
+        (
+            dict(batch=3, seqlen_q=512),
+            f"seqlen_q must equal seqlen_kv, got 512 != {_SQ}",
+        ),
         (dict(kv_block_size=8), "must be >= 16"),
         (
             dict(mask_type=2, seqlen_q=1024, sliding_window=0),
             "causal_bottom_right is not yet supported with paged",
         ),
     ],
-    ids=["multi_seq", "non_causal", "partial_kv_tile", "page_8", "bottom_right"],
+    ids=[
+        "non_causal",
+        "partial_kv_tile_sq_ne_skv",
+        "multi_seq_sq_ne_skv",
+        "page_8",
+        "bottom_right",
+    ],
 )
 def test_paged_outside_the_cohort_is_refused(arch, spec_id, overrides, error):
     with pytest.raises(ValueError, match=error):
         dispatch_attention(pinned(_request(arch, **overrides), spec_id))
 
 
+@pytest.mark.parametrize(
+    "arch,spec_id", [(arch, sid) for arch, sid in _CASES if arch == "gfx950"]
+)
+def test_lse_is_refused_with_paged_varlen(arch, spec_id):
+    req = _request(arch, batch=3, emit_lse=True)
+    with pytest.raises(ValueError, match="emit_lse is not yet supported with paged"):
+        dispatch_attention(pinned(req, spec_id))
+
+
+@pytest.mark.parametrize("arch,spec_id", _VARLEN_CASES)
+@pytest.mark.parametrize("seqlen", [_SQ, 1000], ids=["aligned", "ragged_max"])
+def test_multi_seq_paged_request_builds_a_paged_varlen_spec(arch, spec_id, seqlen):
+    """Several sequences take packed varlen Q; the lengths are maxima, so a
+    non-tile-multiple maximum stays on the varlen body instead of going ragged."""
+    req = _request(arch, batch=3, seqlen_q=seqlen, seqlen_k=seqlen)
+    spec = dispatch_attention(pinned(req, spec_id)).spec.kernel_spec
+    assert spec.paged and spec.varlen and not spec.ragged
+    assert spec.batch == 3
+    assert spec.num_kv_blocks == 3 * -(-seqlen // _BS)
+
+
+@pytest.mark.parametrize("arch,spec_id", _VARLEN_CASES)
+def test_one_sequence_ending_inside_a_kv_tile_takes_the_varlen_body(arch, spec_id):
+    """The single-sequence kernel would read the padded keys of the partial last
+    KV tile from stale page rows; the varlen body zeroes them."""
+    req = _request(arch, seqlen_q=1000, seqlen_k=1000)
+    spec = dispatch_attention(pinned(req, spec_id)).spec.kernel_spec
+    assert spec.paged and spec.varlen and not spec.ragged
+    assert spec.batch == 1 and spec.seqlen_kv % spec.block_n
+
+
+@pytest.mark.parametrize(
+    "arch,spec_id,seqlen,tile,varlen",
+    [
+        # Whole KV tiles at the default block_n, a partial last one at 128.
+        ("gfx950", "gfx950_dense_grid", 1088, (256, 128), True),
+        # A partial last KV tile at the default block_n, whole ones at 32.
+        ("gfx950", "gfx950_dense_grid", 1056, (256, 32), False),
+    ],
+    ids=["gfx950_partial_kv", "gfx950_whole_kv"],
+)
+def test_swept_tile_picks_the_body_for_its_own_tails(
+    arch, spec_id, seqlen, tile, varlen
+):
+    """A swept tile gets the body its own tails need, as if it were the default."""
+    req = _request(
+        arch, seqlen_q=seqlen, seqlen_k=seqlen, sliding_window=0, hdim_q=64, hdim_v=64
+    )
+    default = dispatch_attention(pinned(req, spec_id)).spec.kernel_spec
+    assert default.varlen is not varlen
+    knobs = dict(zip(("block_m", "block_n"), tile))
+    spec = tuning_spec_with_knobs(req, spec_id, knobs).kernel_spec
+    assert spec.varlen is varlen
+    assert (spec.block_m, spec.block_n) == tile
+
+
 @pytest.mark.parametrize("arch,spec_id", _CASES)
-def test_paged_ragged_query_tail_follows_the_contiguous_kernel(arch, spec_id):
-    req = _request(arch, seqlen_q=1088, seqlen_k=1088, sliding_window=0)
+@pytest.mark.parametrize("window", [0, 1024], ids=["causal", "swa"])
+def test_paged_ragged_query_tail_follows_the_contiguous_kernel(arch, spec_id, window):
+    req = _request(arch, seqlen_q=1088, seqlen_k=1088, sliding_window=window)
     if arch == "gfx942":  # no partial-tile (ragged) body on gfx942
         with pytest.raises(ValueError, match="seqlen_q 1088 is not a multiple of"):
             dispatch_attention(pinned(req, spec_id))
+        return
+    spec = dispatch_attention(pinned(req, spec_id)).spec.kernel_spec
+    assert spec.paged
+    # gfx950's ragged body refuses a window: the varlen body takes it.
+    if window:
+        assert spec.varlen and not spec.ragged
     else:
-        spec = dispatch_attention(pinned(req, spec_id)).spec.kernel_spec
-        assert spec.paged and spec.ragged
+        assert spec.ragged and not spec.varlen
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [dict(batch=3), dict(seqlen_q=1000, seqlen_k=1000)],
+    ids=["multi_seq", "partial_kv_tile"],
+)
+def test_gfx942_refuses_paged_varlen(overrides):
+    with pytest.raises(ValueError, match="varlen"):
+        dispatch_attention(pinned(_request("gfx942", **overrides), "gfx942_dense"))
 
 
 _SMALL = dict(seqlen_q=512, seqlen_k=512, nhead_q=8, nhead_k=2, num_cus=256)
@@ -229,7 +319,8 @@ def test_launch_refuses_unknown_keywords(arch, spec_id):
     """A bind-only option passed to launch() is refused, not dropped."""
     result = dispatch_attention(pinned(_request(arch), spec_id))
     cache = CacheStandIn((_SQ // _BS, _BS, _HKV, _D))
-    launch = result.bind_torch({"q": None, "k": cache, "v": cache, "out": None}).launch
+    q = SimpleNamespace(shape=(1, _SQ, _HQ, _D))
+    launch = result.bind_torch({"q": q, "k": cache, "v": cache, "out": q}).launch
     for kw in ({"unsafe_skip_paged_value_validation": True}, {"softmax_scale": 0.5}):
         with pytest.raises(TypeError, match=next(iter(kw))):
             launch(**kw)
@@ -246,9 +337,259 @@ def test_bind_refuses_unknown_keywords(arch, spec_id):
         )
 
 
+def _bind_until_compile(arch, result, tensors, **bind_kw):
+    """Launch through the binding up to compile; return the runner's arguments."""
+    import importlib
+
+    ad = importlib.import_module(f"kernels.{arch}.attention_dense")
+    seen = {}
+    real_run = ad.run_attention_dense_torch
+
+    def run(**kw):
+        seen.update(kw)
+        return real_run(**kw)
+
+    sentinel = RuntimeError("reached-compile")
+    with mock.patch.dict(ad._DENSE_LAUNCHER_CACHE, clear=True), mock.patch.object(
+        ad, "run_attention_dense_torch", run
+    ), mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+        with pytest.raises(RuntimeError, match="reached-compile"):
+            result.bind_torch(tensors, **bind_kw).launch()
+    return seen
+
+
+@pytest.mark.parametrize("arch,spec_id", _VARLEN_CASES)
+def test_binding_forwards_packed_queries_and_cu_seqlens_q(arch, spec_id):
+    lens = [_SQ, 1000, 17]
+    cu = [0, lens[0], lens[0] + lens[1], sum(lens)]
+    result = dispatch_attention(pinned(_request(arch, batch=3), spec_id))
+    pages = [-(-n // _BS) for n in lens]
+    width = _SQ // _BS
+    table, base = [], 0
+    for n in pages:
+        table.append(list(range(base, base + n)) + [0x7FFF_FFFF] * (width - n))
+        base += n
+    packed = CacheStandIn((sum(lens), _HQ, _D))
+    cache = CacheStandIn((base, _BS, _HKV, _D))
+    tensors = {
+        "q": packed,
+        "k": cache,
+        "v": cache,
+        "out": packed,
+        "block_tables": I32DeviceTensor(table),
+        "kv_lens": I32DeviceTensor(lens),
+        "cu_seqlens_q": I32DeviceTensor(cu),
+    }
+    seen = _bind_until_compile(arch, result, tensors)
+    assert seen["spec"].varlen and seen["spec"].num_kv_blocks == base
+    assert seen["q"] is packed and seen["out"] is packed
+    assert seen["cu_seqlens_q"] is tensors["cu_seqlens_q"]
+    assert "cu_seqlens_kv" not in seen
+
+
+@pytest.mark.parametrize("arch,spec_id", _CASES)
+def test_binding_views_one_packed_sequence_as_the_single_sequence_layout(arch, spec_id):
+    result = dispatch_attention(pinned(_request(arch), spec_id))
+    packed = CacheStandIn((_SQ, _HQ, _D))
+    tensors = {
+        "q": packed,
+        "k": CacheStandIn((_SQ // _BS, _BS, _HKV, _D)),
+        "v": CacheStandIn((_SQ // _BS, _BS, _HKV, _D)),
+        "out": packed,
+        "block_tables": I32DeviceTensor([list(range(_SQ // _BS))]),
+        "kv_lens": I32DeviceTensor([_SQ]),
+    }
+    seen = _bind_until_compile(arch, result, tensors)
+    assert not seen["spec"].varlen
+    assert seen["q"].shape == seen["out"].shape == (1, _SQ, _HQ, _D)
+    # Unified-style callers also pass cu_seqlens_q for one sequence.
+    tensors["cu_seqlens_q"] = I32DeviceTensor([0, _SQ])
+    seen = _bind_until_compile(arch, result, tensors)
+    assert "cu_seqlens_q" not in seen
+    tensors["cu_seqlens_q"] = I32DeviceTensor([0, _SQ - 64])
+    with pytest.raises(ValueError, match=r"must be \[0, "):
+        result.bind_torch(tensors).launch()
+    seen = _bind_until_compile(
+        arch, result, tensors, unsafe_skip_paged_value_validation=True
+    )
+    assert "cu_seqlens_q" not in seen
+    tensors["cu_seqlens_q"] = I32DeviceTensor([0, _SQ, _SQ])
+    with pytest.raises(ValueError, match=r"shape \(2,\)"):
+        result.bind_torch(tensors).launch()
+    # The runner's metadata rules hold although the tensor is dropped, also
+    # without value validation.
+    for bad, error in (
+        (I32DeviceTensor([0, _SQ], dtype="torch.int64"), "dtype must be int32"),
+        (I32DeviceTensor([0, _SQ], is_cuda=False), "must be a GPU tensor"),
+        (I32DeviceTensor([0, _SQ], device="cuda:1"), "on the K/V device"),
+        (I32DeviceTensor([0, _SQ], inner_stride=2), "innermost stride"),
+    ):
+        tensors["cu_seqlens_q"] = bad
+        with pytest.raises(ValueError, match=error):
+            result.bind_torch(tensors, unsafe_skip_paged_value_validation=True).launch()
+    del tensors["cu_seqlens_q"]
+    tensors["q"] = tensors["out"] = CacheStandIn((_SQ - 64, _HQ, _D))
+    with pytest.raises(ValueError, match="seqlen_q"):
+        result.bind_torch(tensors)
+
+
+@pytest.mark.parametrize("arch,spec_id", _VARLEN_CASES)
+def test_binding_packs_one_sequence_for_the_varlen_body(arch, spec_id):
+    """One sequence on the varlen body: its [1, Sq, Hq, D] form is viewed packed,
+    and cu_seqlens_q = [0, Sq] is built once at bind time when none is given."""
+    from dispatch.attention import bindings
+
+    sq = 1000
+    result = dispatch_attention(
+        pinned(_request(arch, seqlen_q=sq, seqlen_k=sq), spec_id)
+    )
+    pages = -(-sq // _BS)
+    cache = CacheStandIn((pages, _BS, _HKV, _D))
+    tensors = {
+        "q": CacheStandIn((1, sq, _HQ, _D)),
+        "k": cache,
+        "v": cache,
+        "out": CacheStandIn((1, sq, _HQ, _D)),
+        "block_tables": I32DeviceTensor([list(range(pages))]),
+        "kv_lens": I32DeviceTensor([sq]),
+    }
+    built = []
+
+    def one_sequence_cu(q):
+        built.append(tuple(q.shape))
+        return I32DeviceTensor([0, int(q.shape[0])])
+
+    with mock.patch.object(bindings, "_one_sequence_cu_seqlens_q", one_sequence_cu):
+        seen = _bind_until_compile(arch, result, tensors)
+    assert built == [(sq, _HQ, _D)]
+    assert seen["spec"].varlen
+    assert seen["q"].shape == seen["out"].shape == (sq, _HQ, _D)
+    assert seen["cu_seqlens_q"].tolist() == [0, sq]
+    # A caller's packed Q and cu_seqlens_q go through unchanged.
+    packed = CacheStandIn((sq, _HQ, _D))
+    cu = I32DeviceTensor([0, sq])
+    seen = _bind_until_compile(
+        arch, result, {**tensors, "q": packed, "out": packed, "cu_seqlens_q": cu}
+    )
+    assert seen["q"] is packed and seen["cu_seqlens_q"] is cu
+
+
+def test_one_sequence_cu_seqlens_q_is_int32_on_the_q_device():
+    torch = pytest.importorskip("torch")
+    from dispatch.attention.bindings import _one_sequence_cu_seqlens_q
+
+    cu = _one_sequence_cu_seqlens_q(torch.empty(1000, 2, 8))
+    assert cu.dtype == torch.int32 and cu.device.type == "cpu"
+    assert cu.tolist() == [0, 1000]
+
+
 @pytest.mark.parametrize("arch", sorted(_PAGED_SPEC_IDS))
 def test_contiguous_dense_spec_ignores_the_block_count(arch):
     spec_id = _PAGED_SPEC_IDS[arch][0]
     tuning = dispatch_attention(pinned(_request(arch, layout="auto"), spec_id)).spec
     assert not tuning.kernel_spec.paged
     assert tuning.with_num_kv_blocks(512) is tuning
+
+
+def _check_paged_varlen_dispatch_on_gpu(arch, spec_id, lens, *, one_seq_4d=False):
+    """Sequences of ``lens`` served end to end through dispatch: packed Q, pages
+    permuted in a 2x cache whose unused pages and past-length slots are NaN, a
+    table padded with garbage ids and a NaN-filled output, against per-sequence
+    fp32 sliding-window references. ``one_seq_4d``: one sequence passed as
+    [1, S, Hq, D] without cu_seqlens_q, which the binding then builds."""
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("no GPU")
+    if torch.cuda.get_device_properties(0).gcnArchName.split(":")[0] != arch:
+        pytest.skip(f"needs {arch}")
+    window, seqlen = 1024, max(lens)
+    torch.manual_seed(0)
+    total = sum(lens)
+    cu = torch.tensor([0, *torch.tensor(lens).cumsum(0).tolist()], dtype=torch.int32)
+    q = torch.randn(total, _HQ, _D, device="cuda", dtype=torch.float16)
+    pages = [-(-n // _BS) for n in lens]
+    width = -(-seqlen // _BS)
+    num_blocks = 2 * sum(pages)
+    phys = torch.randperm(num_blocks, device="cuda")[: sum(pages)]
+    k_cache = torch.full(
+        (num_blocks, _BS, _HKV, _D), float("nan"), device="cuda", dtype=torch.float16
+    )
+    v_cache = torch.full_like(k_cache, float("nan"))
+    table = torch.full(
+        (len(lens), width), 0x7FFF_FFFF, device="cuda", dtype=torch.int32
+    )
+    ks, vs, first = [], [], 0
+    for b, n in enumerate(lens):
+        ids = phys[first : first + pages[b]]
+        first += pages[b]
+        table[b, : pages[b]] = ids.to(torch.int32)
+        k = torch.randn(n, _HKV, _D, device="cuda", dtype=torch.float16)
+        v = torch.randn(n, _HKV, _D, device="cuda", dtype=torch.float16)
+        for p in range(pages[b]):
+            rows = slice(p * _BS, min(n, (p + 1) * _BS))
+            k_cache[ids[p], : rows.stop - rows.start] = k[rows]
+            v_cache[ids[p], : rows.stop - rows.start] = v[rows]
+        ks.append(k)
+        vs.append(v)
+    # Rows past the packed output catch a tail store the kernel's guard missed.
+    out_buf = torch.full(
+        (total + 256, _HQ, _D), float("nan"), device="cuda", dtype=torch.float16
+    )
+    out = out_buf[:total]
+    tensors = {
+        "q": q,
+        "k": k_cache,
+        "v": v_cache,
+        "out": out,
+        "block_tables": table,
+        "kv_lens": torch.tensor(lens, device="cuda", dtype=torch.int32),
+        "cu_seqlens_q": cu.to("cuda"),
+    }
+    if one_seq_4d:
+        tensors["q"], tensors["out"] = q.unsqueeze(0), out.unsqueeze(0)
+        del tensors["cu_seqlens_q"]
+    req = _request(
+        arch,
+        batch=len(lens),
+        seqlen_q=seqlen,
+        seqlen_k=seqlen,
+        sliding_window=window,
+    )
+    result = dispatch_attention(pinned(req, spec_id))
+    assert result.spec.kernel_spec.varlen
+    result.bind_torch(tensors).launch()
+    torch.cuda.synchronize()
+    assert torch.isnan(out_buf[total:]).all(), "store past the packed output"
+
+    rep = _HQ // _HKV
+    for b, n in enumerate(lens):
+        rows = slice(int(cu[b]), int(cu[b + 1]))
+        qi = torch.arange(n, device="cuda").view(-1, 1)
+        ki = torch.arange(n, device="cuda").view(1, -1)
+        keep = (ki <= qi) & (ki > qi - window)
+        ref = torch.nn.functional.scaled_dot_product_attention(
+            q[rows].float().transpose(0, 1),
+            ks[b].float().transpose(0, 1).repeat_interleave(rep, 0),
+            vs[b].float().transpose(0, 1).repeat_interleave(rep, 0),
+            attn_mask=keep,
+            scale=1.0 / math.sqrt(_D),
+        ).transpose(0, 1)
+        assert torch.isfinite(out[rows]).all(), f"sequence {b}"
+        assert (out[rows].float() - ref).abs().max().item() < 2e-2, f"sequence {b}"
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("arch,spec_id", _VARLEN_CASES)
+def test_multi_seq_paged_dispatch_matches_the_reference_on_gpu(arch, spec_id):
+    _check_paged_varlen_dispatch_on_gpu(arch, spec_id, [_SQ, 1000, 17])
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("arch,spec_id", _VARLEN_CASES)
+@pytest.mark.parametrize(
+    "seqlen", [1000, 1088], ids=["partial_kv_tile", "partial_q_tile"]
+)
+def test_one_sequence_partial_tile_dispatch_matches_the_reference_on_gpu(
+    arch, spec_id, seqlen
+):
+    _check_paged_varlen_dispatch_on_gpu(arch, spec_id, [seqlen], one_seq_4d=True)

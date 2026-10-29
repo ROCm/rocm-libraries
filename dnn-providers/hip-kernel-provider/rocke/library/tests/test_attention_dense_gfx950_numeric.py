@@ -28,6 +28,12 @@ from kernels.gfx950.attention_dense import (
     run_attention_dense_torch,
     supports_attention_dense,
 )
+from ._dense_paged_varlen_inputs import (
+    PAGED_VARLEN_EDGES,
+    check_paged_varlen,
+    check_whole_tile_sequences,
+    paged_varlen_lengths,
+)
 
 
 torch = pytest.importorskip("torch", reason="ROCm torch required")
@@ -2583,6 +2589,89 @@ class TestDensePagedNumeric:
         if not live.all():
             worst = paged_out.float()[:, ~live].abs().max().item()
             assert worst == 0.0, f"{name}: {int((~live).sum())} keyless rows: {worst}"
+
+
+def _paged_varlen_spec(lens, block_size, d, dtype, num_kv_blocks, window=0, **kw):
+    longest = max(lens)
+    return Gfx950AttentionDenseSpec(
+        batch=len(lens),
+        seqlen_q=longest,
+        seqlen_kv=longest,
+        num_query_heads=16,
+        num_kv_heads=4,
+        head_size=d,
+        causal=True,
+        dtype=dtype,
+        sliding_window=window,
+        varlen=True,
+        paged=True,
+        block_size=block_size,
+        num_kv_blocks=num_kv_blocks,
+        **kw,
+    )
+
+
+class TestDensePagedVarlenNumeric:
+    """Packed sequences (``cu_seqlens_q``) over a paged K/V cache with per-sequence
+    ``kv_lens``: Q and KV tails inside a sequence, empty sequences."""
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("lengths", ["edges", "single", "random3"])
+    @pytest.mark.parametrize("block_size", [16, 32, 64])
+    @pytest.mark.parametrize("d", [128, 64])
+    def test_paged_varlen_matches_reference(self, lengths, block_size, d):
+        self._check(paged_varlen_lengths(lengths), block_size, d, "fp16", 0)
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "dtype,window,d",
+        [("fp16", 256, 128), ("fp16", 256, 64), ("bf16", 0, 128), ("bf16", 256, 64)],
+    )
+    def test_paged_varlen_window_and_bf16(self, dtype, window, d):
+        self._check(list(PAGED_VARLEN_EDGES), 16, d, dtype, window)
+
+    @staticmethod
+    def _check(lens, block_size, d, dtype, window):
+        def reference(q, k, v, scale, window):
+            return _standard_reference(q, k, v, scale, sliding_window=window)
+
+        check_paged_varlen(
+            run_attention_dense_torch,
+            _paged_varlen_spec,
+            reference,
+            _tolerance,
+            lens,
+            block_size,
+            d,
+            dtype,
+            window,
+        )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("d", [128, 64])
+    def test_whole_tile_sequences_match_the_single_sequence_kernel(self, d):
+        """Sequences of whole KV tiles take the same path as the single-sequence
+        paged kernel, so each must give the same bits."""
+        block_size = 16
+
+        def single_spec(n, num_kv_blocks):
+            return dataclasses.replace(
+                _paged_varlen_spec([n], block_size, d, "fp16", num_kv_blocks),
+                varlen=False,
+                ragged=n % 256 != 0,
+            )
+
+        check_whole_tile_sequences(
+            run_attention_dense_torch,
+            _paged_varlen_spec,
+            single_spec,
+            [256, 64, 512],
+            block_size,
+            d,
+        )
 
 
 # Cross-length top-left (unshifted diagonal): sq < sk and sq > sk, ragged and

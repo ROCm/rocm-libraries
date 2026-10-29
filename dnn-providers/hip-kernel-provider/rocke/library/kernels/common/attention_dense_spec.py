@@ -220,7 +220,9 @@ class AttentionDenseSpec:
                     f"{partial_tile_reason(self)} (the partial-tile path has no "
                     "window mask)"
                 )
-        else:
+        elif not (self.paged and self.varlen):
+            # Paged varlen handles each sequence's Q and KV tails in the kernel;
+            # its seqlen_q / seqlen_kv are only the per-sequence maxima.
             if self.seqlen_q % self.block_m != 0:
                 raise ValueError(
                     f"seqlen_q must be a multiple of block_m={self.block_m}, "
@@ -307,10 +309,21 @@ class AttentionDenseSpec:
                 raise ValueError(
                     f"paged cache {cache_bytes} B exceeds i32 addressing (2 GiB)"
                 )
-            if self.batch != 1:
-                raise ValueError("paged multi-sequence (batch>1) not yet implemented")
             if self.varlen:
-                raise ValueError("paged varlen not yet implemented (single-seq only)")
+                if self.seqlen_q != self.seqlen_kv:
+                    raise ValueError(
+                        "paged varlen is self-attention prefill (q_len == kv_len "
+                        "per sequence): seqlen_q must equal seqlen_kv, got "
+                        f"{self.seqlen_q} != {self.seqlen_kv}"
+                    )
+                # emit_lse is declared by the arch specs.
+                if getattr(self, "emit_lse", False):
+                    raise ValueError("emit_lse is not yet supported with paged varlen")
+            elif self.batch != 1:
+                raise ValueError(
+                    "paged multi-sequence (batch>1) needs varlen=True "
+                    "(packed Q + cu_seqlens_q)"
+                )
             if self.persistent:
                 raise ValueError(
                     "paged + persistent not yet implemented "
@@ -318,9 +331,10 @@ class AttentionDenseSpec:
                 )
             if self.dtype not in ("fp16", "bf16"):
                 raise ValueError(f"paged not yet implemented for dtype={self.dtype}")
-            if self.seqlen_kv % self.block_n:
+            if not self.varlen and self.seqlen_kv % self.block_n:
                 # The padded keys of a partial KV tile would read stale page rows
                 # (or block 0) instead of the zeros the contiguous bound gives.
+                # Paged varlen zeroes them in its V loads.
                 raise ValueError(
                     f"paged needs whole KV tiles: seqlen_kv ({self.seqlen_kv}) must be "
                     f"a multiple of block_n ({self.block_n})"
@@ -377,7 +391,7 @@ class AttentionDenseSpec:
             balance_causal(self)
             and not moving_diagonal
             and not self.ragged
-            and not self.varlen
+            and not (self.varlen and not self.paged)
         )
 
     @property
@@ -416,6 +430,13 @@ class AttentionDenseSpec:
         stays the best measured order without causal masking."""
         if self.nonpersist_decode != "auto":
             return self.nonpersist_decode
+        if self.paged and self.varlen and self.batch > 1:
+            # Packed sequences of different lengths: an order with the sequence as
+            # the fastest digit puts each sequence on one XCD, so a long one runs on
+            # a fraction of the GPU. A head band per XCD spreads every sequence.
+            if self.num_query_heads % self.chiplet_num_xcds == 0:
+                return NonpersistHqMinorSwz.name
+            return NonpersistQbMinor.name
         if not self._aligned_causal:
             return NonpersistQbMinor.name
         # Swizzled Head-first measured ahead of every other order, persistent
@@ -754,10 +775,11 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
             f"limit ({INT32_LIMIT} B)"
         )
     qo_elems = spec.batch * spec.seqlen_q * spec.num_query_heads * spec.head_size
-    if spec.ragged:
-        # A ragged Q goes through a buffer resource whose num_records AND voffset
-        # are both i32 BYTES, so the ceiling is half the element count the
-        # element-offset paths get. O stays element-addressed even here.
+    if spec.ragged or (spec.paged and spec.varlen):
+        # A ragged or paged varlen Q goes through a buffer resource whose
+        # num_records AND voffset are both i32 BYTES, so the ceiling is half the
+        # element count the element-offset paths get. O stays element-addressed
+        # even here.
         qo_bytes = qo_elems * 2
         if qo_bytes >= INT32_LIMIT:
             return False, (

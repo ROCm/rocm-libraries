@@ -7,7 +7,7 @@ the specification, the data layout, and the two kernel strategies (2D and 3D
 split-KV) the production dispatcher chooses between. §8 additionally documents the
 **dense prefill kernel** — a compile-time-sized peak-TFLOPS sibling
 (persistent grid-stride + on-chip ragged support) for the contiguous
-`[B, S, H, d]` prefill regime, with a single-sequence paged K/V mode.
+`[B, S, H, d]` prefill regime, with a paged K/V mode (§8.4).
 
 > The harness in this folder benchmarks against AITER's Triton
 > `unified_attention`; the CK DSL kernels mirror that Triton reference 1:1 in
@@ -572,8 +572,9 @@ block-id → work-item map:
 - **`hq_minor_swz`** — Swizzled Head-first (arXiv 2511.02132): grid
   `(M·⌈S_q/256⌉, H_q/M, B)`, $M$ = `chiplet_num_xcds`, so each XCD owns a
   contiguous band of query heads; longest-first under causal masking.
-- **`auto`** (default) — `hq_minor_swz` for large causal MHA, `bt_hkv_minor`
-  for other aligned causal attention, else `qb_minor`.
+- **`auto`** (default) — `hq_minor_swz` for large causal MHA and for packed
+  paged sequences (§8.4), `bt_hkv_minor` for other aligned causal attention, else
+  `qb_minor`.
 
 Both grids balance causal work (longest-first, fold, pair fold) only without a
 sliding window shorter than the keys: such a window gives every query block
@@ -634,6 +635,42 @@ window (the validator rejects those). The aligned path is emitted
 **byte-identically** when `ragged=False`, so ragged support costs the aligned
 schedule nothing; the ragged kernel itself runs at **~890 TFLOPS** (≈94% of the
 948 aligned headline), the delta being the bounds-checked load + guarded store.
+
+### 8.4 Paged K/V
+
+`paged=True` reads K and V from the serving page cache through `block_tables`
+(the layout of the unified kernels, §0) instead of a contiguous `[B, S, H_k, d]`
+buffer. A wave's rows of one KV tile stay inside one page, so each wave looks up
+its page once per tile and the §8.1 schedule is otherwise unchanged. Every lookup
+is bounded by the sequence's live page count $⌈\text{kv\_len}/b⌉$: a lookup past
+it reads block 0, never an unused table column. The cache size is baked in
+(`num_kv_blocks`), as the rest of the shape is.
+
+- **One sequence** (`varlen=False`, $B = 1$): Q/O stay `[1, S_q, H_q, d]` and
+  `kv_lens[0]` must be $S_k$. Keys must fill whole KV tiles: the padded keys of a
+  partial tile would come from stale page rows (or block 0), not the zeros the
+  contiguous buffer bound gives. A partial query tile takes the §8.3 ragged path.
+- **Packed sequences** (`varlen=True`, any $B$): Q/O are packed
+  `[total_q, H_q, d]` with `cu_seqlens_q`; each sequence's KV length is
+  `kv_lens[b]` (no `cu_seqlens_kv`) and must equal its query length, so the causal
+  diagonal is the same top-left or bottom-right. The spec's $S_q$/$S_k$ are the
+  maxima and size the grid; query blocks past a sequence's end exit at once. Each
+  sequence's tails are bounded in the kernel:
+  - Q rows past the sequence load through a buffer resource bounded by the
+    packed total (they read the next sequence's queries or zeros) and their
+    stores are guarded off.
+  - The last KV tile is visited ($⌈\text{kv\_len}/\text{block\_n}⌉$ tiles). Its
+    keys past `kv_len` lie above every live row's diagonal, so the causal select
+    already drops their scores; K needs no extra mask.
+  - V rows past `kv_len` are not covered by that mask: $P = 0$ times a NaN in a
+    stale page row is still NaN. Their DMA offset is pushed past the buffer bound,
+    so the copy writes zeros into LDS.
+
+  Dispatch also sends one sequence here when the one-sequence form cannot bound
+  it: keys ending inside a KV tile, or a partial query tile with a sliding window
+  (the ragged path takes no window). Packed sequences take `hq_minor_swz`
+  (`qb_minor` when the query heads do not split evenly over the XCDs): with the
+  sequence as the fastest grid digit, each sequence would run on one XCD.
 
 ---
 

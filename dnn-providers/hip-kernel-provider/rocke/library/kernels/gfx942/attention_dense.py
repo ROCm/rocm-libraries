@@ -2035,7 +2035,7 @@ def _build_attention_dense_single_buffer(
         if spec.paged:
             # The block table places the sequence's keys; no batch term.
             k_base = b.mul(hkv, b.const_i32(D))
-            _pg_seq_base, _pg_n_pages = paged_seq_setup(
+            _pg_seq_base, _pg_n_pages, _pg_kv_len = paged_seq_setup(
                 b, bt, kv_lens, bt_stride, spec.block_size
             )
         else:

@@ -249,12 +249,24 @@ def resolve_dense_num_persistent(
         ) from None
 
 
-def dense_paged_fields(req) -> dict:
-    """Paged-KV spec fields of a ``layout="paged"`` request; empty for any other.
+def dense_paged_varlen(batch: int, seqlen_kv: int, block_n: int) -> bool:
+    """Whether a paged problem needs the packed varlen body on KV tile ``block_n``.
+
+    Several sequences need it for their own lengths and page rows. So does one
+    sequence whose keys end inside a KV tile: the single-sequence body would read
+    that tile's padded keys from stale page rows, the varlen body zeroes them.
+    """
+    return batch > 1 or seqlen_kv % block_n != 0
+
+
+def dense_paged_fields(req, block_n: int) -> dict:
+    """Paged-KV spec fields of a ``layout="paged"`` request on a candidate with KV
+    tile ``block_n``; empty for any other request.
 
     The block count is known only from the cache tensor, so this is the smallest
     cache that holds the request; binding retargets it from ``k.shape[0]``
-    (:meth:`AttentionTuningSpec.with_num_kv_blocks`).
+    (:meth:`AttentionTuningSpec.with_num_kv_blocks`). A varlen problem's lengths
+    are maxima (:func:`dense_paged_varlen`).
     """
     if req.layout.strip().lower() != "paged":
         return {}
@@ -267,11 +279,14 @@ def dense_paged_fields(req) -> dict:
     if block_size <= 0:
         raise ValueError(f"kv_block_size must be positive, got {block_size}")
     pages_per_seq = -(-int(req.seqlen_k) // block_size)
-    return {
+    fields = {
         "paged": True,
         "block_size": block_size,
         "num_kv_blocks": int(req.batch) * pages_per_seq,
     }
+    if dense_paged_varlen(int(req.batch), int(req.seqlen_k), int(block_n)):
+        fields["varlen"] = True
+    return fields
 
 
 def dense_paged_tile_fits(req, block_m: int, block_n: int) -> bool:
@@ -279,7 +294,7 @@ def dense_paged_tile_fits(req, block_m: int, block_n: int) -> bool:
     request is not paged. A smaller tile that fails this keeps the default tile."""
     from kernels.common._attention_dense_paged import paged_tile_check
 
-    paged = dense_paged_fields(req)
+    paged = dense_paged_fields(req, block_n)
     return not paged or paged_tile_check(paged["block_size"], block_m, block_n)[0]
 
 
@@ -402,8 +417,8 @@ class DenseSpace(WavesPerEuSpace):
     supports: DenseSupports = None
     recorded_fields: frozenset = frozenset()
     # Problem fields that also depend on knobs, recomputed on every build:
-    # ``derived(base, knobs) -> {field: value}`` (gfx950: ``ragged`` follows
-    # the swept tile).
+    # ``derived(base, knobs) -> {field: value}`` (``ragged`` and paged ``varlen``
+    # follow the swept tile).
     derived: Optional[
         Callable[[object, Mapping[str, object]], Mapping[str, object]]
     ] = None

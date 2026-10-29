@@ -10,8 +10,8 @@ Production tiled matrix-core, paged-KV decode:
 - `library/kernels/gfx950/attention_tiled_2d.py`, `library/kernels/gfx942/attention_tiled_2d.py`, `library/kernels/gfx1250/attention_tiled_2d.py`
 - `library/kernels/gfx950/attention_tiled_3d.py`, `library/kernels/gfx942/attention_tiled_3d.py`, `library/kernels/gfx1250/attention_tiled_3d.py`
 - `library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py` -- fast paged-KV + register-resident P (gfx950)
-- `library/kernels/gfx950/attention_dense.py` -- dense flash prefill (contiguous or paged K/V); block orders and
-  grid choice: [case study](../architecture/attention_thread_block_mapping_case_study.md).
+- `library/kernels/gfx950/attention_dense.py` -- dense flash prefill (contiguous K/V, or paged K/V for one
+  sequence or packed varlen sequences); block orders and grid choice: [case study](../architecture/attention_thread_block_mapping_case_study.md).
   Optional fp8 e4m3 (OCP) K/V (`kv_storage_dtype="fp8e4m3"`) with per-tensor `k_scale` /
   `v_scale`, dequantized on load into the bf16/fp16 compute path; default-order grid body
   only, aligned contiguous (non-paged) KV, no sinks
