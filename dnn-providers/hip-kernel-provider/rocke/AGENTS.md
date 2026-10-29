@@ -29,8 +29,10 @@ Prove it — GREEN for every family at every LLVM flavor:
 
 ```bash
 cd platform && export ROCKE=$(pwd) PYTHONPATH=$ROCKE/python
-python tools/check_byte_identity.py                            # llvm20
+ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py   # llvm20
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # llvm22
+ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # llvm23
+ROCKE_LLVM_FLAVOR=llvm24 python tools/check_byte_identity.py   # llvm24
 python tools/check_byte_identity.py --only gemm                # scope to a family
 ```
 
@@ -103,7 +105,10 @@ A change is not done until it clears [`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md
 for its change type (new family / new knob / new feature / perf optimization) — the
 single doc for the Definition of Done, the process map, and commit/branch
 conventions. Build and test references: [`BUILDING.md`](BUILDING.md),
-[`TESTING.md`](TESTING.md). Language style:
+[`TESTING.md`](TESTING.md). Kernel changes that enrolled pinned GPU reference
+cases reach must keep those suites green, and new pinned coverage starts at the
+[pinned reference quickstart](library/tests/reference_common/docs/quickstart.md).
+Language style:
 [`style/PYTHON_STYLE.md`](style/PYTHON_STYLE.md),
 [`style/CPP_STYLE.md`](style/CPP_STYLE.md).
 
@@ -122,6 +127,7 @@ the matching doc first.
 | Historical validation archive (frozen; do not add or update measurements) | [measured_results.md](platform/dsl_docs/optimization/measured_results.md) |
 | GEMM perf | [gemm-optimization-rocke.md](platform/dsl_docs/optimization/utilities/skills/gemm-optimization-rocke.md) |
 | LDS / bank conflicts | [lds-optimization-rocke.md](platform/dsl_docs/optimization/utilities/skills/lds-optimization-rocke.md) |
+| Predict LDS conflicts from lane/address mappings | [lds-bank-conflict-expert](platform/dsl_docs/optimization/utilities/skills/lds-bank-conflict-expert/SKILL.md) |
 | Prefetch / async DRAM→LDS | [prefetch-data-load-rocke.md](platform/dsl_docs/optimization/utilities/skills/prefetch-data-load-rocke.md) |
 | ISA / occupancy / resource inspection | [isa-inspection-rocke.md](platform/dsl_docs/optimization/utilities/skills/isa-inspection-rocke.md) |
 | Capture a kernel trace (rocprof) | [capture-kernel-trace-rocke.md](platform/dsl_docs/optimization/utilities/skills/capture-kernel-trace-rocke.md) |

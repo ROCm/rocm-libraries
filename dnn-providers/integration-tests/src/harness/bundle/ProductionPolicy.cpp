@@ -9,16 +9,23 @@
 namespace hipdnn_integration_tests::bundle
 {
 
+ClaimMode claimMode()
+{
+    return TestConfig::get().enforceSupportClaims() ? ClaimMode::ENFORCE : ClaimMode::WARN;
+}
+
 HarnessPolicy productionPolicy(TensorPlacement placement)
 {
     HarnessPolicy policy;
     policy.mode = TestConfig::get().getVerificationMode();
     policy.validator = TestConfig::get().getValidatorDevice();
-    policy.enforceSupportClaims = TestConfig::get().enforceSupportClaims();
+    policy.claims = claimMode();
+    policy.skipGraphValidation = TestConfig::get().skipGraphValidation();
     policy.placement = placement;
     policy.arch = TestConfig::get().getCurrentArch();
     policy.platform = currentPlatform();
     policy.deviceVramMb = TestConfig::get().getCurrentDeviceVramMb();
+    policy.benchmark = TestConfig::get().benchmarkSettings();
     return policy;
 }
 

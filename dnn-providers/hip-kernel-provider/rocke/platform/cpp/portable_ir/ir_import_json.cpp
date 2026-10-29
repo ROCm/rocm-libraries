@@ -12,13 +12,15 @@
  * SSA values are resolved by their exported names ("%vN" / "%A" / "%k0") via a
  * name->value table with proper region scoping (body-local values, including
  * scf.for induction/iter-arg values, are popped when the region closes). Every
- * region-bearing op (scf.for / scf.if) is built via its real control-flow
+ * region-bearing op (scf.for / scf.if / scf.if_else) is built via its real control-flow
  * builder so induction/iter values and the iter_args list attr are reconstructed
  * exactly as a native C build would; all other ops go through the generic
  * rocke_b_op path keyed by rocke_opcode_from_name.
  */
 #include "rocke/ir_import.h"
 
+#include <limits.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -444,7 +446,10 @@ static jval_t* jp_value(jparser_t* jp)
         return jp_object(jp);
     if(c == '[')
         return jp_array(jp);
-    if(c == '-' || (c >= '0' && c <= '9'))
+    /* Python's json.dumps spells IEEE non-finite doubles as NaN and
+     * Infinity. Float attrs are doubles and must preserve those values, so
+     * accept the producer's spellings through strtod as well as JSON numbers. */
+    if(c == '-' || c == 'N' || c == 'I' || (c >= '0' && c <= '9'))
         return jp_number(jp);
     if(jp_lit(jp, "true"))
     {
@@ -692,6 +697,8 @@ static void rename_value(importer_t* im, rocke_value_t* v, const char* exported_
         v->name = copy;
 }
 
+static bool import_int_value(importer_t* im, const char* context, const jval_t* v, int64_t* out);
+
 /* Build a rocke_type_t from a JSON type node: scalar -> name string; composite
  * -> {"kind": ...}. */
 static const rocke_type_t* import_type(importer_t* im, const jval_t* t)
@@ -722,7 +729,15 @@ static const rocke_type_t* import_type(importer_t* im, const jval_t* t)
             jval_t* cnt = jobj_get(t, "count");
             if(!elem || !cnt || cnt->kind != J_NUM)
                 return im->failed ? nullptr : (imp_fail(im, "bad vector type"), nullptr);
-            return rocke_vector_type(im->b, elem, (int)cnt->num);
+            int64_t count;
+            if(!import_int_value(im, "vector count", cnt, &count))
+                return NULL;
+            if(count < INT_MIN || count > INT_MAX)
+            {
+                imp_fail(im, "vector count is outside the int range");
+                return NULL;
+            }
+            return rocke_vector_type(im->b, elem, (int)count);
         }
         if(strcmp(kind, "ptr") == 0)
         {
@@ -746,7 +761,19 @@ static const rocke_type_t* import_type(importer_t* im, const jval_t* t)
                 return NULL;
             }
             for(int i = 0; i < rank; i++)
-                dims[i] = (int)shp->arr[i]->num;
+            {
+                int64_t dim;
+                char context[64];
+                snprintf(context, sizeof context, "smem shape item %d", i);
+                if(!import_int_value(im, context, shp->arr[i], &dim))
+                    return NULL;
+                if(dim < INT_MIN || dim > INT_MAX)
+                {
+                    imp_fail(im, "%s is outside the int range", context);
+                    return NULL;
+                }
+                dims[i] = (int)dim;
+            }
             /* exclusive is reconstructed from the op attr in import_op (the
              * type node, like the canonical type name, omits it). */
             return rocke_smem_type(im->b, elem, dims, rank, 0);
@@ -756,6 +783,23 @@ static const rocke_type_t* import_type(importer_t* im, const jval_t* t)
     }
     imp_fail(im, "bad type node");
     return NULL;
+}
+
+static bool import_int_value(importer_t* im, const char* context, const jval_t* v, int64_t* out)
+{
+    /* JSON numbers are doubles in this parser. Stay in the safe-integer range
+     * and validate before casting: larger adjacent integer spellings can round
+     * to the same double, while non-finite and out-of-range conversions are
+     * undefined behavior. */
+    if(!v || v->kind != J_NUM || !isfinite(v->num)
+       || !(v->num >= -9007199254740991.0 && v->num <= 9007199254740991.0)
+       || v->num != (double)(int64_t)v->num)
+    {
+        imp_fail(im, "%s is not an integer", context);
+        return false;
+    }
+    *out = (int64_t)v->num;
+    return true;
 }
 
 /* Populate a rocke_attr_map_t from a JSON typed-attr object (keys -> {"t","v"}).
@@ -783,7 +827,13 @@ static void import_attrs(importer_t* im, const jval_t* attrs, rocke_attr_map_t* 
             return;
         }
         if(strcmp(t, "i") == 0)
-            rocke_attr_set_int(im->b, m, key, (int64_t)v->num);
+        {
+            int64_t n;
+            char context[320];
+            snprintf(context, sizeof context, "attr '%s' value", key);
+            if(import_int_value(im, context, v, &n))
+                rocke_attr_set_int(im->b, m, key, n);
+        }
         else if(strcmp(t, "f") == 0)
             rocke_attr_set_float(im->b, m, key, v->num);
         else if(strcmp(t, "b") == 0)
@@ -973,6 +1023,47 @@ static void import_scf_if(importer_t* im, const jval_t* op)
     vmap_truncate(im, mark);
 }
 
+/* scf.if_else: always two regions (then, else) that converge at one join
+ * block. Each arm is its own scope, like the scf.if then-region. */
+static void import_scf_if_else(importer_t* im, const jval_t* op)
+{
+    const jval_t* operands = jobj_get(op, "operands");
+    const jval_t* regions = jobj_get(op, "regions");
+    if(!operands || operands->kind != J_ARR || operands->arr_len < 1)
+    {
+        imp_fail(im, "scf.if_else needs a condition operand");
+        return;
+    }
+    rocke_value_t* cond = vmap_get(im, jstr(operands->arr[0]));
+    if(!cond)
+    {
+        imp_fail(im, "scf.if_else unresolved condition");
+        return;
+    }
+    if(!regions || regions->kind != J_ARR || regions->arr_len != 2)
+    {
+        imp_fail(im, "scf.if_else needs exactly two regions (then, else)");
+        return;
+    }
+    int mark = im->len;
+    rocke_if_else_t s = rocke_b_scf_if_else(im->b, cond);
+    if(!rocke_ir_builder_ok(im->b))
+    {
+        imp_fail(im, "scf.if_else build: %s", rocke_ir_builder_error(im->b));
+        return;
+    }
+    rocke_b_region_enter(im->b, s.then_region);
+    import_region_ops(im, regions->arr[0]);
+    rocke_b_region_leave(im->b);
+    vmap_truncate(im, mark);
+    if(im->failed)
+        return;
+    rocke_b_region_enter(im->b, s.else_region);
+    import_region_ops(im, regions->arr[1]);
+    rocke_b_region_leave(im->b);
+    vmap_truncate(im, mark);
+}
+
 /* Resolve an opcode name, applying portable-IR aliases. The Python builder names
  * some vectorized fp16 buffer ops without the dtype suffix the engine's opcode
  * registry uses ("tile.buffer_load_vN" vs "tile.buffer_load_vN_f16"); the op is
@@ -1157,6 +1248,8 @@ static void import_op(importer_t* im, const jval_t* op)
         import_scf_for(im, op);
     else if(strcmp(opcode_name, "scf.if") == 0)
         import_scf_if(im, op);
+    else if(strcmp(opcode_name, "scf.if_else") == 0)
+        import_scf_if_else(im, op);
     else
         import_generic_op(im, op, opcode_name);
 }
@@ -1218,7 +1311,15 @@ static void import_params(importer_t* im, const jval_t* params)
                 }
                 else if(strcmp(key, "align") == 0)
                 {
-                    opts.align = (int)v->num;
+                    int64_t align;
+                    if(!import_int_value(im, "param align", v, &align) || align < INT_MIN
+                       || align > INT_MAX)
+                    {
+                        if(!im->failed)
+                            imp_fail(im, "param align is outside the int range");
+                        return;
+                    }
+                    opts.align = (int)align;
                     opts.align_set = true;
                 }
                 else if(strcmp(key, "addr_space") == 0)
@@ -1242,6 +1343,43 @@ static void import_params(importer_t* im, const jval_t* params)
     }
 }
 
+/* A kernel list attr of bare ints (e.g. cluster_dims, agpr_alloc), exported as
+ * {"t":"l","v":[{"_":{"t":"i","v":N}}, ...]}. Any other shape is an error: a
+ * dropped list would silently change what the kernel compiles to. */
+static void
+    import_kernel_int_list(importer_t* im, rocke_attr_map_t* m, const char* key, const jval_t* v)
+{
+    int64_t ints[16];
+    const int cap = (int)(sizeof ints / sizeof ints[0]);
+    if(!v || v->kind != J_ARR)
+    {
+        imp_fail(im, "kernel attr '%s': list value must be an array", key);
+        return;
+    }
+    if(v->arr_len > cap)
+    {
+        imp_fail(
+            im, "kernel attr '%s': list has %d items, at most %d supported", key, v->arr_len, cap);
+        return;
+    }
+    for(int i = 0; i < v->arr_len; i++)
+    {
+        const jval_t* item = jobj_get(v->arr[i], "_");
+        const char* t = jstr(jobj_get(item, "t"));
+        const jval_t* n = jobj_get(item, "v");
+        if(!t || strcmp(t, "i") != 0 || !n || n->kind != J_NUM)
+        {
+            imp_fail(im, "kernel attr '%s': item %d is not a bare int", key, i);
+            return;
+        }
+        char context[320];
+        snprintf(context, sizeof context, "kernel attr '%s': item %d", key, i);
+        if(!import_int_value(im, context, n, &ints[i]))
+            return;
+    }
+    rocke_attr_set_int_list(im->b, m, key, ints, v->arr_len);
+}
+
 static void import_kernel_attrs(importer_t* im, const jval_t* attrs)
 {
     if(!attrs || attrs->kind != J_OBJ)
@@ -1255,10 +1393,35 @@ static void import_kernel_attrs(importer_t* im, const jval_t* attrs)
         const jval_t* tv = attrs->obj[i].val;
         const char* t = jstr(jobj_get(tv, "t"));
         const jval_t* v = jobj_get(tv, "v");
+        if(t && strcmp(t, "l") == 0)
+        {
+            import_kernel_int_list(im, &k->attrs, key, v);
+            continue;
+        }
+        /* Rejected rather than skipped: a dropped cluster_dims launches unclustered. */
+        if(v && v->kind == J_ARR)
+        {
+            imp_fail(im,
+                     "kernel attr '%s': array value requires tag \"l\", got \"%s\"",
+                     key,
+                     t ? t : "(none)");
+            continue;
+        }
+        if(strcmp(key, "cluster_dims") == 0)
+        {
+            imp_fail(im, "kernel attr '%s' requires tag \"l\", got \"%s\"", key, t ? t : "(none)");
+            continue;
+        }
         if(!t || !v)
             continue;
         if(strcmp(t, "i") == 0)
-            rocke_attr_set_int(im->b, &k->attrs, key, (int64_t)v->num);
+        {
+            int64_t n;
+            char context[320];
+            snprintf(context, sizeof context, "kernel attr '%s' value", key);
+            if(import_int_value(im, context, v, &n))
+                rocke_attr_set_int(im->b, &k->attrs, key, n);
+        }
         else if(strcmp(t, "f") == 0)
             rocke_attr_set_float(im->b, &k->attrs, key, v->num);
         else if(strcmp(t, "b") == 0)

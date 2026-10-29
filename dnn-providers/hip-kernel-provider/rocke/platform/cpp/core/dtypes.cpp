@@ -1,12 +1,17 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /* Target-independent dtype names. Mirrors rocke.core.dtypes:
- * normalize_dtype -> rocke_normalize_dtype.
- * No architecture, IR builder, or lowering dependencies.
+ * normalize_dtype -> rocke_normalize_dtype, dtype_info -> rocke_dtype_info
+ * (NULL on a miss) and rocke_require_dtype_info (raises).
+ * No architecture, IR builder, or lowering dependencies; the engine exception
+ * types (rocke/error.hpp) carry the raising lookup's refusal.
  */
 #include "rocke/dtypes.h"
 
 #include <string.h>
+
+#include "rocke/dtypes_internal.h"
+#include "rocke/error.hpp"
 
 /* =========================================================================
  * target-independent dtype normalization
@@ -34,16 +39,14 @@ static const rocke_dtype_alias_t k_dtype_aliases[] = {
     {"f32", "fp32"},
     {"float", "fp32"},
     {"fp32", "fp32"},
-    {"iu8", "iu8"},
-    {"iu4", "iu4"},
-    {"i8", "i8"},
-    {"int8", "i8"},
-    {"i4", "i4"},
-    {"int4", "i4"},
-    {"i32", ROCKE_DTYPE_I32},
-    {"int32", ROCKE_DTYPE_I32},
+    {"tf32", "tf32"},
+    {"xf32", "tf32"},
+    {"f64", "fp64"},
+    {"double", "fp64"},
+    {"fp64", "fp64"},
     {"fp8", "fp8e4m3"},
     {"fp8e4m3", "fp8e4m3"},
+    {"e4m3", "fp8e4m3"},
     {"bf8", "bf8e5m2"},
     {"bf8e5m2", "bf8e5m2"},
     {"fp6", "fp6e2m3"},
@@ -52,6 +55,21 @@ static const rocke_dtype_alias_t k_dtype_aliases[] = {
     {"fp6e3m2", "fp6e3m2"},
     {"fp4", "fp4e2m1"},
     {"fp4e2m1", "fp4e2m1"},
+    /* Integers. RDNA integer WMMA instructions call their 8- and 4-bit operands
+     * "iu8"/"iu4" in the instruction name only; their operand dtypes are i8 / i4,
+     * because signedness is an instruction operand, not a property of the data.
+     * "i32" is the integer accumulator. */
+    {"i8", "i8"},
+    {"int8", "i8"},
+    {"i4", "i4"},
+    {"int4", "i4"},
+    {"i32", ROCKE_DTYPE_I32},
+    {"int32", ROCKE_DTYPE_I32},
+    /* Unsigned integers (logical types; no unsigned arithmetic yet). */
+    {"u8", "u8"},
+    {"uint8", "u8"},
+    {"u4", "u4"},
+    {"uint4", "u4"},
 };
 #define K_NUM_DTYPE_ALIASES ((int)(sizeof(k_dtype_aliases) / sizeof(k_dtype_aliases[0])))
 
@@ -136,4 +154,50 @@ const char* rocke_normalize_dtype(const char* name, char* lowered, size_t cap)
         }
     }
     return lowered;
+}
+
+static const rocke_dtype_info_t k_dtype_info[] = {
+    /* Floating point, grouped as in _DTYPE_INFO. */
+    {"fp64", ROCKE_DTYPE_FLOAT, 64},
+    {"fp32", ROCKE_DTYPE_FLOAT, 32},
+    {"tf32", ROCKE_DTYPE_FLOAT, 32},
+    {"fp16", ROCKE_DTYPE_FLOAT, 16},
+    {"bf16", ROCKE_DTYPE_FLOAT, 16},
+    {"fp8e4m3", ROCKE_DTYPE_FLOAT, 8},
+    {"bf8e5m2", ROCKE_DTYPE_FLOAT, 8},
+    {"fp6e2m3", ROCKE_DTYPE_FLOAT, 6},
+    {"fp6e3m2", ROCKE_DTYPE_FLOAT, 6},
+    {"fp4e2m1", ROCKE_DTYPE_FLOAT, 4},
+    {"e8m0", ROCKE_DTYPE_FLOAT, 8},
+    {"e5m3", ROCKE_DTYPE_FLOAT, 8},
+    /* Integers. */
+    {"i4", ROCKE_DTYPE_INTEGER, 4},
+    {"i8", ROCKE_DTYPE_INTEGER, 8},
+    {"u4", ROCKE_DTYPE_INTEGER, 4},
+    {"u8", ROCKE_DTYPE_INTEGER, 8},
+    {"i16", ROCKE_DTYPE_INTEGER, 16},
+    {"i32", ROCKE_DTYPE_INTEGER, 32},
+    {"i64", ROCKE_DTYPE_INTEGER, 64},
+    /* Predicates. */
+    {"i1", ROCKE_DTYPE_PREDICATE, 1},
+};
+
+const rocke_dtype_info_t* rocke_dtype_info(const char* name)
+{
+    if(!name)
+        return NULL;
+    char scratch[64];
+    const char* key = rocke_normalize_dtype(name, scratch, sizeof(scratch));
+    for(const auto& info : k_dtype_info)
+        if(strcmp(key, info.name) == 0)
+            return &info;
+    return NULL;
+}
+
+const rocke_dtype_info_t* rocke_require_dtype_info(const char* name)
+{
+    const rocke_dtype_info_t* info = rocke_dtype_info(name);
+    if(!info)
+        throw ckc::ValueError(ckc::format_error("unknown dtype '%s'", name ? name : "(null)"));
+    return info;
 }

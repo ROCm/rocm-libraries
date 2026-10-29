@@ -162,3 +162,366 @@ def test_non_contiguous_input_is_rejected():
     assert not inp["value"].is_contiguous()
     with pytest.raises(ValueError, match="contiguous"):
         prepare(spec, inp, batch)
+
+
+@pytest.mark.parametrize(
+    "key,mutate,match",
+    [
+        ("a", lambda x: x[..., :1], r"a shape"),
+        (
+            "a",
+            lambda x: x.transpose(-1, -2).contiguous().transpose(-1, -2),
+            r"a.*contiguous",
+        ),
+        ("dt_bias", lambda x: x[..., :1], r"dt_bias shape"),
+        ("dt_bias", lambda x: x.to(torch.bfloat16), r"dt_bias.*float32"),
+        (
+            "dt_bias",
+            lambda x: x.transpose(-1, -2).contiguous().transpose(-1, -2),
+            r"dt_bias.*contiguous",
+        ),
+    ],
+)
+def test_kda_gate_input_contract_is_rejected_before_launch(key, mutate, match):
+    """KDA widens the gate buffers; legacy/malformed allocations must not launch.
+
+    The emitter vector-loads ``a`` as ``[B,1,HV,DK]`` and ``dt_bias`` as f32
+    ``[HV,DK]`` using spec-derived offsets. A legacy GDN-shaped or strided
+    allocation is smaller/differently laid out than that compiled range.
+    """
+    import dataclasses as dc
+
+    spec = dc.replace(GdnDecodeSpec(), gate_kind="kda")
+    batch = 2
+    inp = make_inputs(spec, batch, device=DEVICE)
+    inp[key] = mutate(inp[key])
+
+    with pytest.raises(ValueError, match=match):
+        prepare(spec, inp, batch)
+
+
+@pytest.mark.parametrize("key", ["a", "dt_bias"])
+def test_kda_gate_inputs_must_match_query_device(key):
+    """The launch contract rejects gate buffers on a different device."""
+    import dataclasses as dc
+
+    spec = dc.replace(GdnDecodeSpec(), gate_kind="kda")
+    inp = make_inputs(spec, batch=2, device=DEVICE)
+    inp[key] = torch.empty_like(inp[key], device="meta")
+
+    with pytest.raises(ValueError, match=rf"{key} device"):
+        prepare(spec, inp, batch=2)
+
+
+def test_gdn_gate_input_contract_stays_scalar():
+    """The KDA checks must not reject the existing scalar GDN ABI."""
+    spec = GdnDecodeSpec()
+    inp = make_inputs(spec, batch=2, device=DEVICE)
+
+    assert tuple(inp["a"].shape) == (2, 1, spec.num_v_heads)
+    assert tuple(inp["dt_bias"].shape) == (spec.num_v_heads,)
+    prepare(spec, inp, batch=2)
+
+
+def test_valid_kda_gate_inputs_survive_generic_validation():
+    """Mode-specific KDA checks must prevent a second scalar-GDN recheck.
+
+    The rebase first admitted KDA's `[B,1,HV,DK]` ``a`` and `[HV,DK]`` f32
+    ``dt_bias``, then the generic loop rechecked both against GDN's scalar
+    shapes and rejected every normal KDA launch before the kernel ran.
+    """
+    import dataclasses as dc
+
+    spec = dc.replace(GdnDecodeSpec(), gate_kind="kda")
+    inp = make_inputs(spec, batch=2, device=DEVICE)
+
+    prepare(spec, inp, batch=2)
+
+
+# ---- fused conv1d / gated-RMSNorm inputs ----------------------------------
+#
+# Every one of these feeds device address math (a row base, a pool slot, a
+# vector load's alignment) or the norm's arithmetic, and nothing on the device
+# checks it. Each case breaks exactly one rule and names the message of the
+# guard that must fire.
+
+_BATCH = 3
+
+
+def _fused_spec(**kw):
+    import dataclasses as dc
+
+    base = dict(
+        num_k_heads=2,
+        num_v_heads=2,
+        gate_kind="kda",
+        num_warps=4,
+        warp_threads_k=16,
+        blocks_per_v_dim=1,
+        fuse_conv=True,
+        fuse_out_norm=True,
+    )
+    base.update(kw)
+    return dc.replace(GdnDecodeSpec(), **base)
+
+
+def _offset_view(t, elems):
+    """A contiguous copy of ``t`` that starts ``elems`` elements into its
+    storage, so its address is off the allocator's alignment."""
+    flat = torch.zeros(t.numel() + elems, dtype=t.dtype, device=t.device)
+    view = flat[elems:].view(t.shape)
+    view.copy_(t)
+    return view
+
+
+def _rows(t, width, stride):
+    """``t``'s rows placed ``stride`` elements apart in a wider buffer."""
+    wide = torch.zeros(t.shape[0], stride, dtype=t.dtype, device=t.device)
+    wide[:, : t.shape[1]] = t
+    return wide[:, :width]
+
+
+def _set(**kv):
+    def mutate(inp):
+        inp.update({k: v(inp) if callable(v) else v for k, v in kv.items()})
+
+    return mutate
+
+
+_FUSED_BAD_INPUTS = [
+    # mixed_qkv: [B, >= conv_dim] rows, I/O dtype, unit channel stride
+    (
+        "mixed_qkv_short",
+        _set(mixed_qkv=lambda i: i["mixed_qkv"][:, :-8]),
+        r"mixed_qkv must be \[batch=3, >= 768\]",
+    ),
+    (
+        "mixed_qkv_3d",
+        _set(mixed_qkv=lambda i: i["mixed_qkv"][:, None]),
+        r"mixed_qkv must be \[batch=3, >= 768\]",
+    ),
+    (
+        "mixed_qkv_batch",
+        _set(mixed_qkv=lambda i: i["mixed_qkv"][:-1]),
+        r"mixed_qkv must be \[batch=3, >= 768\]",
+    ),
+    (
+        "mixed_qkv_dtype",
+        _set(mixed_qkv=lambda i: i["mixed_qkv"].half()),
+        r"mixed_qkv dtype",
+    ),
+    (
+        "mixed_qkv_channel_stride",
+        _set(mixed_qkv=lambda i: i["mixed_qkv"].repeat_interleave(2, dim=1)[:, ::2]),
+        r"mixed_qkv must have a unit channel stride",
+    ),
+    # qkv_stride: an int equal to the row stride, rows on a 16 B boundary
+    (
+        "qkv_stride_mismatch",
+        _set(qkv_stride=lambda i: i["qkv_stride"] + 8),
+        r"qkv_stride 776 != mixed_qkv.stride\(0\) 768",
+    ),
+    (
+        "qkv_stride_float",
+        _set(qkv_stride=lambda i: float(i["qkv_stride"])),
+        r"qkv_stride must be an int",
+    ),
+    (
+        "qkv_stride_misaligned",
+        _set(mixed_qkv=lambda i: _rows(i["mixed_qkv"], 768, 772), qkv_stride=772),
+        r"qkv_stride 772 puts mixed_qkv rows off the 16 B alignment",
+    ),
+    # conv_state: [pool, conv_dim, taps] with the SAME pool depth as state
+    (
+        "conv_state_pool_depth",
+        _set(conv_state=lambda i: i["conv_state"][:-1]),
+        r"conv_state shape \(6, 768, 3\) != \(7, 768, 3\)",
+    ),
+    (
+        "conv_state_channels",
+        _set(conv_state=lambda i: i["conv_state"][:, :-1]),
+        r"conv_state shape",
+    ),
+    (
+        "conv_state_dtype",
+        _set(conv_state=lambda i: i["conv_state"].half()),
+        r"conv_state dtype",
+    ),
+    (
+        "conv_state_strided",
+        _set(
+            conv_state=lambda i: i["conv_state"]
+            .transpose(1, 2)
+            .contiguous()
+            .transpose(1, 2)
+        ),
+        r"conv_state must be contiguous",
+    ),
+    # conv_weight: [conv_dim, width] f32
+    (
+        "conv_weight_shape",
+        _set(conv_weight=lambda i: i["conv_weight"][:, :-1]),
+        r"conv_weight shape",
+    ),
+    (
+        "conv_weight_dtype",
+        _set(conv_weight=lambda i: i["conv_weight"].bfloat16()),
+        r"conv_weight dtype",
+    ),
+    (
+        "conv_weight_strided",
+        _set(conv_weight=lambda i: i["conv_weight"].t().contiguous().t()),
+        r"conv_weight must be contiguous",
+    ),
+    # out_gate: [B, >= Hv*Dv] rows, I/O dtype, unit stride; og_stride matches
+    (
+        "out_gate_short",
+        _set(out_gate=lambda i: i["out_gate"][:, :-1]),
+        r"out_gate must be \[batch=3, >= 256\]",
+    ),
+    (
+        "out_gate_dtype",
+        _set(out_gate=lambda i: i["out_gate"].half()),
+        r"out_gate dtype",
+    ),
+    (
+        "out_gate_channel_stride",
+        _set(out_gate=lambda i: i["out_gate"].repeat_interleave(2, dim=1)[:, ::2]),
+        r"out_gate must have a unit channel stride",
+    ),
+    (
+        "og_stride_mismatch",
+        _set(og_stride=lambda i: i["og_stride"] + 1),
+        r"og_stride 257 != out_gate.stride\(0\) 256",
+    ),
+    ("og_stride_float", _set(og_stride=256.0), r"og_stride must be an int"),
+    # norm_weight: [Dv] f32; norm_eps: finite, positive, and still a normal f32
+    # after the f32 kernarg pack
+    (
+        "norm_weight_shape",
+        _set(norm_weight=lambda i: i["norm_weight"][:-1]),
+        r"norm_weight shape",
+    ),
+    (
+        "norm_weight_dtype",
+        _set(norm_weight=lambda i: i["norm_weight"].half()),
+        r"norm_weight dtype",
+    ),
+    ("norm_eps_zero", _set(norm_eps=0.0), r"norm_eps must be a finite positive"),
+    ("norm_eps_negative", _set(norm_eps=-1e-6), r"norm_eps must be a finite positive"),
+    (
+        "norm_eps_nan",
+        _set(norm_eps=float("nan")),
+        r"norm_eps must be a finite positive",
+    ),
+    ("norm_eps_bool", _set(norm_eps=True), r"norm_eps must be a finite positive"),
+    (
+        "norm_eps_tensor",
+        _set(norm_eps=lambda i: torch.tensor(1e-6)),
+        r"norm_eps must be a finite positive",
+    ),
+    # Positive in Python but not as the f32 the kernel receives: 1e-50 packs
+    # to 0.0, 1e-40 is an f32 denormal, 1e39 overflows f32.
+    ("norm_eps_f32_zero", _set(norm_eps=1e-50), r"norm_eps must be a finite positive"),
+    (
+        "norm_eps_f32_denormal",
+        _set(norm_eps=1e-40),
+        r"norm_eps must be a finite positive",
+    ),
+    (
+        "norm_eps_f32_overflow",
+        _set(norm_eps=1e39),
+        r"norm_eps must be a finite positive",
+    ),
+    # one device for every pointer (mixed_qkv is the reference)
+    *[
+        (
+            f"{name}_device",
+            _set(**{name: lambda i, n=name: torch.empty_like(i[n], device="meta")}),
+            rf"{name} device meta != mixed_qkv device",
+        )
+        for name in ("conv_state", "conv_weight", "out_gate", "norm_weight", "state")
+    ],
+    # base alignment the vector accesses assume
+    (
+        "mixed_qkv_misaligned",
+        _set(mixed_qkv=lambda i: _offset_view(i["mixed_qkv"], 1)),
+        r"mixed_qkv must start on a 16 B boundary",
+    ),
+    (
+        "conv_state_misaligned",
+        _set(conv_state=lambda i: _offset_view(i["conv_state"], 1)),
+        r"conv_state must start on a 16 B boundary",
+    ),
+    (
+        "conv_weight_misaligned",
+        _set(conv_weight=lambda i: _offset_view(i["conv_weight"], 1)),
+        r"conv_weight must start on a 16 B boundary",
+    ),
+    (
+        "dt_bias_misaligned",
+        _set(dt_bias=lambda i: _offset_view(i["dt_bias"], 4)),
+        r"dt_bias must start on a 32 B boundary",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "mutate,match",
+    [c[1:] for c in _FUSED_BAD_INPUTS],
+    ids=[c[0] for c in _FUSED_BAD_INPUTS],
+)
+def test_fused_input_contract_is_rejected_before_launch(mutate, match):
+    spec = _fused_spec()
+    inp = make_inputs(spec, _BATCH, device=DEVICE)
+    prepare(spec, inp, _BATCH)  # the unmutated fixture is accepted
+    mutate(inp)
+    with pytest.raises(ValueError, match=match):
+        prepare(spec, inp, _BATCH)
+
+
+def test_wider_fused_rows_on_16_byte_strides_are_accepted():
+    """The contract admits row slices of a wider buffer (``>=`` widths)."""
+    spec = _fused_spec()
+    inp = make_inputs(spec, _BATCH, device=DEVICE)
+    inp["mixed_qkv"] = _rows(inp["mixed_qkv"], 768, 776)
+    inp["qkv_stride"] = 776
+    inp["out_gate"] = _rows(inp["out_gate"], 256, 257)
+    inp["og_stride"] = 257
+    prepare(spec, inp, _BATCH)
+
+
+def test_smallest_normal_f32_norm_eps_is_accepted():
+    """The eps floor is the smallest normal f32, inclusive; int eps is fine."""
+    spec = _fused_spec()
+    inp = make_inputs(spec, _BATCH, device=DEVICE)
+    for eps in (2.0**-126, 1):
+        inp["norm_eps"] = eps
+        prepare(spec, inp, _BATCH)
+
+
+def test_f32_spec_rejects_a_16_bit_pool():
+    """A 16-bit pool under an f32 spec is half the bytes the kernel's slot
+    stride walks: reading or writing it goes past the end of the pool."""
+    spec = _fused_spec(state_dtype="f32", fuse_conv=False, fuse_out_norm=False)
+    inp = make_inputs(spec, _BATCH, device=DEVICE)
+    inp["state"] = inp["state"].bfloat16()
+    with pytest.raises(ValueError, match=r"state dtype torch.bfloat16 != spec"):
+        prepare(spec, inp, _BATCH)
+
+
+def test_unfused_query_must_be_aligned():
+    spec = GdnDecodeSpec()
+    inp = make_inputs(spec, _BATCH, device=DEVICE)
+    inp["query"] = _offset_view(inp["query"], 1)
+    with pytest.raises(ValueError, match=r"query must start on a 16 B boundary"):
+        prepare(spec, inp, _BATCH)
+
+
+@pytest.mark.parametrize("idx", ["read_indices", "write_indices"])
+def test_fused_mode_keeps_the_skip_sentinel(idx):
+    """-1 is still a legal (skip) index with the fused pools in play."""
+    spec = _fused_spec()
+    inp = make_inputs(spec, _BATCH, device=DEVICE)
+    inp[idx][1] = -1
+    prepare(spec, inp, _BATCH)

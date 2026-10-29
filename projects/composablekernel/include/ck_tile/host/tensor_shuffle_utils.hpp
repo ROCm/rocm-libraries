@@ -29,6 +29,22 @@ struct b_contiguous_items_per_access<GemmConfig,
     // PackedSize specified
     static constexpr int value = GemmConfig::BContiguousItemsPerAccess;
 };
+
+// gfx12 shuffle_b layout selector. False (default): K accesses of at most 16
+// bytes are ordered outside the wave lanes. True: each lane owns 8-element
+// (pk_fp4: 32) K chunks interleaved with the other lane half.
+template <typename GemmConfig, typename = void>
+struct b_preshuffle_lane_interleaved_k : std::false_type
+{
+};
+
+template <typename GemmConfig>
+struct b_preshuffle_lane_interleaved_k<
+    GemmConfig,
+    std::void_t<decltype(GemmConfig::BPreshuffleLaneInterleavedK)>>
+    : std::bool_constant<GemmConfig::BPreshuffleLaneInterleavedK>
+{
+};
 } // namespace detail
 
 template <typename T>
@@ -100,10 +116,16 @@ auto shuffle_b(const ck_tile::HostTensor<T>& t, const GemmConfig& gemmConfig)
     int n_ = t.get_lengths()[1];
     int k_ = t.get_lengths()[0];
 
-    if(ck_tile::is_gfx12_supported())
+    if(ck_tile::is_gfx12_supported() || ck_tile::is_gfx117_supported())
     {
-        constexpr int divisor      = 2;
-        constexpr int kABK1PerLane = std::is_same_v<T, pk_fp4_t> ? 32 : 8;
+        constexpr int divisor = 2;
+        // Default: match MakeBFlatDramTileDistribution, where each access loads at
+        // most 16 bytes per lane and additional accesses sit outside the wave lanes.
+        // The MX weight-preshuffle pipeline opts in with BPreshuffleLaneInterleavedK.
+        constexpr bool interleaved = detail::b_preshuffle_lane_interleaved_k<GemmConfig>::value;
+        const int kABK1PerLane     = interleaved ? (std::is_same_v<T, pk_fp4_t> ? 32 : 8)
+                                                 : std::min(16 / static_cast<int>(sizeof(T)),
+                                                        gemmConfig.K_Warp_Tile / divisor);
         int kABK0PerLane           = gemmConfig.K_Warp_Tile / divisor / kABK1PerLane;
         ck_tile::HostTensor<T> t_view({n_ / gemmConfig.N_Warp_Tile,
                                        gemmConfig.N_Warp_Tile,
@@ -112,7 +134,10 @@ auto shuffle_b(const ck_tile::HostTensor<T>& t, const GemmConfig& gemmConfig)
                                        divisor,
                                        kABK1PerLane});
         std::copy(t.begin(), t.end(), t_view.begin());
-        return ck_tile::reference_permute(t_view, {0, 2, 4, 1, 3, 5});
+        if constexpr(interleaved)
+            return ck_tile::reference_permute(t_view, {0, 2, 4, 1, 3, 5});
+        else
+            return ck_tile::reference_permute(t_view, {0, 2, 3, 4, 1, 5});
     }
     else if(ck_tile::is_gfx11_supported())
     {
@@ -175,7 +200,7 @@ auto shuffle_b_permuteN(const ck_tile::HostTensor<T>& t,
     int k_ = t.get_lengths()[0];
     constexpr ck_tile::index_t NRepeat =
         GemmConfig::N_Tile / GemmConfig::N_Warp_Tile / GemmConfig::N_Warp;
-    if(ck_tile::is_gfx12_supported())
+    if(ck_tile::is_gfx12_supported() || ck_tile::is_gfx117_supported())
     {
         constexpr int divisor = 2;
         int kABK1PerLane = min(16 / static_cast<int>(sizeof(T)), gemmConfig.K_Warp_Tile / divisor);

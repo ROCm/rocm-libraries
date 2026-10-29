@@ -3,7 +3,9 @@
 
 // GPU reference scaled-dot-product-attention forward kernel.
 // Compiled via HipRTC with -DQ_TYPE=<type> -DK_TYPE=<type> -DV_TYPE=<type>
-// -DO_TYPE=<type> -DCOMPUTE_TYPE=<type>.
+// -DO_TYPE=<type> -DCOMPUTE_TYPE=<type> -DMASK_TYPE=<type>.
+// MASK_TYPE is the dtype of the additive attention mask (float, half or bfloat16);
+// it is converted to float on read and is independent of COMPUTE_TYPE.
 // One thread per output element (b, h, sq, dv). Uses stride-based indexing.
 // Default mode reproduces the fp32-softmax algorithm of CpuFpReferenceSdpa::forward.
 // Provider-attuned modes can model lower-precision softmax-probability storage before P@V.
@@ -63,7 +65,7 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     auto* k = static_cast<const K_TYPE*>(args.k);
     auto* v = static_cast<const V_TYPE*>(args.v);
     auto* o = static_cast<O_TYPE*>(args.o);
-    auto* mask = static_cast<const COMPUTE_TYPE*>(args.mask);
+    auto* mask = static_cast<const MASK_TYPE*>(args.mask);
     // LSE is always float [B, H, Sq]; nullptr disables it. Written once per
     // (b, h, sq) by the dv == 0 thread (see below).
     auto* lse = static_cast<float*>(args.lse);
@@ -124,8 +126,9 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
             s += toAccum(mask[maskOffset]);
         }
 
-        // (b) Sliding-window mask (applied after the additive mask).
-        // Asymmetric: +1 on the right bound, none on the left bound.
+        // (b) Sliding-window mask (applied after the additive mask), cuDNN semantics:
+        // keeps skv in [sq + windowOffset - leftBound + 1, sq + windowOffset + rightBound],
+        // so leftBound = L keeps the L keys ending at the diagonal.
         if(args.rightBound >= 0)
         {
             long long startKv = sq + 1 + windowOffset + args.rightBound;
@@ -140,7 +143,7 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
         }
         if(args.leftBound >= 0)
         {
-            if(skv < sq + windowOffset - args.leftBound)
+            if(skv <= sq + windowOffset - args.leftBound)
             {
                 s = negInf;
             }

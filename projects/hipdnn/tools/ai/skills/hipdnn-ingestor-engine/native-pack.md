@@ -14,6 +14,14 @@ registration patterns, not another engine's applicability rules.
 | Native score | `double(const MatchContext&, const BoundTokens&, const KernelDefinition&)` | Rank surviving candidates for `heuristic: native` |
 | Dispatch | `IKernelDispatchHandler<Handle>` | Workspace, owned preparation and exact launch |
 
+A multi-launch pack (descriptors carrying `sources`) overrides `launchNames()` to return
+the launch names of its kernels' `sources` maps, the same set for every kernel; the state
+manager drops a kernel whose set differs. `prepare()` and the launch resolve each launch's
+kernel with `launchKernelDefinition(kernel, name)`, which returns a single-launch
+definition and throws `INVALID_VALUE` for an unknown name or a single-launch kernel. The
+handler owns launch order and the workspace between launches. The declaration is
+provisional until `launches[]` exists. Two names may name one kernel.
+
 Complete reachable placeholders. Zero workspace is valid only when none is needed. A
 native scorer ranks on justified free axes; higher wins. `heuristic: none` means no UHD
 and no score declaration, body, constant or registration. Loading alone cannot prove
@@ -46,10 +54,11 @@ UIDs/scalars, workspace and required module/program lifetimes; nothing may retai
 transient `MatchContext` or `BoundTokens` references. A runnable kernel is a view, so
 keep its compiled program alive too.
 
-Use `buildIngestorKernelCode` for source loading and path bounds. Embedded source uses
-real compile options. KPACK loads library/toc-key/symbol relative to descriptor origin
-within `treeRoot`. A layout-neutral stand-in is valid only on a path proven not to
-consume those compile options, never as an embedded-source workaround.
+Use `buildIngestorKernelCode` for source loading and path bounds. A pack that may compile
+from source passes the compiler and real compile options. A pack whose kernels are all
+KPACK calls the overload that takes neither, which refuses an `embedded_source` kernel;
+never fabricate a tensor to construct compile options. KPACK loads
+library/toc-key/symbol relative to descriptor origin within `treeRoot`.
 
 A KPACK load is **digest-checked before the driver sees the bytes**: the descriptor's
 `sha256` is the digest of the decompressed code object, 64 lowercase hex, and the loader

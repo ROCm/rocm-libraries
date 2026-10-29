@@ -21,6 +21,7 @@ is how you get the ``--kernel-regex`` for a capture without perturbing it.
 Usage:
     python3 run_one_dgrad.py --kouter on --stride 2
     python3 run_one_dgrad.py --tile-m 128 --print-name-only
+    python3 run_one_dgrad.py --tap-outer off   # the flat k_dg loop at stride 1
 
     ROCPROF_TRACE_DECODER_LIB=<dir with librocprof-trace-decoder.so> \\
     python3 ../../../../../dsl_docs/optimization/utilities/tools/wavescope/\\
@@ -58,8 +59,8 @@ def _parse_args(argv=None):
         help="override -u/-v in --miopen-cmd. stride > 1 takes the tilde "
         "sub-GEMM decomposition, which is a different kernel shape entirely.",
     )
-    # Defaults are the shipped dispatch geometry -- see _GFX950_TILE_* and
-    # _GFX950_WARP_* in library/dispatch/grouped_convolution.py.
+    # Defaults are the geometry dgrad dispatch shipped (64x64x64 tile, 2x2
+    # waves) before the grouped-convolution dispatcher went forward-only.
     ap.add_argument("--tile-m", type=int, default=64)
     ap.add_argument("--tile-n", type=int, default=64)
     ap.add_argument("--tile-k", type=int, default=64)
@@ -90,6 +91,24 @@ def _parse_args(argv=None):
         "layouts in-process -- which is how you get an M-outer baseline to "
         "trace against. Neither dispatch nor the sweep driver takes an "
         "override.",
+    )
+    ap.add_argument(
+        "--tap-outer",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="DgradConvSpec.tap_outer_k: the stride-1 K loop with the filter "
+        "tap outer and the output-channel chunk inner. auto (the default) "
+        "takes it where the AOT cache offers its tap-outer binary (stride 1, "
+        "dilation 1, wave64, kpg a multiple of tile_k); on/off force the "
+        "field (the validator rejects 'on' outside those rules).",
+    )
+    ap.add_argument(
+        "--uniform-k",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="DgradConvSpec.uniform_k_decode. auto (the default) follows "
+        "the AOT cache: on where DgradConvSpec.default_uniform_k_decode says so "
+        "and the tap-outer loop is off (the two loops are exclusive).",
     )
     ap.add_argument("--warmup", type=int, default=5)
     ap.add_argument("--iters", type=int, default=200)
@@ -122,6 +141,7 @@ def main(argv=None) -> int:
     import torch
     from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
     from kernels.common.conv_implicit_gemm import ConvDataSpec
+    from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_implicit_gemm_dgrad import (
         DgradConvSpec,
         build_implicit_gemm_conv_dgrad,
@@ -130,7 +150,7 @@ def main(argv=None) -> int:
     )
     from rocke import compile_kernel
     from rocke.core.arch import ArchTarget
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_abi import conv_args_signature
     from rocke.runtime import synchronize_and_release, time_launches
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
@@ -177,6 +197,23 @@ def main(argv=None) -> int:
         if a.kouter == "auto"
         else a.kouter == "on"
     )
+    # The K loop of the AOT binary that serves the problem: tap-outer on the
+    # stride-1 binary (kernels/conv/aot_jobs.py, _dgrad_tap_outer_variants),
+    # uniform decode on the tilde binary.
+    stride1 = (p.sH, p.sW, p.dH, p.dW) == (1, 1, 1, 1)
+    tap_outer = (
+        stride1 and tgt.wave_size == 64 and p.kpg % a.tile_k == 0
+        if a.tap_outer == "auto"
+        else a.tap_outer == "on"
+    )
+    uniform_k = (
+        not tap_outer
+        and DgradConvSpec.default_uniform_k_decode(
+            arch=a.arch, wave_size=tgt.wave_size, pipeline=a.pipeline
+        )
+        if a.uniform_k == "auto"
+        else a.uniform_k == "on"
+    )
     spec = DgradConvSpec(
         problem=p,
         name=a.name,
@@ -194,6 +231,8 @@ def main(argv=None) -> int:
         epilogue=a.epilogue,
         split_k=a.split_k,
         lds_k_outer=lds_k_outer,
+        tap_outer_k=tap_outer,
+        uniform_k_decode=uniform_k,
         vector_size_a=vec_a,
         vector_size_b=vec_b,
         vector_size_c=vec_c,
@@ -212,7 +251,11 @@ def main(argv=None) -> int:
         f"config tile={a.tile_m}x{a.tile_n}x{a.tile_k} warp={a.warp_m}x{a.warp_n} "
         f"atom={a.warp_tile_mn}x{a.warp_tile_mn}x{atom.k} {a.pipeline}/{a.epilogue} "
         f"spk={a.split_k} kouter={'on' if lds_k_outer else 'off'}"
-        f"{' (auto)' if a.kouter == 'auto' else ''} sub_gemms={len(sub_gemms)} "
+        f"{' (auto)' if a.kouter == 'auto' else ''} "
+        f"tap_outer={'on' if tap_outer else 'off'} "
+        f"uniform_k={'on' if uniform_k else 'off'} "
+        f"folded_record={'on' if spec.folds_sub_gemm_record else 'off'} "
+        f"sub_gemms={len(sub_gemms)} "
         f"needs_atomic={spec.needs_atomic}",
         flush=True,
     )
@@ -251,20 +294,20 @@ def main(argv=None) -> int:
         len(buf_bytes),
     )
 
-    ext_sig = conv_args_signature(a.dtype) + [
-        {"name": "sub_gemm_buf", "type": "ptr<i32, global>", "size_bytes": 8},
-        {"name": "num_sub_gemms", "type": "i32", "size_bytes": 4},
-    ]
-    values = {
-        "A": dY_dev,
-        "B": W_dev,
-        "D": dX_dev,
-        "A_bytes": dY_t.nbytes,
-        "B_bytes": W_t.nbytes,
-        "D_bytes": dX_t.nbytes,
-        "sub_gemm_buf": sgbuf_dev,
-        "num_sub_gemms": len(sub_gemms),
-    }
+    # The tilde record buffer is part of the dgrad AOT ABI, not an extension.
+    ext_sig = conv_args_signature(a.dtype, direction="dgrad")
+    values = ConvArgs.from_problem(
+        p, direction="dgrad", tile_m=spec.tile_m, tile_n=spec.tile_n
+    ).to_launch_values(
+        int(dY_dev),
+        int(W_dev),
+        int(dX_dev),
+        dY_t.nbytes,
+        W_t.nbytes,
+        dX_t.nbytes,
+        sub_gemm_buf=int(sgbuf_dev),
+        num_sub_gemms=len(sub_gemms),
+    )
     # Conv group rides blockIdx.y; the tilde sub-GEMM geometry is
     # channel-independent so block_end is per-group.
     grid = (sub_gemms[-1].block_end, max(int(p.groups), 1), a.split_k)

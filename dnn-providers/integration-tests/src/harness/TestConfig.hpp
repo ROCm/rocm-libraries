@@ -16,6 +16,7 @@
 #include <string_view>
 
 #include "common/PlatformUtils.hpp"
+#include "harness/Benchmark.hpp"
 #include "harness/TestSettings.hpp"
 #include "harness/ValidationSite.hpp"
 
@@ -158,8 +159,13 @@ struct TestConfigOptions
     std::optional<VerificationMode> verificationMode;
     std::optional<ValidatorDevice> validatorDevice;
     std::optional<std::filesystem::path> captureDir;
+    // Off here, on at the command line: main.cpp resolves --enforce-support-claims
+    // (default true) and its opt-out into this field before initializing. In-process
+    // callers get the inert value, so a test that never mentions claims cannot be
+    // failed by one.
     bool enforceSupportClaims = false;
     bool writeSupportClaims = false;
+    std::optional<BenchmarkSettings> benchmark;
 };
 
 // Singleton class for storing CLI-based test configuration.
@@ -228,6 +234,7 @@ public:
 
         instance._enforceSupportClaims = opts.enforceSupportClaims;
         instance._writeSupportClaims = opts.writeSupportClaims;
+        instance._benchmark = opts.benchmark;
 
         // Golden bundle configuration — default is ON; env var can override.
         instance._allowBundles = opts.allowBundles;
@@ -457,6 +464,9 @@ public:
         return _validatorDevice.value_or(ValidatorDevice::AUTO);
     }
 
+    /// Query every claim-bearing bundle against the engine under test, print the
+    /// summary, and fail the test on a broken claim. One flag for all three: whether
+    /// the sidecar is read and whether a break is fatal are the same decision.
     bool enforceSupportClaims() const
     {
         throwIfNotInitialized();
@@ -486,6 +496,13 @@ public:
         return _captureDir.value();
     }
 
+    /// Set by --benchmark: how to time each verified graph. Empty when off.
+    const std::optional<BenchmarkSettings>& benchmarkSettings() const
+    {
+        throwIfNotInitialized();
+        return _benchmark;
+    }
+
 private:
     TestConfig() = default;
 
@@ -505,6 +522,7 @@ private:
     std::optional<VerificationMode> _verificationMode;
     std::optional<ValidatorDevice> _validatorDevice;
     std::optional<std::filesystem::path> _captureDir;
+    std::optional<BenchmarkSettings> _benchmark;
     std::string _currentArch;
     std::size_t _currentDeviceVramMb = 0;
     std::string _currentPlatform;

@@ -8,9 +8,10 @@ All paths below are relative to the `rocke/platform/` root (with `PYTHONPATH=pyt
 
 ```text
 tests/test_rocke.py                  # unit suite: IR/lowering/transforms (most no-GPU; ~20 harness/timer tests need a GPU)
-tests/run_all.py                      # the cross-platform entrypoint (guard + byte-identity gate + pytest + ctest)
+tests/run_all.py                      # pre-merge: guard + byte identity + IR validity + arch domain + pytest + ctest
 python/rocke/examples/               # Python-owned example generators
-python/rocke/examples/gfx950/attention/parity_unified_attention.py   # attention parity harness
+../library/builders/gfx950/attention/prefill/parity_unified_attention.py   # attention parity harness (Triton/AITER vs rocKE)
+../library/builders/gfx942/attention/prefill/parity_unified_attention.py   # attention parity harness (torch reference)
 python/rocke/examples/common/ck_tile_parity.py               # small-op parity harness
 tests/instances/differential/run_diff.py    # C++ vs Python engine byte-identity (cross-engine parity)
 ```
@@ -28,13 +29,20 @@ Use the Python interpreter from your ROCm development environment:
 python
 ```
 
-Required environment:
+The host/pre-merge gates require Python 3.12 and the dependencies from
+`requirements.txt`; NumPy is the only hard runtime dependency. LLVM/COMGR-backed
+checks need the matching ROCm toolchain, but Torch and a GPU are optional: tests
+that require them must identify their skip. This is the environment for static
+units, byte identity, emitted-IR validity, arch-domain checks, and the host parts
+of `tests/run_all.py`.
 
-- ROCm 7.x with `libamd_comgr` and `libamdhip64` discoverable by the dynamic linker.
-- Python 3.12 with `torch` built for ROCm.
-- AMDGPU device visible to HIP (a `gfx950` part for the default ISA). `gfx942` plus the RDNA targets `gfx1151` / `gfx1201` are also supported.
+On-device numerical and parity sections additionally require:
 
-Verify quickly:
+- ROCm 7.x with `libamd_comgr` and `libamdhip64` discoverable by the dynamic linker;
+- Torch built for ROCm when the selected harness uses Torch; and
+- an AMDGPU device visible to HIP for the target under test.
+
+Verify that optional GPU environment before running an on-device section:
 
 ```bash
 python - <<'PY'
@@ -45,7 +53,8 @@ print("torch", torch.__version__, "cuda_available", torch.cuda.is_available())
 PY
 ```
 
-`torch.cuda.is_available() == True` is required for everything below except the static unit suite.
+`torch.cuda.is_available() == True` is required only for the Torch-backed
+on-device sections, not for the host/pre-merge gates.
 
 ## Static Unit Tests
 
@@ -70,15 +79,20 @@ These tests do not require a GPU. They prove IR builds, LLVM text shape, and hel
 
 The rocKE-native cross-engine test is the byte-identity gate: it builds the C++
 engine fresh and proves the C and Python engines emit identical `.ll` for every
-kernel family, at both LLVM flavors.
+kernel family, at every supported LLVM flavor.
 
 ```bash
-python tools/check_byte_identity.py                                  # llvm20
-ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py        # llvm22
+ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py         # llvm20
+ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py         # llvm22
+ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py         # llvm23
 ```
 
-No GPU is required. For a one-shot run of the guard + gate + pytest (and ctest
-when the C++ test binaries are built), use `python tests/run_all.py`.
+No GPU is required. For the complete developer pre-merge run (guard, byte
+identity, emitted-IR validity, arch-domain warning checks, pytest, and CTest once
+native tests are built), use `python tests/run_all.py`. This is not a fast smoke:
+its unfiltered CTest phase also includes registered toolchain integration tests.
+See [`tests/README.md`](../../tests/README.md#execution-categories) for selector
+scope and focused routes.
 
 The example generators that build HSACO + manifest and verify against a
 reference live under `python/rocke/examples/` (run them as modules, e.g.
@@ -131,27 +145,39 @@ Runs every shipped small-op against a torch reference with per-op tolerance gate
 
 ## Attention Parity
 
+The attention parity harnesses live in the library, one per arch, and run as
+modules:
+
 ```bash
+# gfx950: Triton (AITER) vs rocKE
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="python:${AITER_PATH}" \
-  python \
-  python/rocke/examples/gfx950/attention/parity_unified_attention.py \
+PYTHONPATH=python:../library \
+  python -m \
+  builders.gfx950.attention.prefill.parity_unified_attention \
   --attempts 10 --warmup 5 \
   --paths auto,2d,3d \
   --set default \
   --report "${OUT_DIR:-$(mktemp -d)}"/parity.json
+
+# gfx942: rocKE vs a fp32 torch reference (no AITER)
+PYTHONPATH=python:../library \
+  python -m \
+  builders.gfx942.attention.prefill.parity_unified_attention \
+  --scenario default
 ```
 
-Requires AITER for the Triton baseline and the reference attention path. Set
-`AITER_PATH` to that checkout before running the harness. The harness:
+The gfx950 harness needs AITER only for the Triton baseline lanes. Set
+`AITER_PATH` to that checkout before running it (the harness adds it to
+`sys.path`), or pass `--skip-triton` to run only the rocKE lanes. The gfx950
+harness:
 
 1. Builds AITER unified-attention inputs (paged KV, GQA).
 2. Runs Triton with the matching kernel path.
-3. Runs CK DSL via `run_unified_attention_torch(..., backend=...)`.
-4. Compares both to AITER's `ref_paged_attn`.
+3. Runs rocKE via `run_unified_attention_torch(..., backend=...)`.
+4. Compares both to `ref_paged_attn`, the harness's copy of AITER's reference.
 5. Times each lane on a single HIP queue, the same timer for both backends.
 
-The harness writes a JSON report. Use the `--scenario` filter for targeted reruns. See `examples/gfx950/attention/README.md` for the canonical 5-run methodology.
+The harness writes a JSON report. Use the `--scenario` filter for targeted reruns. See `library/builders/gfx950/attention/README.md` for the canonical 5-run methodology.
 
 ## Benchmark + Sweep
 

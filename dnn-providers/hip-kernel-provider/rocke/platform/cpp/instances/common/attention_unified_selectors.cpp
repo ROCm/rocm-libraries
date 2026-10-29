@@ -204,7 +204,10 @@ static bool enable_single_batch_combo(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    if(p->sliding_window > 0)
+    /* fp16 & bf16 D128 sliding-window (block_size==16 only) route to the
+     * transposed-32x32 combo; all other SW shapes keep their existing
+     * routing. */
+    if(p->sliding_window > 0 && !(p->head_size == 128 && p->block_size == 16))
     {
         return false;
     }
@@ -256,7 +259,8 @@ static bool enable_softmax_mfma_interleave(const rocke_unified_attn_problem_t* p
 }
 
 /* Python: _enable_i64_kv_addr(problem). Switch to i64 addressing when the paged
- * KV-cache exceeds 2 GiB (i32 buffer voffset overflows and silently corrupts).
+ * KV-cache exceeds the i32 buffer range. The K/V buffer resources are bounded at
+ * num_records=0x7FFF0000, so loads at or past that offset read zeros.
  * num_kv_blocks==0 means unknown size -> assume small / fast i32 path. */
 static bool enable_i64_kv_addr(const rocke_unified_attn_problem_t* p)
 {
@@ -268,7 +272,7 @@ static bool enable_i64_kv_addr(const rocke_unified_attn_problem_t* p)
     uint64_t block_stride = (uint64_t)p->block_size * (uint64_t)p->num_kv_heads
                             * (uint64_t)p->head_size * (uint64_t)elem_bytes;
     uint64_t cache_bytes = (uint64_t)p->num_kv_blocks * block_stride;
-    return cache_bytes > 0x80000000ULL; /* 2^31 bytes */
+    return cache_bytes > 0x7FFF0000ULL; /* Python _I32_KV_BUFFER_BYTES */
 }
 
 /* Python: _d256_gfx950_cohort(problem). */
@@ -514,6 +518,11 @@ static int select_2d_tile_size(const rocke_unified_attn_problem_t* p)
     if(enable_combo_2d(p) && p->sliding_window > 0)
     {
         return p->block_size;
+    }
+    /* fp16 & bf16 D128 single-batch sliding-window: force T=64. */
+    if(enable_single_batch_combo(p) && p->sliding_window > 0 && p->head_size == 128)
+    {
+        return 64;
     }
     /* Single-batch d128/d64 prefill full-combo cohort: d128 -> 2*BS, d64 -> 128. */
     if(enable_single_batch_combo(p))
@@ -1017,16 +1026,8 @@ rocke_attention_tiled_2d_spec_t
                                && (p->num_query_heads == 64) && (p->num_kv_heads == 8);
 
     s.use_register_pv = enable_register_pv(p);
-    /* i64_kv_addr: mirrors Python _enable_i64_kv_addr -- fires when the paged KV
-     * cache exceeds 2 GiB (num_kv_blocks * block_stride > 0x80000000). */
-    if(p->num_kv_blocks > 0)
-    {
-        uint64_t elem_bytes = p->use_fp8 ? 1u : 2u;
-        uint64_t block_stride = (uint64_t)p->block_size * (uint64_t)p->num_kv_heads
-                                * (uint64_t)p->head_size * elem_bytes;
-        uint64_t cache_bytes = (uint64_t)p->num_kv_blocks * block_stride;
-        s.use_i64_kv_addr = (cache_bytes > 0x80000000ULL);
-    }
+    /* i64_kv_addr: mirrors Python _enable_i64_kv_addr. */
+    s.use_i64_kv_addr = enable_i64_kv_addr(p);
 
     /* k_single_buffer: mirrors Python _enable_k_single_buffer -- d128 small-tile
      * cohort AND the geometry invariant block_m <= tile_size, DERIVED from the
@@ -1313,6 +1314,7 @@ bool rocke_unified_attn_segm_descriptors(rocke_ir_builder_t* b,
 bool rocke_unified_attn_physical_block_and_token(rocke_ir_builder_t* b,
                                                  const rocke_unified_attn_problem_t* p,
                                                  rocke_value_t* block_tables,
+                                                 rocke_value_t* bt_stride,
                                                  rocke_value_t* seq_idx,
                                                  rocke_value_t* kpos,
                                                  rocke_value_t** out_physical,
@@ -1320,19 +1322,17 @@ bool rocke_unified_attn_physical_block_and_token(rocke_ir_builder_t* b,
 {
     rocke_value_t* block_idx = NULL;
     rocke_value_t* token_in_block = NULL;
-    int max_blocks;
     rocke_value_t* physical;
 
     if(!rocke_unified_attn_magic_div_mod(b, kpos, p->block_size, &block_idx, &token_in_block))
     {
         return false;
     }
-    max_blocks = (p->max_seqlen_k + p->block_size - 1) / p->block_size;
-    physical = rocke_b_global_load_i32(
-        b,
-        block_tables,
-        rocke_b_add(b, rocke_b_mul(b, seq_idx, rocke_b_const_i32(b, max_blocks)), block_idx),
-        0 /* align default */);
+    physical
+        = rocke_b_global_load_i32(b,
+                                  block_tables,
+                                  rocke_b_add(b, rocke_b_mul(b, seq_idx, bt_stride), block_idx),
+                                  0 /* align default */);
 
     if(out_physical != NULL)
     {
@@ -1351,6 +1351,7 @@ rocke_value_t* rocke_unified_attn_emit_qk_score(rocke_ir_builder_t* b,
                                                 rocke_value_t* query,
                                                 rocke_value_t* key,
                                                 rocke_value_t* block_tables,
+                                                rocke_value_t* bt_stride,
                                                 rocke_value_t* seq_idx,
                                                 rocke_value_t* q_tok,
                                                 rocke_value_t* q_head,
@@ -1372,7 +1373,7 @@ rocke_value_t* rocke_unified_attn_emit_qk_score(rocke_ir_builder_t* b,
     int d;
 
     if(!rocke_unified_attn_physical_block_and_token(
-           b, p, block_tables, seq_idx, kpos, &physical, &token_in_block))
+           b, p, block_tables, bt_stride, seq_idx, kpos, &physical, &token_in_block))
     {
         return NULL;
     }
@@ -1451,6 +1452,7 @@ rocke_value_t* rocke_unified_attn_emit_v_load(rocke_ir_builder_t* b,
                                               const rocke_type_t* dtype,
                                               rocke_value_t* value,
                                               rocke_value_t* block_tables,
+                                              rocke_value_t* bt_stride,
                                               rocke_value_t* seq_idx,
                                               rocke_value_t* kv_head,
                                               rocke_value_t* kpos,
@@ -1462,7 +1464,7 @@ rocke_value_t* rocke_unified_attn_emit_v_load(rocke_ir_builder_t* b,
     rocke_value_t* v_off;
 
     if(!rocke_unified_attn_physical_block_and_token(
-           b, p, block_tables, seq_idx, kpos, &physical, &token_in_block))
+           b, p, block_tables, bt_stride, seq_idx, kpos, &physical, &token_in_block))
     {
         return NULL;
     }

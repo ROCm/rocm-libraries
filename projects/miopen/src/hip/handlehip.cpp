@@ -39,7 +39,7 @@
 #include <thread>
 
 #if MIOPEN_USE_HIPBLASLT
-#include <hipblaslt/hipblaslt.h>
+#include <miopen/hipblaslt_errors.hpp>
 #endif
 
 /// hipMemGetInfo constantly fails on gfx906/900 and Navi21.
@@ -1105,6 +1105,26 @@ std::size_t Handle::GetGlobalMemorySize() const
     return result;
 }
 
+std::size_t Handle::GetL2CacheSize() const
+{
+    int result  = 0;
+    auto status = hipDeviceGetAttribute(&result, hipDeviceAttributeL2CacheSize, this->impl->device);
+    if(status != hipSuccess)
+        MIOPEN_THROW_HIP_STATUS(status);
+
+    return result;
+}
+
+std::size_t Handle::GetClockRateKhz() const
+{
+    int result  = 0;
+    auto status = hipDeviceGetAttribute(&result, hipDeviceAttributeClockRate, this->impl->device);
+    if(status != hipSuccess)
+        MIOPEN_THROW_HIP_STATUS(status);
+
+    return result;
+}
+
 std::size_t Handle::GetMaxComputeUnits() const
 {
     const std::size_t num_cu = env::value(MIOPEN_DEVICE_CU);
@@ -1332,9 +1352,10 @@ const hipblasLt_handle_ptr& Handle::HipblasLtHandle() const
 hipblasLt_handle_ptr Handle::CreateHipblasLtHandle() const
 {
     hipblasLtHandle_t handle = nullptr;
-    if(hipblasLtCreate(&handle) != hipblasStatus_t::HIPBLAS_STATUS_SUCCESS)
+    const auto status        = hipblasLtCreate(&handle);
+    if(status != hipblasStatus_t::HIPBLAS_STATUS_SUCCESS)
     {
-        MIOPEN_THROW(miopenStatusUnknownError, "failed creating hipBLASLt handle");
+        MIOPEN_THROW(miopenStatusUnknownError, HipblasLtErrorMessage(status, "hipblasLtCreate"));
     }
 
     return hipblasLt_handle_ptr{handle};
