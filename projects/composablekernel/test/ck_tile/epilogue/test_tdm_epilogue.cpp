@@ -26,7 +26,7 @@ test_tdm_epilogue_lds_reuse_kernel(const typename Problem::AccDataType* __restri
     // TDM exists only on gfx125; discard the body on the other targets of a mixed build.
     if constexpr(CK_TILE_ENABLE_TDM_FEATURE != 0)
     {
-        using Epilogue    = TdmEpilogue<Problem, MIterPerStage, NumStageBuffers>;
+        using Epilogue    = TdmEpilogueStaged<Problem, MIterPerStage, NumStageBuffers>;
         using AccDataType = typename Problem::AccDataType;
         using ODataType   = typename Problem::ODataType;
 
@@ -221,19 +221,19 @@ constexpr index_t kStagedBlocks = 64;
 // LDS sizes and barrier counts of the staged configurations
 static_assert(TdmEpilogue<StagedProblem<true>>::GetSmemSize() == 128 * 64 * 2);
 static_assert(TdmEpilogue<StagedProblem<true>>::GetBarrierCount() == 2);
-static_assert(TdmEpilogue<StagedProblem<true>, 1, 1>::GetSmemSize() == 32 * 64 * 2);
-static_assert(TdmEpilogue<StagedProblem<true>, 1, 1>::GetBarrierCount() == 1 + 4 + 3);
-static_assert(TdmEpilogue<StagedProblem<true>, 1, 2>::GetSmemSize() == 2 * 32 * 64 * 2);
-static_assert(TdmEpilogue<StagedProblem<true>, 1, 2>::GetBarrierCount() == 1 + 4 + 2);
-static_assert(TdmEpilogue<StagedProblem<true>, 2, 2>::GetSmemSize() == 2 * 64 * 64 * 2);
-static_assert(TdmEpilogue<StagedProblem<true>, 2, 2>::GetBarrierCount() == 1 + 2 + 0);
+static_assert(TdmEpilogueStaged<StagedProblem<true>, 1, 1>::GetSmemSize() == 32 * 64 * 2);
+static_assert(TdmEpilogueStaged<StagedProblem<true>, 1, 1>::GetBarrierCount() == 1 + 4 + 3);
+static_assert(TdmEpilogueStaged<StagedProblem<true>, 1, 2>::GetSmemSize() == 2 * 32 * 64 * 2);
+static_assert(TdmEpilogueStaged<StagedProblem<true>, 1, 2>::GetBarrierCount() == 1 + 4 + 2);
+static_assert(TdmEpilogueStaged<StagedProblem<true>, 2, 2>::GetSmemSize() == 2 * 64 * 64 * 2);
+static_assert(TdmEpilogueStaged<StagedProblem<true>, 2, 2>::GetBarrierCount() == 1 + 2 + 0);
 // More buffers than stages: the ring is cut to the stage count.
-static_assert(TdmEpilogue<StagedProblem<true>, 4, 2>::GetSmemSize() == 128 * 64 * 2);
-static_assert(TdmEpilogue<StagedProblem<true>, 4, 2>::GetBarrierCount() == 1 + 1 + 0);
-static_assert(is_tdm_epilogue_v<TdmEpilogue<StagedProblem<true>, 1, 2>>);
+static_assert(TdmEpilogueStaged<StagedProblem<true>, 4, 2>::GetSmemSize() == 128 * 64 * 2);
+static_assert(TdmEpilogueStaged<StagedProblem<true>, 4, 2>::GetBarrierCount() == 1 + 1 + 0);
+static_assert(is_tdm_epilogue_v<TdmEpilogueStaged<StagedProblem<true>, 1, 2>>);
 
 template <typename Tuple>
-class TdmEpilogueStaged : public ::testing::Test
+class TdmEpilogueStagedTest : public ::testing::Test
 {
     protected:
     using Problem                             = std::tuple_element_t<0, Tuple>;
@@ -327,7 +327,7 @@ class TdmEpilogueStaged : public ::testing::Test
     }
 };
 
-// Problem, MIterPerStage and NumStageBuffers of each TdmEpilogue; 0 and 2 are the defaults.
+// Problem, MIterPerStage and NumStageBuffers of each TdmEpilogueStaged; 0 and 2 are the defaults.
 using StagedEpilogues = ::testing::Types<std::tuple<StagedProblem<true>, number<0>, number<2>>,
                                          std::tuple<StagedProblem<true>, number<1>, number<1>>,
                                          std::tuple<StagedProblem<true>, number<1>, number<2>>,
@@ -337,12 +337,12 @@ using StagedEpilogues = ::testing::Types<std::tuple<StagedProblem<true>, number<
                                          std::tuple<StagedProblem<false>, number<0>, number<2>>,
                                          std::tuple<StagedProblem<false>, number<1>, number<2>>,
                                          std::tuple<StagedProblem<false>, number<2>, number<1>>>;
-TYPED_TEST_SUITE(TdmEpilogueStaged, StagedEpilogues);
+TYPED_TEST_SUITE(TdmEpilogueStagedTest, StagedEpilogues);
 
-TYPED_TEST(TdmEpilogueStaged, FullTilesKeepC) { this->template Run<128 * kStagedBlocks>(); }
+TYPED_TEST(TdmEpilogueStagedTest, FullTilesKeepC) { this->template Run<128 * kStagedBlocks>(); }
 
 // Cut the last 40 rows, so the last block has only 88 valid rows
-TYPED_TEST(TdmEpilogueStaged, TailRowsAreClipped)
+TYPED_TEST(TdmEpilogueStagedTest, TailRowsAreClipped)
 {
     this->template Run<128 * kStagedBlocks - 40>();
 }

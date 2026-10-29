@@ -47,8 +47,8 @@ CK_TILE_DEVICE auto tdm_row_major_lds_view(void* p)
 //
 // Writes the C tile to LDS, then to global memory with TDM stores. Two modes:
 //
-// - Full tile (MIterPerStage_ == 0, the default): all of C goes through LDS at once, with one TDM
-//   store per wave. LDS needed: kMPerBlock x kNPerBlock elements.
+// - Full tile (MIterPerStage_ == 0, the default; also TdmEpilogue<Problem> below): all of C goes
+//   through LDS at once, with one TDM store per wave. LDS needed: kMPerBlock x kNPerBlock elements.
 // - Staged (MIterPerStage_ > 0): C goes through LDS one horizontal slab at a time.
 //   A slab is MIterPerStage_ warp tiles tall (MIterPerStage_ * MWave * MPerXdl rows) and the full
 //   tile wide.
@@ -58,7 +58,7 @@ CK_TILE_DEVICE auto tdm_row_major_lds_view(void* p)
 // Compared with CShuffleEpilogue: slabs are full width so that each TDM store is one wide box, and
 // a buffer is reused only after s_wait_tensorcnt, because the TDM engine reads LDS asynchronously.
 template <typename Problem_, index_t MIterPerStage_ = 0, index_t NumStageBuffers_ = 2>
-struct TdmEpilogue
+struct TdmEpilogueStaged
 {
     using Problem                          = remove_cvref_t<Problem_>;
     using AsDataType                       = remove_cvref_t<typename Problem::AsDataType>;
@@ -124,7 +124,7 @@ struct TdmEpilogue
 
     static_assert(MIterPerStage_ >= 0, "MIterPerStage must be 0 (full tile) or positive");
     static_assert(!kStaged || (kMIterPerWarp > 0 && kMPerBlock % kRowsPerMIter == 0),
-                  "staged TdmEpilogue: kMPerBlock must be a positive multiple of MWave * MPerXdl");
+                  "TdmEpilogueStaged: kMPerBlock must be a positive multiple of MWave * MPerXdl");
     static_assert(!kStaged || kMIterPerWarp % kMIterPerStage == 0,
                   "MIterPerStage must divide the warp-tile rows per wave");
     static_assert(!kStaged || NumStageBuffers_ >= 1, "NumStageBuffers must be at least 1");
@@ -288,13 +288,13 @@ struct TdmEpilogue
         // Y0 must be the outermost part of M, so slicing Y0 selects whole row bands.
         static_assert(AccEncode::Ys2RHsMajor::at(number<0>{}) == 1 &&
                           AccEncode::Ys2RHsMinor::at(number<0>{}) == 0,
-                      "staged TdmEpilogue: Y0 of the accumulator must index the outermost M "
+                      "TdmEpilogueStaged: Y0 of the accumulator must index the outermost M "
                       "component (M iterations of a wave)");
         // That part must have length kMIterPerWarp (the M iterations of a wave).
         constexpr auto hs_m = typename AccEncode::HsLengthss{}.at(number<0>{});
         static_assert(hs_m.at(number<0>{}) == kMIterPerWarp &&
                           hs_m.at(number<1>{}) == Problem::MWave,
-                      "staged TdmEpilogue: the accumulator's M must be (MIterPerWarp, MWave, ...)");
+                      "TdmEpilogueStaged: the accumulator's M must be (MIterPerWarp, MWave, ...)");
         // No lane or wave index (P dimension) may map to it.
         constexpr bool p_indexes_m_iter = [] {
             bool found = false;
@@ -307,7 +307,7 @@ struct TdmEpilogue
             return found;
         }();
         static_assert(!p_indexes_m_iter,
-                      "staged TdmEpilogue: no lane/wave dimension may index the M iterations");
+                      "TdmEpilogueStaged: no lane/wave dimension may index the M iterations");
 
         // Same encoding, with the M iterations cut from kMIterPerWarp to kMIterPerStage.
         using StageHsM =
@@ -328,7 +328,7 @@ struct TdmEpilogue
     run_staged(ODramWindow& out_dram_window, const OAccTile& o_acc_tile, void* p_smem)
     {
         static_assert(std::is_same_v<ELayout, tensor_layout::gemm::RowMajor>,
-                      "staged TdmEpilogue supports only row-major E");
+                      "TdmEpilogueStaged supports only row-major E");
 
         using AccDstr             = remove_cvref_t<decltype(o_acc_tile.get_tile_distribution())>;
         constexpr auto stage_dstr = MakeStageDistribution<typename AccDstr::DstrEncode>();
@@ -392,10 +392,14 @@ struct TdmEpilogue
     }
 };
 
+// Full-tile TdmEpilogue
+template <typename Problem_>
+using TdmEpilogue = TdmEpilogueStaged<Problem_>;
+
 namespace impl {
 
 template <typename Problem, index_t MIterPerStage, index_t NumStageBuffers>
-constexpr bool is_tdm_epilogue(const TdmEpilogue<Problem, MIterPerStage, NumStageBuffers>*)
+constexpr bool is_tdm_epilogue(const TdmEpilogueStaged<Problem, MIterPerStage, NumStageBuffers>*)
 {
     return true;
 }
