@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -40,6 +41,17 @@ struct PatternVariable
     bool optional = false;
 };
 
+inline bool operator==(const PatternVariable& lhs, const PatternVariable& rhs)
+{
+    return std::tie(lhs.name, lhs.graphInput, lhs.optional)
+           == std::tie(rhs.name, rhs.graphInput, rhs.optional);
+}
+
+inline bool operator!=(const PatternVariable& lhs, const PatternVariable& rhs)
+{
+    return !(lhs == rhs);
+}
+
 /// One opcode a pattern node may match, with its edges resolved.
 struct CompiledPatternCandidate
 {
@@ -56,6 +68,20 @@ struct CompiledPatternCandidate
     std::vector<const hipdnn_flatbuffers_sdk::data_objects::op_schema::AttributeSchema*> attributes;
 };
 
+/// The schema pointers address the single op-schema registry, so equal pointers mean the
+/// same opcode, edge, or attribute.
+inline bool operator==(const CompiledPatternCandidate& lhs, const CompiledPatternCandidate& rhs)
+{
+    return std::tie(lhs.schema, lhs.operands, lhs.results, lhs.unnamedOptionalEdges, lhs.attributes)
+           == std::tie(
+               rhs.schema, rhs.operands, rhs.results, rhs.unnamedOptionalEdges, rhs.attributes);
+}
+
+inline bool operator!=(const CompiledPatternCandidate& lhs, const CompiledPatternCandidate& rhs)
+{
+    return !(lhs == rhs);
+}
+
 /// An attribute a pattern node publishes. Every candidate declares it with the same
 /// value kind.
 struct CompiledPatternAttribute
@@ -64,6 +90,16 @@ struct CompiledPatternAttribute
     std::string token;
     bool optional = false;
 };
+
+inline bool operator==(const CompiledPatternAttribute& lhs, const CompiledPatternAttribute& rhs)
+{
+    return std::tie(lhs.token, lhs.optional) == std::tie(rhs.token, rhs.optional);
+}
+
+inline bool operator!=(const CompiledPatternAttribute& lhs, const CompiledPatternAttribute& rhs)
+{
+    return !(lhs == rhs);
+}
 
 struct CompiledPatternNode
 {
@@ -77,6 +113,19 @@ struct CompiledPatternNode
     /// In authored opcode order.
     std::vector<CompiledPatternCandidate> candidates;
 };
+
+inline bool operator==(const CompiledPatternNode& lhs, const CompiledPatternNode& rhs)
+{
+    return std::tie(
+               lhs.id, lhs.operandVariables, lhs.resultVariables, lhs.attributes, lhs.candidates)
+           == std::tie(
+               rhs.id, rhs.operandVariables, rhs.resultVariables, rhs.attributes, rhs.candidates);
+}
+
+inline bool operator!=(const CompiledPatternNode& lhs, const CompiledPatternNode& rhs)
+{
+    return !(lhs == rhs);
+}
 
 class CompiledGraphPattern;
 
@@ -160,6 +209,19 @@ private:
     std::vector<PatternVariable> _variables;
     std::vector<std::string> _rootOpcodes;
 };
+
+/// Structural equality. It ignores where(), which names the file the pattern came from, so
+/// two copies of one UED compare equal.
+inline bool operator==(const CompiledGraphPattern& lhs, const CompiledGraphPattern& rhs)
+{
+    return lhs.nodes() == rhs.nodes() && lhs.matchOrder() == rhs.matchOrder()
+           && lhs.variables() == rhs.variables() && lhs.rootOpcodes() == rhs.rootOpcodes();
+}
+
+inline bool operator!=(const CompiledGraphPattern& lhs, const CompiledGraphPattern& rhs)
+{
+    return !(lhs == rhs);
+}
 
 namespace detail
 {

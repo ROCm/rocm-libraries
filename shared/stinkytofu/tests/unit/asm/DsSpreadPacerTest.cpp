@@ -197,6 +197,34 @@ TEST(DsSpreadPacer, AStageNotLaterThanItsPlanKeepsItsPlannedEnd) {
     EXPECT_TRUE(pending.empty());
 }
 
+TEST(DsSpreadPacer, AStageEndsWhereTheLdsRateFitsItsLoadsWhenThatIsBeforeItsPlannedEnd) {
+    // 64 loads from WMMA 0 to a barrier at 71 with 17 kept free: planned end 54. At 6 cycles per
+    // load and 8 cycles per WMMA the loads fit by 48, so the stage ends there: 12 batches, 6 loads
+    // in the first. Without the rate the stage ends at 54: 14 batches, 5 in the first.
+    for (bool rate : {false, true}) {
+        Loads v;
+        add(v, 64, 0, 0, 71);
+        v.back().earliest = 40;
+        DsSpreadPacer p;
+        p.plan(v, 128, 4, 0, 17, 0, rate ? 6 : 0, rate ? 8 : 0);
+        auto pending = ids(v);
+        EXPECT_EQ(issueBatch(p, 0, pending), rate ? 6 : 5) << "rate=" << rate;
+    }
+}
+
+TEST(DsSpreadPacer, ARateFloorAtOrAfterThePlannedEndChangesNothing) {
+    // 64 loads from WMMA 80 to the region end (128): the loads fit by 80 + 48 = 128, the planned
+    // end, so the stage keeps its 12 batches.
+    for (bool rate : {false, true}) {
+        Loads v;
+        add(v, 64, 0, 80);
+        DsSpreadPacer p;
+        p.plan(v, 128, 4, 0, 17, 0, rate ? 6 : 0, rate ? 8 : 0);
+        auto pending = ids(v);
+        EXPECT_EQ(issueBatch(p, 80, pending), 6) << "rate=" << rate;
+    }
+}
+
 TEST(DsSpreadPacer, ABatchBehindItsLineTakesWhatTheStageNeedsUpToTheHardware) {
     // 24 loads over 16 WMMAs: 6 per batch. Nothing issued in the first two batches (a dependency),
     // so the third begins behind its line. The stage needs 12 in the 2 batches left; the hardware
@@ -295,4 +323,32 @@ TEST(DsSpreadPacer, AStageOpeningOffABatchBoundaryCountsBatchesFromItsStart) {
     std::vector<int> per;
     for (int w = 3; w < 11; ++w) per.push_back(issueBatch(p, w, pending));
     EXPECT_EQ(per, (std::vector<int>{3, 0, 0, 0, 3, 0, 0, 0}));
+}
+
+TEST(DsSpreadPacer, AStageTheLdsRateCanNotFinishByItsEndIsReported) {
+    // 60 loads from WMMA 0 to a barrier at 60 with 17 kept free: end 43. At 6 cycles per load and 8
+    // cycles per WMMA they need 45; at 5 they need 38; with no rate nothing is checked.
+    for (int cycles : {0, 5, 6}) {
+        Loads v;
+        add(v, 60, 0, 0, 60);
+        DsSpreadPacer p;
+        p.plan(v, 128, 4, 0, 17, 0, cycles, cycles > 0 ? 8 : 0);
+        if (cycles == 6) {
+            ASSERT_EQ(p.rateLimited().size(), 1u);
+            EXPECT_EQ(p.rateLimited()[0].start, 0);
+            EXPECT_EQ(p.rateLimited()[0].end, 43);
+            EXPECT_EQ(p.rateLimited()[0].total, 60);
+            EXPECT_EQ(p.rateLimited()[0].needed, 45);
+        } else {
+            EXPECT_TRUE(p.rateLimited().empty()) << "cycles=" << cycles;
+        }
+    }
+}
+
+TEST(DsSpreadPacer, TheRateLimitedWarningNamesTheStageTheRateAndTheShortfall) {
+    DsSpreadPacer::RateLimited r{0, 43, 60, 45};
+    EXPECT_EQ(DsSpreadPacer::rateLimitedMessage(r, 6),
+              "stage [0, 43) has 60 ds_loads that need 45 WMMAs at 6 cycles per load but has 43: "
+              "the pace is too sparse for the stage, its last ds_load will land late (lower "
+              "DsReadCyclesPerLoad)");
 }

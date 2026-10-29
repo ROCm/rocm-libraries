@@ -1291,12 +1291,23 @@ invariant, **all** UEDs involved are unloaded (logged, § 15), not keep-the-firs
 exception below.
 
 **Content-identical exception (`id` only).** UEDs that share a descriptor `id` are **not** dropped
-if they are **semantically identical**: the same set of fields with the same values after
-parsing, independent of whitespace and key order. Identical duplicates are one
-definition expressed more than once, so which copy binds is immaterial; the provider keeps a single
-instance and loads normally. If any field or value differs between UEDs sharing an `id`, they are
-treated as a genuine collision and **all** are dropped. This exception applies only to the `id`
-invariant; a `name` collision between non-identical UEDs is always a drop.
+if they are **semantically identical**. Equality is decided on the parsed, typed descriptor (the
+in-memory form the loader builds), not on the file bytes or the raw JSON document. Every field of
+the parsed descriptor must be equal, except the location-derived ones named below. Whitespace,
+comments, key order, and the spelling of an equal number (`1` vs `1.0`) therefore do not matter.
+Extension keys the loader ignores (`x-`-prefixed and `_`-prefixed keys) and `provenance` are not
+part of the parsed descriptor, so they do not make two files differ. Neither is the file-format
+`version`: the accept rule (§ 14.1) admits it, but no parsed descriptor stores it, so copies that
+differ only in a supported format minor are identical. A key that is omitted equals the same key
+spelled at its default value (an omitted `revision` equals `"1.0"`). Fields the loader derives from
+where a file was found (its directory, its descriptor root, and the resolved path of a UHD's model
+artifact) are not part of the comparison, which is what lets per-architecture copies of one generic
+descriptor collapse. A UHD's authored artifact path and its model digest are compared, so two
+copies of one UHD `id` that name different artifact bytes are a collision. Identical duplicates are
+one definition expressed more than once, so which copy binds is immaterial; the provider keeps a
+single instance and loads normally. If any field of the parsed descriptors differs between UEDs
+sharing an `id`, they are treated as a genuine collision and **all** are dropped. This exception
+applies only to the `id` invariant; a `name` collision between non-identical UEDs is always a drop.
 
 **Descriptor roots.** The drop-all rule for a differing `id` applies to UEDs from one descriptor
 root. When the two UEDs come from different roots, the UED from the earlier root stays and the
@@ -1496,9 +1507,12 @@ fuzzing, this RFC adds UED-specific coverage.
   `id`; two sharing a `name`; two sharing both; a UED colliding by name with a built-in engine. In
   each case *every* colliding UED is dropped and named in diagnostics, and no engine is left bound
   to an arbitrarily-chosen definition.
-- **Content-identical duplicates load** (§ 13.2.1): two UEDs with the same `id` and semantically
-  identical fields/values (differing only in whitespace or key order) load as a single
-  engine (not dropped); the same `id` with any differing field value is dropped as a collision.
+- **Content-identical duplicates load** (§ 13.2.1): two UEDs with the same `id` and equal parsed
+  descriptors (differing only in whitespace, comments, key order, number spelling, ignored extension
+  keys, `provenance`, a supported format `version` minor, or a key omitted versus spelled at its
+  default) load as a single engine (not dropped); per-architecture copies of a model-backed UHD and
+  its artifact load as one UHD; the same `id` with any differing parsed field value is dropped as a
+  collision.
 - **Engine-id derivation**: the generic engine's `id()` equals `engineNameToId(name)` (FNV-1a)
   for representative names, including scoped names like `rocke:SDPA`.
 - **`HIPDNN_DISABLE_ENGINES`**: an engine disabled by name, by id-hash, and by UUID is skipped

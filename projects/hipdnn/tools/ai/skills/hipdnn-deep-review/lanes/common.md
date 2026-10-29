@@ -27,6 +27,9 @@ shared, published or swept, and no report or comment may depend on a reader open
 - Read the description (`pr/body.md` or `intent.md`) with its `Known issues` items (`K<n>`). Do not file a known item. File it
   only when the description understates it (worse effect, wider reach or higher tier than stated); the finding then says
   `understated: known-open-item K<n>`.
+- Read `Scope:` in `dispatch-context.md`. A finding in an area a scope note names says so in `Actual`; the note does not
+  lower its tier ([../policy.md](../policy.md) tiers follow blast radius, and deprecated code that still ships can block).
+  Only "do not file findings in <area>" caps findings there at `FUTURE WORK`.
 - Write every output to the absolute `Output:` path of your dispatch, never to a path relative to your working directory.
 - Shell blocks begin `. ./env.sh`, which exports the variables above, `GREP` and `fullclone`: run each block as its own
   command in a subshell (`( … )` or `bash -c`) from `$EVIDENCE/r<N>/` (the absolute paths are in `dispatch-context.md`), so a

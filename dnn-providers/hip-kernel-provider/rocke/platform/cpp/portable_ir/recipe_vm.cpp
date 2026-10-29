@@ -25,6 +25,7 @@
  *   static_if    {pred:<intexpr>,then,else?}     -> compile-time branch
  *   scf_for      {iv,lo,hi,step,iter:[<iterarg>],results:[<reg>],body} -> runtime loop
  *   scf_if       {cond,then}                     -> runtime branch
+ *   scf_if_else  {cond,then,else}                -> runtime if/else (scf.if_else)
  *   ret          {}                              -> rocke_b_ret
  *
  * Parametric (rolled) features:
@@ -1187,6 +1188,39 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
         {
             rocke_b_region_enter(vm->b, s.then_region);
             rv_exec_list(vm, then);
+            rocke_b_region_leave(vm->b);
+        }
+        return;
+    }
+    if(strcmp(op, "scf_if_else") == 0)
+    {
+        /* Converging runtime if/else: both arms join at one block (barriers in
+         * either arm survive simplifycfg). A distinct op from scf_if so that an
+         * engine predating it refuses the recipe instead of dropping "else". */
+        rocke_value_t* cond = rv_reg_get(vm, rocke_jstr(rocke_jget(instr, "cond")));
+        if(!cond)
+        {
+            rv_fail(vm, "scf_if_else needs cond");
+            return;
+        }
+        rocke_if_else_t s = rocke_b_scf_if_else(vm->b, cond);
+        if(!rocke_ir_builder_ok(vm->b))
+        {
+            rv_fail(vm, "scf_if_else build: %s", rocke_ir_builder_error(vm->b));
+            return;
+        }
+        const jd_val_t* then = rocke_jget(instr, "then");
+        if(then)
+        {
+            rocke_b_region_enter(vm->b, s.then_region);
+            rv_exec_list(vm, then);
+            rocke_b_region_leave(vm->b);
+        }
+        const jd_val_t* els = rocke_jget(instr, "else");
+        if(els && !vm->failed)
+        {
+            rocke_b_region_enter(vm->b, s.else_region);
+            rv_exec_list(vm, els);
             rocke_b_region_leave(vm->b);
         }
         return;
