@@ -21,7 +21,19 @@ if(HIPBLASLT_ENABLE_JIT)
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-msgpack.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-library.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-builder.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-problem-type.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-problem-type.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-component.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-backend.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-replay-backend.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-mode.cpp")
+    # The replay backend reads this tree. It is a compile-time path, not an
+    # environment variable, and only a test build has that tree. An installed
+    # library must not point at the build machine's sources. A HipKittens
+    # build does not use it for heuristic queries.
+    if(HIPBLASLT_BUILD_TESTING AND IS_DIRECTORY "${PROJECT_SOURCE_DIR}/clients/tests/jit/data")
+        target_compile_definitions(hipblaslt PRIVATE
+            "HIPBLASLT_JIT_REPLAY_DATA=\"${PROJECT_SOURCE_DIR}/clients/tests/jit/data\"")
+    endif()
 endif()
 
 # TheRock configures with testing on and rejects find_package(Catch2): Catch2

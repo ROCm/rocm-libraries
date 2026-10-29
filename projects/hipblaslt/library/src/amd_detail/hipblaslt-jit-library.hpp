@@ -13,6 +13,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,15 @@ namespace hipblaslt_jit
     constexpr bool    isJitIndex(int32_t index) noexcept
     {
         return index >= jitIndexBase && index < jitIndexEnd;
+    }
+
+    // Whether a map keyed by solution index, such as a prebuilt library's
+    // solutions or libraryMapping, has a key in [jitIndexBase, jitIndexEnd).
+    template <class ByIndex>
+    bool holdsJitIndex(const ByIndex& byIndex)
+    {
+        const auto first = byIndex.lower_bound(jitIndexBase);
+        return first != byIndex.end() && isJitIndex(first->first);
     }
 
     // Libraries live under "v<jitLibrarySchema>"; other versions are never read.
@@ -257,6 +267,14 @@ namespace hipblaslt_jit
         Status     attach(const CacheKey& key, int device, Directory*& attached);
         void       discover(int device);
 
+        // Lookup or publish for the active query. generate is false for a
+        // find-only call, which must not record an attempt.
+        TensileLite::SolutionVector<TensileLite::ContractionSolution>
+            solutionsFor(const TensileLite::ContractionProblemGemm& problem,
+                         const TensileLite::Hardware&               hardware,
+                         int                                        numSolutions,
+                         bool                                       generate);
+
         std::filesystem::path                             m_root;
         DeviceKey                                         m_deviceKey;
         std::mutex                                        m_mutex;
@@ -264,6 +282,12 @@ namespace hipblaslt_jit
         bool                                              m_checked = false;
         std::map<std::string, std::unique_ptr<Directory>> m_directories;
         std::map<int, std::vector<Directory*>>            m_routes;
+        // Problems this library already tried to generate. The key is the cache
+        // directory, workspace, requested count, problem type and sizes, so a
+        // different K, datatype or count is still generated. Another root has
+        // its own set.
+        std::mutex            m_attemptMutex;
+        std::set<std::string> m_attempted;
     };
 
     // Stores GEMM solutions in library under the cache key of backend.

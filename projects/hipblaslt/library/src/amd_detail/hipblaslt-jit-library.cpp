@@ -25,6 +25,7 @@
 #include <fstream>
 #include <new>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string_view>
 #ifdef _WIN32
@@ -546,6 +547,10 @@ namespace hipblaslt_jit
             std::shared_ptr<GemmMaster>                       master;
             files::FileIdentity                               masterFile, mappingFile;
             std::map<int, TensileLite::hip::SolutionAdapter*> adapters;
+            // Code-object prefixes already passed to hipModuleLoad on this device.
+            // A prefix is written once and names one executable, so this survives
+            // refresh(), which publish calls after every new entry in the slice.
+            std::map<int, std::set<std::string>>              loadedCodeObjects;
 
             fs::path masterPath(const Target& target) const
             {
@@ -602,6 +607,35 @@ namespace hipblaslt_jit
 
         std::mutex                                  sliceMutex;
         std::map<std::string, std::unique_ptr<Slice>> slices;
+        std::mutex                                    indexMutex;
+        files::FileIdentity                           indexIdentity;
+        bool                                          indexKnown = false;
+        std::map<int, std::string>                    indexCache;
+
+        // Reads indices.msgpack again only when the file changes, then returns
+        // that one index's slice. name is empty when the index is absent.
+        Status sliceName(int32_t index, std::string& name)
+        {
+            std::lock_guard<std::mutex> lock(indexMutex);
+            const auto                  now = files::identify(indexMapPath());
+            if(!indexKnown || now != indexIdentity)
+            {
+                std::map<int, std::string> fresh;
+                if(now.exists)
+                {
+                    if(auto status = readMapping(Stage::Lookup, indexMapPath(), fresh); !status.ok())
+                        return status;
+                }
+                indexCache    = std::move(fresh);
+                indexIdentity = now;
+                indexKnown    = true;
+            }
+            name.clear();
+            const auto located = indexCache.find(index);
+            if(located != indexCache.end())
+                name = located->second;
+            return {};
+        }
 
         fs::path keyPath() const
         {
@@ -1224,18 +1258,15 @@ namespace hipblaslt_jit
                 }
                 for(auto* directory : routes)
                 {
-                    std::map<int, std::string> indexMap;
-                    if(auto status
-                       = readMapping(Stage::Lookup, directory->indexMapPath(), indexMap);
-                       !status.ok())
+                    std::string sliceOf;
+                    if(auto status = directory->sliceName(index, sliceOf); !status.ok())
                     {
                         reloadFailure = std::move(status);
                         continue;
                     }
-                    Directory::Slice* slice   = nullptr;
-                    const auto        located = indexMap.find(index);
-                    if(located != indexMap.end())
-                        slice = directory->existingSlice(located->second);
+                    Directory::Slice* slice = nullptr;
+                    if(!sliceOf.empty())
+                        slice = directory->existingSlice(sliceOf);
                     if(!slice)
                         continue;
                     std::lock_guard<std::mutex> lock(slice->mutex);
@@ -1249,8 +1280,9 @@ namespace hipblaslt_jit
                     {
                         auto*      adapter = slice->adapter(device);
                         const auto prefix  = slice->master->libraryMapping.at(index);
-                        static_cast<void>(adapter->loadCodeObjectFile(
-                            (slice->path / (prefix + ".co")).string()));
+                        if(slice->loadedCodeObjects[device].insert(prefix).second)
+                            static_cast<void>(adapter->loadCodeObjectFile(
+                                (slice->path / (prefix + ".co")).string()));
                         view = {slice->master, adapter};
                         return {};
                     }
@@ -1303,62 +1335,97 @@ namespace hipblaslt_jit
             return query;
         }
 
-        TensileLite::SolutionVector<TensileLite::ContractionSolution>
-            solutionsFor(JitLibrary&                                  library,
-                         const TensileLite::ContractionProblemGemm&   problem,
-                         const TensileLite::Hardware&                 hardware,
-                         int                                          numSolutions,
-                         bool                                         generate)
+        // Empty when the problem cannot be named. That problem is not generated
+        // and does not suppress a later one.
+        std::string generationAttemptKey(const ActiveQuery&                       query,
+                                         const CacheKey&                          key,
+                                         const TensileLite::ContractionProblemGemm& problem,
+                                         int                                      numSolutions)
         {
-            using Solution = TensileLite::ContractionSolution;
-            TensileLite::SolutionVector<Solution> result;
-            auto&                                 query = activeQuery();
-            if(!query.engaged || numSolutions <= 0 || problem.groupedGemm())
-                return result;
-            auto problemCopy = problem;
-            problemCopy.setWorkspaceSize(query.workspace);
-            const auto key = CacheKey::make(query.target, query.backend, jitCodeObjectVersion);
-            std::vector<int32_t> indices;
-            query.failure = library.lookup(key,
-                                           query.target.device,
-                                           problemCopy,
-                                           hardware,
-                                           static_cast<size_t>(numSolutions),
-                                           query.exclude,
-                                           indices);
-            const bool miss = indices.size() < static_cast<size_t>(numSolutions);
-            if(generate && query.allowGeneration && miss && query.generate && query.failure.ok())
+            try
             {
-                auto exclude = query.exclude;
-                for(auto index : indices)
-                {
-                    Status why;
-                    if(auto solution
-                       = library.solutionByIndex(query.target.device, hardware, index, why))
-                        if(!excludedKernel(exclude, solution->kernelName))
-                            exclude.push_back(solution->kernelName);
-                }
-                std::vector<int32_t> extra;
-                query.generate(static_cast<size_t>(numSolutions) - indices.size(),
-                               exclude,
-                               extra,
-                               query.failure);
-                for(auto index : extra)
-                    if(std::find(indices.begin(), indices.end(), index) == indices.end())
-                        indices.push_back(index);
-                if(!indices.empty())
-                    query.failure = {};
+                std::ostringstream attempt;
+                attempt << query.target.device << '|' << key.directoryName() << '|'
+                        << key.codeObjectVersion << '|' << query.workspace << '|' << numSolutions
+                        << '|' << problemTypeKey(problem);
+                for(auto size : problemSizes(problem))
+                    attempt << 'x' << size;
+                for(const auto& name : query.exclude)
+                    attempt << "|x" << name;
+                return attempt.str();
             }
-            if(indices.size() > static_cast<size_t>(numSolutions))
-                indices.resize(static_cast<size_t>(numSolutions));
+            catch(const std::exception&)
+            {
+                return {};
+            }
+        }
+    }
+
+    TensileLite::SolutionVector<TensileLite::ContractionSolution>
+        JitLibrary::solutionsFor(const TensileLite::ContractionProblemGemm& problem,
+                                 const TensileLite::Hardware&               hardware,
+                                 int                                        numSolutions,
+                                 bool                                       generate)
+    {
+        using Solution = TensileLite::ContractionSolution;
+        TensileLite::SolutionVector<Solution> result;
+        auto&                                 query = activeQuery();
+        if(!query.engaged || numSolutions <= 0 || problem.groupedGemm())
+            return result;
+        auto problemCopy = problem;
+        problemCopy.setWorkspaceSize(query.workspace);
+        const auto key          = CacheKey::make(query.target, query.backend, jitCodeObjectVersion);
+        const auto attemptKey   = generationAttemptKey(query, key, problemCopy, numSolutions);
+        bool       alreadyGenerated = false;
+        if(!attemptKey.empty())
+        {
+            std::lock_guard<std::mutex> guard(m_attemptMutex);
+            alreadyGenerated = m_attempted.count(attemptKey) != 0;
+        }
+        std::vector<int32_t> indices;
+        query.failure = lookup(key,
+                               query.target.device,
+                               problemCopy,
+                               hardware,
+                               static_cast<size_t>(numSolutions),
+                               query.exclude,
+                               indices);
+        const bool miss = indices.size() < static_cast<size_t>(numSolutions);
+        if(generate && query.allowGeneration && miss && !alreadyGenerated && !attemptKey.empty()
+           && query.generate && query.failure.ok())
+        {
+            {
+                std::lock_guard<std::mutex> guard(m_attemptMutex);
+                m_attempted.insert(attemptKey);
+            }
+            auto exclude = query.exclude;
             for(auto index : indices)
             {
                 Status why;
-                if(auto solution = library.solutionByIndex(query.target.device, hardware, index, why))
-                    result.push_back(std::move(solution));
+                if(auto solution = solutionByIndex(query.target.device, hardware, index, why))
+                    if(!excludedKernel(exclude, solution->kernelName))
+                        exclude.push_back(solution->kernelName);
             }
-            return result;
+            std::vector<int32_t> extra;
+            query.generate(static_cast<size_t>(numSolutions) - indices.size(),
+                           exclude,
+                           extra,
+                           query.failure);
+            for(auto index : extra)
+                if(std::find(indices.begin(), indices.end(), index) == indices.end())
+                    indices.push_back(index);
+            if(!indices.empty())
+                query.failure = {};
         }
+        if(indices.size() > static_cast<size_t>(numSolutions))
+            indices.resize(static_cast<size_t>(numSolutions));
+        for(auto index : indices)
+        {
+            Status why;
+            if(auto solution = solutionByIndex(query.target.device, hardware, index, why))
+                result.push_back(std::move(solution));
+        }
+        return result;
     }
 
     void JitLibrary::beginQuery(bool                     allowGeneration,
@@ -1417,7 +1484,7 @@ namespace hipblaslt_jit
                                      TensileLite::Hardware const&               hardware,
                                      TensileLite::SolutionLibrarySearchType) const
     {
-        auto found = solutionsFor(const_cast<JitLibrary&>(*this), problem, hardware, INT32_MAX, false);
+        auto found = const_cast<JitLibrary*>(this)->solutionsFor(problem, hardware, INT32_MAX, false);
         TensileLite::SolutionSet<TensileLite::ContractionSolution> result;
         result.insert(found.begin(), found.end());
         return result;
@@ -1446,7 +1513,7 @@ namespace hipblaslt_jit
                                      TensileLite::Hardware const&               hardware,
                                      int                                        numSolutions) const
     {
-        return solutionsFor(const_cast<JitLibrary&>(*this), problem, hardware, numSolutions, true);
+        return const_cast<JitLibrary*>(this)->solutionsFor(problem, hardware, numSolutions, true);
     }
 
     TensileLite::SolutionVector<TensileLite::ContractionSolution> JitLibrary::findTopSolutionsGroupedGemm(

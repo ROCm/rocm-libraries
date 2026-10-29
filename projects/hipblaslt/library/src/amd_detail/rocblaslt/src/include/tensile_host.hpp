@@ -253,6 +253,14 @@ bool topUpWithSizeIndependentSolutions(rocblaslt_handle                  handle,
                                        int                               requestedAlgoCount,
                                        size_t                            maxWorkSpaceBytes);
 
+#ifdef HIPBLASLT_ENABLE_JIT
+// True when this GEMM query must stay on its existing lookup and not consult JIT.
+bool skipJitHeuristic(rocblaslt_handle handle, const RocblasltContractionProblem& problem);
+
+// The GEMM problem captured for gemmData, or null when this execution has none.
+const RocblasltContractionProblem* savedGemmProblem(const std::shared_ptr<void>& gemmData);
+#endif
+
 namespace TensileLite
 {
     class ProblemOverride;
