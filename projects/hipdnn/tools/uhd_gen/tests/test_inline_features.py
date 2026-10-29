@@ -45,6 +45,28 @@ def test_inline_ast_and_categorical_leaves_match_runtime(evaluator):
     assert digest == compute_features_hash(signature, encoding, evaluator)
 
 
+def test_a_batch_over_the_request_bound_is_split_without_changing_the_result(
+    evaluator, monkeypatch
+):
+    """The evaluator caps one request, so a training-sized batch goes over in chunks."""
+    import uhd_gen.features as features
+
+    signature = [{"*": ["$graph.flops", 2]}]
+    frame = pd.DataFrame({"graph.flops": list(range(50))})
+    whole = evaluate_feature_rows(frame, signature, executable=evaluator)
+    calls = []
+    run = features._evaluate_chunk
+    monkeypatch.setattr(features, "_REQUEST_CHUNK_BYTES", 200)
+    monkeypatch.setattr(
+        features,
+        "_evaluate_chunk",
+        lambda *args: calls.append(len(args[2])) or run(*args),
+    )
+    assert evaluate_feature_rows(frame, signature, executable=evaluator) == whole
+    assert len(calls) > 1 and sum(calls) == 50
+    assert whole[1] == [[2 * flops] for flops in range(50)]
+
+
 DY = "graph.nodes[0].dy.dims[0]"
 
 
