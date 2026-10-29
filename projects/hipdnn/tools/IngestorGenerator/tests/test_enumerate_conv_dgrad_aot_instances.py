@@ -71,7 +71,8 @@ def test_the_labels_file_has_lf_endings_and_one_label_per_line():
     assert b"\r" not in raw and raw.endswith(b"\n")
     lines = raw.decode().splitlines()
     labels = [line for line in lines if not line.startswith("#")]
-    assert len(labels) == 640
+    # pruned 640 -> 406 on users/barkocot/gfx950-dgrad-aot-catalog-prune-150
+    assert len(labels) == 406
     assert all(line.strip() == line and line for line in labels)
 
 
@@ -85,9 +86,10 @@ def test_the_kernels_wrong_at_groups_1_are_not_listed(catalog, committed):
         assert instance_id in header
 
 
-def test_the_catalog_lists_320_kernels_per_dtype_the_same_in_both(catalog):
-    """Per dtype: 247 implicit-GEMM tiles and 73 direct kernels over every dgrad
-    pipeline the sweep enumerates, and the two dtypes list the same kernels."""
+def test_the_catalog_lists_203_kernels_per_dtype_the_same_in_both(catalog):
+    """Per dtype: 203 kernels (141 implicit-GEMM tiles + 62 direct) after pruning
+    on users/barkocot/gfx950-dgrad-aot-catalog-prune-150 (was 320: 247 implicit-GEMM
+    + 73 direct), and the two dtypes list the same kernels."""
     by_dtype = collections.defaultdict(list)
     for identity in catalog:
         by_dtype[identity["dtype_a"]].append(identity)
@@ -95,10 +97,10 @@ def test_the_catalog_lists_320_kernels_per_dtype_the_same_in_both(catalog):
     for identities in by_dtype.values():
         algorithms = collections.Counter(i["algorithm"] for i in identities)
         assert algorithms == {
-            "implicit_gemm": 247,
-            "direct_depthwise_dgrad": 12,
-            "direct_depthwise_dgrad_win": 37,
-            "direct_grouped_dgrad_fused": 18,
+            "implicit_gemm": 141,
+            "direct_depthwise_dgrad": 9,
+            "direct_depthwise_dgrad_win": 31,
+            "direct_grouped_dgrad_fused": 16,
             "direct_grouped_dgrad_mfma": 3,
             "direct_grouped_dgrad_4c": 2,
             "direct_dgrad_mfma_rtc": 1,
@@ -119,7 +121,7 @@ def test_the_lists_add_the_helpers_per_dtype_the_mfma_entries_need(committed):
     the runtime-channel one, which uses its own _rtc transforms."""
     for dtype, entries in committed.items():
         families = collections.Counter(tool.family(e) for e in entries)
-        assert families == {"implicit": 247, "direct": 73, "helper": 4}, dtype
+        assert families == {"implicit": 141, "direct": 62, "helper": 4}, dtype
         helpers = collections.Counter(
             e["algorithm"] for e in entries if tool.family(e) == "helper"
         )

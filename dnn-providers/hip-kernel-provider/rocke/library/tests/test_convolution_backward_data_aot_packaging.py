@@ -193,7 +193,9 @@ def _form(identity: KernelIdentity) -> tuple:
 
 
 def test_the_catalog_converts_and_reproduces_its_identities(catalog):
-    assert len(catalog) > 600
+    # instances_dgrad.txt was pruned from 640 to 406 labels (users/barkocot/
+    # gfx950-dgrad-aot-catalog-prune-150): 414 with weight-transform helpers.
+    assert len(catalog) > 400
     algorithms = set()
     for ident, spec in catalog:
         assert supports_gfx950_conv_dgrad_aot(spec) == (True, "ok"), ident.label()
