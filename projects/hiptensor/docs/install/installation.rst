@@ -85,27 +85,29 @@ hipTensor without the full ROCm HPC SDK.
 
    .. code-block:: shell-session
 
-      amdrocm-hiptensor<-dev/-devel><rocm_version><-llvm_target>
+      amdrocm-hiptensor<rocm_version><-llvm_target>
+      amdrocm-hiptensor<-dev/-devel><rocm_version>
 
    Where:
 
-   * ``<-dev/-devel>`` specifies whether to install the library files and
-     headers. Omit this suffix to only install runtime packages.
+   * ``<-dev/-devel>`` is the development package suffix (headers and CMake
+     configuration files):
 
      * ``-dev`` is used on Debian-based distributions, including Ubuntu.
 
      * ``-devel`` is used on RPM-based distributions, including RHEL and SLES.
 
    * ``<rocm_version>`` is the ROCm version to install. Omit this suffix to
-     install the latest available version.
+     install the latest available version (required when ``<-llvm_target>`` is
+     specified).
 
-   * ``<-llvm_target>`` (starting with ``gfx``) is used if you are installing
-     for a single AMD GPU architecture. Omit this to install for all
-     architectures at the cost of disk space. See
+   * ``<-llvm_target>`` (starting with ``gfx``) is used on the runtime package
+     if you are installing for a single AMD GPU architecture. Omit this to
+     install for all architectures at the cost of disk space. See
      :ref:`Supported GPUs <hiptensor-supported-gpus>` for the available
      targets.
 
-   For example: ``amdrocm-hiptensor10.2-gfx950``
+   For example: ``amdrocm-hiptensor10.2-gfx950`` and ``amdrocm-hiptensor-dev10.2``
 
    The following packages are available for each ROCm version:
 
@@ -157,6 +159,11 @@ hipTensor without the full ROCm HPC SDK.
 
 Uninstall hipTensor
 ===================
+
+If you installed versioned or architecture-specific packages, substitute the
+exact package names used during installation (for example,
+``amdrocm-hiptensor10.2-gfx950`` and ``amdrocm-hiptensor-dev10.2`` or
+``amdrocm-hiptensor-devel10.2``).
 
 .. tab-set::
 
