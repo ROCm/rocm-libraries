@@ -163,6 +163,17 @@ def test_binding_retargets_the_cache_and_forwards_the_block_table(arch, spec_id)
         assert seen["validate_paged"] is not skip
 
 
+@pytest.mark.parametrize("arch,spec_id", _CASES)
+def test_binding_and_spec_refuse_non_bool_paged_flags(arch, spec_id):
+    result = dispatch_attention(_pinned(_request(arch), spec_id))
+    cache = CacheStandIn((_SQ // _BS, _BS, _HKV, _D))
+    tensors = {"q": None, "k": cache, "v": cache, "out": None}
+    with pytest.raises(ValueError, match="must be a bool"):
+        result.bind_torch(tensors, unsafe_skip_paged_value_validation="False")
+    with pytest.raises(ValueError, match="paged must be a bool"):
+        dataclasses.replace(result.spec.kernel_spec, paged="no")
+
+
 @pytest.mark.parametrize("arch", sorted(_PAGED_SPEC_IDS))
 def test_contiguous_dense_spec_ignores_the_block_count(arch):
     spec_id = _PAGED_SPEC_IDS[arch][0]

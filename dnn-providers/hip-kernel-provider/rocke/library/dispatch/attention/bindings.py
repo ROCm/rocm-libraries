@@ -314,7 +314,12 @@ def bind_dense_attention_torch(
     if scale is None:
         scale = 1.0 / math.sqrt(int(getattr(request, "hdim_q", spec.head_size)))
     stream = kwargs.get("stream", 0)
-    unsafe_skip = bool(kwargs.get("unsafe_skip_paged_value_validation", False))
+    unsafe_skip = kwargs.get("unsafe_skip_paged_value_validation", False)
+    if type(unsafe_skip) is not bool:
+        raise ValueError(
+            "unsafe_skip_paged_value_validation must be a bool, got "
+            f"{type(unsafe_skip).__name__}"
+        )
 
     def launch(**_kw):
         call = {

@@ -232,6 +232,8 @@ class AttentionDenseSpec:
         if not 1 <= self.waves_per_eu <= 8:
             raise ValueError(f"waves_per_eu must be in [1, 8], got {self.waves_per_eu}")
 
+        if type(self.paged) is not bool:
+            raise ValueError(f"paged must be a bool, got {type(self.paged).__name__}")
         if self.paged:
             if self.block_size <= 0:
                 raise ValueError("paged=True requires block_size > 0")
