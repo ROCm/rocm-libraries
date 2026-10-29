@@ -123,6 +123,7 @@ else()
             FILE_SET tensilelite_public_headers TYPE HEADERS
                 FILES
                     "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/msgpack/MessagePack.hpp"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/msgpack/SolutionState.hpp"
         PRIVATE
             FILE_SET tensilelite_private_headers TYPE HEADERS
                 FILES
