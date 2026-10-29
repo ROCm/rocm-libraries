@@ -3,14 +3,13 @@
 """Host-only IR tests for opt-in LSE output on the tiled 2D unified-attention
 kernels (gfx942 + gfx950). No GPU: specs are built and lowered to LLVM text."""
 
-import hashlib
 import importlib
 import re
 
 import pytest
 
-from rocke.core.llvm_profile import LLVM_EMISSION_ALIASES
-from rocke.core.lower_llvm import _resolve_llvm_flavor, lower_kernel_to_llvm
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.core.passes import eliminate_dead_pure_ops
 
 _BASE = dict(
     head_size=128,
@@ -51,49 +50,6 @@ _EXPECTED_LSE_STORES = {
     "gfx942": {"transposed32": 1, "mfma32": 16, "striped16": 4},
 }
 
-# sha256 of lower_kernel_to_llvm(...) text for the LSE-off build, keyed by the
-# resolved LLVM flavor (the text differs per flavor, like the flavor-keyed IR
-# golden), one entry per committed flavor. Every hash was computed on the tree
-# after the running-max carry fix and before any LSE store existed.
-_OFF_SHA256 = {
-    "llvm20": {
-        "gfx950": {
-            "transposed32": "b9632fa4fedd6f73aeab033e682e1c7bf5e981dc5638b07a8c686d01ab0c51fe",
-            "mfma32": "75c49deabc455a47c596709cab31c2434cf7dc0a9903f292f0178ab96bc2ed57",
-            "striped16": "2581bfec6efe59e48aec76a867d28d53a26ef41066d7df4a9b050529b983aad5",
-        },
-        "gfx942": {
-            "transposed32": "f529f39c3eaceaa06689456bdc96d340652d0a09b74811379e98ef9b71eb967f",
-            "mfma32": "022a6b762edbc729f480577c9a123b15d79fb7226de95cfed20034c2f88d4f0e",
-            "striped16": "9f3b0e780b9ed4044bc42980fcc9577002b43bc3c278bbfdf3fa481bd771ea9a",
-        },
-    },
-    "llvm22": {
-        "gfx950": {
-            "transposed32": "74b11c4a3665fd25c04c27b2519f109011cd195750a30c96e5e142e47e3f474f",
-            "mfma32": "240eae5f3ece173ba83de9008663f5e3be12691964ad6935acca5b4ead0947c9",
-            "striped16": "2e22eae5e44a748168efb850ff7992a74c3e846855828dbd3e2f2cef94ec2293",
-        },
-        "gfx942": {
-            "transposed32": "a7951ee9ac5147a517372396ef04bc1a31ada7b2c32e62ffbcf613fb74f96403",
-            "mfma32": "e0fc1492d9ae4ba48e4eaa92b4939c41224c8f0805983135a5519471dccbcce7",
-            "striped16": "af4015ea1955e1b12866ddc55b49ffe43738c34d2a942ca208e4d8deafea9a35",
-        },
-    },
-    "llvm23": {
-        "gfx950": {
-            "transposed32": "d69c31d423d534ee46350166125420153c60d7aaf547fa82e3b6f684b2acafc8",
-            "mfma32": "8181cc42d6d9f5db85fe7af8749aed653920e4f4c956ae2d80d85f746d0ca9f5",
-            "striped16": "ceff7404264975479bd8b1a68177914a40325010fcb6fb3b4ce34ef7290ab77b",
-        },
-        "gfx942": {
-            "transposed32": "218efdce76d55d559851aaea80e3bc1adf03d5ddbb52c83e854665ea15b4fb83",
-            "mfma32": "f54c66a9ab69e0b5b54a34d3b9cd4ca305e8af9fa29e7a1ecd8f63760f30ac91",
-            "striped16": "9184314ed9b3719f999427b24fe12f0214a9db058f6160ded11d091f820240a0",
-        },
-    },
-}
-
 _CASES = [
     (arch, branch)
     for arch in ("gfx950", "gfx942")
@@ -112,9 +68,85 @@ def _spec(arch, branch, **kw):
     )
 
 
+def _build(spec, arch):
+    return _module(arch).build_unified_attention_2d_tiled(spec, arch=arch)
+
+
 def _lower(spec, arch):
-    kernel = _module(arch).build_unified_attention_2d_tiled(spec, arch=arch)
-    return lower_kernel_to_llvm(kernel, arch=arch)
+    return lower_kernel_to_llvm(_build(spec, arch), arch=arch)
+
+
+def _walk(region):
+    for op in region.ops:
+        yield op
+        for nested in op.regions:
+            yield from _walk(nested)
+
+
+def _drop_ops(region, drop):
+    """Remove the ops ``drop`` selects, at any depth; return how many went."""
+    kept, gone = [], 0
+    for op in region.ops:
+        for nested in op.regions:
+            gone += _drop_ops(nested, drop)
+        if drop(op):
+            gone += 1
+        else:
+            kept.append(op)
+    region.ops = kept
+    return gone
+
+
+def _drop_dead(kernel, guards=frozenset()):
+    """Remove dead pure ops, and the scf.if ops in ``guards`` once empty."""
+    while eliminate_dead_pure_ops(kernel.body) + _drop_ops(
+        kernel.body,
+        lambda op: id(op) in guards and not any(r.ops for r in op.regions),
+    ):
+        pass
+
+
+def _strip_lse(kernel):
+    """Remove the LSE output from an LSE-on kernel, in place, on the IR before
+    lowering: the ``lse_ptr`` param, every global store through it, the scf.if
+    guards those stores leave empty, and the pure ops that only fed them.
+    Return how many stores went."""
+    lse = next(p for p in kernel.params if p.name == "lse_ptr")
+    kernel.params.remove(lse)
+
+    def is_lse_store(op):
+        return (
+            op.name.startswith("memref.global_store")
+            and op.operands[0].name == f"%{lse.name}"
+        )
+
+    guards = set()
+
+    def find_guards(region, ifs):
+        for op in region.ops:
+            if is_lse_store(op):
+                guards.update(ifs)
+            inner = ifs + (id(op),) if op.name == "scf.if" else ifs
+            for nested in op.regions:
+                find_guards(nested, inner)
+
+    find_guards(kernel.body, ())
+    stores = _drop_ops(kernel.body, is_lse_store)
+    _drop_dead(kernel, guards)
+    assert kernel.name.endswith("_lse"), kernel.name
+    kernel.name = kernel.name.removesuffix("_lse")
+    return stores
+
+
+def _canonical_names(kernel):
+    """Rename every non-param value by first use, in place. Value names come
+    from a builder-wide counter, so LSE ops shift every later name."""
+    params = {f"%{p.name}" for p in kernel.params}
+    names = {}
+    for op in _walk(kernel.body):
+        for value in (*op.operands, *op.results):
+            if value.name not in params:
+                value.name = names.setdefault(value.name, f"%v{len(names)}")
 
 
 def _lse_store_count(ir):
@@ -169,28 +201,29 @@ def test_gfx942_lse_name_is_off_name_plus_lse_suffix(branch, extra):
 
 
 @pytest.mark.parametrize("arch,branch", _CASES)
-def test_2d_lse_off_ir_is_byte_identical_to_pre_change(arch, branch):
-    """LSE off adds no param, no store, no instruction."""
+def test_2d_lse_off_ir_has_no_lse_param_or_store(arch, branch):
     default_ir = _lower(_spec(arch, branch), arch)
     off_ir = _lower(_spec(arch, branch, emit_lse=False), arch)
     assert off_ir == default_ir
     assert "lse_ptr" not in off_ir
     assert _lse_store_count(off_ir) == 0
-    # An aliased lane (llvm24) emits its source flavor's text.
-    flavor = _resolve_llvm_flavor()
-    flavor = LLVM_EMISSION_ALIASES.get(flavor, flavor)
-    digest = hashlib.sha256(off_ir.encode()).hexdigest()
-    # A snapshot, not a regenerable golden: emit_lse must never change LSE-off
-    # IR. Re-record only when the base kernel changes on purpose: re-bless the
-    # IR golden (platform/tests/instances/rocke_ir_parity_harness.py --write)
-    # in the same commit and paste the hash printed here.
-    assert flavor in _OFF_SHA256, (
-        f"no LSE-off hashes for LLVM flavor {flavor}; this build gives "
-        f"{arch}/{branch} {digest}"
-    )
-    assert (
-        digest == _OFF_SHA256[flavor][arch][branch]
-    ), f"LSE-off IR changed for {arch}/{branch} at {flavor}: {digest}"
+
+
+@pytest.mark.parametrize("arch,branch", _CASES)
+def test_2d_lse_on_ir_minus_lse_output_is_lse_off_ir(arch, branch):
+    """LSE on adds only the LSE output: with its param, stores, their guards
+    and the pure ops that fed only them removed, it lowers to the LSE-off
+    text. Dead pure ops go from both sides (LLVM drops them anyway). The
+    LSE-off text itself is pinned by rocke_representative_ir_sha256.json."""
+    off = _build(_spec(arch, branch), arch)
+    on = _build(_spec(arch, branch, emit_lse=True), arch)
+    assert _strip_lse(on) == _EXPECTED_LSE_STORES[arch][branch]
+    _drop_dead(off)
+    for kernel in (off, on):
+        _canonical_names(kernel)
+    off_ir = lower_kernel_to_llvm(off, arch=arch)
+    on_ir = lower_kernel_to_llvm(on, arch=arch)
+    assert on_ir == off_ir, f"LSE on changes more than its output: {arch}/{branch}"
 
 
 @pytest.mark.parametrize("arch,branch", _CASES)
