@@ -32,14 +32,23 @@
 #include <Tensile/Tensile.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <iterator>
 #include <map>
 #include <mutex>
+#include <thread>
 
 #include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
+    // When non-null, publishing a placeholder library stores the raw pointer,
+    // sets *gate to 1, and waits until *gate is no longer 1 before storing the
+    // owning pointer. placeholderEarlyUse counts a member access that saw the
+    // raw pointer without the owning pointer. Both stay unused in production.
+    inline std::atomic<std::atomic<int>*> placeholderPublishGate{nullptr};
+    inline std::atomic<int>               placeholderEarlyUse{0};
+
     // Which placeholder libraries should be initialized at start
     // To be extended in the future
     enum class LazyLoadingInit
@@ -160,7 +169,57 @@ namespace TensileLite
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
     struct PlaceholderLibrary : public SolutionLibrary<MyProblem, MySolution>
     {
-        mutable std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> library;
+        struct Published
+        {
+            using Lib = SolutionLibrary<MyProblem, MySolution>;
+
+            std::shared_ptr<Lib> owned;
+            std::atomic<Lib*>    raw{nullptr};
+
+            Published()                            = default;
+            Published(Published const&)            = delete;
+            Published& operator=(Published const&) = delete;
+
+            Published& operator=(std::shared_ptr<Lib> next)
+            {
+                raw.store(next.get(), std::memory_order_release);
+                if(auto* gate = placeholderPublishGate.load(std::memory_order_acquire))
+                {
+                    if(gate->load(std::memory_order_acquire) == 0)
+                    {
+                        gate->store(1, std::memory_order_release);
+                        while(gate->load(std::memory_order_acquire) == 1)
+                            std::this_thread::yield();
+                    }
+                }
+                owned = std::move(next);
+                return *this;
+            }
+
+            explicit operator bool() const
+            {
+                return raw.load(std::memory_order_acquire) != nullptr;
+            }
+
+            // A caller that uses the member without waiting for the load can
+            // observe the raw pointer while owned is still empty.
+            Lib* operator->() const
+            {
+                if(raw.load(std::memory_order_acquire) != nullptr && !owned)
+                {
+                    placeholderEarlyUse.fetch_add(1, std::memory_order_relaxed);
+                    return nullptr;
+                }
+                return owned.get();
+            }
+
+            operator std::shared_ptr<Lib>() const
+            {
+                return owned;
+            }
+        };
+
+        mutable Published library;
         mutable std::set<std::string>*                                  loadedFiles;
         mutable SolutionMap<MySolution>*                                masterSolutions;
         mutable std::mutex*                                             solutionsGuard;

@@ -46,11 +46,13 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -874,67 +876,105 @@ TEST_F(PlaceholderIndexedShardTest, PlaceholderFirstPublishesItsCacheToTheParent
     EXPECT_EQ(solution, viaCache) << "index lookup and the shard's own cache disagree";
 }
 
-// Several threads resolve one index on a cold placeholder. Each round loads a
-// new library. Every thread must receive the solution.
+// The publish gate makes the raw pointer visible before the owning pointer is
+// stored. Threads that call loadPlaceholderLibrary wait for that store. A use
+// of the member in the gap is counted in placeholderEarlyUse and must stay zero,
+// and every thread must receive the solution.
 TEST_F(PlaceholderIndexedShardTest, ConcurrentColdLookupsAllSeeTheLoadedShard)
 {
     singleTree = true;
     if(!layOutLibrary())
         GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
 
-    constexpr int kRounds  = 25;
-    constexpr int kThreads = 8;
+    const int    index   = *std::min_element(shardIndices.begin(), shardIndices.end());
+    const AMDGPU device  = TensileLite::testing::makeDevice(
+        TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_SPX_CU, "mi350spx");
+    const auto problem = TensileLite::testing::dummyProblem();
 
-    const int      index    = *std::min_element(shardIndices.begin(), shardIndices.end());
-    const AMDGPU   device   = TensileLite::testing::makeDevice(TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_SPX_CU, "mi350spx");
-    const auto     problem  = TensileLite::testing::dummyProblem();
-    int            failures = 0;
-
-    for(int round = 0; round < kRounds; ++round)
+    struct Gate
     {
-        auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(
-            masterPath().string());
-        ASSERT_NE(lib, nullptr);
-        auto* master = dynamic_cast<Master*>(lib.get());
-        ASSERT_NE(master, nullptr);
-        ASSERT_TRUE(master->initLibraryMapping(masterPath().string()));
-
-        auto* placeholder = placeholderOf(master);
-        ASSERT_NE(placeholder, nullptr);
-
-        if(round == 0)
+        std::atomic<int> value{0};
+        Gate()
         {
-            // Control: a lone caller resolves the index, so a null below is the
-            // race and not the problem or hardware chosen here.
-            ASSERT_NE(placeholder->getSolutionByIndex(problem, device, index), nullptr)
-                << "single-threaded lookup failed; test inputs are unusable";
-            continue;
+            placeholderEarlyUse.store(0);
+            placeholderPublishGate.store(&value);
         }
+        ~Gate()
+        {
+            value.store(2);
+            placeholderPublishGate.store(nullptr);
+        }
+    } gate;
 
-        std::atomic<bool> go{false};
-        std::atomic<int>  bad{0};
-        std::vector<std::thread> threads;
-        for(int t = 0; t < kThreads; ++t)
-            threads.emplace_back([&] {
-                while(!go.load())
-                    std::this_thread::yield();
-                try
-                {
-                    if(!placeholder->getSolutionByIndex(problem, device, index))
-                        ++bad;
-                }
-                catch(...)
-                {
-                    ++bad;
-                }
-            });
-        go = true;
-        for(auto& th : threads)
-            th.join();
-        failures += bad.load();
+    // A placeholder that has not been loaded yet. The one inside a master read
+    // from disk may already have run its load, which would close the gap.
+    Master fresh;
+    Holder cold;
+    cold.filePrefix          = kShardPrefix;
+    cold.libraryDirectory    = tmpDir.string();
+    if(cold.libraryDirectory.back() != '/')
+        cold.libraryDirectory.push_back('/');
+    cold.suffix              = ".dat";
+    cold.solutionsGuard      = &fresh.solutionsGuard;
+    cold.loadedFiles         = &fresh.loadedFiles;
+    cold.masterSolutions     = &fresh.solutions;
+    cold.solutionSources     = &fresh.solutionSources;
+    cold.indexLoadedLibraries = &fresh.indexLoadedLibraries;
+
+    std::atomic<int> bad{0};
+    std::mutex       errorMu;
+    std::string      error;
+    std::thread      loader([&] {
+        try
+        {
+            if(!cold.getSolutionByIndex(problem, device, index))
+                bad.fetch_add(1);
+        }
+        catch(std::exception const& ex)
+        {
+            bad.fetch_add(1);
+            std::lock_guard<std::mutex> lock(errorMu);
+            error = ex.what();
+        }
+        catch(...)
+        {
+            bad.fetch_add(1);
+            std::lock_guard<std::mutex> lock(errorMu);
+            error = "unknown exception";
+        }
+    });
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while(gate.value.load() == 0 && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    ASSERT_EQ(gate.value.load(), 1) << "load did not reach the publish gap; error=" << error
+                                    << " bad=" << bad.load();
+
+    constexpr int            kReaders = 7;
+    std::vector<std::thread> readers;
+    for(int t = 0; t < kReaders; ++t)
+    {
+        readers.emplace_back([&] {
+            try
+            {
+                if(!cold.getSolutionByIndex(problem, device, index))
+                    bad.fetch_add(1);
+            }
+            catch(...)
+            {
+                bad.fetch_add(1);
+            }
+        });
     }
 
-    EXPECT_EQ(failures, 0) << "threads saw a half-loaded placeholder";
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    gate.value.store(2);
+    loader.join();
+    for(auto& th : readers)
+        th.join();
+
+    EXPECT_EQ(placeholderEarlyUse.load(), 0);
+    EXPECT_EQ(bad.load(), 0);
 }
 
 TEST_F(PlaceholderIndexedShardTest, ShardRegistersOnceWhenReachedFromBothSides)
