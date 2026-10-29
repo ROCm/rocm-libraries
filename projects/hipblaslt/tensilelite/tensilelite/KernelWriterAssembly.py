@@ -16753,6 +16753,16 @@ class KernelWriterAssembly(KernelWriter):
     (fullVws, elements, fullVws_1, elements_1) = self.notLocalFullTileElements(kernel)
     # print("len(elements)= ", len(elements_1))
     noGSUBranch = (kernel["GlobalSplitU"] == 0 and (not self.states.tileProcessing.requiresWorkspaceReductionStorePath or isPersistentDataParallel(kernel)))
+    # When GlobalSplitU=0 (auto-GSU) and GlobalSplitUAlgorithm=MultipleBuffer, noGSUBranch=True
+    # causes only the MB workspace-write path to be compiled into the kernel.  At runtime,
+    # auto-GSU may resolve to 1 (e.g. small M), in which case the host skips the conversion
+    # kernel (gsu>1 gate in ContractionSolution::solve).  The MB path never applies ScaleAB
+    # vector scaling (isSingleKernel=False), so scale_a is silently dropped.
+    # Fix: keep both paths (noGSUBranch=False) so the GSU=1 branch applies ScaleAB inline.
+    if (noGSUBranch
+            and kernel.get("GlobalSplitUAlgorithm") == "MultipleBuffer"
+            and kernel["ProblemType"].get("UseScaleAB") == "Vector"):
+        noGSUBranch = False
     module = Module("notLocalSplitUGlobalWrite")
     storeModule, deferredGSU0 = self.globalWriteElements(kernel, tPA, tPB, fullVws, fullVws_1, elements, elements_1, noGSUBranch=noGSUBranch)
     module.add(storeModule)
@@ -16800,6 +16810,10 @@ class KernelWriterAssembly(KernelWriter):
     vectorWidths_1 = [fullVw_1, edgeVw_1]
 
     noGSUBranch = (kernel["GlobalSplitU"] == 0 and (not self.states.tileProcessing.requiresWorkspaceReductionStorePath or isPersistentDataParallel(kernel)))
+    if (noGSUBranch
+            and kernel.get("GlobalSplitUAlgorithm") == "MultipleBuffer"
+            and kernel["ProblemType"].get("UseScaleAB") == "Vector"):
+        noGSUBranch = False
     module = Module("localSplitUGlobalWrite")
     storeModule, _ = self.globalWriteElements(kernel, tPA, tPB, vectorWidths, vectorWidths_1, elements_f0, elements_f1, noGSUBranch=noGSUBranch)
     module.add(storeModule)
