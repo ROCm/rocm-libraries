@@ -504,11 +504,44 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[] = {
     {"make.buffer.rsrc.p1",
      "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
      "ptr addrspace(1) nocapture readnone, i16, i64, i32)"},
+    {"mfma.scale.f32.16x16x128.f8f6f4",
+     "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4(<8 x i32>, <8 x i32>, <4 x "
+     "float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"},
 };
 
 const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT
     = (int)(sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES)
             / sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[0]));
+
+/* Python _INTRINSIC_MIN_FLAVOR. */
+static const struct
+{
+    const char* key;
+    rocke_llvm_flavor_t flavor;
+} ROCKE_LL_INTRINSIC_MIN_FLAVOR[] = {
+    {"wmma.gfx1250.f32.16x16x32.f16", ROCKE_LLVM_FLAVOR_LLVM22},
+    {"wmma.gfx1250.f32.16x16x32.bf16", ROCKE_LLVM_FLAVOR_LLVM22},
+    {"wmma.gfx1250.f32.16x16x64.fp8.fp8", ROCKE_LLVM_FLAVOR_LLVM22},
+    {"wmma.gfx1250.f32.16x16x64.fp8.bf8", ROCKE_LLVM_FLAVOR_LLVM22},
+    {"wmma.gfx1250.f32.16x16x64.bf8.fp8", ROCKE_LLVM_FLAVOR_LLVM22},
+    {"wmma.gfx1250.f32.16x16x64.bf8.bf8", ROCKE_LLVM_FLAVOR_LLVM22},
+    {"wmma.scale.block32.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
+     ROCKE_LLVM_FLAVOR_LLVM23},
+    {"wmma.scale.block16.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
+     ROCKE_LLVM_FLAVOR_LLVM23},
+};
+
+rocke_llvm_flavor_t rocke_ll_intrinsic_min_flavor(const char* key)
+{
+    for(const auto& row : ROCKE_LL_INTRINSIC_MIN_FLAVOR)
+    {
+        if(strcmp(row.key, key) == 0)
+        {
+            return row.flavor;
+        }
+    }
+    return ROCKE_LLVM_FLAVOR_AUTO;
+}
 
 /* Resolve the flavor-specific override table (NULL/0 for non-modern flavors),
  * mirroring the Python _Lowerer choosing which OVERRIDES dict to .update(). */

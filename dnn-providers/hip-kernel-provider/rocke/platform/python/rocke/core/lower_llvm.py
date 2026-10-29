@@ -950,6 +950,26 @@ _AV_B128_PTR_TYPES: Dict[int, str] = {
 }
 
 
+# Keys of :data:`_INTRINSIC_DECLS` that the compiler declares only from a
+# minimum flavor. ``_decls_for_flavor`` drops them on older flavors, so a call
+# to one is refused with "requires <flavor>". The keys stay in the base table
+# so that their declares keep their place in the emit order on every flavor
+# that has them.
+_INTRINSIC_MIN_FLAVOR: Dict[str, str] = {
+    "wmma.gfx1250.f32.16x16x32.f16": LLVM_FLAVOR_LLVM22,
+    "wmma.gfx1250.f32.16x16x32.bf16": LLVM_FLAVOR_LLVM22,
+    "wmma.gfx1250.f32.16x16x64.fp8.fp8": LLVM_FLAVOR_LLVM22,
+    "wmma.gfx1250.f32.16x16x64.fp8.bf8": LLVM_FLAVOR_LLVM22,
+    "wmma.gfx1250.f32.16x16x64.bf8.fp8": LLVM_FLAVOR_LLVM22,
+    "wmma.gfx1250.f32.16x16x64.bf8.bf8": LLVM_FLAVOR_LLVM22,
+    "wmma.scale.block32.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32": (
+        LLVM_FLAVOR_LLVM23
+    ),
+    "wmma.scale.block16.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32": (
+        LLVM_FLAVOR_LLVM23
+    ),
+}
+
 # Declares that change shape on LLVM 21+ hosts (ROCm 7.2+). Keys MUST
 # already exist in :data:`_INTRINSIC_DECLS`; only the declaration TEXT
 # differs, so call-site ``_need(...)`` lookups stay flavor-agnostic.
@@ -980,6 +1000,11 @@ _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
 # further override today.
 _INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
     **_INTRINSIC_DECLS_LLVM22_OVERRIDES,
+    "mfma.scale.f32.16x16x128.f8f6f4": (
+        "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+        "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
+        "i32 immarg, i32, i32 immarg, i32)"
+    ),
 }
 
 
@@ -993,7 +1018,11 @@ def _decls_for_flavor(flavor: str) -> Dict[str, str]:
     and :func:`check_arch_domain_in_ir`, which needs the table without a
     lowerer to ask.
     """
-    decls = dict(_INTRINSIC_DECLS)
+    decls = {
+        key: decl
+        for key, decl in _INTRINSIC_DECLS.items()
+        if _flavor_at_least(flavor, _INTRINSIC_MIN_FLAVOR.get(key, LLVM_FLAVOR_LLVM20))
+    }
     abi = _emission_profile(flavor).declaration_abi
     if abi is _LlvmDeclarationAbi.LLVM22:
         decls.update(_INTRINSIC_DECLS_LLVM22_OVERRIDES)
@@ -1846,8 +1875,26 @@ class _Lowerer:
             # Check once per key, not per call, so a demand inside a loop does
             # not warn per iteration.
             return
+        self._require_declared(key)
         self._needs_intrin[key] = True
         self._check_arch_domain(key)
+
+    def _require_declared(self, key: str) -> None:
+        """Refuse a demand that ``finalize`` could not declare on this flavor.
+
+        ``finalize`` declares only keys in ``self._decls``. A call whose key is
+        missing would reach ``opt`` as a use of an undefined function. A key
+        with a higher minimum flavor is a too-old flavor; any other missing key
+        is a defect in the emitter.
+        """
+        if key in self._decls:
+            return
+        minimum = _INTRINSIC_MIN_FLAVOR.get(key)
+        if minimum is not None:
+            raise NotImplementedError(
+                f"intrinsic {key!r} requires {minimum}, got {self._flavor}"
+            )
+        raise KeyError(f"intrinsic {key!r} has no declaration in any flavor table")
 
     def _check_arch_domain(self, key: str) -> None:
         """Act on what the arch-domain table says about ``key`` on this target.

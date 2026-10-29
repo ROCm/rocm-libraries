@@ -16,6 +16,10 @@ from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import (
+    _INTRINSIC_DECLS,
+    _INTRINSIC_MIN_FLAVOR,
+    _decls_for_flavor,
+    _Lowerer,
     _lower_kernel_to_llvm_python,
     lower_kernel_to_llvm,
 )
@@ -394,6 +398,51 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
                 self.assertIn(_scaled_atom("bf8", scale16).op_id, str(error.exception))
                 with self.assertRaisesRegex(NotImplementedError, "no HIP lowering"):
                     lower_kernel_to_hip(kernel, arch="gfx1250")
+
+
+class IntrinsicDeclaredOnFlavorTest(unittest.TestCase):
+    """A demand for a key the flavor cannot declare is refused, not emitted."""
+
+    def _lowerer(self, flavor):
+        return _Lowerer(IRBuilder("k").kernel, arch="gfx1250", llvm_flavor=flavor)
+
+    def test_a_key_that_a_newer_flavor_adds_names_that_flavor(self):
+        for flavor, key, newer in (
+            ("llvm20", "wmma.gfx1250.f32.16x16x32.f16", "llvm22"),
+            (
+                "llvm22",
+                "wmma.scale.block32.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
+                "llvm23",
+            ),
+        ):
+            with (
+                self.subTest(flavor=flavor, key=key),
+                self.assertRaisesRegex(NotImplementedError, f"requires {newer}"),
+            ):
+                self._lowerer(flavor)._need(key)
+
+    def test_a_key_in_the_flavor_table_is_accepted(self):
+        self._lowerer("llvm22")._need("wmma.gfx1250.f32.16x16x32.f16")
+        self._lowerer("llvm23")._need("wmma.gfx1250.f32.16x16x32.f16")
+
+    def test_a_flavor_table_keeps_the_base_table_emit_order(self):
+        """A flavor that declares a key declares it where the base table does."""
+        for flavor in ("llvm20", "llvm22", "llvm23", "llvm24"):
+            with self.subTest(flavor=flavor):
+                base_order = [
+                    k for k in _INTRINSIC_DECLS if k in _decls_for_flavor(flavor)
+                ]
+                self.assertEqual(
+                    base_order,
+                    [k for k in _decls_for_flavor(flavor) if k in _INTRINSIC_DECLS],
+                )
+
+    def test_every_minimum_flavor_key_is_in_the_base_table(self):
+        self.assertLessEqual(set(_INTRINSIC_MIN_FLAVOR), set(_INTRINSIC_DECLS))
+
+    def test_a_key_in_no_table_is_a_defect(self):
+        with self.assertRaises(KeyError):
+            self._lowerer("llvm23")._need("no.such.intrinsic")
 
 
 if __name__ == "__main__":

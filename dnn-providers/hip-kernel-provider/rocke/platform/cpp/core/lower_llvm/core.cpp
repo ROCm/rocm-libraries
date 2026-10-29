@@ -447,6 +447,13 @@ const char* rocke_ll_fresh(rocke_lower_t* L, const char* hint)
 /* Intrinsic need-tracking (Python _need / self._decls)                   */
 /* ====================================================================== */
 
+/* True when the flavor declares the base-table key (Python _decls_for_flavor). */
+static bool ll_flavor_declares(rocke_llvm_flavor_t flavor, const char* key)
+{
+    rocke_llvm_flavor_t minimum = rocke_ll_intrinsic_min_flavor(key);
+    return minimum == ROCKE_LLVM_FLAVOR_AUTO || rocke_ll_flavor_at_least(flavor, minimum);
+}
+
 /* Resolve a decl key to its declaration text: dyn_decls override, then the
  * flavor override table (LLVM22), then the base table. NULL if unknown. */
 static const char* ll_resolve_decl(rocke_lower_t* L, const char* key)
@@ -477,6 +484,10 @@ static const char* ll_resolve_decl(rocke_lower_t* L, const char* key)
     {
         if(strcmp(ROCKE_LL_INTRINSIC_DECLS[i].key, key) == 0)
         {
+            if(!ll_flavor_declares(L->flavor, key))
+            {
+                return NULL;
+            }
             return ROCKE_LL_INTRINSIC_DECLS[i].decl;
         }
     }
@@ -493,6 +504,24 @@ static bool ll_need_has(const rocke_lower_t* L, const char* key)
         }
     }
     return false;
+}
+
+/* Refuse a demand that finalize could not declare on this flavor (Python
+ * _Lowerer._require_declared). A key with a higher minimum flavor is a too-old
+ * flavor. Any other missing key is a defect in the emitter. */
+[[noreturn]] static void ll_refuse_undeclared(rocke_lower_t* L, const char* key)
+{
+    rocke_llvm_flavor_t minimum = rocke_ll_intrinsic_min_flavor(key);
+    if(minimum != ROCKE_LLVM_FLAVOR_AUTO)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "intrinsic '%s' requires %s, got %s",
+                      key,
+                      rocke_llvm_flavor_name(minimum),
+                      rocke_llvm_flavor_name(L->flavor));
+    }
+    rocke_ll_fail(L, ROCKE_ERR_VALUE, "intrinsic '%s' has no declaration in any flavor table", key);
 }
 
 /* Python: _Lowerer._check_arch_domain. Refuses the lowering when the committed
@@ -529,7 +558,11 @@ void rocke_ll_need(rocke_lower_t* L, const char* key)
     }
     rocke_ll_need_t rec;
     rec.key = rocke_arena_strdup(&L->arena, key);
-    rec.decl = ll_resolve_decl(L, key); /* may be NULL; finalize tolerates */
+    rec.decl = ll_resolve_decl(L, key);
+    if(rec.decl == NULL)
+    {
+        ll_refuse_undeclared(L, key);
+    }
     int rc;
     rocke_vec_push(&L->arena, &L->needs, rec, rc);
     if(rc != 0)

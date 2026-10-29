@@ -34,10 +34,12 @@ ROCKE = HERE.parents[0] if HERE.name != "tools" else HERE.parent  # tools -> roc
 RUN_DIFF = ROCKE / "tests" / "instances" / "differential" / "run_diff.py"
 # The parity family that carries the llvm23-gated gfx1250 ops.
 GFX1250_FAMILY = "gfx1250_lowering"
-# Families whose every config uses an llvm23-gated op (their kernels move data
-# with TDM). Under another flavor both engines reject all of them, which the
-# gate reads as ALL_REJECTED, so they are compared in the llvm23 lane only.
+# Families whose every config uses an op that an older flavor cannot declare
+# (TDM data movement, or gfx1250 WMMA, which llvm20 lacks). Under such a flavor
+# both engines reject all of them, which the gate reads as ALL_REJECTED, so they
+# are compared in the llvm23 lane only.
 TARGET_OP_PROFILE_FAMILIES = (
+    "conv_winograd_fused_1d_wmma",
     "conv_direct_dgrad_wmma",
     "conv_direct_fwd_wmma",
     "conv_fwd_small_wmma",
