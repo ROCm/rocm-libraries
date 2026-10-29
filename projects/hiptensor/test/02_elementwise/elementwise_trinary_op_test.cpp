@@ -644,7 +644,8 @@ namespace hiptensor
                             (double*)resource->deviceOutput().get(),
                             (double*)resource->deviceReference().get(),
                             resource->getCurrentMatrixElement(),
-                            convertToComputeType(computeDataType));
+                            convertToComputeType(computeDataType),
+                            1e-12);
                 }
                 else if(dataType == HIPTENSOR_R_32F)
                 {

@@ -522,7 +522,8 @@ namespace hiptensor
                             (double*)resource->deviceOutput().get(),
                             (double*)resource->deviceReference().get(),
                             resource->getCurrentMatrixElement(),
-                            convertToComputeType(computeDataType));
+                            convertToComputeType(computeDataType),
+                            1e-12);
                 }
                 EXPECT_TRUE(mValidationResult) << "Max relative error: " << mMaxRelativeError;
             } // if (testOptions->performValidation())
