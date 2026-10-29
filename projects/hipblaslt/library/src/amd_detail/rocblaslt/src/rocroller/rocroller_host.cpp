@@ -10,7 +10,6 @@
 #include "gemm.hpp"
 #include "kernel_type.hpp"
 #include "parameter_selection.hpp"
-#include "rocroller_interop.hpp"
 #include "runtime_args_selection.hpp"
 #include "solution_cache.hpp"
 #include "solution_selection.hpp"
@@ -373,17 +372,16 @@ rocblaslt_status
     auto scale_type = normalizeOperandType(prob.scale_type);
     if(scale_type != HIPBLASLT_DATATYPE_INVALID && scale_type != HIP_R_32F)
     {
-        // Print the hipDataType. hip2RocRollerType throws on a format rocRoller
-        // does not name, and that throw becomes an internal error.
+        // hip2RocRollerType throws on a format rocRoller does not name.
         std::cerr << "rocRoller only supports F32 as scale type not "
-                  << static_cast<int>(scale_type) << std::endl;
+                  << hipDataType_to_string(scale_type) << std::endl;
         return rocblaslt_status_invalid_value;
     }
 
     if(kernelType.typeAcc != HIP_R_32F)
     {
         std::cerr << "rocRoller only supports F32 accumulation, not "
-                  << static_cast<int>(kernelType.typeAcc) << std::endl;
+                  << hipDataType_to_string(kernelType.typeAcc) << std::endl;
         return rocblaslt_status_invalid_value;
     }
 

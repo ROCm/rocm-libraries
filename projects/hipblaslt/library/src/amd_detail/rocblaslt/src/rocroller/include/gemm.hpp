@@ -8,8 +8,7 @@
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
-// Reached through kernel_type.hpp until hipBLASLt stopped describing a kernel in
-// rocRoller's enumerations. Named here because this is what builds a Command.
+// gemm.cpp builds rocRoller Commands.
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Operations/Scratch_fwd.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
