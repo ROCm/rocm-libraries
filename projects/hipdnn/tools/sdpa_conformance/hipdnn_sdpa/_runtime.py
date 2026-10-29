@@ -6,7 +6,7 @@
 One hipDNN handle per (device, HIP stream); the stream is
 ``torch.cuda.current_stream()`` at call time, so work lands on the caller's stream
 (autograd's backward thread included). Plans are cached by ``Problem.key`` plus
-engine and device; a decline is cached too, so a shape the engine rejects is probed
+engine and device; a decline is cached too (as plain data), so a shape the engine rejects is probed
 once. The whole call runs under one lock: graph state and plans are not shared
 across threads.
 
@@ -35,7 +35,10 @@ from ._types import EngineDeclined
 
 _LOCK = threading.RLock()
 _HANDLES: dict = {}  # (device index, stream pointer) -> Handle
-_PLANS: dict = {}  # (Problem.key, engine, device index) -> _Plan | EngineDeclined
+# (Problem.key, engine, device index) -> _Plan, or a (direction, reason) decline. A decline is
+# kept as plain data: a cached exception would keep its traceback, and with it the declined
+# call's tensors, alive for the rest of the process.
+_PLANS: dict = {}
 
 
 class _Plan:
@@ -115,11 +118,11 @@ def run(prob: Problem, engine: str | None) -> str:
             try:
                 plan = _build_plan(prob, engine, handle)
             except EngineDeclined as declined:
-                _PLANS[key] = declined
+                _PLANS[key] = (declined.direction, declined.reason)
                 raise
             _PLANS[key] = plan
-        elif isinstance(plan, EngineDeclined):
-            raise EngineDeclined(plan.direction, plan.reason)
+        elif isinstance(plan, tuple):
+            raise EngineDeclined(*plan)
 
         workspace = (
             torch.empty(plan.workspace_size, dtype=torch.uint8, device=device)
