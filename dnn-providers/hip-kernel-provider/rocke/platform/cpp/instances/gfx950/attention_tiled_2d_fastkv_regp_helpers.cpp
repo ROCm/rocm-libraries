@@ -78,6 +78,8 @@ static rocke_status_t rocke__fastkv_gfx950_base_name(const rocke_attention_tiled
             hkv_buf,
             s->dtype ? s->dtype : "",
             kv_buf,
+            /* i64 K/V addressing changes the loaders, so it is a distinct kernel. */
+            s->use_i64_kv_addr ? "i64" : "",
             s->use_sinks ? "sinks" : "",
             sw_buf,
             s->has_softcap ? "softcap" : "",

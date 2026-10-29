@@ -1084,6 +1084,8 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
             hkv_buf,
             s->dtype ? s->dtype : "",
             kv_buf,
+            /* i64 K/V addressing changes the loaders, so it is a distinct kernel. */
+            s->use_i64_kv_addr ? "i64" : "",
             s->use_sinks ? "sinks" : "",
             sw_buf,
             s->has_softcap ? "softcap" : "",
