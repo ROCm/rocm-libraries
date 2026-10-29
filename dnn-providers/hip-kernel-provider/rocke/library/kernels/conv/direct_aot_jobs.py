@@ -532,6 +532,10 @@ _GROUPED_MFMA_CHANNELS = (4, 8)
 # transformer-style networks (4x4/s4, 14x14/s14, 16x16/s16).
 _SMALL_C_STEMS = (
     (3, 2, 1, (16, 24, 32, 48, 64)),
+    # The stride-1 3x3 input layers of the UNet / VAE / super-resolution
+    # networks and the unpadded 3x3/s2 Inception stem.
+    (3, 1, 1, (32, 64)),
+    (3, 2, 0, (32,)),
     (7, 2, 3, (64,)),
     (4, 4, 0, (96, 128, 192)),
     (14, 14, 0, (1024, 1152, 1280)),

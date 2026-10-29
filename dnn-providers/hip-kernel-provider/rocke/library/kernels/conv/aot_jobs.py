@@ -504,6 +504,24 @@ def _fwd_k_loops(pipeline: str) -> List[Tuple[bool, bool]]:
     return k_loops
 
 
+def _wgrad_k_loops(wave_size: int, pipeline: str, two_stage: bool) -> List[dict]:
+    """K-loop variants built per wgrad configuration.
+
+    The base loop always. On wave32 (WMMA) next to "mem": the "wmma_v1"
+    ds_read / wmma interleave hints and the double-buffered ``unroll_k`` loop,
+    alone and together -- the WMMA wgrad K loop admits both, and with "mem"
+    alone the cache held only its slowest loop.
+    """
+    loops: List[dict] = [{}]
+    if wave_size == 32 and pipeline == "mem" and not two_stage:
+        loops += [
+            {"pipeline": "wmma_v1"},
+            {"unroll_k": True},
+            {"pipeline": "wmma_v1", "unroll_k": True},
+        ]
+    return loops
+
+
 def _wgrad_two_stages(split_k: int) -> Tuple[bool, ...]:
     """Two-stage variants for a split-K degree.
 
@@ -992,23 +1010,25 @@ def _wgrad_jobs(
                     # Pinned in the spec and the identity alike, so the host
                     # sizes the scratch and Stage 2 from what was compiled.
                     cfg["ws_replicas"] = _DEFAULT_WS_REPLICAS
-                cfg["prefetch_addr"] = _wgrad_prefetch_addr(arch, cfg)
-                yield BuildJob(
-                    identity=KernelIdentity(
-                        arch=arch,
+                for k_loop in _wgrad_k_loops(wave_size, pipeline, two_stage):
+                    kcfg = dict(cfg, **k_loop)
+                    kcfg["prefetch_addr"] = _wgrad_prefetch_addr(arch, kcfg)
+                    yield BuildJob(
+                        identity=KernelIdentity(
+                            arch=arch,
+                            direction="wgrad",
+                            algorithm="implicit_gemm",
+                            llvm_flavor=flavor,
+                            dtype_a=da,
+                            dtype_b=db,
+                            dtype_d=dd,
+                            grouped=grouped,
+                            **kcfg,
+                        ),
                         direction="wgrad",
-                        algorithm="implicit_gemm",
-                        llvm_flavor=flavor,
-                        dtype_a=da,
-                        dtype_b=db,
-                        dtype_d=dd,
-                        grouped=grouped,
-                        **cfg,
-                    ),
-                    direction="wgrad",
-                    spec_kwargs=cfg,
-                    caps=caps,
-                )
+                        spec_kwargs=kcfg,
+                        caps=caps,
+                    )
         # Stream-K kernels (opt-in). Default epilogue only, so the store is
         # scalar and B takes its own width; split_k stays 1 (stream-K owns the
         # K partition). The workspace reduction reuses the two-stage scratch,
