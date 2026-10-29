@@ -11,6 +11,8 @@ subtrees:
   entries:
   - file: install/installation
     title: Install hipTensor
+  - file: install/source-build
+    title: Build from source
 
 - caption: Conceptual
   entries:
