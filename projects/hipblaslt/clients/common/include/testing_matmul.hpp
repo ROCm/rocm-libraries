@@ -2117,6 +2117,12 @@ void testing_matmul_with_bias(const Arguments& arg,
     std::vector<hipblasLtMatrixLayout_t> matA(gemm_count), matB(gemm_count), matC(gemm_count),
         matD(gemm_count);
     std::vector<std::vector<hipblasLtMatmulDesc_t>> matmul;
+    using MatrixLayoutOwner = std::unique_ptr<std::remove_pointer_t<hipblasLtMatrixLayout_t>,
+                                              decltype(&hipblasLtMatrixLayoutDestroy)>;
+    using MatmulDescOwner = std::unique_ptr<std::remove_pointer_t<hipblasLtMatmulDesc_t>,
+                                           decltype(&hipblasLtMatmulDescDestroy)>;
+    std::vector<MatrixLayoutOwner> matrix_layout_owners;
+    std::vector<MatmulDescOwner>   matmul_desc_owners;
     std::vector<hipblasLtEpilogue_t> epilogue(gemm_count, HIPBLASLT_EPILOGUE_DEFAULT);
     std::vector<float>               act0(gemm_count), act1(gemm_count);
 
@@ -2568,12 +2574,16 @@ void testing_matmul_with_bias(const Arguments& arg,
     {
         CHECK_HIPBLASLT_ERROR(
             hipblasLtMatrixLayoutCreate(&(matA[i]), arg.a_type, A_row[i], A_col[i], lda[i]));
+        matrix_layout_owners.push_back({matA[i], &hipblasLtMatrixLayoutDestroy});
         CHECK_HIPBLASLT_ERROR(
             hipblasLtMatrixLayoutCreate(&(matB[i]), arg.b_type, B_row[i], B_col[i], ldb[i]));
+        matrix_layout_owners.push_back({matB[i], &hipblasLtMatrixLayoutDestroy});
         CHECK_HIPBLASLT_ERROR(
             hipblasLtMatrixLayoutCreate(&(matC[i]), arg.c_type, M[i], N[i], ldc[i]));
+        matrix_layout_owners.push_back({matC[i], &hipblasLtMatrixLayoutDestroy});
         CHECK_HIPBLASLT_ERROR(
             hipblasLtMatrixLayoutCreate(&(matD[i]), arg.d_type, M[i], N[i], ldd[i]));
+        matrix_layout_owners.push_back({matD[i], &hipblasLtMatrixLayoutDestroy});
 
         if(do_swizzle_a)
         {
@@ -2660,6 +2670,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         CHECK_HIPBLASLT_ERROR(
             hipblasLtMatmulDescCreate(&(matmul[0][i]), arg.compute_type, arg.scale_type));
+        matmul_desc_owners.push_back({matmul[0][i], &hipblasLtMatmulDescDestroy});
 
         EXPECT_HIPBLAS_STATUS(
             hipblasLtMatmulDescSetAttribute(
@@ -4206,6 +4217,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
             CHECK_HIPBLASLT_ERROR(
                 hipblasLtMatmulDescCreate(&(matmul[b][i]), arg.compute_type, arg.scale_type));
+            matmul_desc_owners.push_back({matmul[b][i], &hipblasLtMatmulDescDestroy});
             CHECK_HIPBLASLT_ERROR(hipblaslt_ext::copyMatmul(matmul[0][i], matmul[b][i]));
 
             EXPECT_HIPBLAS_STATUS(
@@ -7112,25 +7124,6 @@ void testing_matmul_with_bias(const Arguments& arg,
         CHECK_HIP_ERROR(hipFree(userArgs));
     if(d_userArgs != nullptr)
         CHECK_HIP_ERROR(hipFree(d_userArgs));
-
-    // Explicitly destroy opaque handles to avoid leaks.
-    for(auto& h : matA)
-        if(h)
-            (void)hipblasLtMatrixLayoutDestroy(h);
-    for(auto& h : matB)
-        if(h)
-            (void)hipblasLtMatrixLayoutDestroy(h);
-    for(auto& h : matC)
-        if(h)
-            (void)hipblasLtMatrixLayoutDestroy(h);
-    for(auto& h : matD)
-        if(h)
-            (void)hipblasLtMatrixLayoutDestroy(h);
-
-    for(auto& block : matmul)
-        for(auto& h : block)
-            if(h)
-                (void)hipblasLtMatmulDescDestroy(h);
 
     // The stream is destroyed by stream_owner after the device buffers (see its declaration).
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_start_owner.release()));
