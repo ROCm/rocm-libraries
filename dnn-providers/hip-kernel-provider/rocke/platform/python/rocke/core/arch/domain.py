@@ -197,16 +197,42 @@ def committed_flavors() -> tuple[str, ...]:
     )
 
 
+# Lanes that enforce another lane's measured column until their own is
+# committed. The borrowed column was not measured on the borrowing toolchain;
+# it preserves the gate that applied before the compiler lane was split out and
+# is safer than silently running with no gate. A lane's own column always wins.
+# tools/gen_arch_domain_cpp.py copies this map into the C++ engine.
+COLUMN_ALIASES: dict[str, str] = {"llvm24": "llvm23"}
+
+
+def _column_path(flavor: str) -> Path:
+    return _DATA_DIR / f"{_COLUMN_PREFIX}{flavor}{_COLUMN_SUFFIX}"
+
+
+def column_flavor(flavor: str) -> str:
+    """The column ``flavor`` checks against: its own, else its alias."""
+    if _column_path(flavor).is_file():
+        return flavor
+    return COLUMN_ALIASES.get(flavor, flavor)
+
+
 @functools.cache
 def load(flavor: str) -> ArchDomain | None:
     """The committed column for ``flavor``, or ``None`` if there is not one.
+
+    A flavor in :data:`COLUMN_ALIASES` with no column of its own gets its
+    source's column. The returned table's ``flavor`` names that source, which
+    messages and waivers must also use.
 
     A host can only measure its own LLVM, so a missing column is normal, not an
     error. Callers must treat the ``None`` as no data. Only absence is: a column
     that exists but cannot be read (permissions, I/O) raises, because returning
     ``None`` for it would switch the whole lane off without a word.
     """
-    path = _DATA_DIR / f"{_COLUMN_PREFIX}{flavor}{_COLUMN_SUFFIX}"
+    source = column_flavor(flavor)
+    if source != flavor:
+        return load(source)
+    path = _column_path(flavor)
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:

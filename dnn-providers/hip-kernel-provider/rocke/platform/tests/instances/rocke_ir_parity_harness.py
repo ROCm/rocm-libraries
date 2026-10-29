@@ -12,7 +12,11 @@ import traceback
 from collections import Counter
 from pathlib import Path
 
-from rocke.core.ir_golden import GOLDEN_FLAVORS
+from rocke.core.ir_golden import (
+    GOLDEN_ALIASES,
+    GOLDEN_FLAVORS,
+    GOLDEN_PROFILE_FLAVORS,
+)
 from rocke.core.ir_golden import check_golden as _check_golden
 
 
@@ -2612,6 +2616,26 @@ def cases():
             tile_n=32,
             tile_k=32,
             dtype_d="fp32",
+        ),
+    )
+    # WMMA split-K: the packed bf16 atomic with a zero partner.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx1250/n1h8c16k32r3_spk4",
+        "gfx1250",
+        build_conv_wgrad(
+            "irhash_wgrad_1250_spk4",
+            "gfx1250",
+            wgrad1,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=32,
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            split_k=4,
+            dtype_d="bf16",
         ),
     )
 
@@ -5477,7 +5501,8 @@ def build_golden() -> dict:
     """Run every case under each golden flavor and return the flavor-keyed doc."""
     return {
         "schema": GOLDEN_SCHEMA,
-        "flavors": {fl: run(flavor=fl) for fl in GOLDEN_FLAVORS},
+        "aliases": GOLDEN_ALIASES,
+        "flavors": {fl: run(flavor=fl) for fl in GOLDEN_PROFILE_FLAVORS},
     }
 
 
@@ -5495,8 +5520,8 @@ def main():
     ap.add_argument(
         "--write",
         type=Path,
-        help="(re-)bless the flavor-keyed golden: run every case under each of "
-        f"{GOLDEN_FLAVORS} and write the result. Run only from a verified-good "
+        help="(re-)bless the profile-keyed golden: run every case under each of "
+        f"{GOLDEN_PROFILE_FLAVORS} and write lane aliases. Run only from a verified-good "
         "tree; re-blessing should accompany a reviewed, expected output change.",
     )
     ap.add_argument(
