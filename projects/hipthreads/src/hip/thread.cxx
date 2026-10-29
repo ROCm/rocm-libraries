@@ -354,10 +354,12 @@ static __host__ WorkNode_Header **getCPUWorkQueueAddr() {
     return cpuWorkQueueAddr;
 }
 
-// The host must update cpuWorkQueue.pushCount with hipStreamWriteValue32, not hipMemcpyToSymbolAsync: on Navi4 (gfx12)
-// under Windows, a running threading_main never observes a pushCount written by hipMemcpyToSymbolAsync, so it never
-// exits and anything that synchronizes with mainStream (e.g. a null-stream copy) hangs forever. This is the same
-// problem that led sendToGPU to publish queue entries with hipStreamWriteValue64.
+  // pushCount is written by the host while threading_main is already running. Use hipStreamWriteValue32 rather than
+  // hipMemcpyToSymbolAsync: on Navi4 (gfx12) under Windows, the running kernel was observed never to see a value
+  // written by hipMemcpyToSymbolAsync, so it never exited and anything synchronizing with mainStream (e.g. a null-stream
+  // copy) hung. This is related to, but distinct from, the issue behind sendToGPU's use of hipStreamWriteValue64
+  // (the kernel seeing partially written values): both concern how a host-initiated write becomes visible to the
+  // persistent kernel.
 static __host__ uint32_t *getCPUWorkQueuePushCountAddr() {
     static uint32_t * const pushCountAddr = [](){
         void *temp;
