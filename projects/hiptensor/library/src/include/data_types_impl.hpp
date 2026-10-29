@@ -29,6 +29,7 @@
 #include <iostream>
 
 #include "data_types.hpp"
+#include "logger.hpp"
 
 namespace hiptensor
 {
