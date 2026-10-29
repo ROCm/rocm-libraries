@@ -77,6 +77,14 @@ std::vector<DeterministicSplitKTestConfig> GetDeterministicTestConfigs2D()
             {4, 2, 8, 8, {16, 16}, {2, 2}, {1, 1}, {1, 1}, {1, 1}, false}};
 }
 
+std::vector<DeterministicSplitKTestConfig> GetDeterministicFwdTestConfigs2D()
+{
+    auto configs = GetDeterministicTestConfigs2D();
+    // Large-N 1x3: a temporal conv1d with frames and spatial positions folded into the batch.
+    configs.push_back({1, 256, 32, 32, {1, 64}, {1, 3}, {0, 1}, {1, 1}, {1, 1}, false});
+    return configs;
+}
+
 std::vector<DeterministicSplitKTestConfig> GetDeterministicTestConfigs3D()
 {
     return {// G  N  C  K  img        filter    pad       stride    dilation  3d
@@ -136,7 +144,13 @@ protected:
             return prng::gen_A_to_B(static_cast<T>(-3.0), static_cast<T>(3.0));
         };
 
-        if constexpr(CONV_DIR == Direction::BackwardData)
+        if constexpr(CONV_DIR == Direction::Forward)
+        {
+            input.generate(gen_value);
+            weights.generate(gen_value);
+            std::fill(output.begin(), output.end(), T(0));
+        }
+        else if constexpr(CONV_DIR == Direction::BackwardData)
         {
             output.generate(gen_value);
             weights.generate(gen_value);
@@ -162,8 +176,14 @@ protected:
         auto ctx = miopen::ExecutionContext{};
         ctx.SetStream(&handle);
 
-        miopen::conv::ProblemDescription problem{
-            output.desc, weights.desc, input.desc, conv_desc, CONV_DIR};
+        miopen::conv::ProblemDescription problem = [&]() {
+            if constexpr(CONV_DIR == Direction::Forward)
+                return miopen::conv::ProblemDescription{
+                    input.desc, weights.desc, output.desc, conv_desc, CONV_DIR};
+            else
+                return miopen::conv::ProblemDescription{
+                    output.desc, weights.desc, input.desc, conv_desc, CONV_DIR};
+        }();
 
         if(!solv.IsApplicable(ctx, problem))
         {
@@ -194,7 +214,12 @@ protected:
         for(int i = 0; i < NUM_ITERATIONS; ++i)
         {
             // Reset output buffer
-            if constexpr(CONV_DIR == Direction::BackwardData)
+            if constexpr(CONV_DIR == Direction::Forward)
+            {
+                std::fill(output.begin(), output.end(), T(0));
+                out_dev = handle.Write(output.data);
+            }
+            else if constexpr(CONV_DIR == Direction::BackwardData)
             {
                 std::fill(input.begin(), input.end(), T(0));
                 in_dev = handle.Write(input.data);
@@ -206,7 +231,21 @@ protected:
             }
 
             // Execute kernel
-            if constexpr(CONV_DIR == Direction::BackwardData)
+            if constexpr(CONV_DIR == Direction::Forward)
+            {
+                auto invoke_params =
+                    miopen::conv::DataInvokeParams{miopen::ConvFwdTensors{input.desc,
+                                                                          in_dev.get(),
+                                                                          weights.desc,
+                                                                          wei_dev.get(),
+                                                                          output.desc,
+                                                                          out_dev.get()},
+                                                   wspace.ptr(),
+                                                   wspace.size(),
+                                                   false};
+                (invoker)(handle, invoke_params);
+            }
+            else if constexpr(CONV_DIR == Direction::BackwardData)
             {
                 auto invoke_params =
                     miopen::conv::DataInvokeParams{miopen::ConvDataTensors{output.desc,
@@ -238,7 +277,12 @@ protected:
             handle.Finish();
 
             // Read results
-            if constexpr(CONV_DIR == Direction::BackwardData)
+            if constexpr(CONV_DIR == Direction::Forward)
+            {
+                handle.ReadToVec(out_dev, output.data);
+                results.push_back(output.data);
+            }
+            else if constexpr(CONV_DIR == Direction::BackwardData)
             {
                 handle.ReadToVec(in_dev, input.data);
                 results.push_back(input.data);
@@ -280,6 +324,57 @@ protected:
 };
 
 } // namespace
+
+// 2D FWD
+using GPU_GroupConv2D_Deterministic_FWD_FP32 =
+    GPU_GroupConvDeterministicSplitK<float,
+                                     Direction::Forward,
+                                     miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops,
+                                     false>;
+using GPU_GroupConv2D_Deterministic_FWD_FP16 =
+    GPU_GroupConvDeterministicSplitK<half,
+                                     Direction::Forward,
+                                     miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops,
+                                     false>;
+using GPU_GroupConv2D_Deterministic_FWD_BFP16 =
+    GPU_GroupConvDeterministicSplitK<bfloat16,
+                                     Direction::Forward,
+                                     miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops,
+                                     false>;
+
+// 3D FWD
+using GPU_GroupConv3D_Deterministic_FWD_FP32 =
+    GPU_GroupConvDeterministicSplitK<float,
+                                     Direction::Forward,
+                                     miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdXdlops,
+                                     true>;
+using GPU_GroupConv3D_Deterministic_FWD_FP16 =
+    GPU_GroupConvDeterministicSplitK<half,
+                                     Direction::Forward,
+                                     miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdXdlops,
+                                     true>;
+using GPU_GroupConv3D_Deterministic_FWD_BFP16 =
+    GPU_GroupConvDeterministicSplitK<bfloat16,
+                                     Direction::Forward,
+                                     miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdXdlops,
+                                     true>;
+
+// 3D BWD
+using GPU_GroupConv3D_Deterministic_BWD_FP32 =
+    GPU_GroupConvDeterministicSplitK<float,
+                                     Direction::BackwardData,
+                                     miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdXdlops,
+                                     true>;
+using GPU_GroupConv3D_Deterministic_BWD_FP16 =
+    GPU_GroupConvDeterministicSplitK<half,
+                                     Direction::BackwardData,
+                                     miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdXdlops,
+                                     true>;
+using GPU_GroupConv3D_Deterministic_BWD_BFP16 =
+    GPU_GroupConvDeterministicSplitK<bfloat16,
+                                     Direction::BackwardData,
+                                     miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdXdlops,
+                                     true>;
 
 // 2D BWD
 using GPU_GroupConv2D_Deterministic_BWD_FP32 =
@@ -333,6 +428,15 @@ using GPU_GroupConv3D_Deterministic_WRW_BFP16 =
                                      true>;
 
 // Test definitions
+TEST_P(GPU_GroupConv2D_Deterministic_FWD_FP32, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_GroupConv2D_Deterministic_FWD_FP16, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_GroupConv2D_Deterministic_FWD_BFP16, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_GroupConv3D_Deterministic_FWD_FP32, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_GroupConv3D_Deterministic_FWD_FP16, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_GroupConv3D_Deterministic_FWD_BFP16, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_GroupConv3D_Deterministic_BWD_FP32, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_GroupConv3D_Deterministic_BWD_FP16, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_GroupConv3D_Deterministic_BWD_BFP16, DeterministicTest) { this->RunTest(); };
 TEST_P(GPU_GroupConv2D_Deterministic_BWD_FP32, DeterministicTest) { this->RunTest(); };
 TEST_P(GPU_GroupConv2D_Deterministic_BWD_FP16, DeterministicTest) { this->RunTest(); };
 TEST_P(GPU_GroupConv2D_Deterministic_BWD_BFP16, DeterministicTest) { this->RunTest(); };
@@ -344,6 +448,36 @@ TEST_P(GPU_GroupConv3D_Deterministic_WRW_FP16, DeterministicTest) { this->RunTes
 TEST_P(GPU_GroupConv3D_Deterministic_WRW_BFP16, DeterministicTest) { this->RunTest(); };
 
 // Test instantiations
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv2D_Deterministic_FWD_FP32,
+                         testing::ValuesIn(GetDeterministicFwdTestConfigs2D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv2D_Deterministic_FWD_FP16,
+                         testing::ValuesIn(GetDeterministicFwdTestConfigs2D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv2D_Deterministic_FWD_BFP16,
+                         testing::ValuesIn(GetDeterministicFwdTestConfigs2D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv3D_Deterministic_FWD_FP32,
+                         testing::ValuesIn(GetDeterministicTestConfigs3D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv3D_Deterministic_FWD_FP16,
+                         testing::ValuesIn(GetDeterministicTestConfigs3D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv3D_Deterministic_FWD_BFP16,
+                         testing::ValuesIn(GetDeterministicTestConfigs3D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv3D_Deterministic_BWD_FP32,
+                         testing::ValuesIn(GetDeterministicTestConfigs3D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv3D_Deterministic_BWD_FP16,
+                         testing::ValuesIn(GetDeterministicTestConfigs3D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv3D_Deterministic_BWD_BFP16,
+                         testing::ValuesIn(GetDeterministicTestConfigs3D()));
+
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_GroupConv2D_Deterministic_BWD_FP32,
                          testing::ValuesIn(GetDeterministicTestConfigs2D()));
