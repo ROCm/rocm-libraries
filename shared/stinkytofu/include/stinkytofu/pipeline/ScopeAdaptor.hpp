@@ -276,6 +276,10 @@ inline std::string makeDebugLabel(const std::vector<std::string>& groupNames) {
 /// instructions that mark group ranges. If a future pass needs to delete
 /// boundaries, use separate single-region adapters instead.
 ///
+/// TEXTBLOCK comments are erased during extract. If another group's stored
+/// endpoint is that comment, the endpoint is moved to the neighboring
+/// instruction before the comment is freed.
+///
 /// Example — whole-kernel adapter followed by a scoped adapter:
 ///
 /// @code
@@ -341,19 +345,23 @@ class ScopeAdaptor : public Pass {
    private:
     /// Move IR from [begin, end) into \p bb.
     /// StinkyInstructions and non-TEXTBLOCK AsmDirectives are preserved;
-    /// TEXTBLOCK directives (comments) are erased.
-    static void moveIRToBlock(IntrusiveListIterator<IRBase> begin,
-                              IntrusiveListIterator<IRBase> end, BasicBlock* bb) {
+    /// TEXTBLOCK directives (comments) are erased. A comment that is another
+    /// group's stored endpoint is retargeted onto a neighbor first so a later
+    /// adaptor does not start on a freed node.
+    void moveIRToBlock(IntrusiveListIterator<IRBase> begin, IntrusiveListIterator<IRBase> end,
+                       BasicBlock* bb) {
         for (auto it = begin; it != end;) {
             IRBase* ir = it.getNodePtr();
             it++;
             if (dyn_cast<StinkyInstruction>(ir)) {
                 bb->appendIR(ir);
             } else if (const auto* directive = dyn_cast<AsmDirective>(ir)) {
-                if (directive->kind == AsmDirectiveKind::TEXTBLOCK)
+                if (directive->kind == AsmDirectiveKind::TEXTBLOCK) {
+                    module.retargetGroupEndpoint(ir, it.getNodePtr(), ir->getPrev());
                     ir->erase();
-                else
+                } else {
                     bb->appendIR(ir);
+                }
             } else {
                 assert(false && "Unexpected non-instruction IR type in scope adaptor");
             }
