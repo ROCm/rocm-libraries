@@ -151,6 +151,8 @@ namespace TensileLite
         X_MACRO(GSUSync) \
         /* Random seed args */ \
         X_MACRO(RNDSeed) \
+        /* The whole fixed-size fused GEMM-A2A kernarg segment */ \
+        X_MACRO(FusedA2ASegment) \
         /* Appended to preserve existing CustomArgSemantic values. */ \
         X_MACRO(PersistentGrid) \
         X_MACRO(BatchOffsetD) \
@@ -1370,6 +1372,8 @@ namespace TensileLite
             // newly generated StreamK 3 / SK5 set it true. Uniform-summation-order
             // grid steering consults the same bit.
             bool perTileExtraIters  = false;
+            // Kernel takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args (CU-occupancy probe).
+            bool occupancyProbe     = false;
             bool useUniversalArgs   = true;
             bool useSFC             = false;
         };
@@ -1426,7 +1430,7 @@ namespace TensileLite
             rocisa::DataType mxTypeB        = rocisa::DataType::E8;
 
             // In-device MX scale layout expected by the kernel. Mirrors the
-            // MXScaleFormat solution parameter (see Tensile/Common/ValidParameters.py).
+            // MXScaleFormat solution parameter (see tensilelite/Common/ValidParameters.py).
             // Encoded as a small int so it round-trips through msgpack and YAML
             // logic files without an explicit enum schema:
             //   0 = NoSwizzle       (default; canonical row/column layout)

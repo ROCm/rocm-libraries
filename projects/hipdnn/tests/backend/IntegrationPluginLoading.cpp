@@ -259,9 +259,9 @@ TEST_F(IntegrationPluginLoading, IncorrectEngineID)
     std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> buffer;
     hipdnnGetLastErrorString(buffer.data(), buffer.size());
 
-    ASSERT_EQ(
-        std::string{buffer.data()},
-        "EngineDescriptor::finalize() failed: Engine id is not in a valid range of engine IDs");
+    ASSERT_EQ(std::string{buffer.data()},
+              "EngineDescriptor::finalize() failed: Engine id is not applicable to this graph (no "
+              "engine plugin offered it; see the log for plugin warnings)");
 }
 
 // Two plugins declare the same engine id. The first to load keeps it; the second still loads,
