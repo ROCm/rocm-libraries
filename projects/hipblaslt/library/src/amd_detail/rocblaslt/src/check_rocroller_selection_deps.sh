@@ -21,6 +21,8 @@ if [[ ! -d "$depdir" ]]; then
     echo "not a directory: $depdir" >&2
     exit 1
 fi
+# A relative depdir makes dirname settle on "." and the walk below never ends.
+depdir=$(cd "$depdir" && pwd -P)
 
 is_header() {
     case "$1" in
@@ -84,8 +86,19 @@ if [[ ! -s "$record" ]]; then
         echo "hipblaslt-rocroller-selection produced no objects under $depdir" >&2
         exit 1
     fi
+    # ninja -t deps names targets relative to the build directory, not the
+    # process's working directory.
+    rel_objs=()
+    for obj in "${objs[@]}"; do
+        rel=${obj#"$ninjafile"/}
+        if [[ "$rel" == "$obj" ]]; then
+            echo "object is outside $ninjafile: $obj" >&2
+            exit 1
+        fi
+        rel_objs+=("$rel")
+    done
     # `ninja -t deps` prints a header per object, then one dependency per line.
-    ninja -C "$ninjafile" -t deps "${objs[@]}" >"$tmpdir/ninja-deps.txt"
+    ninja -C "$ninjafile" -t deps "${rel_objs[@]}" >"$tmpdir/ninja-deps.txt"
     awk 'NF && $0 ~ /^[[:space:]]/ { gsub(/^[[:space:]]+/, ""); print }' \
         "$tmpdir/ninja-deps.txt" >>"$record"
 fi

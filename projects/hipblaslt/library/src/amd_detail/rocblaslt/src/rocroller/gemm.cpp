@@ -64,7 +64,9 @@ void RocRollerGemmKernel::setPredicates()
     commandKernel->addPredicate(unrollKPredicate);
 }
 
-std::string genScaleModeString(RocblasltContractionProblem::ScalingFormat format)
+// "B" when the operand uses block scaling, otherwise empty. Kernel names use
+// this tag; they do not name rocRoller's scale mode.
+std::string genBlockScalingTag(RocblasltContractionProblem::ScalingFormat format)
 {
     if(isBlockScaling(format))
         return "B";
@@ -87,7 +89,7 @@ std::string genKernelName(std::shared_ptr<SolutionParameters> gemm)
 
     if(gemm->kernelType.scaleTypeA.format != RocblasltContractionProblem::ScalingFormat::None)
     {
-        rv << "SA_" << genScaleModeString(gemm->kernelType.scaleTypeA.format);
+        rv << "SA_" << genBlockScalingTag(gemm->kernelType.scaleTypeA.format);
         rv << toString(hipblaslt::hip2RocRollerType(gemm->kernelType.scaleTypeA.type))
            << "_";
         if(isBlockScaling(gemm->kernelType.scaleTypeA.format))
@@ -114,7 +116,7 @@ std::string genKernelName(std::shared_ptr<SolutionParameters> gemm)
 
     if(gemm->kernelType.scaleTypeB.format != RocblasltContractionProblem::ScalingFormat::None)
     {
-        rv << "SB_" << genScaleModeString(gemm->kernelType.scaleTypeB.format);
+        rv << "SB_" << genBlockScalingTag(gemm->kernelType.scaleTypeB.format);
         rv << toString(hipblaslt::hip2RocRollerType(gemm->kernelType.scaleTypeB.type))
            << "_";
         if(isBlockScaling(gemm->kernelType.scaleTypeB.format))
@@ -205,13 +207,13 @@ std::shared_ptr<RocRollerGemmKernel> RocRollerGemmKernel::generate(std::shared_p
     AssertFatal(gemm->kernelType.scaleTypeA.format
                         == RocblasltContractionProblem::ScalingFormat::None
                     || isBlockScaling(gemm->kernelType.scaleTypeA.format),
-                "Scale mode not supported!",
-                ShowValue(static_cast<int>(gemm->kernelType.scaleTypeA.format)));
+                "Scale format not supported: ",
+                rocblaslt_scaling_format_to_string(gemm->kernelType.scaleTypeA.format));
     AssertFatal(gemm->kernelType.scaleTypeB.format
                         == RocblasltContractionProblem::ScalingFormat::None
                     || isBlockScaling(gemm->kernelType.scaleTypeB.format),
-                "Scale mode not supported!",
-                ShowValue(static_cast<int>(gemm->kernelType.scaleTypeB.format)));
+                "Scale format not supported: ",
+                rocblaslt_scaling_format_to_string(gemm->kernelType.scaleTypeB.format));
 
     std::optional<Operations::OperationTag> tagTensorScaleA, tagLoadScaleA, tagBlockScaleA,
         tagTensorScaleB, tagLoadScaleB, tagBlockScaleB, tagSKGrid, tagWGM;

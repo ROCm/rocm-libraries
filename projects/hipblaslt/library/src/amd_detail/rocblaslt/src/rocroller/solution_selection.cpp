@@ -159,17 +159,14 @@ std::vector<origami::config_t> generateTileListWrapper(bool hasPreSwizzle, bool 
     return generateTileList<A, B>(hasPreSwizzle, hasPreTile);
 }
 
-#define INSTANTIATE_TILE_LIST(A, B) \
-    {                               \
-        {A, B}, &generateTileListWrapper<A, B> \
-    }
+#define INSTANTIATE_TILE_LIST(A, B) {{A, B}, &generateTileListWrapper<A, B>}
 
-// The eight element formats a ranked kernel's A and B operands can have. A
-// problem whose operands normalise to anything else misses this map and is
-// left with no tiles, which is how an unsupported format is refused.
-#define INSTANTIATE_TILE_LIST_FOR(A)                                                 \
-    INSTANTIATE_TILE_LIST(A, HIP_R_16F), INSTANTIATE_TILE_LIST(A, HIP_R_32F),        \
-        INSTANTIATE_TILE_LIST(A, HIP_R_16BF), INSTANTIATE_TILE_LIST(A, HIP_R_8F_E4M3), \
+// The eight element formats a ranked kernel's A and B operands can have.
+// getTileListForKernelType throws "Unsupported DataType combination" when a
+// normalised operand is not one of these.
+#define INSTANTIATE_TILE_LIST_FOR(A)                                                      \
+    INSTANTIATE_TILE_LIST(A, HIP_R_16F), INSTANTIATE_TILE_LIST(A, HIP_R_32F),             \
+        INSTANTIATE_TILE_LIST(A, HIP_R_16BF), INSTANTIATE_TILE_LIST(A, HIP_R_8F_E4M3),    \
         INSTANTIATE_TILE_LIST(A, HIP_R_8F_E5M2), INSTANTIATE_TILE_LIST(A, HIP_R_4F_E2M1), \
         INSTANTIATE_TILE_LIST(A, HIP_R_6F_E3M2), INSTANTIATE_TILE_LIST(A, HIP_R_6F_E2M3)
 
@@ -232,19 +229,9 @@ size_t maxNumberSolutions()
 //    for E5M2, but a ranked kernel is the same kernel either way. The tile map
 //    is keyed on the folded format, so the fold has to happen before the lookup.
 //  - Answer HIPBLASLT_DATATYPE_INVALID for a format no ranked kernel handles.
-//    That value is in no tile-map key, so such a problem is left with no tiles.
+//    getTileListForKernelType throws when it is asked for that value.
 hipDataType normalizeOperandType(hipDataType type)
 {
-    // Compared as integers because some HIP headers declare these formats as
-    // constants rather than enumerators, which is how the rest of hipBLASLt
-    // reads them too (see utility.cpp).
-    if(static_cast<int>(type) == HIP_R_6F_E2M3)
-        return HIP_R_6F_E2M3;
-    if(static_cast<int>(type) == HIP_R_6F_E3M2)
-        return HIP_R_6F_E3M2;
-    if(static_cast<int>(type) == HIP_R_4F_E2M1)
-        return HIP_R_4F_E2M1;
-
     switch(type)
     {
     case HIP_R_16F:
@@ -259,6 +246,12 @@ hipDataType normalizeOperandType(hipDataType type)
     case HIP_R_8F_E5M2_FNUZ:
     case HIP_R_8F_E5M2:
         return HIP_R_8F_E5M2;
+    case HIP_R_6F_E2M3:
+        return HIP_R_6F_E2M3;
+    case HIP_R_6F_E3M2:
+        return HIP_R_6F_E3M2;
+    case HIP_R_4F_E2M1:
+        return HIP_R_4F_E2M1;
     default:
         return HIPBLASLT_DATATYPE_INVALID;
     }
