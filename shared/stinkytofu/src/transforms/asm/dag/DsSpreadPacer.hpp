@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <climits>
 #include <map>
+#include <sstream>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -36,7 +38,30 @@ class DsSpreadPacer {
         int earliest = 0;  // WMMA count the graph lets it issue at the soonest
     };
 
+    // A stage the LDS rate can not finish by its end: its loads need `needed` WMMAs from its start
+    // at cyclesPerLoad, but it has end - start. Its last load lands late, whatever the pace.
+    struct RateLimited {
+        int start;
+        int end;
+        int total;
+        int needed;
+    };
+    const std::vector<RateLimited>& rateLimited() const {
+        return rateLimited_;
+    }
+    // The debug warning for a rate-limited stage, at the rate the stage was planned with.
+    static std::string rateLimitedMessage(const RateLimited& r, int cyclesPerLoad) {
+        std::ostringstream os;
+        os << "stage [" << r.start << ", " << r.end << ") has " << r.total << " ds_loads that need "
+           << r.needed << " WMMAs at " << cyclesPerLoad << " cycles per load but has "
+           << (r.end - r.start)
+           << ": the pace is too sparse for the stage, its last ds_load will land late (lower "
+              "DsReadCyclesPerLoad)";
+        return os.str();
+    }
+
     void reset() {
+        rateLimited_.clear();
         active_ = false;
         stageOf_.clear();
         stages_.clear();
@@ -82,10 +107,14 @@ class DsSpreadPacer {
         for (Stage& st : stages_) {
             // Loads can not all be returned before start + total * cyclesPerLoad / windowCycles, so
             // a stage planned to end later than that ends there, never before its last load's slot.
-            if (cyclesPerLoad > 0 && windowCycles > 0)
-                st.end = std::min(st.end, st.start + (st.total * cyclesPerLoad + windowCycles - 1) /
-                                                         windowCycles);
+            const int atRate =
+                cyclesPerLoad > 0 && windowCycles > 0
+                    ? st.start + (st.total * cyclesPerLoad + windowCycles - 1) / windowCycles
+                    : 0;
+            if (atRate > 0) st.end = std::min(st.end, atRate);
             if (st.lastDs > st.end) st.end = std::min(st.lastDs, wmmaTotal);
+            if (atRate > st.end)
+                rateLimited_.push_back({st.start, st.end, st.total, atRate - st.start});
             st.batches = std::max(1, (st.end - st.start + batch_ - 1) / batch_);
         }
     }
@@ -172,6 +201,7 @@ class DsSpreadPacer {
     }
 
     int maxPerBatch_ = 0;
+    std::vector<RateLimited> rateLimited_;
     std::unordered_map<unsigned, int> stageOf_;
     std::vector<Stage> stages_;
     int batch_ = 1;
