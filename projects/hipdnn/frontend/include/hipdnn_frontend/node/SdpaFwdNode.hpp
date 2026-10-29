@@ -301,8 +301,10 @@ private:
         return {};
     }
 
-    // Paged K/V (cuDNN): each page table is INT32 [B, 1, max_blocks_per_seq, 1] and not packed,
-    // and when max_seq_len_kv is given it is exactly ceil(max_seq_len_kv / block_size) wide
+    // Paged K/V (cuDNN): each page table is INT32 [B, 1, max_blocks_per_seq, 1] (it may be packed
+    // with a ragged offset, which cuDNN 9.10.2+ accepts; an engine that cannot read a packed table
+    // declines the graph), and when max_seq_len_kv is given it is exactly
+    // ceil(max_seq_len_kv / block_size) wide
     // (block_size = that side's container dim 2). Paging needs both seq_len tensors;
     // max_seq_len_kv without paging is rejected. K or V may be paged alone, with its own block
     // size, and an unset max_seq_len_kv is inferred by the engine (as cuDNN does).
@@ -345,10 +347,6 @@ private:
                                   ErrorCode::INVALID_VALUE,
                                   std::string("SdpaFwdNode: ") + name
                                       + " must have INT32 data type");
-            HIPDNN_RETURN_IF_TRUE(table->has_ragged_offset(),
-                                  ErrorCode::INVALID_VALUE,
-                                  std::string("SdpaFwdNode: packed (ragged) ") + name
-                                      + " is not supported");
             const auto blockSize = (*container)[2];
             HIPDNN_RETURN_IF_TRUE(blockSize <= 0,
                                   ErrorCode::INVALID_VALUE,

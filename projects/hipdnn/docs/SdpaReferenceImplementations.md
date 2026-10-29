@@ -329,7 +329,8 @@ cuDNN, so they come first.
   decline test.
 - **`mma_core_mode`** is accepted and ignored. If cuDNN changes P's precision under some modes (for
   example fp8), the references need either that behaviour or a decline for those values.
-- **Packed page tables** are declined by the frontend although cuDNN accepts them on newer backends.
+- **Packed page tables** are accepted by the frontend, as cuDNN 9.10.2+ does, but the references read tables
+  unpacked and decline them. Reading a packed table would let the references serve those graphs.
 - **fp8 softmax scaling over more than 128 keys** matches cuDNN only up to its per-tile quantization
   (SEM-024); modelling the tiling would make those rows exact.
 - **Not expressible in the graph API yet:** backward Philox dropout, backward sinks and dSink, the fp8

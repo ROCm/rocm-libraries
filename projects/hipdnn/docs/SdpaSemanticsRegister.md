@@ -163,9 +163,11 @@ batch when `seq_len_q/kv` are set).
   check the table width as cuDNN does (`sdpaPagedMaxSeqKv`). Pinned by `TestCpuFpReferenceSdpaPropertyPaged` (block
   sizes 1/3/4, NHD strides, shuffled blocks, NaN in the null block and unused slots), the paged applicability cases,
   and ragged Q over paged K/V through the dense rewrite (`*RaggedQOverPagedKv*`).
-- **Frontend:** `SdpaFwdNode` applies cuDNN's rules: INT32 `[B, 1, M, 1]` unpacked tables, `M` = ceil(max /
+- **Frontend:** `SdpaFwdNode` applies cuDNN's rules: INT32 `[B, 1, M, 1]` tables, `M` = ceil(max /
   block_size) when `max_seq_len_kv` is set, both seq_len tensors, and no `max_seq_len_kv` without paging. K or V may
-  be paged alone, each with its own block size. Pinned by `TestSdpaFwdNode.*Paged*`.
+  be paged alone, each with its own block size. A packed table (with a ragged offset) is accepted, as cuDNN 9.10.2+
+  does; the references read tables unpacked and decline it (`TestSdpaFwdPlanPagedApplicability`, `PackedPageTableK`).
+  Pinned by `TestSdpaFwdNode.*Paged*`.
 - **External oracle:** `generate_sdpa_fwd_paged_golden.py` (gather-then-dense PyTorch, checked against a naive
   per-row loop in its tests); its bundles cover decode, speculative decode, mixed ragged prefill/decode, windows and
   sinks.

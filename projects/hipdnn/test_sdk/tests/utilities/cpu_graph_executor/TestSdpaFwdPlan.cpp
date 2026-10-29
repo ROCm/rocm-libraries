@@ -667,6 +667,8 @@ struct RawPagedGraphSpec
     // Both page tables' dims, and both paged containers' dims.
     std::vector<int64_t> pageTableDims = {2, 1, 3, 1};
     std::vector<int64_t> containerDims = {5, 2, 2, 8};
+    // A packed K page table: it carries a ragged offset (INT32 [3, 1, 1, 1], uid 11).
+    bool packedPageTableK = false;
 };
 
 flatbuffers::FlatBufferBuilder makeRawPagedSdpaFwdGraph(const RawPagedGraphSpec& spec)
@@ -721,7 +723,27 @@ flatbuffers::FlatBufferBuilder makeRawPagedSdpaFwdGraph(const RawPagedGraphSpec&
     if(spec.pageK)
     {
         attrs.page_table_k_tensor_uid = 8;
-        add(8, "PageTableK", spec.pageTableType, tableStrides, tableDims);
+        if(spec.packedPageTableK)
+        {
+            const std::vector<int64_t> offsetDims = {3, 1, 1, 1};
+            const auto offsetStrides = hipdnn_data_sdk::utilities::generateStrides(offsetDims);
+            add(11, "PageTableKOffset", DataType::INT32, offsetStrides, offsetDims);
+            tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                           8,
+                                                           "PageTableK",
+                                                           spec.pageTableType,
+                                                           &tableStrides,
+                                                           &tableDims,
+                                                           false,
+                                                           TensorValue::NONE,
+                                                           0,
+                                                           false,
+                                                           int64_t{11}));
+        }
+        else
+        {
+            add(8, "PageTableK", spec.pageTableType, tableStrides, tableDims);
+        }
     }
     if(spec.pageV)
     {
@@ -823,6 +845,20 @@ INSTANTIATE_TEST_SUITE_P(
         // A dense V sets the extent (6) when only K is paged; the bias must still match it.
         PagedApplicabilityCase{
             "PagedKOnlyNarrowBias", {true, false, true, DataType::INT32, std::nullopt, 4}, false},
+        // cuDNN 9.10.2+ accepts a packed page table and the frontend allows it. The references
+        // read tables unpacked: the dense plans decline any ragged tensor and the ragged rewrite
+        // declines a ragged tensor that is not a primary, so the graph is declined.
+        PagedApplicabilityCase{"PackedPageTableK",
+                               {true,
+                                true,
+                                true,
+                                DataType::INT32,
+                                std::nullopt,
+                                std::nullopt,
+                                {2, 1, 3, 1},
+                                {5, 2, 2, 8},
+                                true},
+                               false},
         // The dense side must span the extent: max_seq_len_kv 5 fits K's table (3 blocks of 2)
         // but the dense V has 6 keys.
         PagedApplicabilityCase{"PagedKOnlyDenseVBeyondMaxSeqLen",

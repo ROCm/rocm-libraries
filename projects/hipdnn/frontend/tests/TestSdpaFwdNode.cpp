@@ -683,8 +683,8 @@ TEST(TestSdpaFwdNode, PreValidatePagedBiasMustMatchMaxSeqLenKv)
     }
 }
 
-// cuDNN's paged rules, one field at a time from an accepted graph: unpacked INT32 [B, 1, M, 1]
-// tables with M > 0, M == ceil(max_seq_len_kv / block_size) when max_seq_len_kv is given, a
+// cuDNN's paged rules, one field at a time from an accepted graph: INT32 [B, 1, M, 1] tables
+// (packed or not, as cuDNN 9.10.2+ accepts both) with M > 0, M == ceil(max_seq_len_kv / block_size) when max_seq_len_kv is given, a
 // positive block size, both seq_len tensors, and no max_seq_len_kv without paging.
 TEST(TestSdpaFwdNode, PreValidatePagedRulesFollowCudnn)
 {
@@ -741,7 +741,9 @@ TEST(TestSdpaFwdNode, PreValidatePagedRulesFollowCudnn)
     auto packedK = makePageTable(2, 8);
     packedK->set_ragged_offset(makeSeqLen(3));
     packedTable.set_paged_attention_k_table(packedK);
-    EXPECT_EQ(validate(packedTable), error_code_t::INVALID_VALUE) << "tables are not packed";
+    EXPECT_EQ(validate(packedTable), error_code_t::OK)
+        << "a packed table is accepted, as cuDNN 9.10.2+ does; an engine that cannot read it "
+           "declines";
 
     auto zeroBlocks = makePaddedAttrs(q, makeTensor4D(9, 2, 0, 64), v);
     zeroBlocks.set_paged_attention_k_table(makePageTable(2, 8));
