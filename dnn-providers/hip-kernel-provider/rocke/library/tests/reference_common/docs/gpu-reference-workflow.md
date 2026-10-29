@@ -68,7 +68,8 @@ grouped by variant, and names the other variants whose cohort is the same; add
 when the architecture has several. `diff` authenticates the published bundle's
 manifest against the committed lock, matches cases by contract as verification
 does, and names enrolled cases the bundle does not record, recorded cases that
-are no longer enrolled, and changed tolerances or budgets. Without `--variant`,
+are no longer enrolled, changed tolerances or budgets, and cases whose generated
+inputs no longer have their recorded digests. Without `--variant`,
 `--bundle`, or `--lock`, it compares every published variant of the
 architecture. It exits with status 1 on any difference, and with status 2 when
 it cannot read or authenticate a lock or bundle. It reads the DVC archive, or
@@ -653,7 +654,7 @@ rows for the kernel author implicate a kernel change.
 | `does not cover the complete enrolled cohort`, `the enrolled cases differ from`, `tolerance or budget changed`, `different compiler target` | The adapter's `CASES`, a shared cohort, the operation's `Case` fields, or the adapter's `COMPILER_TARGET` changed without a replacement bundle | Author of that change | Revert an unintended change. Otherwise [requalify the complete cohort](#decide-what-must-change) and publish its archive, lock, and DVC pointer. `diff` lists every difference |
 | `pins a cohort that its manifest does not record` | The lock's fields come from different qualifications, such as after a merge, or its `cohort_sha256` was edited to follow a cohort change that was not requalified | Author of the lock change | Restore the complete `qualification-lock.json` written with the published bundle. A cohort change needs a complete requalification |
 | `the current adapter cannot prepare`, `outside the sources of locked baseline` | An adapter update for a newer production API dropped the API of the variant's locked baseline revision, or a new case needs newer kernel support | Author of the adapter or case change | Keep the older API working in the adapter, or requalify the variant at a newer baseline revision |
-| `input digest mismatch` | The input generator or the NumPy implementation differs from qualification | Author of the contract change | Restore the generator; an intended change needs requalification of every variant of the operation |
+| `input digest mismatch`, `generated inputs changed` | The input generator or the NumPy implementation differs from qualification | Author of the contract change | Restore the generator; an intended change needs requalification of every variant whose cases it changes, which `status` lists. A change in `reference_common` can span operations |
 | `GPU unavailable`, `GPU is not available` | An explicitly selected suite found no GPU, or a GPU outside `AMDGPU_TARGETS` | CI job configuration | Run on the selected processor; see [processor selection](#processor-selection-in-therock-jobs) |
 | `baseline snapshot (qualification) worker failed`, `is not deterministic`, `leaves no comparison budget` | During qualification: the adapter does not support the snapshot's API, or the baseline kernel fails, is not deterministic, or exceeds the tolerance | Whoever qualifies | Select another committed baseline revision or extend the adapter. Never raise a tolerance to qualify |
 

@@ -235,7 +235,7 @@ def _bundle(tmp_path, architecture="gfx942", variant="dense"):
                 "device_target": f"{architecture}:sramecc+:xnack-",
                 "budget": asdict(ErrorBudget(case.tolerance, 0.001)),
                 "comparison_limit": ErrorBudget(case.tolerance, 0.001).comparison_limit,
-                "input_digests": {},
+                "input_digests": OPERATION.input_digests(case),
                 "output_digest": "not-a-qualified-output",
                 "kernel": {
                     "compiler_target": getattr(target, "COMPILER_TARGET", architecture)
@@ -565,6 +565,7 @@ def test_generic_wmma_replay_requires_qualified_processor(
 
 def test_generated_input_mismatch_prevents_any_worker(tmp_path, monkeypatch):
     manifest = _bundle(tmp_path)
+    manifest["cases"][CASES[0].id]["input_digests"]["q"] = "0" * 64
     calls = []
     monkeypatch.setattr(
         common_cli, "run_worker", lambda *args, **kwargs: calls.append(args)

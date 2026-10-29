@@ -110,6 +110,25 @@ def _shared_cohort(
     return f"; cohort shared with {', '.join(shared)}" if shared else ""
 
 
+_INPUT_DIGESTS: dict[tuple[Callable, str], dict[str, str]] = {}
+
+
+def _input_digests(make_inputs: Callable, case: Any) -> dict[str, str]:
+    """Digest a case's generated inputs once per process.
+
+    Generation must be deterministic per case. The key is the case contract
+    that manifests record, so a ``Case`` need not be hashable, and a change to
+    generation replaces ``make_inputs``, which is part of the key. The
+    pre-launch check, ``checked_inputs``, regenerates.
+    """
+    key = (make_inputs, json.dumps(asdict(case), sort_keys=True))
+    if key not in _INPUT_DIGESTS:
+        _INPUT_DIGESTS[key] = {
+            name: array_digest(array) for name, array in make_inputs(case).items()
+        }
+    return dict(_INPUT_DIGESTS[key])
+
+
 @dataclass(frozen=True)
 class Metric:
     """An operation's comparison against its original tolerance.
@@ -290,14 +309,15 @@ class ReferenceOperation:
         return cohort_digest(
             {
                 "case": asdict(case),
-                "input_digests": {
-                    name: array_digest(array)
-                    for name, array in self.contract.make_inputs(case).items()
-                },
+                "input_digests": self.input_digests(case),
                 "tolerance": case.tolerance,
             }
             for case in target.CASES
         )
+
+    def input_digests(self, case: Any) -> dict[str, str]:
+        """Digest each input tensor that the contract generates for a case."""
+        return _input_digests(self.contract.make_inputs, case)
 
     def _enrolled_cohorts(self) -> dict[tuple[str, str], str]:
         """Digest every enrolled (architecture, variant) slot's cohort."""
@@ -776,6 +796,19 @@ class ReferenceOperation:
                 f"{case.tolerance:g}; recorded tolerance {budget.tolerance:g}, "
                 f"margin {budget.margin:g})"
             )
+        # The lock's cohort digest covers these too, so status and the host
+        # tests that compare it report what diff lists here.
+        generated, recorded = self.input_digests(case), entry["input_digests"]
+        changed = sorted(
+            name
+            for name in generated.keys() | recorded.keys()
+            if generated.get(name) != recorded.get(name)
+        )
+        if changed:
+            return (
+                f"generated inputs changed: {case.id} ({', '.join(changed)}); the "
+                "generator or NumPy implementation differs from qualification"
+            )
         return None
 
     def diff_bundle(
@@ -1218,8 +1251,9 @@ class ReferenceOperation:
             description=(
                 "Authenticate a bundle's manifest against its lock, then report "
                 "enrolled cases it does not record, recorded cases that are not "
-                "enrolled, and changed tolerances or budgets, matching cases as "
-                "verification does. Without --variant, --bundle, or --lock, it "
+                "enrolled, changed tolerances or budgets, and cases whose "
+                "generated inputs changed, matching cases as verification does. "
+                "Without --variant, --bundle, or --lock, it "
                 "compares every published variant of the architecture. Exits "
                 "with status 1 on any difference and 2 when the lock or bundle "
                 "cannot be read or authenticated. Reading the recorded device "

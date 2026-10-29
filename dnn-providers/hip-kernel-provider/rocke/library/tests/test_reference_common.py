@@ -539,6 +539,8 @@ def test_unpacked_payload_is_checked_against_the_lock(tmp_path, operation):
 
 def test_cohort_digest_binds_contracts_inputs_and_tolerances():
     """Only what a lock certifies changes the digest; ids, order and outputs do not."""
+    # diff must report every component bound here; see
+    # test_diff_names_whatever_changes_the_cohort_digest.
     entries = {
         "a": {
             "case": {"name": "a", "shape": [1, 2]},
@@ -2505,6 +2507,7 @@ def _qualified_cohort(tmp_path, operation, index=0):
         budget = ErrorBudget(case.tolerance, 0.001)
         entries[case.id] = {
             "case": asdict(case),
+            "input_digests": spec.input_digests(case),
             "device_target": architecture,
             "kernel": {
                 "compiler_target": getattr(target, "COMPILER_TARGET", architecture)
@@ -2873,6 +2876,68 @@ def test_diff_reports_every_difference_that_verification_rejects(
         spec.load_bundle(bundle, lock, **selected)
 
 
+@pytest.mark.parametrize("component", ["contract", "tolerance", "inputs"])
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_diff_names_whatever_changes_the_cohort_digest(
+    tmp_path, capsys, monkeypatch, operation, component
+):
+    """diff names every difference that the cohort digest detects.
+
+    status and the locked-cohort host test compare ``cohort_sha256`` and point
+    to diff, so for each component that the digest binds (the case contract,
+    its tolerance, and its generated inputs) diff must name a difference and
+    verification must reject the bundle before any worker runs.
+    """
+    spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    variant = _variant(spec.architectures, architecture)
+    selected = {"architecture": architecture, "variant": variant}
+    target = spec.architectures.get_adapter(architecture, variant)
+    cases = target.CASES
+    pinned = manifest_cohort_digest(json.loads((bundle / "manifest.json").read_text()))
+    lock.write_text(
+        json.dumps(dict(json.loads(lock.read_text()), cohort_sha256=pinned))
+    )
+    assert spec.enrolled_cohort_digest(architecture, variant) == pinned
+    assert spec.diff_bundle(bundle, lock, **selected) == []
+    if component == "contract":
+        monkeypatch.setattr(target, "CASES", cases[1:])
+    elif component == "tolerance":
+        kind = type(cases[0])
+        original = kind.tolerance
+
+        def tolerance(case):
+            return original.fget(case) * (2 if case == cases[0] else 1)
+
+        monkeypatch.setattr(kind, "tolerance", property(tolerance))
+    else:
+        generate = spec.contract.make_inputs
+
+        def drifted(case):
+            # As a generator edit or NumPy drift would: the case contract, its
+            # tolerance, and the input generator id stay unchanged.
+            inputs = generate(case)
+            if case == cases[0]:
+                name = sorted(inputs)[0]
+                inputs[name] = inputs[name].copy()
+                inputs[name].view(np.uint16).flat[0] ^= 1
+            return inputs
+
+        monkeypatch.setattr(spec.contract, "make_inputs", drifted)
+    assert spec.enrolled_cohort_digest(architecture, variant) != pinned
+    command = ["diff", "--arch", architecture, "--variant", variant]
+    with pytest.raises(SystemExit) as exit:
+        spec.main([*command, "--bundle", str(bundle), "--lock", str(lock)])
+    assert exit.value.code == 1
+    assert "needs a complete requalification" in capsys.readouterr().out
+    differences = spec.diff_bundle(bundle, lock, **selected)
+    assert differences
+    if component == "inputs":
+        (difference,) = differences
+        assert difference.startswith(f"generated inputs changed: {cases[0].id} (")
+    with pytest.raises(ValueError):
+        spec.load_bundle(bundle, lock, **selected)
+
+
 @pytest.mark.parametrize("operation", OPERATIONS)
 def test_diff_authenticates_an_archive_before_reading_it(tmp_path, operation):
     spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
@@ -3113,9 +3178,6 @@ def test_bundle_commands_check_the_cohort_that_the_lock_pins(
     """
     spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
     manifest = json.loads((bundle / "manifest.json").read_text())
-    for entry in manifest["cases"].values():
-        entry["input_digests"] = {"input": "1" * 64}
-    _relock(bundle, manifest, lock)
     pinned = dict(
         json.loads(lock.read_text()), cohort_sha256=manifest_cohort_digest(manifest)
     )
