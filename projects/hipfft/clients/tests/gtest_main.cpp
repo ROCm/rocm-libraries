@@ -67,7 +67,8 @@ double real_prob_factor;
 double complex_planar_prob_factor;
 // Modifier for probability of running tests with callbacks
 double callback_prob_factor;
-// Flag to indicate that only quick tests have been requested
+// Flag to indicate that only quick tests have been requested (cases
+// that we wouldn't want to run in smoke tests or emulation).
 bool quick_tests_only = false;
 // Constraints for the hipfftw tests
 size_t      max_length_for_hipfftw_test;

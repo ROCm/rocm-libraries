@@ -73,7 +73,8 @@ double complex_planar_prob_factor;
 double callback_prob_factor;
 // Modifier for probability of running very large tests
 double very_large_prob_factor;
-// Flag to indicate that only quick tests have been requested
+// Flag to indicate that only quick tests have been requested (cases
+// that we wouldn't want to run in smoke tests or emulation).
 bool quick_tests_only = false;
 // Number of random tests per suite
 size_t n_random_tests = 0;
