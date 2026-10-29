@@ -170,7 +170,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 ### cuDNN compatibility
 - Continued cuDNN v9 frontend compatibility, including a user guide and samples ⏳
-- cuDNN v8 frontend compatibility, scope to be confirmed
+- cuDNN v8 frontend compatibility ⏳
 
 ### Heuristics
 - Learned engine and kernel ranking via Universal Heuristic Descriptors, with shipped trained models ⏳
