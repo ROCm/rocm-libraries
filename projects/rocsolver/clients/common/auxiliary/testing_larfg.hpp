@@ -160,7 +160,9 @@ void larfg_getError(const rocblas_handle handle,
     if(singular)
     {
         err_alpha = abs(ha[0][0] + ha_res[0][0]);
+        #ifdef ROCSOLVER_ENABLE_LARFG_TAU2
         err_tau = abs(htau_res[0][0] - 2);
+        #endif
     }
     else
     {
