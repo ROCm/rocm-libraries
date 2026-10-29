@@ -157,5 +157,13 @@ void tensorBindings(nb::module_& m)
         .def("get_volume", &TensorAttributes::get_volume)
         .def("has_uid", &TensorAttributes::has_uid)
         .def("clear_uid", &TensorAttributes::clear_uid, nb::rv_policy::reference_internal)
+        .def("get_ragged_offset",
+             &TensorAttributes::get_ragged_offset,
+             "Return the ragged-offset aux tensor, or None if the tensor is not ragged.")
+        .def("set_ragged_offset",
+             &TensorAttributes::set_ragged_offset,
+             nb::arg("value").none(),
+             nb::rv_policy::reference_internal,
+             "Set the ragged-offset aux tensor; None clears it. Returns self.")
         .def("validate", &TensorAttributes::validate);
 }
