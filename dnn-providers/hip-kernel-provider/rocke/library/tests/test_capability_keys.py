@@ -171,9 +171,7 @@ def _direct_problems() -> list:
     return [
         DirectConvProblem(N=2, H=28, W=28, groups=1, cpg=64, kpg=64),
         DirectConvProblem(N=1, H=56, W=56, groups=16, cpg=16, kpg=16),
-        DirectConvProblem(
-            N=4, H=14, W=14, groups=128, cpg=1, kpg=1, KH=3, KW=3, PAD=1
-        ),
+        DirectConvProblem(N=4, H=14, W=14, groups=128, cpg=1, kpg=1, KH=3, KW=3, PAD=1),
         DirectConvProblem(
             N=2, H=32, W=32, groups=1, cpg=32, kpg=64, KH=1, KW=1, PAD=0, stride=2
         ),

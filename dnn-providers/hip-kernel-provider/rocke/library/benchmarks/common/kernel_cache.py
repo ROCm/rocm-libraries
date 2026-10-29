@@ -456,8 +456,7 @@ class KernelCache:
         self._compatible[key] = out
         self._compatible_rows += len(out)
         while (
-            self._compatible_rows > _COMPATIBLE_MEMO_ROWS
-            and len(self._compatible) > 1
+            self._compatible_rows > _COMPATIBLE_MEMO_ROWS and len(self._compatible) > 1
         ):
             _, dropped = self._compatible.popitem(last=False)
             self._compatible_rows -= len(dropped)
