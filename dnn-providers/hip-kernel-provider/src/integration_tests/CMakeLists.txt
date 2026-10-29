@@ -233,7 +233,9 @@ endif()
 # expands to every gfx11 member this build targets; merged ships gfx950 only. Gated and
 # routed per architecture exactly as the gfx950 dense target above: the predicate is the
 # one the census uses, and the entry installs into that architecture's shard so a package
-# without the architecture carries no entry for an engine it no longer ships.
+# without the architecture carries no entry for an engine it no longer ships. The backward
+# bundles include bf16 cases, so the target takes the engine's tolerance config, as its
+# tiered checks do.
 foreach(_hkp_bwd_engine IN ITEMS split merged)
     foreach(_hkp_bwd_arch IN ITEMS gfx950 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150
                                    gfx1151 gfx1152 gfx1153)
@@ -257,6 +259,7 @@ foreach(_hkp_bwd_engine IN ITEMS split merged)
             INSTALL_DESTINATION "${_hkp_bwd_shard_dest}"
             INSTALL_STAGING_KEY hkp_census_${_hkp_bwd_arch}
             REFERENCE_EXECUTOR gpu
+            TEST_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/../../config/hipkernel_flydsl_sdpa_bwd_${_hkp_bwd_engine}.toml"
             GTEST_FILTER "quick_SdpaBackward_Default.*:standard_SdpaBackward_Default.*:comprehensive_SdpaBackward_Default.*:full_SdpaBackward_Default.*"
             ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
