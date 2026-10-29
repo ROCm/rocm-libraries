@@ -275,8 +275,8 @@ void rocke_attn_unified_emit_3d_epilogue(rocke_attn_unified_build_ctx_t* ctx);
 void rocke_attn_unified_declare_reduce_params(rocke_attn_unified_build_ctx_t* ctx);
 
 /* The reduce max-pass over [0, num_segments):
- * overall = max over seg of select(segm_expsum == 0, -inf, segm_max). Only an
- * exact-zero sum marks an empty segment, so a NaN sum is not skipped.
+ * overall = max over seg of segm_max. An empty segment already stores -inf
+ * there, so the pass does not read segm_expsum.
  * Writes ctx->overall. */
 void rocke_attn_unified_emit_reduce_max_loop(rocke_attn_unified_build_ctx_t* ctx);
 

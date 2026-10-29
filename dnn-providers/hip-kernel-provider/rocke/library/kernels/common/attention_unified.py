@@ -6919,15 +6919,14 @@ def build_unified_attention_reduce(
         [("mx", neg_inf)],
         iv_name="seg",
     )
-    # A segment that saw no key stores max = -inf with sum = 0. It carries no
-    # mass: skip it in both passes, and give a row with no key at all O = 0
-    # instead of NaN from exp2(-inf - -inf) or acc * rcp(0). Only an exact zero
-    # sum counts as empty, so a NaN sum or denominator still yields NaN.
+    # A segment that saw no key stores max = -inf with sum = 0: the segment kernel
+    # carries the raw max, so the max pass ignores that segment as is. The combine
+    # pass weights it by 0, and a row with no key at all gets O = 0 instead of NaN
+    # from exp2(-inf - -inf) or acc * rcp(0). Only an exact zero sum counts as
+    # empty, so a NaN sum or denominator still yields NaN.
     with max_loop as (seg, (mx,)):
         idx, _ = ml_desc.offset(b, token=q_tok, head=q_head, seg=seg)
         mv = b.global_load_f32(segm_max, idx)
-        lv = b.global_load_f32(segm_expsum, idx)
-        mv = b.select(b.fcmp("oeq", lv, zero), neg_inf, mv)
         b.scf_yield(b.fmax(mx, mv))
     overall = max_loop.results[0]
     red = b.scf_for_iter(

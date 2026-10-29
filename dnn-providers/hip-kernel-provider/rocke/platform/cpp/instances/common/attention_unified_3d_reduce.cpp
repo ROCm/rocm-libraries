@@ -318,20 +318,18 @@ void rocke_attn_unified_declare_reduce_params(rocke_attn_unified_build_ctx_t* ct
  *   with max_loop as (seg, (mx,)):
  *       idx, _ = ml_desc.offset(b, token=q_tok, head=q_head, seg=seg)
  *       mv = global_load_f32(segm_max, idx)
- *       lv = global_load_f32(segm_expsum, idx)
- *       mv = select(fcmp("oeq", lv, zero), neg_inf, mv)
  *       scf_yield(fmax(mx, mv))
  *   overall = max_loop.results[0]
  *
- * A segment that saw no key stores max = -inf with sum = 0: it is skipped.
- * Only an exact zero sum counts as empty, so a NaN sum still propagates.
+ * A segment that saw no key stores max = -inf with sum = 0 (the segment kernel
+ * carries the raw max), so this pass ignores it without reading the sum.
  * ============================================================ */
 void rocke_attn_unified_emit_reduce_max_loop(rocke_attn_unified_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
     rocke_iter_arg_t iter_args[1];
     rocke_for_t max_loop;
-    rocke_value_t *seg, *mx, *idx, *mv, *lv, *empty;
+    rocke_value_t *seg, *mx, *idx, *mv;
     rocke_value_t* yields[1];
 
     iter_args[0].name = "mx";
@@ -354,9 +352,6 @@ void rocke_attn_unified_emit_reduce_max_loop(rocke_attn_unified_build_ctx_t* ctx
 
     idx = rocke__ml_offset(ctx, ctx->q_tok, ctx->q_head, seg);
     mv = rocke_b_global_load_f32(b, ctx->segm_max, idx, 0);
-    lv = rocke_b_global_load_f32(b, ctx->segm_expsum, idx, 0);
-    empty = rocke_b_fcmp(b, "oeq", lv, ctx->zero_f);
-    mv = rocke_b_select(b, empty, ctx->neg_inf, mv);
 
     yields[0] = rocke_b_fmax(b, mx, mv);
     rocke_b_scf_yield(b, yields, 1);
