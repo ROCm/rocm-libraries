@@ -12,7 +12,7 @@
  * SSA values are resolved by their exported names ("%vN" / "%A" / "%k0") via a
  * name->value table with proper region scoping (body-local values, including
  * scf.for induction/iter-arg values, are popped when the region closes). Every
- * region-bearing op (scf.for / scf.if) is built via its real control-flow
+ * region-bearing op (scf.for / scf.if / scf.if_else) is built via its real control-flow
  * builder so induction/iter values and the iter_args list attr are reconstructed
  * exactly as a native C build would; all other ops go through the generic
  * rocke_b_op path keyed by rocke_opcode_from_name.
@@ -1023,6 +1023,47 @@ static void import_scf_if(importer_t* im, const jval_t* op)
     vmap_truncate(im, mark);
 }
 
+/* scf.if_else: always two regions (then, else) that converge at one join
+ * block. Each arm is its own scope, like the scf.if then-region. */
+static void import_scf_if_else(importer_t* im, const jval_t* op)
+{
+    const jval_t* operands = jobj_get(op, "operands");
+    const jval_t* regions = jobj_get(op, "regions");
+    if(!operands || operands->kind != J_ARR || operands->arr_len < 1)
+    {
+        imp_fail(im, "scf.if_else needs a condition operand");
+        return;
+    }
+    rocke_value_t* cond = vmap_get(im, jstr(operands->arr[0]));
+    if(!cond)
+    {
+        imp_fail(im, "scf.if_else unresolved condition");
+        return;
+    }
+    if(!regions || regions->kind != J_ARR || regions->arr_len != 2)
+    {
+        imp_fail(im, "scf.if_else needs exactly two regions (then, else)");
+        return;
+    }
+    int mark = im->len;
+    rocke_if_else_t s = rocke_b_scf_if_else(im->b, cond);
+    if(!rocke_ir_builder_ok(im->b))
+    {
+        imp_fail(im, "scf.if_else build: %s", rocke_ir_builder_error(im->b));
+        return;
+    }
+    rocke_b_region_enter(im->b, s.then_region);
+    import_region_ops(im, regions->arr[0]);
+    rocke_b_region_leave(im->b);
+    vmap_truncate(im, mark);
+    if(im->failed)
+        return;
+    rocke_b_region_enter(im->b, s.else_region);
+    import_region_ops(im, regions->arr[1]);
+    rocke_b_region_leave(im->b);
+    vmap_truncate(im, mark);
+}
+
 /* Resolve an opcode name, applying portable-IR aliases. The Python builder names
  * some vectorized fp16 buffer ops without the dtype suffix the engine's opcode
  * registry uses ("tile.buffer_load_vN" vs "tile.buffer_load_vN_f16"); the op is
@@ -1207,6 +1248,8 @@ static void import_op(importer_t* im, const jval_t* op)
         import_scf_for(im, op);
     else if(strcmp(opcode_name, "scf.if") == 0)
         import_scf_if(im, op);
+    else if(strcmp(opcode_name, "scf.if_else") == 0)
+        import_scf_if_else(im, op);
     else
         import_generic_op(im, op, opcode_name);
 }
