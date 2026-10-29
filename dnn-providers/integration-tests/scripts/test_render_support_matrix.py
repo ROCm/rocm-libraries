@@ -437,6 +437,21 @@ class TestCollection:
         assert [u.case_id for u in units] == ["a", "b", "c"]
         assert all(u.claims == {} for u in units)
 
+    def test_probe_cases_are_not_units(self, bundle_root: Path) -> None:
+        """Support matrices exclude probes (RFC 0022 §9); claims and regressions stay."""
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            [
+                {"id": "a", "metadata": {"purpose": "claim"}},
+                {"id": "b", "metadata": {"purpose": "probe"}},
+                {"id": "c", "metadata": {"purpose": "regression"}},
+                {"id": "d"},
+            ],
+        )
+        units = collect_units(bundle_root)
+        assert [u.case_id for u in units] == ["a", "c", "d"]
+
     def test_wholly_unclaimed_family_still_gets_a_row(self, bundle_root: Path) -> None:
         """The regression that motivated the rule: silence has to be visible."""
         _single_bundle(
@@ -1923,7 +1938,14 @@ def _recount_overview(root: Path) -> dict:
         cases = json.loads((sweep_dir / "sweep.json").read_text(encoding="utf-8")).get(
             "cases", []
         )
-        ids = {c["id"] for c in cases if isinstance(c, dict) and "id" in c}
+        # Probes are in no matrix (RFC 0022 §9): neither numerator nor denominator.
+        ids = {
+            c["id"]
+            for c in cases
+            if isinstance(c, dict)
+            and "id" in c
+            and (c.get("metadata") or {}).get("purpose") != "probe"
+        }
         for case_id in ids:
             ops[(where, case_id)] = where[0]
             claimed.setdefault((where, case_id), set())
