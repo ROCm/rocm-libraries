@@ -65,11 +65,12 @@ option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
 
 # A second kernel set for the ingestor, independent of rocKE: prebuilt FlyDSL
 # AOT objects, fetched with `dvc pull` (flydsl/README.md), packed and staged by
-# flydsl/. On by default, like the ASM SDPA and ML-ops engines, and switched off
-# the same way. Only the ingestor loads its
-# shard, so with HIPDNN_ENABLE_KERNEL_INGESTOR OFF it builds nothing.
+# flydsl/. OFF by default, like rocKE: TheRock's feature flags can only turn an
+# option ON, so TheRock enables it through its HIPKERNELPROVIDER_ENABLE_FLYDSL
+# flag and can switch it off there. Only the ingestor loads its shard, so with
+# HIPDNN_ENABLE_KERNEL_INGESTOR OFF it builds nothing.
 option(HIPKERNELPROVIDER_ENABLE_FLYDSL
-       "Pack the prebuilt FlyDSL kernels for the kernel ingestor" ON)
+       "Pack the prebuilt FlyDSL kernels for the kernel ingestor" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 

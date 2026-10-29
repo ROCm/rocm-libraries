@@ -15,7 +15,7 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds two producers' bundles:
   target is a concrete arch or an LLVM generic target such as `gfx11-generic`, whose UKDs
   list every member arch, so the same objects pack into each member's shard. A bundle
   packs for a build whose GPU targets include one of its arches and that has FlyDSL
-  enabled (`HIPKERNELPROVIDER_ENABLE_FLYDSL`, ON by default). The objects and descriptors are
+  enabled (`HIPKERNELPROVIDER_ENABLE_FLYDSL`, OFF by default; TheRock turns it on). The objects and descriptors are
   generated, not hand-written: see `flydsl/REGEN.md` in the provider tree.
 
 For any other build the root has nothing to pack and production packaging is dormant,

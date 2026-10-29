@@ -208,26 +208,29 @@ member's shard ships exactly the checked-in objects.
 
 Two flags, and the difference between them matters:
 
-- **`HIPKERNELPROVIDER_ENABLE_FLYDSL`** — the option. States *intent*. **ON by
-  default**, like the ASM SDPA and ML-ops engines, and switched off the same way
-  (`-DHIPKERNELPROVIDER_ENABLE_FLYDSL=OFF`). It takes effect only with
+- **`HIPKERNELPROVIDER_ENABLE_FLYDSL`** — the option. States *intent*. **OFF by
+  default**, like rocKE; switch it on with `-DHIPKERNELPROVIDER_ENABLE_FLYDSL=ON`.
+  TheRock enables it through its `HIPKERNELPROVIDER_ENABLE_FLYDSL` feature flag
+  (TheRock's flags can only turn an option ON, so the flag is also how TheRock
+  switches FlyDSL off). It takes effect only with
   `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`, since only the ingestor loads FlyDSL's
   shard; with the ingestor OFF, configure reports FlyDSL as not built and
   carries on.
-- **`HIPKERNELPROVIDER_FLYDSL_ACTIVE`** — an internal cache variable. States
-  *outcome*, raised by `flydsl/CMakeLists.txt` only when the product pack
-  ships FlyDSL objects for a requested architecture. Everything conditional
-  keys on **this one**.
+- **`HIPKERNELPROVIDER_FLYDSL_ACTIVE`** — an internal cache variable, raised by
+  `flydsl/CMakeLists.txt` whenever FlyDSL content exists (the `<op>/<target>.dvc`
+  pointers or pulled objects), independent of `GPU_TARGETS`. The engine and test
+  TUs key on it. TheRock's multi-arch build ships one shard's host half to every
+  arch, so host code must not depend on the requested architectures: the tests
+  carry each op's content arch list and decide at run time whether the device's
+  shard is staged.
 
-The gap between them is real: with `GPU_TARGETS=gfx908` the option is ON and yet
-nothing ships, because no gfx908 kernels are checked in. That configuration
-reports **dormant** and continues — it is not an error to build for an
-architecture this directory does not serve. Keying the engine TUs, the test TUs
-and the census on the outcome rather than the intent is what makes that
-configuration compile.
+Packing, `check_shards.py` and the census follow the requested architectures. With
+`GPU_TARGETS=gfx908` the engines compile but no shard ships FlyDSL objects, because
+no gfx908 kernels are checked in; that is not an error.
 
 ```bash
-cmake -B build -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPDNN_ENABLE_SDPA=ON
+cmake -B build -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPKERNELPROVIDER_ENABLE_FLYDSL=ON \
+      -DHIPDNN_ENABLE_SDPA=ON
 cmake --build build -j
 ctest --test-dir build -R hip-kernel-provider
 ```
