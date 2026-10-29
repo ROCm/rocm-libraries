@@ -4,7 +4,7 @@ The nightly job runs 1,000 sampled hipBLASLt GEMMs through rocJITsu with race
 detection enabled. A 100-input subset runs on relevant PRs. Both execute gfx950
 GPU instructions on CPUs and check the numerical output with `hipblaslt-bench`.
 
-See [rocJITsu's race detector documentation](https://github.com/ROCm/rocm-systems/blob/29656a8dcc052615e1ca49cafde98d684b6b81f2/emulation/rocjitsu/docs/race-detector.md)
+See [rocJITsu's race detector documentation](https://github.com/ROCm/rocm-systems/blob/6f5d9658a4b13656e0c1a3719d86a320c9206dbe/emulation/rocjitsu/docs/race-detector.md)
 for how detection works and its coverage limits.
 
 ## Design
