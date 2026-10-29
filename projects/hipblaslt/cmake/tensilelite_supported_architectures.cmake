@@ -138,15 +138,25 @@ endfunction()
 
 # Whether the compiler driver accepts a target ID. Asked with -###, a driver dry
 # run: the target ID is validated but nothing is compiled, so a probe costs ~10ms.
-# Answers are cached, so each distinct ID is asked once per build tree.
+# Answers are remembered for the rest of the configure, so each distinct ID is
+# asked once per configure rather than once per call.
 #
 # A compiler that is not an AMDGPU-aware clang rejects every ID, including bare
 # ones. Callers must treat a lone "no" as "cannot judge" rather than as a verdict
 # about the qualifier; see tensilelite_normalize_xnack_archs.
 function(tensilelite_target_id_supported output_var arch)
+    # Remembered in a global property, not a cache entry: the answer is a
+    # property of the compiler that happens to be installed, and a cache entry
+    # would outlive it. An in-place toolchain upgrade keeps the same
+    # CMAKE_CXX_COMPILER path, so nothing would invalidate a cached answer, and
+    # the configure would go on stripping a suffix the new compiler accepts --
+    # while TensileLite, which probes afresh in every process, would not. A
+    # global property is dropped at the end of each configure, so the two cannot
+    # drift apart; the cost is one ~10ms probe per distinct target ID.
     string(MAKE_C_IDENTIFIER "_TENSILELITE_TARGET_ID_OK_${arch}" _cache_key)
-    if(DEFINED ${_cache_key})
-        set(${output_var} "${${_cache_key}}" PARENT_SCOPE)
+    get_property(_cached GLOBAL PROPERTY ${_cache_key})
+    if(NOT "${_cached}" STREQUAL "")
+        set(${output_var} "${_cached}" PARENT_SCOPE)
         return()
     endif()
 
@@ -171,7 +181,7 @@ function(tensilelite_target_id_supported output_var arch)
     else()
         set(_ok OFF)
     endif()
-    set(${_cache_key} "${_ok}" CACHE INTERNAL "clang accepts -mcpu=${arch}")
+    set_property(GLOBAL PROPERTY ${_cache_key} "${_ok}")
     set(${output_var} "${_ok}" PARENT_SCOPE)
 endfunction()
 
