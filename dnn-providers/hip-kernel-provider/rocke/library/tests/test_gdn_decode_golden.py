@@ -49,14 +49,17 @@ def _cases():
     """case id -> zero-arg builder returning a KernelDef.
 
     Covers the default spec, the reference path, and every legal registered
-    tile, so a change to any selectable configuration is visible.
+    tile's base configuration (every knob at its default: the kernel ``auto``
+    runs on that tile) for both gate kinds, so a change to any tile is
+    visible. Knobs are hashed by the ``knob_*`` cases: one per knob on each
+    path it changes, plus the knob combinations that share LDS
+    (``knob_conv_once_norm_gate_once``, ``knob_out_lds_norm_gate_once_kda``,
+    ``knob_out_lds_2rounds_cv_rn_ngo``). Hashing every (tile x knob)
+    configuration is a scope choice not made here: the other combinations are
+    covered on device, by the knob suite (every knob on every configured tile
+    and together) and the pinned-dispatch suite, not by IR hashes.
     """
-    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
-    from dispatch.gdn.gfx950 import (
-        _TUNED_TILES_KDA,
-        FUSED_DEFAULT_TILE,
-        KDA_FUSED_SPEC_ID,
-    )
+    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_bases
     from kernels.gfx950.gdn_decode import GdnDecodeSpec, build_gdn_decode
 
     def build(**overrides):
@@ -191,22 +194,15 @@ def _cases():
         if fn.spec.kernel_name() not in named:
             named.add(fn.spec.kernel_name())
             cases[cid] = fn
-    request = GdnDecodeRequest(batch=16, arch=_ARCH)
-    for result in dispatch_gdn_decode_all(request):
-        cases[f"registered_{result.candidate.spec_id}"] = (
-            lambda spec=result.spec: build_gdn_decode(spec, arch=_ARCH)
-        )
-    # Every KDA candidate: the work table's bands plus the fused default, which
-    # an unfused KDA request can also pin.
-    kda_candidates = [(tile, spec_id) for _, tile, spec_id in _TUNED_TILES_KDA]
-    kda_candidates.append((FUSED_DEFAULT_TILE, KDA_FUSED_SPEC_ID))
-    for tile, spec_id in kda_candidates:
-        cases[f"tuned_{spec_id}"] = build(
-            gate_kind="kda",
-            num_warps=tile[0],
-            warp_threads_k=tile[1],
-            blocks_per_v_dim=tile[2],
-        )
+    # GDN tiles keep their pre-registry case ids (``registered_<spec_id>``);
+    # KDA tiles are registered in the same tile space, so each gets its own
+    # (``registered_kda_<tile>``).
+    for gate_kind in ("gdn", "kda"):
+        request = GdnDecodeRequest(batch=16, arch=_ARCH, gate_kind=gate_kind)
+        for result in dispatch_gdn_decode_bases(request):
+            cases[f"registered_{result.candidate.spec_id}"] = (
+                lambda spec=result.spec.kernel_spec: build_gdn_decode(spec, arch=_ARCH)
+            )
     return cases
 
 
@@ -539,9 +535,9 @@ def test_gdn_cases_carry_no_kda_marker():
     quietly measuring the wrong kernel.
 
     KDA appears in an id two ways -- as a prefix for the hand-written cases
-    (``kda_default``) and as an infix for the tuned ones (``tuned_kda_w128``,
-    which inherits its gate kind from the spec id in the KDA table) -- so the
-    split is on containment, not prefix.
+    (``kda_default``) and as an infix for the registered ones
+    (``registered_kda_nw4_wtk16_bpv4``, whose spec id carries the gate kind)
+    -- so the split is on containment, not prefix.
     """
     from kernels.gfx950.gdn_decode import GdnDecodeSpec
 

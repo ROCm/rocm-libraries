@@ -87,11 +87,12 @@ jobs:
           repository: ROCm/rocm-systems
           # Keep the validated tool revision stable instead of following
           # rocm-systems develop, where rocjitsu interfaces can change independently.
-          # Pinned 2026-09-10.
-          ref: 50d855a7dcf382f57267443250c3776067b29223
+          # Pinned 2026-10-21.
+          ref: 6f5d9658a4b13656e0c1a3719d86a320c9206dbe
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
+            runtimes/api-headers
             shared/machine-readable-isa/isa
           sparse-checkout-cone-mode: true
 

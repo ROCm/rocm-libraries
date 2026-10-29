@@ -28,12 +28,14 @@
 #pragma once
 
 #include "rocblaslt.h"
+#include "rocblaslt_adaptive_sm_controller.hpp"
 #include <hipblaslt/hipblaslt-opt-in-features.h>
 //#include "rocblaslt_ostream.hpp"
 #include <atomic>
 #include <fstream>
 #include <hip/hip_runtime_api.h>
 #include <iostream>
+#include <memory>
 #include <vector>
 
 struct _rocblaslt_attribute
@@ -212,6 +214,19 @@ struct _rocblaslt_handle
         if(problemIndex >= c_syncSkSlotsPerStream)
             return rocblaslt_status_internal_error;
 
+        const int i = streamSlot(stream);
+        if(i < 0)
+            return rocblaslt_status_internal_error;
+
+        *out = static_cast<char*>(StreamKFlags)
+               + (i * c_syncSkSlotsPerStream + problemIndex) * c_syncSkSlotBytes;
+        return rocblaslt_status_success;
+    }
+
+    // Index of the per-stream block owned by `stream`, claiming a free one on
+    // first use; -1 once all c_syncSkStreamSlots are taken.
+    int streamSlot(hipStream_t stream)
+    {
         // hipStreamPerThread is a sentinel that resolves to a different stream
         // for every host thread, so every thread would present the same key and
         // share one block. Key those by thread instead. The legacy null stream
@@ -244,18 +259,18 @@ struct _rocblaslt_handle
                             : expected;
             }
             if(owner == key)
-            {
-                *out = static_cast<char*>(StreamKFlags)
-                       + (i * c_syncSkSlotsPerStream + problemIndex) * c_syncSkSlotBytes;
-                return rocblaslt_status_success;
-            }
+                return static_cast<int>(i);
         }
 
-        return rocblaslt_status_internal_error;
+        return -1;
     }
 
     // Value-initialised so every block starts unowned.
     std::atomic<const void*> m_skSlotOwner[c_syncSkStreamSlots] = {};
+
+    // Adaptive sm_count_target state, per stream slot; null when the mode is
+    // off or its setup failed.
+    std::unique_ptr<rocblaslt::adaptive_sm::Controller> adaptive_sm;
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // Device communicator, registered once by hipblasLtSetDeviceComm. Every rank
@@ -306,7 +321,28 @@ struct _rocblaslt_matrix_layout
     int64_t          batch_offset = 0;
     hipblasLtOrder_t order        = HIPBLASLT_ORDER_COL;
     // Batch Mode
-    hipblasLtBatchMode_t batch_mode = HIPBLASLT_BATCH_MODE_STRIDED;    
+    hipblasLtBatchMode_t batch_mode = HIPBLASLT_BATCH_MODE_STRIDED;
+
+    // HIPBLASLT_BATCH_MODE_GROUPED only. The arrays are device pointers with group_count
+    // elements; a null array means m, n, or ld applies to every group.
+    int32_t     group_count         = 0;
+    const void* rows_array          = nullptr;
+    const void* cols_array          = nullptr;
+    const void* ld_array            = nullptr;
+    int32_t     rows_cols_int_width = HIPBLASLT_INTEGER_WIDTH_32;
+    int32_t     ld_int_width        = HIPBLASLT_INTEGER_WIDTH_32;
+};
+
+// Grouped GEMM size hints from the HIPBLASLT_MATMUL_PREF_GROUPED_* attributes. 0 means not set.
+struct rocblaslt_grouped_hints
+{
+    int64_t avg_rows       = 0;
+    int64_t avg_cols       = 0;
+    int64_t avg_k          = 0;
+    int64_t max_rows       = 0;
+    int64_t max_cols       = 0;
+    int64_t max_total_rows = 0;
+    int64_t max_total_cols = 0;
 };
 
 /********************************************************************************
@@ -381,6 +417,16 @@ struct _rocblaslt_matmul_desc
     // Default value is 0 which means same bias vector will be used across all batches (broadcast).
     int32_t bias_stride = 0;
 
+    // Grouped GEMM only: 0 = one alpha/beta for all groups, 1 = per-group pointer array.
+    int64_t alpha_batch_stride = 0;
+    int64_t beta_batch_stride  = 0;
+
+    // Grouped GEMM: hipblasLtMatmul gets no preference, so the heuristic records the
+    // hints here. grouped_launch caches launch state built from them.
+    rocblaslt_grouped_hints grouped_hints;
+    bool                    grouped_hints_set = false;
+    std::shared_ptr<void>   grouped_launch;
+
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // Fused epilogue attached via ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE. Non-owning:
     // the descriptor is the caller's and must outlive every matmul using this desc.
@@ -421,6 +467,11 @@ struct _rocblaslt_matmul_desc
         this->uniform_summation_order = src.uniform_summation_order;
         this->int4_encoding_a_ext     = src.int4_encoding_a_ext;
         this->bias_stride             = src.bias_stride;
+        this->alpha_batch_stride      = src.alpha_batch_stride;
+        this->beta_batch_stride       = src.beta_batch_stride;
+        this->grouped_hints           = src.grouped_hints;
+        this->grouped_hints_set       = src.grouped_hints_set;
+        this->grouped_launch.reset();
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         this->fused_epilogue          = src.fused_epilogue;
 #endif
@@ -448,6 +499,8 @@ struct _rocblaslt_matmul_preference
     // Negative values are rejected by the setter.
     int32_t sm_count_target = 0;
 
+    rocblaslt_grouped_hints grouped;
+
     int64_t alg_config_id     = 0;
     int64_t alg_max_id        = 0;
     int64_t search_iterations = 0;
@@ -468,6 +521,20 @@ inline int32_t effective_sm_count_target(const _rocblaslt_handle*            han
     if(handle)
         return handle->sm_count_target;
     return 0;
+}
+
+// True when the hint for a matmul comes from the adaptive estimator: adaptive
+// mode on, StreamK tile scheduling AUTO or ON, and no desc or handle hint.
+inline bool adaptive_sm_count_applies(const _rocblaslt_handle*      handle,
+                                      const _rocblaslt_matmul_desc* desc)
+{
+    return handle && desc
+           && rocblaslt::adaptive_sm::applies(
+               handle->adaptive_sm != nullptr,
+               desc->streamk_tile_scheduling_ext == HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO
+                   || desc->streamk_tile_scheduling_ext == HIPBLASLT_STREAMK_TILE_SCHEDULING_ON,
+               desc->sm_count_target,
+               handle->sm_count_target);
 }
 
 // Resolve the effective uniform-summation-order request for a matmul launch
