@@ -140,13 +140,35 @@ def _strip_lse(kernel):
 
 def _canonical_names(kernel):
     """Rename every non-param value by first use, in place. Value names come
-    from a builder-wide counter, so LSE ops shift every later name."""
+    from a builder-wide counter, so LSE ops shift every later name.
+
+    An op's result object is also the later ops' operand object, so map the
+    original names first and rename each object once; renaming while walking
+    would rekey a value on every reuse and can merge two values."""
     params = {f"%{p.name}" for p in kernel.params}
-    names = {}
+    names, values = {}, {}
     for op in _walk(kernel.body):
         for value in (*op.operands, *op.results):
-            if value.name not in params:
-                value.name = names.setdefault(value.name, f"%v{len(names)}")
+            if value.name in params or id(value) in values:
+                continue
+            values[id(value)] = value
+            names.setdefault(value.name, f"%v{len(names)}")
+    for value in values.values():
+        value.name = names[value.name]
+
+
+def test_canonical_names_keep_reused_values_distinct():
+    from rocke.core.ir import I32, IRBuilder
+
+    b = IRBuilder("k")
+    x = b.param("x", I32)
+    first = b.add(x, x)
+    second = b.add(first, x)
+    third = b.mul(first, second)
+    # Original names already in the canonical %vN space, in the reverse order.
+    first.name, second.name = "%v1", "%v0"
+    _canonical_names(b.kernel)
+    assert (first.name, second.name, third.name) == ("%v0", "%v1", "%v2")
 
 
 def _lse_store_count(ir):
