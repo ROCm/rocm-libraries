@@ -160,9 +160,8 @@ inline bool UseMultiple(const miopen::batchnorm::ProblemDescription& problem)
 }
 
 // Provide the stash method to use for spatial multiple implementation
-// Vectorsize is needed as a parameter for NHWC loads, see `batchnorm_functions.hpp`
-// for its implementation. Note that at the time of writing, earlier functions
-// ensure that c % vectorsize = 0
+// For NHWC, vectorsize divides c (checked in IsSpatialMultipleApplicable). The stash layout
+// depends on the parity of c / vectorsize, matching `getStashIndex` in `batchnorm_functions.hpp`.
 inline int GetStashMethod(bool IsLayoutNHWC,
                           miopenDataType_t problem_type,
                           unsigned int stash_values,

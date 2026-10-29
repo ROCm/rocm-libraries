@@ -21,6 +21,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Fixed a `ConvHipConv` crash on gfx1250 for grouped convolutions with more than
   65535 group-batch tiles, and an LDS race in its gfx1250 direct kernel
   (hipconv v0.3.2).
+* [BatchNorm] Fixed incorrect results from NHWC FP16/BF16 spatial batch normalization (forward training and backward) when `C / vectorsize` is odd and the batch is too small to hold the intermediate statistics: the solver applicability check and stash-method selection now use the same `C / vectorsize` parity as the kernel, and configurations without enough space are rejected so a valid fallback is selected.
+* [BatchNorm] Fixed BF16 batch normalization output being truncated instead of rounded on the device while the host reference rounded to nearest-even. All batchnorm solvers now receive `MIOPEN_USE_RNE_BFLOAT16`, so device conversion follows the build setting (round-to-nearest-even when ON, the default; truncation when OFF) and matches host conversion. In default builds this changes BF16 batchnorm results by up to one BF16 ulp.
+* [BatchNorm] Fixed the CPU reference for spatial backward training in the test/driver verification path omitting `epsilon` when recomputing the inverse variance, and reduced the `bn_driver` verification epsilon from `1e-3` to `1e-5`.
 
 ## MIOpen 3.6.1 for ROCm 10.1.0
 
