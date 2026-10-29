@@ -86,6 +86,13 @@ and [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 | `block_scale_gemm` | ✅ | ✅ | ❌ | MFMA quantized GEMM |
 | `mx_gemm` | ✅ | ✅ | ❌ | MFMA microscaling GEMM |
 
+`universal_gemm`, `batched_gemm` and `grouped_gemm` also accept fp64 on gfx942
+(A/B/C fp64, fp64 accumulation, warp tile 16x16x4): pipelines `mem`, `compv3`
+and `compv4`, `default` and `cshuffle` epilogues, and `pad_m`/`pad_n`/`pad_k`.
+`split_k > 1`, fused epilogues and `direct_to_lds` with `pad_k` are rejected for
+fp64. With `direct_to_lds`, global byte offsets are 32-bit, so A and B must each
+be smaller than 2 GiB.
+
 ---
 
 ## Convolution
