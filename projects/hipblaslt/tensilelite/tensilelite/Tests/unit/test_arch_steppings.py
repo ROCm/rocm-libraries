@@ -4262,3 +4262,83 @@ def test_benchmark_cache_key_mutation_without_the_requested_names():
     # the qualified one no longer lands on the same entry.
     assert _cacheKey([GFX1250]) == preFix
     assert _cacheKey([GFX1250 + ":xnack-"]) != preFix
+
+
+# ---------------------------------------------------------------------------
+# A hand-written qualifier is the one spec nothing else has already validated,
+# and the base name stays valid however the suffix is misspelled -- so a typo
+# reaches the capability lookup, misses, and leaves the build in the mode the
+# config asked it to leave.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [GFX1250, GFX1250 + ":xnack-", GFX1250 + ":xnack+", GFX1250 + ":xnack-[cu=64]",
+     GFX1250 + ":xnack-:sramecc+", GFX1250_STRICT + ":xnack-"],
+)
+def test_target_id_qualifiers_accepts_every_well_formed_spec(spec):
+    from tensilelite.Common.Architectures import verifyTargetIdQualifiers
+
+    verifyTargetIdQualifiers(spec)  # must not raise
+
+
+@pytest.mark.parametrize(
+    "spec, match",
+    [
+        (GFX1250 + ":xnack--", "Unknown target ID qualifier"),
+        (GFX1250 + ":xnack", "Unknown target ID qualifier"),
+        (GFX1250 + ":xnck-", "Unknown target ID qualifier"),
+        (GFX1250 + ":XNACK-", "Unknown target ID qualifier"),
+        (GFX1250 + ":xnack-:xnack+", "Repeated xnack qualifier"),
+        (GFX1250 + ":xnack-:xnack-", "Repeated xnack qualifier"),
+        (GFX1250 + ":sramecc+:sramecc-", "Repeated sramecc qualifier"),
+    ],
+)
+def test_target_id_qualifiers_rejects_a_misspelling_or_a_repeat(spec, match):
+    from tensilelite.Common.Architectures import verifyTargetIdQualifiers
+
+    with pytest.raises(ValueError, match=match):
+        verifyTargetIdQualifiers(spec)
+
+
+def test_config_architecture_rejects_a_misspelled_qualifier():
+    """The config is where this matters: nothing downstream can catch it."""
+    from tensilelite.Common.Architectures import ARCH_CAP_OVERRIDES
+    from tensilelite.Tensile import archNamesFromConfig
+
+    isaList = [ISA_GFX1250]
+    assert archNamesFromConfig(GFX1250 + ":xnack-", isaList, []) == [GFX1250 + ":xnack-"]
+
+    with pytest.raises(ValueError, match="Unknown target ID qualifier"):
+        archNamesFromConfig(GFX1250 + ":xnack--", isaList, [])
+
+    # Why it has to be caught here: the typo names no override, so the build
+    # would have run with replay left on -- the opposite of what was asked.
+    assert GFX1250 + ":xnack-" in ARCH_CAP_OVERRIDES
+    assert GFX1250 + ":xnack--" not in ARCH_CAP_OVERRIDES
+
+
+def test_xnack_is_stripped_by_exact_match_not_by_prefix(monkeypatch):
+    """A misspelled qualifier must survive to be refused, not be stripped.
+
+    compilerTargetOf drops the xnack token only to reach a target the compiler
+    will take. A prefix match also eats ``xnack-typo``, so the spec comes back
+    as bare gfx1250 -- which the compiler accepts, leaving the build on the
+    default replay mode with nothing to report. Checked against a toolchain that
+    refuses every xnack-qualified id, which is the one that makes the fallback
+    run at all.
+    """
+    import tensilelite.Common.Architectures as Arch
+
+    monkeypatch.setattr(Arch, "_targetIdAccepted", lambda compiler, target: ":xnack" not in target)
+
+    assert Arch._withoutXnack(GFX1250 + ":xnack-") == GFX1250
+    assert Arch._withoutXnack(GFX1250 + ":xnack+") == GFX1250
+    assert Arch._withoutXnack(GFX1250 + ":xnack-:sramecc+") == GFX1250 + ":sramecc+"
+    for typo in (":xnack-typo", ":xnackfoo", ":xnack"):
+        assert Arch._withoutXnack(GFX1250 + typo) == GFX1250 + typo
+        # ... and so the spec reaches the compiler untouched rather than
+        # degrading to a name that happens to be valid.
+        assert Arch.compilerTargetOf(GFX1250 + typo, "cc") == GFX1250 + typo
+    assert Arch.compilerTargetOf(GFX1250 + ":xnack-", "cc") == GFX1250

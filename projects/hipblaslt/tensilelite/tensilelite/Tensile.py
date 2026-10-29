@@ -44,7 +44,7 @@ from .Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            DebugConfig, IsaVersion, coVersionMap
 from .Common.Architectures import ARCH_BUILD_ALIASES, architectureMap, archNameForIsa, \
                                          baseArchName, detectGlobalCurrentArch, \
-                                         gfxToIsa, steppingArchOf
+                                         gfxToIsa, steppingArchOf, verifyTargetIdQualifiers
 from .Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from .Common.GlobalParameters import globalParameters, assignGlobalParameters, \
                                             restoreDefaultGlobalParameters, validateRuntimeLanguage
@@ -538,6 +538,13 @@ def archNamesFromConfig(configArchitecture, isaList, archNames):
         if isa is None or baseArchName(arch) not in architectureMap \
                 or baseArchName(arch) in ARCH_BUILD_ALIASES:
             raise ValueError(f"Unrecognized Architecture in config: '{arch}'")
+        # Checked here because this is the one place a qualifier is authored by
+        # hand; everywhere else it arrives from a list the build already
+        # validated. The base-name check above lets a typo straight through --
+        # 'gfx1250:xnack--' is gfx1250 with something unrecognizable attached,
+        # which ARCH_CAP_OVERRIDES then fails to match, leaving replay enabled
+        # in a run that asked for it off and saying nothing.
+        verifyTargetIdQualifiers(arch)
         if nameCameFromDetection:
             # A qualifier is not a stepping: gfx1250 and gfx1250:xnack- are one
             # chip under two driver configurations, and the enumerator reads the

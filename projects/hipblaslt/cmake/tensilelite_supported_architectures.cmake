@@ -93,10 +93,25 @@ function(tensilelite_validate_gpu_targets targets)
     string(REGEX REPLACE ";" " " target_flat "${target_list}")
     string(REGEX REPLACE " +" ";" target_list "${target_flat}")
 
+    tensilelite_sanitizer_requires_xnack(_requires_xnack)
     foreach(target IN LISTS target_list)
         list(FIND supported_list "${target}" idx)
         if(idx EQUAL -1)
             message(FATAL_ERROR "Unsupported GPU target: ${target}\nSupported targets are: ${supported_list}")
+        endif()
+        # Device ASAN instruments memory accesses that only resolve under XNACK
+        # replay, so an xnack- target asks for the two things at once: the
+        # sanitizer, and the hardware behaviour it depends on turned off. The
+        # list above cannot express this -- it is one list, the same under every
+        # sanitizer setting -- so the pairing is refused here instead. Host-only
+        # ASAN does not instrument device code and is unaffected; this is gated
+        # on the same predicate that decides whether to promote a bare target to
+        # xnack+, so the two cannot disagree about what "full ASAN" means.
+        if(_requires_xnack AND "${target}" MATCHES ":xnack-")
+            message(FATAL_ERROR
+                "GPU target ${target} disables XNACK replay, which device "
+                "AddressSanitizer requires. Drop the ':xnack-' qualifier, or "
+                "build without HIPBLASLT_ENABLE_ASAN/THEROCK_SANITIZER=ASAN.")
         endif()
     endforeach()
 endfunction()
@@ -185,13 +200,21 @@ function(tensilelite_target_id_supported output_var arch)
     set(${output_var} "${_ok}" PARENT_SCOPE)
 endfunction()
 
-# An arch with every xnack qualifier removed, other qualifiers kept in order.
+# An arch with the xnack qualifier removed, other qualifiers kept in order.
+#
+# Matched exactly, not by prefix, and for the same reason as _withoutXnack in
+# tensilelite/Common/Architectures.py: the xnack token is dropped only to reach
+# a target the compiler will take, and anything else is left for the compiler to
+# refuse. A prefix match would also eat "xnack-typo", so a misspelling would come
+# back as a bare arch the compiler accepts, and the build would go on with the
+# replay mode nobody asked for. The two must agree, or hip::device and the
+# Tensile code objects part ways.
 function(tensilelite_strip_xnack output_var arch)
     string(REPLACE ":" ";" _parts "${arch}")
     list(POP_FRONT _parts _base)
     set(_kept "")
     foreach(_qualifier IN LISTS _parts)
-        if(NOT _qualifier MATCHES "^xnack")
+        if(NOT _qualifier STREQUAL "xnack+" AND NOT _qualifier STREQUAL "xnack-")
             list(APPEND _kept "${_qualifier}")
         endif()
     endforeach()
