@@ -22,8 +22,15 @@
  * subclass. The C port passes them in explicitly:
  *   - __post_init__ consults _supports_noncausal_window,
  *     _supports_noncausal_cross_length_ragged, supported_persist_decodes and
- *     supported_nonpersist_decodes; the auto decode policies consult
- *     _aligned_causal: rocke_attention_dense_traits_t.
+ *     supported_nonpersist_decodes: rocke_attention_dense_traits_t, which holds
+ *     only per-class answers.
+ *   - The auto decode policies and the GQA-pair decode checks consult
+ *     _aligned_causal, which gfx950 overrides with a per-spec value (right_bound
+ *     == 0). That answer is the `lookahead` argument of validate, both
+ *     resolved_*_decode functions and name_parts_base: true when the concrete
+ *     spec sees keys ahead of its diagonal (gfx950: right_bound != 0), false for
+ *     the base class and gfx942. It is an argument, not a traits field, so a
+ *     caller cannot set it once for a type and get it wrong per spec.
  *   - kernel_name() consults the _*_name_parts methods:
  *     rocke_attention_dense_name_parts_t, which the concrete spec fills.
  *   - check_dense_spec_preflight re-runs the CONCRETE type's validators:
@@ -31,8 +38,17 @@
  * rocke_attention_dense_traits_base() / rocke_attention_dense_name_parts_base()
  * are the base-class answers.
  *
- * REASON STRINGS. Every reject reason is the Python ValueError text byte for
- * byte, so a C caller can log the same message the Python predicate returns.
+ * DECODES. The persistent and non-persistent decode registries
+ * (kernels/common/attention_dense_decode.py) are one {name, tag, check} table
+ * per grid in the .cpp. A decode a traits list names but that table does not
+ * implement is rejected, and never gets the default order's empty name tag.
+ *
+ * REASON STRINGS. Every ValueError reason is the Python text byte for byte, so a
+ * C caller can log the same message the Python predicate returns. The two
+ * paged geometries where Python raises ZeroDivisionError instead (block_m < 32,
+ * or more waves than block_n rows) return the fixed text "division by zero";
+ * CPython's own text varies by version, so those are compared by verdict only.
+ * A reason longer than the caller's buffer ends in "...".
  *
  * Not ported: attention_dense_cache_key (a Python launcher-cache key over
  * dataclass fields and the spec's class object; it has no C caller).
@@ -130,9 +146,6 @@ typedef struct rocke_attention_dense_traits
     /* supported_nonpersist_decodes(), sorted ascending. */
     const char* const* nonpersist_decodes;
     size_t num_nonpersist_decodes;
-    /* gfx950's right_bound != 0. Its _aligned_causal override then turns the
-     * aligned auto decode policies off, and the GQA-pair decodes reject. */
-    bool has_right_bound;
 } rocke_attention_dense_traits_t;
 
 /* Base support: all registered persistent and non-persistent decodes, with no
@@ -141,11 +154,11 @@ typedef struct rocke_attention_dense_traits
 rocke_attention_dense_traits_t rocke_attention_dense_traits_base(void);
 
 /* AttentionDenseSpec.__post_init__. Returns true when the spec is valid. On
- * false, writes the Python exception text (ValueError, or the one
- * ZeroDivisionError a degenerate paged tile reaches) NUL-terminated into
- * reason (capacity reason_cap), if non-NULL. */
+ * false, writes the reject reason (see REASON STRINGS) NUL-terminated into
+ * reason (capacity reason_cap), if non-NULL. lookahead: see SUBCLASS HOOKS. */
 bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* spec,
                                          const rocke_attention_dense_traits_t* traits,
+                                         bool lookahead,
                                          char* reason,
                                          size_t reason_cap);
 
@@ -154,14 +167,16 @@ int rocke_attention_dense_spec_num_waves(const rocke_attention_dense_spec_t* spe
 /* @property num_queries_per_kv: num_query_heads // num_kv_heads. */
 int rocke_attention_dense_spec_num_queries_per_kv(const rocke_attention_dense_spec_t* spec);
 /* @property resolved_persist_decode: explicit value, or the auto policy using
- * causal balance, chiplet locality, and persistent work thresholds. traits
- * supplies the concrete type's _aligned_causal (has_right_bound). */
-const char* rocke_attention_dense_spec_resolved_persist_decode(
-    const rocke_attention_dense_spec_t* spec, const rocke_attention_dense_traits_t* traits);
+ * causal balance, chiplet locality, and persistent work thresholds.
+ * lookahead: see SUBCLASS HOOKS. */
+const char*
+    rocke_attention_dense_spec_resolved_persist_decode(const rocke_attention_dense_spec_t* spec,
+                                                       bool lookahead);
 /* @property resolved_nonpersist_decode: explicit value, or the auto policy for
- * the one-CTA-per-work-item grid. traits as above. */
-const char* rocke_attention_dense_spec_resolved_nonpersist_decode(
-    const rocke_attention_dense_spec_t* spec, const rocke_attention_dense_traits_t* traits);
+ * the one-CTA-per-work-item grid. lookahead: see SUBCLASS HOOKS. */
+const char*
+    rocke_attention_dense_spec_resolved_nonpersist_decode(const rocke_attention_dense_spec_t* spec,
+                                                          bool lookahead);
 
 /* The _*_name_parts hooks of kernel_name(), filled by the concrete spec. */
 #define ROCKE_ATTENTION_DENSE_MAX_NAME_PARTS 8
@@ -186,14 +201,18 @@ typedef struct rocke_attention_dense_name_parts
 } rocke_attention_dense_name_parts_t;
 
 /* The base-class name parts: head and shape tokens, no layout or band parts,
- * the lazy-rescale algorithm token, and the decode tags resolved under traits. */
-void rocke_attention_dense_name_parts_base(const rocke_attention_dense_spec_t* spec,
-                                           const rocke_attention_dense_traits_t* traits,
-                                           rocke_attention_dense_name_parts_t* out);
+ * the lazy-rescale algorithm token, and the decode tags resolved with
+ * lookahead. Returns ROCKE_ERR_VALUE when the active grid's decode is not a
+ * registered one (it has no tag, and "" would alias the default order). */
+rocke_status_t rocke_attention_dense_name_parts_base(const rocke_attention_dense_spec_t* spec,
+                                                     bool lookahead,
+                                                     rocke_attention_dense_name_parts_t* out);
 
 /* AttentionDenseSpec.kernel_name() with the given hooks, NUL-terminated into
  * out (capacity out_cap). Returns ROCKE_OK, or ROCKE_ERR_VALUE when an argument
- * is NULL or the buffer is too small. */
+ * is NULL, a hook count is outside [0, ROCKE_ATTENTION_DENSE_MAX_NAME_PARTS], a
+ * part does not fit its slot, or the buffer is too small: the name is the
+ * kernel's identity, so it is never silently shortened. */
 rocke_status_t rocke_attention_dense_kernel_name(const rocke_attention_dense_spec_t* spec,
                                                  const rocke_attention_dense_name_parts_t* parts,
                                                  char* out,

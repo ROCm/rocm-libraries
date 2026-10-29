@@ -558,22 +558,26 @@ if(BUILD_TESTING)
 
   # Shared dense attention spec (validator, preflight, kernel name): the reject
   # reasons never reach the emitted IR, so the byte-identity gate cannot see a
-  # divergence in them. Both engines are pinned to one vectors file owned by the
-  # library test test_attention_dense_spec_vectors.py; it is embedded into this
-  # binary at configure time so the installed test needs no data path. Guarded on
-  # the sibling library tree, like the other library-backed entries.
-  set(_rocke_dense_spec_vectors
-      "${CMAKE_CURRENT_SOURCE_DIR}/../../library/tests/golden/attention_dense_spec_vectors.json")
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/test_attention_dense_spec.cpp"
-     AND EXISTS "${_rocke_dense_spec_vectors}")
+  # divergence in them. Both engines are pinned to one vectors file. It is the C
+  # ABI's contract, so platform owns it (tests/golden/); the library test
+  # test_attention_dense_spec_vectors.py regenerates it and checks the Python
+  # against it (library -> platform, the allowed direction). The file is embedded
+  # into this binary at configure time so the installed test needs no data path.
+  set(_rocke_dense_spec_vectors "${CMAKE_CURRENT_SOURCE_DIR}/golden/attention_dense_spec_vectors.json")
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/test_attention_dense_spec.cpp")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_rocke_dense_spec_vectors}")
     file(READ "${_rocke_dense_spec_vectors}" _rocke_dense_spec_hex HEX)
     string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _rocke_dense_spec_bytes
                          "${_rocke_dense_spec_hex}")
     string(REGEX REPLACE "(0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,)"
                          "\\1\n" _rocke_dense_spec_bytes "${_rocke_dense_spec_bytes}")
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_spec_vectors.inc"
+    # configure_file rewrites the .inc only when the bytes change, so a
+    # reconfigure does not force a recompile.
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_spec_vectors.inc.tmp"
          "${_rocke_dense_spec_bytes}\n")
+    configure_file("${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_spec_vectors.inc.tmp"
+                   "${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_spec_vectors.inc"
+                   COPYONLY)
     add_executable(rocke_attention_dense_spec instances/test_attention_dense_spec.cpp)
     target_include_directories(rocke_attention_dense_spec
                                PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")

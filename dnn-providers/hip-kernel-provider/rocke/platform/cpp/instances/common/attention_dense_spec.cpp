@@ -4,19 +4,24 @@
  * attention_dense_spec.cpp -- C port of library/kernels/common/
  * attention_dense_spec.py (see rocke/instance_attention_dense_spec.h).
  *
- * Every reject reason is the Python exception text byte for byte. Python ints
- * are unbounded, so extents and products are computed in 64 or 128 bits and a
- * C remainder is used only where its zero-ness matches Python's for every
- * operand sign (x % y == 0 holds in both languages for the same x, y != 0).
+ * Every ValueError reason is the Python text byte for byte. Python ints are
+ * unbounded, so the 32-bit limit products are computed exactly with
+ * ExactProduct (base-10**9 limbs, no __int128, so MSVC builds it), and a C
+ * remainder is used only where its zero-ness matches Python's for every operand
+ * sign (x % y == 0 holds in both languages for the same x, y != 0).
  */
 #include "rocke/instance_attention_dense_spec.h"
 
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include <algorithm>
 #include <initializer_list>
+#include <string>
+#include <vector>
 
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 
@@ -28,20 +33,19 @@ const rocke_dense_tile_geometry_t ROCKE_DENSE_TILE_GEOMETRIES[ROCKE_DENSE_TILE_G
 namespace
 {
 
-const char* const k_base_persist_decodes[] = {
-    "auto", "bt_hkv_minor", "gqa_pair", "gqa_pair_2phase", "hkv_major", "hq_minor_swz", "qb_major"};
-const char* const k_base_nonpersist_decodes[]
-    = {"auto", "bt_hkv_minor", "hq_minor_swz", "qb_minor"};
-
-/* Write the formatted reason (if a buffer was given) and return false. */
+/* Write the formatted reason (if a buffer was given) and return false. A reason
+ * longer than the buffer ends in "..." so a truncated text is never mistaken
+ * for a complete one. */
 bool reject(char* reason, size_t cap, const char* fmt, ...)
 {
     if(reason != NULL && cap > 0)
     {
         va_list ap;
         va_start(ap, fmt);
-        (void)vsnprintf(reason, cap, fmt, ap);
+        const int len = vsnprintf(reason, cap, fmt, ap);
         va_end(ap);
+        if(len >= 0 && (size_t)len >= cap && cap >= 4)
+            memcpy(reason + cap - 4, "...", 4);
     }
     return false;
 }
@@ -53,82 +57,51 @@ bool streq(const char* a, const char* b)
 
 /* Python repr() of an Optional[str]: None, or the quoted string with the
  * escapes repr() emits for the characters a spec value can carry. */
-void py_repr(const char* s, char* out, size_t cap)
+std::string py_repr(const char* s)
 {
     if(s == NULL)
-    {
-        snprintf(out, cap, "None");
-        return;
-    }
+        return "None";
     const char quote = (strchr(s, '\'') != NULL && strchr(s, '"') == NULL) ? '"' : '\'';
-    size_t n = 0;
-    auto put = [&](const char* piece) {
-        size_t len = strlen(piece);
-        if(n + len < cap)
-        {
-            memcpy(out + n, piece, len);
-            n += len;
-        }
-    };
-    char q[2] = {quote, 0};
-    put(q);
+    std::string out(1, quote);
     for(const unsigned char* p = (const unsigned char*)s; *p; ++p)
     {
-        char buf[8];
         if(*p == '\\')
-            put("\\\\");
+            out += "\\\\";
         else if(*p == (unsigned char)quote)
         {
-            buf[0] = '\\';
-            buf[1] = quote;
-            buf[2] = 0;
-            put(buf);
+            out += '\\';
+            out += quote;
         }
         else if(*p == '\n')
-            put("\\n");
+            out += "\\n";
         else if(*p == '\r')
-            put("\\r");
+            out += "\\r";
         else if(*p == '\t')
-            put("\\t");
+            out += "\\t";
         else if(*p < 0x20 || *p == 0x7f)
         {
+            char buf[8];
             snprintf(buf, sizeof(buf), "\\x%02x", *p);
-            put(buf);
+            out += buf;
         }
         else
-        {
-            buf[0] = (char)*p;
-            buf[1] = 0;
-            put(buf);
-        }
+            out += (char)*p;
     }
-    put(q);
-    out[n < cap ? n : cap - 1] = '\0';
+    out += quote;
+    return out;
 }
 
 /* Python str(list_of_str), e.g. "['auto', 'qb_major']". */
-void py_str_list(const char* const* items, size_t count, char* out, size_t cap)
+std::string py_str_list(const char* const* items, size_t count)
 {
-    size_t n = 0;
-    out[0] = '\0';
-    auto put = [&](const char* piece) {
-        size_t len = strlen(piece);
-        if(n + len < cap)
-        {
-            memcpy(out + n, piece, len + 1);
-            n += len;
-        }
-    };
-    put("[");
+    std::string out = "[";
     for(size_t i = 0; i < count; ++i)
     {
-        char item[ROCKE_ATTENTION_DENSE_NAME_PART_CAP * 2];
-        py_repr(items[i], item, sizeof(item));
         if(i)
-            put(", ");
-        put(item);
+            out += ", ";
+        out += py_repr(items[i]);
     }
-    put("]");
+    return out + "]";
 }
 
 /* Exact products of spec factors. Python ints are unbounded, so products and
@@ -161,6 +134,10 @@ struct ExactProduct
                 limb[n++] = (uint32_t)(carry % 1000000000u);
                 carry /= 1000000000u;
             }
+            /* Five int32 factors need at most 5 limbs. A sixth factor that
+             * overflows the array must stop the process, not compare wrongly. */
+            if(carry != 0)
+                abort();
         }
         if(zero)
         {
@@ -240,16 +217,33 @@ bool balance_causal(const rocke_attention_dense_spec_t* s)
     return s->causal && !(s->sliding_window > 0 && s->sliding_window < s->seqlen_kv);
 }
 
-bool aligned_causal(const rocke_attention_dense_spec_t* s, bool has_right_bound)
+/* AttentionDenseSpec._aligned_causal, with the concrete spec's lookahead veto
+ * (gfx950: right_bound > 0) passed in. */
+bool aligned_causal(const rocke_attention_dense_spec_t* s, bool lookahead)
 {
     const bool moving_diagonal = s->causal_bottom_right && s->seqlen_q != s->seqlen_kv;
     return balance_causal(s) && !moving_diagonal && !s->ragged && !s->varlen && !s->paged
-           && !has_right_bound;
+           && !lookahead;
 }
 
-bool check_nonpersist_decode(const rocke_attention_dense_spec_t* s, char* reason, size_t cap)
+/* A decode's extra constraint (Python Decode.check); NULL when it has none. */
+typedef bool (*decode_check_fn)(const rocke_attention_dense_spec_t* s,
+                                bool lookahead,
+                                char* reason,
+                                size_t cap);
+
+/* One registry entry of kernels/common/attention_dense_decode.py: the name, the
+ * kernel-name tag ("" for the default order), and the check. */
+struct DecodeInfo
 {
-    if(streq(s->nonpersist_decode, "hq_minor_swz") && s->num_query_heads % s->chiplet_num_xcds != 0)
+    const char* name;
+    const char* tag;
+    decode_check_fn check;
+};
+
+bool check_np_hq_minor_swz(const rocke_attention_dense_spec_t* s, bool, char* reason, size_t cap)
+{
+    if(s->num_query_heads % s->chiplet_num_xcds != 0)
         return reject(reason,
                       cap,
                       "hq_minor_swz needs num_query_heads (%d) divisible by chiplet_num_xcds (%d)",
@@ -258,64 +252,71 @@ bool check_nonpersist_decode(const rocke_attention_dense_spec_t* s, char* reason
     return true;
 }
 
-bool check_persist_decode(const rocke_attention_dense_spec_t* s,
-                          const rocke_attention_dense_traits_t* t,
-                          char* reason,
-                          size_t cap)
+bool check_hq_minor_swz(const rocke_attention_dense_spec_t* s, bool, char* reason, size_t cap)
 {
-    if(streq(s->persist_decode, "hq_minor_swz"))
-    {
-        if(s->num_query_heads % s->chiplet_num_xcds != 0
-           || s->num_persistent % s->chiplet_num_xcds != 0)
-            return reject(reason,
-                          cap,
-                          "hq_minor_swz needs num_query_heads and num_persistent divisible by %d",
-                          s->chiplet_num_xcds);
-        if(balance_causal(s) && dense_nqb(s) % 2 != 0)
-            return reject(reason,
-                          cap,
-                          "hq_minor_swz needs an even number of query blocks under causal "
-                          "masking without a sliding window");
-        return true;
-    }
+    if(s->num_query_heads % s->chiplet_num_xcds != 0
+       || s->num_persistent % s->chiplet_num_xcds != 0)
+        return reject(reason,
+                      cap,
+                      "hq_minor_swz needs num_query_heads and num_persistent divisible by %d",
+                      s->chiplet_num_xcds);
+    if(balance_causal(s) && dense_nqb(s) % 2 != 0)
+        return reject(reason,
+                      cap,
+                      "hq_minor_swz needs an even number of query blocks under causal "
+                      "masking without a sliding window");
+    return true;
+}
 
-    const bool gqa_pair = streq(s->persist_decode, "gqa_pair");
-    const bool gqa_pair_2phase = streq(s->persist_decode, "gqa_pair_2phase");
-    if(!gqa_pair && !gqa_pair_2phase)
-        return true;
-
-    const char* name = gqa_pair ? "gqa_pair" : "gqa_pair_2phase";
-    if(!s->persistent || !s->causal || t->has_right_bound)
+/* _aligned_causal_error: the pair decodes need persistent causal attention, no
+ * lookahead, on the plain dense layout. */
+bool check_aligned_pair(const rocke_attention_dense_spec_t* s,
+                        bool lookahead,
+                        const char* name,
+                        char* reason,
+                        size_t cap)
+{
+    if(!s->persistent || !s->causal || lookahead)
         return reject(reason, cap, "%s requires persistent causal attention", name);
     if(s->ragged || s->varlen || s->paged)
         return reject(reason, cap, "%s is validated only for aligned dense attention", name);
+    return true;
+}
 
+bool check_gqa_pair(const rocke_attention_dense_spec_t* s, bool lookahead, char* reason, size_t cap)
+{
+    if(!check_aligned_pair(s, lookahead, "gqa_pair", reason, cap))
+        return false;
+    const int64_t nqb = dense_nqb(s);
+    if(nqb % 2 != 0 || dense_gqa(s) % 2 != 0)
+        return reject(reason, cap, "gqa_pair requires even NQB and even GQA ratio");
+    const ExactProduct expected({nqb, s->num_kv_heads, s->batch});
+    if(expected.compare(ExactProduct({s->num_persistent})) != 0)
+    {
+        char expected_text[64];
+        expected.str(expected_text, sizeof(expected_text));
+        return reject(reason,
+                      cap,
+                      "gqa_pair requires num_persistent == NQB*Hkv*B (%s), got %d",
+                      expected_text,
+                      s->num_persistent);
+    }
+    return true;
+}
+
+bool check_gqa_pair_2phase(const rocke_attention_dense_spec_t* s,
+                           bool lookahead,
+                           char* reason,
+                           size_t cap)
+{
+    if(!check_aligned_pair(s, lookahead, "gqa_pair_2phase", reason, cap))
+        return false;
     const int64_t nqb = dense_nqb(s);
     const int64_t gqa = dense_gqa(s);
-    if(gqa_pair)
-    {
-        if(nqb % 2 != 0 || gqa % 2 != 0)
-            return reject(reason, cap, "gqa_pair requires even NQB and even GQA ratio");
-        const ExactProduct expected({nqb, s->num_kv_heads, s->batch});
-        const ExactProduct got({s->num_persistent});
-        if(expected.compare(got) != 0)
-        {
-            char expected_text[64];
-            expected.str(expected_text, sizeof(expected_text));
-            return reject(reason,
-                          cap,
-                          "gqa_pair requires num_persistent == NQB*Hkv*B (%s), got %d",
-                          expected_text,
-                          s->num_persistent);
-        }
-        return true;
-    }
-
     if(nqb % 2 != 0 || gqa < 2)
         return reject(reason, cap, "gqa_pair_2phase requires even NQB and GQA ratio >= 2");
     const ExactProduct expected({nqb / 2, s->num_kv_heads, s->batch, gqa});
-    const ExactProduct got({s->num_persistent});
-    if(expected.compare(got) != 0)
+    if(expected.compare(ExactProduct({s->num_persistent})) != 0)
     {
         char expected_text[64];
         expected.str(expected_text, sizeof(expected_text));
@@ -328,28 +329,75 @@ bool check_persist_decode(const rocke_attention_dense_spec_t* s,
     return true;
 }
 
-const char* persist_decode_tag(const char* decode)
+/* PERSIST_DECODES and NONPERSIST_DECODES. The only place a decode is named. */
+const DecodeInfo k_persist_decodes[] = {
+    {"qb_major", "", NULL},
+    {"hkv_major", "hkvmaj", NULL},
+    {"bt_hkv_minor", "bthkvmin", NULL},
+    {"hq_minor_swz", "hqminswz", check_hq_minor_swz},
+    {"gqa_pair", "gqapair", check_gqa_pair},
+    {"gqa_pair_2phase", "gqapair2", check_gqa_pair_2phase},
+};
+const DecodeInfo k_nonpersist_decodes[] = {
+    {"qb_minor", "", NULL},
+    {"bt_hkv_minor", "npbthkvmin", NULL},
+    {"hq_minor_swz", "nphqminswz", check_np_hq_minor_swz},
+};
+
+template <size_t N>
+const DecodeInfo* find_decode(const DecodeInfo (&table)[N], const char* name)
 {
-    if(streq(decode, "hkv_major"))
-        return "hkvmaj";
-    if(streq(decode, "bt_hkv_minor"))
-        return "bthkvmin";
-    if(streq(decode, "hq_minor_swz"))
-        return "hqminswz";
-    if(streq(decode, "gqa_pair"))
-        return "gqapair";
-    if(streq(decode, "gqa_pair_2phase"))
-        return "gqapair2";
-    return "";
+    for(const DecodeInfo& d : table)
+        if(streq(d.name, name))
+            return &d;
+    return NULL;
 }
 
-const char* nonpersist_decode_tag(const char* decode)
+/* supported_*_decodes() of the base class: "auto" plus the registry, sorted
+ * (Python's sorted() order in the reject reason). */
+template <size_t N>
+std::vector<const char*> sorted_names(const DecodeInfo (&table)[N])
 {
-    if(streq(decode, "bt_hkv_minor"))
-        return "npbthkvmin";
-    if(streq(decode, "hq_minor_swz"))
-        return "nphqminswz";
-    return "";
+    std::vector<const char*> names{"auto"};
+    for(const DecodeInfo& d : table)
+        names.push_back(d.name);
+    std::sort(
+        names.begin(), names.end(), [](const char* a, const char* b) { return strcmp(a, b) < 0; });
+    return names;
+}
+
+const std::vector<const char*>& base_persist_names()
+{
+    static const std::vector<const char*> names = sorted_names(k_persist_decodes);
+    return names;
+}
+
+const std::vector<const char*>& base_nonpersist_names()
+{
+    static const std::vector<const char*> names = sorted_names(k_nonpersist_decodes);
+    return names;
+}
+
+/* The decode the active grid uses: membership in the concrete type's list, then
+ * the registry entry and its check. A name the type lists but this file does
+ * not implement is rejected (Python raises KeyError there), never accepted
+ * unchecked. */
+template <size_t N>
+bool check_decode(const DecodeInfo (&table)[N],
+                  const char* field,
+                  const char* value,
+                  const rocke_attention_dense_spec_t* s,
+                  bool lookahead,
+                  char* reason,
+                  size_t cap)
+{
+    if(streq(value, "auto"))
+        return true;
+    const DecodeInfo* d = find_decode(table, value);
+    if(d == NULL)
+        return reject(
+            reason, cap, "%s %s is not implemented by the C++ port", field, py_repr(value).c_str());
+    return d->check == NULL || d->check(s, lookahead, reason, cap);
 }
 
 } // namespace
@@ -388,17 +436,16 @@ rocke_attention_dense_traits_t rocke_attention_dense_traits_base(void)
     t.type_name = "AttentionDenseSpec";
     t.supports_noncausal_window = false;
     t.supports_noncausal_cross_length_ragged = false;
-    t.has_right_bound = false;
-    t.persist_decodes = k_base_persist_decodes;
-    t.num_persist_decodes = sizeof(k_base_persist_decodes) / sizeof(k_base_persist_decodes[0]);
-    t.nonpersist_decodes = k_base_nonpersist_decodes;
-    t.num_nonpersist_decodes
-        = sizeof(k_base_nonpersist_decodes) / sizeof(k_base_nonpersist_decodes[0]);
+    t.persist_decodes = base_persist_names().data();
+    t.num_persist_decodes = base_persist_names().size();
+    t.nonpersist_decodes = base_nonpersist_names().data();
+    t.num_nonpersist_decodes = base_nonpersist_names().size();
     return t;
 }
 
 bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
                                          const rocke_attention_dense_traits_t* t,
+                                         bool lookahead,
                                          char* reason,
                                          size_t cap)
 {
@@ -474,21 +521,17 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
                       s->num_query_heads,
                       s->num_kv_heads);
     if(!contains(t->persist_decodes, t->num_persist_decodes, s->persist_decode))
-    {
-        char allowed[ROCKE_ATTENTION_DENSE_REASON_CAP];
-        char got[ROCKE_ATTENTION_DENSE_NAME_PART_CAP * 2];
-        py_str_list(t->persist_decodes, t->num_persist_decodes, allowed, sizeof(allowed));
-        py_repr(s->persist_decode, got, sizeof(got));
-        return reject(reason, cap, "persist_decode must be one of %s, got %s", allowed, got);
-    }
+        return reject(reason,
+                      cap,
+                      "persist_decode must be one of %s, got %s",
+                      py_str_list(t->persist_decodes, t->num_persist_decodes).c_str(),
+                      py_repr(s->persist_decode).c_str());
     if(!contains(t->nonpersist_decodes, t->num_nonpersist_decodes, s->nonpersist_decode))
-    {
-        char allowed[ROCKE_ATTENTION_DENSE_REASON_CAP];
-        char got[ROCKE_ATTENTION_DENSE_NAME_PART_CAP * 2];
-        py_str_list(t->nonpersist_decodes, t->num_nonpersist_decodes, allowed, sizeof(allowed));
-        py_repr(s->nonpersist_decode, got, sizeof(got));
-        return reject(reason, cap, "nonpersist_decode must be one of %s, got %s", allowed, got);
-    }
+        return reject(reason,
+                      cap,
+                      "nonpersist_decode must be one of %s, got %s",
+                      py_str_list(t->nonpersist_decodes, t->num_nonpersist_decodes).c_str(),
+                      py_repr(s->nonpersist_decode).c_str());
     if(s->chiplet_num_xcds <= 0)
         return reject(
             reason, cap, "chiplet_num_xcds must be positive, got %d", s->chiplet_num_xcds);
@@ -497,10 +540,17 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
         if(s->num_persistent <= 0)
             return reject(
                 reason, cap, "num_persistent must be positive, got %d", s->num_persistent);
-        if(!streq(s->persist_decode, "auto") && !check_persist_decode(s, t, reason, cap))
+        if(!check_decode(
+               k_persist_decodes, "persist_decode", s->persist_decode, s, lookahead, reason, cap))
             return false;
     }
-    else if(!streq(s->nonpersist_decode, "auto") && !check_nonpersist_decode(s, reason, cap))
+    else if(!check_decode(k_nonpersist_decodes,
+                          "nonpersist_decode",
+                          s->nonpersist_decode,
+                          s,
+                          lookahead,
+                          reason,
+                          cap))
         return false;
     if(s->sliding_window < 0)
         return reject(reason, cap, "sliding_window must be >= 0, got %d", s->sliding_window);
@@ -606,14 +656,14 @@ int rocke_attention_dense_spec_num_queries_per_kv(const rocke_attention_dense_sp
 
 const char*
     rocke_attention_dense_spec_resolved_persist_decode(const rocke_attention_dense_spec_t* s,
-                                                       const rocke_attention_dense_traits_t* t)
+                                                       bool lookahead)
 {
     if(!streq(s->persist_decode, "auto"))
         return s->persist_decode;
 
     const int64_t gqa = dense_gqa(s);
     const int64_t nqb = dense_nqb(s);
-    if(aligned_causal(s, t->has_right_bound))
+    if(aligned_causal(s, lookahead))
     {
         if(s->interleave)
             return "qb_major";
@@ -638,11 +688,11 @@ const char*
 
 const char*
     rocke_attention_dense_spec_resolved_nonpersist_decode(const rocke_attention_dense_spec_t* s,
-                                                          const rocke_attention_dense_traits_t* t)
+                                                          bool lookahead)
 {
     if(!streq(s->nonpersist_decode, "auto"))
         return s->nonpersist_decode;
-    if(!aligned_causal(s, t->has_right_bound))
+    if(!aligned_causal(s, lookahead))
         return "qb_minor";
 
     const int64_t nqb = dense_nqb(s);
@@ -656,24 +706,30 @@ const char*
     return "bt_hkv_minor";
 }
 
-void rocke_attention_dense_name_parts_base(const rocke_attention_dense_spec_t* s,
-                                           const rocke_attention_dense_traits_t* t,
-                                           rocke_attention_dense_name_parts_t* out)
+rocke_status_t rocke_attention_dense_name_parts_base(const rocke_attention_dense_spec_t* s,
+                                                     bool lookahead,
+                                                     rocke_attention_dense_name_parts_t* out)
 {
+    if(s == NULL || out == NULL)
+        return ROCKE_ERR_VALUE;
     memset(out, 0, sizeof(*out));
     out->head_parts = true;
     out->shape_parts = true;
     if(s->lazy_rescale)
         snprintf(
             out->algorithm[out->num_algorithm++], ROCKE_ATTENTION_DENSE_NAME_PART_CAP, "lazyrs");
-    snprintf(out->persist_decode,
-             sizeof(out->persist_decode),
-             "%s",
-             persist_decode_tag(rocke_attention_dense_spec_resolved_persist_decode(s, t)));
-    snprintf(out->nonpersist_decode,
-             sizeof(out->nonpersist_decode),
-             "%s",
-             nonpersist_decode_tag(rocke_attention_dense_spec_resolved_nonpersist_decode(s, t)));
+    /* An unregistered decode has no tag. "" is qb_major's / qb_minor's real tag,
+     * so falling back to it would give two block orders one symbol. */
+    const DecodeInfo* p = find_decode(
+        k_persist_decodes, rocke_attention_dense_spec_resolved_persist_decode(s, lookahead));
+    const DecodeInfo* np = find_decode(
+        k_nonpersist_decodes, rocke_attention_dense_spec_resolved_nonpersist_decode(s, lookahead));
+    if((s->persistent && p == NULL) || (!s->persistent && np == NULL))
+        return ROCKE_ERR_VALUE;
+    snprintf(out->persist_decode, sizeof(out->persist_decode), "%s", p != NULL ? p->tag : "");
+    snprintf(
+        out->nonpersist_decode, sizeof(out->nonpersist_decode), "%s", np != NULL ? np->tag : "");
+    return ROCKE_OK;
 }
 
 rocke_status_t rocke_attention_dense_kernel_name(const rocke_attention_dense_spec_t* s,
@@ -681,28 +737,53 @@ rocke_status_t rocke_attention_dense_kernel_name(const rocke_attention_dense_spe
                                                  char* out,
                                                  size_t out_cap)
 {
-    if(s == NULL || np == NULL || out == NULL)
+    if(s == NULL || np == NULL || out == NULL || s->dtype == NULL)
         return ROCKE_ERR_VALUE;
+    for(int count : {np->num_layout, np->num_band, np->num_algorithm})
+        if(count < 0 || count > ROCKE_ATTENTION_DENSE_MAX_NAME_PARTS)
+            return ROCKE_ERR_VALUE;
 
     enum
     {
-        CAP = ROCKE_ATTENTION_DENSE_NAME_PART_CAP
+        CAP = ROCKE_ATTENTION_DENSE_NAME_PART_CAP,
+        /* The fixed tokens plus three full hook lists. */
+        MAX_PARTS = 24 + 3 * ROCKE_ATTENTION_DENSE_MAX_NAME_PARTS
     };
-    /* Python kernel_name()'s parts list, in order. */
-    char buf[48][CAP];
-    const char* parts[48];
+    /* Python kernel_name()'s parts list, in order. The name is the kernel's
+     * identity, so a part that does not fit is an error, never a shorter name. */
+    char buf[MAX_PARTS][CAP];
+    const char* parts[MAX_PARTS];
     size_t n = 0;
+    bool truncated = false;
     auto add = [&](const char* fmt, ...) {
+        if(n == MAX_PARTS)
+        {
+            truncated = true;
+            return;
+        }
         va_list ap;
         va_start(ap, fmt);
-        (void)vsnprintf(buf[n], CAP, fmt, ap);
+        const int len = vsnprintf(buf[n], CAP, fmt, ap);
         va_end(ap);
+        if(len < 0 || len >= CAP)
+            truncated = true;
         parts[n] = buf[n];
         ++n;
     };
     auto add_list = [&](const char(*items)[CAP], int count) {
         for(int i = 0; i < count; ++i)
-            add("%s", items[i]);
+        {
+            if(memchr(items[i], '\0', CAP) == NULL)
+                truncated = true;
+            else
+                add("%s", items[i]);
+        }
+    };
+    auto add_tag = [&](const char(&tag)[CAP]) {
+        if(memchr(tag, '\0', CAP) == NULL)
+            truncated = true;
+        else if(tag[0] != '\0')
+            add("%s", tag);
     };
 
     add("d%d", s->head_size);
@@ -744,15 +825,16 @@ rocke_status_t rocke_attention_dense_kernel_name(const rocke_attention_dense_spe
     if(s->persistent)
     {
         add("persist%d", s->num_persistent);
-        if(np->persist_decode[0] != '\0')
-            add("%s", np->persist_decode);
+        add_tag(np->persist_decode);
         if(s->interleave)
             add("intl");
     }
-    else if(np->nonpersist_decode[0] != '\0')
-        add("%s", np->nonpersist_decode);
+    else
+        add_tag(np->nonpersist_decode);
     if(s->chiplet_num_xcds != 8)
         add("xcd%d", s->chiplet_num_xcds);
+    if(truncated)
+        return ROCKE_ERR_VALUE;
     return rocke_kernel_name_join(
         "rocke_attention_dense", parts, n, NULL, NULL, 0, out, out_cap, NULL);
 }

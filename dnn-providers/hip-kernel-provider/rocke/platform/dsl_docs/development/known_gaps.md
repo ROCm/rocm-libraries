@@ -264,7 +264,7 @@ This entry covers `emit_lse` only, not other changes to the reduce kernel.
 |---|---|
 | `emit_lse` field (default 0) and the `lse` kernel-name suffix | `rocke_unified_attention_reduce_tiled_spec_t` and `*_reduce_tiled_spec_kernel_name()`, both arches |
 | Trailing `lse_ptr` param and the `tid == 0` LSE store | both C reduce builders |
-| A C twin of `_lse_store.py` | `helpers/`; none exists (its dense-attention users have no C twin either) |
+| Wiring the reduce to the C twin of `_lse_store.py` | `lse_store`, `dense_row_has_key` and `zero_keyless_row` exist in `include/rocke/instance_attention_dense_lse_internal.h` (`instances/common/attention_dense_lse.cpp`) and `natural_lse_from_log2_stats` in `helpers/attention_fwd_ext.cpp`; no C reduce builder calls them yet |
 | Gate coverage of an LSE-on reduce | `library/tests/parity/gfx9{42,50}_attention_tiled_3d_emit.{py,c}` emit the LSE-off reduce only; neither takes `emit_lse` |
 | `emit_lse` on the unified problem and the `_reject_lse` support gate (`library/kernels/common/attention_unified.py`) | `rocke_unified_attn_problem_t`; the C selectors carry no support gates to mirror it into. No codegen selector reads `emit_lse`: the selected split-KV spec differs only in `reduce_spec.emit_lse` between LSE on and off, so C selector output is unaffected |
 
