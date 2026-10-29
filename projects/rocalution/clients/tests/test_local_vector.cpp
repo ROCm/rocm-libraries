@@ -413,6 +413,17 @@ GENERATE_P_TEST_CASES(parameterized_local_vector_test, testing_asum, asum)
 // Test for LocalVector::Amax(ValueType& value) const
 GENERATE_P_TEST_CASES(parameterized_local_vector_test, testing_amax, amax)
 
+// Host-only and cheap: run in every tier, including the emulation tiers used by CI
+TEST(local_vector_amax_ties, host_float)
+{
+    TEST_CASE(testing_amax_ties, float, true);
+}
+
+TEST(local_vector_amax_ties, host_double)
+{
+    TEST_CASE(testing_amax_ties, double, true);
+}
+
 // Test for LocalVector::Prolongation
 GENERATE_P_TEST_CASES(parameterized_local_vector_test, testing_prolongation, prolongation)
 
