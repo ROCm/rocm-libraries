@@ -153,7 +153,6 @@ typedef struct rocke_gfx950_attn_tiled_3d_config
     int PV_N_TILES; /* HD // MFMA_N                                         */
 
     int THREADS; /* 64 */
-    int binary_search_iters; /* spec.binary_search_iters */
 
     /* ---- async / fp8 KV feed geometry (lines 565-643) ---- */
     int ASYNC_LDS_DWORDS; /* 4 (CDNA4) */

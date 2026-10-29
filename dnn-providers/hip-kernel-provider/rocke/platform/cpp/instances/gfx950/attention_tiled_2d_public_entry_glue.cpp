@@ -763,14 +763,11 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
     }
 
     /* ---- seq lookup + Q-block geometry (Py906-925) ---- */
-    ctx->seq_idx
-        = rocke_binary_search_seq_idx(b,
-                                      ctx->cu_q,
-                                      ctx->q_block_global_idx,
-                                      ctx->num_seqs_p,
-                                      BLOCK_Q,
-                                      rocke_attention_tiled_2d_spec_binary_search_iters(spec),
-                                      false);
+    {
+        rocke_value_t* trip = rocke_binary_search_seq_idx_trip_count(b, ctx->num_seqs_p);
+        ctx->seq_idx = rocke_binary_search_seq_idx_dyn(
+            b, ctx->cu_q, ctx->q_block_global_idx, ctx->num_seqs_p, BLOCK_Q, trip, false);
+    }
     ctx->cu_q_start = rocke_b_global_load_i32(b, ctx->cu_q, ctx->seq_idx, 0);
     ctx->cu_q_stop = rocke_b_global_load_i32(
         b, ctx->cu_q, rocke_b_add(b, ctx->seq_idx, rocke_b_const_i32(b, 1)), 0);

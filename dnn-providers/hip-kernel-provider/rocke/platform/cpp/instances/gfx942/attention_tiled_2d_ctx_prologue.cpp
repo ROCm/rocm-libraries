@@ -120,6 +120,7 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     /* This body also stands in for the gfx950 Python builder (the fastKV
      * register-P twin), which bakes the shape values gfx942 reads at runtime. */
     ctx->runtime_shape = rocke_a2d_streq(arch, "gfx942");
+    ctx->runtime_search = ctx->runtime_shape || rocke_a2d_streq(arch, "gfx950");
 
     /* ---- require_tiled_attention_arch(arch) (lines 1139-1141) ---- */
     if(!rocke_a2d_require_tiled_attention_arch(b, arch))
@@ -436,7 +437,7 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     }
 
     /* ---- seq lookup + Q-block geometry (lines 1390-1409) ---- */
-    if(ctx->runtime_shape)
+    if(ctx->runtime_search)
     {
         rocke_value_t* trip = rocke_binary_search_seq_idx_trip_count(b, ctx->num_seqs_p);
         ctx->seq_idx = rocke_binary_search_seq_idx_dyn(

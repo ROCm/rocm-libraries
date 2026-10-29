@@ -1714,6 +1714,23 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     num_warps_2d = None if fp16_flash else _select_2d_num_warps(problem, arch)
     tile_size = _select_2d_tile_size(problem, arch)
     block_m_per_warp = _select_2d_block_m_per_warp(problem, arch)
+    # gfx950 schedule tail of `_spec_gfx950_generic`. Both flags are false
+    # outside the single-batch cohort (num_seqs == 1), so skip them there. Keyed
+    # as None when both are off, because the cohort itself does not change the
+    # kernel and a runtime batch search must not split ns=1 from ns>1 on it.
+    single_batch_sched = None
+    if _enable_single_batch_combo(problem, arch):
+        flags = (
+            _enable_softmax_mfma_interleave(problem, arch),
+            _enable_k_single_buffer(
+                problem,
+                arch,
+                num_warps=num_warps_2d,
+                block_m_per_warp=block_m_per_warp,
+                tile_size=tile_size,
+            ),
+        )
+        single_batch_sched = flags if any(flags) else None
     return (
         "tiled",
         arch,
@@ -1758,24 +1775,9 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         # The builder derives the scalar-state / mask / skip-qreg / fast-paged-KV
         # spec fields from the combo predicate, which reads max_seqlen_q.
         _enable_combo_2d(problem, arch),
-        # gfx950 schedule tail of `_spec_gfx950_generic`. Both are false
-        # outside the single-batch cohort (num_seqs == 1), so gate on it and
-        # spare every other launch the selector walks. sched_barrier is implied
-        # by _enable_v_double_buffer, which is already in the key above.
-        (
-            (
-                _enable_softmax_mfma_interleave(problem, arch),
-                _enable_k_single_buffer(
-                    problem,
-                    arch,
-                    num_warps=num_warps_2d,
-                    block_m_per_warp=block_m_per_warp,
-                    tile_size=tile_size,
-                ),
-            )
-            if _enable_single_batch_combo(problem, arch)
-            else None
-        ),
+        # sched_barrier is implied by _enable_v_double_buffer, which is already
+        # in the key above.
+        single_batch_sched,
         # Reads max_seqlen_q and max_seqlen_k (the 16 * T threshold). The
         # gfx1250 builder never sets this field, so keying it there would only
         # split identical kernels.

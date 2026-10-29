@@ -363,13 +363,9 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
     }
     else
     {
-        ctx->seq_idx = rocke_binary_search_seq_idx(B,
-                                                   ctx->cu_q,
-                                                   ctx->q_block_global_idx,
-                                                   ctx->num_seqs_p,
-                                                   BLOCK_Q,
-                                                   CFG.binary_search_iters,
-                                                   false);
+        rocke_value_t* trip = rocke_binary_search_seq_idx_trip_count(B, ctx->num_seqs_p);
+        ctx->seq_idx = rocke_binary_search_seq_idx_dyn(
+            B, ctx->cu_q, ctx->q_block_global_idx, ctx->num_seqs_p, BLOCK_Q, trip, false);
     }
 
     /* ---- cu_q bounds / per-sequence geometry (lines 373-379) ---- */

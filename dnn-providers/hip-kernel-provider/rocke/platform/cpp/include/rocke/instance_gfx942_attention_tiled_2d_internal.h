@@ -185,6 +185,9 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     /* The gfx942 Python body: it reads its runtime kernargs and searches at
      * runtime. False when this body stands in for the gfx950 builder. */
     bool runtime_shape;
+    /* The cu_q search reads its trip count from num_seqs: true for gfx942 and
+     * for the gfx950 builder this body also stands in for. */
+    bool runtime_search;
 
     /* ---- grid ids + wave decomposition (lines 1371-1388) ---- */
     rocke_value_t* q_block_global_idx;

@@ -20,7 +20,7 @@ Layers:
     lower to byte-identical IR.
   * Launch geometry: the grid caches still separate batch counts.
   * ``_binary_search_iters`` mirrors every spec class that bakes the search;
-    gfx942 searches at runtime, so its batch sizes share a binary.
+    gfx942 and gfx950 search at runtime, so their batch sizes share a binary.
 
 No GPU required.
 """
@@ -288,8 +288,9 @@ def _assert_split(key_fn, built_fn, a, b, field, arch):
     assert key_fn(a, arch) != key_fn(b, arch)
 
 
-# gfx942 searches at runtime, so its buckets share a binary (_SHARED_PAIRS).
-@pytest.mark.parametrize("arch", ("gfx950", "gfx1250"))
+# gfx942 and gfx950 search at runtime, so their buckets share a binary
+# (_SHARED_PAIRS).
+@pytest.mark.parametrize("arch", ("gfx1250",))
 def test_search_bucket_edge_splits_2d_key(routing_env, arch):
     # num_seqs 3 and 4 fall in different log2 search buckets (2 vs 3 iterations).
     # d64 GQA-8 (+ fp8 K/V on gfx1250): a geometry every arch's tiled 2D supports.
@@ -308,25 +309,6 @@ def test_search_bucket_edge_splits_2d_key(routing_env, arch):
     _assert_split(au._tiled_cache_key, _built_2d, a, b, "binary_search_iters", arch)
     # The trip count is a literal in the IR, so the binaries really differ.
     assert _lower_2d(a, arch, "llvm22") != _lower_2d(b, arch, "llvm22")
-
-
-@pytest.mark.parametrize("arch", ("gfx950",))
-def test_search_bucket_edge_splits_3d_key(routing_env, arch):
-    # Two query tokens per sequence, so the launch takes the searching prefill
-    # grid rather than the decode grid.
-    base = dict(
-        num_query_heads=32,
-        num_kv_heads=8,
-        head_size=128,
-        block_size=16,
-        max_seqlen_q=2,
-        max_seqlen_k=8192,
-        dtype="bf16",
-    )
-    a = P(total_q=6, num_seqs=3, **base)
-    b = P(total_q=8, num_seqs=4, **base)
-    assert not au._use_decode_grid(a, arch)
-    _assert_split(au._tiled_3d_cache_key, _built_3d, a, b, "binary_search_iters", arch)
 
 
 def test_fp8_mfma_qk_kv_threshold_splits_key(routing_env):
@@ -519,6 +501,33 @@ _SHARED_PAIRS = [
             P(total_q=64, num_seqs=64, **_D128_DECODE),
         )
         for arch in ("gfx942", "gfx950")
+    ),
+    # gfx950 reads the search trip count from num_seqs at runtime too.
+    (
+        "gfx950-2d-ns3-vs-ns9",
+        "gfx950",
+        "2d",
+        P(
+            total_q=3 * 1024,
+            num_seqs=3,
+            max_seqlen_q=1024,
+            max_seqlen_k=1024,
+            **_D64_GQA8,
+        ),
+        P(
+            total_q=9 * 1024,
+            num_seqs=9,
+            max_seqlen_q=1024,
+            max_seqlen_k=1024,
+            **_D64_GQA8,
+        ),
+    ),
+    (
+        "gfx950-3d-prefill-ns3-vs-ns9",
+        "gfx950",
+        "3d",
+        P(total_q=6, num_seqs=3, **_D128_TWO_TOKENS),
+        P(total_q=18, num_seqs=9, **_D128_TWO_TOKENS),
     ),
     # gfx942 reads the search trip count from num_seqs at runtime, so batch
     # sizes several log2 buckets apart share a binary on every builder route.
@@ -738,8 +747,6 @@ def test_launch_geometry_separates_head_counts_under_one_key(routing_env):
 # (spec class, floor) for every class that bakes the search. gfx1250 3D floors
 # it at 32 iterations.
 _SPEC_CLASSES = (
-    (Gfx950Spec2D, 1),
-    (Gfx950Spec3D, 1),
     (Gfx1250Spec2D, 1),
     (Gfx1250Spec3D, 32),
 )
@@ -768,13 +775,20 @@ def test_binary_search_iters_mirrors_spec(spec_cls, floor, num_seqs):
     assert au._binary_search_iters(problem, floor=floor) == spec.binary_search_iters
 
 
-@pytest.mark.parametrize("spec_cls", (Gfx942Spec2D, Gfx942Spec3D))
-def test_gfx942_specs_search_at_runtime(spec_cls):
+@pytest.mark.parametrize(
+    "arch, path, spec_cls",
+    (
+        ("gfx942", "2d", Gfx942Spec2D),
+        ("gfx942", "3d", Gfx942Spec3D),
+        ("gfx950", "2d", Gfx950Spec2D),
+        ("gfx950", "3d", Gfx950Spec3D),
+    ),
+)
+def test_specs_search_at_runtime(arch, path, spec_cls):
     assert spec_cls.RUNTIME_SEARCH_ITERS
     assert not hasattr(spec_cls, "binary_search_iters")
-    arch, path = "gfx942", "2d" if spec_cls is Gfx942Spec2D else "3d"
     assert au._searches_at_runtime(arch, path)
-    assert not au._searches_at_runtime("gfx950", path)
+    assert not au._searches_at_runtime("gfx1250", path)
 
 
 def _trip_count(num_seqs: int) -> int:

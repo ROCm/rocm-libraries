@@ -40,7 +40,7 @@ Correctness contract (validated against `aiter.op_tests.triton_tests.attention`
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import ClassVar, Optional, Tuple
 
 from kernels.common._attention_additive_bias import (
     add_additive_bias,
@@ -65,7 +65,7 @@ from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2,
     binary_search_seq_idx,
-    binary_search_seq_idx_iters,
+    binary_search_seq_idx_trip_count,
     dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype,
     mfma_16x16x32_for_dtype,
@@ -154,6 +154,10 @@ _warp_xor_reduce_sum_32lane = warp_xor_reduce_sum_32lane
 
 @dataclass(frozen=True)
 class UnifiedAttention2DTiledSpec:
+    # The cu_q search derives its trip count from the num_seqs kernarg, so
+    # num_seqs never reaches the IR and one binary serves every batch.
+    RUNTIME_SEARCH_ITERS: ClassVar[bool] = True
+
     head_size: int
     block_size: int
     num_query_heads: int
@@ -884,15 +888,6 @@ class UnifiedAttention2DTiledSpec:
     def dtype_ir(self) -> Type:
         return F16 if self.dtype == "fp16" else BF16
 
-    @property
-    def binary_search_iters(self) -> int:
-        # AITER/Triton uses a true while-loop binary search. Our IR currently
-        # lowers this as a fixed-trip scf.for, so specialize the trip count to
-        # the known problem batch size instead of always paying 32 iterations.
-        # Falls back to 32 for direct unit-test specs that do not provide
-        # `num_seqs`.
-        return binary_search_seq_idx_iters(self.num_seqs)
-
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
@@ -1322,7 +1317,7 @@ def build_unified_attention_2d_tiled(
         q_block_global_idx,
         num_seqs_p,
         block_q=BLOCK_Q,
-        iterations=spec.binary_search_iters,
+        iterations=binary_search_seq_idx_trip_count(b, num_seqs_p),
     )
     cu_q_start = b.global_load_i32(cu_q, seq_idx)
     cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
