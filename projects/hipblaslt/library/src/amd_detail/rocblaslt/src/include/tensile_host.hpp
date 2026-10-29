@@ -369,4 +369,4 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
 // desc- or handle-level enable.
 void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
-                                bool                   value);
+                                int32_t                value);
