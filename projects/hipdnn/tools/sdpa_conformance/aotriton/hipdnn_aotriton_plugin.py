@@ -231,6 +231,14 @@ def pytest_addoption(parser):
         choices=["always-decline"],
         help="replace hipdnn_sdpa.sdpa_fwd/sdpa_bwd with functions that decline",
     )
+    group.addoption(
+        "--hipdnn-prefix",
+        metavar="DIR",
+        help=(
+            "hipDNN install prefix whose libhipdnn_backend must be the one mapped into the "
+            "process (the runner passes $ROCM_PATH); unset leaves the backend unchecked"
+        ),
+    )
 
 
 def _parse_shard(text):
@@ -254,6 +262,52 @@ def _knob_active(name):
         except ValueError:
             return True
     return True
+
+
+def _mapped_backends(maps_path="/proc/self/maps"):
+    """Paths of every ``libhipdnn_backend`` mapped into this process."""
+    with open(maps_path) as maps:
+        return sorted(
+            {line.split()[-1] for line in maps if "libhipdnn_backend" in line}
+        )
+
+
+def backend_problem(mapped, prefix):
+    """Why the loaded hipDNN backend is not ``prefix``'s, or None when it is.
+
+    ``mapped`` lists the mapped ``libhipdnn_backend`` paths; ``prefix`` is where
+    dnn-benchmarking's ``setup_env.py`` installed hipDNN (``ROCM_PATH``).
+    """
+    if len(mapped) != 1:
+        return f"expected one mapped libhipdnn_backend, found {len(mapped)}: {mapped}"
+    root = os.path.realpath(prefix) + os.sep
+    if not os.path.realpath(mapped[0]).startswith(root):
+        return f"mapped {mapped[0]}, which is not under {prefix}"
+    return None
+
+
+def _bind_backend_first(prefix):
+    """Load hipDNN before any test module imports torch, then verify which backend bound.
+
+    dnn-benchmarking's recipe (``docs/troubleshooting.md``, "Mixed ROCm torch and hipDNN
+    prefixes"): the ROCm devel wheel ships an older ``libhipdnn_backend.so`` beside the one
+    ``setup_env.py`` builds, ``$ROCM_PATH/lib`` comes first on ``LD_LIBRARY_PATH``, importing
+    ``hipdnn_frontend`` first gives it the first bind, and ``/proc/self/maps`` is the proof.
+    Returns the mapped backend path; None when no prefix is given (CPU-only test runs).
+    """
+    if not prefix:
+        return None
+    try:
+        import hipdnn_frontend  # noqa: F401
+    except ImportError as exc:
+        raise pytest.UsageError(
+            f"--hipdnn-prefix given but hipdnn_frontend: {exc}"
+        ) from None
+    mapped = _mapped_backends()
+    problem = backend_problem(mapped, prefix)
+    if problem:
+        raise pytest.UsageError(f"hipDNN backend check failed: {problem}")
+    return mapped[0]
 
 
 def _install_wrappers(fake):
@@ -337,6 +391,7 @@ def pytest_configure(config):
         )
     if config.getoption("shard"):
         _parse_shard(config.getoption("shard"))
+    config._sdpa_backend = _bind_backend_first(config.getoption("hipdnn_prefix"))
     _install_wrappers(config.getoption("fake") == "always-decline")
     results = config.getoption("results_dir")
     if results and not hasattr(config, "workerinput"):
@@ -353,7 +408,12 @@ def pytest_unconfigure(config):
 
 def pytest_report_header(config):
     forwarded = [f"{k}={os.environ[k]}" for k in _FORWARDED_KNOBS if k in os.environ]
-    return "sdpa-conformance: " + (", ".join(forwarded) or "no forwarded knobs")
+    backend = getattr(config, "_sdpa_backend", None) or "not loaded"
+    return (
+        "sdpa-conformance: "
+        + (", ".join(forwarded) or "no forwarded knobs")
+        + f"; hipDNN backend: {backend}"
+    )
 
 
 @pytest.hookimpl(trylast=True)

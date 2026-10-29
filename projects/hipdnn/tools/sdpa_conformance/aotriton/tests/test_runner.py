@@ -30,6 +30,12 @@ class FakePytest:
         return subprocess.CompletedProcess(cmd, 0)
 
 
+@pytest.fixture(autouse=True)
+def rocm_path(monkeypatch):
+    """The setup_env.py activation sets ROCM_PATH; the runner's --hipdnn-prefix defaults to it."""
+    monkeypatch.setenv("ROCM_PATH", "/opt/fake-rocm")
+
+
 @pytest.fixture
 def runner(monkeypatch):
     def go(ids_per_pass, *argv):
@@ -94,9 +100,7 @@ def test_packed_gpu_adds_a_second_gpu_marked_pass_into_the_same_collected_list(
 
 
 def test_default_out_is_arch_run_shard_directory(monkeypatch, runner):
-    monkeypatch.setattr(
-        run_aotriton, "WORKSPACE_RESULTS", run_aotriton.Path("/nowhere")
-    )
+    monkeypatch.setattr(run_aotriton, "DEFAULT_RESULTS", run_aotriton.Path("/nowhere"))
     args = run_aotriton.parse_args(
         ["--arch", "gfx950", "--run", "r1", "--shard", "2/4", "--workers", "1"]
     )
@@ -130,3 +134,19 @@ def test_empty_collection_runs_nothing_and_collection_errors_stop_the_run(
 
     monkeypatch.setattr(run_aotriton.subprocess, "run", failing)
     assert run_aotriton.main(["--workers", "1", "--out", str(tmp_path / "b")]) == 2
+
+
+def test_every_pytest_command_checks_the_hipdnn_prefix(runner, tmp_path):
+    status, commands = runner(
+        [["t.py::a"]], "--workers", "1", "--out", str(tmp_path / "o")
+    )
+    assert status == 0
+    assert commands and all(
+        "--hipdnn-prefix=/opt/fake-rocm" in cmd for cmd, _ in commands
+    )
+
+
+def test_runner_refuses_to_start_without_a_hipdnn_prefix(monkeypatch, tmp_path):
+    monkeypatch.delenv("ROCM_PATH")
+    with pytest.raises(SystemExit, match="no hipDNN prefix"):
+        run_aotriton.main(["--workers", "1", "--out", str(tmp_path / "o")])
