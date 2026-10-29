@@ -1255,6 +1255,244 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithGqa)
 }
 
 // ---------------------------------------------------------------------------
+// Attention sink tests
+// ---------------------------------------------------------------------------
+
+TEST(TestCpuFpReferenceSdpaFp64, SinkTokenMatchesFormula)
+{
+    // [B=1, H=1, Sq=1, Skv=2, D=2, Dv=2]
+    // Q = [1,0], K0 = [1,0], K1 = [0,1] -> scores = [1, 0]
+    // V0 = [1,2], V1 = [3,4], sink = 0.5
+    // max = 1, sum = e^0 + e^-1 + e^(0.5-1)
+    // O = (V0 + e^-1 * V1) / sum, LSE = 1 + log(sum)
+    Tensor<double> q({1, 1, 1, 2});
+    Tensor<double> k({1, 1, 2, 2});
+    Tensor<double> v({1, 1, 2, 2});
+    Tensor<double> o({1, 1, 1, 2});
+    Tensor<float> lse({1, 1, 1, 1});
+    Tensor<float> sink({1, 1, 1, 1});
+
+    q.fillWithValue(0.0);
+    k.fillWithValue(0.0);
+    q.setHostValue(1.0, 0, 0, 0, 0);
+    k.setHostValue(1.0, 0, 0, 0, 0);
+    k.setHostValue(1.0, 0, 0, 1, 1);
+    v.setHostValue(1.0, 0, 0, 0, 0);
+    v.setHostValue(2.0, 0, 0, 0, 1);
+    v.setHostValue(3.0, 0, 0, 1, 0);
+    v.setHostValue(4.0, 0, 0, 1, 1);
+    sink.setHostValue(0.5f, 0, 0, 0, 0);
+
+    CpuFpReferenceSdpa::forward<double, double, double, double, double>(q,
+                                                                        k,
+                                                                        v,
+                                                                        o,
+                                                                        std::nullopt,
+                                                                        nullptr,
+                                                                        /*leftBound=*/-1,
+                                                                        /*rightBound=*/-1,
+                                                                        /*topLeftAlignment=*/true,
+                                                                        &lse,
+                                                                        nullptr,
+                                                                        nullptr,
+                                                                        nullptr,
+                                                                        &sink);
+
+    const double sum = 1.0 + std::exp(-1.0) + std::exp(-0.5);
+    const double p0 = 1.0 / sum;
+    const double p1 = std::exp(-1.0) / sum;
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), p0 * 1.0 + p1 * 3.0, 1e-12);
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 1), p0 * 2.0 + p1 * 4.0, 1e-12);
+    EXPECT_NEAR(lse.getHostValue(0, 0, 0, 0), 1.0 + std::log(sum), 1e-6);
+}
+
+TEST(TestCpuFpReferenceSdpaFp64, SinkTokenRescalesOutputAndLse)
+{
+    // A sink only adds mass to the softmax denominator, so for every row:
+    //   LSE_sink = logaddexp(LSE, sink)
+    //   O_sink   = O * exp(LSE - LSE_sink)
+    // GQA (H=4, Hkv=2) with a distinct sink per Q head, under a causal mask.
+    const int64_t numHeads = 4;
+    const int64_t seqQ = 8;
+    Tensor<double> q({2, numHeads, seqQ, 16});
+    Tensor<double> k({2, 2, seqQ, 16});
+    Tensor<double> v({2, 2, seqQ, 8});
+    Tensor<double> o({2, numHeads, seqQ, 8});
+    Tensor<double> oSink({2, numHeads, seqQ, 8});
+    Tensor<float> lse({2, numHeads, seqQ, 1});
+    Tensor<float> lseSink({2, numHeads, seqQ, 1});
+    Tensor<float> sink({1, numHeads, 1, 1});
+
+    q.fillWithRandomValues(-1.0, 1.0, 400);
+    k.fillWithRandomValues(-1.0, 1.0, 401);
+    v.fillWithRandomValues(-1.0, 1.0, 402);
+    const std::array<float, 4> sinkValues = {-2.0f, 0.0f, 0.75f, 3.0f};
+    for(int64_t h = 0; h < numHeads; ++h)
+    {
+        sink.setHostValue(sinkValues[static_cast<size_t>(h)], 0, h, 0, 0);
+    }
+
+    const float scale = 0.25f;
+    const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+        q, k, v, o, scale, noMask, /*causalMask=*/true, &lse);
+    CpuFpReferenceSdpa::forward<double, double, double, double, double>(q,
+                                                                        k,
+                                                                        v,
+                                                                        oSink,
+                                                                        scale,
+                                                                        noMask,
+                                                                        /*causalMask=*/true,
+                                                                        &lseSink,
+                                                                        nullptr,
+                                                                        nullptr,
+                                                                        nullptr,
+                                                                        &sink);
+
+    for(int64_t b = 0; b < 2; ++b)
+    {
+        for(int64_t h = 0; h < numHeads; ++h)
+        {
+            const auto s = static_cast<double>(sinkValues[static_cast<size_t>(h)]);
+            for(int64_t sq = 0; sq < seqQ; ++sq)
+            {
+                const auto l = static_cast<double>(lse.getHostValue(b, h, sq, 0));
+                const double m = std::max(l, s);
+                const double expectedLse = m + std::log(std::exp(l - m) + std::exp(s - m));
+                EXPECT_NEAR(lseSink.getHostValue(b, h, sq, 0), expectedLse, 1e-5)
+                    << "b=" << b << " h=" << h << " sq=" << sq;
+
+                const double ratio = std::exp(l - expectedLse);
+                for(int64_t dv = 0; dv < 8; ++dv)
+                {
+                    EXPECT_NEAR(oSink.getHostValue(b, h, sq, dv),
+                                o.getHostValue(b, h, sq, dv) * ratio,
+                                1e-5)
+                        << "b=" << b << " h=" << h << " sq=" << sq << " dv=" << dv;
+                }
+            }
+        }
+    }
+}
+
+TEST(TestCpuFpReferenceSdpaFp64, SinkTokenNegativeInfinityIsNoSink)
+{
+    Tensor<double> q({1, 2, 4, 8});
+    Tensor<double> k({1, 2, 4, 8});
+    Tensor<double> v({1, 2, 4, 8});
+    Tensor<double> o({1, 2, 4, 8});
+    Tensor<double> oSink({1, 2, 4, 8});
+    Tensor<float> lse({1, 2, 4, 1});
+    Tensor<float> lseSink({1, 2, 4, 1});
+    Tensor<float> sink({1, 2, 1, 1});
+
+    q.fillWithRandomValues(-1.0, 1.0, 410);
+    k.fillWithRandomValues(-1.0, 1.0, 411);
+    v.fillWithRandomValues(-1.0, 1.0, 412);
+    sink.fillWithValue(-std::numeric_limits<float>::infinity());
+
+    const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+        q, k, v, o, std::nullopt, noMask, false, &lse);
+    CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+        q, k, v, oSink, std::nullopt, noMask, false, &lseSink, nullptr, nullptr, nullptr, &sink);
+
+    for(int64_t h = 0; h < 2; ++h)
+    {
+        for(int64_t sq = 0; sq < 4; ++sq)
+        {
+            EXPECT_EQ(lseSink.getHostValue(0, h, sq, 0), lse.getHostValue(0, h, sq, 0));
+            for(int64_t dv = 0; dv < 8; ++dv)
+            {
+                EXPECT_EQ(oSink.getHostValue(0, h, sq, dv), o.getHostValue(0, h, sq, dv));
+            }
+        }
+    }
+}
+
+TEST(TestCpuFpReferenceSdpaFp64, SinkTokenFullyMaskedRow)
+{
+    // A fully masked row keeps only the sink's mass: O = 0 and LSE = sink
+    // (cuDNN's documented behaviour), instead of the -inf/NaN LSE without a sink.
+    Tensor<double> q({1, 1, 2, 2});
+    Tensor<double> k({1, 1, 2, 2});
+    Tensor<double> v({1, 1, 2, 2});
+    Tensor<double> o({1, 1, 2, 2});
+    Tensor<float> lse({1, 1, 2, 1});
+    Tensor<float> sink({1, 1, 1, 1});
+
+    q.fillWithValue(1.0);
+    k.fillWithValue(1.0);
+    v.fillWithValue(1.0);
+    sink.setHostValue(0.3f, 0, 0, 0, 0);
+
+    // Block every position for sq=0; sq=1 sees all positions.
+    Tensor<float> mask({2, 2});
+    mask.fillWithValue(-std::numeric_limits<float>::infinity());
+    mask.setHostValue(0.0f, 1, 0);
+    mask.setHostValue(0.0f, 1, 1);
+
+    const hipdnn_data_sdk::utilities::TensorBase<float>* maskPtr = &mask;
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, std::nullopt, maskPtr, false, &lse, nullptr, nullptr, nullptr, &sink);
+
+    EXPECT_EQ(o.getHostValue(0, 0, 0, 0), 0.0);
+    EXPECT_EQ(o.getHostValue(0, 0, 0, 1), 0.0);
+    EXPECT_FLOAT_EQ(lse.getHostValue(0, 0, 0, 0), 0.3f);
+
+    // sq=1: scores = [2, 2], sum = 2e^0 + e^(0.3-2) -> O = 2 / sum, LSE = 2 + log(sum)
+    const double sum = 2.0 + std::exp(0.3 - 2.0);
+    // Default ComputeDataType is float here, hence the looser tolerance.
+    EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), 2.0 / sum, 1e-5);
+    EXPECT_NEAR(lse.getHostValue(0, 0, 1, 0), 2.0 + std::log(sum), 1e-5);
+}
+
+TEST(TestCpuFpReferenceSdpaFp64, SinkTokenWrongShapeThrows)
+{
+    Tensor<double> q({1, 4, 2, 2});
+    Tensor<double> k({1, 2, 2, 2});
+    Tensor<double> v({1, 2, 2, 2});
+    Tensor<double> o({1, 4, 2, 2});
+    q.fillWithValue(1.0);
+    k.fillWithValue(1.0);
+    v.fillWithValue(1.0);
+
+    const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
+
+    // Sized by KV heads instead of Q heads.
+    Tensor<float> kvHeadSink({1, 2, 1, 1});
+    EXPECT_THROW((CpuFpReferenceSdpa::forward<double, double, double, double, double>(q,
+                                                                                      k,
+                                                                                      v,
+                                                                                      o,
+                                                                                      std::nullopt,
+                                                                                      noMask,
+                                                                                      false,
+                                                                                      nullptr,
+                                                                                      nullptr,
+                                                                                      nullptr,
+                                                                                      nullptr,
+                                                                                      &kvHeadSink)),
+                 std::invalid_argument);
+
+    // Rank-1 instead of [1, H, 1, 1].
+    Tensor<float> flatSink({4});
+    EXPECT_THROW((CpuFpReferenceSdpa::forward<double, double, double, double, double>(q,
+                                                                                      k,
+                                                                                      v,
+                                                                                      o,
+                                                                                      std::nullopt,
+                                                                                      noMask,
+                                                                                      false,
+                                                                                      nullptr,
+                                                                                      nullptr,
+                                                                                      nullptr,
+                                                                                      nullptr,
+                                                                                      &flatSink)),
+                 std::invalid_argument);
+}
+
+// ---------------------------------------------------------------------------
 // Backward pass tests
 //
 // These tests use Fp32 (unlike forward tests which use Fp64) because the GPU
