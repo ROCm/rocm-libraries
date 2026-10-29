@@ -13394,12 +13394,16 @@ namespace
 {
 // Records the plan handle of every backendExecute in call order and answers each elapsed-time
 // query with the time configured for the plan executed most recently (1 ms when none is
-// configured). `failCallIndex` (0-based) makes exactly that execute call fail.
+// configured). `failCallIndex` (0-based) makes exactly that execute call fail. Each device sync
+// records how many executes preceded it; `failSyncAfterExecutes` makes the sync that follows
+// that many executes fail.
 struct WinnerLastRecorder
 {
     std::vector<hipdnnBackendDescriptor_t> executedPlans;
     std::unordered_map<hipdnnBackendDescriptor_t, float> elapsedMsByPlan;
     int failCallIndex = -1;
+    std::vector<size_t> executesBeforeEachSync;
+    int failSyncAfterExecutes = -1;
 
     void install(::testing::NiceMock<Mock_hipdnn_backend>& backend)
     {
@@ -13429,6 +13433,17 @@ struct WinnerLastRecorder
                 }
                 *static_cast<float*>(out) = elapsedMs;
                 return HIPDNN_STATUS_SUCCESS;
+            });
+        ON_CALL(backend, backendSetAttribute(_, HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT, _, _, _))
+            .WillByDefault([this](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  const void*) {
+                executesBeforeEachSync.push_back(executedPlans.size());
+                return static_cast<int>(executedPlans.size()) == failSyncAfterExecutes
+                           ? HIPDNN_STATUS_INTERNAL_ERROR
+                           : HIPDNN_STATUS_SUCCESS;
             });
         // Every timed pass arms the stall gate; a backend that reports it unused makes autotune
         // discard the pass and re-measure unstalled, which would add executes to the sequence.
@@ -13495,6 +13510,53 @@ TEST_F(TestGraph, AutotuneExecutesTheWinnerLastWhenTheWinnerIsNotTheLastTimedPla
            GraphTestUtils::executionPlanHandleFor(3),
            GraphTestUtils::executionPlanHandleFor(1)};
     EXPECT_EQ(recorder.executedPlans, expectedCalls);
+
+    // A device sync follows the final execute, so the winner's output is complete on return.
+    ASSERT_FALSE(recorder.executesBeforeEachSync.empty());
+    EXPECT_EQ(recorder.executesBeforeEachSync.back(), recorder.executedPlans.size());
+}
+
+// A custom ranking function can pick a plan that is neither the fastest nor the last timed;
+// the final execute runs that plan, the one left active.
+TEST_F(TestGraph, AutotuneExecutesTheWinnerChosenByACustomRankingFunction)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    graph.injectValidCompiledPlan(/*engineId=*/1, /*workspaceSize=*/0, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/2, /*workspaceSize=*/0, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/3, /*workspaceSize=*/0, /*barred=*/false);
+
+    // Plan index 0 is the fastest; the ranking function puts plan index 1 first.
+    WinnerLastRecorder recorder;
+    recorder.elapsedMsByPlan = {{GraphTestUtils::executionPlanHandleFor(1), 1.0f},
+                                {GraphTestUtils::executionPlanHandleFor(2), 2.0f},
+                                {GraphTestUtils::executionPlanHandleFor(3), 3.0f}};
+    recorder.install(*_mockBackend);
+
+    AutotuneConfig config;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 1;
+    config.warmupIterations = 0;
+    config.rankingFn = [](std::vector<AutotuneResult>& ranked) {
+        std::stable_partition(ranked.begin(), ranked.end(), [](const AutotuneResult& r) {
+            return r.compiledPlanIndex == 1;
+        });
+    };
+
+    std::vector<AutotuneResult> results;
+    auto result = graph.autotune(_handle, winnerLastVariantPack(), nullptr, config, {}, &results);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    const std::vector<hipdnnBackendDescriptor_t> expectedCalls
+        = {GraphTestUtils::executionPlanHandleFor(1),
+           GraphTestUtils::executionPlanHandleFor(2),
+           GraphTestUtils::executionPlanHandleFor(3),
+           GraphTestUtils::executionPlanHandleFor(2)};
+    EXPECT_EQ(recorder.executedPlans, expectedCalls);
 }
 
 // A failure of the final winner execute is an autotune failure: the winner is already the
@@ -13545,6 +13607,42 @@ TEST_F(TestGraph, AutotuneReturnsTheErrorOfAFailedFinalWinnerExecuteAndKeepsTheW
     EXPECT_EQ(graph.getActivePlanIndex(), 2u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
     EXPECT_FALSE(storageWritten);
+    EXPECT_TRUE(results.empty());
+}
+
+// A device fault in the final winner run surfaces at the sync after it; autotune returns that
+// error, with the winner active and no results reported.
+TEST_F(TestGraph, AutotuneReturnsTheErrorOfAFailedSyncAfterTheFinalWinnerExecute)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    graph.injectValidCompiledPlan(/*engineId=*/1, /*workspaceSize=*/0, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/2, /*workspaceSize=*/0, /*barred=*/false);
+
+    // Plan index 1 is the fastest; only the sync after the winner's final execute (the third
+    // execute) fails.
+    WinnerLastRecorder recorder;
+    recorder.elapsedMsByPlan = {{GraphTestUtils::executionPlanHandleFor(1), 2.0f},
+                                {GraphTestUtils::executionPlanHandleFor(2), 1.0f}};
+    recorder.failSyncAfterExecutes = 3;
+    recorder.install(*_mockBackend);
+
+    AutotuneConfig config;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 1;
+    config.warmupIterations = 0;
+
+    std::vector<AutotuneResult> results;
+    auto result = graph.autotune(_handle, winnerLastVariantPack(), nullptr, config, {}, &results);
+
+    ASSERT_EQ(recorder.executedPlans.size(), 3u);
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_NE(result.get_message().find("device sync"), std::string::npos) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     EXPECT_TRUE(results.empty());
 }
 
@@ -13811,6 +13909,8 @@ TEST_F(TestGraph, ExhaustiveSweepExecutesTheWinnerLast)
     const std::vector<hipdnnBackendDescriptor_t> expectedCalls
         = {compiledPlanHandles[0], compiledPlanHandles[1], compiledPlanHandles[0]};
     EXPECT_EQ(recorder.executedPlans, expectedCalls);
+    ASSERT_FALSE(recorder.executesBeforeEachSync.empty());
+    EXPECT_EQ(recorder.executesBeforeEachSync.back(), recorder.executedPlans.size());
 }
 
 // Mock_hipdnn_backend leaves the exact-match cache write at the interface default, so a

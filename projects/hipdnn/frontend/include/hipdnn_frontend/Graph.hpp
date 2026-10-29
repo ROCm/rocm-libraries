@@ -2121,12 +2121,19 @@ private:
         // --- Run the winner last ---
         // The timed sweep leaves the last timed plan's output in the caller's buffers.
         // Executing the winner after the sweep (and after any stalled restart) makes those
-        // buffers hold the winner's output on success.
+        // buffers hold the winner's output on success. The sync makes that output complete
+        // on return, as the event-synchronized timed runs were, and reports a device fault
+        // in this run as the error of this call.
         auto winnerExecErr = detail::executeWithPlan(
             handle, *_compiledPlans[winnerPlanIndex].executionPlanDesc, variantPackDesc);
         if(winnerExecErr.is_bad())
         {
             return winnerExecErr;
+        }
+        auto winnerSyncErr = autotune::detail::syncDevice();
+        if(winnerSyncErr.is_bad())
+        {
+            return winnerSyncErr;
         }
 
         // --- Persist results ---
@@ -4004,8 +4011,10 @@ public:
      * Ranks plans by performance and sets the winner as the active plan.
      * Optionally persists results to a JSON config file.
      *
-     * The winner executes last, after every timed pass, so on success the caller's output
-     * buffers hold the winner's output. A failure of that final run is returned as the
+     * The winner executes last, after every timed pass, and this call waits for that run to
+     * finish. On success the caller's output buffers therefore hold the winner's output,
+     * unless the graph writes one of its own inputs: every run then reads what the previous
+     * one wrote. A failure of that final run, including a device fault, is returned as the
      * error of this call; the winner then stays the active plan, no results are persisted,
      * and @c results is not filled.
      *
@@ -4092,8 +4101,9 @@ public:
      * before benchmarking. Filtered plans appear in @c results (if requested)
      * with succeeded=false and an explanatory errorMessage.
      *
-     * As with the overload above, the winner executes last, so on success the caller's
-     * output buffers hold the winner's output; a failure of that final run is returned.
+     * As with the overload above, the winner executes last and this call waits for it, so on
+     * success the caller's output buffers hold the winner's output unless the graph writes
+     * one of its own inputs; a failure of that final run is returned.
      *
      * @param handle The hipDNN handle
      * @param variantPack Map from tensor UID to device memory pointers
@@ -4235,8 +4245,9 @@ public:
      * lookups reject the entry. A cache-write failure is logged and does not fail this
      * call.
      *
-     * The winner executes last, so on success the caller's output buffers hold the
-     * winner's output. A failure of that final run is returned, and nothing is cached.
+     * The winner executes last and this call waits for it, so on success the caller's output
+     * buffers hold the winner's output unless the graph writes one of its own inputs. A
+     * failure of that final run is returned, and nothing is cached.
      *
      * @param handle The hipDNN handle
      * @param variantPack Map from tensor UID to device memory pointers
