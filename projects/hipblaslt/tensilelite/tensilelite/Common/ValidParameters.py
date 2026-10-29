@@ -419,10 +419,12 @@ validParameters = { # we need to make sure this matches develop
     # Not applied with 1LDSBuffer=1, LocalSplitU>1, subtile, or sparse.
     #
     # Values:
-    #   -1 = auto: enable only where it needs no extra LDS reserved.
-    #    0 = off (default): baseline layout.
-    #    1 = on: enable wherever valid, including cases that reserve more LDS to reach a segment
-    #            boundary (needs PrefetchGlobalRead=2).
+    #    0 = off (default).
+    #    1 = require interleave; allow additional LDS up to MaxLDS.
+    #        Reject the kernel candidate if the layout or buffering is unsupported.
+    #   -1 = auto: enable only when supported and LDS usage does not exceed mode 0;
+    #        otherwise disable interleave.
+    #
     # Recommended: set [0, 1] when tuning to compare baseline vs interleaved.
     "LDSSegmentInterleave": [-1, 0, 1],
     # LDSSegmentBRotate (gfx1250, needs LDSSegmentInterleave=1 aligned [2,2] layout): split B into

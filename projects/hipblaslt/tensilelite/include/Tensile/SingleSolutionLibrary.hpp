@@ -193,7 +193,7 @@ namespace TensileLite
                     // SynchronizerSizeCheck / LeadingFree1SizesGreaterOrEqual on this local
                     // problem copy, so it stays behind the USO check with softwarePredicate().
                     bool swMatch;
-                    if(problem.getParams().uniformSummationOrder())
+                    if(problem.getParams().uniformSummationOrder() != 0)
                     {
                         problem.setGroupedGemm(true);
                         swMatch = softwarePredicate(SolutionLibrarySearchType::DEFAULT,
@@ -307,7 +307,7 @@ namespace TensileLite
                         // softwarePredicate() widening stay behind the USO check, so with USO off
                         // this stays the problemPredicate && taskPredicate filter.
                         bool swMatch;
-                        if(problem.getParams().uniformSummationOrder())
+                        if(problem.getParams().uniformSummationOrder() != 0)
                         {
                             problem.setGroupedGemm(true);
                             swMatch
