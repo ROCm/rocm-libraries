@@ -501,8 +501,9 @@ struct UniversalGemmKernel
     /// @details The TDM epilogues overwrite E, so split-K is not possible, and the pipelines
     ///          need at least one K tile. TDM addresses global memory in elements from a byte
     ///          base address, so A, B and E must be aligned to their element size.
-    ///          IsSupportedArgument returns true for TDM pipelines, so each hosting kernel calls
-    ///          this (and IsTdmDeviceSupported) instead.
+    ///          IsSupportedArgument skips the layout and vector checks for TDM pipelines and
+    ///          returns this instead; the other kernels that host a TDM pipeline call this (and
+    ///          IsTdmDeviceSupported) themselves.
     CK_TILE_HOST static bool IsTdmArgumentSupported(const char* op_name,
                                                     index_t k_batch,
                                                     index_t K,
@@ -718,7 +719,11 @@ struct UniversalGemmKernel
 
         if constexpr(has_skip_check_valid_launch_params::value)
         {
-            return true;
+            // A TDM pipeline paired with a split-K-capable epilogue (comp_tdm_v3 with CShuffle)
+            // passes the EpilogueSupportsSplitK guard above, but no TDM pipeline is tested with
+            // k_batch != 1, so apply the same TDM checks as the kernels that host one.
+            return IsTdmArgumentSupported(
+                "GEMM", kargs.k_batch, kargs.K, kargs.as_ptr[0], kargs.bs_ptr[0], kargs.e_ptr);
         }
 
         const auto vectorSizeA = is_wave32() ? GemmPipeline::template GetVectorSizeA<true>()

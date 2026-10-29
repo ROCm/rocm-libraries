@@ -13,6 +13,8 @@
 // (kTensorWaitAllWaves = false) and with the refill issued right after the arrive
 // (kRefillPoint = AfterArrive).
 //
+// Split-K (k_batch != 1) must be rejected by IsSupportedArgument.
+//
 // Shapes: K = 256, 512 and 768 (one, two and three K tiles: both tail paths, with and without the
 // hot loop) and 512x512x1024 in test_gemm_pipeline_comp_tdm_v3_wmma.cpp (SMOKE_TEST); K = 65536 (a
 // long K loop with the real K stride) in test_gemm_pipeline_comp_tdm_v3_longk_wmma.cpp
@@ -97,7 +99,7 @@ struct V3Config
 };
 
 template <typename Config>
-float run_v3_gemm(const ck_tile::GemmHostArgs& args)
+struct V3KernelOf
 {
     using TileShape =
         ck_tile::TileGemmShape<ck_tile::sequence<Config::TileM, Config::TileN, Config::TileK>,
@@ -141,7 +143,15 @@ float run_v3_gemm(const ck_tile::GemmHostArgs& args)
                                                              1,     // BlockedXDLN_PerWarp
                                                              true>; // DoubleSmemBuffer
     using Epilogue        = ck_tile::CShuffleEpilogue<EpilogueProblem>;
-    using Kernel          = ck_tile::GemmKernel<Partitioner, Pipeline, Epilogue>;
+    using type            = ck_tile::GemmKernel<Partitioner, Pipeline, Epilogue>;
+};
+template <typename Config>
+using V3Kernel = typename V3KernelOf<Config>::type;
+
+template <typename Config>
+float run_v3_gemm(const ck_tile::GemmHostArgs& args)
+{
+    using Kernel = V3Kernel<Config>;
 
     auto kargs = Kernel::MakeKernelArgs(args);
     EXPECT_TRUE(Kernel::IsSupportedArgument(kargs));
@@ -245,6 +255,20 @@ class TestCkTileGemmPipelineCompTDMV3 : public ::testing::Test
             }
         }
         EXPECT_EQ(bad, 0u) << "mismatches at M=" << M << " N=" << N << " K=" << K;
+    }
+
+    // Host check only, no launch: k_batch = 1 is accepted and split-K is rejected. The CShuffle
+    // epilogue has a split-K store path, so this rejection is the TDM check, not the epilogue's.
+    void CheckSplitKRejected()
+    {
+        using Kernel = V3Kernel<Config>;
+        for(ck_tile::index_t k_batch : {1, 2, 4})
+        {
+            const ck_tile::GemmHostArgs args(
+                nullptr, nullptr, nullptr, k_batch, 512, 512, 1024, 1024, 1024, 512);
+            EXPECT_EQ(Kernel::IsSupportedArgument(Kernel::MakeKernelArgs(args)), k_batch == 1)
+                << "k_batch=" << k_batch;
+        }
     }
 };
 

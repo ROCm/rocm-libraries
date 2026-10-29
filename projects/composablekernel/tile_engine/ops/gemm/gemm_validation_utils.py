@@ -58,6 +58,9 @@ PIPELINE_EXTRA_WARP_COMBINATIONS = {GEMM_TDM_V3_PIPELINE: {"gfx1250": [[4, 4, 1]
 GFX1250_TDM_V3_WARPS = ([2, 2, 1], [4, 4, 1])
 GFX1250_TDM_V3_DTYPES = ("fp8", "bf8")
 GFX1250_TDM_V3_OPS = ("gemm_universal",)
+# A row-major, B column-major, C row-major: the only tested layout; the other A/B
+# layouts spill VGPRs in the K loop at the 16-wave tile.
+GFX1250_TDM_V3_LAYOUT = "rcr"
 
 
 def tdm_pipeline_epilogue(pipeline):
@@ -67,9 +70,17 @@ def tdm_pipeline_epilogue(pipeline):
 
 
 def gfx1250_tdm_v3_reject_reason(
-    pipeline, a_datatype, b_datatype, warp_m, warp_n, warp_k, kernel_name_prefix=""
+    pipeline,
+    a_datatype,
+    b_datatype,
+    warp_m,
+    warp_n,
+    warp_k,
+    kernel_name_prefix="",
+    layout="",
 ):
-    """Reason string if a comp_tdm_v3 config is outside what it supports, else ""."""
+    """Reason string if a comp_tdm_v3 config is outside what it supports, else "".
+    An empty layout is not checked."""
     if pipeline != GEMM_TDM_V3_PIPELINE:
         return ""
     if kernel_name_prefix and kernel_name_prefix not in GFX1250_TDM_V3_OPS:
@@ -83,6 +94,11 @@ def gfx1250_tdm_v3_reject_reason(
         return (
             f"{pipeline} supports the 2x2x1 and 4x4x1 wave maps only, got "
             f"{warp_m}x{warp_n}x{warp_k}"
+        )
+    if layout and layout != GFX1250_TDM_V3_LAYOUT:
+        return (
+            f"{pipeline} supports layout {GFX1250_TDM_V3_LAYOUT!r} only (the pipeline "
+            f"static_asserts it), got {layout!r}"
         )
     return ""
 
@@ -1416,6 +1432,7 @@ def is_tile_config_valid(
                 warp_n,
                 warp_k,
                 kernel_name_prefix,
+                layout,
             )
         )
         if dtype_reason:

@@ -710,11 +710,16 @@ _V3_CONFIG = os.path.join(
 
 
 def _v3_tile_ok(
-    pipeline, tile=None, dtype="fp8", arch="gfx1250", prefix="gemm_universal"
+    pipeline,
+    tile=None,
+    dtype="fp8",
+    arch="gfx1250",
+    prefix="gemm_universal",
+    layout="rcr",
 ):
     t = dict(_V3_TILE, **(tile or {}))
     args = [t[k] for k in _V3_TILE] + [dtype, dtype, "bf16"]
-    return vu.is_tile_config_valid(*args, pipeline, "rcr", arch, prefix)
+    return vu.is_tile_config_valid(*args, pipeline, layout, arch, prefix)
 
 
 class TestCompTdmV3(unittest.TestCase):
@@ -771,6 +776,27 @@ class TestCompTdmV3(unittest.TestCase):
         )
         self.assertEqual(
             vu.gfx1250_tdm_v3_reject_reason("comp_tdm", "fp16", "fp16", 4, 2, 1), ""
+        )
+
+    def test_v3_rcr_only(self):
+        self.assertTrue(_v3_tile_ok("comp_tdm_v3", layout="rcr"))
+        for layout in ("rrr", "crr", "ccr", "rcc"):
+            self.assertFalse(_v3_tile_ok("comp_tdm_v3", layout=layout), layout)
+            self.assertIn(
+                "'rcr' only",
+                vu.gfx1250_tdm_v3_reject_reason(
+                    "comp_tdm_v3", "fp8", "fp8", 4, 4, 1, layout=layout
+                ),
+            )
+        # An empty layout is not checked; other pipelines are not affected.
+        self.assertEqual(
+            vu.gfx1250_tdm_v3_reject_reason("comp_tdm_v3", "fp8", "fp8", 4, 4, 1), ""
+        )
+        self.assertEqual(
+            vu.gfx1250_tdm_v3_reject_reason(
+                "comp_tdm_v2", "fp8", "fp8", 2, 2, 1, layout="rrr"
+            ),
+            "",
         )
 
     def test_v3_lds_budget(self):
