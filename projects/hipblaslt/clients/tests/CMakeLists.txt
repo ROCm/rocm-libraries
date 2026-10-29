@@ -50,11 +50,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
       "${PROJECT_BINARY_DIR}/staging"
       "${HIPBLASLT_CTEST_INSTALL_FILE}"
     )
-    # hipblaslt-test-online-tuner is deliberately not registered here, for the
-    # reason clients/CMakeLists.txt gives for hipblaslt-test-tuning-store:
-    # TheRock shards hipBLASLt by ctest entry and by gtest case at once, so a
-    # second labelled entry leaves some cases of both binaries on no shard.
-    # online_tuner_test_categories.yaml records the categories it would carry.
     # Install CTestTestfile.cmake to bin/hipblaslt/ for TheRock (relocatable tests; run ctest from that dir)
     install(
         FILES "${HIPBLASLT_CTEST_INSTALL_FILE}"

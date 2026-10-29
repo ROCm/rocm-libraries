@@ -51,6 +51,23 @@ if(NOT WIN32)
     )
 endif()
 
+# The online tuner's bookkeeping, against a private copy of the tuner built
+# from OnlineTuner.cpp and the onlineTunerConfig() the test file defines. It is
+# compiled in here, not built as its own binary, so hipBLASLt keeps one ctest
+# entry and test_categories.yaml selects the cases with "*OnlineTuner.*", for
+# the reason given on hipblaslt-test-tuning-store in clients/CMakeLists.txt.
+# The private copy does not meet the library's: libhipblaslt has hidden
+# visibility and exports neither. Coverage builds link the library's own
+# objects into hipblaslt-test, where the two copies would be duplicate
+# definitions, so they leave these cases out; the coverage job's filter does
+# not select them either.
+if(NOT HIPBLASLT_ENABLE_COVERAGE)
+    target_sources(hipblaslt-test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/online_tuner_test.cpp
+        ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/OnlineTuner.cpp
+    )
+endif()
+
 if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
     target_sources(hipblaslt-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/fused_a2a_gtest.cpp

@@ -4,13 +4,24 @@
 // Tests for the online tuner's bookkeeping: what registering a problem does,
 // how exploration ends, and what the lock-free resolution table answers. The
 // tuner carries no Tensile types, so like the store tests these need neither
-// the solution library nor the hooks hipblaslt-test uses.
+// the solution library nor the hooks the rest of hipblaslt-test uses.
+//
+// They run inside hipblaslt-test, against a private copy of the tuner:
+// OnlineTuner.cpp is compiled into the test binary alongside this file, and
+// the onlineTunerConfig() at the bottom of this file is what that copy is
+// built from. The library's own tuner is a different object. libhipblaslt
+// builds with hidden visibility and exports neither the class nor
+// onlineTunerConfig(), so the two copies never meet, and nothing here changes
+// what the library's tuner does in the cases that drive it through the API.
+// See clients/tests/src/CMakeLists.txt.
 //
 // Most need no device either, because they are decided before any HIP call.
 // The ones gathered at the end of the file do: advancing the rotation means
 // issuing a candidate, issuing one means acquiring an event pair, and the
 // event pool is itself under test. Those skip where there is no device rather
-// than passing for the wrong reason.
+// than passing for the wrong reason. The one case that needs two devices is
+// in the OnlineTuner_multi_gpu suite, so CI runs it in its multi_gpu tier
+// rather than skipping it on every single-GPU runner.
 
 #include "OnlineTuner.hpp"
 
@@ -1350,6 +1361,14 @@ namespace
             const int liveBefore = OnlineTunerTestAccess::livePairs(tuner(), id);
             tuner().harvestPending(key);
 
+            // The harvest reads a fresh pair that was never recorded with
+            // hipEventElapsedTime, which fails, and the failure stays in this
+            // thread's HIP last-error state. These cases share hipblaslt-test
+            // with the matmul cases, which check hipGetLastError() after their
+            // allocations, so it is cleared here rather than left for whichever
+            // case runs next to report as its own.
+            static_cast<void>(hipGetLastError());
+
             EXPECT_EQ(OnlineTunerTestAccess::livePairs(tuner(), id), liveBefore - 1)
                 << "key " << key << ": a rejected pair was not retired";
 
@@ -1489,7 +1508,7 @@ namespace
     // recycled -- and hipEventRecord rejects a pair belonging to another
     // device with hipErrorInvalidResourceHandle, measured on gfx950, which the
     // production launch then has to carry.
-    TEST(OnlineTuner, APooledEventPairIsNotHandedToAnotherDevice)
+    TEST(OnlineTuner_multi_gpu, APooledEventPairIsNotHandedToAnotherDevice)
     {
         if(deviceCount() < 2)
             GTEST_SKIP() << "needs two HIP devices";
@@ -1538,9 +1557,10 @@ namespace
 } // namespace
 
 // The configuration the tuner is built with, which inside hipBLASLt comes from
-// the tuning mode and TuningPolicy. Supplied here instead, so these tests pin
-// the bookkeeping to known values and the tuner stays linkable without the
-// library, a device or an environment.
+// the tuning mode and TuningPolicy. Supplied here instead, for the test
+// binary's private copy of the tuner, so these tests pin the bookkeeping to
+// known values whatever the environment says. The library's copy is built from
+// its own definition and never sees this one.
 rocblaslt::OnlineTunerConfig rocblaslt::onlineTunerConfig()
 {
     OnlineTunerConfig config;
@@ -1548,10 +1568,4 @@ rocblaslt::OnlineTunerConfig rocblaslt::onlineTunerConfig()
     config.topK    = kTopK;
     config.repeats = kRepeats;
     return config;
-}
-
-int main(int argc, char** argv)
-{
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
 }
