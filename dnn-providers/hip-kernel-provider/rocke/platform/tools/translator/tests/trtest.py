@@ -143,6 +143,32 @@ def platform_probe(
     return env
 
 
+def overlay_root(dst: Path, files: dict[str, str]) -> Path:
+    """A rocKE root at dst that reads as ROCKE with files (path relative to
+    the root -> text) added or replaced: symlinks to the real tree everywhere
+    else. The hand-ABI tests put a reviewed header in it."""
+    dirs = set()
+    for rel in files:
+        p = Path(rel).parent
+        while str(p) != ".":
+            dirs.add(p)
+            p = p.parent
+
+    def fill(d: Path, rel: Path):
+        d.mkdir(parents=True, exist_ok=True)
+        for f in (ROCKE / rel).iterdir():
+            r = rel / f.name
+            if r in dirs:
+                fill(d / f.name, r)
+            elif str(r) not in files and f.name != "__pycache__":
+                (d / f.name).symlink_to(f)
+
+    fill(dst, Path("."))
+    for rel, text in files.items():
+        (dst / rel).write_text(text)
+    return dst
+
+
 def strip_holes(cpp: str) -> str:
     """The source without the #error line of each hole (it may be wrapped)."""
-    return re.sub(r'#error (?:\\\n\s*)?".*"\n', "", cpp)
+    return re.sub(r'#error\s*(?:\\\n\s*)?".*"\n', "", cpp)

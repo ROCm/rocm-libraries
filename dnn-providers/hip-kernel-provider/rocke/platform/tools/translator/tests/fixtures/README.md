@@ -6,6 +6,7 @@
 | `data/facts/` | Recorded types of addr, valu and counted (`tr.record`), keyed by qualname. |
 | `data/abi/` | `peers.json` and counted's kept names. |
 | `data/maps/` | `sigmap.json` and `twin_map.json` mined from a tree with the hand C++ twins of these modules, cut down to the entries of addr, valu and counted, frag's `eval_layout` (the one name valu imports from it) and the IR builder methods the fixture modules call. |
+| `hand_abi/` | A reviewed hand header, `instance_batched_transpose.h` of PR #14538 (the C++ twin of the batched 2D transpose), for the hand-ABI tests: `trtest.overlay_root` puts it into a copy of the tree, which the translator reads as the module's existing ABI. |
 | `golden/` | The expected headers and sources (`.golden`, so no formatter touches them). |
 
 The pinned modules do not follow the live `library/`: the test checks the

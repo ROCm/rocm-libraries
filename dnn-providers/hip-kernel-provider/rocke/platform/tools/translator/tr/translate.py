@@ -550,6 +550,27 @@ def lower_function(mod: Module, fn: ast.FunctionDef, sig: Sig) -> list[str]:
     return out
 
 
+def ok_reason_body(call: str) -> list[str]:
+    """The body of a C validity gate `bool f(..., char* reason, size_t
+    reason_cap)` whose Python returns (ok, reason): the reason copied into the
+    caller's buffer (truncated, NUL-terminated), ok returned. Both shim paths
+    use it inside py_adapt::with_reason (a raise: its text, false)."""
+    return [
+        f"const auto res_ = {call};",
+        "if(reason != nullptr && reason_cap > 0) {"
+        " const std::string why_(std::get<1>(res_));"
+        " strncpy(reason, why_.c_str(), reason_cap - 1);"
+        " reason[reason_cap - 1] = '\\0'; }",
+        "return std::get<0>(res_);",
+    ]
+
+
+def is_ok_reason(t: str) -> bool:
+    """A Python (ok, reason) result: std::tuple<bool, str>."""
+    items = T.tuple_items(t)
+    return items is not None and len(items) == 2 and items[0] == T.BOOL and T.is_str(items[1])
+
+
 def make_shim(
     env: Env,
     mod: Module,
@@ -635,6 +656,10 @@ def make_shim(
         fail = "-1" if T.is_int(cf.ret) else "false"
         val = "true" if sig.ret == T.VOID else None
         body_ = f"{call}; return true;" if val else f"return ({cf.ret}){call};"
+        if cf.ret == "bool" and is_ok_reason(sig.ret):
+            body_ = " ".join(ok_reason_body(call))  # the (ok, reason) validity gate
+        elif T.tuple_items(sig.ret) is not None:
+            raise Refuse(fn, f"shim: Python return {sig.ret} as C {cf.ret}")
         ps = [f"{t} {n}" for t, n in cf.params]
         return [
             f"{cf.ret} {cf.name}({', '.join(ps)})",
@@ -905,14 +930,7 @@ def make_gen_shim(
         elif roles.get("reason") == "reason_str":
             # (ok, reason) as the validity-gate ABI: the reason into the caller's
             # buffer, ok returned (a raise: with_reason writes its text, false)
-            body.append(f"const auto res_ = {call};")
-            body.append(
-                "if(reason != nullptr && reason_cap > 0) {"
-                " const std::string why_(std::get<1>(res_));"
-                " strncpy(reason, why_.c_str(), reason_cap - 1);"
-                " reason[reason_cap - 1] = '\\0'; }"
-            )
-            body.append("return std::get<0>(res_);")
+            body += ok_reason_body(call)
         elif sig.ret == T.VOID:
             body.append(f"{call};")
         elif "_tuple_" in cf.ret and (
