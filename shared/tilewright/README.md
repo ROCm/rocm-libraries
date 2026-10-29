@@ -253,10 +253,16 @@ total, over every model and candidate set of the process, is within the cache
 limit (`set_cache_limit`; 1 GiB unless `TILEWRIGHT_CACHE_MB` sets it). Past it,
 the least recently used of them are released and built again from the packed
 weights when a ranking needs them, so rankings are the same under any limit;
-only their first use after a release takes longer. Outside the limit,
-`CandidateSet::prepare()` keeps a copy of what rankings of a cell's whitelist
-read for as long as the candidate set lives, and each thread that ranks keeps
-its scratch arrays in one 2 MiB block, both in memory of `allocate_huge_pages`.
+only their first use after a release takes longer. `CandidateSet::prepare()`
+keeps a copy of what rankings of a cell's whitelist read for as long as the
+candidate set lives, and each thread that ranks keeps its scratch arrays in one
+2 MiB block until it exits, both in memory of `allocate_huge_pages`; the cache
+cannot release either, so neither counts against the limit or in
+`cache_usage()`. The thread that calls `prepare()` writes the copy, except the
+kernel part of the interaction features when that part is built later: the
+thread that builds it then copies it in. A thread's first ranking takes its
+block. Rankings read the copy bit for bit as the data it copies, so a candidate
+set ranks alike prepared or not.
 
 ## Model files (MLREC_v2)
 
@@ -417,11 +423,19 @@ embedding-only stage), with the group's first config in pool order. Since
 `plan` is on the ranking's path, a launch model should hold what it reads of
 each kernel (by `Config::index`, prepared with the pool, or from the
 framework's own kernel struct) instead of searching `Config::attributes` by
-name per call; `hipblaslt_launch::Launch` takes the pool's configs for this. A model
-must be served with the plans it was trained with;
-the training pipeline computes hipBLASLt's (`training_pipeline/lib/hipblaslt_launch.py`),
-and TensileLite's adapter must return the same plans from TensileLite's launch code.
-`LaunchModel::id()` names the rule and its version (empty by default); the
+name per call; `hipblaslt_launch::Launch` takes the pool's configs for this.
+`prefetch(config)` lets a launch model ask the memory system for what `plan`
+will read of `config` without waiting for it: in an engine built with
+`TW_LEVER_PREFETCH` (see Building and testing), a ranking whose first tier is
+a cell whitelist calls it during the query tower for the first config of each
+key of that tier, before it asks for their plans. It must not change what
+`plan` or `launch_key` return and must not throw; the default asks for
+nothing.
+
+A model must be served with the plans it was trained with; the training
+pipeline computes hipBLASLt's (`training_pipeline/lib/hipblaslt_launch.py`),
+and TensileLite's adapter must return the same plans from TensileLite's launch
+code. `LaunchModel::id()` names the rule and its version (empty by default); the
 pipeline records it as the model's `launch_model` provenance, and a
 `CandidateSet` built on a model that records one throws
 `std::invalid_argument` unless `PoolOptions::launch` has that id. hipBLASLt's
@@ -684,14 +698,21 @@ engine and for whatever includes its private headers. CMake keeps an
 option's cached value, so a build directory configured while the options
 were off by default, a hipBLASLt one included, stays without them when its
 sources update: configure it again with `-DTILEWRIGHT_LEVER_PREFETCH=ON
--DTILEWRIGHT_LEVER_MEMO=ON`, or use a new build directory.
+-DTILEWRIGHT_LEVER_MEMO=ON`, or use a new build directory. The copy that
+`CandidateSet::prepare()` keeps and the threads' scratch blocks (see Memory)
+are not such options but part of every build: rankings read the copy bit for
+bit as the data it copies, and the scratch arrays hold the same values
+wherever their memory comes from.
 
 - `TW_LEVER_PREFETCH`: a ranking whose first tier is a cell whitelist asks,
   as it starts, for the scattered per-key data it is about to read and for
   the query tower's tensors, and during the query tower for the whitelisted
-  keys' configs and kernel features and the scoring tensors, so that a call
-  with cold caches waits less. As it changes no result, no test can see it:
-  only timing ranking calls with cold caches shows whether it still helps.
+  keys' configs and kernel features, the scoring tensors and, through
+  `LaunchModel::prefetch`, what the launch model's `plan` reads of those keys,
+  so that a call with cold caches waits less. As it changes no result, no
+  test can see what it brings into the caches (`tests/test_v3.cpp` checks
+  only which configs a launch model is asked to prefetch): only timing
+  ranking calls with cold caches shows whether it still helps.
   It asks for data that a call with warm caches already holds, so it costs
   such a call a little; turn it off where warm calls matter more.
 - `TW_LEVER_MEMO`: when the thread's last ranking scored a cell whitelist

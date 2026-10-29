@@ -816,8 +816,10 @@ struct Scratch {
   } memo;
 #endif
 
-  // The thread's ScratchBlock is made before the scratch, so it outlives the
-  // arrays at thread exit.
+  // Constructing the thread's ScratchBlock here, before this constructor
+  // completes, destroys it after the scratch when the thread exits
+  // (thread_local objects are destroyed in the reverse order of their
+  // construction), so the arrays are always freed into a live block.
   Scratch() { scratch_block(); }
 
   // The epoch of a new call over `nk` keys.
