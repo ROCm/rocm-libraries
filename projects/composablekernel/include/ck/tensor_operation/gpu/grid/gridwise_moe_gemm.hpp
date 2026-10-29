@@ -326,6 +326,19 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
     static constexpr index_t KLane =
         mfma_selector::GetKPerXdlops() / mfma_selector::GetK1PerXdlops();
 
+    // N padding needs whole 16-row blocks of weights, so N must be a multiple of 8 for gate and up
+    // weights and of 16 otherwise. Columns past N read the scale of the last real column.
+    static constexpr bool PadsN =
+        GemmSpec == tensor_operation::device::GemmSpecialization::NPadding ||
+        GemmSpec == tensor_operation::device::GemmSpecialization::MNPadding ||
+        GemmSpec == tensor_operation::device::GemmSpecialization::NKPadding ||
+        GemmSpec == tensor_operation::device::GemmSpecialization::MNKPadding;
+    static constexpr bool PadsK =
+        GemmSpec == tensor_operation::device::GemmSpecialization::KPadding ||
+        GemmSpec == tensor_operation::device::GemmSpecialization::MKPadding ||
+        GemmSpec == tensor_operation::device::GemmSpecialization::NKPadding ||
+        GemmSpec == tensor_operation::device::GemmSpecialization::MNKPadding;
+
     // A 16-byte FP8 K vector holds 16 elements, and a half-width one holds 8.
     static constexpr index_t FP8KVec     = 16;
     static constexpr index_t FP8HalfKVec = FP8KVec / 2;
@@ -337,9 +350,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
 #else
         (is_same_v<remove_cvref_t<BDataType>, f8_t> ||
          is_same_v<remove_cvref_t<BDataType>, bf8_t>) &&
-        BK1Value == FP8HalfKVec &&
-        GemmSpec != tensor_operation::device::GemmSpecialization::Default &&
-        KPerBlock % (KLane * FP8KVec) == 0;
+        BK1Value == FP8HalfKVec && (PadsN || PadsK) && KPerBlock % (KLane * FP8KVec) == 0;
 #endif
     static constexpr index_t KPack = math::max(
         math::max(math::lcm(AK1Number, BK1Number), mfma_selector::selected_mfma.k_per_blk),
@@ -374,13 +385,6 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
     static constexpr index_t BThreadKVec = BSplitKPack ? KPack / KGroup : BK1Value;
 
     static constexpr index_t NLane = NPerXdl;
-    // N padding lets N be any multiple of 8.
-    // Columns past N read the scale of the last real column.
-    static constexpr bool PadsN =
-        GemmSpec == tensor_operation::device::GemmSpecialization::NPadding ||
-        GemmSpec == tensor_operation::device::GemmSpecialization::MNPadding ||
-        GemmSpec == tensor_operation::device::GemmSpecialization::NKPadding ||
-        GemmSpec == tensor_operation::device::GemmSpecialization::MNKPadding;
     static constexpr index_t NWave = NPerBlock / NPerXdl / NXdlPerWave;
     // static constexpr index_t NumTokens = 1;
     static constexpr index_t SortedTileSize = MPerBlock;
@@ -597,8 +601,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                      GemmSpec == GemmSpecialization::NKPadding ||
                      GemmSpec == GemmSpecialization::MNKPadding)
         {
-            // Address each row, so N only needs to be a multiple of 8 and the gate and up halves
-            // may share a row block. Rows past N read as zeros.
+            // Address each row, so the gate and up halves may share a row block.
+            // Rows past N read as zeros.
             constexpr index_t KVec = BSplitKPack ? BK1Value : KPack / KGroup;
             constexpr index_t KSub = KPack / KGroup / KVec;
             static_assert(NkSwizzleNumber == KLane * NLane * KSub * KVec,
