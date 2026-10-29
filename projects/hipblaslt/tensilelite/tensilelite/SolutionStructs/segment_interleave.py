@@ -46,13 +46,15 @@ internal padding. If fA + fB < 64 KiB, insert a gap after [A0][B0] (aligned).
 Otherwise the one-buffer order needs no gap (tight).
 Pairing can still add gaps; "tight" describes the one-buffer order, not the final
 ping/pong allocation. See paired_buffer_reason() for supported buffering settings.
-StreamK and Persistent DataParallel use the same paired placement. Prefetching
-across persistent tiles remains unsupported by paired_buffer_reason().
+StreamK and Persistent DataParallel use the same paired placement, except MX
+kernels with shadow init, which keep separate ping/pong blocks (see
+persistent_keeps_unpaired()). Prefetching across persistent tiles remains
+unsupported by paired_buffer_reason().
 
 For problems with both MX scales, buffer placement is:
   Non-TDMSplit tight, with supported pairing:
     [all paired A/B data][MXSA ping][MXSA pong][MXSB ping][MXSB pong]
-  Aligned or TDMSplit interleave:
+  Aligned, TDMSplit, or persistent MX with shadow init:
     ping: [interleaved A/B data][MXSA][MXSB]
     pong: [interleaved A/B data][MXSA][MXSB]
 
@@ -535,6 +537,17 @@ def paired_buffer_reason(state):
     if state.get("LocalSplitU", 1) != 1 or state.get("NumWaveSplitK", 1) > 1:
         return "split-K LDS layout is not supported"
     return None
+
+
+def persistent_keeps_unpaired(state):
+    """Whether a persistent kernel keeps the interleave's separate ping/pong blocks.
+
+    Pairing reserves a per-wave swap-mask SGPR for each descriptor set (A/B, and
+    the MX scales). Persistent MX kernels with shadow init can already sit at the
+    SGPR limit, so they keep the unpaired layout instead of failing code generation.
+    """
+    pt = state["ProblemType"]
+    return bool(pt["MXBlockA"] or pt["MXBlockB"]) and not state["ForceDisableShadowInit"]
 
 
 def paired_buffer_offsets(state, isolate_operands=False):

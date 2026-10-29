@@ -80,7 +80,8 @@ from .lds_layout import format_lds_layout
 from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget, \
   b_rotate_reason as segBRotateReason, \
   paired_buffer_reason as segPairedReason, paired_buffer_offsets as segPairedOffsets, \
-  paired_buffer_layout_reason as segPairedLayoutReason
+  paired_buffer_layout_reason as segPairedLayoutReason, \
+  persistent_keeps_unpaired as segPersistentKeepsUnpaired
 from ..Toolchain.Component import Assembler
 from ..Components.CustomSchedule import hasCustomSchedule
 
@@ -6686,7 +6687,10 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "LDSSegmentBRotate: %s" % _bRotReason)
         return
     # Tight layouts pair each component's ping/pong buffers, including persistent kernels.
-    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and not _segAligned:
+    # Persistent kernels that cannot afford the swap-mask SGPRs skip this block and
+    # keep their interleave offsets and buffer swaps; rejecting would drop them.
+    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and not _segAligned \
+        and not (isPersistent(state) and segPersistentKeepsUnpaired(state)):
       _pairedReason = None if state["LDSSegmentBRotate"] else segPairedReason(state)
       if _pairedReason is None:
         _pairedOffsets = segPairedOffsets(state)

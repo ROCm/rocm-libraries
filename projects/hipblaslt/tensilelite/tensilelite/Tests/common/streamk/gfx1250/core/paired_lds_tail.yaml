@@ -6,7 +6,9 @@
 # resolve pairedBuffers=True (checked by test_segment_interleave_policy.py).
 # K includes tail-only, complete unrolls, odd/even unroll counts plus a tail,
 # M/N edges, and a larger tile grid under normal runtime grid selection.
-# Random MX scales expose misplaced scale-buffer writes.
+# Random MX scales expose misplaced scale-buffer writes. Uniform summation order
+# is off, as in hipBLASLt by default: requesting it refuses StreamK MX launches
+# whose scales are not HostPreSwizzle, which gfx1250 TDM scale loads cannot use.
 
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030,
@@ -22,6 +24,7 @@ GlobalParameters:
   CpuThreads: 4
   PrintSolutionRejectionReason: true
   PrintLevel: 2
+  UniformSummationOrder: 0
   DataInitTypeA: 3
   DataInitTypeB: 3
   DataInitTypeC: 3
@@ -79,7 +82,7 @@ BenchmarkProblems:
       - Exact: [512, 640, 1, 512]
       - Exact: [512, 640, 1, 544]
       - Exact: [512, 640, 1, 800]
-      - Exact: [257, 193, 1, 288]
+      - Exact: [260, 193, 1, 288]
       - Exact: [2048, 2048, 1, 288]
 - - OperationType: GEMM
     DataType: F8
@@ -183,5 +186,5 @@ BenchmarkProblems:
       - Exact: [512, 640, 1, 1024]
       - Exact: [512, 640, 1, 1056]
       - Exact: [512, 640, 1, 1568]
-      - Exact: [257, 193, 1, 544]
+      - Exact: [260, 193, 1, 544]
       - Exact: [2048, 2048, 1, 544]

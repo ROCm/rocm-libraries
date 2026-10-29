@@ -214,23 +214,41 @@ def test_paired_capacity_includes_only_final_layout_and_other_lds_users(
     assert sol["LdsNumBytes"] == expected
 
 
-@pytest.mark.parametrize("mode", [-1, 1])
-@pytest.mark.parametrize("streamk", [3, 4, 5], ids=["static", "dynamic", "hybrid"])
-def test_streamk_uses_paired_tight_interleave(derive, mode, streamk):
+def _derive_shipped_streamk(derive, mode, mx=True, **overrides):
     # Match the MXFP8 StreamK geometry shipped in the gfx1250 Origami logic.
-    sol, out = derive(mode, mi=[16, 16, 128, 1, 1, 1, 5, 2, 2],
-                      StreamK=streamk, GlobalSplitU=0, SourceSwap=False, HalfPLR=0,
-                      VectorWidthA=1, VectorWidthB=1, DepthU=512,
-                      PrefetchGlobalRead=2,
-                      ProblemType={"DestDataType": "s", "MXBlockA": 32, "MXBlockB": 32})
+    scales = {"MXBlockA": 32, "MXBlockB": 32} if mx else {"DataType": "F8"}
+    return derive(mode, mi=[16, 16, 128, 1, 1, 1, 5, 2, 2],
+                  StreamK=3, GlobalSplitU=0, SourceSwap=False, HalfPLR=0,
+                  VectorWidthA=1, VectorWidthB=1, DepthU=512,
+                  PrefetchGlobalRead=2,
+                  ProblemType={"DestDataType": "s", **scales}, **overrides)
+
+
+@pytest.mark.parametrize("mode,mx,shadow_init,paired", [
+    pytest.param(-1, True, True, False, id="mx-shadow-init-auto"),
+    pytest.param(1, True, True, False, id="mx-shadow-init-forced"),
+    pytest.param(-1, True, False, True, id="mx-no-shadow-init"),
+    pytest.param(-1, False, True, True, id="fp8-shadow-init"),
+])
+def test_streamk_pairs_unless_mx_with_shadow_init(derive, mode, mx, shadow_init, paired):
+    sol, out = _derive_shipped_streamk(derive, mode, mx, ForceDisableShadowInit=not shadow_init)
     assert sol["Valid"], out
     assert sol["LDSSegmentInterleave"] == 1
-    offsets = sol["LDSSegInterleaveOffsets"]
-    assert offsets["pairedBuffers"] is True
-    assert offsets["bBaseline"] is True
-    assert sol["StoreSwapAddr"] is True
     assert sol["NumLdsBlk"] == 2
-    assert offsets["pairedUsedBytes"] <= sol["LdsNumBytes"] <= sol["MaxLDS"]
+    offsets = sol["LDSSegInterleaveOffsets"]
+    if paired:
+        assert offsets["pairedBuffers"] is True
+        assert sol["StoreSwapAddr"] is True
+        assert offsets["pairedUsedBytes"] <= sol["LdsNumBytes"] <= sol["MaxLDS"]
+    else:
+        # The paired swap masks would push these kernels past the SGPR limit, so
+        # even an explicit request keeps develop's unpaired layout exactly.
+        assert offsets == {
+            "ldsBaseB": 8448, "writeStrideBytes": 92928, "footprintPacked": True,
+            "bBaseline": True, "ldsBaseMXSA": 101376, "ldsBaseMXSB": 101888,
+        }
+        assert sol["StoreSwapAddr"] is False
+        assert sol["LdsNumBytes"] == 235520
 
 
 @pytest.mark.parametrize("problem_index", [0, 1, 2], ids=["bf16", "fp8-shared-B", "mxfp8"])
@@ -260,6 +278,10 @@ def test_persistent_yaml_reaches_paired_tail_reset(problem_index):
     for name, source, error in emitted:
         assert error == 0, name
         assert "Reset to paired ping buffer" in source, name
-        assert "sgprPairedTDMSwap" in source, name
+        resets = [line for line in source.splitlines()
+                  if "Compute the other paired LDS buffer address" in line]
+        # Scale descriptors swap with their own mask; using the data mask moves them.
+        for line in resets:
+            assert ("sgprtdmMXS" in line) == ("sgprPairedTDMScaleSwap" in line), line
         if problem_index == 2:
-            assert "sgprPairedTDMScaleSwap" in source, name
+            assert any("sgprPairedTDMScaleSwap" in line for line in resets), name
