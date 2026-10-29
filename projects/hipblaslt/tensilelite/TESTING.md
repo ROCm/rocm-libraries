@@ -52,6 +52,12 @@ question that this section returns to below. It matters more than the headline c
 | How to run | `cd tensilelite && tox -e unit` (skips the client build), or `tox -e rocisa` for the extension only |
 | Coverage | `tox -e coverage-unit` measures; `tox -e coverage-gate` enforces the floors against what it wrote |
 
+**Arch gating.** Unit tests: `@pytest.mark.gpu` (any GPU) or `@pytest.mark.gpu("gfx950")`; the
+[conftest](tensilelite/Tests/unit/conftest.py) skips what HIP's device can't run (`TENSILE_GPU_TARGET`
+overrides; `gfx1250` covers `gfx1250-strict`, not the reverse; nearest mark wins). No arch/hip `skipif`
+or in-body skip; `test_gpu_marker_guard.py` enforces it. Non-gate code uses `gpu_is(...)`.
+`Tests/common` configs use `skip-gfxNNNN`.
+
 A significant part of that suite is a **characterization suite** under
 [`tensilelite/Tests/unit/characterization/`](tensilelite/Tests/unit/characterization/), established in
 [PR #7989](https://github.com/ROCm/rocm-libraries/pull/7989) and grown considerably since. It now

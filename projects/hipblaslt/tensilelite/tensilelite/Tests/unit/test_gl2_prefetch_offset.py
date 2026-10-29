@@ -114,8 +114,8 @@ sys.path.insert(0, TENSILE_ROOT)
 # register scanning, kernel launch) instead of re-implementing it here. The
 # wave32-specific bits (gfx1250) are passed as args to the wave-size-aware
 # helpers.
+from tensilelite.Tests.gpu_detection import detect_gpu_target, gpu_is  # noqa: E402
 from gpu_test_helpers import (  # noqa: E402
-    GFX_TARGET,
     run_on_gpu,
     init_rocisa,
     assemble_kernel,
@@ -127,7 +127,6 @@ from gpu_test_helpers import (  # noqa: E402
 # GPU target (this test is gfx1250-only)
 # ---------------------------------------------------------------------------
 TARGET = "gfx1250"
-HAS_GFX1250 = GFX_TARGET == TARGET
 WAVESIZE = 32
 GLOBAL_PREFETCH_SIZE = 256
 
@@ -1292,9 +1291,8 @@ def run_config(cfg, tmp_dir, debug=False):
 # ---------------------------------------------------------------------------
 # Pytest
 # ---------------------------------------------------------------------------
-@pytest.mark.gpu
+@pytest.mark.gpu(TARGET)
 @pytest.mark.gfx1250
-@pytest.mark.skipif(not HAS_GFX1250, reason=f"GL2 prefetch tests require gfx1250, found {GFX_TARGET}")
 class TestGL2PrefetchOffset:
 
     @pytest.fixture(params=CONFIGS, ids=lambda c: c.name)
@@ -1342,8 +1340,8 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
-    if not HAS_GFX1250:
-        print(f"SKIP: requires gfx1250, found {GFX_TARGET}")
+    if not gpu_is(TARGET):
+        print(f"SKIP: requires {TARGET}, found {detect_gpu_target()}")
         sys.exit(0)
 
     total = 0
