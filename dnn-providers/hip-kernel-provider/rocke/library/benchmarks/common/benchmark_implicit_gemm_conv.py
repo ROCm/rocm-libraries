@@ -630,7 +630,14 @@ def _verify_kernel(
         _lowp = out_t.dtype in (torch.float16, torch.bfloat16)
     tol = 5e-2 if _lowp else 1e-3
     err = rel_err
-    status = "PASS" if err < tol else f"FAIL(rel_err={err:.2e})"
+    # The achieved error is printed on a pass too: split-K reductions trade
+    # accuracy for speed (a 16-bit atomic rounds every partial sum into the
+    # output), and comparing them needs the number, not just the verdict.
+    status = (
+        f"PASS (rel_err={err:.2e}, max_abs={float(abs_diff.max()):.2e})"
+        if err < tol
+        else f"FAIL(rel_err={err:.2e})"
+    )
     print(f"  verify {kernel_name}: {status}", flush=True)
 
     if err >= tol and dump_fail:
@@ -5513,7 +5520,7 @@ def _widest_vector_sizes(candidates):
     problem: the default epilogue stores scalar (c = 1), and a group-merged
     kernel derives its widths in the builder (recorded as 0). Default-epilogue
     kernels are dropped altogether where a kernel of the same kind can store
-    wider than 1 for this problem.
+    wider than 1 for this problem -- except for wgrad (see below).
     ``supports_problem`` has already dropped widths the problem cannot take,
     so the widest combination present in a kind is the problem's maximum;
     configurations that cannot reach it are dropped, and every configuration
@@ -5558,10 +5565,18 @@ def _widest_vector_sizes(candidates):
     for ident, *_ in candidates:
         k = store_kind(ident)
         widest_store[k] = max(widest_store.get(k, 0), ident.vector_size_c)
+    # wgrad keeps them: its default epilogue needs no LDS C tile, which on the
+    # wgrad tiles is larger than the A/B tiles and caps the resident
+    # workgroups per CU, so the scalar-store kernel can win even where a
+    # cshuffle one stores wider.
     candidates = [
         c
         for c in candidates
-        if not (c[0].epilogue == "default" and widest_store[store_kind(c[0])] > 1)
+        if not (
+            c[0].epilogue == "default"
+            and c[0].direction != "wgrad"
+            and widest_store[store_kind(c[0])] > 1
+        )
     ]
 
     best = {}
@@ -5853,6 +5868,27 @@ def _cached_streamk_run(
     return run, extras, f"{ident.label()} @streamk_ctas={pool}"
 
 
+_DEVICE_NUM_CUS: list = []
+
+
+def _device_num_cus():
+    """CU count of the device the cached binaries launch on, or None.
+
+    The split-K cost model is sized for the arch's default part; a part of the
+    arch built with fewer CUs fills differently, so the degree the benchmark
+    launches a cached split-K binary at is resolved for the device it times
+    on. Queried once; None (the arch default) where no device answers.
+    """
+    if not _DEVICE_NUM_CUS:
+        try:
+            from rocke.runtime.hip_module import get_device_num_cus
+
+            _DEVICE_NUM_CUS.append(get_device_num_cus(0))
+        except Exception:  # noqa: BLE001 -- no runtime: keep the arch default
+            _DEVICE_NUM_CUS.append(None)
+    return _DEVICE_NUM_CUS[0]
+
+
 def _split_k_degrees(
     problem,
     *,
@@ -5914,6 +5950,7 @@ def _split_k_degrees(
                     ws_replicas=ws_replicas,
                     reduction="workspace" if two_stage else "atomic",
                     allow_unsplit=False,
+                    num_cus=_device_num_cus(),
                 ).split_k
             )
         except ValueError:

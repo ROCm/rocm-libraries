@@ -341,6 +341,32 @@ CACHE_FWD_GROUP_MERGE_EXCLUDED_TILE_M: Tuple[int, ...] = (16,)
 # sweep does: one workgroup per merged group cannot fill the device.
 CACHE_WGRAD_SPLIT_KS: Tuple[int, ...] = (1, 2)
 
+# ---- wgrad K-loop variants (per arch) ----------------------------------------
+# Built next to every plain (synchronous, M-outer) wgrad kernel, as extra
+# binaries the benchmark ranks like any other: WgradConvSpec.prefetch_regs
+# (register-prefetch K loop), lds_kpack (packed transpose-on-store) and
+# sep_addr=2 (operand addresses carried across the K loop). Together they are
+# the gfx942 answer to what lds_k_outer / async_dma do on gfx950, which need
+# the LDS transpose read gfx942 lacks: kp2 replaces the bank-conflicting
+# ds_write_b16 transpose-on-store, the prefetch overlaps a workgroup's own
+# global reads with its MFMAs, and the carried addressing takes the address
+# decode (magic division, stride multiplies) out of the loop.
+CACHE_WGRAD_KLOOP_VARIANTS: Dict[str, Tuple[dict, ...]] = {
+    "gfx942": ({"prefetch_regs": 1, "lds_kpack": 2, "sep_addr": 2},),
+}
+# Unsplit kernels also get the two-tiles-ahead prefetch (prefetch_regs=3):
+# their K loop runs the whole reduction, long enough for a second tile in
+# flight to pay for its registers. The split-K slices are short, and there
+# the deeper queue only adds VGPRs.
+CACHE_WGRAD_KLOOP_UNSPLIT_VARIANTS: Dict[str, Tuple[dict, ...]] = {
+    "gfx942": ({"prefetch_regs": 3, "lds_kpack": 2, "sep_addr": 2},),
+}
+# ROCKE_AOT_WGRAD_XCD=<n> additionally builds each split-K variant with
+# WgradConvSpec.xcd_remap=n (the whole-grid XCD remap), for a cache scoped to
+# a device with n XCDs. The XCD count is a property of the part, not of the
+# arch (gfx942 ships with 6 and with 8), so it is opt-in per cache build.
+_WGRAD_XCD = int(_os.environ.get("ROCKE_AOT_WGRAD_XCD", "0") or 0)
+
 # ---- wgrad stream-K axis (opt-in) -------------------------------------------
 # Stream-K (WgradConvSpec.streamk) bakes its launch mode and its partial-sum
 # reduction into the kernel; the CTA pool -- and with it the whole iteration
@@ -993,23 +1019,25 @@ def _wgrad_jobs(
                     # sizes the scratch and Stage 2 from what was compiled.
                     cfg["ws_replicas"] = _DEFAULT_WS_REPLICAS
                 cfg["prefetch_addr"] = _wgrad_prefetch_addr(arch, cfg)
-                yield BuildJob(
-                    identity=KernelIdentity(
-                        arch=arch,
+                for _kloop in ({},) + _wgrad_kloop_variants(arch, cfg):
+                    vcfg = dict(cfg, **_kloop)
+                    yield BuildJob(
+                        identity=KernelIdentity(
+                            arch=arch,
+                            direction="wgrad",
+                            algorithm="implicit_gemm",
+                            llvm_flavor=flavor,
+                            dtype_a=da,
+                            dtype_b=db,
+                            dtype_d=dd,
+                            grouped=grouped,
+                            is_3d=caps.get("is_3d", False),
+                            **vcfg,
+                        ),
                         direction="wgrad",
-                        algorithm="implicit_gemm",
-                        llvm_flavor=flavor,
-                        dtype_a=da,
-                        dtype_b=db,
-                        dtype_d=dd,
-                        grouped=grouped,
-                        is_3d=caps.get("is_3d", False),
-                        **cfg,
-                    ),
-                    direction="wgrad",
-                    spec_kwargs=cfg,
-                    caps=caps,
-                )
+                        spec_kwargs=vcfg,
+                        caps=caps,
+                    )
         # Stream-K kernels (opt-in). Default epilogue only, so the store is
         # scalar and B takes its own width; split_k stays 1 (stream-K owns the
         # K partition). The workspace reduction reuses the two-stage scratch,
@@ -1052,6 +1080,7 @@ def _wgrad_jobs(
                     dtype_b=db,
                     dtype_d=dd,
                     grouped=caps["grouped"],
+                    is_3d=caps.get("is_3d", False),
                     **cfg,
                 ),
                 direction="wgrad",
@@ -1108,6 +1137,27 @@ def _wgrad_jobs(
                 spec_kwargs=cfg,
                 caps=dict(grouped=True, group_merge=gm),
             )
+
+
+def _wgrad_kloop_variants(arch: str, cfg: dict) -> Tuple[dict, ...]:
+    """Extra K-loop variants built next to each plain wgrad job.
+
+    ``CACHE_WGRAD_KLOOP_VARIANTS[arch]``, minus what cannot apply to the
+    job: the register-prefetch loop and the packed transpose-on-store both
+    rewrite the synchronous M-outer K loop, so a K-outer, async or
+    prefetch_addr job gets none. (A variant the tile does not admit is
+    rejected by the spec validator like any other grid point.)
+    """
+    if cfg.get("lds_k_outer") or cfg.get("async_dma") or cfg.get("unroll_k"):
+        return ()
+    if cfg.get("prefetch_addr"):
+        return ()
+    variants = CACHE_WGRAD_KLOOP_VARIANTS.get(arch, ())
+    if cfg.get("split_k", 1) == 1:
+        variants = variants + CACHE_WGRAD_KLOOP_UNSPLIT_VARIANTS.get(arch, ())
+    if _WGRAD_XCD > 1 and cfg.get("split_k", 1) > 1:
+        variants = variants + tuple(dict(v, xcd_remap=_WGRAD_XCD) for v in variants)
+    return variants
 
 
 def _wgrad_prefetch_addr(arch: str, cfg: dict) -> bool:

@@ -133,6 +133,18 @@ class KernelIdentity:
     # Left out of the hash while False, like ws_replicas, so identities that
     # predate the field keep their hash and their cache entries.
     prefetch_addr: bool = False
+    # wgrad only (WgradConvSpec.prefetch_regs): the register-prefetch K loop
+    # (1: one LDS tile, 2: two). Left out of the hash at 0, like prefetch_addr.
+    prefetch_regs: int = 0
+    # wgrad only (WgradConvSpec.lds_kpack): K steps packed per LDS store on
+    # the M-outer transpose-on-store. Left out of the hash at 1.
+    lds_kpack: int = 1
+    # wgrad only (WgradConvSpec.xcd_remap): XCD count of the whole-grid remap.
+    # Left out of the hash at 0.
+    xcd_remap: int = 0
+    # wgrad only (WgradConvSpec.sep_addr): separable (1) / carried (2)
+    # operand addressing. Left out of the hash at 0.
+    sep_addr: int = 0
     # dgrad only (DgradConvSpec.uniform_k_decode): the per-tile reduction
     # decode K loop. Left out of the hash while False, like prefetch_addr.
     uniform_k_decode: bool = False
@@ -238,6 +250,14 @@ class KernelIdentity:
             del fields["ws_replicas"]
         if not fields["prefetch_addr"]:
             del fields["prefetch_addr"]
+        if not fields["prefetch_regs"]:
+            del fields["prefetch_regs"]
+        if fields["lds_kpack"] == 1:
+            del fields["lds_kpack"]
+        if not fields["xcd_remap"]:
+            del fields["xcd_remap"]
+        if not fields["sep_addr"]:
+            del fields["sep_addr"]
         if not fields["uniform_k_decode"]:
             del fields["uniform_k_decode"]
         if not fields["patch"]:

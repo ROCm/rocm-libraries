@@ -542,6 +542,76 @@ class WgradConvSpec:
     # byte-identical IR and keeps its kernel name.
     prefetch_addr: bool = False
 
+    # Register-prefetch the next K tile ("pfr").
+    #
+    # The plain synchronous K loop loads a tile, waits for it, writes it to
+    # LDS and only then runs the MFMAs: every iteration pays the full global
+    # latency, which only other resident workgroups can hide. With this flag
+    # the loop carries the *next* tile's global reads in registers: an
+    # iteration writes the carried tile to LDS, issues the reads for the tile
+    # after it, and runs the MFMAs while those reads are in flight, so a
+    # single workgroup overlaps its own loads with its own math (the CK
+    # "compute v3" register prefetch). Costs the A+B tile's per-thread
+    # elements in VGPRs and one extra (discarded) tile read per slice.
+    #
+    # Default False: strictly additive, so every existing config emits
+    # byte-identical IR and keeps its kernel name.
+    # 2 = the same loop over two LDS buffers (rows doubled, the buffer index
+    # carried): the tile written in one iteration is never the one any wave
+    # still reads from the previous one, so the trailing barrier goes and
+    # each K step has a single barrier.
+    # 3 = one LDS tile, two K tiles in flight: the loop carries the next two
+    # tiles' reads and issues the reads two tiles ahead, so each read has two
+    # iterations of MFMAs to land in (costs a second tile of VGPRs).
+    prefetch_regs: int = 0
+
+    # Transpose-on-store packing ("kp<N>", M-outer tile only): each thread
+    # loads N adjacent K steps of its free-axis vector and writes the tile
+    # with N-element LDS stores (CoalescedTileLoader.row_kpack) instead of
+    # single-element ones. This is the gfx942 counterpart of lds_k_outer,
+    # which needs a transpose read gfx942 does not have. Applied per operand
+    # where the tile admits it, else that operand keeps N = 1.
+    #
+    # Default 1: strictly additive, byte-identical IR and kernel name.
+    lds_kpack: int = 1
+
+    # XCD-aware remap of the whole (N tile, M tile, z) grid ("xcd<N>", N =
+    # the device's XCD count). Workgroups are dealt to the XCDs round-robin
+    # by flat id, so the CTAs that share a K slice -- every output tile of
+    # one split, which read the same dY rows and overlapping X windows --
+    # land on all N dies and each die's L2 fetches the slice again. The remap
+    # gives each XCD a contiguous run of the flat (x fastest, then y, then z)
+    # order instead, so one die works through one K slice's tiles together.
+    # A bijection for any grid size. Unlike chiplet_swizzle it covers z,
+    # which is where a split-K wgrad's parallelism lives.
+    #
+    # Default 0 (off): byte-identical IR and kernel name.
+    xcd_remap: int = 0
+
+    # Separable operand addressing ("sepa"). The generic descriptors turn
+    # every (row, col) chunk into an address through the whole transform DAG,
+    # so each chunk pays its own stride multiplies (n*s_n + di*s_di + ...).
+    # But a wgrad address is a sum of a part that depends only on the
+    # reduction index k_wg (the output position: n, do, ho, wo) and a part
+    # that depends only on the free-axis row (the filter tap and channel):
+    #     X  = [n*s_n + (do*sD-pD)*s_di + (ho*sH-pH)*s_hi + (wo*sW-pW)*s_wi]
+    #        + [z*dD*s_di + y*dH*s_hi + x*dW*s_wi + c]
+    #     dY = [n*t_n + do*t_do + ho*t_ho + wo*t_wo] + k_out
+    # The row part is loop-invariant (hoisted out of the K loop), the k part
+    # is shared by every chunk of the same column, and the per-chunk work
+    # drops to adds and the bounds compares (di = di0 + z*dD, ...). Same
+    # addresses and the same zero-fill predicate as the descriptors.
+    #
+    # 2 = additionally carry the k part across the register-prefetch K loop
+    # (prefetch_regs) and advance it by one K tile with a mixed-radix carry
+    # instead of re-deriving it: no magic division and no stride multiply in
+    # the loop at all. Needs the packed store (lds_kpack) on both operands,
+    # which pins each thread to lds_kpack fixed columns; where the tile does
+    # not give that, the loop falls back to 1.
+    #
+    # Default 0: byte-identical IR and kernel name.
+    sep_addr: int = 0
+
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
     chiplet_num_xcds: int = 8
@@ -759,6 +829,13 @@ class WgradConvSpec:
                 "unroll": self.unroll_k,
                 # A different K-loop body; only tagged when set.
                 "pfa": self.prefetch_addr,
+                "pfr": self.prefetch_regs == 1,
+                "pfr2": self.prefetch_regs == 2,
+                "pfr3": self.prefetch_regs == 3,
+                f"kp{self.lds_kpack}": self.lds_kpack > 1,
+                f"xcd{self.xcd_remap}": self.xcd_remap > 1,
+                "sepa": self.sep_addr == 1,
+                "sepa2": self.sep_addr == 2,
                 # Stream-K changes the grid decode, the K ranges and the
                 # epilogue, and the launch mode and the reduction both change
                 # the emitted body. The CTA pool does not: like the split-K
@@ -1217,6 +1294,34 @@ def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
     whose code it does not change. Shared by ``validate`` and
     ``is_valid_wgrad_spec`` so the hard and soft gates cannot drift apart.
     """
+    if spec.xcd_remap not in (0, 1) and (
+        spec.xcd_remap < 0
+        or spec.streamk != "off"
+        or spec.chiplet_swizzle
+        or spec.group_merge > 1
+    ):
+        return "xcd_remap needs the grid-per-tile kernel (no stream-K, chiplet_swizzle or group_merge)"
+    if spec.sep_addr not in (0, 1, 2):
+        return f"sep_addr must be 0, 1 or 2 (got {spec.sep_addr})"
+    if spec.sep_addr and (spec.group_merge > 1 or spec.problem.is_pointwise):
+        return "sep_addr covers the general (non-pointwise, unmerged) descriptors only"
+    if spec.sep_addr == 2 and not (spec.prefetch_regs and spec.lds_kpack > 1):
+        return "sep_addr=2 carries the address across the prefetch_regs loop with lds_kpack > 1"
+    if spec.lds_kpack != 1:
+        if spec.lds_kpack not in (2, 4, 8) or spec.tile_k % spec.lds_kpack:
+            return f"lds_kpack={spec.lds_kpack} must be 2/4/8 and divide tile_k"
+        if spec.lds_k_outer or spec.async_dma:
+            return "lds_kpack packs the M-outer transpose-on-store; not with lds_k_outer/async_dma"
+    if spec.prefetch_regs not in (0, 1, 2, 3):
+        return f"prefetch_regs must be 0..3 (got {spec.prefetch_regs})"
+    if spec.prefetch_regs == 2 and spec.lds_k_outer:
+        return "prefetch_regs=2 doubles the M-outer tile rows; not with lds_k_outer"
+    if spec.prefetch_regs:
+        if spec.async_dma or spec.unroll_k or spec.prefetch_addr:
+            return (
+                "prefetch_regs rewrites the single-buffer synchronous K loop; it "
+                "cannot combine with async_dma, unroll_k or prefetch_addr"
+            )
     if not spec.prefetch_addr:
         return ""
     if spec.async_dma:
@@ -1362,9 +1467,9 @@ def wgrad_streamk_available(spec: "WgradConvSpec") -> Tuple[bool, str]:
             "streamk runs one plain K loop per work item; async_dma/unroll_k "
             "pipeline the K loop across items"
         )
-    if spec.prefetch_addr:
+    if spec.prefetch_addr or spec.prefetch_regs:
         return False, (
-            "streamk runs its own K loop per work item; prefetch_addr rewrites "
+            "streamk runs its own K loop per work item; prefetch_addr/regs rewrites "
             "the data-parallel K loop, which stream-K never reaches"
         )
     if spec.epilogue != "default":
@@ -1969,7 +2074,7 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     # single-buffer scf.for_iter body with "mem"/"compv3" -- it differs only in
     # scheduling hints -- so charging it for a second A/B tile rejected specs for
     # LDS the kernel never allocates.
-    _double = spec.async_dma or spec.unroll_k
+    _double = spec.async_dma or spec.unroll_k or spec.prefetch_regs == 2
     _ab_lds = _ab_bytes * (2 if _double else 1)
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
     _c_lds = (
@@ -2017,6 +2122,7 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             (spec.unroll_k, "unroll_k"),
             (spec.chiplet_swizzle, "chiplet_swizzle"),
             (spec.prefetch_addr, "prefetch_addr"),
+            (spec.prefetch_regs, "prefetch_regs"),
         ):
             if flag:
                 return False, f"WMMA wgrad does not support {label} on {arch}"
@@ -2333,8 +2439,33 @@ def build_implicit_gemm_conv_wgrad(
     # Stream-K launches a one-dimensional grid and folds the group into its
     # linear tile index, so it skips this decode and binds both per work item.
     c_ks = _ks_param
+    _xcd_tile = None
+    if spec.xcd_remap > 1 and not _is_streamk:
+        # flat = (z*gy + y)*gx + x is dealt to XCD flat % X; give XCD i the
+        # contiguous run [i*q + min(i, r), +count) of the flat order instead.
+        _gx = p_num_pid_n
+        _gy = p_num_pid_m
+        _gz = b.mul(p_groups, _ks_count_param)
+        _flat = b.add(
+            b.mul(b.add(b.mul(b.block_id_z(), _gy), b.block_id_y()), _gx),
+            b.block_id_x(),
+        )
+        _total = b.mul(b.mul(_gx, _gy), _gz)
+        _cx = b.const_i32(spec.xcd_remap)
+        _q = b.div(_total, _cx)
+        _r = b.mod(_total, _cx)
+        _xi = b.mod(_flat, _cx)
+        _new = b.add(
+            b.add(b.mul(_xi, _q), b.select(b.cmp_lt(_xi, _r), _xi, _r)),
+            b.div(_flat, _cx),
+        )
+        _nx = b.mod(_new, _gx)
+        _t = b.div(_new, _gx)
+        _ny = b.to_sgpr_u32(b.mod(_t, _gy))
+        _nz = b.to_sgpr_u32(b.div(_t, _gy))
+        _xcd_tile = (b.to_sgpr_u32(_nx), _ny)
     if not _is_streamk:
-        z_id = b.block_id_z()
+        z_id = b.block_id_z() if _xcd_tile is None else _nz
         if grouped:
             group_v = b.to_sgpr_u32(b.div(z_id, _ks_count_param))
             slice_id = b.mod(z_id, _ks_count_param)
@@ -2363,6 +2494,10 @@ def build_implicit_gemm_conv_wgrad(
         )
         block_m_off_v = b.mul(swz.row, b.const_i32(block_m))
         block_n_off_v = b.mul(swz.col, b.const_i32(block_n))
+        grid = dc_replace(grid, block_m_off=block_m_off_v, block_n_off=block_n_off_v)
+    elif _xcd_tile is not None:
+        block_m_off_v = b.mul(_xcd_tile[1], b.const_i32(block_m))
+        block_n_off_v = b.mul(_xcd_tile[0], b.const_i32(block_n))
         grid = dc_replace(grid, block_m_off=block_m_off_v, block_n_off=block_n_off_v)
     else:
         block_m_off_v = grid.block_m_off
@@ -2397,6 +2532,11 @@ def build_implicit_gemm_conv_wgrad(
         _a_shape = lds_layout.storage_shape(block_m)
         _b_shape = lds_layout.storage_shape(block_n)
 
+    if spec.prefetch_regs == 2:
+        # Two M-outer tiles stacked along the rows; the K loop picks one with
+        # a carried row offset.
+        _a_shape = (2 * _a_shape[0], _a_shape[1])
+        _b_shape = (2 * _b_shape[0], _b_shape[1])
     A_smem = b.smem_alloc(ir_dtype_a, _a_shape, name_hint="A_smem")
     B_smem = b.smem_alloc(ir_dtype_b, _b_shape, name_hint="B_smem")
     # See the LDS budget note in is_valid_*_spec: "compv4" alone does not reach a
@@ -2558,6 +2698,282 @@ def build_implicit_gemm_conv_wgrad(
             return X_desc.offset(b_, m=m_val, k=k_val, group=group_v)
         return X_desc.offset(b_, m=m_val, k=k_val)
 
+    if spec.sep_addr and not p.is_pointwise:
+        from rocke.helpers.magic_division import do_magic_division_dynamic
+
+        def _divmod(b_, v, name, dim):
+            q = do_magic_division_dynamic(
+                b_,
+                v,
+                params[f"p_magic_{name}_mult"],
+                params[f"p_magic_{name}_shift"],
+            )
+            return q, b_.sub(v, b_.mul(q, dim))
+
+        def _k_decode(b_, k):
+            """k_wg -> (n, do, ho, wo); do is None for 2-D."""
+            q, wo = _divmod(b_, k, "k_Wo", p_Wo)
+            q, ho = _divmod(b_, q, "k_Ho", p_Ho)
+            if p.is_3d:
+                q, do_ = _divmod(b_, q, "k_Do", params["p_Do"])
+            else:
+                do_ = None
+            return q, do_, ho, wo
+
+        _c_wgK_sep = p_wg_K
+        _c_wgN_sep = p_wg_N
+
+        def dy_descriptor(b_: IRBuilder, row: Value, col: Value):  # noqa: F811
+            k_out = b_.add(block_m_off_v, row)
+            if grouped:
+                k_out = b_.add(k_out, b_.mul(group_v, c_kpg))
+            k = b_.add(k_off_capture[0], col)
+            n_, do_, ho, wo = _k_decode(b_, k)
+            kpart = b_.add(
+                b_.mul(n_, params["p_dY_stride_n"]),
+                b_.add(
+                    b_.mul(ho, params["p_dY_stride_ho"]),
+                    b_.mul(wo, params["p_dY_stride_wo"]),
+                ),
+            )
+            if do_ is not None:
+                kpart = b_.add(kpart, b_.mul(do_, params["p_dY_stride_do"]))
+            return b_.add(kpart, k_out), b_.cmp_lt(k, _c_wgK_sep)
+
+        def x_descriptor(b_: IRBuilder, row: Value, col: Value):  # noqa: F811
+            nwg = b_.add(block_n_off_v, row)
+            # Row part: n_wg -> ([z,] y, x, c), loop-invariant.
+            q, c_ = _divmod(b_, nwg, "n_cpg", p_cpg)
+            if p.is_3d:
+                q, x_ = _divmod(b_, q, "n_X", p_X)
+                z_, y_ = _divmod(b_, q, "n_Y", p_Y)
+            else:
+                y_, x_ = _divmod(b_, q, "n_X", p_X)
+                z_ = None
+            yr = b_.mul(y_, params["p_dH"])
+            xr = b_.mul(x_, params["p_dW"])
+            if grouped:
+                c_ = b_.add(c_, b_.mul(group_v, p_cpg))
+            rpart = b_.add(
+                b_.add(
+                    b_.mul(yr, params["p_X_stride_hi"]),
+                    b_.mul(xr, params["p_X_stride_wi"]),
+                ),
+                c_,
+            )
+            if z_ is not None:
+                zr = b_.mul(z_, params["p_dD"])
+                rpart = b_.add(rpart, b_.mul(zr, params["p_X_stride_di"]))
+            # k part: k_wg -> (n, [do,] ho, wo), shared by a column's chunks.
+            k = b_.add(k_off_capture[0], col)
+            n_, do_, ho, wo = _k_decode(b_, k)
+            hi0 = b_.sub(b_.mul(ho, params["p_sH"]), params["p_pH"])
+            wi0 = b_.sub(b_.mul(wo, params["p_sW"]), params["p_pW"])
+            kpart = b_.add(
+                b_.mul(n_, params["p_X_stride_n"]),
+                b_.add(
+                    b_.mul(hi0, params["p_X_stride_hi"]),
+                    b_.mul(wi0, params["p_X_stride_wi"]),
+                ),
+            )
+            hi = b_.add(hi0, yr)
+            wi = b_.add(wi0, xr)
+            valid = b_.land(
+                b_.land(b_.cmp_ult(hi, p_Hi), b_.cmp_ult(wi, p_Wi)),
+                b_.land(b_.cmp_lt(k, _c_wgK_sep), b_.cmp_lt(nwg, _c_wgN_sep)),
+            )
+            if do_ is not None:
+                di0 = b_.sub(b_.mul(do_, params["p_sD"]), params["p_pD"])
+                kpart = b_.add(kpart, b_.mul(di0, params["p_X_stride_di"]))
+                valid = b_.land(valid, b_.cmp_ult(b_.add(di0, zr), params["p_Di"]))
+            return b_.add(kpart, rpart), valid
+
+    def _make_inc_addr():
+        """The sep_addr=2 machinery, or None where it does not apply.
+
+        Each thread of a packed (lds_kpack = kp) row-mode loader reads the
+        columns ``kp*(tid % (block_k/kp)) + j``, j < kp, in every chunk group
+        (when block_k/kp divides the block), on both operands. So it has kp
+        distinct reduction indices per K tile. For each, carry
+        ``(k, wo, ho, [do,] wi0, hi0, [di0,] offX, offY)`` -- the decoded
+        output position, the input base coordinates (o*s - p) and the k parts
+        of the X and dY offsets -- and advance it by block_k per K tile with a
+        mixed-radix carry against the uniform decomposition of block_k.
+        """
+        if spec.sep_addr != 2 or p.is_pointwise or spec.lds_k_outer:
+            return None
+        kp = spec.lds_kpack
+        if not (
+            kp > 1
+            and a_sync_loader.row_kpack == kp
+            and b_sync_loader.row_kpack == kp
+            and threads % (block_k // kp) == 0
+        ):
+            return None
+        is3 = p.is_3d
+        P = params
+        c_one = b.const_i32(1)
+        cz = b.const_i32(0)
+        col0 = b.mul(b.mod(tid, b.const_i32(block_k // kp)), b.const_i32(kp))
+        # Uniform mixed-radix decomposition of the K step (prologue only).
+        _bk = c_block_k
+        sw = b.mod(_bk, p_Wo)
+        t = b.div(_bk, p_Wo)
+        sh = b.mod(t, p_Ho)
+        t = b.div(t, p_Ho)
+        if is3:
+            sd = b.mod(t, P["p_Do"])
+            sn = b.div(t, P["p_Do"])
+        else:
+            sd = None
+            sn = t
+        XsW = b.mul(P["p_sW"], P["p_X_stride_wi"])
+        XsH = b.mul(P["p_sH"], P["p_X_stride_hi"])
+        Xn = P["p_X_stride_n"]
+        Yw, Yh, Yn = P["p_dY_stride_wo"], P["p_dY_stride_ho"], P["p_dY_stride_n"]
+        WsW = b.mul(p_Wo, P["p_sW"])
+        HsH = b.mul(p_Ho, P["p_sH"])
+        A0x = b.add(b.add(b.mul(sw, XsW), b.mul(sh, XsH)), b.mul(sn, Xn))
+        A0y = b.add(b.add(b.mul(sw, Yw), b.mul(sh, Yh)), b.mul(sn, Yn))
+        A1x = b.sub(XsH, b.mul(p_Wo, XsW))
+        A1y = b.sub(Yh, b.mul(p_Wo, Yw))
+        swW = b.mul(sw, P["p_sW"])
+        shH = b.mul(sh, P["p_sH"])
+        if is3:
+            XsD = b.mul(P["p_sD"], P["p_X_stride_di"])
+            Yd = P["p_dY_stride_do"]
+            A0x = b.add(A0x, b.mul(sd, XsD))
+            A0y = b.add(A0y, b.mul(sd, Yd))
+            A2x = b.sub(XsD, b.mul(p_Ho, XsH))
+            A2y = b.sub(Yd, b.mul(p_Ho, Yh))
+            A3x = b.sub(Xn, b.mul(P["p_Do"], XsD))
+            A3y = b.sub(Yn, b.mul(P["p_Do"], Yd))
+            DsD = b.mul(P["p_Do"], P["p_sD"])
+            sdD = b.mul(sd, P["p_sD"])
+        else:
+            A2x = b.sub(Xn, b.mul(p_Ho, XsH))
+            A2y = b.sub(Yn, b.mul(p_Ho, Yh))
+        n_f = 9 if is3 else 7
+
+        def _init(k_base):
+            st = []
+            for j in range(kp):
+                k = b.add(b.add(k_base, col0), b.const_i32(j)) if j else b.add(
+                    k_base, col0
+                )
+                n_, do_, ho, wo = _k_decode(b, k)
+                wi0 = b.sub(b.mul(wo, P["p_sW"]), P["p_pW"])
+                hi0 = b.sub(b.mul(ho, P["p_sH"]), P["p_pH"])
+                offx = b.add(
+                    b.mul(n_, Xn),
+                    b.add(b.mul(hi0, P["p_X_stride_hi"]), b.mul(wi0, P["p_X_stride_wi"])),
+                )
+                offy = b.add(b.mul(n_, Yn), b.add(b.mul(ho, Yh), b.mul(wo, Yw)))
+                if is3:
+                    di0 = b.sub(b.mul(do_, P["p_sD"]), P["p_pD"])
+                    offx = b.add(offx, b.mul(di0, P["p_X_stride_di"]))
+                    offy = b.add(offy, b.mul(do_, Yd))
+                    st += [k, wo, ho, do_, wi0, hi0, di0, offx, offy]
+                else:
+                    st += [k, wo, ho, wi0, hi0, offx, offy]
+            return st
+
+        def _sel(c, v):
+            return b.select(c, v, cz)
+
+        def _step(st):
+            out = []
+            for j in range(kp):
+                f = st[j * n_f : (j + 1) * n_f]
+                if is3:
+                    k, wo, ho, do_, wi0, hi0, di0, offx, offy = f
+                else:
+                    k, wo, ho, wi0, hi0, offx, offy = f
+                k = b.add(k, c_block_k)
+                wo = b.add(wo, sw)
+                c1 = b.cmp_ge(wo, p_Wo)
+                wo = b.sub(wo, _sel(c1, p_Wo))
+                wi0 = b.sub(b.add(wi0, swW), _sel(c1, WsW))
+                ho = b.add(b.add(ho, sh), b.select(c1, c_one, cz))
+                c2 = b.cmp_ge(ho, p_Ho)
+                ho = b.sub(ho, _sel(c2, p_Ho))
+                hi0 = b.sub(b.add(b.add(hi0, shH), _sel(c1, P["p_sH"])), _sel(c2, HsH))
+                offx = b.add(b.add(offx, A0x), b.add(_sel(c1, A1x), _sel(c2, A2x)))
+                offy = b.add(b.add(offy, A0y), b.add(_sel(c1, A1y), _sel(c2, A2y)))
+                if is3:
+                    do_ = b.add(b.add(do_, sd), b.select(c2, c_one, cz))
+                    c3 = b.cmp_ge(do_, P["p_Do"])
+                    do_ = b.sub(do_, _sel(c3, P["p_Do"]))
+                    di0 = b.sub(
+                        b.add(b.add(di0, sdD), _sel(c2, P["p_sD"])), _sel(c3, DsD)
+                    )
+                    offx = b.add(offx, _sel(c3, A3x))
+                    offy = b.add(offy, _sel(c3, A3y))
+                    out += [k, wo, ho, do_, wi0, hi0, di0, offx, offy]
+                else:
+                    out += [k, wo, ho, wi0, hi0, offx, offy]
+            return out
+
+        state = {"st": None, "e": 0}
+
+        def _cur():
+            j = state["e"] % kp
+            state["e"] += 1
+            return state["st"][j * n_f : (j + 1) * n_f]
+
+        def a_fn(b_, row, col):
+            f = _cur()
+            k_out = b_.add(block_m_off_v, row)
+            if grouped:
+                k_out = b_.add(k_out, b_.mul(group_v, c_kpg))
+            return b_.add(f[-1], k_out), b_.cmp_lt(f[0], p_wg_K)
+
+        def b_fn(b_, row, col):
+            f = _cur()
+            nwg = b_.add(block_n_off_v, row)
+            q, c_ = _divmod(b_, nwg, "n_cpg", p_cpg)
+            if is3:
+                q, x_ = _divmod(b_, q, "n_X", p_X)
+                z_, y_ = _divmod(b_, q, "n_Y", p_Y)
+            else:
+                y_, x_ = _divmod(b_, q, "n_X", p_X)
+            yr = b_.mul(y_, P["p_dH"])
+            xr = b_.mul(x_, P["p_dW"])
+            if grouped:
+                c_ = b_.add(c_, b_.mul(group_v, p_cpg))
+            rpart = b_.add(
+                b_.add(b_.mul(yr, P["p_X_stride_hi"]), b_.mul(xr, P["p_X_stride_wi"])),
+                c_,
+            )
+            wi0, hi0 = (f[4], f[5]) if is3 else (f[3], f[4])
+            valid = b_.land(
+                b_.land(
+                    b_.cmp_ult(b_.add(hi0, yr), p_Hi), b_.cmp_ult(b_.add(wi0, xr), p_Wi)
+                ),
+                b_.land(b_.cmp_lt(f[0], p_wg_K), b_.cmp_lt(nwg, p_wg_N)),
+            )
+            if is3:
+                zr = b_.mul(z_, P["p_dD"])
+                rpart = b_.add(rpart, b_.mul(zr, P["p_X_stride_di"]))
+                valid = b_.land(valid, b_.cmp_ult(b_.add(f[6], zr), P["p_Di"]))
+            return b_.add(f[-2], rpart), valid
+
+        def _set(st):
+            state["st"] = list(st)
+
+        def _reset():
+            state["e"] = 0
+
+        return {
+            "init": _init,
+            "step": _step,
+            "set": _set,
+            "get": lambda: state["st"],
+            "reset": _reset,
+            "a_fn": a_fn,
+            "b_fn": b_fn,
+        }
+
     if spec.async_dma:
         # K-outer: rows are K_wg, columns are the free axis. A chunk is then a
         # run along the free axis at one k_wg, which is contiguous in global for
@@ -2629,6 +3045,21 @@ def build_implicit_gemm_conv_wgrad(
             a_axis, b_axis = axis_a, axis_b
             a_vec, b_vec = load_vec_a, load_vec_b
 
+        _kp_extra_a: dict = {}
+        _kp_extra_b: dict = {}
+        if spec.lds_kpack > 1:
+            for _ax, _vec, _rows, _cols, _extra in (
+                (a_axis, a_vec, a_tile_rows, a_tile_cols, _kp_extra_a),
+                (b_axis, b_vec, b_tile_rows, b_tile_cols, _kp_extra_b),
+            ):
+                if _ax == "row" and CoalescedTileLoader.kpack_ok(
+                    tile_rows=_rows,
+                    tile_cols=_cols,
+                    block_size=threads,
+                    load_vec=_vec,
+                    kpack=spec.lds_kpack,
+                ):
+                    _extra["row_kpack"] = spec.lds_kpack
         a_sync_loader = CoalescedTileLoader(
             tile_rows=a_tile_rows,
             tile_cols=a_tile_cols,
@@ -2636,6 +3067,7 @@ def build_implicit_gemm_conv_wgrad(
             load_vec=a_vec,
             elem_dtype=ir_dtype_a,
             vector_axis=a_axis,
+            **_kp_extra_a,
         )
         b_sync_loader = CoalescedTileLoader(
             tile_rows=b_tile_rows,
@@ -2644,6 +3076,7 @@ def build_implicit_gemm_conv_wgrad(
             load_vec=b_vec,
             elem_dtype=ir_dtype_b,
             vector_axis=b_axis,
+            **_kp_extra_b,
         )
 
     schedule = SchedulePolicy.for_pipeline(
@@ -2817,7 +3250,11 @@ def build_implicit_gemm_conv_wgrad(
         )
 
     def emit_mfma_phase(
-        A_src: Value, B_src: Value, iter_vars: Sequence[Value]
+        A_src: Value,
+        B_src: Value,
+        iter_vars: Sequence[Value],
+        a_row_off: Optional[Value] = None,
+        b_row_off: Optional[Value] = None,
     ) -> List[Value]:
         if op.family == "wmma":
             return emit_wmma_phase(A_src, B_src, iter_vars)
@@ -2829,6 +3266,10 @@ def build_implicit_gemm_conv_wgrad(
 
         warp_m_off = grid.warp_m_off(b)
         warp_n_off = grid.warp_n_off(b)
+        if a_row_off is not None:
+            warp_m_off = b.add(warp_m_off, a_row_off)
+        if b_row_off is not None:
+            warp_n_off = b.add(warp_n_off, b_row_off)
         new_accs: List[Value] = list(iter_vars)
 
         for kk in range(k_atoms):
@@ -3228,6 +3669,147 @@ def build_implicit_gemm_conv_wgrad(
 
             b.scf_yield(*accs_b)
         final_accs = list(for_op_uk.results)
+    elif spec.prefetch_regs:
+        # Register prefetch: the loop carries the next tile's global reads.
+        # Each iteration stores the carried tile to LDS, issues the reads of
+        # the following tile, and runs the MFMAs while they are in flight; the
+        # wait for them lands at the next iteration's LDS store. The last tile
+        # of the slice is peeled off the loop so it issues no read past the
+        # slice (the epilogue would otherwise wait for a discarded read).
+        #
+        # Barriers are LDS-only: b.sync() would also drain VMEM, i.e. wait for
+        # the prefetch this loop exists to keep in flight. The LDS store waits
+        # for its own data through the compiler's waitcnt.
+        _dbuf = spec.prefetch_regs == 2
+        _a_fn, _b_fn = _split_desc_fns()
+        _inc = _make_inc_addr()
+        if _inc is not None:
+            _a_fn, _b_fn = _inc["a_fn"], _inc["b_fn"]
+            _inc["set"](_inc["init"](k_lo))
+        k_off_capture[0] = k_lo
+        _inc_reset = _inc["reset"] if _inc is not None else (lambda: None)
+        _inc_reset()
+        _a0 = a_sync_loader.load_global(b, tid=tid, descriptor=_a_fn, rsrc=dy_rsrc)
+        _inc_reset()
+        _b0 = b_sync_loader.load_global(b, tid=tid, descriptor=_b_fn, rsrc=x_rsrc)
+        _n_acc = len(accs)
+        _n_a = len(_a0)
+        _n_b = len(_b0)
+        _n_st = 0 if _inc is None else len(_inc["get"]())
+
+        _c_dist = (
+            b.const_i32(2 * block_k) if spec.prefetch_regs == 3 else c_block_k
+        )
+
+        def _pfr_body(k0, acc_vals, cur, buf, prefetch):
+            """One K step: store ``cur`` to LDS, prefetch the next tile, MMA.
+
+            Returns ``(accs, next_tile_values)``.
+            """
+            _a_off = _b_off = None
+            if buf is not None:
+                _a_off = b.mul(buf, b.const_i32(block_m))
+                _b_off = b.mul(buf, b.const_i32(block_n))
+
+            def _shift(r, off):
+                return r if off is None else b.add(r, off)
+
+            a_sync_loader.store_lds(
+                b,
+                smem_dst=A_smem,
+                staged=[
+                    (_shift(r, _a_off), c, v) for (r, c, _), v in zip(_a0, cur[:_n_a])
+                ],
+            )
+            b_sync_loader.store_lds(
+                b,
+                smem_dst=B_smem,
+                staged=[
+                    (_shift(r, _b_off), c, v) for (r, c, _), v in zip(_b0, cur[_n_a:])
+                ],
+            )
+            b.sync_lds_only()
+            nxt = []
+            if prefetch:
+                k_off_capture[0] = b.add(k0, _c_dist)
+                if _inc is not None:
+                    _inc["set"](_inc["step"](_inc["get"]()))
+                _inc_reset()
+                _an = a_sync_loader.load_global(
+                    b, tid=tid, descriptor=_a_fn, rsrc=dy_rsrc
+                )
+                _inc_reset()
+                _bn = b_sync_loader.load_global(
+                    b, tid=tid, descriptor=_b_fn, rsrc=x_rsrc
+                )
+                nxt = [v for _r, _c, v in _an] + [v for _r, _c, v in _bn]
+                if _inc is not None:
+                    nxt += list(_inc["get"]())
+            k_off_capture[0] = k0
+            new = emit_mfma_phase(
+                A_smem, B_smem, list(acc_vals), a_row_off=_a_off, b_row_off=_b_off
+            )
+            if buf is None:
+                b.sync_lds_only()
+            return new, nxt
+
+        # prefetch_regs=3: two tiles in flight. The prologue also reads the
+        # second tile, the loop carries both and reads two tiles ahead; the
+        # reads issued by the last two iterations land past the slice (the
+        # next slice's tiles inside the tensor, zero past wg_K) and are
+        # discarded.
+        _deep = spec.prefetch_regs == 3
+        _n_t = _n_a + _n_b
+        _tile1 = []
+        if _deep:
+            k_off_capture[0] = b.add(k_lo, c_block_k)
+            if _inc is not None:
+                _inc["set"](_inc["step"](_inc["get"]()))
+            _inc_reset()
+            _a1 = a_sync_loader.load_global(b, tid=tid, descriptor=_a_fn, rsrc=dy_rsrc)
+            _inc_reset()
+            _b1 = b_sync_loader.load_global(b, tid=tid, descriptor=_b_fn, rsrc=x_rsrc)
+            _tile1 = [v for _r, _c, v in _a1] + [v for _r, _c, v in _b1]
+        _iter = (
+            list(accs)
+            + [(f"pfr_a{i}", v) for i, (_r, _c, v) in enumerate(_a0)]
+            + [(f"pfr_b{i}", v) for i, (_r, _c, v) in enumerate(_b0)]
+            + [(f"pfr_q{i}", v) for i, v in enumerate(_tile1)]
+        )
+        _n_q = len(_tile1)
+        if _inc is not None:
+            _iter += [(f"pfr_st{i}", v) for i, v in enumerate(_inc["get"]())]
+        if _dbuf:
+            _iter.append(("pfr_buf", b.const_i32(0)))
+        _o_st = _n_acc + _n_t + _n_q
+        _k_last = b.sub(_k_upper, c_block_k)
+        for_op = b.scf_for_iter(k_lo, _k_last, c_block_k, _iter, iv_name="k0")
+        with for_op as (k0, iter_vars):
+            _buf = iter_vars[_o_st + _n_st] if _dbuf else None
+            if _inc is not None:
+                _inc["set"](list(iter_vars[_o_st : _o_st + _n_st]))
+            new_accs, _nxt = _pfr_body(
+                k0,
+                iter_vars[:_n_acc],
+                list(iter_vars[_n_acc : _n_acc + _n_t]),
+                _buf,
+                True,
+            )
+            _tail = [b.sub(b.const_i32(1), _buf)] if _dbuf else []
+            if _deep:
+                # Queue: the carried second tile moves up, the new read joins.
+                _q = list(iter_vars[_n_acc + _n_t : _n_acc + _n_t + _n_q])
+                b.scf_yield(*new_accs, *_q, *_nxt[:_n_t], *_nxt[_n_t:], *_tail)
+            else:
+                b.scf_yield(*new_accs, *_nxt, *_tail)
+        _res = list(for_op.results)
+        final_accs, _ = _pfr_body(
+            _k_last,
+            _res[:_n_acc],
+            _res[_n_acc : _n_acc + _n_t],
+            _res[_o_st + _n_st] if _dbuf else None,
+            False,
+        )
     elif spec.prefetch_addr:
         # Same loop as below, with the global byte offsets of the current tile
         # carried as iteration arguments. Each iteration issues every buffer

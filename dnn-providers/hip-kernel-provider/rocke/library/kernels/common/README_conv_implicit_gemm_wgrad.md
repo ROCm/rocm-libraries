@@ -383,6 +383,28 @@ split-K kernels. Every
 launch follows the zeroing contract above, and `workspace` launches are timed
 together with their Stage 2 reduce.
 
+### gfx942 K loop: register prefetch, packed transpose-on-store, carried addressing
+
+gfx942 has no LDS transpose read, so `lds_k_outer` (and with it `async_dma`)
+is unavailable and the M-outer tile is stored transposed, one `ds_write_b16`
+per element. Four opt-in `WgradConvSpec` knobs rework that synchronous K
+loop; all default off (byte-identical IR and kernel names), and each is a
+`KernelIdentity` field left out of the hash at its default.
+
+| Knob | Label | What it does |
+|------|-------|--------------|
+| `prefetch_regs` = 1 / 2 / 3 | `pfr1` / `pfr2` / `pfr3` | The loop carries the next K tile's global reads in VGPRs across the back-edge: an iteration writes the carried tile to LDS, issues the reads of the following tile and runs its MFMAs while they are in flight. Barriers are LDS-only (`sync_lds_only`): `b.sync()` waits `vmcnt(0)` and would drain the prefetch. The last tile is peeled so no read is issued past the slice. `2` stacks two LDS tiles (carried buffer index) and drops the trailing barrier. `3` keeps one LDS tile but two K tiles in flight (reads issued two tiles ahead). |
+| `lds_kpack` = 2 / 4 | `kp2` / `kp4` | `CoalescedTileLoader.row_kpack`: each thread loads `lds_kpack` adjacent K columns of its free-axis vector and transposes them in registers (`v_perm`), so the store issues `lds_kpack`-element writes (`ds_write_b32` / `b64`, often merged into `ds_write2_*`) instead of single elements. The lane decode is column-fastest, which spreads a wave's writes over the banks instead of stepping whole row runs (the row stride is a multiple of 16 banks). Applied per operand where the tile gives each thread a multiple of `lds_kpack` chunks. |
+| `sep_addr` = 1 / 2 | `sepa1` / `sepa2` | 1: the X and dY addresses are computed as a k part (`n, do, ho, wo`, shared by a column's chunks) plus a row part (filter tap and channel, loop-invariant). 2: with `prefetch_regs` and `lds_kpack`, each thread owns `lds_kpack` fixed reduction columns, so the k part (decoded position, input base coordinates and both offsets) is carried across the loop and advanced by one K tile with a mixed-radix carry against the uniform decomposition of `tile_k` -- no magic division and no stride multiply left in the loop. An operand whose tile gives a thread too few chunks for the packed store (a 64-row dY tile on 256 threads is one 8-wide chunk) keeps the unpacked store, and the loop falls back to `sep_addr=1` addressing. |
+| `xcd_remap` = N | `xcdN` | Remaps the whole `(n tile, m tile, z)` grid so each of the N XCDs works a contiguous run of the flat order (one K slice's tiles on one die, sharing its L2). A bijection for any grid size. N is the part's XCD count, so the AOT grid builds it only on request (`ROCKE_AOT_WGRAD_XCD=N`). |
+
+`aot_jobs.CACHE_WGRAD_KLOOP_VARIANTS["gfx942"]` builds a
+`prefetch_regs=1, lds_kpack=2, sep_addr=2` twin of every plain M-outer wgrad
+kernel, and `CACHE_WGRAD_KLOOP_UNSPLIT_VARIANTS` a `prefetch_regs=3` one of
+every unsplit kernel (a whole-reduction K loop is long enough for the second
+tile in flight to pay for its registers; split-K slices are not). The two-stage (f32 workspace) kernels take the same loop; they are
+offered by `--run-from-cache` only with `--two-stage always` unless C is odd.
+
 ## Next steps
 
 ### K0-M-K1 LDS layout

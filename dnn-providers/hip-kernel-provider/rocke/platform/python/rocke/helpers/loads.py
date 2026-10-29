@@ -121,6 +121,17 @@ class CoalescedTileLoader:
     # dim) hoist out of the loop. ``None`` (default) is the legacy
     # flat-K behaviour.
     inner_dim: Optional[int] = None
+    # ``"row"`` mode only: pack ``row_kpack`` adjacent columns (K steps) into
+    # one LDS write. Each thread loads ``row_kpack`` free-axis vectors at
+    # consecutive columns of the same rows and transposes them in registers,
+    # so the transpose-on-store issues ``load_vec`` writes of ``row_kpack``
+    # elements (``ds_write_b32`` / ``b64`` for 16-bit data) instead of
+    # ``load_vec * row_kpack`` single-element writes. The chunk decode is
+    # column-fastest across lanes (adjacent lanes take adjacent column
+    # groups of one row run), which also spreads a wave's writes over the
+    # LDS banks instead of stepping whole row runs. 1 (default) keeps the
+    # historical decode and store, byte-identical.
+    row_kpack: int = 1
 
     def __post_init__(self) -> None:
         # Fail fast on a mistyped ``vector_axis`` (e.g. "Row"): silently falling
@@ -132,6 +143,53 @@ class CoalescedTileLoader:
                 f"CoalescedTileLoader: vector_axis must be one of "
                 f"{_VALID_VECTOR_AXES}, got {self.vector_axis!r}"
             )
+        if self.row_kpack != 1:
+            kp = self.row_kpack
+            if self.vector_axis != "row" or self.load_vec <= 1:
+                raise ValueError("row_kpack > 1 needs vector_axis='row' and load_vec > 1")
+            if kp not in (2, 4, 8) or self.tile_cols % kp:
+                raise ValueError(
+                    f"row_kpack={kp} must be 2/4/8 and divide tile_cols={self.tile_cols}"
+                )
+            if self.vecs_per_thread % kp:
+                raise ValueError(
+                    f"row_kpack={kp} must divide the per-thread chunk count "
+                    f"{self.vecs_per_thread}"
+                )
+
+    @staticmethod
+    def kpack_ok(
+        *, tile_rows: int, tile_cols: int, block_size: int, load_vec: int, kpack: int
+    ) -> bool:
+        """Whether ``row_kpack=kpack`` is admissible for this row-mode tile."""
+        if kpack == 1:
+            return True
+        if load_vec <= 1 or tile_cols % kpack or tile_rows % load_vec:
+            return False
+        chunks = tile_rows * tile_cols // load_vec
+        if chunks % block_size:
+            return False
+        return (chunks // block_size) % kpack == 0
+
+    def _chunk_row_col(
+        self, b: IRBuilder, e: int, tid: Value, *, c_threads: Value, c_span: Value,
+        c_load_vec: Value,
+    ) -> Tuple[Value, Value]:
+        """Tile-local ``(row, col)`` of per-thread chunk ``e``."""
+        if self.row_kpack == 1:
+            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+            return self._decode_row_col(b, vec_idx, c_span=c_span, c_load_vec=c_load_vec)
+        kp = self.row_kpack
+        g, j = divmod(e, kp)
+        unit = b.add(b.mul(b.const_i32(g), c_threads), tid)
+        c_groups = b.const_i32(self.tile_cols // kp)
+        colg = b.mod(unit, c_groups)
+        rowc = b.div(unit, c_groups)
+        row = b.mul(rowc, c_load_vec)
+        col = b.mul(colg, b.const_i32(kp))
+        if j:
+            col = b.add(col, b.const_i32(j))
+        return row, col
 
     @classmethod
     def choose_vec(
@@ -305,9 +363,8 @@ class CoalescedTileLoader:
 
         staged = []
         for e in range(self.vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row, col = self._decode_row_col(
-                b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
+            row, col = self._chunk_row_col(
+                b, e, tid, c_threads=c_threads, c_span=c_span, c_load_vec=c_load_vec
             )
 
             off_elems, valid = descriptor(b, row, col)
@@ -344,8 +401,23 @@ class CoalescedTileLoader:
         on the same loader instance. Emits ``smem_store_vN`` for each entry
         (a transpose-on-store scatter in ``vector_axis="row"`` mode).
         """
-        for row, col, v in staged:
-            self._store_tile(b, smem_dst, row, col, v)
+        self._store_staged(b, smem_dst, staged)
+
+    def _store_staged(self, b: IRBuilder, smem_dst: Value, staged: list) -> None:
+        if self.row_kpack == 1:
+            for row, col, v in staged:
+                self._store_tile(b, smem_dst, row, col, v)
+            return
+        kp = self.row_kpack
+        for g in range(0, len(staged), kp):
+            grp = staged[g : g + kp]
+            row, col, _ = grp[0]
+            for i in range(self.load_vec):
+                r = b.add(row, b.const_i32(i)) if i else row
+                parts = [b.vec_extract(v, i) for _r, _c, v in grp]
+                b.smem_store_vN(
+                    smem_dst, [r, col], b.vec_pack(parts, self.elem_dtype), kp
+                )
 
     # ---- address-prefetch split -------------------------------------------
     #
@@ -372,9 +444,10 @@ class CoalescedTileLoader:
         )
         slots: List[Tuple[Value, Value]] = []
         for e in range(self.vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
             slots.append(
-                self._decode_row_col(b, vec_idx, c_span=c_span, c_load_vec=c_load_vec)
+                self._chunk_row_col(
+                    b, e, tid, c_threads=c_threads, c_span=c_span, c_load_vec=c_load_vec
+                )
             )
         return slots
 
@@ -457,6 +530,12 @@ class CoalescedTileLoader:
         resource from `b.buffer_rsrc(ptr, num_bytes)`). Otherwise
         `ptr` must be provided (a `ptr<f16, global>`).
         """
+        if self.row_kpack != 1:
+            staged = self.load_global(
+                b, tid=tid, descriptor=descriptor, rsrc=rsrc, ptr=ptr
+            )
+            self.store_lds(b, smem_dst=smem_dst, staged=staged)
+            return
         if self.use_buffer_rsrc and rsrc is None:
             raise ValueError("CoalescedTileLoader: use_buffer_rsrc=True requires rsrc")
         if not self.use_buffer_rsrc and ptr is None:
@@ -479,9 +558,8 @@ class CoalescedTileLoader:
         c_oob = b.const_i32(self.oob_sentinel)
 
         for e in range(self.vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row, col = self._decode_row_col(
-                b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
+            row, col = self._chunk_row_col(
+                b, e, tid, c_threads=c_threads, c_span=c_span, c_load_vec=c_load_vec
             )
 
             off_elems, valid = descriptor(b, row, col)
@@ -548,9 +626,8 @@ class CoalescedTileLoader:
         # the LDS address without re-running the descriptor.
         fetched = []
         for e in range(self.vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row, col = self._decode_row_col(
-                b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
+            row, col = self._chunk_row_col(
+                b, e, tid, c_threads=c_threads, c_span=c_span, c_load_vec=c_load_vec
             )
 
             off_elems, valid = descriptor(b, row, col)
@@ -572,8 +649,7 @@ class CoalescedTileLoader:
         fetched: list,
     ) -> None:
         """Store a register tile (returned by :meth:`fetch`) into LDS."""
-        for row, col, v in fetched:
-            self._store_tile(b, smem_dst, row, col, v)
+        self._store_staged(b, smem_dst, fetched)
 
 
 # ---------------------------------------------------------------------
