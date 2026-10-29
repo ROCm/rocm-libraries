@@ -1,30 +1,9 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Host-only unit tests for setHostMXScaleA/B (mx_scale_setup.hpp), the pair of
-// helpers every MX scale attachment in tensile_host.cpp goes through.
-//
-// What is being pinned is the pairing, not the arithmetic. ContractionSolution::
-// generateCustomCall hands an external custom kernel the packed ceil(K/mxBlock)
-// scale pitch only when the problem says customKernelMXScalesArePacked(); the
-// flag defaults to false because the TensileLite benchmark client allocates its
-// scale buffer from the padded descriptor and hands that same buffer over. So
-// hipBLASLt has to turn it on, and if that ever stopped happening the result
-// would be silent numerical corruption -- the padded pitch read against a packed
-// buffer, which is the failure this helper's PR fixed in the other direction.
-//
-// ConstructTensileProblem and updateTensileProblem, the two functions that set
-// the scales, cannot be driven from here: both live in tensile_host.cpp's
-// anonymous namespace, and both call mxScaleTensorNeedsPaddingFreeDim(), which
-// calls hipGetDevice -- these tests run with no GPU (see README.md). So the
-// declaration is instead made inseparable from the descriptor it describes, in
-// the helpers below, and this file pins that. Deleting the setup at either call
-// site is caught separately, at compile time, by the -Wunused-variable tripwire
-// around padMXScaleTensorFreeDim in tensile_host.cpp.
-//
-// The header is included by relative path, following rocroller_kernel_match_gtest
-// .cpp: putting the library's internal src/include on this target's include path
-// shadows the clients' own utility.hpp (see the note in ../src/CMakeLists.txt).
+// Host-only tests of the descriptor/layout pairing used by hipBLASLt.
+// The relative include avoids shadowing the clients' utility.hpp with the
+// library's internal header of the same name.
 
 #include "../../../library/src/amd_detail/rocblaslt/src/include/mx_scale_setup.hpp"
 
@@ -83,9 +62,7 @@ TEST(HostUnitMXScaleSetup, smoke_PackedDeclarationArrivesWithTheScaleDescriptor)
     EXPECT_TRUE(viaB.customKernelMXScalesArePacked());
 }
 
-// Without the helper the declaration is absent, so the test above is reading the
-// helper rather than something setMXScaleA/B or the constructor does anyway. This
-// is also the state the TensileLite benchmark client is left in on purpose.
+// The TensileLite client uses the descriptor's padded layout by default.
 TEST(HostUnitMXScaleSetup, smoke_RawSetMXScaleLeavesTheDeclarationUnset)
 {
     auto problem = mxProblem(64, 64, 128);
@@ -97,9 +74,7 @@ TEST(HostUnitMXScaleSetup, smoke_RawSetMXScaleLeavesTheDeclarationUnset)
     EXPECT_FALSE(problem.customKernelMXScalesArePacked());
 }
 
-// The helper must still be a faithful wrapper: the padding argument is the one
-// thing it forwards, and it is what makes the descriptor disagree with the packed
-// pitch in the first place. ceil(128/32) = 4, padded up to a multiple of 8.
+// gfx950 pads ceil(128/32) = 4 K-blocks to 8; gfx1250 leaves this size at 4.
 TEST(HostUnitMXScaleSetup, smoke_PaddingArgumentReachesTheDescriptor)
 {
     auto padded = mxProblem(64, 64, 128);

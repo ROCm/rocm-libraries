@@ -2265,10 +2265,7 @@ namespace
         tensileProblem.setParams().setBiasEnum(
             tensileUseBias(prob.epilogue) ? biasType : rocisa::DataType::None);
 
-        // Tripwire, in the spirit of the -Wswitch one in clients/tests/unit: drop the
-        // MX scale setup below and padMXScaleTensorFreeDim goes unused, so this file
-        // stops compiling rather than silently losing the packed-buffer declaration
-        // that setHostMXScaleA/B carry along with the descriptor.
+        // Diagnose removal of all MX setup that consumes this padding choice.
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic error "-Wunused-variable"
@@ -2596,10 +2593,7 @@ namespace
         tensileProblem.setParams().setBiasEnum(
             tensileUseBias(prob.epilogue) ? biasType : rocisa::DataType::None);
 
-        // Tripwire, in the spirit of the -Wswitch one in clients/tests/unit: drop the
-        // MX scale setup below and padMXScaleTensorFreeDim goes unused, so this file
-        // stops compiling rather than silently losing the packed-buffer declaration
-        // that setHostMXScaleA/B carry along with the descriptor.
+        // Diagnose removal of all MX setup that consumes this padding choice.
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic error "-Wunused-variable"
@@ -7218,9 +7212,6 @@ static bool matchesRocRollerSelectedKernel(const std::string&                 ke
                                + rocRollerTypeToken(prob.c_type) + "_" + rocRollerTypeToken(prob.d_type)
                                + "_Float_";
 
-    // Everything past the prefix is rocRollerKernelNameMatchesTile
-    // (rocroller_kernel_match.hpp), where clients/tests/unit covers it without a
-    // problem descriptor or a GPU.
     return rocRollerKernelNameMatchesTile(kernel, prefix, tile);
 }
 
@@ -7276,16 +7267,9 @@ static rocblaslt_status
                    && !matchesRocRollerSelectedKernel(entry.second->name(), prob, tile))
                     continue;
 
-                // The name carries the tile shape and the operand types, and
-                // nothing else. Every other condition a checked-in rocRoller
-                // kernel was captured under -- scale layout, size multiples and
-                // windows, batch count, buffer-addressing extent -- lives in its
-                // predicates, which a library lookup would have evaluated and
-                // this hand-rolled search otherwise skips. Without them a
-                // one-sided-MX problem name-matches a two-sided kernel and
-                // faults the GPU. hardware and problem only, as in the grouped
-                // path below: taskPredicate needs a Task, which needs the
-                // workspace size that is checked separately right after.
+                // A name match does not establish eligibility: for example, a
+                // one-sided MX problem must not use a kernel that reads both
+                // scale tensors. Workspace is checked separately below.
                 if(entry.second->hardwarePredicate
                    && !(*entry.second->hardwarePredicate)(*hardware))
                     continue;
@@ -7297,12 +7281,8 @@ static rocblaslt_status
                 break;
             }
         }
-        // The rocRoller-on path rejects a ranked tile whose kernel needs more
-        // workspace than the caller offers (gemm.cpp:703-706, isSupportedProblem)
-        // and walks on to the next tile (rocroller_host.cpp:426-429). Without the
-        // same reject here an off build hands back a StreamK kernel that an on
-        // build would have skipped. _convertToHeuristicResultArray only reports
-        // requiredWorkspaceSize; it never filters on it.
+        // Heuristic conversion reports workspace requirements but does not
+        // filter them, so reject kernels that exceed the caller's budget here.
         if(found && found->requiredWorkspaceSize(tensileProblem, *hardware) > maxWorkSpaceBytes)
             continue;
 
