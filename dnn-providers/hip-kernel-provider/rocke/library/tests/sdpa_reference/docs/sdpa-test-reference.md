@@ -327,11 +327,13 @@ arbitrary future Torch outputs. Use `cuda` on the corresponding ROCm processor
 for GPU reference evidence. This comparison also does not prove exact-real
 arithmetic accuracy or accuracy no-regression. Existing Torch tests remain useful.
 
-A reference-only audit can run without compiling or executing rocKE:
+A reference-only audit can run without compiling or executing rocKE. It checks
+one variant's cases and records the variant in its report; `--variant` may be
+omitted while the architecture has only one:
 
 ```bash
 PYTHONPATH=library/tests:platform/python python -m sdpa_reference.torch_reference \
-  --arch gfx942 --device cpu --output oracle-agreement.json
+  --arch gfx942 --variant dense --device cpu --output oracle-agreement.json
 python -m pytest library/tests/sdpa_reference/check_torch_reference.py -q
 ```
 

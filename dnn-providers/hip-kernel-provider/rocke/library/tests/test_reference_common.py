@@ -2685,6 +2685,70 @@ def test_commands_need_a_variant_when_a_processor_has_several(
     assert not bundle.exists()
 
 
+def test_reference_tools_name_the_variant_they_use():
+    """No reference tool relies on an architecture's only variant as a default.
+
+    ``get_adapter``, ``baseline_lock``, and ``resolve_variant`` fall back to the
+    only variant, so a tool that omits it fails once a second variant is
+    enrolled. The Torch audits run outside CI, so nothing else would notice.
+    Host tests are exempt so that the registry's own tests can exercise the
+    default; the variant authoring notes require every other host test to
+    name its variant or run for every variant.
+    """
+    import ast
+
+    tests = Path(__file__).resolve().parent
+    defaulted = []
+    for package in ("reference_common", *(p.name for p in tests.glob("*_reference"))):
+        for path in sorted((tests / package).rglob("*.py")):
+            for node in ast.walk(ast.parse(path.read_text(), str(path))):
+                if not isinstance(node, ast.Call):
+                    continue
+                name = getattr(node.func, "attr", getattr(node.func, "id", None))
+                if (
+                    name in ("get_adapter", "baseline_lock", "resolve_variant")
+                    and len(node.args) < 2
+                    and all(keyword.arg != "variant" for keyword in node.keywords)
+                ):
+                    defaulted.append(f"{path.relative_to(tests)}:{node.lineno} {name}")
+    assert not defaulted, "pass the selected variant:\n" + "\n".join(defaulted)
+
+
+@pytest.mark.parametrize("operation", ["sdpa"])
+def test_torch_audit_checks_one_selected_variant(
+    second_variant, tmp_path, monkeypatch, capsys
+):
+    """The SDPA Torch audit needs ``--variant`` before it probes the device."""
+    from sdpa_reference import architectures, torch_reference
+
+    registry = second_variant.architectures
+    first = registry.ARCHITECTURES[0]
+    for name in ("resolve_variant", "get_adapter"):
+        monkeypatch.setattr(architectures, name, getattr(registry, name))
+    probed = []
+    monkeypatch.setattr(torch_reference, "validate_device", lambda *a: probed.append(a))
+    monkeypatch.setattr(torch_reference, "make_inputs", lambda case: {})
+    monkeypatch.setattr(torch_reference, "independent_reference", lambda *a: None)
+    monkeypatch.setattr(torch_reference, "cross_check", lambda case, *a, **k: case.id)
+    output = tmp_path / "audit.json"
+    command = ["--arch", first, "--output", str(output)]
+    with pytest.raises(SystemExit) as exit:
+        torch_reference.main(command)
+    assert exit.value.code == 2
+    assert capsys.readouterr().err.endswith(
+        f"error: argument --variant: SDPA {first} needs a selected reference "
+        "variant; enrolled: narrow, wide\n"
+    )
+    assert not probed and not output.exists()
+    torch_reference.main([*command, "--variant", "narrow"])
+    report = json.loads(output.read_text())
+    assert (report["architecture"], report["variant"]) == (first, "narrow")
+    cases = registry.get_adapter(first, "narrow").CASES
+    assert {
+        key: entry["torch_reference"] for key, entry in report["cases"].items()
+    } == {case.id: case.id for case in cases}
+
+
 @pytest.mark.parametrize("operation", OPERATIONS)
 def test_qualification_records_the_selected_variant(
     second_variant, tmp_path, monkeypatch, capsys, operation
