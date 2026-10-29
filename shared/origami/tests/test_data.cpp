@@ -44,3 +44,7 @@ fs::path origami_test_data(const fs::path& name, const char* source_dir) {
 }
 
 fs::path olc_test_data() { return origami_test_data("olc", ORIGAMI_OLC_TEST_DATA); }
+
+fs::path olc_shipped_models() {
+  return origami_test_data("nn/olc", ORIGAMI_OLC_SHIPPED_MODELS);
+}

@@ -12,5 +12,8 @@ std::filesystem::path origami_test_data(const std::filesystem::path& name, const
 /// The OLC fixtures (tests/data/olc).
 std::filesystem::path olc_test_data();
 
+/// The shipped OLC models (data/nn/olc).
+std::filesystem::path olc_shipped_models();
+
 /// This test binary, or "" where the platform does not say.
 std::filesystem::path test_executable();
