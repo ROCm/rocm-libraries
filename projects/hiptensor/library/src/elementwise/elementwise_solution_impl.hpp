@@ -222,7 +222,7 @@ namespace hiptensor
                             CkHiptensorUnaryOp{operators[2]},
                             typename Traits::ScaleOp{
                                 static_cast<decltype(Traits::ScaleOp::scale_)>(scalarValues[0])}},
-                        typename Traits::AOp{
+                        typename Traits::BOp{
                             CkHiptensorUnaryOp{operators[3]},
                             typename Traits::ScaleOp{
                                 static_cast<decltype(Traits::ScaleOp::scale_)>(scalarValues[1])}},
