@@ -154,6 +154,13 @@ _KERNEL_RESOURCE_BUDGETS = {
         "max_scratch_bytes": 64,
         "min_waves_per_simd": 2,
     },
+    # gfx942 fp16 D128 paged prefill: paged V always takes the DMA path (no cfvst),
+    # where the ROCm 7.1 comgr caps VGPR at 256 and spills 28 B; contiguous with
+    # use_cfvst=False spills the same there. ROCm 7.2 and later fit with no scratch.
+    "rocke_attention_dense_d128_hq32_kv8_bn64_fp16_sq8192_sk8192_causal_swa4096_pgd16_nb512_lazyrs_gfx942_b1_wpe2": {
+        "max_scratch_bytes": 32,
+        "min_waves_per_simd": 2,
+    },
 }
 
 # Every kernel_name ``_assert_resources_fit`` is handed, so a budget whose key no
