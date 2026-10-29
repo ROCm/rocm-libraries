@@ -266,6 +266,24 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* kv_stride_tok_b_v; /* num_kv_p*HD*KV_BYTES            */
     rocke_value_t* kv_stride_blk_b_v; /* kv_stride_tok_b_v*BS            */
     rocke_value_t* kv_block_bytes_c_v; /* kv_stride_blk_b_v (one block)   */
+    /* bf16/fp16 loaders (!KV_FP8, !FAST_PAGED_KV_DESC): the lane's in-page byte
+     * offset, each copy's first-token offset in its page (indexed by that
+     * token; [0] stays NULL), and the i64 page stride (I64_KV_ADDR). */
+    rocke_value_t* lane_within_b_v;
+    rocke_value_t* copy_tok_b[64];
+    rocke_value_t* kv_stride_blk_i64_v;
+    /* Page ids the KV loop carries when page copies prefetch them (one per page
+     * of a tile), with the tile index value each set belongs to: the first tile
+     * and the one after it (prologue), the current and next tile, and the tile
+     * after next read one iteration ahead. */
+    rocke_value_t* page_start_tile;
+    rocke_value_t* page_start[16];
+    rocke_value_t* page_start_next[16];
+    rocke_value_t* page_cur_tile;
+    rocke_value_t* page_cur[16];
+    rocke_value_t* page_next_tile;
+    rocke_value_t* page_next[16];
+    rocke_value_t* page_after_next[16];
     rocke_value_t* lane_half_base_v; /* tid * KV_HALVES_PER_LANE        */
     rocke_value_t* zero_soff_v; /* const_i32(0) soffset            */
     rocke_value_t* wave_lds_off_i64_v; /* wave_lds_offset_i64             */
@@ -439,6 +457,13 @@ void rocke_gfx950_attn2d_issue_k_load_runtime(rocke_gfx950_attn2d_build_ctx_t* c
 void rocke_gfx950_attn2d_issue_v_load_runtime(rocke_gfx950_attn2d_build_ctx_t* ctx,
                                               rocke_value_t* kv_tile_idx,
                                               rocke_value_t* buf_idx);
+/* True when the bf16/fp16 loaders use per-page copy offsets and the KV loop
+ * carries the page ids, reading each tile's ids one iteration ahead. */
+bool rocke_gfx950_attn2d_page_prefetch(const rocke_gfx950_attn2d_build_ctx_t* ctx);
+/* The page ids of every page of a tile: one guarded block-table read each. */
+void rocke_gfx950_attn2d_tile_page_ids(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                       rocke_value_t* kv_tile_idx,
+                                       rocke_value_t** out);
 void rocke_gfx950_attn2d_issue_k(rocke_gfx950_attn2d_build_ctx_t* ctx,
                                  rocke_value_t* tile_idx,
                                  rocke_value_t* buf_idx);

@@ -914,6 +914,34 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->tile_size = 64;
         break;
 
+    /* bf16 D64/b16 GQA-4 multi-batch: the shipping spec, whose one K/V copy per
+     * tile (32 tokens) spans two pages, so the bf16 loaders keep the paged-KV
+     * descriptor. Every other bf16/fp16 case takes the per-page copy offsets. */
+    case 56:
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_mask_limit = true;
+        break;
+
     default:
         return -1;
     }

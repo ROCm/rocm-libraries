@@ -656,6 +656,13 @@ void rocke_gfx950_attn2d_emit_pv_bucket(rocke_gfx950_attn2d_build_ctx_t* ctx,
         for(atom = 0; atom < ctx->ACC_M_ATOMS; ++atom)
             yields[yc++] = new_acc[n * ctx->ACC_M_ATOMS + atom];
     yields[yc++] = ctx->GROUPED_KV2 ? in->cur_buf : ctx->nxt_buf_v;
+    if(rocke_gfx950_attn2d_page_prefetch(ctx))
+    {
+        for(i = 0; i < ctx->N_BLOCKS_PER_TILE; ++i)
+            yields[yc++] = ctx->page_next[i];
+        for(i = 0; i < ctx->N_BLOCKS_PER_TILE; ++i)
+            yields[yc++] = ctx->page_after_next[i];
+    }
 
     /* Record the rewritten carry for callers that thread phases (the driver's
      * single-phase path reads this back via the loop results). */
@@ -711,6 +718,15 @@ rocke_for_t rocke_gfx950_attn2d_drive_kv_loop(rocke_gfx950_attn2d_build_ctx_t* c
     for(i = 0; i < num_accs; ++i)
         ctx->acc_cur[i] = kvloop.iter_vars[ml + i];
     ctx->cur_buf = kvloop.iter_vars[ml + num_accs];
+    if(rocke_gfx950_attn2d_page_prefetch(ctx))
+    {
+        for(i = 0; i < ctx->N_BLOCKS_PER_TILE; ++i)
+        {
+            ctx->page_cur[i] = kvloop.iter_vars[ml + num_accs + 1 + i];
+            ctx->page_next[i] = kvloop.iter_vars[ml + num_accs + 1 + ctx->N_BLOCKS_PER_TILE + i];
+        }
+        ctx->page_cur_tile = kvloop.iv;
+    }
     ctx->skip_mask = false;
 
     rocke_gfx950_attn2d_emit_kv_body(ctx);

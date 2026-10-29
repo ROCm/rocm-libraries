@@ -560,6 +560,8 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
     rocke_value_t* in_range_next = rocke_b_cmp_lt(b, next_tile_iv_raw, ctx->tile_end);
     rocke_value_t* safe_next_tile
         = rocke_b_select(b, in_range_next, next_tile_iv_raw, ctx->kv_tile_iv);
+    if(rocke_gfx950_attn2d_page_prefetch(ctx))
+        ctx->page_next_tile = safe_next_tile;
 
     /* softmax-derived state forwarded to the PV bucket. */
     rocke_value_t* alpha_regs[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
@@ -593,6 +595,19 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
     if(ctx->USE_SOFTMAX_INTERLEAVE
        && (ctx->SOFTMAX_INTERLEAVE_MODE == 0 || ctx->SOFTMAX_INTERLEAVE_MODE == 1))
         rocke_b_iglp_opt(b, ctx->SOFTMAX_INTERLEAVE_MODE);
+
+    /* Read the page ids of the tile after next now, right after the iter-start
+     * drain, so they arrive long before next iteration's copies need them. That
+     * tile is next iteration's safe_next_tile. */
+    if(rocke_gfx950_attn2d_page_prefetch(ctx))
+    {
+        rocke_value_t* c_two = rocke_b_const_i32(b, 2);
+        rocke_value_t* after_next_raw = rocke_b_add(b, ctx->kv_tile_iv, c_two);
+        rocke_value_t* in_range_after = rocke_b_cmp_lt(b, after_next_raw, ctx->tile_end);
+        rocke_value_t* after_next
+            = rocke_b_select(b, in_range_after, after_next_raw, next_tile_iv_raw);
+        rocke_gfx950_attn2d_tile_page_ids(ctx, after_next, ctx->page_after_next);
+    }
 
     /* Early-V schedule: V_lds is single-buffered and the iter-start full drain
      * guarantees the previous PV's V reads retired, so the current V copy can be
