@@ -13,7 +13,18 @@ this rewrite moved fwd/dgrad onto the instance-list machinery but has not yet
 ported those onto it, so those
 directions/arches are an explicit, declared gap rather than a silent
 regression -- a request for either is rejected with a reason, not routed to a
-default. Every
+default.
+
+One forward candidate is not an instance: ``conv_winograd_fwd``, the
+Winograd forward on gfx1250 (:mod:`dispatch.conv_winograd_plan`). It is
+opt-in -- ``algorithm="auto"`` never picks it, so it displaces no default --
+and a request reaches it by pinning ``algorithm="winograd"``; the sweep entry
+points list every safe Winograd plan of an eligible request. Its kernels are
+built per problem (no AOT binary), its eligibility and plan come from
+:mod:`kernels.common.conv_winograd_select`, and its :class:`ConvLaunchPlan`
+runs the transform, GEMM and output kernels in order over named workspaces.
+
+Every
 record there spells the :class:`KernelIdentity` of one AOT kernel (format:
 :class:`InstanceList`; edit with
 ``benchmarks/common/grouped_conv/instance_list.py``) and becomes one
@@ -94,7 +105,20 @@ from kernels.conv.kernel_identity import (
     identity_supports_problem,
 )
 from kernels.conv.kernel_label import field_baseline
+from kernels.common.conv_winograd_select import (
+    WinogradCostModel,
+    select_winograd,
+    winograd_ineligible_reason,
+    winograd_plans,
+)
+from rocke.helpers.split_k import _ARCH_NUM_CUS, _DEFAULT_NUM_CUS
 from rocke.core.lower_llvm import LLVM_FLAVORS
+from .conv_winograd_plan import (
+    ConvWinogradSpec,
+    winograd_flavor_reason,
+    winograd_launch_plan,
+    winograd_steps,
+)
 from rocke.dispatch.core import (
     Capability,
     CandidateRegistry,
@@ -116,11 +140,13 @@ __all__ = [
     "CONV_FWD_EXECUTION_REGISTRY",
     "CONV_FWD_REGISTRY",
     "CONV_GROUPED_ABI_VERSION",
+    "CONV_WINOGRAD_ABI_VERSION",
     "DEFAULT_LLVM_FLAVOR",
     "ConvGroupedRequest",
     "ConvInstanceSpec",
     "ConvLaunchPlan",
     "ConvLaunchStep",
+    "ConvWinogradSpec",
     "InstanceList",
     "InstanceListError",
     "conv_grouped_candidates",
@@ -146,6 +172,8 @@ _FAMILIES = {"fwd": "conv_fwd", "dgrad": "conv_dgrad"}
 # direct variant the conv_direct_args_signature one.
 CONV_GROUPED_ABI_VERSION = "hipkg-conv-grouped/v1"
 CONV_DIRECT_ABI_VERSION = "hipkg-conv-direct/v1"
+# Winograd forward plans: per-kernel signatures, kernargs named per step.
+CONV_WINOGRAD_ABI_VERSION = "hipkg-conv-winograd/v1"
 
 # The registered instance lists, by (arch, direction). Relative to this file.
 _INSTANCE_DIR = Path(__file__).resolve().with_name("grouped_convolution_instances")
@@ -598,15 +626,23 @@ class ConvLaunchStep:
     kernel takes its extents from ``args``. ``scalars`` are the trailing
     ``(name, value)`` kernargs of a weight transform: the runtime-channel
     (``_rtc``) ones take the per-group channel counts.
+
+    A kernel built per problem (the Winograd forward) has no AOT identity:
+    ``identity`` is ``None``, ``kernel`` holds its ``name`` and
+    ``build(arch) -> KernelDef``, and ``kernargs`` spells every kernarg of
+    ``signature`` in order: ``("buf", buffer, byte_offset)``,
+    ``("bytes", buffer)`` (its size) or ``("i32", value)``.
     """
 
-    identity: KernelIdentity
+    identity: KernelIdentity | None
     grid: tuple[int, int, int]
     block: tuple[int, int, int]
     signature: tuple[dict, ...]
     buffers: tuple[str, str | None, str]
     args: object = None
     scalars: tuple[tuple[str, int], ...] = ()
+    kernel: object = None
+    kernargs: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -630,6 +666,19 @@ class ConvLaunchPlan:
         self, step: ConvLaunchStep, ptrs: Mapping[str, int], sizes: Mapping[str, int]
     ) -> dict:
         """The full kernarg ``values`` of ``step``, its buffers at ``ptrs``."""
+        if step.kernargs:
+            out = {}
+            for arg, spelled in zip(step.signature, step.kernargs):
+                kind = spelled[0]
+                if kind == "buf":
+                    out[arg["name"]] = ptrs[spelled[1]] + int(spelled[2])
+                elif kind == "bytes":
+                    out[arg["name"]] = sizes[spelled[1]]
+                elif kind == "i32":
+                    out[arg["name"]] = int(spelled[1])
+                else:
+                    raise ValueError(f"unknown kernarg kind {kind!r}")
+            return out
         a, b, d = step.buffers
         if step.args is None:
             return {
@@ -660,6 +709,8 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
     """
     from kernels.common.conv_args import ConvArgs
 
+    if isinstance(spec, ConvWinogradSpec):
+        return winograd_launch_plan(spec.problem, spec.dtype, spec.plan, spec.arch)
     ident = spec.identity
     step = functools.partial(
         ConvLaunchStep,
@@ -1133,6 +1184,151 @@ for (_arch, _direction), _ in _INSTANCE_LISTS.items():
 
 
 # ---------------------------------------------------------------------------
+# Winograd forward (gfx1250, opt-in)
+# ---------------------------------------------------------------------------
+
+_WINOGRAD_NAME = "conv_winograd_fwd"
+_WINOGRAD_ARCHES = ("gfx1250",)
+
+
+def _winograd_model(arch: str) -> WinogradCostModel:
+    return WinogradCostModel(num_cus=_ARCH_NUM_CUS.get(arch, _DEFAULT_NUM_CUS))
+
+
+def _winograd_spec(req: ConvGroupedRequest, plan) -> ConvWinogradSpec:
+    """The spec of ``plan`` on ``req``; raises ``ValueError`` when a kernel of
+    the plan cannot run the problem or does not lower at the request's LLVM
+    flavor (the K3 GEMM lowers at llvm23 only)."""
+    problem = _conv_problem(req)
+    dtype = req.dtype.lower()
+    steps, _ = winograd_steps(problem, dtype, plan)
+    why = winograd_flavor_reason(problem, dtype, plan, req.llvm_flavor)
+    if why is not None:
+        raise ValueError(f"{_WINOGRAD_NAME}:{plan.label}: {why}")
+    return ConvWinogradSpec(
+        name=f"{_WINOGRAD_NAME}:{plan.label}",
+        plan=plan,
+        problem=problem,
+        dtype=dtype,
+        arch=req.arch,
+        block=steps[-1].block,
+    )
+
+
+def _winograd_problem_reason(req: ConvGroupedRequest) -> str | None:
+    if req.direction.lower() != "fwd":
+        return "Winograd runs the forward direction only"
+    problem = _conv_problem(req)
+    return winograd_ineligible_reason(problem, req.dtype.lower())
+
+
+@functools.lru_cache(maxsize=256)
+def _winograd_sweep(req: ConvGroupedRequest) -> tuple[ConvWinogradSpec, ...]:
+    """Every safe Winograd plan of ``req`` whose kernels can run it, in model
+    cost order."""
+    if _winograd_problem_reason(req) is not None:
+        return ()
+    dtype = req.dtype.lower()
+    out = []
+    for plan in winograd_plans(
+        _conv_problem(req), dtype, model=_winograd_model(req.arch)
+    ):
+        try:
+            out.append(_winograd_spec(req, plan))
+        except ValueError:
+            continue
+    return tuple(out)
+
+
+@functools.lru_cache(maxsize=256)
+def _winograd_selection(
+    req: ConvGroupedRequest,
+) -> tuple[ConvWinogradSpec | None, str]:
+    """The selector's plan for ``req`` (the next safe one when a kernel of the
+    selected plan cannot run the problem), or ``(None, why)``."""
+    why = _winograd_problem_reason(req)
+    if why is not None:
+        return None, why
+    dtype = req.dtype.lower()
+    sel = select_winograd(
+        _conv_problem(req),
+        dtype,
+        model=_winograd_model(req.arch),
+    )
+    if sel.kind == "none":
+        return None, sel.reason
+    try:
+        return _winograd_spec(req, sel), "ok"
+    except ValueError as e:
+        rest = _winograd_sweep(req)
+        if rest:
+            return rest[0], "ok"
+        return None, str(e)
+
+
+def _winograd_last_step(spec: ConvWinogradSpec):
+    steps, _ = winograd_steps(spec.problem, spec.dtype, spec.plan)
+    return steps[-1]
+
+
+def _make_winograd_candidate() -> KernelCandidate:
+    def support(req: OperatorRequest) -> tuple[bool, str]:
+        errors = _request_errors(req)
+        if errors:
+            return False, "; ".join(errors)
+        assert isinstance(req, ConvGroupedRequest)
+        ok, why = selector_matches(req, candidate)
+        if not ok:
+            return False, why
+        spec, why = _winograd_selection(req)
+        return spec is not None, why
+
+    def select(req: OperatorRequest) -> ConvWinogradSpec:
+        ok, why = candidate.admits(req)
+        if not ok:
+            raise ValueError(f"{_WINOGRAD_NAME} does not support request: {why}")
+        assert isinstance(req, ConvGroupedRequest)
+        spec, why = _winograd_selection(req)
+        if spec is None:
+            raise ValueError(f"{_WINOGRAD_NAME} does not support request: {why}")
+        return spec
+
+    def build(spec: ConvWinogradSpec, arch: str):
+        return _winograd_last_step(spec).kernel.build(arch)
+
+    candidate = KernelCandidate(
+        name=_WINOGRAD_NAME,
+        family=_FAMILIES["fwd"],
+        algorithm="winograd",
+        spec_id=_WINOGRAD_NAME,
+        abi_version=CONV_WINOGRAD_ABI_VERSION,
+        # After every listed instance; opt-in, so never picked under "auto".
+        priority=1_000_000,
+        capability=Capability(
+            arches=_WINOGRAD_ARCHES,
+            dtypes=("fp16", "bf16"),
+            layouts=("NHWC",),
+        ),
+        _supports=support,
+        select_spec=select,
+        signature=lambda spec: _winograd_last_step(spec).signature,
+        grid=lambda spec, req: _winograd_last_step(spec).grid,
+        block=lambda spec: _winograd_last_step(spec).block,
+        sweep_space=lambda req: (
+            _winograd_sweep(req) if candidate.admits(req)[0] else ()
+        ),
+        build=build,
+        opt_in=True,
+    )
+    return candidate
+
+
+_WINOGRAD_CANDIDATE = _make_winograd_candidate()
+_REGISTRIES["fwd"].register(_WINOGRAD_CANDIDATE)
+_EXECUTION_REGISTRIES["fwd"].register(_WINOGRAD_CANDIDATE)
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -1164,7 +1360,7 @@ def registered_conv_grouped_instances(
     return tuple(
         _INSTANCE_SPECS[c.name]
         for c in conv_grouped_candidates(direction)
-        if arch is None or arch in c.capability.arches
+        if c.name in _INSTANCE_SPECS and (arch is None or arch in c.capability.arches)
     )
 
 
@@ -1223,10 +1419,20 @@ def _no_instance_reason(req: ConvGroupedRequest) -> str:
     if errors:
         return "; ".join(errors)
     reasons: dict[str, int] = {}
+    opt_in = []
     for candidate in _registry(req).candidates():
         ok, why = candidate.admits(req)
         if not ok:
             reasons[why] = reasons.get(why, 0) + 1
+        elif candidate.opt_in:
+            opt_in.append(candidate.algorithm)
+    if opt_in:
+        note = (
+            "only opt-in candidates admit it (pin algorithm="
+            + ", ".join(repr(a) for a in sorted(set(opt_in)))
+            + ")"
+        )
+        reasons[note] = reasons.get(note, 0) + 1
     if not reasons:
         return "no instances registered"
     top = sorted(reasons.items(), key=lambda kv: -kv[1])[:5]

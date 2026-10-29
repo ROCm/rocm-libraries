@@ -24,6 +24,8 @@ contributes what is conv-specific:
   (:func:`wgrad_atomic_epilogue_available`) and accumulates rounding error with
   the degree (:data:`ATOMIC_16BIT_MAX_SPLIT_K`); a merged tile reduces through
   the workspace only; the workspace must fit the i32 ``ws_bytes`` kernarg;
+  WMMA (wave32) arches have no workspace path, and their packed atomic needs
+  neither cshuffle nor an even store vector;
 * the gridDim.z budget (``z = groups * split_k``).
 
 An explicit degree, an override, and an auto degree on an arch without a cost
@@ -74,6 +76,8 @@ from kernels.common.conv_implicit_gemm_wgrad import (
     _wg_M,
     _wg_N,
     wgrad_atomic_epilogue_available,
+    wgrad_two_stage_available,
+    wgrad_wmma_split_k_available,
 )
 from kernels.common.conv_implicit_gemm_wgrad_two_stage import wgrad_workspace_nbytes
 
@@ -180,16 +184,30 @@ def _resolve_wgrad(
     z_cap = MAX_GRID_DIM_Z // grid_groups
     # Merged tiles cannot use the packed atomic: its epilogue has no way to
     # drop an off-diagonal group pair, so only the workspace carries the mask.
-    # The packed 16-bit atomic is emitted by the cshuffle epilogue only (the
-    # direct-store one scatters the MFMA layout and has no pairs to add).
-    layout_ok, atomic_why = wgrad_atomic_epilogue_available(p, dtype, None)
+    # On MFMA the packed 16-bit atomic is emitted by the cshuffle epilogue only
+    # (the direct-store one scatters the MFMA layout and has no pairs to add).
+    # WMMA (wave32) has only the default epilogue, and its split-K epilogue
+    # forms each packed pair itself.
+    wave_size = ArchTarget.from_gfx(arch).wave_size
+    layout_ok, atomic_why = wgrad_atomic_epilogue_available(p, dtype, None, wave_size)
     if gm > 1:
         atomic_why = "a merged tile reduces through the workspace only"
-    elif layout_ok and epilogue == "default" and _is_16bit(dtype):
+    elif wave_size == 32 and not wgrad_wmma_split_k_available(arch):
+        # Same gate as is_valid_wgrad_spec: the WMMA epilogue needs the float
+        # global atomics the arch catalog marks as run on a device.
+        atomic_why = (
+            f"{arch} has no validated float global atomics "
+            "(has_global_float_atomic_add)"
+        )
+    elif layout_ok and epilogue == "default" and _is_16bit(dtype) and wave_size != 32:
         atomic_why = "the default epilogue emits no packed 16-bit atomic"
     atomic_ok = atomic_why == "ok"
-    # Deliberately unmerged: the workspace is R copies of the true dW.
-    ws_ok = wgrad_workspace_nbytes(p, ws_replicas) <= MAX_WGRAD_WS_BYTES
+    # Deliberately unmerged: the workspace is R copies of the true dW. WMMA
+    # arches have no two-stage path, so no workspace at all.
+    ws_ok = (
+        wgrad_two_stage_available(arch)
+        and wgrad_workspace_nbytes(p, ws_replicas) <= MAX_WGRAD_WS_BYTES
+    )
     if reduction == "workspace" and not ws_ok:
         # Fixing the reduction does not lift its limit: the caller's two-stage
         # binary cannot encode this workspace at any degree.
@@ -256,7 +274,19 @@ def _resolve_wgrad(
             arch=arch,
             groups=grid_groups,
             block_size=block_size,
+            # Selects the arch's WgradSplitPolicy (gfx1250) where it has one.
+            dtype_d=dtype,
         )
+        if reduction == "atomic" and not atomic_ok and allow_unsplit:
+            # An auto degree the packed atomic cannot serve runs unsplit, as
+            # on the planner path (e.g. a WMMA 16-bit dW with an odd row: no
+            # packed pair and no workspace). A forced degree still raises.
+            return ConvSplitK(
+                1,
+                False,
+                legacy.split_k,
+                f"CK formula ({legacy.reason}); no split: {atomic_why}",
+            )
         return _rule(legacy.split_k, f"CK formula ({legacy.reason})", atomic_cap=False)
 
     reductions = []

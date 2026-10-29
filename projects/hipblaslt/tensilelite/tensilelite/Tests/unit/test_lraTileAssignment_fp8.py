@@ -100,6 +100,8 @@ TILE_CONFIGS_FP8 = [
 
 # ---- Pytest tests ----
 
+# `gpu` routes this host-arch roundtrip to the unit lane's native-rocisa pass;
+# stinkytofu only emits gfx1250 ISA and cannot assemble for the host arch.
 @pytest.mark.gpu("gfx950")
 class TestLraTileAssignmentFP8GPU:
 

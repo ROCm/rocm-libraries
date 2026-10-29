@@ -249,6 +249,21 @@ inline std::ostream& operator<<(std::ostream& os, const GLOBALModifiers& mod) {
     if (mod.offset != 0) {
         os << " offset:" << mod.offset;
     }
+    if (mod.glc) {
+        if (mod.hasGLCModifier)
+            os << " glc";
+        else if (mod.hasSC0Modifier)
+            os << " sc0";
+    }
+    if (mod.slc) {
+        if (mod.hasGLCModifier)
+            os << " slc";
+        else if (mod.hasSC0Modifier)
+            os << " sc1";
+    }
+    if (mod.hasDLCModifier && mod.dlc) {
+        os << " dlc";
+    }
     // Temporal hint / cache scope for global_prefetch_b8 (gl2-prefetch). Match
     // rocisa GLOBALModifiers::toString(): emit only non-default fields, temporal
     // hint first then scope (e.g. " th:TH_LOAD_NT scope:SCOPE_SE").
@@ -257,6 +272,9 @@ inline std::ostream& operator<<(std::ostream& os, const GLOBALModifiers& mod) {
     }
     if (mod.scope != MUBUFScope::SCOPE_NONE) {
         os << " scope:" << toString(mod.scope);
+    }
+    if (mod.lds) {
+        os << " lds";
     }
     return os;
 }
@@ -874,9 +892,23 @@ static void emitDirective(std::ostream& os, const AsmDirective& directive,
         // Output raw text as-is (no newline added since text may already have it)
         os << directive.value;
         return;
-    } else if (directive.kind == AsmDirectiveKind::IF ||
-               directive.kind == AsmDirectiveKind::ENDIF) {
-        os << directive.value;
+    } else if (directive.kind == AsmDirectiveKind::IF) {
+        if (!directive.value.empty()) {
+            os << directive.value;
+        } else {
+            os << ".if " << directive.condition << "\n";
+        }
+        return;
+    } else if (directive.kind == AsmDirectiveKind::ENDIF) {
+        if (!directive.value.empty()) {
+            os << directive.value;
+        } else {
+            os << ".endif";
+            if (options.emitComments && !directive.comment.empty()) {
+                os << std::string(44, ' ') << " // " << directive.comment;
+            }
+            os << "\n";
+        }
         return;
     }
 
