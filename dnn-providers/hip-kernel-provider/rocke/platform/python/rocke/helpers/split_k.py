@@ -125,17 +125,19 @@ _WGRAD_SPLIT_POLICY: dict[str, WgradSplitPolicy] = {
 
 # Per-dtype overrides of _WGRAD_SPLIT_POLICY, keyed by (arch, dW dtype).
 #
-# gfx1250 fp16 (fitted 2026-10-29 on the corpus_all wgrad shapes, every cached
-# split-K binary timed at every degree 2..128 with verification): a smaller
-# fill target and a deeper minimum slice than bf16, up to degree 128. Against
-# the per-shape best degree it loses ~1.4% (geomean); the cap of 1 it replaces
-# lost 2.2x. No fp16 degree failed the 5e-2 verification on that corpus, so
-# the packed fp16 atomic's rounding is not the binding limit there.
+# gfx1250 fp16 (fitted 2026-10-29 on a stratified sample of the corpus_all
+# wgrad shapes, every cached split-K binary -- every K loop -- timed at every
+# degree 2..128 with verification, after the packed fp16 atomic stopped being
+# fenced): fill to 1024 CTAs (2048 grouped) with K slices as shallow as 512,
+# up to degree 128. Against the per-shape best degree it loses ~2.6%
+# (geomean); the cap of 1 it replaces lost 3.6x. No fp16 degree failed the
+# 5e-2 verification on that corpus, so the packed fp16 atomic's rounding is
+# not the binding limit there.
 _WGRAD_SPLIT_POLICY_BY_DTYPE: dict[tuple[str, str], WgradSplitPolicy] = {
     ("gfx1250", "fp16"): WgradSplitPolicy(
-        target_ctas=512,
-        grouped_target_ctas=1024,
-        min_slice_k=4096,
+        target_ctas=1024,
+        grouped_target_ctas=2048,
+        min_slice_k=512,
         max_degree=128,
     ),
 }
