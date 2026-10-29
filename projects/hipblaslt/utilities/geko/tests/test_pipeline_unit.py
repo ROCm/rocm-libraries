@@ -622,7 +622,7 @@ def test_process_duplicates_updates_shared_size_performance(monkeypatch: pytest.
     def _create(_hip, logic_dir, output_dir):
         created.append((Path(logic_dir), Path(output_dir)))
 
-    def _bench(_hip, bench_file, _output, custom_lib_dir=None, devices=None):
+    def _bench(_hip, bench_file, _output, custom_lib_dir=None, devices=None, cache=False):
         text = Path(bench_file).read_text()
         rows = []
         if "M: 1024" in text:

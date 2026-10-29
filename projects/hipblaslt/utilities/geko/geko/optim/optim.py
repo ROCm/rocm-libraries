@@ -37,6 +37,7 @@ from dataclasses import dataclass
 
 from geko import bench
 import geko.library as library
+from geko.bench.utils import is_built_custom_library
 from geko.config_generator import config_generator as cg
 from geko.config_generator.load_input_config import apply_input_config_defaults, resolve_mx_defaults
 from geko.constants import GEMM_FIELDS, canonical_arch, runtime_env
@@ -633,42 +634,62 @@ def process_duplicates(
         len(duplicated),
     )
 
-    for build_dir, loaded in completed:
-        if build_dir not in selected:
-            continue
+    class DuplicateBenchWorker(Worker[tuple[Path, list[tuple[Path, library.Library]]]]):
+        """Build one config's library and benchmark its duplicated sizes."""
 
-        lib_out = build_dir / "lib"
-        library.create(hipblaslt_path, build_dir / "3_LibraryLogic", lib_out)
-        bench_dir = build_dir / "duplicate_bench"
-        for yaml_path, lib in loaded:
-            if not any(_size_key(lib.name, size) in duplicated for size in lib.sizes or []):
-                continue
-            bench_file, _ = lib.create_bench_input(bench_dir)
-            results = bench.run(
-                hipblaslt_path,
-                bench_file,
-                Path(bench_file).with_suffix(".csv"),
-                custom_lib_dir=lib_out,
-                devices=devices,
-            )
-            measured = {
-                (int(row["m"]), int(row["n"]), int(row["batch_count"]), int(row["k"])): float(row["hipblaslt-Gflops"])
-                for _, row in results.iterrows()
-            }
-            updates = [
-                (size, key[1:])
-                for size in lib.sizes or []
-                if (key := _size_key(lib.name, size)) is not None
-                and key in duplicated
-                and key[1:] in measured
-                and isinstance(size[1], list)
-                and len(size[1]) >= 2
-            ]
-            for size, problem in updates:
-                size[1][1] = measured[problem]
-            if updates:
-                lib.dump(yaml_path.parent, name=yaml_path.name)
-                logger.info(
-                    "Wrote measured performance for duplicate sizes in '%s'",
-                    yaml_path,
+        def setup(self) -> None:
+            self.build_dir, self.loaded = self.item
+
+        def run(self) -> bool:
+            lib_out = self.build_dir / "lib"
+            if not is_built_custom_library(lib_out):
+                library.create(hipblaslt_path, self.build_dir / "3_LibraryLogic", lib_out)
+
+            bench_dir = self.build_dir / "duplicate_bench"
+            for yaml_path, lib in self.loaded:
+                if not any(_size_key(lib.name, size) in duplicated for size in lib.sizes or []):
+                    continue
+                bench_file, _ = lib.create_bench_input(bench_dir)
+                results = bench.run(
+                    hipblaslt_path,
+                    bench_file,
+                    Path(bench_file).with_suffix(".out"),
+                    custom_lib_dir=lib_out,
+                    devices=[self.device],
+                    cache=True,
                 )
+                measured = {
+                    (int(row["m"]), int(row["n"]), int(row["batch_count"]), int(row["k"])): float(row["hipblaslt-Gflops"])
+                    for _, row in results.iterrows()
+                }
+                updates = [
+                    (size, key[1:])
+                    for size in lib.sizes or []
+                    if (key := _size_key(lib.name, size)) is not None
+                    and key in duplicated
+                    and key[1:] in measured
+                    and isinstance(size[1], list)
+                    and len(size[1]) >= 2
+                ]
+                for size, problem in updates:
+                    size[1][1] = measured[problem]
+                if updates:
+                    lib.dump(yaml_path.parent, name=yaml_path.name)
+                    logger.info(
+                        "Wrote measured performance for duplicate sizes in '%s'",
+                        yaml_path,
+                    )
+            return True
+
+        def teardown(self) -> None:
+            pass
+
+    device_list = list(devices) if devices else [0]
+    work = [(build_dir, loaded) for build_dir, loaded in completed if build_dir in selected]
+    runner = Runner(
+        items=work,
+        worker_impl=DuplicateBenchWorker,
+        devices=device_list,
+        n_slots=1,
+    )
+    runner(input_dir / "duplicate_bench_runner")
