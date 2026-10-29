@@ -8,7 +8,8 @@
 # Rather than hand-port build_unified_attention_2d (~3000 LOC of helpers,
 # closures, dataclasses, descriptor math) to the recorder, we run the real
 # production builder (untouched) to get its KernelDef, then convert that graph
-# op-for-op into a recipe (param / generic emit / scf_for / scf_if / ret). The C
+# op-for-op into a recipe (param / generic emit / scf_for / scf_if /
+# scf_if_else / ret). The C
 # recipe VM then re-emits it and lowers it. Because the recipe carries the exact
 # production op stream, the comgr HSACO is byte-identical (SSA value-name
 # differences in the .ll don't affect the object).
@@ -65,6 +66,13 @@ def _op_to_instr(op):
             "op": "scf_if",
             "cond": _reg(op.operands[0]),
             "then": [_op_to_instr(o) for o in op.regions[0].ops],
+        }
+    if op.name == "scf.if_else":
+        return {
+            "op": "scf_if_else",
+            "cond": _reg(op.operands[0]),
+            "then": [_op_to_instr(o) for o in op.regions[0].ops],
+            "else": [_op_to_instr(o) for o in op.regions[1].ops],
         }
     if op.name == "cf.return":
         return {"op": "ret"}

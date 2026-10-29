@@ -27,6 +27,15 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.
 
+### Changed
+* [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
+  never uses split-K, so these solvers are deterministic; previously, deterministic forward
+  convolutions could only use the GEMM and naive solvers.
+
+### Removed
+* Removed the unused `miopenOperatorDescriptor` type from `miopen.h` (source-level only, ABI-neutral).
+* Removed `miopenAlphaBetaCase_t` and its unprefixed enumerators `DEFAULT`, `SCALE`, `BILINEAR` and `ERROR_STATE` from `miopen.h` (source-level only, ABI-neutral).
+
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
 ### Resolved Issues

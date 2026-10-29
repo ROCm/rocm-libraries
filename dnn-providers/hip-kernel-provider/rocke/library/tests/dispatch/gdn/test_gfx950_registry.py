@@ -12,7 +12,7 @@ import pytest
 from dispatch.gdn import (
     GdnDecodeRequest,
     dispatch_gdn_decode,
-    dispatch_gdn_decode_all,
+    dispatch_gdn_decode_bases,
     gdn_candidates,
 )
 from dispatch.gdn.gfx950 import ARCH, CONFIGURED_TILES, DEFAULT_TILE, make_spec
@@ -25,19 +25,18 @@ def _req(batch: int = 16, **changes) -> GdnDecodeRequest:
 
 
 def _tile(spec) -> tuple[int, int, int]:
-    return spec.num_warps, spec.warp_threads_k, spec.blocks_per_v_dim
+    kernel = spec.kernel_spec
+    return kernel.num_warps, kernel.warp_threads_k, kernel.blocks_per_v_dim
 
 
 def _legal_results(req: GdnDecodeRequest | None = None):
-    return dispatch_gdn_decode_all(req or _req())
+    """Each legal registered tile's base configuration."""
+    return dispatch_gdn_decode_bases(req or _req())
 
 
 def test_configured_count_and_identity_are_stable_and_unique():
-    candidates = tuple(
-        candidate
-        for candidate in gdn_candidates()
-        if not candidate.spec_id.startswith("kda_")
-    )
+    # GDN's candidates come first in the shared registry, then KDA's.
+    candidates = gdn_candidates()[: len(CONFIGURED_TILES)]
     expected_ids = tuple(
         f"nw{nw}_wtk{wtk}_bpv{bpv}" for nw, wtk, bpv in CONFIGURED_TILES
     )
@@ -62,7 +61,9 @@ def test_legal_d128_count_is_54_and_validator_is_authority():
     assert len(expected) == 54
     assert {_tile(result.spec) for result in results} == expected
     assert len(results) == 54
-    assert all(is_valid_spec(result.spec, arch=ARCH)[0] for result in results)
+    assert all(
+        is_valid_spec(result.spec.kernel_spec, arch=ARCH)[0] for result in results
+    )
 
 
 def test_legal_compile_identities_are_unique():
@@ -70,7 +71,7 @@ def test_legal_compile_identities_are_unique():
     identity_sets = (
         {result.candidate.name for result in results},
         {result.candidate.spec_id for result in results},
-        {stable_json_hash(asdict(result.spec), n=16) for result in results},
+        {stable_json_hash(asdict(result.spec.kernel_spec), n=16) for result in results},
         {result.spec.kernel_name() for result in results},
         {result.kernel_id.compile_key for result in results},
     )
@@ -139,7 +140,7 @@ def test_gdn_auto_ignores_custom_rankers_when_default_is_legal():
 
 def test_d64_auto_falls_back_to_a_validator_approved_candidate():
     result = dispatch_gdn_decode(_req(head_k_dim=64))
-    assert is_valid_spec(result.spec, arch=ARCH)[0]
+    assert is_valid_spec(result.spec.kernel_spec, arch=ARCH)[0]
 
 
 def test_registry_and_benchmark_enumeration_have_identity_bijection():
