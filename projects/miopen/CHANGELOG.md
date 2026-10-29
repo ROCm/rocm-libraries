@@ -30,9 +30,16 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   the 2 GiB bound are restored where the tuned config passes the new check. This restores
   ResNet-50/101 FP32 batch-1024 backward-weights speed. FP16/BF16 keep the 2 GiB bound, and so
   does the weight tensor in every case.
-* [BatchNorm] Fixed incorrect results from NHWC FP16/BF16 spatial batch normalization (forward training and backward) when `C / vectorsize` is odd and the batch is too small to hold the intermediate statistics: the solver applicability check and stash-method selection now use the same `C / vectorsize` parity as the kernel, and configurations without enough space are rejected so a valid fallback is selected.
-* [BatchNorm] Fixed BF16 batch normalization output being truncated instead of rounded on the device while the host reference rounded to nearest-even. All batchnorm solvers now receive `MIOPEN_USE_RNE_BFLOAT16`, so device conversion follows the build setting (round-to-nearest-even when ON, the default; truncation when OFF) and matches host conversion. In default builds this changes BF16 batchnorm results by up to one BF16 ulp.
-* [BatchNorm] Fixed the CPU reference for spatial backward training in the test/driver verification path omitting `epsilon` when recomputing the inverse variance, and reduced the `bn_driver` verification epsilon from `1e-3` to `1e-5`.
+* [BatchNorm] Fixed incorrect NHWC FP16/BF16 spatial batch normalization results (forward training
+  and backward) when `C / vectorsize` is odd and the batch is too small to hold the intermediate
+  statistics. Solver applicability and stash-method selection now use the kernel's parity, so
+  configurations without enough space are rejected and a valid fallback is selected.
+* [BatchNorm] Fixed BF16 batch normalization output being truncated on the device while the host
+  reference rounded to nearest-even. All batchnorm solvers now receive `MIOPEN_USE_RNE_BFLOAT16`,
+  so device and host conversion match. In default builds (RNE ON), BF16 batchnorm results change
+  by up to one BF16 ulp.
+* [BatchNorm] Fixed the spatial backward-training CPU reference omitting `epsilon` when recomputing
+  the inverse variance, and reduced the `bn_driver` verification epsilon from `1e-3` to `1e-5`.
 
 ### Added
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
