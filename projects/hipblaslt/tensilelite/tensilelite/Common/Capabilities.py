@@ -129,7 +129,6 @@ def makeIsaInfoMap(targetIsas: List[IsaVersion], cxxCompiler: str) -> Dict[IsaVe
     # Probing is hundreds of serial assembler runs per ISA; do the ISAs concurrently.
     ti.initMany(targetIsas, cxxCompiler, False)
     for v in targetIsas:
-        ti.init(v, cxxCompiler, False)
         asmCaps = ti.getIsaInfo(v).asmCaps
         archCaps = ti.getIsaInfo(v).archCaps
         regCaps = ti.getIsaInfo(v).regCaps
