@@ -63,6 +63,16 @@ reason = "DEF-05: an odd element stride on a sequence or dK/dV head axis is misa
 filters = ["*_SdpaBackward_*.def06*"]
 reason = "DEF-06: an attention scale of 0 or below gives NaN and Inf; tracked as ALMIOPEN-3043 (fix: asm-sdpa-decline-nonpositive-scale)"
 
+# Rejection probes (test plan sdpa-bwd.md §4.2): undefined graphs this engine accepts
+# today. The same declines remove these entries.
+[[test_skips]]
+filters = ["*_SdpaBackward_*.prbu01_*", "*_SdpaBackward_*.prbu03_*"]
+reason = "Rejection probe: O or dQ dims that differ from Q's are accepted; tracked as ALMIOPEN-3039 (fix: asm-sdpa-bwd-decline-strides)"
+
+[[test_skips]]
+filters = ["*_SdpaBackward_*.prbu13_*"]
+reason = "Rejection probe: a dQ sequence stride below D (overlapping rows) is accepted; tracked as ALMIOPEN-3038 (fix: asm-sdpa-bwd-decline-strides)"
+
 # The common suite's ToleranceResolver maps both SdpaAttributes and
 # SdpaBackwardAttributes to tol::sdpa::getToleranceFwd<T>() (tight, tuned for
 # forward), so SDPA backward gradients (dQ/dK/dV) get their own entries here:
