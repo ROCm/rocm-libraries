@@ -74,6 +74,27 @@ def test_at_least_one_column_is_committed() -> None:
     assert _committed_flavors(), "no committed arch-domain column to test against"
 
 
+def test_every_lane_has_a_column_or_an_alias() -> None:
+    """A lane with neither would silently run without the qualification gate."""
+    from rocke.core.lower_llvm import LLVM_FLAVORS
+
+    assert [flavor for flavor in LLVM_FLAVORS if arch_domain.load(flavor) is None] == []
+
+
+def test_a_column_alias_borrows_its_emission_alias_and_retires() -> None:
+    """An alias follows profile sharing and disappears when its own column lands."""
+    from rocke.core.llvm_profile import LLVM_EMISSION_ALIASES
+
+    committed = set(arch_domain.committed_flavors())
+    for lane, source in arch_domain.COLUMN_ALIASES.items():
+        assert LLVM_EMISSION_ALIASES.get(lane) == source, lane
+        assert source in committed, lane
+        assert lane not in committed, f"{lane} has its own column; drop the alias"
+        table = arch_domain.load(lane)
+        assert table is arch_domain.load(source)
+        assert table.flavor == source
+
+
 def test_only_arch_absent_is_negative() -> None:
     for status in (
         arch_domain.STATUS_OK,
@@ -803,6 +824,25 @@ def _lower_dpp8(flavor: str) -> str:
     return _lower_kernel_to_llvm_python(
         _dpp8_kernel(), arch=_DPP8_ARCH, llvm_flavor=flavor
     )
+
+
+def test_a_borrowing_lane_refuses_at_its_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A borrowed column keeps Python and C++ diagnostics on its source lane."""
+    monkeypatch.setenv(arch_domain.MODE_ENV, "error")
+    tested: list[str] = []
+    for lane, source in arch_domain.COLUMN_ALIASES.items():
+        table = arch_domain.load(source)
+        assert table is not None
+        cell = table.lookup(_DPP8_KEY, _DPP8_ARCH)
+        if cell is None or not arch_domain.is_negative(cell.status):
+            continue
+        with pytest.raises(ArchDomainError) as refused:
+            _lower_dpp8(lane)
+        assert refused.value.flavor == source, lane
+        tested.append(lane)
+    assert tested, "no borrowing lane had the negative test cell"
 
 
 def _waive(monkeypatch: pytest.MonkeyPatch, *cells: tuple[str, str, str]) -> None:

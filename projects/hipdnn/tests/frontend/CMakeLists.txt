@@ -77,6 +77,7 @@ add_executable(
     IntegrationRMSNormBackwardDescriptorLowering.cpp
     IntegrationRMSNormBackwardDescriptorLifting.cpp
     IntegrationAutotuneCompiledPlanPath.cpp
+    IntegrationBuildPlansFallback.cpp
     IntegrationAutotuneConfigRoundTrip.cpp
     IntegrationAutotuneConfigRoundTripUnsupportedOp.cpp
     IntegrationAutotuneEndToEnd.cpp
@@ -118,6 +119,8 @@ function(configure_hipdnn_public_frontend_test_target TARGET_NAME)
         ${TARGET_NAME}
         PRIVATE TEST_GOOD_PLUGIN_NAME="${TEST_GOOD_PLUGIN_NAME}"
                 TEST_EXECUTE_FAILS_PLUGIN_NAME="${TEST_EXECUTE_FAILS_PLUGIN_NAME}"
+                TEST_NO_SOLVER_PLUGIN_NAME="${TEST_NO_SOLVER_PLUGIN_NAME}"
+                TEST_RESOURCE_FAIL_PLUGIN_NAME="${TEST_RESOURCE_FAIL_PLUGIN_NAME}"
                 TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME="${TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME}"
                 TEST_NO_APPLICABLE_ENGINES_B_PLUGIN_NAME="${TEST_NO_APPLICABLE_ENGINES_B_PLUGIN_NAME}"
                 TEST_DUPLICATE_ID_A_PLUGIN_NAME="${TEST_DUPLICATE_ID_A_PLUGIN_NAME}"
@@ -146,6 +149,8 @@ function(configure_hipdnn_public_frontend_test_target TARGET_NAME)
         ${TEST_GOOD_PLUGIN_NAME}
         ${TEST_GOOD_DEFAULT_PLUGIN_NAME}
         ${TEST_EXECUTE_FAILS_PLUGIN_NAME}
+        ${TEST_NO_SOLVER_PLUGIN_NAME}
+        ${TEST_RESOURCE_FAIL_PLUGIN_NAME}
         ${TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME}
         ${TEST_NO_APPLICABLE_ENGINES_B_PLUGIN_NAME}
         ${TEST_DUPLICATE_ID_A_PLUGIN_NAME}
