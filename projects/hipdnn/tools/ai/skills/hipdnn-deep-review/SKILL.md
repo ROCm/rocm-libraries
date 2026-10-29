@@ -36,6 +36,7 @@ Ask for what is missing; record it in `PIN.md`:
 | `terms:<file>`, `knowledge:<dir>` | Optional private terms, one fixed string per line, outside the repository; optional `$KNOWLEDGE` store |
 | `round:<N>` | Default: one more than the highest `$EVIDENCE/r<k>/`; 1 when none |
 | Agent limits | Ask the user or the host for `Agents:` (maximum concurrent agents), `Cores:` (CPU cores for builds and tests) and `Mutation:` (a host recipe for mutating a built tree, or none); the skill assumes no values. They go into `dispatch-context.md` ([RUNBOOK.md](RUNBOOK.md) *Fan out*) |
+| Scope notes | Ask the user for scope notes the change's description does not state, such as areas being deprecated, or `none`. Free text; it goes into `dispatch-context.md` as `Scope:` and is informational unless it says "do not file findings in <area>" ([lanes/common.md](lanes/common.md) *Rules*) |
 
 Local builds and host-only tests are allowed. GPU, remote or shared compute, and every write
 to GitHub, Jira or a remote branch need the user's approval for that exact action. The

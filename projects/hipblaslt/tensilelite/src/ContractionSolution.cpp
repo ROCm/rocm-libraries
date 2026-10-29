@@ -1086,6 +1086,32 @@ namespace TensileLite
 
     namespace
     {
+        bool usePerTileStreamKSplit(ContractionSolution const& solution,
+                                   ContractionProblemGemm const& problem,
+                                   PersistentLaunchSettings const& launch,
+                                   size_t tiles, size_t itersPerTile)
+        {
+            if(!solution.internalArgsSupport.perTileExtraIters)
+                return false;
+            if(problem.getParams().uniformSummationOrder())
+                return true;
+            // With an integral number of workers per tile, distribute the
+            // remainder within each tile. Global first-E distribution otherwise
+            // makes workers straddle tile boundaries and creates extra fixups.
+            // A single tile, exact K division and whole tiles need no change.
+            if(!solution.sizeMapping.hasStaticAssignment()
+               || (!solution.customKernel.name.empty() && !solution.customKernel.generated)
+               || solution.sizeMapping.useSubtileImpl || solution.problemType.useGradient
+               || solution.problemType.sparse || problem.groupedGemm()
+               || launch.reduction != origami::reduction_t::tree
+               || tiles <= 1 || launch.grid <= tiles || launch.grid % tiles != 0)
+                return false;
+            const size_t factor = launch.grid / tiles;
+            return factor <= itersPerTile && itersPerTile % factor != 0
+                   && (!solution.usesStreamKSpatialCluster()
+                       || launch.clusterSchedule.split.skTiles == tiles);
+        }
+
         template <typename KA>
         void appendLegacyDataParallelSchedulingArgs(ContractionSolution const& solution,
                                                    ContractionSolution::Problem const& problem,
@@ -1597,8 +1623,7 @@ namespace TensileLite
                 // predates the gate (custom kernels, older logic) would receive
                 // a bit it misreads.
                 assert((magicShiftItersPerTile & 0x60000000u) == 0u);
-                if(internalArgsSupport.perTileExtraIters
-                   && problem.getParams().uniformSummationOrder())
+                if(usePerTileStreamKSplit(*this, problem, launch, tiles, itersPerTile))
                     magicShiftItersPerTile |= 0x20000000u;
 
                 args.template append<uint32_t>("itersPerTile", itersPerTile);
@@ -2902,6 +2927,36 @@ namespace TensileLite
                                inputs.fusedA2ADrain,
                                static_cast<uint32_t>(problem.fusedA2AExtent()));
 
+        // CU-occupancy probe tail args (layout: Signature.py addOccupancyProbeArgs).
+        // A grid smaller than minGrid is padded with probe-only WGs so the probe
+        // covers minGrid CUs. Only a 1-D grid can be padded; otherwise the probe
+        // is disabled for this launch. !groupedGemm mirrors the codegen gate.
+        if(internalArgsSupport.occupancyProbe && !problemType.groupedGemm)
+        {
+            auto const&    params    = problem.getParams();
+            void*          probeAddr = params.occupancyProbeAddr();
+            const uint32_t minGrid   = params.occupancyProbeMinGrid();
+            auto&          wg        = rv.numWorkGroups;
+            const size_t   realGrid  = static_cast<size_t>(wg.x) * wg.y * wg.z;
+
+            const bool needsPad = probeAddr && realGrid < minGrid;
+            const bool canPad   = wg.y == 1 && wg.z == 1;
+            if(needsPad && !canPad)
+                probeAddr = nullptr;
+
+            rv.occupancyProbe = probeAddr != nullptr;
+            rv.args.appendAligned<void*>("ProbeAddr", probeAddr);
+            rv.args.append<uint32_t>("ProbeEpoch", params.occupancyProbeEpoch());
+            rv.args.append<uint32_t>("ProbeGrid", static_cast<uint32_t>(realGrid));
+
+            // Grow only the dispatch; the kernargs above keep the real grid.
+            if(needsPad && canPad)
+            {
+                wg.x              = minGrid;
+                rv.numWorkItems.x = rv.workGroupSize.x * minGrid;
+            }
+        }
+
         if(problemType.stochasticRounding)
         {
             // generate seed from random generator
@@ -3757,7 +3812,17 @@ namespace TensileLite
                 case CustomArgSemantic::BatchOffsetB:
                     rv.args.template append<int64_t>("batchOffsetB", inputs.batchOffsetB);
                     break;
-
+                case CustomArgSemantic::FusedA2ASegment:
+                {
+                    appendFusedSegment(rv.args,
+                                       inputs.fusedA2APeers,
+                                       inputs.fusedA2ACounter,
+                                       inputs.fusedA2AMyRank,
+                                       problem.fusedA2AWorld(),
+                                       inputs.fusedA2ADrain,
+                                       static_cast<uint32_t>(problem.fusedA2AExtent()));
+                    break;
+                }
                 // ---- Random seed args ----
                 case CustomArgSemantic::RNDSeed:
                 {
