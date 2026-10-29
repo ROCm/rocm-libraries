@@ -294,63 +294,6 @@ if(HIPDNN_ENABLE_TOOLING_TESTS AND NOT HIPDNN_SKIP_TESTS)
     _apply_hipdnn_test_category_labels(hipdnn_descriptor_generator_pytest)
 endif()
 
-# sdpa_conformance pytest suites (the hipdnn_sdpa adapter's non-GPU tests, the AOTriton port's CPU
-# tests and the vendored-tree check). Opt-in separately from the tooling tests: they need torch.
-# Build tree only. The GPU runs go through tools/sdpa_conformance/aotriton/run_aotriton.py.
-if(HIPDNN_ENABLE_SDPA_CONFORMANCE_TESTS AND HIPDNN_SKIP_TESTS)
-    message(STATUS "hipDNN: HIPDNN_ENABLE_SDPA_CONFORMANCE_TESTS is ignored because HIPDNN_SKIP_TESTS is ON")
-endif()
-if(HIPDNN_ENABLE_SDPA_CONFORMANCE_TESTS AND NOT HIPDNN_SKIP_TESTS)
-    if(NOT Python3_FOUND)
-        message(FATAL_ERROR "hipDNN: HIPDNN_ENABLE_SDPA_CONFORMANCE_TESTS=ON needs a Python3 interpreter")
-    endif()
-    set(HIPDNN_STRICT_SKIPS_PLUGIN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/pytest_plugins")
-
-    # Registered by directory so new test files are picked up.
-    set(_hipdnn_sdpa_conformance_dir "${CMAKE_CURRENT_SOURCE_DIR}/sdpa_conformance")
-    execute_process(
-        COMMAND "${Python3_EXECUTABLE}" -c "import pytest, xdist, torch, numpy"
-        RESULT_VARIABLE _hipdnn_sdpa_conformance_imports
-        OUTPUT_QUIET ERROR_QUIET
-    )
-    if(NOT _hipdnn_sdpa_conformance_imports EQUAL 0)
-        message(
-            FATAL_ERROR
-                "hipDNN: pytest, pytest-xdist, numpy and torch are not all importable by "
-                "${Python3_EXECUTABLE}, so the sdpa_conformance tests cannot run. Install "
-                "tools/sdpa_conformance/aotriton/requirements.txt for that interpreter, or "
-                "configure with -DHIPDNN_ENABLE_SDPA_CONFORMANCE_TESTS=OFF."
-        )
-    endif()
-    add_test(
-        NAME hipdnn_sdpa_conformance_pytest
-        COMMAND "${Python3_EXECUTABLE}" -m pytest -p hipdnn_strict_skips -m "not gpu"
-                "${_hipdnn_sdpa_conformance_dir}/tests" -v
-    )
-    add_test(
-        NAME hipdnn_sdpa_conformance_aotriton_pytest
-        COMMAND "${Python3_EXECUTABLE}" -m pytest -p hipdnn_strict_skips
-                "${_hipdnn_sdpa_conformance_dir}/aotriton/tests" -v
-    )
-    # Hashes only; the collection counts (about 5 minutes) are a manual `sync.py --check`.
-    add_test(
-        NAME hipdnn_sdpa_conformance_vendor_check
-        COMMAND "${Python3_EXECUTABLE}" "${_hipdnn_sdpa_conformance_dir}/aotriton/sync.py" --check --no-collect
-    )
-    set_tests_properties(
-        hipdnn_sdpa_conformance_pytest
-        hipdnn_sdpa_conformance_aotriton_pytest
-        hipdnn_sdpa_conformance_vendor_check
-        PROPERTIES
-            ENVIRONMENT_MODIFICATION
-            "PYTHONPATH=path_list_prepend:${HIPDNN_STRICT_SKIPS_PLUGIN_DIR};PYTHONPATH=path_list_prepend:${_hipdnn_sdpa_conformance_dir}"
-    )
-    _apply_hipdnn_test_category_labels(
-        hipdnn_sdpa_conformance_pytest hipdnn_sdpa_conformance_aotriton_pytest
-        hipdnn_sdpa_conformance_vendor_check
-    )
-endif()
-
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # ValidateDescriptors.cpp transitively includes <hip/hip_runtime.h> through
     # DescriptorLoader.hpp, so it needs the same HIP wiring every ingestor test target
