@@ -103,6 +103,76 @@ silicon bench harness (timings outside the repo).
 | Variant | Flags on | FFM |
 | --- | --- | --- |
 | `base_kernel_mxfp4_gemm` | (none) | `bad=0` (Step 4/5) |
+| `step6_1_mxfp4_gemm` | `local_read_prefetch` | `bad=0` |
+| `step6_2_mxfp4_gemm` | + `prefetch_gl2` | `bad=0` |
+| `step6_3_mxfp4_gemm` | + `scale_double_buffer` | `bad=0` (YAML `256x256x512`: `vgpr=774`, `vgpr_spill=4`, scratch=20; smoke tile_k=512 spill-free) |
+| `step6_4_mxfp4_gemm` | + `wave_separated_tdm` | `bad=0` |
+| `step6_5_mxfp4_gemm` | + `scale_tdm` (row-major rocKE LDS staging, not Tensile swizzle) | `bad=0` (YAML LDS 278528, `vgpr=768`, spill=0) |
+| `step6_6_mxfp4_gemm` | + `lds_pad` (+16 B A/B row stride) | `bad=0` |
+| `step6_7_mxfp4_gemm` | + `lds_segment_interleave` (`[A0][B-full][A1][scales]` bcontig layout) | Host/IR coverage: YAML MacroTile is valid; on-silicon numeric check pending |
+| `step6_9_mxfp4_gemm` | + `tdm_plus_lds_buf` (auto depth 3 when it fits) | Host/IR coverage; the bcontig YAML buffer stays depth 2 |
+| `step6_10_mxfp4_gemm` | + `init_c_wmma` (peeled first K tile reads C=0; the loop has no select) | Host/IR coverage |
+| `step6_11_mxfp4_gemm` | + `cluster_dim=(4,4,1)` (needs grid multiple; smoke grows M/N) | Host/IR coverage |
+| `step6_12_mxfp4_gemm` | + `b_scale_n_major` (B_scale is `[N][K/32]`, like A_scale) | Host/IR coverage; on-silicon numeric check pending |
+| `step6_13_mxfp4_gemm` | + `tdm_multicast` (cluster `workgroup_mask` on A/B/scale TDM, cluster barrier per tile) | Host/IR coverage; on-silicon numeric check pending |
+| `step6_14_mxfp4_gemm` | + `cross_tile_prefetch` (barrier and refill before the last K-step's WMMAs) | Host/IR coverage (YAML tile `vgpr=1018`, spill=0); on-silicon numeric check pending |
+| `step6_15_mxfp4_gemm` | + `cluster_gl2_prefetch` (cluster threads split the GL2 prefetch of the cluster's A/B tiles) | Host/IR coverage; on-silicon numeric check pending |
+| `step6_17_mxfp4_gemm` | + `a_scale_lds_pad` (8 B LDS pad per 256 B of A scales, via the TDM pad fields) | Host/IR coverage (YAML tile `vgpr=1016`, spill=0); on-silicon numeric check pending |
+
+`cluster_gl2_prefetch` follows TensileLite's GL2Prefetch: the cluster
+consumes `cy` A tiles and `cx` B tiles, and all `cx·cy·block_size` threads
+split their rows in 256 B chunks, A first and then B. On the YAML cluster each
+thread issues one prefetch per tile, choosing the A or B address with a select
+instead of a branch. Scale tensors are not prefetched.
+
+`a_scale_lds_pad` pads only the A-scale tile. An A-scale read is one
+`ds_load_b32` per lane, and lane `l` reads row `atom_row + l`, with rows
+16 B apart. Rows `r` and `r + 16` are then 256 B apart and share a bank, so
+the 32 lanes collide in pairs. An 8 B pad after every 256 B moves rows 16–31
+by two banks onto banks the first 16 rows do not use. The TDM descriptor
+inserts the pad (`pad_interval` 256 B, `pad_amount` 8 B), and the read adds
+`(offset >> 8) * 8`.
+
+The A/B data keep the per-row pad from `lds_pad`. TensileLite pads A every
+2048 B and B every 1024 B, but rocKE's fragment reads put 16 lanes on 16
+consecutive rows at the same K offset. Only a pad on every row gives those
+16 rows distinct banks; TensileLite's gfx1250 bank model scores its block
+sizes on that pattern as 8-way (A) and 4-way (B) conflicts.
+
+`tdm_multicast` sets each TDM descriptor's `workgroup_mask` from
+`cluster_workgroup_id`. A is shared along a cluster row (x is the N tile) and
+B along a cluster column, so each tile can be fetched once per cluster. Peers
+then write into this workgroup's LDS, which is why the per-tile barrier becomes
+`cluster_barrier(fences=False)`. LDS is ordered by `s_wait_tensorcnt`, so the
+cluster-scope fences (and the `global_inv` they cost) are left out.
+
+`cross_tile_prefetch` runs the tile-boundary wait, barrier and TDM refill after
+the last K-step's operands are read, but before its WMMAs. It then reads the
+next tile's first-step A/B fragments and scales, which are carried through the
+loop. Compiler memory clobbers on both sides of the barrier keep LLVM from
+moving LDS reads across it.
+
+`b_scale_n_major` changes the B_scale input contract from `[K/32][N]` to
+`[N][K/32]`. Scale TDM then stages B scales as `tile_n × (tile_k/32)` bytes,
+so each lane's four E8M0 groups are one aligned 4-byte LDS load instead of
+four byte loads plus packing. The LDS footprint is unchanged.
+`kernel_inputs()` in `mxfp4_tdm_gemm.py` transposes the host array for these
+kernels; `mxfp4_tdm_gemm_variants_bench.py --with-flag b_scale_n_major`
+applies the flag to any variant.
+
+Step 6.8 (`lds_segment_b_rotate`, odd-wave B N±8) is dropped from the
+cumulative chain and listed in `MXFP4_GEMM_BLOCKED_VARIANTS`: rotate needs a
+split-B layout, while bcontig keeps B contiguous. The resolved TensileLite
+winner for the YAML problem also uses `LDSSegmentBRotate=0`. Steps 6.9–6.11
+build directly on Step 6.7.
+
+Step 6.7 does not require a whole prefetch buffer to fit one 64 KiB segment.
+For the supported `2×2` wave group, it splits A into two M components and
+places B as one contiguous block between them. A component placement keeps the
+two A read groups in separate segments; the full double-buffered LDS allocation
+is checked against the 320 KiB workgroup LDS capacity. This is rocKE's
+row-padded bcontig layout, not a byte-identical implementation of TensileLite's
+block-padded `InMemorySwizzle` layout.
 
 ## Deferred controls
 

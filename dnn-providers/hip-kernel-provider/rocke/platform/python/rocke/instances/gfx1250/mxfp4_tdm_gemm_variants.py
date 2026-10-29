@@ -20,9 +20,204 @@ BASE_VARIANT = "base_kernel_mxfp4_gemm"
 # Only landed substeps appear here. Blocked substeps are listed separately.
 MXFP4_GEMM_VARIANTS: list[tuple[str, dict[str, Any]]] = [
     (BASE_VARIANT, {}),
+    ("step6_1_mxfp4_gemm", {"local_read_prefetch": True}),
+    (
+        "step6_2_mxfp4_gemm",
+        {"local_read_prefetch": True, "prefetch_gl2": True},
+    ),
+    (
+        "step6_3_mxfp4_gemm",
+        {
+            "local_read_prefetch": True,
+            "prefetch_gl2": True,
+            "scale_double_buffer": True,
+        },
+    ),
+    (
+        "step6_4_mxfp4_gemm",
+        {
+            "local_read_prefetch": True,
+            "prefetch_gl2": True,
+            "scale_double_buffer": True,
+            "wave_separated_tdm": True,
+        },
+    ),
+    (
+        "step6_5_mxfp4_gemm",
+        {
+            "local_read_prefetch": True,
+            "prefetch_gl2": True,
+            "scale_double_buffer": True,
+            "wave_separated_tdm": True,
+            "scale_tdm": True,
+        },
+    ),
+    (
+        "step6_6_mxfp4_gemm",
+        {
+            "local_read_prefetch": True,
+            "prefetch_gl2": True,
+            "scale_double_buffer": True,
+            "wave_separated_tdm": True,
+            "scale_tdm": True,
+            "lds_pad": True,
+        },
+    ),
+    (
+        "step6_7_mxfp4_gemm",
+        {
+            "local_read_prefetch": True,
+            "prefetch_gl2": True,
+            "scale_double_buffer": True,
+            "wave_separated_tdm": True,
+            "scale_tdm": True,
+            "lds_pad": True,
+            "lds_segment_interleave": True,
+        },
+    ),
+    (
+        "step6_9_mxfp4_gemm",
+        {
+            "local_read_prefetch": True,
+            "prefetch_gl2": True,
+            "scale_double_buffer": True,
+            "wave_separated_tdm": True,
+            "scale_tdm": True,
+            "lds_pad": True,
+            "lds_segment_interleave": True,
+            "tdm_plus_lds_buf": True,
+        },
+    ),
+    (
+        "step6_10_mxfp4_gemm",
+        {
+            "local_read_prefetch": True,
+            "prefetch_gl2": True,
+            "scale_double_buffer": True,
+            "wave_separated_tdm": True,
+            "scale_tdm": True,
+            "lds_pad": True,
+            "lds_segment_interleave": True,
+            "tdm_plus_lds_buf": True,
+            "init_c_wmma": True,
+        },
+    ),
+    (
+        "step6_11_mxfp4_gemm",
+        {
+            "local_read_prefetch": True,
+            "prefetch_gl2": True,
+            "scale_double_buffer": True,
+            "wave_separated_tdm": True,
+            "scale_tdm": True,
+            "lds_pad": True,
+            "lds_segment_interleave": True,
+            "tdm_plus_lds_buf": True,
+            "init_c_wmma": True,
+            "cluster_dim": (4, 4, 1),
+        },
+    ),
+    (
+        "step6_12_mxfp4_gemm",
+        {
+            "local_read_prefetch": True,
+            "prefetch_gl2": True,
+            "scale_double_buffer": True,
+            "wave_separated_tdm": True,
+            "scale_tdm": True,
+            "lds_pad": True,
+            "lds_segment_interleave": True,
+            "tdm_plus_lds_buf": True,
+            "init_c_wmma": True,
+            "cluster_dim": (4, 4, 1),
+            "b_scale_n_major": True,
+        },
+    ),
+    (
+        "step6_13_mxfp4_gemm",
+        {
+            "local_read_prefetch": True,
+            "prefetch_gl2": True,
+            "scale_double_buffer": True,
+            "wave_separated_tdm": True,
+            "scale_tdm": True,
+            "lds_pad": True,
+            "lds_segment_interleave": True,
+            "tdm_plus_lds_buf": True,
+            "init_c_wmma": True,
+            "cluster_dim": (4, 4, 1),
+            "b_scale_n_major": True,
+            "tdm_multicast": True,
+        },
+    ),
+    (
+        "step6_14_mxfp4_gemm",
+        {
+            "local_read_prefetch": True,
+            "prefetch_gl2": True,
+            "scale_double_buffer": True,
+            "wave_separated_tdm": True,
+            "scale_tdm": True,
+            "lds_pad": True,
+            "lds_segment_interleave": True,
+            "tdm_plus_lds_buf": True,
+            "init_c_wmma": True,
+            "cluster_dim": (4, 4, 1),
+            "b_scale_n_major": True,
+            "tdm_multicast": True,
+            "cross_tile_prefetch": True,
+        },
+    ),
+    (
+        "step6_15_mxfp4_gemm",
+        {
+            "local_read_prefetch": True,
+            "prefetch_gl2": True,
+            "scale_double_buffer": True,
+            "wave_separated_tdm": True,
+            "scale_tdm": True,
+            "lds_pad": True,
+            "lds_segment_interleave": True,
+            "tdm_plus_lds_buf": True,
+            "init_c_wmma": True,
+            "cluster_dim": (4, 4, 1),
+            "b_scale_n_major": True,
+            "tdm_multicast": True,
+            "cross_tile_prefetch": True,
+            "cluster_gl2_prefetch": True,
+        },
+    ),
+    (
+        "step6_17_mxfp4_gemm",
+        {
+            "local_read_prefetch": True,
+            "prefetch_gl2": True,
+            "scale_double_buffer": True,
+            "wave_separated_tdm": True,
+            "scale_tdm": True,
+            "lds_pad": True,
+            "lds_segment_interleave": True,
+            "tdm_plus_lds_buf": True,
+            "init_c_wmma": True,
+            "cluster_dim": (4, 4, 1),
+            "b_scale_n_major": True,
+            "tdm_multicast": True,
+            "cross_tile_prefetch": True,
+            "cluster_gl2_prefetch": True,
+            "a_scale_lds_pad": True,
+        },
+    ),
 ]
 
-MXFP4_GEMM_BLOCKED_VARIANTS: list[tuple[str, str]] = []
+MXFP4_GEMM_BLOCKED_VARIANTS: list[tuple[str, str]] = [
+    (
+        "step6_8_mxfp4_gemm",
+        (
+            "lds_segment_b_rotate needs a split-B LDS layout; the Step 6.7 "
+            "bcontig layout keeps B contiguous"
+        ),
+    ),
+]
 
 
 def variant_names() -> list[str]:

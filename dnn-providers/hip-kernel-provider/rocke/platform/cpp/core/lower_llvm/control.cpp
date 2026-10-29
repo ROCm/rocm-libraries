@@ -1461,14 +1461,17 @@ static void _op_gpu_cluster_workgroup_max_flat_id(rocke_lower_t* L, const rocke_
  * workgroup on the cluster barrier; waves never signal it directly. */
 static void _op_tile_cluster_barrier(rocke_lower_t* L, const rocke_op_t* op)
 {
-    (void)op;
+    bool fences;
     if(!rocke_ll_live(L))
         return;
     rocke_ll_require_llvm23_target_fact(L, "cluster_barrier", ROCKE_LL_FACT_CLUSTER_LAUNCH);
     rocke_ll_need(L, "s.cluster.barrier");
-    rocke_ll_emit(L, "  fence syncscope(\"cluster\") release");
+    fences = rocke_attr_get_bool(&op->attrs, "fences", true);
+    if(fences)
+        rocke_ll_emit(L, "  fence syncscope(\"cluster\") release");
     rocke_ll_emit(L, "  call void @llvm.amdgcn.s.cluster.barrier()");
-    rocke_ll_emit(L, "  fence syncscope(\"cluster\") acquire");
+    if(fences)
+        rocke_ll_emit(L, "  fence syncscope(\"cluster\") acquire");
 }
 
 /* Python _op_tile_iglp_opt. */

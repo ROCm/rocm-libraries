@@ -20,6 +20,7 @@ from ....instances.gfx1250.mxfp4_tdm_gemm import (
 )
 from ....instances.gfx1250.mxfp4_tdm_gemm_variants import (
     BASE_VARIANT,
+    variant_flags,
     variant_names,
     variant_spec,
 )
@@ -46,6 +47,18 @@ def make_inputs(spec: MxFp4TdmGemmSpec, seed: int = 0x32F4):
         a_codes,
         b_codes,
     )
+
+
+def kernel_inputs(spec: MxFp4TdmGemmSpec, inputs) -> tuple[np.ndarray, ...]:
+    """Return the five device inputs (A, B, A_scale, B_scale, C) in kernel layout.
+
+    ``inputs`` keeps B_scale as ``[K/32][N]`` for the reference; N-major
+    kernels take its transpose.
+    """
+    a, b, a_scale, b_scale, c = inputs[:5]
+    if spec.b_scale_n_major:
+        b_scale = np.ascontiguousarray(b_scale.T)
+    return a, b, a_scale, b_scale, c
 
 
 def reference(
@@ -111,7 +124,7 @@ def run_case(
     allocations = []
     try:
         function = module.get_function(artifact.kernel_name)
-        for array in (*inputs[:5], out):
+        for array in (*kernel_inputs(spec, inputs), out):
             pointer = runtime.alloc(array.nbytes)
             allocations.append(pointer)
             runtime.memcpy_h2d(pointer, _u8_buffer(array), array.nbytes)
@@ -189,7 +202,19 @@ def main(argv: list[str] | None = None) -> int:
     geo = _geometry_kwargs(args)
     names = variant_names() if args.variant == "all" else [args.variant]
     for name in names:
-        spec = variant_spec(name, args.m, args.n, args.k, **geo)
+        m, n, k = args.m, args.n, args.k
+        flags = variant_flags(name)
+        cluster = flags.get("cluster_dim")
+        if cluster is not None:
+            # Grid is (N/tile_n, M/tile_m, 1); grow so it divides the cluster.
+            cx, cy, _cz = cluster
+            tile_m = geo["tile_m"]
+            tile_n = geo["tile_n"]
+            m = max(m, tile_m * cy)
+            n = max(n, tile_n * cx)
+            m = ((m + tile_m * cy - 1) // (tile_m * cy)) * (tile_m * cy)
+            n = ((n + tile_n * cx - 1) // (tile_n * cx)) * (tile_n * cx)
+        spec = variant_spec(name, m, n, k, **geo)
         run_case(spec, alpha=args.alpha, beta=args.beta)
     return 0
 

@@ -2416,7 +2416,7 @@ class IRBuilder:
         """Workgroups per cluster along ``axis``: ``cluster_workgroup_max_id + 1``."""
         return self.add(self.cluster_workgroup_max_id(axis), self.const_i32(1))
 
-    def cluster_barrier(self) -> None:
+    def cluster_barrier(self, *, fences: bool = True) -> None:
         """Barrier across every workgroup of the cluster.
 
         Lowers to ``fence syncscope("cluster") release``,
@@ -2427,8 +2427,16 @@ class IRBuilder:
         barrier, then one wave per workgroup signals the cluster barrier and
         all waves wait on it; the workgroup barrier immediates used by
         :meth:`s_barrier_signal` stay separate.
+
+        ``fences=False`` emits only the intrinsic, for callers that order
+        their memory traffic with explicit wait counters (for example TDM
+        loads tracked by ``s_wait_tensorcnt``). The acquire fence otherwise
+        invalidates the vector cache on every call.
         """
-        self._op("tile.cluster_barrier")
+        if fences:
+            self._op("tile.cluster_barrier")
+        else:
+            self._op("tile.cluster_barrier", attrs={"fences": False})
 
     # ----- memory -----
 
@@ -5128,7 +5136,7 @@ class IRBuilder:
         row_stride: Value,
         tile_dim0: int,
         tile_dim1: int,
-        workgroup_mask: int = 0,
+        workgroup_mask: int | Value = 0,
         pad_interval: int | None = None,
         pad_amount: int = 0,
     ) -> tuple[Value, Value, Value, Value, Value]:
@@ -5143,7 +5151,9 @@ class IRBuilder:
         ``pad_interval`` is given, which enables LDS padding with the raw
         ``pad_interval`` (0..7) and ``pad_amount`` (0..127) fields.
         ``workgroup_mask`` selects the cluster workgroups that receive the
-        tile (0 = only the issuing workgroup).
+        tile (0 = only the issuing workgroup). It may be an ``int`` or a
+        wave-uniform i32 IR value whose bits above 15 are zero; bit ``i`` is
+        the workgroup whose ``cluster_workgroup_flat_id`` is ``i``.
 
         Group 0 holds the addresses, group 1 the shape and element size;
         groups 2..4 are zero (no rank > 2, no gather, no iteration). Every
@@ -5174,10 +5184,15 @@ class IRBuilder:
         for field, value in (("tile_dim0", tile_dim0), ("tile_dim1", tile_dim1)):
             if not 1 <= value <= 0xFFFF:
                 raise ValueError(f"{name} {field} must be in 1..65535 (got {value})")
-        if not 0 <= workgroup_mask <= 0xFFFF:
+        if isinstance(workgroup_mask, Value):
+            self._check_i32_value(name, "workgroup_mask", workgroup_mask)
+            dynamic_mask, static_mask = workgroup_mask, 0
+        elif not 0 <= workgroup_mask <= 0xFFFF:
             raise ValueError(
                 f"{name} workgroup_mask must be in 0..65535 (got {workgroup_mask})"
             )
+        else:
+            dynamic_mask, static_mask = None, workgroup_mask
         pad_enable = pad_interval is not None
         if pad_enable and not 0 <= pad_interval <= 7:
             raise ValueError(
@@ -5206,14 +5221,17 @@ class IRBuilder:
         # Group 1: flags | tensor dims split 16/16 across words | tile dims |
         # dim-0 stride = row_stride; dim-1 stride = 1, as CK Tile programs rank 2.
         flags = (
-            workgroup_mask
+            static_mask
             | data_size << 16
             | int(pad_enable) << 20
             | (pad_interval or 0) << 22
             | pad_amount << 25
         )
+        flags_word = word(flags)
+        if dynamic_mask is not None:
+            flags_word = self.lor(flags_word, dynamic_mask)
         group1 = (
-            word(flags),
+            flags_word,
             self.shl(tensor_dim0, c16),
             self.lor(self.lshr(tensor_dim0, c16), self.shl(tensor_dim1, c16)),
             self.lor(self.lshr(tensor_dim1, c16), word(tile_dim0 << 16)),
