@@ -102,7 +102,8 @@ def test_occupancy_probe_emission():
 
     # A plain store; every branch goes to the one skip label.
     store = next(line for i, line in zip(items, lines) if isinstance(i, GlobalStoreB32))
-    assert store.startswith("global_store_dword ")
+    # Native rocisa prints dword before gfx11. The stinkytofu backend prints b32.
+    assert store.split()[0] in ("global_store_dword", "global_store_b32"), store
     assert " sc0" not in store and " sc1" not in store and " nt" not in store
     labelName = next(i for i in items if isinstance(i, Label)).getLabelName()
     assert all(labelName in line for i, line in zip(items, lines)
@@ -132,6 +133,11 @@ def _kernarg_metadata(src):
 
 @pytest.mark.parametrize("numU32, padded", [(53, True), (54, False)])
 def test_occupancy_probe_signature_layout(numU32, padded):
+    # Signature text reads the active kernel (wavefront size, accum layout).
+    # Pin gfx950 here so the check does not depend on an earlier test.
+    ri = rocisa.rocIsa.getInstance()
+    ri.init((9, 5, 0), shutil.which("amdclang++") or "/opt/rocm/bin/amdclang++")
+    ri.setKernel((9, 5, 0), 64)
     commonArgsSize = 16
     writer = SimpleNamespace(states=SimpleNamespace(probeKernArgOffset=-1))
     sig = SignatureBase(kernelName="probe_layout", kernArgsVersion=3, codeObjectVersion="5",
@@ -186,4 +192,4 @@ def test_occupancy_probe_kernarg_matches_loads(monkeypatch):
     stores = [op for op in prologue
               if op.startswith(("global_store", "global_atomic", "buffer_store", "buffer_atomic",
                                 "flat_", "scratch_", "s_store", "s_atomic", "ds_"))]
-    assert stores == ["global_store_dword"]
+    assert stores in (["global_store_dword"], ["global_store_b32"]), stores

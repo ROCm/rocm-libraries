@@ -17,9 +17,9 @@ config. These tests check both paths.
 import inspect
 import os
 
-from Tensile.BenchmarkProblems import _benchmarkProblemType, _readCacheIfValid
-from Tensile.ClientWriter import writeClientConfigIni
-from Tensile.CustomKernels import (
+from tensilelite.BenchmarkProblems import _benchmarkProblemType, _readCacheIfValid
+from tensilelite.ClientWriter import writeClientConfigIni
+from tensilelite.CustomKernels import (
     customKernelNameOf,
     isExternalCustomKernel,
     mxScalesArePackedForSolutions,
@@ -132,8 +132,8 @@ def test_cache_reader_surfaces_the_layout_decision(tmp_path):
     replayed the build phase's choice. This is exactly how the first cut of this
     change failed, so it gets its own test.
     """
-    import Tensile.LibraryIO as LibraryIO
-    from Tensile.BenchmarkProblems import _CACHE_FIELDS, _KERNEL_NAMING_VERSION
+    import tensilelite.LibraryIO as LibraryIO
+    from tensilelite.BenchmarkProblems import _CACHE_FIELDS, _KERNEL_NAMING_VERSION
 
     class _Step:
         pass

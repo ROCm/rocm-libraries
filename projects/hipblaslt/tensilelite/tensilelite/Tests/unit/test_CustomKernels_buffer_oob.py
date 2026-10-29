@@ -182,8 +182,9 @@ NO_BUFFER_OOB_KERNELS = {
     "wvSpltK_bf16_tn_m4": "rocBLAS wvSpltK, global_store only",
 }
 # HIP-compiled W4A16 decode: a single 64-bit global_store, kept inside an exec
-# mask against the free size taken at entry.
-NO_BUFFER_OOB_GLOB = "RuntimeGroup_Decode_*"
+# mask against the free size taken at entry. rocRoller GEMMs bound stores with
+# buffer_store and never emit the generator's BufferOOB symbol.
+NO_BUFFER_OOB_GLOBS = ("RuntimeGroup_Decode_*", "RR_GEMM_*")
 
 _SET_BUFFER_OOB = re.compile(r"^\s*\.set\s+BufferOOB\s*,\s*([^\s/]+)", re.M)
 _STORE_SRD_NUM_RECORDS = re.compile(
@@ -298,8 +299,10 @@ def test_every_kernel_without_a_recognized_store_bound_is_listed():
         checked, _ = store_bound_findings(_kernel_text(name), generator_buffer_oob())
         if not any("BufferOOB" in kind or "num_records" in kind for kind in checked):
             unrecognized.add(name)
-    listed = set(NO_BUFFER_OOB_KERNELS) | set(
-        fnmatch.filter(custom_kernel_names(), NO_BUFFER_OOB_GLOB))
+    names = custom_kernel_names()
+    listed = set(NO_BUFFER_OOB_KERNELS)
+    for pattern in NO_BUFFER_OOB_GLOBS:
+        listed |= set(fnmatch.filter(names, pattern))
     assert unrecognized == listed, (
         f"no store bound recognized, not listed: {sorted(unrecognized - listed)}; "
         f"listed, but a store bound is recognized or the kernel is gone: "

@@ -28,8 +28,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from Tensile.CustomKernels import _metadataArgToCustomArg, rocRollerOccupancy
-from Tensile.RocRollerStreamK import (
+from tensilelite.CustomKernels import _metadataArgToCustomArg, rocRollerOccupancy
+from tensilelite.RocRollerStreamK import (
     SK_POINTER_ROLES,
     SK_ROLE_ORDER,
     STABLE_NAME_TO_SEMANTIC,
@@ -37,7 +37,7 @@ from Tensile.RocRollerStreamK import (
     evaluate_streamk,
     iters_per_tile,
 )
-from Tensile.RocRollerWgm import u32
+from tensilelite.RocRollerWgm import u32
 
 pytestmark = pytest.mark.unit
 
@@ -87,7 +87,7 @@ _BINARY_OPS = {
 
 
 def _evaluate(node, binding):
-    from Tensile.RocRollerWgm import magic_multiple_u32, magic_shifts_u32
+    from tensilelite.RocRollerWgm import magic_multiple_u32, magic_shifts_u32
 
     if not isinstance(node, dict):
         raise AssertionError(f"unexpected expression node {node!r}")

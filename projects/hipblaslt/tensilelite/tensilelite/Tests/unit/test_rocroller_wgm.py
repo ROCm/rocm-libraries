@@ -177,8 +177,9 @@ def _args_section(text):
 def test_shipped_wgm_kernels_classify_to_the_eleven_roles():
     root = Path(__file__).resolve().parents[2] / "CustomKernels" / "rocroller"
     kernels = sorted(root.glob("*_WGM_.s"))
-    # 20 mixed-operand WGM kernels + 12 pure MXFP8/MXBF8/MXFP4 WGM kernels.
-    assert len(kernels) == 32
+    # Every shipped workgroup-mapping kernel, not a frozen count: the pure-MX
+    # library adds tiles over time. The check is that each one still classifies.
+    assert kernels
     for path in kernels:
         text = path.read_text(errors="replace")
         # Flattened workgroup X. These kernels do not read workgroup Y.

@@ -17,7 +17,7 @@ makes the kernels unreachable, which is the opposite failure.
 
 import pytest
 
-from Tensile.Contractions import ProblemPredicate
+from tensilelite.Contractions import ProblemPredicate
 
 
 M_TAG = "Free0SizeMultiple"

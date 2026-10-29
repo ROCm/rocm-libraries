@@ -2087,7 +2087,9 @@ class _SignatureKernelDescriptor(Item):
         self._apply_gpr_layout(int(totalVgprs), int(totalAgprs))
 
     def _apply_gpr_layout(self, total_vgprs: int, total_agprs: int) -> None:
-        if self.getArchCaps()["ArchAccUnifiedRegs"]:
+        # capOrDefault in native rocisa: a missing entry is 0. That is the
+        # unpinned-ISA map and any backend that does not publish this cap.
+        if self.getArchCaps().get("ArchAccUnifiedRegs"):
             self.accumOffset = ((total_vgprs + 7) // 8) * 8
             self.totalVgprs = self.accumOffset + total_agprs
         else:
@@ -2095,7 +2097,7 @@ class _SignatureKernelDescriptor(Item):
             self.totalVgprs = total_vgprs
 
     def setGprs(self, totalVgprs: int, totalAgprs: int, totalSgprs: int) -> None:
-        if self.getArchCaps()["ArchAccUnifiedRegs"]:
+        if self.getArchCaps().get("ArchAccUnifiedRegs"):
             self.accumOffset = ((totalVgprs + 7) // 8) * 8
             self.totalVgprs = self.accumOffset + totalAgprs
         else:
@@ -2182,7 +2184,7 @@ class _SignatureKernelDescriptor(Item):
             f"{kd_indent}.amdhsa_group_segment_fixed_size {self.groupSegSize}"
             " // lds bytes\n"
         )
-        if self.getArchCaps()["HasWavefrontSize32Directive"]:
+        if self.getArchCaps().get("HasWavefrontSize32Directive"):
             wavefront = self.kernel().wavefrontSize
             if wavefront == 32:
                 out += (
