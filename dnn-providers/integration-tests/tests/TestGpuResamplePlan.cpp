@@ -1071,11 +1071,11 @@ void runResamplePlanExecuteForType(const TensorLayout& layout, bool isForward)
 
 } // namespace
 
-class GpuResamplePlanExecutionTest : public testing::TestWithParam<std::tuple<DataType, bool, bool>>
+class TestGpuResamplePlanExecution : public testing::TestWithParam<std::tuple<DataType, bool, bool>>
 {
 };
 
-TEST_P(GpuResamplePlanExecutionTest, MatchesCpuReference)
+TEST_P(TestGpuResamplePlanExecution, MatchesCpuReference)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -1100,7 +1100,7 @@ TEST_P(GpuResamplePlanExecutionTest, MatchesCpuReference)
 
 INSTANTIATE_TEST_SUITE_P(
     DataTypeLayoutAndDirection,
-    GpuResamplePlanExecutionTest,
+    TestGpuResamplePlanExecution,
     testing::Combine(testing::Values(DataType::FLOAT, DataType::HALF, DataType::BFLOAT16),
                      testing::Bool(),
                      testing::Bool()));
@@ -1145,11 +1145,11 @@ const std::vector<ResampleGeometryCase>& resampleGeometryCases()
 
 } // namespace
 
-class GpuResamplePlanGeometryTest : public testing::TestWithParam<ResampleGeometryCase>
+class TestGpuResamplePlanGeometry : public testing::TestWithParam<ResampleGeometryCase>
 {
 };
 
-TEST_P(GpuResamplePlanGeometryTest, FwdMatchesCpuReference)
+TEST_P(TestGpuResamplePlanGeometry, FwdMatchesCpuReference)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -1172,7 +1172,7 @@ TEST_P(GpuResamplePlanGeometryTest, FwdMatchesCpuReference)
     }
 }
 
-TEST_P(GpuResamplePlanGeometryTest, BwdMatchesCpuReference)
+TEST_P(TestGpuResamplePlanGeometry, BwdMatchesCpuReference)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -1196,7 +1196,7 @@ TEST_P(GpuResamplePlanGeometryTest, BwdMatchesCpuReference)
 }
 
 INSTANTIATE_TEST_SUITE_P(Geometries,
-                         GpuResamplePlanGeometryTest,
+                         TestGpuResamplePlanGeometry,
                          testing::ValuesIn(resampleGeometryCases()),
                          [](const testing::TestParamInfo<ResampleGeometryCase>& info) {
                              return info.param.name;
