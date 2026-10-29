@@ -79,7 +79,7 @@ Install rocALUTION on Linux
 Alternatively, you can use the ``amdrocm-rocalution`` packages to install
 rocALUTION without the full ROCm HPC SDK.
 
-1. Complete the `ROCm installation prerequisites <https://rocm.docs.amd.com/en/latest/install/rocm.html?fam=all&w=compute&os=ubuntu&ubuntu-ver=26.04&i=pkgman>`__ to
+1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
    install dependencies and configure GPU access permissions.
 
 2. Install the rocALUTION packages that match your desired ROCm version,
@@ -88,27 +88,29 @@ rocALUTION without the full ROCm HPC SDK.
 
    .. code-block:: shell-session
 
-      amdrocm-rocalution<-dev/-devel><rocm_version><-llvm_target>
+      amdrocm-rocalution<rocm_version><-llvm_target>
+      amdrocm-rocalution<-dev/-devel><rocm_version>
 
    Where:
 
-   * ``<-dev/-devel>`` specifies whether to install the library files and
-     headers. Omit this suffix to only install runtime packages.
+   * ``<-dev/-devel>`` is the development package suffix (headers and CMake
+     configuration files):
 
      * ``-dev`` is used on Debian-based distributions, including Ubuntu.
 
      * ``-devel`` is used on RPM-based distributions, including RHEL and SLES.
 
    * ``<rocm_version>`` is the ROCm version to install. Omit this suffix to
-     install the latest available version.
+     install the latest available version (required when ``<-llvm_target>`` is
+     specified).
 
-   * ``<-llvm_target>`` (starting with ``gfx``) is used if you are installing
-     for a single AMD GPU architecture. Omit this to install for all
-     architectures at the cost of disk space. See
+   * ``<-llvm_target>`` (starting with ``gfx``) is used on the runtime package
+     if you are installing for a single AMD GPU architecture. Omit this to
+     install for all architectures at the cost of disk space. See
      :ref:`Supported GPUs <rocalution-supported-gpus>` for the available
      targets.
 
-   For example: ``amdrocm-rocalution10.2-gfx950``
+   For example: ``amdrocm-rocalution10.2-gfx950`` and ``amdrocm-rocalution-dev10.2``
 
    The following packages are available for each ROCm version:
 
@@ -161,6 +163,11 @@ rocALUTION without the full ROCm HPC SDK.
 
 Uninstall rocALUTION
 ====================
+
+If you installed versioned or architecture-specific packages, substitute the
+exact package names used during installation (for example,
+``amdrocm-rocalution10.2-gfx950`` and ``amdrocm-rocalution-dev10.2`` or
+``amdrocm-rocalution-devel10.2``).
 
 .. tab-set::
 
