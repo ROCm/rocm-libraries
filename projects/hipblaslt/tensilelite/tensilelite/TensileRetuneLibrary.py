@@ -82,7 +82,10 @@ def libraryArchitectureName(libYaml):
     if isinstance(libYaml, dict):
         archName = libYaml.get("ArchitectureName")
     elif isinstance(libYaml, list) and len(libYaml) > 2:
-        archName = libYaml[2]
+        arch = libYaml[2]
+        # A list-format file names its architecture as a string, or as a
+        # mapping that carries it: {Architecture: gfx942, CUCount: 228, ...}.
+        archName = arch["Architecture"] if isinstance(arch, dict) else arch
     else:
         archName = None
     if not isinstance(archName, str):
