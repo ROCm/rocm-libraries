@@ -63,6 +63,7 @@ test_categories:
       # tools/CMakeLists.txt.
       - "hipdnn_descriptor_generator_pytest"
       - "hipdnn_ingestor_generator_pytest"
+      - "hipdnn_sdpa_conformance_.*"
       # Build tree only; see plugin_sdk/tests/CMakeLists.txt.
       - "hipdnn_gpu_generic_targets_.*"
 
