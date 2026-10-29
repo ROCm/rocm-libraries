@@ -44,7 +44,7 @@ A change that replaces a bundle, as described in the table below, needs:
 | Add a kernel family with the operation's contract and existing `Case` fields | Add it as a [variant](#a-variant-or-a-new-operation): its family module and adapters, then qualify and publish its own archive, lock, and pointer on each processor. Existing variants are untouched |
 | Add a field to an operation's `Case`, even one with a default | This changes the contract of every case of the operation, including cases that never set the field: manifests record each case's complete field set, verification matches it exactly, and published runners cannot build a case with a field they predate. Requalify every published variant of the operation on its processor. Put a knob that is constant across a variant's cases on its adapter, as `COMPILER_TARGET` is; a knob that varies between cases is a `Case` field |
 | Add an architecture | Implement its processor package and variant adapters, enroll qualification support, qualify on that target, then enroll publication and provider test selection |
-| Add an operation, including a kernel family with other math or another input and output model | Define its numerical contract, oracle, adapters, and replay support before following qualification and publication below |
+| Add an operation, including a kernel family with other math, another output, or another [case model](#a-variant-or-a-new-operation), such as attention decode | Define its numerical contract, oracle, adapters, and replay support before following qualification and publication below |
 | Reorganize host tests, documentation, or installation without changing the qualified contract | Validate the affected code; no replacement bundle solely for that reorganization |
 
 Each variant of an operation on an architecture has its own cohort, baseline
@@ -605,17 +605,31 @@ cohort, baseline, lock, and archive; see the [glossary](README.md#glossary).
 
 ### A variant or a new operation
 
-A new kernel family that computes the same math with the same inputs and
-outputs as an existing operation, using that operation's `Case`, independent
-reference, input generator, and manifest operation id, is a new **variant** of
-that operation. A family with different math or a different input and output
-model, such as convolution backward-data or backward-weight, or attention
-decode, paged KV, or backward, is a new **operation** package, such as
-`conv_bwd_reference`, with its own variants. This keeps each operation's
-contract single-purpose, and it keeps independent kernel pull requests in
-disjoint files. Tuning candidates, dtypes, and compiler targets within one
-family are cases or adapter attributes, such as `COMPILER_TARGET`, not
-variants.
+An operation is one contract: its `Case` fields, input generator, independent
+reference, single output, and manifest operation id. A new kernel family that
+computes that output for cases the operation's `Case` describes is a new
+**variant** of the operation, even when its kernel also reads read-only
+operands derived from the case and its inputs, such as a paged K/V cache and
+its block table. The shared worker binds and checks only the `Case`'s inputs
+and its single output today, so the pull request that adds the first such
+variant also decides how to bind the extra operands.
+
+An operation has one case model: the tensors that a case reads and writes, and
+how their shapes follow from the `Case` fields. A per-case knob that keeps that
+model, with a default that reproduces every qualified case, such as an
+attention sliding window or logit softcap, is a new `Case` field of the
+operation. Adding one, even with a default, changes the contract of every case,
+because manifests match cases by every `Case` field, a lock's `cohort_sha256`
+covers every field, and a frozen runner rebuilds the `Case` from the request;
+[what must change](#decide-what-must-change) describes the work. Otherwise, a
+family with different math, another output, or another case model is a new
+**operation** package with its own variants, such as `conv_bwd_reference` for
+convolution backward-data or backward-weight. For attention, that includes
+backward, an LSE output, per-sequence lengths, and decode, whose query length
+differs from its key length. This keeps each operation's contract
+single-purpose; the next section lists what concurrent pull requests still
+share. Tuning candidates, dtypes, and compiler targets within one family are
+cases or adapter attributes, such as `COMPILER_TARGET`, not variants.
 
 ### What concurrent pull requests share
 

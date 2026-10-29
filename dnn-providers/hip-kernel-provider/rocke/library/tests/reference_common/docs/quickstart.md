@@ -195,9 +195,14 @@ choices.
 
 ## I want to add a variant
 
-A kernel family that computes an operation's math on the same inputs and
-outputs, with the same `Case`, independent reference, input generator, and
-manifest operation id, is a new variant of that operation; anything else is a
+A kernel family that computes an operation's output for cases its `Case`
+describes, with the same independent reference, input generator, and manifest
+operation id, is a new variant of that operation, even when its kernel also
+reads operands derived from the case, such as a K/V block table. If its cases
+need a per-case knob that the `Case` lacks, such as a sliding window, add that
+field first, as
+[what must change](gpu-reference-workflow.md#decide-what-must-change)
+describes. A family with other math, another output, or another case model is a
 [new operation](#i-want-to-add-an-operation). See
 [a variant or a new operation](gpu-reference-workflow.md#a-variant-or-a-new-operation).
 A variant has its own cohort, baseline revision, lock, and archive, so adding
@@ -289,9 +294,10 @@ adapter's own cohort.
 
 ## I want to add an operation
 
-An operation keeps one numerical contract. A kernel family with other math or
-another input and output model, such as convolution backward-data, is a new
-operation with its own variants, such as a `conv_bwd_reference` package; see
+An operation keeps one numerical contract and one case model. A kernel family
+with other math, another output, or another case model, such as convolution
+backward-data or attention decode, is a new operation with its own variants,
+such as a `conv_bwd_reference` package; see
 [a variant or a new operation](gpu-reference-workflow.md#a-variant-or-a-new-operation).
 Each `library/tests/<operation>_reference/` package with an
 `architectures/registry.json` is an operation. `artifact.py`, the
