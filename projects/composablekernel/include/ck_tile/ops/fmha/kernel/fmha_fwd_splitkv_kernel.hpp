@@ -647,7 +647,10 @@ struct FmhaFwdSplitKVKernel
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
         // allocate LDS
-        __shared__ char smem_ptr[GetSmemSize()];
+        // The qr_tdm arena slices itself at 256 B boundaries and its offset
+        // asserts are relative, so they cannot catch a misaligned base. Today
+        // this is the only __shared__ here and lands at offset 0 anyway.
+        alignas(256) __shared__ char smem_ptr[GetSmemSize()];
 
         // divide problem
         const auto [i_tile_m, i_tile_n, i_split, i_nhead, i_batch] = GetTileIndex(kargs);

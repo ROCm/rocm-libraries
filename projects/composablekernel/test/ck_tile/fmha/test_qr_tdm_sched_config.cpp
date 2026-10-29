@@ -246,6 +246,11 @@ TYPED_TEST(QrTdmSplitKVConfig, UsesTheSingleVArenaLayout)
     EXPECT_EQ(Pipeline::GetSmemSize(), Layout::kArenaBytes);
 }
 
+// These flags are hardwired in the pipeline, so the assertions restate the
+// declaration rather than probe behaviour. They are here because each one was
+// wrong once during the port and the names are easy to drop while refactoring;
+// the load-bearing part of this suite is that instantiating the pipeline at all
+// fires LdsArenaLayout's budget static_asserts.
 TYPED_TEST(QrTdmSplitKVConfig, KernelPathFlagsAreDeclared)
 {
     using Pipeline = typename TypeParam::Pipeline;
@@ -265,7 +270,10 @@ TYPED_TEST(QrTdmSplitKVConfig, ProgressiveKReloadStaysOn)
     // speed: the bn0 32 tile probe, which has to fall back to the plain
     // traversal, measured 4-5x slower. The split-kv problem hardwires
     // kProgressiveDsLoadK to false, so this copy overrides it locally, gated on
-    // the bn0 == 64 the reload's own static_asserts require.
+    // the bn0 == 64 the reload's own static_asserts require. This model is
+    // built with N = 64, so the assertion only states that the gate tracks kN0;
+    // that codegen really hands this pipeline a bn0 64 tile is asserted in
+    // test_fmha_fwd_codegen.py, which is the side that can change.
     EXPECT_TRUE(Pipeline::kProgressiveDsLoadK);
     EXPECT_EQ(Pipeline::kN0, 64);
     EXPECT_FALSE(Pipeline::kSkipMinSeqlenQ);
