@@ -18,7 +18,7 @@ Documentation for rocSPARSE is available at
 * Fixed `rocsparse_Xcsrsm_solve`, `rocsparse_spsm`, and `rocsparse_sptrsm` (CSR, CSC, and COO formats) returning incorrect results for complex types when `trans_B` is `rocsparse_operation_conjugate_transpose` and there is a single right-hand side.
 
 ### Upcoming changes
-* Deprecated the `rocsparse_sddmm_alg_dense` enum value. It will be removed in a future release, together with the rocBLAS dependency it requires. Use `rocsparse_sddmm_alg_default` instead.
+* Deprecated the `rocsparse_sddmm_alg_dense` enum value. It will be removed in a future release, along with its rocBLAS dependency. Use `rocsparse_sddmm_alg_default` instead.
 
 ## (Unreleased) rocSPARSE 5.2.0
 
