@@ -5497,12 +5497,13 @@ def _widest_vector_sizes(candidates):
         )
 
     def rank(ident):
-        return (
-            ident.vector_size_a + ident.vector_size_b + ident.vector_size_c,
-            ident.vector_size_a,
-            ident.vector_size_b,
-            ident.vector_size_c,
+        # An async-DMA binary leaves A / B unset: the copy picks its own
+        # (widest) chunk, so it ranks with the widest synchronous loads.
+        a, b, c = (
+            8 if v is None else v
+            for v in (ident.vector_size_a, ident.vector_size_b, ident.vector_size_c)
         )
+        return (a + b + c, a, b, c)
 
     # The default epilogue stores scalar (c = 1) straight from the MMA
     # accumulators. Where the same kind of kernel can store wider -- a
