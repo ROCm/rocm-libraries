@@ -5350,7 +5350,7 @@ def _fast_rank_candidates(
             # A stream-K binary partitions K over its CTA pool itself; the
             # split-K kernarg is not its knob, so it ranks once.
             degrees = (None,)
-        elif direction == "wgrad" and ident.split_k > 1:
+        elif direction in ("wgrad", "fwd") and ident.split_k > 1:
             degrees = _runtime_split_ks(
                 problem, ident, args.split_k, args.split_k_degrees
             )
@@ -5666,7 +5666,12 @@ def _signature_for_identity(ident, dtype):
         )
     if ident.direction == "dgrad":
         return conv_args_signature(dtype, direction="dgrad", is_3d=ident.is_3d)
-    return conv_args_signature(dtype, is_3d=ident.is_3d, two_stage=ident.two_stage)
+    return conv_args_signature(
+        dtype,
+        is_3d=ident.is_3d,
+        two_stage=ident.two_stage,
+        split_k=ident.split_k > 1 and not ident.two_stage,
+    )
 
 
 def _ws_replicas_of(ident) -> int:
@@ -6115,6 +6120,11 @@ def _runtime_split_ks(
     else:
         swept, include_resolved = (requested,), False
     if ident.direction == "fwd":
+        if not ident.two_stage:
+            # The atomic (MFMA) forward split-K binary: no workspace, D zeroed.
+            return _fwd_split_k_degrees(
+                problem, ident, degrees if requested in (0, -1) else swept
+            )
         return _split_k_degrees(
             problem,
             arch=ident.arch,
@@ -6142,6 +6152,43 @@ def _runtime_split_ks(
         degrees=swept,
         ws_replicas=ident.ws_replicas,
         include_resolved=include_resolved,
+    )
+
+
+# A forward split-K degree is only worth a launch while the grid it makes
+# stays within a few waves of workgroups and every slice keeps several K
+# tiles: past that the extra slices only add output atomics. The forward
+# split exists for grids too small to fill the device, so these bounds cut
+# the degree sweep to the useful corner instead of timing every degree of
+# --split-k-degrees on every split binary.
+_FWD_SPLIT_MAX_CTAS = 4096
+_FWD_SPLIT_MIN_TILES_PER_SLICE = 4
+
+
+def _fwd_split_k_degrees(problem, ident, degrees) -> tuple:
+    """Degrees to launch a cached forward split-K binary at, largest first.
+
+    There is no forward split-K cost model yet, so this is ``degrees``
+    (``--split-k-degrees``, or the one ``--split-k`` pins) cut to the
+    degrees that keep the grid under :data:`_FWD_SPLIT_MAX_CTAS` workgroups
+    and every slice at least :data:`_FWD_SPLIT_MIN_TILES_PER_SLICE` K tiles
+    (and gridDim.z in range).
+    """
+    from kernels.common.conv_args import ConvArgs
+
+    args_ = ConvArgs.from_problem(
+        problem, tile_m=ident.tile_m, tile_n=ident.tile_n, tile_k=ident.tile_k
+    )
+    k_tiles = -(-args_.gemm_k // ident.tile_k)
+    groups = max(1, problem.groups)
+    tiles = args_.num_pid_m * args_.num_pid_n * groups
+    return tuple(
+        sk
+        for sk in sorted(set(degrees), reverse=True)
+        if 1 < sk
+        and sk * _FWD_SPLIT_MIN_TILES_PER_SLICE <= k_tiles
+        and tiles * sk <= _FWD_SPLIT_MAX_CTAS
+        and groups * sk <= _MAX_GRID_DIM_Z
     )
 
 
@@ -6309,6 +6356,15 @@ def _cached_bind(
 
         def run(_launch=_launch, dw_ptr=ptrs[2], dw_bytes=sizes[2], stream=stream):
             rt.memset_async(dw_ptr, 0, dw_bytes, stream)
+            _launch()
+
+    elif direction == "fwd" and ident.split_k > 1 and not ident.two_stage:
+        # The atomic forward split-K epilogue atomic-adds every K slice into
+        # D, so each launch zeroes D first -- part of the algorithm's cost.
+        _launch = run
+
+        def run(_launch=_launch, d_ptr=ptrs[2], d_bytes=sizes[2], stream=stream):
+            rt.memset_async(d_ptr, 0, d_bytes, stream)
             _launch()
 
     elif direction == "wgrad" and ident.needs_stage2:
@@ -6520,6 +6576,15 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
         extras["ws_ptr"] = rt.alloc(ws_bytes)
         extras["ws_bytes"] = ws_bytes
         return extras, _grid_for(direction, problem, ident, split_k)
+
+    if direction == "fwd" and ident.split_k > 1:
+        # The atomic forward split-K binary: the degree rides in ks/ks_count
+        # and on z.
+        if split_k is None:
+            split_k = max(1, ident.split_k)
+        extras["split_k"] = split_k
+        gx, gy, gz = _grid_for(direction, problem, ident)
+        return extras, (gx, gy, gz * split_k)
 
     return extras, _grid_for(direction, problem, ident)
 

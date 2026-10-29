@@ -479,11 +479,16 @@ class ConvArgs:
     # ---- the ABI ----
 
     def arg_names(
-        self, *, two_stage: bool = False, streamk: Optional[str] = None
+        self,
+        *,
+        two_stage: bool = False,
+        streamk: Optional[str] = None,
+        split_k: bool = False,
     ) -> List[ArgSpec]:
         """The ordered kernarg ABI of the kernel these args launch.
 
-        ``streamk`` is the stream-K reduction of a stream-K wgrad kernel.
+        ``streamk`` is the stream-K reduction of a stream-K wgrad kernel;
+        ``split_k`` selects the fwd split-K binary's ABI.
         """
         if self.algorithm == "direct":
             if two_stage or streamk is not None:
@@ -494,6 +499,7 @@ class ConvArgs:
             is_3d=self.geom.is_3d,
             two_stage=two_stage,
             streamk=streamk,
+            split_k=split_k,
         )
 
     # ---- GEMM view (implicit GEMM only) ----
@@ -754,6 +760,14 @@ class ConvArgs:
         abi = self.arg_names(
             two_stage=ws_ptr is not None and streamk is None,
             streamk=streamk.reduction if streamk is not None else None,
+            # The MFMA fwd split-K binary (atomic store into D, no workspace)
+            # is launched at a degree > 1 only (degree 1 is the separate
+            # unsplit binary), so the degree selects its ABI; with a workspace
+            # the launch is the WMMA two-stage split (``two_stage``).
+            split_k=self.direction == "fwd"
+            and self.algorithm == "implicit_gemm"
+            and split_k > 1
+            and ws_ptr is None,
         )
         names = [n for n, _ in abi]
         values: Dict[str, int] = dict(

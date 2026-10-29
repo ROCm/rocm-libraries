@@ -311,6 +311,7 @@ def conv_arg_names(
     is_3d: bool = False,
     two_stage: bool = False,
     streamk: Optional[str] = None,
+    split_k: bool = False,
 ) -> List[ArgSpec]:
     """The implicit-GEMM conv kernarg ABI for one direction.
 
@@ -329,7 +330,24 @@ def conv_arg_names(
     ``streamk`` (wgrad only) is the stream-K reduction, or ``None`` for a
     kernel without stream-K. Stream-K partitions K itself, so it excludes the
     two-stage split-K variant.
+
+    ``split_k`` (fwd only) selects the atomic (MFMA) forward split-K binary's
+    ABI: the problem block followed by ``ks`` (slice width, a multiple of
+    tile_k) and ``ks_count`` (slices; gridDim.z = groups * ks_count), no
+    workspace -- the slices add into D. wgrad always carries that pair, so the
+    flag is only meaningful for fwd; the workspace (WMMA) split is
+    ``two_stage``.
     """
+    if split_k and direction != "fwd":
+        raise ValueError(
+            f"split_k selects the fwd split-K ABI (got direction={direction!r}; "
+            f"wgrad always carries ks/ks_count)"
+        )
+    if split_k and two_stage:
+        raise ValueError(
+            "split_k (the atomic fwd split-K ABI) and two_stage (the workspace "
+            "fwd split-K ABI) are exclusive"
+        )
     if two_stage and direction not in ("wgrad", "fwd"):
         raise ValueError(
             f"two_stage is a wgrad / fwd split-K variant (got direction={direction!r})"
@@ -347,7 +365,10 @@ def conv_arg_names(
         if two_stage:
             raise ValueError("streamk and two_stage are exclusive: both partition K_wg")
     if direction == "fwd":
-        return _fwd_arg_names(is_3d=is_3d, split_k=two_stage)
+        out = _fwd_arg_names(is_3d=is_3d, split_k=two_stage)
+        if split_k:
+            out += [("ks", "i32"), ("ks_count", "i32")]
+        return out
     if direction == "wgrad":
         return _wgrad_arg_names(is_3d=is_3d, two_stage=two_stage, streamk=streamk)
     if direction == "dgrad":
@@ -489,6 +510,7 @@ def conv_args_signature(
     is_3d: bool = False,
     two_stage: bool = False,
     streamk: Optional[str] = None,
+    split_k: bool = False,
 ) -> List[Dict[str, Any]]:
     """Implicit-GEMM conv launch signature for one direction.
 
@@ -504,7 +526,11 @@ def conv_args_signature(
     """
     return _conv_signature(
         conv_arg_names(
-            direction=direction, is_3d=is_3d, two_stage=two_stage, streamk=streamk
+            direction=direction,
+            is_3d=is_3d,
+            two_stage=two_stage,
+            streamk=streamk,
+            split_k=split_k,
         ),
         dtype,
         dtype_b or dtype,
