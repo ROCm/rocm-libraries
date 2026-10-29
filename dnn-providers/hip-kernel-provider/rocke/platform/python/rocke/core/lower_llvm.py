@@ -411,6 +411,55 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v8i16("
         "<8 x i16>, <8 x i16>, <8 x float>)"
     ),
+    # gfx1250 (gfx1250) WMMA — wave32 16x16x32 (K=32). A/B are <16 x half> per lane
+    # and the intrinsic carries the gfx1250 8-operand form (i1 neg flags, i16
+    # format modifier, i1 reuse flags). bf16 uses <16 x bfloat> directly (v16bf16,
+    # not the <16 x i16> bitcast gfx11/gfx12 use). Emission goes through
+    # Gfx1250Backend.emit_wmma. ABI confirmed on ROCm 7.13 clang 23.
+    "wmma.gfx1250.f32.16x16x32.f16": (
+        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x32.f16.v8f32.v16f16("
+        "i1 immarg, <16 x half>, i1 immarg, <16 x half>, i16 immarg, "
+        "<8 x float>, i1 immarg, i1 immarg)"
+    ),
+    "wmma.gfx1250.f32.16x16x32.bf16": (
+        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x32.bf16.v8f32.v16bf16("
+        "i1 immarg, <16 x bfloat>, i1 immarg, <16 x bfloat>, i16 immarg, "
+        "<8 x float>, i1 immarg, i1 immarg)"
+    ),
+    # gfx1250 (gfx1250) FP8/BF8 WMMA — wave32 16x16x64 (K=64, NOT the gfx12
+    # 16x16x16 FP8 form, which is not selectable on gfx1250). A/B are 32 fp8/bf8
+    # bytes per lane, presented to the intrinsic as <8 x i32>; the accumulator /
+    # result is <8 x float>. 6-operand form: (A, B, i16 fmt, C, i1, i1).
+    # Signature confirmed on a gfx1250 device (ROCm 7.13 clang 23) via
+    # __builtin_amdgcn_wmma_f32_16x16x64_{fp8,bf8}_{fp8,bf8}.
+    "wmma.gfx1250.f32.16x16x64.fp8.fp8": (
+        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32("
+        "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"
+    ),
+    "wmma.gfx1250.f32.16x16x64.fp8.bf8": (
+        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8.v8f32.v8i32("
+        "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"
+    ),
+    "wmma.gfx1250.f32.16x16x64.bf8.fp8": (
+        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.fp8.v8f32.v8i32("
+        "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"
+    ),
+    "wmma.gfx1250.f32.16x16x64.bf8.bf8": (
+        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32("
+        "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"
+    ),
+    "wmma.scale.block32.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32": (
+        "declare <8 x float> @llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4."
+        "v8f32.v16i32.v16i32(i32 immarg, <16 x i32>, i32 immarg, "
+        "<16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, i32, "
+        "i32 immarg, i32 immarg, i32, i1 immarg, i1 immarg)"
+    ),
+    "wmma.scale.block16.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32": (
+        "declare <8 x float> @llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4."
+        "v8f32.v16i32.v16i32(i32 immarg, <16 x i32>, i32 immarg, "
+        "<16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, i64, "
+        "i32 immarg, i32 immarg, i64, i1 immarg, i1 immarg)"
+    ),
     "mfma.f32.16x16x16f16": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x16f16("
         "<4 x half>, <4 x half>, <4 x float>, "
@@ -901,11 +950,29 @@ _AV_B128_PTR_TYPES: Dict[int, str] = {
 }
 
 
-# Declares that change shape, or first exist, on LLVM 21+ hosts (ROCm 7.2+).
-# A key that also exists in :data:`_INTRINSIC_DECLS` changes only its
-# declaration TEXT. A key that is absent there is an intrinsic that LLVM 20
-# lacks, such as ``wmma.gfx1250.*``. ``_Lowerer`` emits those declares after
-# the base ones. Call-site ``_need(...)`` lookups stay flavor-agnostic.
+# Keys of :data:`_INTRINSIC_DECLS` that the compiler declares only from a
+# minimum flavor. ``_decls_for_flavor`` drops them on older flavors, so a call
+# to one is refused with "requires <flavor>". The keys stay in the base table
+# so that their declares keep their place in the emit order on every flavor
+# that has them.
+_INTRINSIC_MIN_FLAVOR: Dict[str, str] = {
+    "wmma.gfx1250.f32.16x16x32.f16": LLVM_FLAVOR_LLVM22,
+    "wmma.gfx1250.f32.16x16x32.bf16": LLVM_FLAVOR_LLVM22,
+    "wmma.gfx1250.f32.16x16x64.fp8.fp8": LLVM_FLAVOR_LLVM22,
+    "wmma.gfx1250.f32.16x16x64.fp8.bf8": LLVM_FLAVOR_LLVM22,
+    "wmma.gfx1250.f32.16x16x64.bf8.fp8": LLVM_FLAVOR_LLVM22,
+    "wmma.gfx1250.f32.16x16x64.bf8.bf8": LLVM_FLAVOR_LLVM22,
+    "wmma.scale.block32.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32": (
+        LLVM_FLAVOR_LLVM23
+    ),
+    "wmma.scale.block16.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32": (
+        LLVM_FLAVOR_LLVM23
+    ),
+}
+
+# Declares that change shape on LLVM 21+ hosts (ROCm 7.2+). Keys MUST
+# already exist in :data:`_INTRINSIC_DECLS`; only the declaration TEXT
+# differs, so call-site ``_need(...)`` lookups stay flavor-agnostic.
 _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
     "mfma.f32.16x16x32.fp8.fp8": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
@@ -927,60 +994,16 @@ _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
         "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
         "ptr addrspace(1) nocapture readnone, i16, i64, i32)"
     ),
-    # gfx1250 (gfx1250) WMMA — wave32 16x16x32 (K=32). A/B are <16 x half> per lane
-    # and the intrinsic carries the gfx1250 8-operand form (i1 neg flags, i16
-    # format modifier, i1 reuse flags). bf16 uses <16 x bfloat> directly (v16bf16,
-    # not the <16 x i16> bitcast gfx11/gfx12 use). Emission goes through
-    # Gfx1250Backend.emit_wmma. ABI confirmed on ROCm 7.13 clang 23.
-    "wmma.gfx1250.f32.16x16x32.f16": (
-        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x32.f16.v8f32.v16f16("
-        "i1 immarg, <16 x half>, i1 immarg, <16 x half>, i16 immarg, "
-        "<8 x float>, i1 immarg, i1 immarg)"
-    ),
-    "wmma.gfx1250.f32.16x16x32.bf16": (
-        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x32.bf16.v8f32.v16bf16("
-        "i1 immarg, <16 x bfloat>, i1 immarg, <16 x bfloat>, i16 immarg, "
-        "<8 x float>, i1 immarg, i1 immarg)"
-    ),
-    # gfx1250 (gfx1250) FP8/BF8 WMMA — wave32 16x16x64 (K=64, NOT the gfx12
-    # 16x16x16 FP8 form, which is not selectable on gfx1250). A/B are 32 fp8/bf8
-    # bytes per lane, presented to the intrinsic as <8 x i32>; the accumulator /
-    # result is <8 x float>. 6-operand form: (A, B, i16 fmt, C, i1, i1).
-    # Signature confirmed on a gfx1250 device (ROCm 7.13 clang 23) via
-    # __builtin_amdgcn_wmma_f32_16x16x64_{fp8,bf8}_{fp8,bf8}.
-    "wmma.gfx1250.f32.16x16x64.fp8.fp8": (
-        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32("
-        "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"
-    ),
-    "wmma.gfx1250.f32.16x16x64.fp8.bf8": (
-        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8.v8f32.v8i32("
-        "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"
-    ),
-    "wmma.gfx1250.f32.16x16x64.bf8.fp8": (
-        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.fp8.v8f32.v8i32("
-        "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"
-    ),
-    "wmma.gfx1250.f32.16x16x64.bf8.bf8": (
-        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32("
-        "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"
-    ),
 }
 
 # LLVM 23 (ROCm 7.13+) inherits the LLVM 22 overrides. No intrinsic needs a
 # further override today.
 _INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
     **_INTRINSIC_DECLS_LLVM22_OVERRIDES,
-    "wmma.scale.block32.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32": (
-        "declare <8 x float> @llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4."
-        "v8f32.v16i32.v16i32(i32 immarg, <16 x i32>, i32 immarg, "
-        "<16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, i32, "
-        "i32 immarg, i32 immarg, i32, i1 immarg, i1 immarg)"
-    ),
-    "wmma.scale.block16.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32": (
-        "declare <8 x float> @llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4."
-        "v8f32.v16i32.v16i32(i32 immarg, <16 x i32>, i32 immarg, "
-        "<16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, i64, "
-        "i32 immarg, i32 immarg, i64, i1 immarg, i1 immarg)"
+    "mfma.scale.f32.16x16x128.f8f6f4": (
+        "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+        "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
+        "i32 immarg, i32, i32 immarg, i32)"
     ),
 }
 
@@ -995,7 +1018,11 @@ def _decls_for_flavor(flavor: str) -> Dict[str, str]:
     and :func:`check_arch_domain_in_ir`, which needs the table without a
     lowerer to ask.
     """
-    decls = dict(_INTRINSIC_DECLS)
+    decls = {
+        key: decl
+        for key, decl in _INTRINSIC_DECLS.items()
+        if _flavor_at_least(flavor, _INTRINSIC_MIN_FLAVOR.get(key, LLVM_FLAVOR_LLVM20))
+    }
     abi = _emission_profile(flavor).declaration_abi
     if abi is _LlvmDeclarationAbi.LLVM22:
         decls.update(_INTRINSIC_DECLS_LLVM22_OVERRIDES)
@@ -1857,19 +1884,16 @@ class _Lowerer:
 
         ``finalize`` declares only keys in ``self._decls``. A call whose key is
         missing would reach ``opt`` as a use of an undefined function. A key
-        that a newer flavor's table adds is a too-old flavor; any other
-        missing key is a defect in the emitter.
+        with a higher minimum flavor is a too-old flavor; any other missing key
+        is a defect in the emitter.
         """
         if key in self._decls:
             return
-        for newer, table in (
-            (LLVM_FLAVOR_LLVM22, _INTRINSIC_DECLS_LLVM22_OVERRIDES),
-            (LLVM_FLAVOR_LLVM23, _INTRINSIC_DECLS_LLVM23_OVERRIDES),
-        ):
-            if key in table:
-                raise NotImplementedError(
-                    f"intrinsic {key!r} requires {newer}, got {self._flavor}"
-                )
+        minimum = _INTRINSIC_MIN_FLAVOR.get(key)
+        if minimum is not None:
+            raise NotImplementedError(
+                f"intrinsic {key!r} requires {minimum}, got {self._flavor}"
+            )
         raise KeyError(f"intrinsic {key!r} has no declaration in any flavor table")
 
     def _check_arch_domain(self, key: str) -> None:

@@ -447,6 +447,13 @@ const char* rocke_ll_fresh(rocke_lower_t* L, const char* hint)
 /* Intrinsic need-tracking (Python _need / self._decls)                   */
 /* ====================================================================== */
 
+/* True when the flavor declares the base-table key (Python _decls_for_flavor). */
+static bool ll_flavor_declares(rocke_llvm_flavor_t flavor, const char* key)
+{
+    rocke_llvm_flavor_t minimum = rocke_ll_intrinsic_min_flavor(key);
+    return minimum == ROCKE_LLVM_FLAVOR_AUTO || rocke_ll_flavor_at_least(flavor, minimum);
+}
+
 /* Resolve a decl key to its declaration text: dyn_decls override, then the
  * flavor override table (LLVM22), then the base table. NULL if unknown. */
 static const char* ll_resolve_decl(rocke_lower_t* L, const char* key)
@@ -477,6 +484,10 @@ static const char* ll_resolve_decl(rocke_lower_t* L, const char* key)
     {
         if(strcmp(ROCKE_LL_INTRINSIC_DECLS[i].key, key) == 0)
         {
+            if(!ll_flavor_declares(L->flavor, key))
+            {
+                return NULL;
+            }
             return ROCKE_LL_INTRINSIC_DECLS[i].decl;
         }
     }
@@ -495,37 +506,20 @@ static bool ll_need_has(const rocke_lower_t* L, const char* key)
     return false;
 }
 
-static bool ll_table_has(const rocke_ll_decl_t* table, int n, const char* key)
-{
-    for(int i = 0; i < n; i++)
-    {
-        if(strcmp(table[i].key, key) == 0)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 /* Refuse a demand that finalize could not declare on this flavor (Python
- * _Lowerer._require_declared). A key that a newer flavor's table adds is a
- * too-old flavor. Any other missing key is a defect in the emitter. */
+ * _Lowerer._require_declared). A key with a higher minimum flavor is a too-old
+ * flavor. Any other missing key is a defect in the emitter. */
 [[noreturn]] static void ll_refuse_undeclared(rocke_lower_t* L, const char* key)
 {
-    static const rocke_llvm_flavor_t newer[] = {ROCKE_LLVM_FLAVOR_LLVM22, ROCKE_LLVM_FLAVOR_LLVM23};
-    for(rocke_llvm_flavor_t f : newer)
+    rocke_llvm_flavor_t minimum = rocke_ll_intrinsic_min_flavor(key);
+    if(minimum != ROCKE_LLVM_FLAVOR_AUTO)
     {
-        int n = 0;
-        const rocke_ll_decl_t* table = rocke_ll_flavor_overrides(f, &n);
-        if(ll_table_has(table, n, key))
-        {
-            rocke_ll_fail(L,
-                          ROCKE_ERR_NOTIMPL,
-                          "intrinsic '%s' requires %s, got %s",
-                          key,
-                          rocke_llvm_flavor_name(f),
-                          rocke_llvm_flavor_name(L->flavor));
-        }
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "intrinsic '%s' requires %s, got %s",
+                      key,
+                      rocke_llvm_flavor_name(minimum),
+                      rocke_llvm_flavor_name(L->flavor));
     }
     rocke_ll_fail(L, ROCKE_ERR_VALUE, "intrinsic '%s' has no declaration in any flavor table", key);
 }

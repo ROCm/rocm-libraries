@@ -70,8 +70,8 @@ typedef struct rocke_ll_decl
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_COUNT;
 
-/* The LLVM22 overrides (Python _INTRINSIC_DECLS_LLVM22_OVERRIDES): new keys and
- * keys with different decl text. */
+/* The LLVM22 overrides (Python _INTRINSIC_DECLS_LLVM22_OVERRIDES): same keys,
+ * different decl text. */
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
 
@@ -82,6 +82,10 @@ extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;
 
 /* Resolve the flavor-specific override table (NULL/0 for non-modern flavors). */
 const rocke_ll_decl_t* rocke_ll_flavor_overrides(rocke_llvm_flavor_t flavor, int* out_count);
+
+/* Python _INTRINSIC_MIN_FLAVOR: the lowest flavor that declares a base-table
+ * key. ROCKE_LLVM_FLAVOR_AUTO means the key has no minimum. */
+rocke_llvm_flavor_t rocke_ll_intrinsic_min_flavor(const char* key);
 
 /* ---------------------------------------------------------- anyptr overloads */
 

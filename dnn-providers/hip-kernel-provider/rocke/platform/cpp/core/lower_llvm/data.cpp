@@ -146,6 +146,32 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"wmma.gfx12.f32.16x16x16.bf16",
      "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v8i16(<8 x i16>, <8 x i16>, <8 "
      "x float>)"},
+    {"wmma.gfx1250.f32.16x16x32.f16",
+     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x32.f16.v8f32.v16f16(i1 immarg, <16 x half>, "
+     "i1 immarg, <16 x half>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
+    {"wmma.gfx1250.f32.16x16x32.bf16",
+     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x32.bf16.v8f32.v16bf16(i1 immarg, <16 x "
+     "bfloat>, i1 immarg, <16 x bfloat>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
+    {"wmma.gfx1250.f32.16x16x64.fp8.fp8",
+     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32(<8 x i32>, <8 x i32>, "
+     "i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
+    {"wmma.gfx1250.f32.16x16x64.fp8.bf8",
+     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8.v8f32.v8i32(<8 x i32>, <8 x i32>, "
+     "i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
+    {"wmma.gfx1250.f32.16x16x64.bf8.fp8",
+     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.fp8.v8f32.v8i32(<8 x i32>, <8 x i32>, "
+     "i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
+    {"wmma.gfx1250.f32.16x16x64.bf8.bf8",
+     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32(<8 x i32>, <8 x i32>, "
+     "i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
+    {"wmma.scale.block32.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
+     "declare <8 x float> @llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32(i32 "
+     "immarg, <16 x i32>, i32 immarg, <16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, "
+     "i32, i32 immarg, i32 immarg, i32, i1 immarg, i1 immarg)"},
+    {"wmma.scale.block16.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
+     "declare <8 x float> @llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32(i32 "
+     "immarg, <16 x i32>, i32 immarg, <16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, "
+     "i64, i32 immarg, i32 immarg, i64, i1 immarg, i1 immarg)"},
     {"mfma.f32.16x16x16f16",
      "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x16f16(<4 x half>, <4 x half>, <4 x float>, "
      "i32 immarg, i32 immarg, i32 immarg)"},
@@ -432,7 +458,7 @@ const int ROCKE_LL_AV_B128_PTR_TYPES_COUNT
 
 /* ---------------------------------------------------------------------- */
 /* LLVM22 overrides (Python _INTRINSIC_DECLS_LLVM22_OVERRIDES)            */
-/* New keys (absent from LLVM 20) and keys with different decl text.      */
+/* Same keys, different decl text.                                         */
 /* ---------------------------------------------------------------------- */
 
 const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[] = {
@@ -451,24 +477,6 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[] = {
     {"make.buffer.rsrc.p1",
      "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
      "ptr addrspace(1) nocapture readnone, i16, i64, i32)"},
-    {"wmma.gfx1250.f32.16x16x32.f16",
-     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x32.f16.v8f32.v16f16(i1 immarg, <16 x half>, "
-     "i1 immarg, <16 x half>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
-    {"wmma.gfx1250.f32.16x16x32.bf16",
-     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x32.bf16.v8f32.v16bf16(i1 immarg, <16 x "
-     "bfloat>, i1 immarg, <16 x bfloat>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
-    {"wmma.gfx1250.f32.16x16x64.fp8.fp8",
-     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32(<8 x i32>, <8 x i32>, "
-     "i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
-    {"wmma.gfx1250.f32.16x16x64.fp8.bf8",
-     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8.v8f32.v8i32(<8 x i32>, <8 x i32>, "
-     "i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
-    {"wmma.gfx1250.f32.16x16x64.bf8.fp8",
-     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.fp8.v8f32.v8i32(<8 x i32>, <8 x i32>, "
-     "i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
-    {"wmma.gfx1250.f32.16x16x64.bf8.bf8",
-     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32(<8 x i32>, <8 x i32>, "
-     "i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
 };
 
 const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT
@@ -496,37 +504,44 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[] = {
     {"make.buffer.rsrc.p1",
      "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
      "ptr addrspace(1) nocapture readnone, i16, i64, i32)"},
-    {"wmma.gfx1250.f32.16x16x32.f16",
-     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x32.f16.v8f32.v16f16(i1 immarg, <16 x half>, "
-     "i1 immarg, <16 x half>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
-    {"wmma.gfx1250.f32.16x16x32.bf16",
-     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x32.bf16.v8f32.v16bf16(i1 immarg, <16 x "
-     "bfloat>, i1 immarg, <16 x bfloat>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
-    {"wmma.gfx1250.f32.16x16x64.fp8.fp8",
-     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32(<8 x i32>, <8 x i32>, "
-     "i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
-    {"wmma.gfx1250.f32.16x16x64.fp8.bf8",
-     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8.v8f32.v8i32(<8 x i32>, <8 x i32>, "
-     "i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
-    {"wmma.gfx1250.f32.16x16x64.bf8.fp8",
-     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.fp8.v8f32.v8i32(<8 x i32>, <8 x i32>, "
-     "i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
-    {"wmma.gfx1250.f32.16x16x64.bf8.bf8",
-     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32(<8 x i32>, <8 x i32>, "
-     "i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
-    {"wmma.scale.block32.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
-     "declare <8 x float> @llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32(i32 "
-     "immarg, <16 x i32>, i32 immarg, <16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, "
-     "i32, i32 immarg, i32 immarg, i32, i1 immarg, i1 immarg)"},
-    {"wmma.scale.block16.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
-     "declare <8 x float> @llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32(i32 "
-     "immarg, <16 x i32>, i32 immarg, <16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, "
-     "i64, i32 immarg, i32 immarg, i64, i1 immarg, i1 immarg)"},
+    {"mfma.scale.f32.16x16x128.f8f6f4",
+     "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4(<8 x i32>, <8 x i32>, <4 x "
+     "float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"},
 };
 
 const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT
     = (int)(sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES)
             / sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[0]));
+
+/* Python _INTRINSIC_MIN_FLAVOR. */
+static const struct
+{
+    const char* key;
+    rocke_llvm_flavor_t flavor;
+} ROCKE_LL_INTRINSIC_MIN_FLAVOR[] = {
+    {"wmma.gfx1250.f32.16x16x32.f16", ROCKE_LLVM_FLAVOR_LLVM22},
+    {"wmma.gfx1250.f32.16x16x32.bf16", ROCKE_LLVM_FLAVOR_LLVM22},
+    {"wmma.gfx1250.f32.16x16x64.fp8.fp8", ROCKE_LLVM_FLAVOR_LLVM22},
+    {"wmma.gfx1250.f32.16x16x64.fp8.bf8", ROCKE_LLVM_FLAVOR_LLVM22},
+    {"wmma.gfx1250.f32.16x16x64.bf8.fp8", ROCKE_LLVM_FLAVOR_LLVM22},
+    {"wmma.gfx1250.f32.16x16x64.bf8.bf8", ROCKE_LLVM_FLAVOR_LLVM22},
+    {"wmma.scale.block32.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
+     ROCKE_LLVM_FLAVOR_LLVM23},
+    {"wmma.scale.block16.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
+     ROCKE_LLVM_FLAVOR_LLVM23},
+};
+
+rocke_llvm_flavor_t rocke_ll_intrinsic_min_flavor(const char* key)
+{
+    for(const auto& row : ROCKE_LL_INTRINSIC_MIN_FLAVOR)
+    {
+        if(strcmp(row.key, key) == 0)
+        {
+            return row.flavor;
+        }
+    }
+    return ROCKE_LLVM_FLAVOR_AUTO;
+}
 
 /* Resolve the flavor-specific override table (NULL/0 for non-modern flavors),
  * mirroring the Python _Lowerer choosing which OVERRIDES dict to .update(). */
