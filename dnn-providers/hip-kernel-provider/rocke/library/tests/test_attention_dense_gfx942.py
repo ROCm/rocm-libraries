@@ -36,6 +36,7 @@ import re
 
 import pytest
 
+from kernels.common.attention_dense_decode import FASTDIV_DIVIDEND_LIMIT
 from kernels.common.attention_dense_spec import attention_dense_cache_key
 from kernels.gfx942.attention_dense import (
     AttentionDenseSpec,
@@ -51,7 +52,6 @@ from kernels.gfx942.attention_dense import (
     _BLOCK_M,
     _as_gfx942_spec,
     _DEFAULT_LDS_ROW_PAD,
-    _FASTDIV_DIVIDEND_LIMIT,
     _k_group_pad_active,
     _k_group_stride,
     _use_exp2_fast,
@@ -2256,7 +2256,7 @@ def test_persistent_kernarg_abi_carries_the_fastdiv_pairs(decode):
         assert -(1 << 31) <= args[f"{d}_magic"] < (1 << 31), "magic must fit an i32"
         assert args[f"{d}_magic"] & 0xFFFFFFFF == magic
         assert args[f"{d}_shift"] == shift
-        top = _FASTDIV_DIVIDEND_LIMIT - 1
+        top = FASTDIV_DIVIDEND_LIMIT - 1
         for n in (*range(0, 4 * value[d] + 3), top - value[d], top - 1, top):
             assert _fastdiv(n, args[f"{d}_magic"], shift) == n // value[d], (d, n)
 
@@ -2321,10 +2321,10 @@ def test_persistent_runtime_args_reject_work_past_the_fastdiv_bound():
     wrong, so ``attention_dense_runtime_args`` must raise rather than hand the kernel
     a work-item count it decodes incorrectly. Boundary pinned on both sides; the
     default grid has no fast division and so no such bound."""
-    assert _FASTDIV_DIVIDEND_LIMIT == 1 << 30
+    assert FASTDIV_DIVIDEND_LIMIT == 1 << 30
     per_batch = (4096 // _BLOCK_M) * 32  # NQB * Hq of the persistent base
-    at_limit = _FASTDIV_DIVIDEND_LIMIT // per_batch
-    assert at_limit * per_batch == _FASTDIV_DIVIDEND_LIMIT
+    at_limit = FASTDIV_DIVIDEND_LIMIT // per_batch
+    assert at_limit * per_batch == FASTDIV_DIVIDEND_LIMIT
     for decode in ("qb_major", "hkv_major"):
         under = _persistent_spec(batch=at_limit - 1, persist_decode=decode)
         assert attention_dense_runtime_args(under)["batch"] == at_limit - 1
