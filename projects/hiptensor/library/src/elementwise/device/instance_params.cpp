@@ -52,7 +52,7 @@ namespace ck::tensor_operation::device::instance
                 } else if (typeIn[0] == HIPTENSOR_R_32F) {
                     hashCodes.push_back(hiptensor::Hash{}( DeviceElementwiseParams::Gen(typeIn , typeOut , scale , numDim , {256 , 64  , 64  , 4 , 4 , {0 , 1} , {2} , {2}})));
                     hashCodes.push_back(hiptensor::Hash{}( DeviceElementwiseParams::Gen(typeIn , typeOut , scale , numDim , {256 , 64  , 64  , 4 , 4 , {0 , 1} , {1} , {1}})));
-                } else if (typeIn[0] == HIPTENSOR_R_64F) {
+                } else if (typeIn[0] == HIPTENSOR_R_64F || typeIn[0] == HIPTENSOR_R_16BF) {
                     hashCodes.push_back(hiptensor::Hash{}( DeviceElementwiseParams::Gen(typeIn , typeOut , scale , numDim , {256 , 64  , 64  , 4 , 4 , {0 , 1} , {2} , {2}})));
                     hashCodes.push_back(hiptensor::Hash{}( DeviceElementwiseParams::Gen(typeIn , typeOut , scale , numDim , {256 , 64  , 64  , 4 , 4 , {0 , 1} , {1} , {1}})));
                 }
@@ -63,7 +63,7 @@ namespace ck::tensor_operation::device::instance
                 } else if (typeIn[0] == HIPTENSOR_R_32F) {
                     hashCodes.push_back(hiptensor::Hash{}( DeviceElementwiseParams::Gen(typeIn , typeOut , scale , numDim , {256 , 64  , 64  , 4 , 4 , {0 , 1} , {2} , {2}})));
                     hashCodes.push_back(hiptensor::Hash{}( DeviceElementwiseParams::Gen(typeIn , typeOut , scale , numDim , {256 , 64  , 64  , 4 , 4 , {0 , 1} , {1} , {1}})));
-                } else if (typeIn[0] == HIPTENSOR_R_64F) {
+                } else if (typeIn[0] == HIPTENSOR_R_64F || typeIn[0] == HIPTENSOR_R_16BF) {
                     hashCodes.push_back(hiptensor::Hash{}( DeviceElementwiseParams::Gen(typeIn , typeOut , scale , numDim , {256 , 64  , 64  , 4 , 4 , {0 , 1} , {2} , {2}})));
                     hashCodes.push_back(hiptensor::Hash{}( DeviceElementwiseParams::Gen(typeIn , typeOut , scale , numDim , {256 , 64  , 64  , 4 , 4 , {0 , 1} , {1} , {1}})));
                 }
@@ -74,7 +74,7 @@ namespace ck::tensor_operation::device::instance
                 } else if (typeIn[0] == HIPTENSOR_R_32F) {
                     hashCodes.push_back(hiptensor::Hash{}( DeviceElementwiseParams::Gen(typeIn , typeOut , scale , numDim , {256 , 64  , 64  , 4 , 4 , {0 , 1} , {2} , {2}})));
                     hashCodes.push_back(hiptensor::Hash{}( DeviceElementwiseParams::Gen(typeIn , typeOut , scale , numDim , {256 , 64  , 64  , 4 , 4 , {0 , 1} , {1} , {1}})));
-                } else if (typeIn[0] == HIPTENSOR_R_64F) {
+                } else if (typeIn[0] == HIPTENSOR_R_64F || typeIn[0] == HIPTENSOR_R_16BF) {
                     hashCodes.push_back(hiptensor::Hash{}( DeviceElementwiseParams::Gen(typeIn , typeOut , scale , numDim , {256 , 64  , 64  , 4 , 4 , {0 , 1} , {2} , {2}})));
                     hashCodes.push_back(hiptensor::Hash{}( DeviceElementwiseParams::Gen(typeIn , typeOut , scale , numDim , {256 , 64  , 64  , 4 , 4 , {0 , 1} , {1} , {1}})));
                 }
