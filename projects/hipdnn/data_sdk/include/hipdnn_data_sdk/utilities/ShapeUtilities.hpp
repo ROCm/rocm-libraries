@@ -290,6 +290,20 @@ inline std::vector<int64_t>
     return generateStrides(targetDims, strideOrder);
 }
 
+// True when an axis of extent > 1 has stride 0, so several indices map to one element.
+// The element span can still equal the element count when other axes leave matching gaps.
+inline bool hasBroadcastAxis(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
+{
+    for(size_t axis = 0; axis < dims.size(); ++axis)
+    {
+        if(dims[axis] > 1 && strides[axis] == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Checks if the tensor defined by dims and strides is packed (contiguous in memory).
 // Note: Assumes dims are positive (validated at graph level).
 // Strides can be negative (for reversed dimensions).
@@ -306,14 +320,9 @@ inline bool isTensorPacked(const std::vector<int64_t>& dims, const std::vector<i
         return true;
     }
 
-    // A zero stride on an axis of extent > 1 maps several indices to one element, and the
-    // span check below can still pass when other axes leave matching gaps.
-    for(size_t axis = 0; axis < dims.size(); ++axis)
+    if(hasBroadcastAxis(dims, strides))
     {
-        if(dims[axis] > 1 && strides[axis] == 0)
-        {
-            return false;
-        }
+        return false;
     }
 
     // Calculate total element count

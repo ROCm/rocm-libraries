@@ -839,21 +839,30 @@ TEST(TestTensor, ZeroStrideOnUnitExtentAxisStaysPacked)
 
 TEST(TestTensor, FillWithRandomValuesBroadcastsAlongZeroStrideAxis)
 {
+    using hipdnn_data_sdk::types::isnan;
+
     const std::vector<int64_t> dims = {3, 4, 2};
     Tensor<float> tensor(dims, {2, 0, 1});
+    ASSERT_EQ(tensor.elementSpace(), 6);
 
+    tensor.fillWithSentinelValue();
     tensor.fillWithRandomValues(-1.0F, 1.0F, 1234);
+
+    const auto* hostData = static_cast<const float*>(tensor.rawHostData());
+    for(size_t offset = 0; offset < tensor.elementSpace(); ++offset)
+    {
+        EXPECT_FALSE(isnan(hostData[offset])) << "offset " << offset;
+        EXPECT_GE(hostData[offset], -1.0F);
+        EXPECT_LE(hostData[offset], 1.0F);
+    }
 
     for(int64_t i0 = 0; i0 < dims[0]; ++i0)
     {
-        for(int64_t i2 = 0; i2 < dims[2]; ++i2)
+        for(int64_t i1 = 0; i1 < dims[1]; ++i1)
         {
-            const float first = tensor.getHostValue(i0, 0, i2);
-            EXPECT_GE(first, -1.0F);
-            EXPECT_LE(first, 1.0F);
-            for(int64_t i1 = 1; i1 < dims[1]; ++i1)
+            for(int64_t i2 = 0; i2 < dims[2]; ++i2)
             {
-                EXPECT_EQ(tensor.getHostValue(i0, i1, i2), first);
+                EXPECT_EQ(tensor.getHostValue(i0, i1, i2), hostData[tensor.getIndex(i0, i1, i2)]);
             }
         }
     }
