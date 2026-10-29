@@ -383,11 +383,19 @@ namespace
         ScopedVariable(const char* name, const char* value)
             : m_name(name)
         {
+#ifdef _WIN32
+            _putenv_s(name, value);
+#else
             setenv(name, value, 1);
+#endif
         }
         ~ScopedVariable()
         {
+#ifdef _WIN32
+            _putenv_s(m_name, "");
+#else
             unsetenv(m_name);
+#endif
         }
 
     private:
@@ -440,6 +448,9 @@ namespace
 
     TEST(MatmulMemory_pre_checkin, host_estimate_matches_what_a_unit_check_case_uses)
     {
+#ifndef __linux__
+        GTEST_SKIP() << "the estimate check reads the peak resident memory from /proc";
+#endif
         // In the f32 case six 256 MiB host buffers make up the estimate, each with the pool's 20%
         // extra. In the f16 case the CPU reference's 1 GiB float copy of A is most of it. The
         // bound on the overestimate keeps the preflight from skipping cases that would fit.
