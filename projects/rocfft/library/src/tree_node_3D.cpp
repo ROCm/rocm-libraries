@@ -935,8 +935,7 @@ void SBRCTransXY_ZNode::SetupGridParam_internal(GridParam& gp)
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     lds         = length[0] * bwd;
-    gp.set_stockham_grid(
-        DivRoundingUp(length[2], bwd) * length[1] * batch, wgs, deviceProp.maxGridSize[1]);
+    gp.set_stockham_grid(DivRoundingUp(length[2], bwd) * length[1] * batch, wgs, deviceProp);
 }
 
 /*****************************************************
@@ -950,8 +949,7 @@ void SBRCTransZ_XYNode::SetupGridParam_internal(GridParam& gp)
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     lds         = length[0] * bwd;
-    gp.set_stockham_grid(
-        DivRoundingUp(length[1], bwd) * length[2] * batch, wgs, deviceProp.maxGridSize[1]);
+    gp.set_stockham_grid(DivRoundingUp(length[1], bwd) * length[2] * batch, wgs, deviceProp);
 }
 
 /*****************************************************
@@ -967,8 +965,7 @@ void RealCmplxTransZ_XYNode::SetupGridParam_internal(GridParam& gp)
     // this kernel always does real-complex processing and needs one
     // extra element per row
     lds = (length[0] + 1) * bwd;
-    gp.set_stockham_grid(
-        DivRoundingUp(length[1], bwd) * length[2] * batch, wgs, deviceProp.maxGridSize[1]);
+    gp.set_stockham_grid(DivRoundingUp(length[1], bwd) * length[2] * batch, wgs, deviceProp);
 }
 
 bool RealCmplxTransZ_XYNode::CreateDevKernelArgs()
