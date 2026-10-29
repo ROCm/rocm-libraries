@@ -31,6 +31,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed `init_rocalution()` making every host OpenMP parallel region, including those of the application, run on a single thread when rocALUTION is built with OpenMP 5.0 or newer, which is the default with `amdclang++`.
 * Fixed `stop_rocalution()` aborting when nested parallelism was enabled before `init_rocalution()`, for example with `OMP_MAX_ACTIVE_LEVELS`, `OMP_NESTED` or a nested `OMP_NUM_THREADS` list, in builds with OpenMP 5.0 or newer. In builds with older OpenMP versions, such as with GCC, it restored a different maximum number of active parallel levels.
 * Fixed a data race in the host `LocalVector::Amax()` with more than one OpenMP thread, which could return the index of a later entry when the largest magnitude occurs more than once. It now returns the first one, as the sequential code and the HIP backend do.
+* Fixed a data race in the host Laplace 2D stencil `Apply()` that made it run slower with several OpenMP threads than with one.
 
 ## (Unreleased) rocALUTION 4.1.1
 
