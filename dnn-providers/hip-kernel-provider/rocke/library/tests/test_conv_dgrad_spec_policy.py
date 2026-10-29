@@ -424,6 +424,9 @@ class TestTapOuterKIdentity(unittest.TestCase):
             "prefetch_global_regs",
             "patch",
             "tap_outer_k",
+            "tapk_prefetch",
+            "tapk_xhalo",
+            "b_kpack",
             "dy_halo",
             "dy_halo_setprio",
             "dy_halo_kouter_pad",
@@ -845,6 +848,41 @@ def _dgrad_unsplit(base, ident):
 
 
 class TestAotSplitKCover(unittest.TestCase):
+    def test_aot_dgrad_split_k_skips_3d_capabilities(self):
+        """With the 3-D grid enabled (ROCKE_AOT_SPATIAL=2d,3d) the split-K copies
+        are still built for the 2-D capabilities only: their identity has no
+        is_3d, so a copy built for a 3-D capability would take the 2-D label."""
+        from unittest import mock
+
+        from rocke.core.arch import ArchTarget
+
+        target = ArchTarget.from_gfx("gfx950")
+        geos = []
+        for tm, tn, tk, wm, wn, wt, pipeline in sorted(
+            {g[:7] for g in aj.CACHE_DGRAD_SPLIT_K_GEOMETRIES}
+        ):
+            atom = target.mma.select_largest_k(
+                family="mma", a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", m=wt, n=wt
+            )
+            geos.append((tm, tn, tk, wm, wn, wt, pipeline, "cshuffle", atom))
+        with mock.patch.object(aj, "CACHE_SPATIAL_3D", (False, True)):
+            jobs = list(
+                aj._dgrad_jobs(
+                    "gfx950",
+                    "fp16",
+                    target.wave_size,
+                    "mma",
+                    target,
+                    64,
+                    geometries=geos,
+                )
+            )
+        split = [j for j in jobs if j.identity.split_k > 1]
+        assert split
+        assert not any(j.caps.get("is_3d") for j in split)
+        labels = [j.identity.label() for j in jobs]
+        assert len(labels) == len(set(labels))
+
     def test_aot_dgrad_split_k_variants(self):
         """gfx950 builds one split-K (atomic dX) copy of each 8 / 8 cshuffle tilde
         kernel on the ``CACHE_DGRAD_SPLIT_K_GEOMETRIES`` cover; no other arch does.

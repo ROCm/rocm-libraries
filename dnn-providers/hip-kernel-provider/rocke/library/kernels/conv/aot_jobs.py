@@ -393,6 +393,28 @@ CACHE_SPATIAL_3D: Tuple[bool, ...] = tuple(
     for v in _os.environ.get("ROCKE_AOT_SPATIAL", "2d").split(",")
     if v.strip()
 )
+# Software pipelining of the stride-1 tap-outer dgrad loop
+# (DgradConvSpec.tapk_prefetch) built per tap-outer configuration: 0 = the
+# plain loop, 1 = register prefetch, 2 = LDS ping-pong. ROCKE_AOT_DGRAD_TPF
+# (e.g. "0,1,2") overrides it.
+CACHE_DGRAD_TAPK_PREFETCH: Tuple[int, ...] = tuple(
+    int(v) for v in _os.environ.get("ROCKE_AOT_DGRAD_TPF", "0").split(",") if v.strip()
+)
+# The x-halo mode of the stride-1 tap-outer dgrad loop
+# (DgradConvSpec.tapk_xhalo; filter width baked, pW == 0 served) next to the
+# plain tap-outer binary, one per tapk_prefetch value listed in
+# ROCKE_AOT_DGRAD_XH (e.g. "0,1,3"; unset = none). Built for the probe's
+# 3-wide filter.
+CACHE_DGRAD_XHALO_TPF: Tuple[int, ...] = tuple(
+    int(v) for v in _os.environ.get("ROCKE_AOT_DGRAD_XH", "").split(",") if v.strip()
+)
+# k values per B (W) LDS write of the stride-1 tap-outer dgrad binaries
+# (DgradConvSpec.b_kpack; 0 = the element-wise transpose-on-store), built per
+# tap-outer variant where the tile admits it. ROCKE_AOT_DGRAD_BKP (e.g.
+# "0,2,4") overrides it.
+CACHE_DGRAD_B_KPACK: Tuple[int, ...] = tuple(
+    int(v) for v in _os.environ.get("ROCKE_AOT_DGRAD_BKP", "0").split(",") if v.strip()
+)
 # Whether the stride-1 dgrad binaries are built next to the tilde ones.
 CACHE_DGRAD_STRIDE1: tuple[bool, ...] = (False, True)
 # dY halo binaries (DgradConvSpec.dy_halo): a capped sub-grid, not the
@@ -870,7 +892,9 @@ def _dgrad_split_ks(
 
     ``geometry`` is ``(tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile)``:
     wave64 MFMA, the runtime-stride (tilde) binary, the widest vectors and the
-    cshuffle epilogue, on the ``CACHE_DGRAD_SPLIT_K_GEOMETRIES`` cover.
+    cshuffle epilogue, on the ``CACHE_DGRAD_SPLIT_K_GEOMETRIES`` cover. 2-D
+    problems only: the split-K copy's identity carries no ``is_3d``, so a 3-D
+    capability (``ROCKE_AOT_SPATIAL``) would relabel it as the 2-D kernel.
     """
     if not (
         arch in CACHE_DGRAD_SPLIT_K_ARCHS
@@ -878,6 +902,7 @@ def _dgrad_split_ks(
         and (vec_a, vec_bc) == (8, 8)
         and epilogue == "cshuffle"
         and not caps.get("stride", 0)
+        and not caps.get("is_3d", False)
     ):
         return ()
     return tuple(
@@ -1846,9 +1871,42 @@ def _dgrad_jobs(
             # uniform_k_decode loop and serves only problems whose kpg is a
             # multiple of tile_k (supports_problem).
             base_cfg = cfg
-            for tapk in _dgrad_tap_outer_variants(caps, wave_size, pipeline):
+            for tapk, tpf, bkp in (
+                (t, f, k)
+                for t in _dgrad_tap_outer_variants(caps, wave_size, pipeline)
+                for f in (
+                    (
+                        CACHE_DGRAD_TAPK_PREFETCH
+                        + tuple(("xh", x) for x in CACHE_DGRAD_XHALO_TPF)
+                    )
+                    if t
+                    else (0,)
+                )
+                for k in (CACHE_DGRAD_B_KPACK if t else (0,))
+            ):
+                filt = {}
+                job_caps = caps
                 if tapk:
-                    cfg = {**cfg, "uniform_k_decode": False, "tap_outer_k": True}
+                    cfg = {
+                        **cfg,
+                        "uniform_k_decode": False,
+                        "tap_outer_k": True,
+                        "tapk_prefetch": tpf[1] if isinstance(tpf, tuple) else tpf,
+                        "tapk_xhalo": isinstance(tpf, tuple),
+                    }
+                    if not cfg["tapk_prefetch"]:
+                        del cfg["tapk_prefetch"]
+                    if not cfg["tapk_xhalo"]:
+                        del cfg["tapk_xhalo"]
+                    else:
+                        # The x taps are unrolled: the probe's filter is baked,
+                        # and its W pad is 0 (the problems the binary serves).
+                        filt = {"filter_w": 3}
+                        job_caps = {**caps, "xhalo": True}
+                    if bkp:
+                        cfg["b_kpack"] = bkp
+                    else:
+                        cfg.pop("b_kpack", None)
                 yield BuildJob(
                     identity=KernelIdentity(
                         arch=arch,
@@ -1864,11 +1922,12 @@ def _dgrad_jobs(
                         stride_w=caps.get("stride", 0),
                         dilation_h=caps.get("dilation", 0),
                         dilation_w=caps.get("dilation", 0),
+                        **filt,
                         **cfg,
                     ),
                     direction="dgrad",
                     spec_kwargs=cfg,
-                    caps=caps,
+                    caps=job_caps,
                 )
             for sk in _dgrad_split_ks(
                 arch,
@@ -2288,8 +2347,12 @@ def count_jobs(
                 )
             elif direction == "dgrad":
                 total += vecs * sum(
-                    len(_dgrad_tap_outer_variants(caps, wave_size, pipeline))
+                    (len(CACHE_DGRAD_TAPK_PREFETCH) + len(CACHE_DGRAD_XHALO_TPF))
+                    * len(CACHE_DGRAD_B_KPACK)
+                    if t
+                    else 1
                     for caps in _dgrad_caps()
+                    for t in _dgrad_tap_outer_variants(caps, wave_size, pipeline)
                 )
                 total += len(_dgrad_halo_jobs_for(target.gfx, geo, wave_size, db))
                 if 8 in _VECS:
@@ -2454,7 +2517,8 @@ def _probe_problem(direction: str, caps: Optional[dict] = None):
         dH=dilation,
         dW=dilation,
         pH=dilation,
-        pW=dilation,
+        # An x-halo dgrad binary serves pW == 0 only.
+        pW=0 if caps.get("xhalo") else dilation,
         groups=groups,
         **depth,
     )
