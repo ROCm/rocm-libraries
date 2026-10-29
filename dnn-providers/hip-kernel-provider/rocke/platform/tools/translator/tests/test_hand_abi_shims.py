@@ -107,7 +107,10 @@ def test_ok_reason_writes_the_reason_and_returns_ok(reviewed):
     e = entry(reviewed[0], "rocke_batched_transpose2d_is_valid_spec")
     assert "(bool)py_is_valid_spec" not in e
     assert "py_adapt::with_reason<bool>(reason, reason_cap, false," in e
-    assert 'const auto res_ = py_is_valid_spec(spec, arch != nullptr ? arch : "gfx950");' in e
+    assert (
+        'const auto res_ = py_is_valid_spec(spec, arch != nullptr ? arch : "gfx950");'
+        in e
+    )
     assert "strncpy(reason, why_.c_str(), reason_cap - 1);" in e
     assert "reason[reason_cap - 1] = '\\0';" in e
     assert "return std::get<0>(res_);" in e
@@ -137,7 +140,9 @@ DOC = (
     " * Python floor division. Returns 0 for a NULL spec or vec == 0 (where the\n"
     " * Python raises ZeroDivisionError). */"
 )
-UNDOCUMENTED = "/* BatchedTranspose2DSpec.block_size @property: (tile_m * tile_n) // vec. */"
+UNDOCUMENTED = (
+    "/* BatchedTranspose2DSpec.block_size @property: (tile_m * tile_n) // vec. */"
+)
 
 
 def test_int_narrowing_follows_the_header(reviewed):
@@ -174,7 +179,7 @@ def test_abi_hole_is_a_hole_of_the_report(undocumented):
     out = root / "o.cpp"
     p = tr(env, "tr.translate", "batched_transpose", "--out", str(out))
     assert p.returncode == 1
-    assert f'abi hole: {BLOCK}' in out.read_text()
+    assert f"abi hole: {BLOCK}" in out.read_text()
 
 
 def test_regen_writes_nothing_with_an_abi_hole(undocumented, tmp_path):

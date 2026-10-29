@@ -203,7 +203,9 @@ def regen(a, scratch: list) -> int:
     if conflicts:
         # two headers the source needs define one name differently: it cannot
         # compile whatever is filled; the headers (or the calls) must change
-        print("include conflicts (resolve them in the headers or the calls); nothing written:")
+        print(
+            "include conflicts (resolve them in the headers or the calls); nothing written:"
+        )
         print("\n".join(conflicts))
     if holes or conflicts:
         return 1

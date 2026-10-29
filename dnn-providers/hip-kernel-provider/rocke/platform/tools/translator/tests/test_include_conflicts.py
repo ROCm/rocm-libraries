@@ -127,12 +127,12 @@ def test_calls_into_both_headers_are_a_conflict(tmp_path, clang_format):
         ["tr.translate", MODULE, "--abi", str(tmp_path / "abi"), "--out", str(out)],
     )
     assert p.returncode == 1, p.stdout + p.stderr
-    line = next(
-        x for x in p.stdout.splitlines() if x.startswith("conflict ")
-    )
+    line = next(x for x in p.stdout.splitlines() if x.startswith("conflict "))
     assert "rocke_tensor_descriptor_t" in line and TV in line and XF in line
     cpp = out.read_text()
-    assert re.search(r'#error (?:\\\n\s*)?"include conflict: rocke_tensor_descriptor_t', cpp), cpp
+    assert re.search(
+        r'#error (?:\\\n\s*)?"include conflict: rocke_tensor_descriptor_t', cpp
+    ), cpp
 
 
 def test_regen_writes_nothing_on_a_conflict(tmp_path, clang_format):

@@ -568,7 +568,12 @@ def ok_reason_body(call: str) -> list[str]:
 def is_ok_reason(t: str) -> bool:
     """A Python (ok, reason) result: std::tuple<bool, str>."""
     items = T.tuple_items(t)
-    return items is not None and len(items) == 2 and items[0] == T.BOOL and T.is_str(items[1])
+    return (
+        items is not None
+        and len(items) == 2
+        and items[0] == T.BOOL
+        and T.is_str(items[1])
+    )
 
 
 # C int returns a Python int (int64_t inside) narrows to, with a range check
@@ -803,7 +808,10 @@ def make_shim(
                     " no return value for a Python raise",
                 )
             val, why, guards = doc
-            ps = [f"{t} {n}" if n in used else f"[[maybe_unused]] {t} {n}" for t, n in cf.params]
+            ps = [
+                f"{t} {n}" if n in used else f"[[maybe_unused]] {t} {n}"
+                for t, n in cf.params
+            ]
             out = [f"{cf.ret} {cf.name}({', '.join(ps)})", "{"]
             import textwrap
 

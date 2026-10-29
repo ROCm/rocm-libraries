@@ -122,7 +122,9 @@ def test_keep_is_stable(tmp_path):
     if exe is None:
         pytest.skip("no g++")
     src = tmp_path / "keep.cpp"
-    src.write_text(textwrap.dedent("""\
+    src.write_text(
+        textwrap.dedent(
+            """\
             #include "rocke_py.hpp"
             #include <cstdio>
             static const char* make(int i) { std::string s = "why " + std::to_string(i); return py::keep(s); }
@@ -133,7 +135,9 @@ def test_keep_is_stable(tmp_path):
                 const char* c = make(1);
                 return (a == c && a != b && strcmp(a, "why 1") == 0 && strcmp(b, "why 2") == 0) ? 0 : 1;
             }
-            """))
+            """
+        )
+    )
     inc = ROCKE / "platform" / "cpp" / "include"
     prelude = TR / "tr" / "prelude"
     out = tmp_path / "keep"
