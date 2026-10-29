@@ -2,6 +2,20 @@
 
 Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hiptensor](https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html).
 
+## hipTensor 2.6.0 for ROCm 10.3
+
+### Added
+* Added support for the following new GPU targets:
+  * gfx11-7: gfx1170, gfx1171.
+* Added fp64 support to hiptensorPermute for ranks 2-6.
+* Added bf16 support to hiptensorPermute for ranks 2-6, with a bf16 or fp32 scalar type.
+
+### Changed
+* Changed `hiptensorPermute` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when the output tensor's data type differs from the input tensor's. Previously the mismatch passed validation and the call failed with `HIPTENSOR_STATUS_INTERNAL_ERROR` because no kernel matched.
+
+### Resolved issues
+* Fixed `hiptensorElementwiseBinaryExecute` and `hiptensorReduce` treating the alpha, beta, and gamma scalars as 0 when the compute descriptor is `HIPTENSOR_COMPUTE_DESC_16BF`.
+
 ## hipTensor 2.5.0 for ROCm 10.2
 
 ### Added

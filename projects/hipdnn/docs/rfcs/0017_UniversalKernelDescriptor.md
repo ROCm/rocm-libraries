@@ -130,6 +130,7 @@ adapter yet.
 | Heuristic sources | `NATIVE` (a registered C++ score symbol). Not yet built: LightGBM model; custom C-API library | other model formats, static tables |
 | Runtime drop-in | None | prebuilt code objects (opt-in, off by default); JIT-compiled sources. Prebuilt code objects ship through build-time packing (`kind: hsaco`) |
 | Multi-kernel launch program (e.g. SDPA backward) | Kernel descriptor: a `sources` map of several launches ([§15.1](#151-several-kernels-for-one-operation)), authored as `rocke` entries and launched in an order the pack's native handler owns | the dispatch-descriptor `launches[]` program, intermediates and cross-step checks; `hip` and `hsaco` entries; composition |
+| Independently selected kernels per engine (e.g. split SDPA backward) | None | kernel slots, [RFC 0021](0021_KernelSlots.md) (draft); orthogonal to `sources` ([§15.4](#154-execution-and-selection)) |
 | Selection composition: UCD (Universal Composite Descriptor) decomposition | None | composition |
 | JIT compilation; normalized providers | None | JIT |
 | Authoring workflow | agentic skills that draft, validate, and inspect descriptors | further skills for retraining, packaging, and migration |
@@ -360,7 +361,7 @@ additive:
 
 | Addition | Why it is needed |
 |---|---|
-| A **graph identity**, an additive field carried on the graph | so a provider can cache per-graph work instead of reconstructing an identity of its own |
+| A **graph identity**, an additive field carried on the graph | so logs and graph dumps name one graph across serialization round trips; no provider cache keys on it, the applicability cache keys on graph content (§8.1) |
 | An extended **`$device.*` property set** | the expression vocabulary reads device facts hipDNN does not carry today |
 | **UED names** in hipDNN's engine-id space, registered at load | a descriptor-backed engine needs an id the host already understands, and a name diagnostics can print |
 | A **workspace entry point for custom plans** | the workspace query arrives before a plan exists, so a custom-plan handler must be able to answer it |
@@ -1422,28 +1423,47 @@ first phase that needs it.
 `IEngine::isApplicable(handle, opGraph)`. The provider receives the graph; the handle identifies
 the device the answer is for.
 
-**2. Check the cache.** Look up `(engine id, graph id, device id)` and, on a hit, return the cached
-verdict.
-*Why this key:* the graph id and the device describe the problem, and the engine id says whose answer
-it is. The catalog is per-engine, so a key without it would let one engine's catalog answer for another
-in the same provider. The handle is absent from the key because the caller may swap it between calls.
+**2. Check the cache.** Look up `(engine id, graph content, graph-level fields, tensor uids, device
+id)` and, on a hit, return the cached verdict.
+*Why this key:* the graph content, its graph-level fields and tensor uids, and the device describe
+the problem, and the engine id says whose answer it is. The catalog is per-engine, so a key without
+it would let one engine's catalog answer for another in the same provider. The handle is absent from
+the key because the caller may swap it between calls.
 
-**The graph id is a small addition to hipDNN, and this RFC owns it.** A graph does not carry an
-identity today, so one is added: an id minted when a graph descriptor is finalized. A finalized
-graph is immutable, so the id is stable for the graph's lifetime. This mirrors existing
-`GraphDescriptor` machinery, where the serialized-graph buffer builds at finalize, and follows the
-precedent of the cached runtime-pass-by-value flag, which turns a later query into a read instead of
-a rescan of every tensor. The id is an additive schema field, so an older reader sees its default
-and is unaffected.
+**The graph content is a `GraphContentKey` over the serialized graph.** It folds the nodes, their
+attributes, the tensors' types, shapes and values, and operand wiring, and drops names, the graph id,
+and the other fields `graph.fbs` marks `(cache_ignore)`, so two structurally identical graphs built
+separately share an entry. Equality is exact: the hash only narrows the lookup, and a
+structural comparison of the retained bytes decides the match, so which catalog this is never rests
+on a probability. The cost is one verified copy of the serialized bytes and one hash per lookup, on
+a call that arrives a few times per engine per graph; a lookup builds the key once and carries it
+through. Each cached catalog also retains its key's copy, so the cache holds up to its capacity
+(256 per engine) of serialized graphs. A graph that supplies no serialized bytes has
+no content key; its catalog is rematched on every call and never cached.
 
-Hashing the serialized bytes was the rejected alternative: it hashes the whole graph on a call that
-arrives once per engine per graph, obliges the provider to retain a copy of those bytes to confirm a
-hit, and answers a correctness-critical question, which catalog is this, with a probability. An id
-carries none of those costs, and every provider gets the same one instead of inventing its own key.
+**Tensor uids are part of the key because the bound token state carries them.** The content key
+compares tensor references by their ordinal in `Graph.tensors`, so it treats a graph whose uids were
+renumbered as the same graph. A `graph_match`, however, publishes raw tensor uids into the bound token
+state, and the dispatch binds variant-pack buffers through them. Keying on content alone would hand a
+renumbered graph the uids of the graph that populated the entry. The key therefore also carries the
+ordered list of `Graph.tensors[i].uid`: a rebuild of the same problem that assigns the same uids hits,
+and a renumbered graph misses and rematches.
 
-The id identifies a graph *object*, not its *content*. Two structurally identical graphs built
-separately carry different ids and do not share a cache entry. That costs a rematch, never a wrong
-answer, and a content hash can be layered on later if cross-construction reuse proves worth having.
+**The graph-level fields the content key drops are part of the key because a matcher can read
+them.** The content key's `(cache_ignore)` set suits a measurement cache, which asks whether a
+kernel timing carries over; the graph-level default data types, `preferred_engine_id`,
+`is_override_shape_enabled`, and `min_required_engine_api_version` do not change that. The
+catalog asks a different question: whether a verdict and its bound token state carry over, and
+those depend on anything a matcher reads. `$graph.is_override_shape_enabled` is a matcher token,
+so keying on content alone would let whichever of two otherwise identical graphs matched first
+decide for the other, override shapes on or off. The key therefore carries every `(cache_ignore)`
+field of `Graph` except `name` and `id`, exactly as stamped: an absent
+`min_required_engine_api_version` is distinct from an explicit baseline. The name and id stay out
+because no matcher reads them.
+
+The graph id is not the key. It identifies a graph *object*, not its *content*: two structurally
+identical graphs built separately carry different ids, so an id key would rematch every rebuild of
+the same problem, which is the reuse this cache exists to provide.
 
 **3. Resolve this engine's descriptor and load its metadata schema.** The engine descriptor
 (**UED**) gives the engine identity, the `graph_match` its kernels are bound by, the metadata
@@ -1524,7 +1544,9 @@ arrives with no execution context, so in general no kernel has been chosen yet. 
 filter the config carries, load the dispatch descriptor of each surviving kernel's pack, and
 evaluate its workspace requirement over the cached bound token state: `workspace_bytes`, or for a
 multi-launch program the sum of its intermediates and each Launch's own scratch
-([Section 15.3](#153-intermediate-buffers)). Report the **maximum** across survivors.
+([Section 15.3](#153-intermediate-buffers)). Report the **maximum** across survivors. (For an engine
+with kernel slots, the shared region plus the largest slot scratch;
+[RFC 0021 § 6](0021_KernelSlots.md#6-shared-workspace-and-arguments).)
 *Why the dispatch descriptor loads here:* workspace is the first question whose answer is a
 dispatch property.
 *Stored:* the parsed dispatch descriptors, in the descriptor cache; the plan build reuses them.
@@ -1567,14 +1589,23 @@ hipDNN moves on to the next engine having lost nothing.
 
 After that the promise is binding. hipDNN has already chosen this engine on the strength of it, so
 a later failure (a heuristic that ranks nothing, a source that fails to resolve, a descriptor that
-fails validation) is not a fallback to another engine; it surfaces to the caller as a failed plan
-build. The catalog is settled during applicability and every later stage is a read, so the cost of
-being wrong is paid by the user, not absorbed by the framework. Producing no launchable kernel after
-accepting is a bug, not a legal outcome. For a multi-launch kernel
+fails validation, a resource or device error, an internal error) is not a legal way to decline and,
+over a stable inventory (scoped below), is a bug in the engine. The catalog is settled during
+applicability and every later stage is a read, so there is nothing an engine can legitimately learn
+late. Producing no launchable kernel after accepting is a bug, not a legal outcome. For a multi-launch kernel
 ([§15.1](#151-several-kernels-for-one-operation)) that includes the launch set: a kernel whose
 launch names differ from those its pack's handler declares is dropped when the catalog is built,
 never accepted. The same invariant applies to a composite's mandatory
 stage.
+
+The frontend nevertheless tolerates an engine that breaks the promise. The default
+`build_plans` finalizes the active plan, and when that fails for any reason it logs a WARN naming
+the engine and the failure and tries the other ranked plans, scanning from the top of the list, so
+a faulty engine does not take down a graph another engine can run. Each plan that fails logs its
+own WARN. When no plan builds, the call returns `GRAPH_EXECUTION_PLAN_CREATION_FAILED` with every
+attempted engine's failure in the message. This is a safety net, not a way to decline after
+applicability: it does not relax the invariant, and declining is returning false from
+`isApplicable`.
 
 The invariant is scoped to a stable inventory, which is the one thing the engine does not control.
 A drop-in pack may be deleted between the applicability that accepted it and the plan build that
@@ -1584,8 +1615,8 @@ not a silent wrong answer: the generation counter below retires the cached verdi
 query re-decides against the inventory that exists.
 
 **The cache is provider-owned and keyed on the problem, not the caller.** hipDNN caches none of
-this itself, so the provider keeps its own, keyed on the graph id and device that describe the
-problem.
+this itself, so the provider keeps its own, keyed on the graph content, graph-level fields, tensor
+uids, and device that describe the problem (§8.1).
 
 **Nothing is keyed on the handle.** A handle is a caller-side object that can be swapped, rebound
 to another device, or destroyed while a plan built through it is still in use, so keying on it
@@ -2088,7 +2119,7 @@ a descriptor format with the subsystem it drives. Together they form the planned
 | KMD + metadata schema | The metadata format plus the field/type/default declaration and the feature contract the heuristic and matchers consume |
 | Runtime drop-in | Loading custom bundles, compatibility gating, and source-trust rules. Five open questions land here: the enablement and location mechanism; the minimum trust requirement for drop-in source, including whether JIT source is allowed at all; whether a pack may carry its own engine/heuristic pair or must bind an installed one; how an extension provider (a DSL wheel) is bundled and released; and the three removal/deprecation cases |
 | Adapters | Registering kernel-source and heuristic adapters |
-| Composition | Multi-kernel launch, intermediate buffers, and composite (UCD) graph decomposition |
+| Composition | Multi-kernel launch, intermediate buffers, and composite (UCD) graph decomposition. Independently selected kernels per engine are kernel slots ([RFC 0021](0021_KernelSlots.md), draft) |
 | JIT and normalized providers | JIT sources, general pattern matching, and normalizing existing providers onto the descriptor system |
 
 ---
@@ -2624,9 +2655,9 @@ choices; none is a dependency.
   publishes the tensor fields and node attributes, and the criteria resolve `$kernel`, `$graph`, and
   `$device` alongside them. Cached with the catalog so matching, ranking, and dispatch all read
   them without recomputing them.
-- **Graph id:** the identity of one graph, minted when its descriptor is finalized and stable for the
-  graph's lifetime. It lets a provider cache per-graph work without reconstructing an identity of its
-  own, and it keys the applicability cache alongside the engine and device.
+- **Graph id:** the identity of one graph, minted when its descriptor is finalized and stable across
+  serialization round trips. Logs and graph dumps name a graph by it; no provider cache keys on it,
+  because it identifies a graph object rather than its content (§8.1).
 - **Inventory generation:** a counter the provider advances whenever a discovery scan changes the set
   of descriptors it can see. It is folded into the cache key, so a pack appearing or disappearing
   retires every prior cached verdict rather than leaving one stale.

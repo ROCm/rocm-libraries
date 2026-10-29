@@ -19,7 +19,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from miopen_wrapper_libs import find_library, resolve_pair
+from miopen_wrapper_libs import default_lib_dirs, find_library, resolve_pair
 
 
 class WrapperLibsTest(unittest.TestCase):
@@ -29,6 +29,14 @@ class WrapperLibsTest(unittest.TestCase):
         self.tree = Path(holder.name)
         self.lib = self.tree / "lib"
         self.lib.mkdir()
+
+    def test_default_lib_dirs_come_from_the_install_prefix(self):
+        """The scripts install to <prefix>/bin/miopen_wrapper_tests/."""
+        (self.tree / "lib64").mkdir()
+        (self.tree / "bin" / "lib_decoy").mkdir(parents=True)
+        script_dir = self.tree / "bin" / "miopen_wrapper_tests"
+        script_dir.mkdir()
+        self.assertEqual(default_lib_dirs(script_dir), [self.lib, self.tree / "lib64"])
 
     def test_the_one_versioned_file_is_found(self):
         (self.lib / "libMIOpen.so.1.0").touch()
