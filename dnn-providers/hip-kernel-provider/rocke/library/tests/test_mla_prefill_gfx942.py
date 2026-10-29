@@ -455,7 +455,7 @@ class _OccupancyGuard:
         except (ImportError, OSError, RuntimeError) as exc:  # pragma: no cover
             _require_tools_or_skip(f"comgr unavailable: {exc}")
         if llvm_major < 21:
-            _require_tools_or_skip(
+            raise unittest.SkipTest(
                 f"loaded comgr is LLVM {llvm_major}; the forward kernel's "
                 "-amdgpu-mfma-vgpr-form option needs LLVM 21+"
             )
@@ -475,7 +475,7 @@ class _OccupancyGuard:
             # failure is real.
             if "vintage mismatch" not in str(exc):
                 raise
-            _require_tools_or_skip(f"comgr cannot take this IR flavor: {exc}")
+            raise unittest.SkipTest(f"comgr cannot take this IR flavor: {exc}")
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "mla_prefill_fwd.hsaco"
             path.write_bytes(bytes(art.hsaco))
@@ -616,7 +616,7 @@ class TestAgprAccResources(unittest.TestCase):
         except ImportError as exc:  # pragma: no cover - environment-dependent
             _require_tools_or_skip(f"comgr/resource tools unavailable: {exc}")
         if not _is_modern_flavor(_resolve_llvm_flavor()):
-            _require_tools_or_skip("agpr_acc needs an llvm22 / llvm23 comgr")
+            raise unittest.SkipTest("agpr_acc needs an llvm22 / llvm23 comgr")
         try:
             art = compile_kernel(
                 build_mla_prefill_fwd(_aa_spec(), arch="gfx942"),
