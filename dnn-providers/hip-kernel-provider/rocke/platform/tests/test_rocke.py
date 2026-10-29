@@ -4884,14 +4884,14 @@ class TestBothBackendDifferentialGate(unittest.TestCase):
     def test_flavor_rejection_is_never_swallowed(self):
         """One engine rejecting a flavor the other took is a defect, not a gap."""
         with self.assertRaises(ValueError):
-            self._run(ValueError("unknown LLVM flavor 'llvm24'"))
+            self._run(ValueError("unknown LLVM flavor 'llvm25'"))
         self.assertEqual(self.backend.cpp_fallbacks(), [])
 
     def test_flavor_rejection_is_not_excused_on_an_unported_arch(self):
         """Even on a listed arch a ValueError is a defect, not a coverage gap."""
         self._with_gap("gfxfuture")
         with self.assertRaises(ValueError):
-            self._run(ValueError("unknown LLVM flavor 'llvm24'"), arch="gfxfuture")
+            self._run(ValueError("unknown LLVM flavor 'llvm25'"), arch="gfxfuture")
 
 
 class TestFusionPlanner(unittest.TestCase):

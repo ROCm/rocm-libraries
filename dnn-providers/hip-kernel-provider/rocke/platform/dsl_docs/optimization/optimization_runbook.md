@@ -2390,6 +2390,24 @@ sweep CSVs.
   display kernel symbol is the same across two compile-time-constant
   variants, the cache can serve the wrong HSACO. Salt the kernel
   symbol with a shape hash before compile (see §12.2).
+- **16-bit split-K degree outgrows the atomic's rounding.** A packed
+  bf16/fp16 atomic (`global_atomic_add_pk_*`) rounds the running sum in
+  dW on every add, so with same-sign partials the relative error grows
+  roughly linearly in the split degree, up to about
+  `degree * 2**-(fraction bits + 1)` (`2**-8` per add for bf16, which
+  has 7 fraction bits). A degree picked for CTA fill alone on a
+  small-channel, deep-reduction wgrad can pass on signed random
+  inputs and still miss the tolerance on all-positive ones. Cap the
+  16-bit degree from that bound, not from throughput, and test the cap
+  with all-positive inputs (`WgradSplitPolicy.max_degree_by_dtype` on
+  gfx1250 caps bf16 at 12).
+- **Validator rule scoped to the wrong epilogue.** A store-width rule
+  written for the MFMA cshuffle epilogue also gated the WMMA split-K
+  epilogue, which never reads that width. Hand-built specs left the width
+  unset and passed, while every AOT cache job pins it, so the cache built
+  no split-K binary at all. Scope each validator rule to the code path
+  that consumes it, and test reachability through the AOT grid, not a
+  hand-built spec.
 
 ### 14.2 Performance Failures
 
@@ -2525,6 +2543,19 @@ An optimization is done when:
 - If the HIP-debug backend disagrees with LLVM-direct on a kernel,
   one of the two is missing an op lowering — file the issue,
   don't ignore it.
+- If a higher 16-bit split-K degree is faster, check it against the
+  atomic-rounding bound before raising the cap (§14.1): the speed comes
+  from accepting more rounding error. Only a wider dW dtype raises the
+  bound itself.
+- Sweep every 16-bit split-K degree per dtype, and compare it with the best
+  `split_k=1` kernel, before you set a cap. Do not assume two packed atomics
+  with the same instruction pattern behave alike. In a gfx1250 wgrad sweep
+  (`benchmark_implicit_gemm_conv.py --direction wgrad --verify`, once per
+  `--split-k` degree), bf16 timings kept improving up to the accuracy cap,
+  while no fp16 degree beat the unsplit kernel on a mid-size dW. That is a
+  timing observation only; the cause was not classified with hardware
+  counters. When no cap avoids such a loss, turn the automatic split off for
+  that dtype and leave the explicit degree as an opt-in.
 
 ### 16.2 Anti-patterns (what to avoid)
 

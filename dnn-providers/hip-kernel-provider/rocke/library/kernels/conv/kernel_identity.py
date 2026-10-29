@@ -551,7 +551,10 @@ def identity_supports_problem(
         )
 
         ok, why = wgrad_atomic_epilogue_available(
-            problem, identity.dtype_d, identity.vector_size_c or None
+            problem,
+            identity.dtype_d,
+            identity.vector_size_c or None,
+            identity.wave_size,
         )
         if not ok:
             return False, why

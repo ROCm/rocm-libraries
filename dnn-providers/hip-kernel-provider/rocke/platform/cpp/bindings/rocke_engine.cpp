@@ -4171,7 +4171,7 @@ std::vector<std::string> gfx1201_wmma_gemm_verify(const py::dict& d, const std::
  * the engine's extern "C" boundary never aborts/terminates.
  * ------------------------------------------------------------------------ */
 
-/* "'llvm20', 'llvm22', 'llvm23'" -- built from the engine's flavor ladder so
+/* Canonical concrete flavor names -- built from the engine's ladder so
  * the message cannot drift from what from_name() actually accepts. */
 static std::string rocke_engine_flavor_list()
 {
@@ -4239,7 +4239,7 @@ std::string lower_serialized_ir(const std::string& ir_text,
         fl = rocke_llvm_flavor_from_name(flavor.c_str());
         if(fl == ROCKE_LLVM_FLAVOR_AUTO)
         {
-            throw std::runtime_error(
+            throw pybind11::value_error(
                 std::string("rocke_engine.lower_serialized_ir: unknown LLVM flavor '") + flavor
                 + "' (expected one of " + rocke_engine_flavor_list() + ")");
         }

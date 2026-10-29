@@ -1733,7 +1733,8 @@ class LocalReadMFMA(LocalRead):
                                         numComp  = kernel["NumWaves"] // 2
                                         compCols = kernel["MacroTile%u" % tile01] // numComp
                                         if compCols > 0 and MIWaveGroupShape[tile01] > 0:
-                                            segCompByteOff = (vCols // compCols) * kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
+                                            readStride = _segOff.get("readStrideBytes" + tc, _segOff["writeStrideBytes"])
+                                            segCompByteOff = (vCols // compCols) * readStride
                                             vCols = vCols % compCols
                                 if perpStride > 1 and kernel["ProblemType"]["TLU%s"%tc] == 0:
                                     permBlock = kernel["MatrixInstK"] if kernel["ProblemType"]["TLU%s"%tc] == 1 else kernel["VectorWidth%s"%tc] * kernel["MatrixInstM"]
@@ -1823,9 +1824,11 @@ class LocalReadMFMA(LocalRead):
                                 # B-rotate swaps LocalReadAddrB+0/+1 per SIMD pair, so register h must
                                 # serve exactly component h (see segment_interleave.b_rotate_reason).
                                 assert numOffsets == 1 and \
-                                    addrIdx == segCompByteOff // kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"], \
+                                    addrIdx == segCompByteOff // _segOff.get("readStrideBytesB", _segOff["writeStrideBytes"]), \
                                     "LDSSegmentBRotate: B read vIdx=%u uses LocalReadAddrB+%u" % (vIdx, addrIdx)
-                            srcAddr=vgpr("LocalReadAddr%s+%u"%(tc, addrIdx))
+                            addressWindows = (kernel.get("LDSSegInterleaveOffsets") or {}).get("readAddressWindows" + tc)
+                            registerIndex = addressWindows.index(addrIdx) if addressWindows is not None else addrIdx
+                            srcAddr=vgpr("LocalReadAddr%s+%u"%(tc, registerIndex))
                             tdmFullLdsOffset = paramList[0]
                             paramList[0] -= addrIdx * 65536
 
