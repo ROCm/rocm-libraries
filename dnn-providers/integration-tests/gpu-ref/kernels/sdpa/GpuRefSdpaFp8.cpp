@@ -68,8 +68,7 @@ extern "C" __global__ void sdpaScaleOutRef(SdpaScaleOutArgs args)
         atomicMax(reinterpret_cast<unsigned int*>(args.amax),
                   __builtin_bit_cast(unsigned int, __builtin_fabsf(x)));
     }
-    O_TYPE* tag = nullptr;
     out[b * args.outStr.s[0] + h * args.outStr.s[1] + s * args.outStr.s[2] + d * args.outStr.s[3]]
-        = fromAccum(static_cast<COMPUTE_TYPE>(x * args.scale), tag);
+        = fromAccum<O_TYPE>(static_cast<COMPUTE_TYPE>(x * args.scale));
 }
 #endif

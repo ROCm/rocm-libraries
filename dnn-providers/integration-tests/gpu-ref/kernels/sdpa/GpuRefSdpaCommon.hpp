@@ -111,7 +111,7 @@ __device__ inline COMPUTE_TYPE scoreFromDot(const SdpaScoreParams& p,
 // softcap. dQ and dK take it; dBias and dV do not.
 __device__ inline COMPUTE_TYPE softcapGradFromDot(const SdpaScoreParams& p, COMPUTE_TYPE dot)
 {
-    if(!(p.softcap > 0.0f))
+    if(p.softcap <= 0.0f)
     {
         return static_cast<COMPUTE_TYPE>(1);
     }

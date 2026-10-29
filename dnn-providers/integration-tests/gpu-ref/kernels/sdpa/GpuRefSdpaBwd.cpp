@@ -89,7 +89,7 @@ __device__ COMPUTE_TYPE
 __device__ COMPUTE_TYPE
     softcapGrad(const SdpaBwdArgs& a, long long b, long long h, long long sq, long long skv)
 {
-    if(!(a.score.softcap > 0.0f))
+    if(a.score.softcap <= 0.0f)
     {
         return static_cast<COMPUTE_TYPE>(1);
     }
@@ -138,14 +138,15 @@ extern "C" __global__ void sdpaBwdRowStatsRef(SdpaBwdArgs a)
     const long long b = idx / (a.seqQ * a.numHeads);
     const long long liveQ = sdpa_common::liveLength(a.seqLenQ, a.seqLenQStride, b, a.seqQ);
     const long long liveKv = sdpa_common::liveLength(a.seqLenKv, a.seqLenKvStride, b, a.seqKv);
-    const COMPUTE_TYPE negInf = -__builtin_huge_valf();
-    a.rowD[idx] = 0.0f;
-    a.rowM[idx] = negInf;
-    a.rowL[idx] = 0.0f;
+    // Padded query rows (sq >= liveQ) are never read by the dQ/dK/dV/dBias kernels.
     if(sq >= liveQ)
     {
         return;
     }
+    const COMPUTE_TYPE negInf = -__builtin_huge_valf();
+    a.rowD[idx] = 0.0f;
+    a.rowM[idx] = negInf;
+    a.rowL[idx] = 0.0f;
     const auto* dO = static_cast<const DO_TYPE*>(a.dO);
     const auto* o = static_cast<const O_TYPE*>(a.o);
     COMPUTE_TYPE dVal = static_cast<COMPUTE_TYPE>(0);

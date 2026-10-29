@@ -576,5 +576,13 @@ class TestGenerateSdpaFwdGoldenGraphOnly(unittest.TestCase):
                     self.assertIn("--graph-only", completed.stderr)
 
 
+# ctest reports exit code 77 as Skipped (SKIP_RETURN_CODE), so a run in which every
+# test skipped, e.g. without PyTorch, does not look like a pass.
+SKIP_EXIT = 77
+
 if __name__ == "__main__":
-    unittest.main()
+    result = unittest.main(exit=False).result
+    if not result.wasSuccessful():
+        sys.exit(1)
+    if result.testsRun > 0 and len(result.skipped) == result.testsRun:
+        sys.exit(SKIP_EXIT)

@@ -204,20 +204,24 @@ if(Python3_FOUND)
         PROPERTIES ENVIRONMENT "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"
     )
 
-    # Skips itself when PyTorch, which the generator needs, is not installed.
+    # Skips itself (exit 77) when PyTorch, which the generator needs, is not installed.
     add_test(
         NAME hipdnn_golden_sdpa_fwd_generator_python_tests
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests/test_generate_sdpa_fwd_golden.py
     )
+    set_tests_properties(hipdnn_golden_sdpa_fwd_generator_python_tests
+                         PROPERTIES SKIP_RETURN_CODE 77)
     set(HIPDNN_IT_GOLDEN_SDPA_FWD_GENERATOR_TEST hipdnn_golden_sdpa_fwd_generator_python_tests)
 
-    # Skips itself when PyTorch, which the generator needs, is not installed.
+    # Skips itself (exit 77) when PyTorch, which the generator needs, is not installed.
     add_test(
         NAME hipdnn_golden_sdpa_bwd_generator_python_tests
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests/test_generate_sdpa_bwd_golden.py
     )
+    set_tests_properties(hipdnn_golden_sdpa_bwd_generator_python_tests
+                         PROPERTIES SKIP_RETURN_CODE 77)
     set(HIPDNN_IT_GOLDEN_SDPA_BWD_GENERATOR_TEST hipdnn_golden_sdpa_bwd_generator_python_tests)
 
     # Skips itself (exit 77) when PyTorch, which the generator needs, is not installed.
