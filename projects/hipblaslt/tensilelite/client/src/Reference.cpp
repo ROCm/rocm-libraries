@@ -549,6 +549,7 @@ namespace TensileLite
             }
             break;
                 break;
+            case rocisa::DataType::Int4:
             case rocisa::DataType::XFloat32:
             case rocisa::DataType::ComplexFloat:
             case rocisa::DataType::ComplexDouble:
@@ -662,6 +663,7 @@ namespace TensileLite
                 typedPtr[pos] = SaturateCast<BFloat8_fnuz>(src);
             }
             break;
+            case rocisa::DataType::Int4:
             case rocisa::DataType::XFloat32:
             case rocisa::DataType::ComplexFloat:
             case rocisa::DataType::ComplexDouble:
@@ -720,6 +722,7 @@ namespace TensileLite
                 throw std::runtime_error("Not supported yet.");
             }
             break;
+            case rocisa::DataType::Int4:
             case rocisa::DataType::Count:
             case rocisa::DataType::Float8BFloat8:
             case rocisa::DataType::BFloat8Float8:

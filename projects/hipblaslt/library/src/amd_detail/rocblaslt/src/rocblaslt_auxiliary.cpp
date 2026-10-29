@@ -960,6 +960,12 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
     problem.int4EncodingA = matmul_descr->int4_encoding_a_ext;
     problem.deviceScalarAlpha = isDeviceScalarAlphaPointerMode(matmul_descr->pointermode);
 
+    if(adaptive_sm_count_applies(handle, matmul_descr))
+    {
+        problem.sm_count_target   = int32_t(handle->adaptive_sm->queryHint());
+        problem.adaptive_sm_count = true;
+    }
+
     if(scaleAlphaVec)
     {
         // Fill owned storage with "1" for the compute type, and repoint alpha into it.
@@ -3182,6 +3188,19 @@ rocblaslt_status
                                       pref->max_workspace_bytes);
         }
 
+        // The top Tensile result reports enough workspace for a StreamK hybrid
+        // re-grid under a later adaptive hint. A tuning-file result, the other
+        // results and AlgoCheck report the plain size.
+        if(prob.adaptive_sm_count && !override_success && *returnAlgoCount > 0
+           && heuristicResultsArray[0].state == rocblaslt_status_success
+           && *(int*)heuristicResultsArray[0].algo.data >= 0)
+        {
+            using namespace rocblaslt::adaptive_sm;
+            auto& r0         = heuristicResultsArray[0];
+            r0.workspaceSize = std::min(pref->max_workspace_bytes,
+                                        std::max(r0.workspaceSize, c_adaptiveWorkspace));
+        }
+
         if(override_success)
         {
 
@@ -3890,4 +3909,40 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_stats_for_test(uint64_t* val
     for(size_t i = 0; values && i < count && i < known; i++)
         values[i] = all[i];
     return known;
+}
+
+// Test support: the adaptive sm_count_target state of `stream` into `state`,
+// a rocblaslt::adaptive_sm::StreamStateForTest of `size` bytes. Returns false
+// when adaptive mode is off, the stream has no slot or the size differs.
+extern "C" HIPBLASLT_EXPORT bool
+    hipblaslt_adaptive_sm_state_for_test(void* handle, hipStream_t stream, void* state, size_t size)
+{
+    auto*     h    = static_cast<rocblaslt_handle>(handle);
+    const int slot = h && h->adaptive_sm ? h->streamSlot(stream) : -1;
+    if(slot < 0 || size != sizeof(rocblaslt::adaptive_sm::StreamStateForTest))
+        return false;
+    *static_cast<rocblaslt::adaptive_sm::StreamStateForTest*>(state)
+        = h->adaptive_sm->stateForTest(slot);
+    return true;
+}
+
+// Test support: an adaptive launch on `stream` with no kernel. `*probe`: the
+// launch planned a probe; `*heldBetween`, `*heldAfter`: the slot's lock is
+// held while the launch lives and after it ends. Returns false when adaptive
+// mode is off or the stream has no slot.
+extern "C" HIPBLASLT_EXPORT bool hipblaslt_adaptive_sm_launch_lock_for_test(
+    void* handle, hipStream_t stream, bool tiny, bool* probe, bool* heldBetween, bool* heldAfter)
+{
+    auto*     h    = static_cast<rocblaslt_handle>(handle);
+    const int slot = h && h->adaptive_sm ? h->streamSlot(stream) : -1;
+    if(slot < 0)
+        return false;
+    {
+        const auto launch = h->adaptive_sm->begin(stream, slot, tiny);
+        *probe            = launch.epoch != 0;
+        *heldBetween      = launch.holdsLockForTest();
+    }
+    // This thread no longer holds the lock, so try_lock is well defined.
+    *heldAfter = h->adaptive_sm->lockedForTest(slot);
+    return true;
 }
