@@ -332,6 +332,7 @@ jobs:
             random_gemm_count: 100
             rocjitsu_ref: 29656a8dcc052615e1ca49cafde98d684b6b81f2
     # TODO(newling): Remove 'true ||' after validating all three matrix jobs run.
+    # filtering is done inside the reusable workflow via amdgpu_families input.
     if: >-
       ${{
         true ||
@@ -349,7 +350,6 @@ jobs:
             contains(github.event.pull_request.labels.*.name, 'test:hipblaslt') ||
             needs.configure.outputs.run_all_tests == 'true'
           ) &&
-          contains(needs.setup.outputs.linux_build_config, matrix.amdgpu_families) &&
           needs.linux_build_and_test.result != 'skipped'
         )
       }}
