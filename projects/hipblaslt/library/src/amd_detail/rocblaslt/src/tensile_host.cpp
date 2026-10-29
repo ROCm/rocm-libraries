@@ -2087,6 +2087,10 @@ namespace
         assignAlphaBeta(compute_type, a_type, prob.alpha, prob.beta, &alpha, &beta);
         auto k = prob.k && alpha ? prob.k : 0;
 
+        // The caller pointer keeps this width. The f16 fallback below widens only
+        // the tensile compute type, because those kernels accumulate in float.
+        const auto scalarStorageType = compute_type;
+
         // fallback to f32 for f16 compute type after alpha/beta assignment
         if(prob.compute_type == rocblaslt_compute_f16)
         {
@@ -2207,6 +2211,8 @@ namespace
                                || a_type == rocisa::DataType::ComplexDouble);
 
         auto alphaBetaType = isComplexInput ? a_type : compute_type;
+        // Do not load through alphaBetaType: for f16 compute it is the f32 fallback.
+        const auto scalarLoadType = isComplexInput ? a_type : scalarStorageType;
 
         tensileProblem.setAlphaType(alphaBetaType);
         tensileProblem.setBetaType(alphaBetaType);
@@ -2229,10 +2235,10 @@ namespace
             tensileProblem.setAlphaRestriction(TensileLite::toScalarValueEnum(0.0));
         else
             tensileProblem.setAlphaRestriction(
-                get_scalar_value_from_void_ptr(prob.alpha, alphaBetaType));
+                get_scalar_value_from_void_ptr(prob.alpha, scalarLoadType));
 
         tensileProblem.setBetaRestriction(
-            get_scalar_value_from_void_ptr(prob.beta, alphaBetaType));
+            get_scalar_value_from_void_ptr(prob.beta, scalarLoadType));
 
         // Add problem predicates for CEqualsD
         tensileProblem.setCEqualsD(prob.C == prob.D);
@@ -2497,6 +2503,10 @@ namespace
         double alpha = 0, beta = 0;
         assignAlphaBeta(compute_type, a_type, prob.alpha, prob.beta, &alpha, &beta);
 
+        // The caller pointer keeps this width. The f16 fallback below widens only
+        // the tensile compute type, because those kernels accumulate in float.
+        const auto scalarStorageType = compute_type;
+
         // fallback to f32 for f16 compute type after alpha/beta assignment
         if(prob.compute_type == rocblaslt_compute_f16)
         {
@@ -2514,6 +2524,8 @@ namespace
                                || a_type == rocisa::DataType::ComplexDouble);
 
         auto alphaBetaType = isComplexInput ? a_type : compute_type;
+        // Do not load through alphaBetaType: for f16 compute it is the f32 fallback.
+        const auto scalarLoadType = isComplexInput ? a_type : scalarStorageType;
 
         tensileProblem.setAlphaType(alphaBetaType);
         tensileProblem.setBetaType(alphaBetaType);
@@ -2536,10 +2548,10 @@ namespace
             tensileProblem.setAlphaRestriction(TensileLite::toScalarValueEnum(0.0));
         else
             tensileProblem.setAlphaRestriction(
-                get_scalar_value_from_void_ptr(prob.alpha, alphaBetaType));
+                get_scalar_value_from_void_ptr(prob.alpha, scalarLoadType));
 
         tensileProblem.setBetaRestriction(
-            get_scalar_value_from_void_ptr(prob.beta, alphaBetaType));
+            get_scalar_value_from_void_ptr(prob.beta, scalarLoadType));
 
         // Add problem predicates for CEqualsD
         tensileProblem.setCEqualsD(prob.C == prob.D);
@@ -6120,11 +6132,20 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
     rocblaslt_status status = rocblaslt_status_internal_error;
     try
     {
-        // Check if pointer is valid
-        // Update for the valid case: (alpha=0 && (A=NULL || B=NULL))
+        // Check if pointer is valid.
+        // A host alpha of 0 may leave A or B null. Load alpha at the scalar
+        // width: a 4-byte read of a HIP_R_16F alpha over-reads the caller
+        // (ROCM-31553). The ext API leaves scale_type invalid; the width then
+        // follows the compute type, or the A type when A is complex.
+        const hipDataType scalar_type
+            = alphaBetaScalarType(problem.scale_type, problem.compute_type, problem.a_type);
         if(problem.alpha == nullptr || problem.beta == nullptr || problem.C == nullptr
            || problem.D == nullptr
-           || ((*((float*)problem.alpha)) && (problem.A == nullptr || problem.B == nullptr)))
+           || alphaForbidsNullAB(scalar_type,
+                                 rocblaslt_pointer_mode_host,
+                                 problem.alpha,
+                                 problem.A,
+                                 problem.B))
         {
             log_error(__func__, "invalid data pointer");
             return rocblaslt_status_invalid_pointer;
