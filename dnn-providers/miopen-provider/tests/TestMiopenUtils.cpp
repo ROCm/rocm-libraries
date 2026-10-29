@@ -574,15 +574,17 @@ TEST(TestMiopenUtils, MapPointwiseModeUnsupported)
 
 TEST(TestMiopenUtils, EnvFindEnforceIsSetOnlyForEnforcingValues)
 {
-    // MIOpen reads NONE, 1 and values it rejects as "nothing enforced", so they must not
-    // disable the benchmarking tuning policy.
+    // MIOpen reads NONE and 1 as "nothing enforced" and throws on values it cannot parse, so
+    // none of them may disable the benchmarking tuning policy.
     for(const char* value : {"", "NONE", "none", "1", "0", "6", "bogus"})
     {
         const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter enforce(
             "MIOPEN_FIND_ENFORCE", value);
         EXPECT_FALSE(miopen_utils::envFindEnforceIsSet()) << "MIOPEN_FIND_ENFORCE=" << value;
     }
-    for(const char* value : {"DB_UPDATE", "search", "SEARCH_DB_UPDATE", "db_clean", "2", "5"})
+    // Numbers are read as std::stoul reads them, as MIOpen does.
+    for(const char* value :
+        {"DB_UPDATE", "search", "SEARCH_DB_UPDATE", "db_clean", "2", "5", "04", " 3", "4x"})
     {
         const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter enforce(
             "MIOPEN_FIND_ENFORCE", value);
@@ -615,6 +617,19 @@ TEST_F(TestGpuScopedTuningPolicy, EnvFindEnforceTakesPrecedenceOverBenchmarking)
     miopenTuningPolicy_t currentPolicy;
     ASSERT_EQ(miopenGetTuningPolicy(_miopenHandle, &currentPolicy), miopenStatusSuccess);
     EXPECT_EQ(currentPolicy, miopenTuningPolicyNone);
+}
+
+TEST_F(TestGpuScopedTuningPolicy, NonEnforcingEnvKeepsSearchPolicy)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter enforce("MIOPEN_FIND_ENFORCE",
+                                                                              "NONE");
+    ASSERT_EQ(miopenSetTuningPolicy(_miopenHandle, miopenTuningPolicyNone), miopenStatusSuccess);
+
+    const ScopedTuningPolicy guard(_miopenHandle, true);
+
+    miopenTuningPolicy_t currentPolicy;
+    ASSERT_EQ(miopenGetTuningPolicy(_miopenHandle, &currentPolicy), miopenStatusSuccess);
+    EXPECT_EQ(currentPolicy, miopenTuningPolicySearch);
 }
 
 TEST_F(TestGpuScopedTuningPolicy, SetsSearchPolicyWhenBenchmarkingEnabled)

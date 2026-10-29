@@ -214,6 +214,16 @@ bool envFindEnforceIsSet()
     {
         return true;
     }
-    return value.size() == 1 && value[0] >= '2' && value[0] <= '5';
+    // MIOpen falls back to std::stoul, which skips leading whitespace and ignores trailing
+    // characters. A value it cannot parse makes MIOpen throw; here it counts as unset.
+    try
+    {
+        const unsigned long action = std::stoul(value);
+        return action >= 2 && action <= 5;
+    }
+    catch(const std::exception&)
+    {
+        return false;
+    }
 }
 }

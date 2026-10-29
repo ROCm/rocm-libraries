@@ -46,9 +46,9 @@
 namespace miopen_plugin::miopen_utils
 {
 
-/// @brief True when MIOPEN_FIND_ENFORCE names an enforcing action, parsed as MIOpen does:
-/// DB_UPDATE, SEARCH, SEARCH_DB_UPDATE or DB_CLEAN (case-insensitive), or 2-5. Unset, NONE,
-/// 1 and values MIOpen rejects all mean "nothing enforced".
+/// @brief True when MIOPEN_FIND_ENFORCE names an enforcing action as MIOpen parses it:
+/// DB_UPDATE, SEARCH, SEARCH_DB_UPDATE or DB_CLEAN (case-insensitive), or a number 2-5 as
+/// std::stoul reads it. Unset, NONE, 1 and values MIOpen cannot use mean "nothing enforced".
 bool envFindEnforceIsSet();
 
 }
