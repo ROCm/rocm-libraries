@@ -521,6 +521,68 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "Created the FlyDSL external integration targets (one per engine and architecture)")
     endif()
 
+    # The FlyDSL SDPA backward engines, hipkernel:flydsl_sdpa_bwd_split and
+    # hipkernel:flydsl_sdpa_bwd_merged. Split ships gfx950 content and gfx11-generic
+    # content, which the pack expands to every gfx11 member this build targets; merged
+    # ships gfx950 only. Each (engine, architecture) the product ships gets its own
+    # engine-pinned target in that architecture's shard, for the reason the gfx950 dense
+    # registration above sets out: pruning an artifact to another architecture removes the
+    # entry along with the engine it names. An engine the product does not ship for an
+    # architecture registers nothing there. The gfx950 shard's external file is the one
+    # created above; another shard's is created on its first registration here, truncated
+    # for the same reason.
+    foreach(_hkp_bwd_engine IN ITEMS split merged)
+        string(TOUPPER "${_hkp_bwd_engine}" _hkp_bwd_engine_upper)
+        foreach(_hkp_bwd_arch IN ITEMS gfx950 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150
+                                       gfx1151 gfx1152 gfx1153)
+            set(_hkp_bwd_ships FALSE)
+            if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+                hkp_product_ships_engine_for_arch(_hkp_bwd_ships
+                    "hipkernel:flydsl_sdpa_bwd_${_hkp_bwd_engine}" ${_hkp_bwd_arch})
+            endif()
+            if(NOT (HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+                    AND _hkp_bwd_ships AND TARGET hipdnn_integration_tests))
+                continue()
+            endif()
+
+            hkp_reserve_census_shard(_hkp_bwd_shard_dest ${_hkp_bwd_arch})
+            set(_hkp_bwd_shard_args
+                INSTALL_DESTINATION "${_hkp_bwd_shard_dest}"
+                INSTALL_STAGING_KEY hkp_census_${_hkp_bwd_arch})
+
+            set(_hkp_bwd_category_args "")
+            if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+                set(_hkp_bwd_external_ctest
+                    "${CMAKE_CURRENT_BINARY_DIR}/census_external_${_hkp_bwd_arch}_CTestTestfile.cmake")
+                get_property(_hkp_bwd_file_known GLOBAL PROPERTY
+                             HKP_CENSUS_EXTERNAL_TEST_FILE_${_hkp_bwd_arch} SET)
+                if(NOT _hkp_bwd_file_known)
+                    file(WRITE "${_hkp_bwd_external_ctest}" "")
+                    set_property(GLOBAL PROPERTY
+                        HKP_CENSUS_EXTERNAL_TEST_FILE_${_hkp_bwd_arch} "${_hkp_bwd_external_ctest}")
+                endif()
+                list(APPEND _hkp_bwd_category_args
+                    TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_FLYDSL_SDPA_BWD_${_hkp_bwd_engine_upper}_INTEGRATION_CATEGORIES_YAML}"
+                    INSTALL_TEST_FILE "${_hkp_bwd_external_ctest}"
+                    TEST_NAME_PREFIX ${PROJECT_NAME}-flydsl-sdpa-bwd-${_hkp_bwd_engine}-${_hkp_bwd_arch}-external-integration
+                )
+            endif()
+
+            add_external_integration_test_target(
+                TARGET_NAME    ${PROJECT_NAME}-flydsl-sdpa-bwd-${_hkp_bwd_engine}-${_hkp_bwd_arch}-external-integration-check
+                PLUGIN_TARGET  hip_kernel_provider
+                ENGINE_NAME    "hipkernel:flydsl_sdpa_bwd_${_hkp_bwd_engine}"
+                INSTALL_SUBDIR hip_kernel_provider
+                ${_hkp_bwd_shard_args}
+                GTEST_FILTER   "quick_SdpaBackward_Default.*:standard_SdpaBackward_Default.*:comprehensive_SdpaBackward_Default.*:full_SdpaBackward_Default.*"
+                ENVIRONMENT    ${TEST_ENVIRONMENT}
+                ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+                ${_hkp_bwd_category_args}
+            )
+            message(STATUS "Created ${PROJECT_NAME}-flydsl-sdpa-bwd-${_hkp_bwd_engine}-${_hkp_bwd_arch}-external-integration-check target")
+        endforeach()
+    endforeach()
+
     # Second drain of the common external staging, after every registration above.
     #
     # The first drain sits beside the cross-provider target, far higher up, so it can
