@@ -301,12 +301,22 @@ endfunction() # finalize_test_targets
 
 # Generates the <TARGET>_<category>_suite entries of a GTEST_CATEGORIES target from
 # test_categories_gtest.yaml (see add_hipdnn_test).
+#
+# Without shared/ctest (a sparse or standalone checkout of projects/hipdnn) no test gets category
+# labels at all, so there is nothing to pair these suites with: skip them, as the label pass above
+# skips. A missing yaml next to a present shared/ctest would instead drop the target out of every
+# category the yaml defines, so that case is a warning.
 function(_hipdnn_add_gtest_category_suites TARGET WORKING_DIR)
-    if(NOT COMMAND apply_test_category_labels OR NOT EXISTS "${_HIPDNN_GTEST_CATEGORIES_YAML}")
-        message(FATAL_ERROR
-            "add_hipdnn_test(${TARGET} GTEST_CATEGORIES) needs shared/ctest and "
-            "${_HIPDNN_GTEST_CATEGORIES_YAML}"
+    if(NOT COMMAND apply_test_category_labels)
+        message(STATUS "hipDNN: shared/ctest not available; skipping the gtest-filter suites of ${TARGET}")
+        return()
+    endif()
+    if(NOT EXISTS "${_HIPDNN_GTEST_CATEGORIES_YAML}")
+        message(WARNING
+            "hipDNN: ${_HIPDNN_GTEST_CATEGORIES_YAML} not found; ${TARGET} gets no gtest-filter "
+            "suites and is not selected by the categories that file defines"
         )
+        return()
     endif()
 
     # Same environment and fixtures as the plain entry. The installed-tree lines that the parser
