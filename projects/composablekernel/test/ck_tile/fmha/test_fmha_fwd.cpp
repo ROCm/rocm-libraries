@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "example/ck_tile/01_fmha/fmha_fwd.hpp"
+#include "example/ck_tile/01_fmha/fmha_fwd_kvshared.hpp"
 #include "example/ck_tile/01_fmha/fmha_fwd_runner.hpp"
 
 #include "gtest/gtest.h"
@@ -571,6 +572,208 @@ TEST_P(QrTdmShortQuery, DataTypeConfig)
         ASSERT_EQ(result, fwd_result::success);
         EXPECT_NE(selected_kernel.find("_qr_tdm_pingpong_"), std::string::npos) << selected_kernel;
         EXPECT_NE(selected_kernel.find("_b16x64"), std::string::npos) << selected_kernel;
+    }
+}
+
+// K and V passed as one tensor (same buffer and strides) take qr_tdm_kvshared up to 16
+// query rows, on any grid: each K/V tile is staged once and read by both gemms. seqlen_k
+// covers one partial tile, a tile multiple and a padded tail over many tiles (both LDS
+// buffers in turn); the masks cover the causal and windowed paths, LSE and ALiBi the
+// row-max frame. Group mode packs 2 sequences of 8 rows (this runner passes the packed
+// length as max_seqlen_q). Head dims 128 and 256. With num_splits > 1 the split-KV API
+// runs it on each split (a small batch then fills the GPU).
+// hdim, mode, batch, seqlen_q, seqlen_k, mask, bias, lse, BHSD, num_splits
+class QrTdmKVShared
+    : public TestWithParam<
+          std::tuple<int, mode_enum, int, int, int, const char*, const char*, bool, bool, int>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    QrTdmKVShared,
+    Values(std::tuple{128, mode_enum::batch, 1, 16, 1, "0", "n", true, true, 1},
+           std::tuple{128, mode_enum::batch, 4, 16, 64, "0", "n", true, true, 1},
+           std::tuple{128, mode_enum::batch, 37, 16, 4097, "0", "n", true, true, 1},
+           std::tuple{128, mode_enum::batch, 5, 1, 509, "0", "n", false, false, 1},
+           std::tuple{128, mode_enum::batch, 3, 16, 1000, "2", "n", true, true, 1},
+           std::tuple{128, mode_enum::batch, 3, 16, 700, "t:50,64", "n", false, false, 1},
+           std::tuple{128, mode_enum::batch, 3, 16, 700, "0", "a", true, true, 1},
+           std::tuple{128, mode_enum::group, 2, 8, 509, "2", "n", true, true, 1},
+           std::tuple{256, mode_enum::batch, 4, 16, 1, "0", "n", true, true, 1},
+           std::tuple{256, mode_enum::batch, 37, 16, 4097, "0", "n", true, false, 1},
+           std::tuple{256, mode_enum::batch, 3, 16, 1000, "2", "n", false, true, 1},
+           std::tuple{256, mode_enum::group, 2, 8, 509, "t:50,64", "a", true, true, 1},
+           // split-KV
+           std::tuple{128, mode_enum::batch, 2, 16, 4097, "0", "n", true, true, 4},
+           std::tuple{128, mode_enum::batch, 3, 1, 1000, "2", "n", true, false, 3},
+           std::tuple{128, mode_enum::group, 2, 8, 2049, "0", "n", true, true, 5},
+           std::tuple{256, mode_enum::batch, 1, 16, 4097, "0", "n", true, true, 8},
+           std::tuple{256, mode_enum::batch, 2, 16, 1000, "t:50,64", "n", true, false, 2}));
+
+TEST_P(QrTdmKVShared, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "qr_tdm_kvshared is only supported on gfx1250";
+
+        auto [hdim, mode, batch, seqlen_q, seqlen_k, mask_str, bias_str, lse, perm, num_splits] =
+            GetParam();
+
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode,
+                                                   batch,
+                                                   2,
+                                                   -1,
+                                                   {seqlen_q},
+                                                   {seqlen_k},
+                                                   hdim,
+                                                   hdim,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   perm,
+                                                   perm,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   lse,
+                                                   0,
+                                                   false,
+                                                   bias_str,
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   mask_str,
+                                                   qscale_str,
+                                                   true,
+                                                   num_splits,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel,
+                                                   true); // kv_shared
+        ASSERT_EQ(result, fwd_result::success);
+        EXPECT_NE(selected_kernel.find("_qr_tdm_kvshared_"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find("_b16x64"), std::string::npos) << selected_kernel;
+    }
+}
+
+// make_fmha_fwd_kvshared_args / make_fmha_fwd_splitkv_kvshared_args: one head, K and V one
+// contiguous tensor, as a caller passes it. Checked against a host reference for O and the
+// LSE.
+// hdim, batch, seqlen_q, seqlen_k, num_splits (1: fmha_fwd)
+class KVSharedHelpers : public TestWithParam<std::tuple<int, int, int, int, int>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         KVSharedHelpers,
+                         Values(std::tuple{128, 64, 16, 1000, 1},
+                                std::tuple{128, 3, 16, 4097, 8},
+                                std::tuple{128, 5, 7, 513, 1},
+                                std::tuple{256, 2, 16, 2049, 4},
+                                std::tuple{256, 37, 16, 700, 1}));
+
+TEST_P(KVSharedHelpers, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        using T = typename FmhaFwdTypeConfig<DataTypeConfig>::QDataType;
+        const auto [hdim, batch, seqlen_q, seqlen_k, num_splits] = GetParam();
+
+        ck_tile::HostTensor<T> q({batch, seqlen_q, hdim});
+        ck_tile::HostTensor<T> kv({batch, seqlen_k, hdim});
+        ck_tile::HostTensor<T> o({batch, seqlen_q, hdim});
+        ck_tile::HostTensor<float> lse({batch, seqlen_q});
+        ck_tile::FillUniformDistribution<T>{-1.f, 1.f, 11}(q);
+        ck_tile::FillUniformDistribution<T>{-1.f, 1.f, 12}(kv);
+
+        ck_tile::DeviceMem q_buf(q.get_element_space_size_in_bytes());
+        ck_tile::DeviceMem kv_buf(kv.get_element_space_size_in_bytes());
+        ck_tile::DeviceMem o_buf(o.get_element_space_size_in_bytes());
+        ck_tile::DeviceMem lse_buf(lse.get_element_space_size_in_bytes());
+        q_buf.ToDevice(q.data());
+        kv_buf.ToDevice(kv.data());
+
+        fmha_fwd_kvshared_problem p{};
+        p.data_type = std::is_same_v<DataTypeConfig, FmhaFwdBf16> ? "bf16" : "fp16";
+        p.q_ptr     = q_buf.GetDeviceBuffer();
+        p.kv_ptr    = kv_buf.GetDeviceBuffer();
+        p.o_ptr     = o_buf.GetDeviceBuffer();
+        p.lse_ptr   = lse_buf.GetDeviceBuffer();
+        p.batch     = batch;
+        p.seqlen_q  = seqlen_q;
+        p.seqlen_k  = seqlen_k;
+        p.hdim      = hdim;
+        p.scale_s   = 1.f / std::sqrt(static_cast<float>(hdim));
+
+        std::string selected_kernel;
+        float time = -1.f;
+        if(num_splits == 1)
+        {
+            auto [t, a]            = make_fmha_fwd_kvshared_args(p);
+            a.selected_kernel_name = &selected_kernel;
+            time                   = fmha_fwd(t, a, ck_tile::stream_config{});
+        }
+        else
+        {
+            const auto [lse_acc_bytes, o_acc_bytes] =
+                fmha_fwd_kvshared_splitkv_workspace_bytes(p, num_splits);
+            ck_tile::DeviceMem lse_acc_buf(lse_acc_bytes);
+            ck_tile::DeviceMem o_acc_buf(o_acc_bytes);
+            auto [t, a] = make_fmha_fwd_splitkv_kvshared_args(
+                p, num_splits, lse_acc_buf.GetDeviceBuffer(), o_acc_buf.GetDeviceBuffer());
+            a.selected_kernel_name = &selected_kernel;
+            time                   = fmha_fwd_splitkv(t, a, ck_tile::stream_config{});
+        }
+        if(time < 0.f)
+            GTEST_SKIP() << "No instance for current parameters";
+        if(ck_tile::is_gfx125_supported())
+            EXPECT_NE(selected_kernel.find("_qr_tdm_kvshared_"), std::string::npos)
+                << selected_kernel;
+        o_buf.FromDevice(o.data());
+        lse_buf.FromDevice(lse.data());
+
+        // host reference: softmax(q kv^T * scale) kv
+        double max_o_err = 0, max_lse_err = 0;
+        std::vector<double> s(seqlen_k);
+        for(int b = 0; b < batch; ++b)
+            for(int i = 0; i < seqlen_q; ++i)
+            {
+                double m = -INFINITY;
+                for(int j = 0; j < seqlen_k; ++j)
+                {
+                    double dot = 0;
+                    for(int d = 0; d < hdim; ++d)
+                        dot += ck_tile::type_convert<float>(q(b, i, d)) *
+                               ck_tile::type_convert<float>(kv(b, j, d));
+                    s[j] = dot * p.scale_s;
+                    m    = std::max(m, s[j]);
+                }
+                double l = 0;
+                for(int j = 0; j < seqlen_k; ++j)
+                    l += std::exp(s[j] - m);
+                for(int d = 0; d < hdim; ++d)
+                {
+                    double acc = 0;
+                    for(int j = 0; j < seqlen_k; ++j)
+                        acc += std::exp(s[j] - m) * ck_tile::type_convert<float>(kv(b, j, d));
+                    max_o_err = std::max(
+                        max_o_err, std::abs(acc / l - ck_tile::type_convert<float>(o(b, i, d))));
+                }
+                max_lse_err = std::max(max_lse_err, std::abs(m + std::log(l) - lse(b, i)));
+            }
+        EXPECT_LT(max_o_err, 1e-2) << selected_kernel;
+        EXPECT_LT(max_lse_err, 1e-3) << selected_kernel;
+    }
+    else
+    {
+        GTEST_SKIP() << "kv-shared helpers test fp16 and bf16";
     }
 }
 

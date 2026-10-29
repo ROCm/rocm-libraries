@@ -101,7 +101,8 @@ inline std::string get_device_name() {
     return value == nullptr ? "gfx1250" : value;
 }
 template <bool> struct SimplifiedGenericAttentionMask {};
-enum class BlockFmhaPipelineEnum { QRKSVS, QRKSVS_TDM, QRKSVS_TDM_SCHED, QRKSVS_TDM_PINGPONG };
+enum class BlockFmhaPipelineEnum { QRKSVS, QRKSVS_TDM, QRKSVS_TDM_SCHED, QRKSVS_TDM_PINGPONG,
+                                  QRKSVS_TDM_KVSHARED };
 enum class BlockAttentionBiasEnum { NO_BIAS, ELEMENTWISE_BIAS, ALIBI };
 enum class BlockAttentionQuantScaleEnum { NO_SCALE, PERTENSOR, BLOCKSCALE, KV_BLOCKSCALE, MX };
 }
@@ -137,6 +138,10 @@ struct fmha_fwd_args {
     const void* sink_ptr = nullptr;
     const void* seqlen_k_ptr = nullptr;
     const void* cu_seqlen_k_ptr = nullptr;
+    const void* k_ptr = nullptr;
+    const void* v_ptr = nullptr;
+    int stride_k = 256, stride_v = 256, nhead_stride_k = 128, nhead_stride_v = 128;
+    int batch_stride_k = 32768, batch_stride_v = 32768;
 };
 template <typename Trait, typename Arch> struct dispatch_id;
 template <typename Trait, typename Arch>
@@ -150,13 +155,13 @@ _HOST_MAIN = """
 int main() {
     fmha_fwd_traits t;
     fmha_fwd_args a;
-    int mask, bias, scale, arg_q, arg_v, max_q, has_cu_sk, has_sk_ptr, has_sink_ptr;
+    int mask, bias, scale, arg_q, arg_v, max_q, has_cu_sk, has_sk_ptr, has_sink_ptr, kv_shared;
     if(!(std::cin >> t.hdim_q >> t.hdim_v >> a.seqlen_q >> a.seqlen_k
          >> t.is_group_mode >> t.is_v_rowmajor >> t.has_logits_soft_cap >> mask >> bias
          >> t.has_lse >> t.has_dropout >> scale >> t.skip_min_seqlen_q >> t.has_sink
          >> t.data_type >> arg_q >> arg_v >> max_q >> a.batch >> a.nhead_q
          >> a.nhead_k >> a.window_size_left >> a.window_size_right
-         >> has_cu_sk >> has_sk_ptr >> has_sink_ptr)) return 2;
+         >> has_cu_sk >> has_sk_ptr >> has_sink_ptr >> kv_shared)) return 2;
     t.mask_type = static_cast<mask_enum>(mask);
     t.bias_type = static_cast<bias_enum>(bias);
     t.qscale_type = static_cast<quant_scale_enum>(scale);
@@ -166,6 +171,9 @@ int main() {
     a.cu_seqlen_k_ptr = has_cu_sk ? &a : nullptr;
     a.seqlen_k_ptr = has_sk_ptr ? &a : nullptr;
     a.sink_ptr = has_sink_ptr ? &a : nullptr;
+    // K and V one buffer, or two
+    a.k_ptr = &a;
+    a.v_ptr = kv_shared ? a.k_ptr : &t;
     std::cout << fmha_fwd(t, a, {}) << '\\n';
 }
 """
@@ -278,6 +286,7 @@ class _CompiledDispatcher:
             has_cu_sk=0,
             has_sk_ptr=0,
             has_sink_ptr=0,
+            kv_shared=0,
         )
         if changes.keys() - case.keys():
             raise ValueError(
@@ -1866,12 +1875,16 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
         pingpong = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_pingpong"]
         self.assertTrue(pingpong)
         for kernel in kernels:
-            owned = kernel.F_tile.F_pipeline_tag == "qr_tdm_pingpong"
+            owner = kernel.F_tile.F_pipeline_tag
             self.assertEqual(
-                owned, kernel.F_pipeline.tag == "qr_tdm_pingpong", kernel.name
+                owner == "qr_tdm_pingpong",
+                kernel.F_pipeline.tag == "qr_tdm_pingpong",
+                kernel.name,
             )
             self.assertEqual(
-                "LdsShuffle2DEpilogue" in kernel.render(), owned, kernel.name
+                "LdsShuffle2DEpilogue" in kernel.render(),
+                owner in ("qr_tdm_pingpong", "qr_tdm_kvshared"),
+                kernel.name,
             )
         for kernel in pingpong:
             self.assertIn(kernel.F_dtype, ("fp16", "bf16"))
@@ -1969,6 +1982,140 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
             run(seqlen_q=100, seqlen_k=512, **big), [kernel("qr_tdm_pingpong", 64)]
         )
         self.assertEqual(run(seqlen_q=100, seqlen_k=512), [kernel("qr_tdm", 64)])
+
+    def test_d128_kvshared_tiles(self):
+        # qr_tdm_kvshared runs on its own d128/d256 fp16/bf16 16-row tiles only.
+        _, kernels = get_fwd_blobs(["gfx1250"], "*", 600, [128, 192, 256], "simplified")
+        kvshared = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_kvshared"]
+        self.assertTrue(kvshared)
+        for kernel in kernels:
+            self.assertEqual(
+                kernel.F_tile.F_pipeline_tag == "qr_tdm_kvshared",
+                kernel.F_pipeline.tag == "qr_tdm_kvshared",
+                kernel.name,
+            )
+        for kernel in kvshared:
+            self.assertIn(kernel.F_dtype, ("fp16", "bf16"))
+            self.assertIn(kernel.F_hdim, (128, 256))
+            self.assertEqual(kernel.F_tile.F_bm0, 16)
+            self.assertIn("BlockFmhaPipelineQRKSVSTdmKVShared", kernel.render())
+
+    def test_d128_kvshared_dispatch(self):
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            "fmha_fwd_d128_bf16_*_nlogits*_ndropout*_nskip*_nqscale*_ntrload*",
+            600,
+            [128],
+            "simplified",
+        )
+        dispatch = _CompiledDispatcher(self, pool, kernels)
+
+        def kernel(pipeline, bm0, mask="s_no"):
+            return dispatch.expected_id(
+                hdim=128,
+                mode="batch",
+                pipeline=pipeline,
+                bm0=bm0,
+                mask=mask,
+                skpad="f",
+                dpad="f",
+                bias="no",
+                lse="f",
+                sink="f",
+            )
+
+        def run(**changes):
+            return dispatch.run(hdim_q=128, hdim_v=128, **changes)
+
+        big = dict(batch=1280, nhead_q=2, nhead_k=2)
+        # K and V one tensor: up to 16 rows on any grid
+        for length in (1, 16):
+            for grid in (dict(batch=1, nhead_q=1, nhead_k=1), big):
+                self.assertEqual(
+                    run(seqlen_q=length, seqlen_k=532, kv_shared=1, **grid),
+                    [kernel("qr_tdm_kvshared", 16)],
+                )
+        # two tensors, or more than 16 rows: as before
+        self.assertEqual(
+            run(seqlen_q=8, seqlen_k=532, **big), [kernel("qr_tdm_pingpong", 16)]
+        )
+        self.assertEqual(
+            run(seqlen_q=17, seqlen_k=532, kv_shared=1, **big),
+            [kernel("qr_tdm_pingpong", 64)],
+        )
+        self.assertEqual(run(seqlen_q=8, seqlen_k=512), [kernel("qr_tdm", 64)])
+
+
+class TestGfx125SplitKVCodegen(unittest.TestCase):
+    """fwd_splitkv on gfx1250: the TDM pipelines of fmha_fwd (no sink, no soft cap) before qr,
+    which keeps sink and soft cap, and other archs unchanged."""
+
+    def test_tdm_instances_and_dispatch(self):
+        from codegen.ops.fmha_fwd_splitkv import (
+            get_fwd_splitkv_blobs,
+        )
+
+        kernels = get_fwd_splitkv_blobs(
+            ["gfx1250"], "*d128_bf16*", 0, "simplified", [128]
+        )
+        tags = Counter(k.F_pipeline.tag for k in kernels)
+        self.assertEqual(
+            set(tags),
+            {"qr", "qr_tdm", "qr_tdm_sched", "qr_tdm_pingpong", "qr_tdm_kvshared"},
+        )
+        for kernel in kernels:
+            with self.subTest(kernel=kernel.name):
+                tdm = kernel.F_pipeline.tag != "qr"
+                self.assertEqual(
+                    "BlockFmhaFwdSplitKVTdmPipelineProblem" in kernel.template, tdm
+                )
+                if tdm:
+                    # dense K/V only
+                    self.assertEqual(kernel.F_pipeline.F_pagedkv, "f")
+                    self.assertEqual(kernel.F_pipeline.F_sink, "f")
+                    self.assertEqual(kernel.F_pipeline.F_logits, "f")
+        self.assertTrue(
+            any(k.F_pipeline.F_sink == "t" for k in kernels if k.F_pipeline.tag == "qr")
+        )
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            from codegen.ops.fmha_fwd_splitkv import write_blobs
+
+            write_blobs(
+                ["gfx1250"], Path(output_dir), "@*d128_bf16*", 0, [128], "simplified"
+            )
+            api = (Path(output_dir) / "fmha_fwd_splitkv_api.cpp").read_text()
+        merged_rows = "(a.max_seqlen_q == 1 && a.nhead_k < a.nhead_q ? a.nhead_q / a.nhead_k : a.max_seqlen_q)"
+        # the 16-row tile up to 16 query rows (decode merges the heads of a K/V head)
+        self.assertIn(f"({merged_rows} <= 16)", api)
+        # K and V one tensor: qr_tdm_kvshared's 16-row tile first
+        self.assertIn(f"({merged_rows} <= 16 && a.k_ptr == a.v_ptr", api)
+        # qr_tdm_sched from 128 rows, the 64-row pingpong tile on big split grids below
+        self.assertIn(f"({merged_rows} >= 128)", api)
+        self.assertIn("a.batch * a.nhead_q * a.num_splits >= 4 * ", api)
+        order = [
+            api.index(f"ck_tile::BlockFmhaPipelineEnum::{enum},")
+            for enum in (
+                "QRKSVS_TDM_KVSHARED",
+                "QRKSVS_TDM_PINGPONG",
+                "QRKSVS_TDM_SCHED",
+                "QRKSVS_TDM",
+                "QRKSVS",
+            )
+        ]
+        self.assertEqual(order, sorted(order))
+
+    def test_other_archs_keep_their_pipelines(self):
+        from codegen.ops.fmha_fwd_splitkv import get_fwd_splitkv_blobs
+
+        for target in ("gfx950", "gfx1201"):
+            with self.subTest(target=target):
+                kernels = get_fwd_splitkv_blobs([target], "", 0, "simplified", [-1])
+                self.assertTrue(kernels)
+                self.assertFalse(
+                    {k.F_pipeline.tag for k in kernels}
+                    & {"qr_tdm", "qr_tdm_sched", "qr_tdm_pingpong", "qr_tdm_kvshared"}
+                )
 
 
 if __name__ == "__main__":
