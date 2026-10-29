@@ -144,6 +144,7 @@ _SEQLEN_K = ("q", 512, 513, 1024, 1025)
 _FEATURES = (
     (0, False, None),
     (128, False, None),
+    (512, False, None),
     (0, True, None),
     (0, False, "softcap"),
     (0, False, "alibi"),
@@ -156,7 +157,9 @@ def _static_grid(arch):
         (False, True),
         (64, 128, 256),
         (16, 32, 64),
-        ((8, 8), (32, 8), (64, 8)),
+        # Two pairs share each of ratios 1 and 8, so a body that reads the
+        # head counts as kernargs is checked against an under-key at one ratio.
+        ((8, 8), (16, 16), (32, 8), (32, 4), (64, 8)),
         _FEATURES,
     ):
         yield dict(
