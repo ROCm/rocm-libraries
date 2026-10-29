@@ -7,7 +7,15 @@
 # and each architecture's installed variants scale its CTest timeout.
 # Each tests/<operation>_reference package with an architecture registry is a
 # reference operation; reference_common/artifact.py discovers the same set.
-file(GLOB _ROCKE_REFERENCE_REGISTRIES RELATIVE "${_ROCKE_LIBRARY_DIR}/tests"
+# Each file that the wiring checks below glob, read or test with EXISTS is a
+# configure dependency, so a build of an existing build directory reruns them
+# when such a file appears, disappears or changes. Script mode (cmake -P), which
+# platform/tests/test_gpu_references.py uses, rejects CONFIGURE_DEPENDS.
+set(_configure_depends CONFIGURE_DEPENDS)
+if(CMAKE_SCRIPT_MODE_FILE)
+  set(_configure_depends "")
+endif()
+file(GLOB _ROCKE_REFERENCE_REGISTRIES ${_configure_depends} RELATIVE "${_ROCKE_LIBRARY_DIR}/tests"
      "${_ROCKE_LIBRARY_DIR}/tests/*_reference/architectures/registry.json")
 set(_ROCKE_REFERENCE_OPERATIONS "")
 foreach(_registry IN LISTS _ROCKE_REFERENCE_REGISTRIES)
@@ -23,8 +31,8 @@ list(SORT _ROCKE_REFERENCE_OPERATIONS)
 include("${CMAKE_CURRENT_LIST_DIR}/PublishedGpuReferences.cmake")
 # A committed lock publishes its variant together with the variant's adapter,
 # its architecture's list entry and its DVC pointer, and a listed architecture
-# must be enrolled in its operation's registry.json. Every build checks that
-# wiring, with references or not, so neither a half-wired variant nor a file
+# must be enrolled in its operation's registry.json. Every configuration checks
+# that wiring, with references or not, so neither a half-wired variant nor a file
 # that a branch opened before the variant layout restores at its old path can
 # silently drop a qualification.
 set(_bundles "${_ROCKE_LIBRARY_DIR}/tests/reference_bundles")
@@ -34,6 +42,9 @@ foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
   # A listed architecture's GPU CTest fails at session start unless
   # registry.json, a flat JSON array of names, enrolls it.
   file(READ "${_architectures}/registry.json" _registry)
+  # Globs see only files that appear or disappear; an edit reruns configuration
+  # only for files listed here.
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_architectures}/registry.json")
   string(REGEX MATCHALL "\"[^\"]*\"" _enrolled "${_registry}")
   string(REPLACE "\"" "" _enrolled "${_enrolled}")
   foreach(_arch IN LISTS ROCKE_PUBLISHED_${_operation_upper}_ARCHITECTURES)
@@ -46,14 +57,15 @@ foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
               "or remove it from the list.")
     endif()
   endforeach()
-  file(GLOB _legacy "${_architectures}/*/baseline_lock.json")
+  file(GLOB _legacy ${_configure_depends} "${_architectures}/*/baseline_lock.json")
   foreach(_lock IN LISTS _legacy)
     message(FATAL_ERROR
             "${_lock} is a pre-variant baseline lock, which installation does not "
             "read. Move it to ${_architectures}/<arch>/<variant>/baseline_lock.json, "
             "beside its variant's adapter, or delete it.")
   endforeach()
-  file(GLOB _locks RELATIVE "${_architectures}" "${_architectures}/*/*/baseline_lock.json")
+  file(GLOB _locks ${_configure_depends} RELATIVE "${_architectures}"
+       "${_architectures}/*/*/baseline_lock.json")
   foreach(_lock IN LISTS _locks)
     get_filename_component(_variant_dir "${_lock}" DIRECTORY)
     get_filename_component(_arch "${_variant_dir}" DIRECTORY)
@@ -73,6 +85,10 @@ foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
               "does not exist, so no reference test runs the variant that it "
               "publishes.")
     endif()
+    # Deleting the adapter reruns configuration, as the globs do for the files
+    # that they find.
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                 "${_architectures}/${_variant_dir}/__init__.py")
     if(NOT _arch IN_LIST ROCKE_PUBLISHED_${_operation_upper}_ARCHITECTURES)
       message(FATAL_ERROR
               "${_lock} publishes ${_arch}, which "
@@ -87,14 +103,14 @@ foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
     endif()
   endforeach()
 endforeach()
-file(GLOB _legacy "${_bundles}/*/*.tar.gz.dvc")
+file(GLOB _legacy ${_configure_depends} "${_bundles}/*/*.tar.gz.dvc")
 foreach(_pointer IN LISTS _legacy)
   message(FATAL_ERROR
           "${_pointer} is a pre-variant DVC pointer, which installation does not "
           "read. Move it to ${_bundles}/<operation>/<arch>/<variant>.tar.gz.dvc "
           "with its lock, or delete it.")
 endforeach()
-file(GLOB _pointers RELATIVE "${_bundles}" "${_bundles}/*/*/*.tar.gz.dvc")
+file(GLOB _pointers ${_configure_depends} RELATIVE "${_bundles}" "${_bundles}/*/*/*.tar.gz.dvc")
 foreach(_pointer IN LISTS _pointers)
   string(REGEX REPLACE "^([^/]+)/(.+)\\.tar\\.gz\\.dvc$"
          "\\1_reference/architectures/\\2/baseline_lock.json" _lock "${_pointer}")
@@ -108,7 +124,8 @@ endforeach()
 # The root ignore file already ignores every archive, so dvc add writes no other
 # and variants share no ignore file. Deeper ignore files sit inside extracted
 # bundles, which it ignores whole.
-file(GLOB _ignores "${_bundles}/*/.gitignore" "${_bundles}/*/*/.gitignore")
+file(GLOB _ignores ${_configure_depends}
+     "${_bundles}/*/.gitignore" "${_bundles}/*/*/.gitignore")
 foreach(_ignore IN LISTS _ignores)
   message(FATAL_ERROR
           "Delete ${_ignore}: ${_bundles}/.gitignore is the only ignore file for "
@@ -158,7 +175,8 @@ foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
     # A variant's committed lock publishes it, with its own archive and bundle.
     # The architecture's GPU CTest runs every variant installed here.
     set(_variants "${_ROCKE_LIBRARY_DIR}/tests/${_operation}_reference/architectures/${_arch}")
-    file(GLOB _locks CONFIGURE_DEPENDS RELATIVE "${_variants}" "${_variants}/*/baseline_lock.json")
+    file(GLOB _locks ${_configure_depends} RELATIVE "${_variants}"
+         "${_variants}/*/baseline_lock.json")
     list(LENGTH _locks _lock_count)
     if(_lock_count EQUAL 0)
       message(FATAL_ERROR

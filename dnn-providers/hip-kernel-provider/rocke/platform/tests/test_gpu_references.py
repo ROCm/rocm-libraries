@@ -268,6 +268,32 @@ def configure(project, *, enabled=True, python=True):
     )
 
 
+def build(project):
+    return subprocess.run(
+        [_CMAKE, "--build", str(project / "build")], capture_output=True, text=True
+    )
+
+
+def prepare(project, *, enabled=True, rebuild=False):
+    """Configure and build the valid fixture first if the check runs on a rebuild."""
+    if rebuild:
+        for result in (configure(project, enabled=enabled), build(project)):
+            assert result.returncode == 0, result.stdout + result.stderr
+
+
+def check(project, *, enabled=True, rebuild=False):
+    """Run the configuration checks in a new or an existing build directory.
+
+    A build reruns configuration only when a file that it depends on changes,
+    so each check that a file triggers must also fail a build of an existing
+    build directory.
+    """
+    return build(project) if rebuild else configure(project, enabled=enabled)
+
+
+_REBUILD = pytest.mark.parametrize("rebuild", [False, True], ids=["new", "existing"])
+
+
 def test_published_operations_install_separately(project):
     result = configure(project)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -435,9 +461,11 @@ def test_staging_rejects_a_bundle_qualified_for_another_variant(project):
     assert "dvc pull" not in output
 
 
+@_REBUILD
 @pytest.mark.parametrize("missing", ["package", "publication", "metadata"])
-def test_half_wired_operation_fails_configuration(project, missing):
+def test_half_wired_operation_fails_configuration(project, missing, rebuild):
     """Each half-wired state fails instead of silently losing coverage."""
+    prepare(project, rebuild=rebuild)
     if missing == "package":
         publish(project, fictional=["gfx942"])
         expected = [
@@ -455,13 +483,14 @@ def test_half_wired_operation_fails_configuration(project, missing):
             "Reference operation fictional has no",
             "fictional_reference/operation.json recording the manifest_operation",
         ]
-    result = configure(project)
+    result = check(project, rebuild=rebuild)
     assert result.returncode != 0
     # CMake wraps long messages.
     output = " ".join((result.stdout + result.stderr).split())
     assert all(message in output for message in expected), output
 
 
+@_REBUILD
 @pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
 @pytest.mark.parametrize(
     "problem",
@@ -471,13 +500,14 @@ def test_half_wired_operation_fails_configuration(project, missing):
         "pointer-without-lock",
         "lock-without-pointer",
         "unlisted-architecture",
+        "new-architecture",
         "adapter",
         "operation-gitignore",
         "architecture-gitignore",
     ],
 )
 def test_half_wired_or_pre_variant_references_fail_configuration(
-    project, problem, enabled
+    project, problem, enabled, rebuild
 ):
     """A lock or pointer that installation would not read fails every build.
 
@@ -486,6 +516,7 @@ def test_half_wired_or_pre_variant_references_fail_configuration(
     parts. Builds without references check them too, so the failure is not
     left to the jobs that install references.
     """
+    prepare(project, enabled=enabled, rebuild=rebuild)
     tests = project / "library/tests"
     architectures = tests / "conv_reference/architectures"
     lock = architectures / f"gfx942/{_VARIANT}/baseline_lock.json"
@@ -511,6 +542,15 @@ def test_half_wired_or_pre_variant_references_fail_configuration(
             f"{lock} publishes gfx942, which ROCKE_PUBLISHED_CONV_ARCHITECTURES in "
             "PublishedGpuReferences.cmake does not list"
         )
+    elif problem == "new-architecture":
+        # The next processor's variant, committed without its list entry.
+        path = architectures / f"gfx950/{_VARIANT}/baseline_lock.json"
+        shutil.copytree(lock.parent, path.parent)
+        shutil.copytree(pointer.parent, archives / "gfx950")
+        expected = (
+            f"{path} publishes gfx950, which ROCKE_PUBLISHED_CONV_ARCHITECTURES in "
+            "PublishedGpuReferences.cmake does not list"
+        )
     elif problem == "adapter":
         adapter = lock.with_name("__init__.py")
         adapter.unlink()
@@ -521,27 +561,29 @@ def test_half_wired_or_pre_variant_references_fail_configuration(
         path = directory / ".gitignore"
         path.write_text(f"/{_VARIANT}.tar.gz\n")
         expected = f"Delete {path}"
-    result = configure(project, enabled=enabled)
+    result = check(project, enabled=enabled, rebuild=rebuild)
     assert result.returncode != 0
     # CMake wraps long messages.
     output = " ".join((result.stdout + result.stderr).split())
     assert expected in output, output
 
 
+@_REBUILD
 @pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
 @pytest.mark.parametrize(
     "enrolled", [["gfx950"], ["gfx9420", "gfx950"]], ids=["missing", "longer-name"]
 )
-def test_listed_architectures_need_enrollment(project, enrolled, enabled):
+def test_listed_architectures_need_enrollment(project, enrolled, enabled, rebuild):
     """A listed architecture that registry.json does not enroll fails every build.
 
     Its variants would install and its GPU CTest would register, but the test
     would fail at session start, where the registry rejects the processor.
     Enrollment matches whole names.
     """
+    prepare(project, enabled=enabled, rebuild=rebuild)
     registry = project / "library/tests/conv_reference/architectures/registry.json"
     registry.write_text(json.dumps(enrolled))
-    result = configure(project, enabled=enabled)
+    result = check(project, enabled=enabled, rebuild=rebuild)
     assert result.returncode != 0
     # CMake wraps long messages, and at spaces inside a path.
     output = " ".join((result.stdout + result.stderr).split())
@@ -552,20 +594,22 @@ def test_listed_architectures_need_enrollment(project, enrolled, enabled):
     assert " ".join(expected.split()) in output, output
 
 
+@_REBUILD
 @pytest.mark.parametrize("variant", ["gfx942", "gfx_wide", "Wide", "wide-v2", "2wide"])
-def test_invalid_variant_names_fail_configuration(project, variant):
+def test_invalid_variant_names_fail_configuration(project, variant, rebuild):
     """A published variant needs a lowercase package name, never a processor's.
 
     TheRock splits installed payloads by their first gfx-named directory, and
     the variant directory sits below the processor's.
     """
+    prepare(project, rebuild=rebuild)
     tests = project / "library/tests"
     variants = tests / "conv_reference/architectures/gfx942"
     archives = tests / "reference_bundles/conv/gfx942"
     (variants / _VARIANT).rename(variants / variant)
     for suffix in (".tar.gz", ".tar.gz.dvc"):
         (archives / f"{_VARIANT}{suffix}").rename(archives / f"{variant}{suffix}")
-    result = configure(project)
+    result = check(project, rebuild=rebuild)
     assert result.returncode != 0
     # CMake wraps long messages.
     output = " ".join((result.stdout + result.stderr).split())
