@@ -304,7 +304,7 @@ template double rocblas_internal_value_category(const rocblas_double_complex* be
                                                 rocblas_datatype              compute_type);
 
 void rocblas_internal_log_kernel_select(rocblas_handle                       handle,
-                                        const rocblas_kernel_select_problem& p,
+                                        const rocblas_internal_gemm_problem& p,
                                         const char*                          source,
                                         const char*                          kernel,
                                         const char*                          fallback_from)

@@ -209,7 +209,7 @@ extern const char* c_rocblas_internal;
 // One internal GEMM sub-problem as reported by ROCBLAS_LAYER=0x10
 // (rocblas_layer_mode_log_kernel_select). A and B share input_type; C and D share output_type.
 // alpha and beta must point to host memory of compute_type.
-struct rocblas_kernel_select_problem
+struct rocblas_internal_gemm_problem
 {
     rocblas_operation trans_a        = rocblas_operation_none;
     rocblas_operation trans_b        = rocblas_operation_none;
@@ -241,7 +241,7 @@ struct rocblas_kernel_select_problem
 // gemm_ex, gemm_batched_ex or gemm_strided_batched_ex, matching how the sub-problem is laid out.
 // `kernel` may be null when the backend does not expose a kernel identifier.
 void rocblas_internal_log_kernel_select(rocblas_handle                       handle,
-                                        const rocblas_kernel_select_problem& prob,
+                                        const rocblas_internal_gemm_problem& prob,
                                         const char*                          source,
                                         const char*                          kernel,
                                         const char*                          fallback_from);

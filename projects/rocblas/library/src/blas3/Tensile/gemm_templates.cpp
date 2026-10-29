@@ -210,25 +210,24 @@ rocblas_status rocblas_internal_gemm(rocblas_handle    handle,
 #endif
     auto log_kernel_select = [&](const char* kernel) {
         if(kernel_select_logging)
-            rocblas_internal_log_kernel_select(
-                handle,
-                rocblas_gemm_kernel_select_problem<BATCHED>(trans_a,
-                                                            trans_b,
-                                                            m,
-                                                            n,
-                                                            k,
-                                                            alpha,
-                                                            lda,
-                                                            stride_a,
-                                                            ldb,
-                                                            stride_b,
-                                                            beta,
-                                                            ldc,
-                                                            stride_c,
-                                                            batch_count),
-                "source",
-                kernel,
-                fallback_from);
+            rocblas_internal_log_kernel_select(handle,
+                                               rocblas_make_gemm_problem<BATCHED>(trans_a,
+                                                                                  trans_b,
+                                                                                  m,
+                                                                                  n,
+                                                                                  k,
+                                                                                  alpha,
+                                                                                  lda,
+                                                                                  stride_a,
+                                                                                  ldb,
+                                                                                  stride_b,
+                                                                                  beta,
+                                                                                  ldc,
+                                                                                  stride_c,
+                                                                                  batch_count),
+                                               "source",
+                                               kernel,
+                                               fallback_from);
     };
 
     bool backend_logging = handle->layer_mode & rocblas_layer_mode_log_internal;

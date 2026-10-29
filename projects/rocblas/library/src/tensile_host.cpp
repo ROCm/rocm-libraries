@@ -1344,6 +1344,42 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
 #endif
 }
 
+namespace
+{
+    template <typename Ti, typename To, typename Tc>
+    rocblas_internal_gemm_problem
+        make_gemm_problem(const RocblasContractionProblem<Ti, To, Tc>& prob,
+                          rocblas_gemm_algo                            algo,
+                          int32_t                                      solution_index)
+    {
+        rocblas_internal_gemm_problem p;
+        p.trans_a        = prob.trans_a;
+        p.trans_b        = prob.trans_b;
+        p.m              = prob.m;
+        p.n              = prob.n;
+        p.k              = prob.k;
+        p.alpha          = prob.alpha;
+        p.beta           = prob.beta;
+        p.input_type     = rocblas_datatype_from_type<Ti>;
+        p.output_type    = rocblas_datatype_from_type<To>;
+        p.compute_type   = rocblas_datatype_from_type<Tc>;
+        p.lda            = prob.col_stride_a;
+        p.ldb            = prob.col_stride_b;
+        p.ldc            = prob.col_stride_c;
+        p.ldd            = prob.col_stride_d;
+        p.stride_a       = prob.batch_stride_a;
+        p.stride_b       = prob.batch_stride_b;
+        p.stride_c       = prob.batch_stride_c;
+        p.stride_d       = prob.batch_stride_d;
+        p.batch_count    = prob.batch_count;
+        p.pointer_array  = !prob.strided_batch;
+        p.algo           = algo;
+        p.solution_index = solution_index;
+        p.flags          = uint32_t(prob.flags);
+        return p;
+    }
+} // namespace
+
 /******************************************************************************
  * runContractionProblem calls Tensile to run a contraction problem described *
  * by RocblasContractionProblem                                               *
@@ -1578,34 +1614,9 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
 
         if(launched && status == rocblas_status_success)
         {
-            rocblas_kernel_select_problem p;
-            p.trans_a        = prob.trans_a;
-            p.trans_b        = prob.trans_b;
-            p.m              = prob.m;
-            p.n              = prob.n;
-            p.k              = prob.k;
-            p.alpha          = prob.alpha;
-            p.beta           = prob.beta;
-            p.input_type     = rocblas_datatype_from_type<Ti>;
-            p.output_type    = rocblas_datatype_from_type<To>;
-            p.compute_type   = rocblas_datatype_from_type<Tc>;
-            p.lda            = prob.col_stride_a;
-            p.ldb            = prob.col_stride_b;
-            p.ldc            = prob.col_stride_c;
-            p.ldd            = prob.col_stride_d;
-            p.stride_a       = prob.batch_stride_a;
-            p.stride_b       = prob.batch_stride_b;
-            p.stride_c       = prob.batch_stride_c;
-            p.stride_d       = prob.batch_stride_d;
-            p.batch_count    = prob.batch_count;
-            p.pointer_array  = !prob.strided_batch;
-            p.algo           = algo;
-            p.solution_index = solution_index;
-            p.flags          = uint32_t(prob.flags);
-
             rocblas_internal_log_kernel_select(
                 prob.handle,
-                p,
+                make_gemm_problem(prob, algo, solution_index),
                 hipblaslt_backend ? "hipblaslt" : "tensile",
                 hipblaslt_backend ? nullptr : selected_tensile_name.c_str(),
                 hipblaslt_attempted && !hipblaslt_backend ? "hipblaslt" : "none");

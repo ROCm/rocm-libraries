@@ -422,7 +422,7 @@ rocblas_status rocblas_gemv_in_gemm_launcher(rocblas_handle    handle,
     if(status == rocblas_status_success
        && (handle->layer_mode & rocblas_layer_mode_log_kernel_select))
     {
-        rocblas_kernel_select_problem p;
+        rocblas_internal_gemm_problem p;
         p.trans_a       = trans_a;
         p.trans_b       = trans_b;
         p.m             = m;

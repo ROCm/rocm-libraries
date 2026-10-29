@@ -31,22 +31,22 @@
 // Describes a rocblas_internal_gemm{,_64} problem, whose output D is C, for 0x10 logging.
 // alpha and beta must be host pointers.
 template <bool BATCHED, typename T>
-rocblas_kernel_select_problem rocblas_gemm_kernel_select_problem(rocblas_operation trans_a,
-                                                                 rocblas_operation trans_b,
-                                                                 int64_t           m,
-                                                                 int64_t           n,
-                                                                 int64_t           k,
-                                                                 const T*          alpha,
-                                                                 int64_t           lda,
-                                                                 rocblas_stride    stride_a,
-                                                                 int64_t           ldb,
-                                                                 rocblas_stride    stride_b,
-                                                                 const T*          beta,
-                                                                 int64_t           ldc,
-                                                                 rocblas_stride    stride_c,
-                                                                 int64_t           batch_count)
+rocblas_internal_gemm_problem rocblas_make_gemm_problem(rocblas_operation trans_a,
+                                                        rocblas_operation trans_b,
+                                                        int64_t           m,
+                                                        int64_t           n,
+                                                        int64_t           k,
+                                                        const T*          alpha,
+                                                        int64_t           lda,
+                                                        rocblas_stride    stride_a,
+                                                        int64_t           ldb,
+                                                        rocblas_stride    stride_b,
+                                                        const T*          beta,
+                                                        int64_t           ldc,
+                                                        rocblas_stride    stride_c,
+                                                        int64_t           batch_count)
 {
-    rocblas_kernel_select_problem p;
+    rocblas_internal_gemm_problem p;
     p.trans_a       = trans_a;
     p.trans_b       = trans_b;
     p.m             = m;

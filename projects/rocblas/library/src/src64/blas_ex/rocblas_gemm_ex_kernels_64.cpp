@@ -219,7 +219,7 @@ rocblas_status rocblas_internal_gemm_ex_typecasting_64(rocblas_handle     handle
 
     if(handle->layer_mode & rocblas_layer_mode_log_kernel_select)
     {
-        rocblas_kernel_select_problem p;
+        rocblas_internal_gemm_problem p;
         p.trans_a        = trans_a;
         p.trans_b        = trans_b;
         p.m              = m_64;
