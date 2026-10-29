@@ -28,6 +28,7 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
     using typename PingPong::BlockFmhaShape;
     using typename PingPong::FmhaMask;
     using typename PingPong::KDataType;
+    using typename PingPong::LSEDataType;
     using typename PingPong::Policy;
     using typename PingPong::Problem;
     using typename PingPong::QDataType;
@@ -75,18 +76,47 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
     static constexpr index_t kQKSteps  = kSubQKHeaddim / 32;  // QK WMMAs per 16 keys
     static constexpr index_t kOBlocks  = kSubQKHeaddim / 16;  // PV WMMAs (O^T row blocks)
     static constexpr index_t kKeyBlock = kN0 / (kNWarp * 16); // 16-key blocks per warp
+    static constexpr index_t kOHalf    = kOBlocks / kNWarp;   // O^T blocks a warp stores
 
-    // S^T of a trip as a (query, key) tile: query = lane % 16; key = warp, 16-key block,
-    // lane / 16, then 8 keys in registers, the WMMA C layout of S^T = K Q^T.
-    CK_TILE_HOST_DEVICE static constexpr auto MakeSDistribution()
+    // A (query, column) tile laid out as a WMMA C tile of the transposed product: query =
+    // lane % 16; column = warp, 16-column block, lane / 16, then 8 columns in registers.
+    template <index_t kCols>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeWarpLocalDistribution()
     {
         return make_static_tile_distribution(
-            tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<kM0, 1>, sequence<kNWarp, kKeyBlock, 2, 8>>,
-                                       tuple<sequence<2>, sequence<2, 1>>,
-                                       tuple<sequence<0>, sequence<2, 0>>,
-                                       sequence<1, 2, 2>,
-                                       sequence<1, 1, 3>>{});
+            tile_distribution_encoding<
+                sequence<>,
+                tuple<sequence<kM0, 1>, sequence<kNWarp, kCols / (kNWarp * 16), 2, 8>>,
+                tuple<sequence<2>, sequence<2, 1>>,
+                tuple<sequence<0>, sequence<2, 0>>,
+                sequence<1, 2, 2>,
+                sequence<1, 1, 3>>{});
+    }
+
+    // S^T of a trip as a (query, key) tile, the WMMA C layout of S^T = K Q^T: a warp's keys
+    CK_TILE_HOST_DEVICE static constexpr auto MakeSDistribution()
+    {
+        return MakeWarpLocalDistribution<kN0>();
+    }
+
+    // O as the merge leaves it, in O^T's C layout: warp w holds O^T blocks [w, w + 1) *
+    // kOHalf, a lane 8 consecutive d of one query (the epilogue's LDS shuffle then stores
+    // whole rows)
+    CK_TILE_HOST_DEVICE static constexpr auto MakeODistribution()
+    {
+        return MakeWarpLocalDistribution<kN1>();
+    }
+
+    // The LSE of the 16 queries: query = lane % 16, the same in both warps and lane halves
+    CK_TILE_HOST_DEVICE static constexpr auto MakeLseDistribution()
+    {
+        return make_static_tile_distribution(
+            tile_distribution_encoding<sequence<kNWarp, 2>,
+                                       tuple<sequence<kM0, 1>>,
+                                       tuple<sequence<0>, sequence<0, 1>>,
+                                       tuple<sequence<0>, sequence<1, 0>>,
+                                       sequence<1>,
+                                       sequence<1>>{});
     }
 
     // The LDS arena in address space 3. As in amd_transpose_load_to_vgpr, a C-style cast
@@ -188,22 +218,21 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
                           kN0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I1],
                       "wrong!");
 
-        // O, returned in gemm_1's C layout for the epilogue
-        constexpr auto gemm_1   = Policy::template GetPVBlockGemm<Problem>();
-        using OaccBlockTileType = decltype(gemm_1.MakeCBlockTile());
-        auto o_acc              = OaccBlockTileType{};
+        auto o_acc = make_static_distributed_tensor<SMPLComputeDataType>(MakeODistribution());
 
-        const auto f_max      = [](auto e0, auto e1) { return max(e0, e1); };
-        using MLBlockTileType = decltype(block_tile_reduce<SMPLComputeDataType>(
-            decltype(cast_tile<SMPLComputeDataType>(o_acc)){},
-            sequence<1>{},
-            f_max,
-            SMPLComputeDataType{0}));
+        // With bias or ALiBi the scores come scaled (ApplyScaleAndBias); otherwise scale_s
+        // goes into the exponent.
+        constexpr bool kScaledScores = BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                                       BiasEnum == BlockAttentionBiasEnum::ALIBI;
+        const float exp_scale = kScaledScores ? 1.f : scale_s;
 
-        // m and l as qr_tdm_pingpong starts them (a finite sink pre-seeds them)
-        auto m = MLBlockTileType{};
-        auto l = MLBlockTileType{};
-        PingPong::InitRowMaxSum(m, l, sink_v, scale_s);
+        // A finite sink seeds m (log2 domain) and l, as qr_tdm_pingpong's InitRowMaxSum
+        const bool has_sink_logit = __builtin_isinf_sign(sink_v) >= 0;
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+        const float sink_m = sink_v * (kScaledScores ? scale_s : 1.f) * log2e_v<float>;
+#else
+        const float sink_m = sink_v;
+#endif
 
         const auto q_origin = q_dram_block_window_tmp.get_window_origin();
 
@@ -222,7 +251,12 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
             if(logical_num_total_loop <= 0)
             {
                 if constexpr(kStoreLSE)
-                    PingPong::StoreLseOfEmptyRows(lse_acc_dram_window_tmp, m, sink_v, scale_s);
+                {
+                    // the sink alone, or -inf
+                    auto lse = make_static_distributed_tensor<LSEDataType>(MakeLseDistribution());
+                    set_tile(lse, has_sink_logit ? sink_v * scale_s : -numeric<float>::infinity());
+                    store_tile(lse_acc_dram_window_tmp, lse);
+                }
                 clear_tile(o_acc);
                 return o_acc;
             }
@@ -276,9 +310,13 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
                              Policy::template MakeKVLdsBlockDescriptor<Problem>().get_lengths(),
                              {0, 0});
 
+        const index_t num_total_loop =
+            integer_divide_ceil(physical_seqlen_k_end - physical_seqlen_k_start, kN0) +
+            num_sink_loop;
+
         // Tile t into buffer i_buf: the window moves from tile t - 1 (the sink->normal jump
-        // at the boundary between the sink tiles and the others). Past the end the TDM
-        // zero-fills, and nothing reads it.
+        // at the boundary between the sink tiles and the others). Tiles past the last are not
+        // loaded, so the merge can use buffer num_total_loop % kNumKVBuffers.
         const auto load_next_kv_tile = [&](index_t t, index_t i_buf) {
             if constexpr(kHasSink)
             {
@@ -292,7 +330,10 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
 
         // tiles 0 .. kNumKVBuffers - 2, issued while Q is still in flight
         load_tile_tdm(tdm_config_kv, kv_lds_write_window, kv_dram_window);
-        static_for<1, kNumKVBuffers - 1, 1>{}([&](auto t) { load_next_kv_tile(t, t); });
+        static_for<1, kNumKVBuffers - 1, 1>{}([&](auto t) {
+            if(t < num_total_loop)
+                load_next_kv_tile(t, t);
+        });
 
         constexpr index_t kKVRowBytes =
             Policy::template MakeKVLdsBlockDescriptor<Problem>().calculate_offset(
@@ -323,26 +364,16 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
         // share a query; the sink is counted once, by warp 0's lanes 0..15.
         float m_w = -numeric<float>::infinity();
         float l_w = 0.f;
-        if(i_warp == 0)
+        if(i_warp == 0 && has_sink_logit)
         {
-            m_w = m.get_thread_buffer()[0];
+            m_w = sink_m;
             if(i_half == 0)
-                l_w = l.get_thread_buffer()[0];
+                l_w = 1.f;
         }
         F32x8 o_t[kOBlocks];
         static_for<0, kOBlocks, 1>{}([&](auto i_d) { o_t[i_d] = F32x8{0}; });
 
-        // With bias or ALiBi the scores come scaled (ApplyScaleAndBias); otherwise scale_s
-        // goes into the exponent.
-        constexpr bool kScaledScores = BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                                       BiasEnum == BlockAttentionBiasEnum::ALIBI;
-        const float exp_scale = kScaledScores ? 1.f : scale_s;
-
         auto s_acc = make_static_distributed_tensor<SaccDataType>(MakeSDistribution());
-
-        const index_t num_total_loop =
-            integer_divide_ceil(physical_seqlen_k_end - physical_seqlen_k_start, kN0) +
-            num_sink_loop;
 
         // buffer of tile i_total_loops, and of tile i_total_loops + kNumKVBuffers - 1
         index_t i_total_loops = 0;
@@ -357,25 +388,38 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
             // (the last trip's gemms, or on the first trip Q's) is done.
             s_wait_tensorcnt_barrier<kNumKVBuffers - 2, 0>();
 
-            // the next tile, issued on the last trips too
-            load_next_kv_tile(i_total_loops + kNumKVBuffers - 1, i_write_buf);
+            // the next tile, if any
+            if(i_total_loops + kNumKVBuffers - 1 < num_total_loop)
+                load_next_kv_tile(i_total_loops + kNumKVBuffers - 1, i_write_buf);
             i_read_buf  = i_read_buf + 1 == kNumKVBuffers ? 0 : i_read_buf + 1;
             i_write_buf = i_write_buf + 1 == kNumKVBuffers ? 0 : i_write_buf + 1;
 
             // STAGE 1, S^T = K Q^T over this warp's keys, K read row-wise
             const LdsChar* const k_rows =
                 kv + (i_warp * kKeyBlock * 16 + i_q) * kKVRowBytes + i_half * 8 * sizeof(KDataType);
+            RawX16 k_operand[kKeyBlock][kQKSteps];
+            static_for<0, kKeyBlock, 1>{}([&](auto i_kb) {
+                static_for<0, kQKSteps, 1>{}([&](auto i_k) {
+                    k_operand[i_kb][i_k] = LoadOperand(k_rows + i_kb * 16 * kKVRowBytes +
+                                                       i_k * 32 * sizeof(KDataType));
+                });
+            });
             static_for<0, kKeyBlock, 1>{}([&](auto i_kb) {
                 F32x8 s_t{0};
-                static_for<0, kQKSteps, 1>{}([&](auto i_k) {
-                    s_t = Wmma(LoadOperand(k_rows + i_kb * 16 * kKVRowBytes +
-                                           i_k * 32 * sizeof(KDataType)),
-                               q_operand[i_k],
-                               s_t);
-                });
+                static_for<0, kQKSteps, 1>{}(
+                    [&](auto i_k) { s_t = Wmma(k_operand[i_kb][i_k], q_operand[i_k], s_t); });
                 static_for<0, 8, 1>{}([&](auto i) {
                     s_acc.get_thread_buffer()[i_kb.value * 8 + i.value] = s_t[i.value];
                 });
+            });
+            // V^T for STAGE 4, read under the softmax
+            const LdsChar* const v_cols =
+                kv + (i_warp * kKeyBlock * 16 + i_half * 8 + lane % 8) * kKVRowBytes +
+                (lane / 8) % 2 * 8 * sizeof(KDataType);
+            RawX16 v_operand[kOBlocks];
+            static_for<0, kOBlocks, 1>{}([&](auto i_d) {
+                v_operand[i_d] =
+                    LoadOperandTransposed(v_cols + i_d * 16 * sizeof(KDataType), kKVRowBytes);
             });
 
             const index_t kv_tile_start =
@@ -424,92 +468,70 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
                 p[i.value] = static_cast<RawType>(e);
             });
 
-            // STAGE 4, O^T += V^T P^T, V^T read transposed from the same K/V tile
-            const LdsChar* const v_cols =
-                kv + (i_warp * kKeyBlock * 16 + i_half * 8 + lane % 8) * kKVRowBytes +
-                (lane / 8) % 2 * 8 * sizeof(KDataType);
-            static_for<0, kOBlocks, 1>{}([&](auto i_d) {
-                o_t[i_d] =
-                    Wmma(LoadOperandTransposed(v_cols + i_d * 16 * sizeof(KDataType), kKVRowBytes),
-                         p,
-                         o_t[i_d]);
-            });
+            // STAGE 4, O^T += V^T P^T
+            static_for<0, kOBlocks, 1>{}(
+                [&](auto i_d) { o_t[i_d] = Wmma(v_operand[i_d], p, o_t[i_d]); });
         } while(++i_total_loops < num_total_loop);
 
-        // retire the tile issued past the last one consumed
-        s_wait_tensorcnt<0>();
-
-        // Merge the warps in LDS: per query, m = max m_w and l = sum exp(m_w - m) l_w; each
-        // warp stores O^T exp(m_w - m) / l, and O is the sum.
-        constexpr index_t kORowFloats = kSubQKHeaddim + 4; // 16 B apart: no bank conflicts
-        float* const ml_lds           = reinterpret_cast<float*>(smem_arena); // [kNWarp][kM0](m, l)
-        float* const ml_final         = ml_lds + kNWarp * kM0 * 2;            // [kM0](m, l)
-        float* const o_lds            = ml_final + kM0 * 2;                   // [kNWarp][kM0][row]
-        static_assert((kNWarp + 1) * kM0 * 2 * sizeof(float) +
-                          kNWarp * kM0 * kORowFloats * sizeof(float) <=
-                      Layout::kArenaBytes);
-
-        const float l_q = l_w + OtherHalf(l_w);
-        block_sync_lds(); // the K/V buffers are read
-        if(i_half == 0)
+        // Merge the warps: each hands the other its m, l and the O^T blocks the other
+        // stores, through the K/V buffer no tile went to (read last before the last trip's
+        // barrier). Per query, m = max m_w, l = sum exp(m_w - m) l_w, O = sum exp(m_w - m)
+        // O_w / l.
+        constexpr index_t kXRowFloats  = kOHalf * 16 + 4; // 16 B apart: no bank conflicts
+        constexpr index_t kXWarpFloats = kM0 * (2 + kXRowFloats);
+        static_assert(kNWarp * kXWarpFloats * sizeof(float) <= Layout::kKVStride);
+        const auto x_lds = [&](index_t i_w) {
+            return reinterpret_cast<float*>(static_cast<char*>(smem_arena) +
+                                            (num_total_loop % kNumKVBuffers) * Layout::kKVStride) +
+                   i_w * kXWarpFloats;
+        };
+        const index_t i_other = kNWarp - 1 - i_warp;
+        const float l_q       = l_w + OtherHalf(l_w);
         {
-            ml_lds[(i_warp * kM0 + i_q) * 2 + 0] = m_w;
-            ml_lds[(i_warp * kM0 + i_q) * 2 + 1] = l_q;
+            float* const x = x_lds(i_warp);
+            if(i_half == 0)
+            {
+                x[i_q * 2 + 0] = m_w;
+                x[i_q * 2 + 1] = l_q;
+            }
+            float* const row = x + kM0 * 2 + i_q * kXRowFloats + i_half * 8;
+            static_for<0, kOHalf, 1>{}([&](auto i_d) {
+                const F32x8 o = i_warp == 0 ? o_t[kOHalf + i_d] : o_t[i_d];
+                static_for<0, 8, 1>{}([&](auto i) { row[i_d * 16 + i.value] = o[i.value]; });
+            });
         }
         block_sync_lds();
 
-        float m_q = -numeric<float>::infinity();
-        static_for<0, kNWarp, 1>{}(
-            [&](auto i_w) { m_q = max(m_q, ml_lds[(i_w * kM0 + i_q) * 2]); });
-        const auto rescale = [&](float m_i) {
+        const float* const x = x_lds(i_other);
+        const float m_o      = x[i_q * 2 + 0];
+        const float m_q      = max(m_w, m_o);
+        const auto rescale   = [&](float m_i) {
             return m_i == -numeric<float>::infinity() ? 0.f : exp2(exp_scale * (m_i - m_q));
         };
-        float l_sum = 0.f;
-        static_for<0, kNWarp, 1>{}([&](auto i_w) {
-            l_sum += rescale(ml_lds[(i_w * kM0 + i_q) * 2]) * ml_lds[(i_w * kM0 + i_q) * 2 + 1];
-        });
+        const float f_w   = rescale(m_w);
+        const float f_o   = rescale(m_o);
+        const float l_sum = f_w * l_q + f_o * x[i_q * 2 + 1];
         // a fully masked row, l == 0, gives 0
-        const float o_scale = l_sum == 0.f ? 0.f : rescale(m_w) / l_sum;
-        static_for<0, kOBlocks, 1>{}([&](auto i_d) {
-            float* const row = o_lds + (i_warp * kM0 + i_q) * kORowFloats + i_d * 16 + i_half * 8;
-            static_for<0, 8, 1>{}([&](auto i) { row[i.value] = o_t[i_d][i.value] * o_scale; });
-        });
-        if(i_warp == 0 && i_half == 0)
-        {
-            ml_final[i_q * 2 + 0] = m_q;
-            ml_final[i_q * 2 + 1] = l_sum;
-        }
-        block_sync_lds();
-
-        constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
-        sweep_tile_span(o_spans[I0], [&](auto idx0) {
-            sweep_tile_span(o_spans[I1], [&](auto idx1) {
-                constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                const auto x =
-                    get_x_indices_from_distributed_indices(o_acc.get_tile_distribution(), i_j_idx);
-                float o = 0.f;
-                static_for<0, kNWarp, 1>{}(
-                    [&](auto i_w) { o += o_lds[(i_w * kM0 + x.at(I0)) * kORowFloats + x.at(I1)]; });
-                o_acc(i_j_idx) = o;
+        const float inv_l     = l_sum == 0.f ? 0.f : 1.f / l_sum;
+        const float* const xr = x + kM0 * 2 + i_q * kXRowFloats + i_half * 8;
+        static_for<0, kOHalf, 1>{}([&](auto i_d) {
+            const F32x8 o = i_warp == 0 ? o_t[i_d] : o_t[kOHalf + i_d];
+            static_for<0, 8, 1>{}([&](auto i) {
+                o_acc.get_thread_buffer()[i_d.value * 8 + i.value] =
+                    (f_w * o[i.value] + f_o * xr[i_d * 16 + i.value]) * inv_l;
             });
         });
 
         if constexpr(kStoreLSE)
         {
-            constexpr auto m_spans = decltype(m)::get_distributed_spans();
-            sweep_tile_span(m_spans[I0], [&](auto idx0) {
-                constexpr auto i_idx = make_tuple(idx0);
-                const index_t row =
-                    get_x_indices_from_distributed_indices(m.get_tile_distribution(), i_idx).at(I0);
-                // a fully masked row stores -inf, from log(0)
-                const float m_row = ml_final[row * 2 + 0];
-                m(i_idx)          = m_row == -numeric<float>::infinity() ? 0.f : m_row;
-                l(i_idx)          = ml_final[row * 2 + 1];
-            });
-            PingPong::StoreLse(lse_acc_dram_window_tmp, m, l, scale_s);
+            // natural log, as StoreLse; a fully masked row stores -inf, from log(0)
+            constexpr float kLn2 = 1.f / log2e_v<float>;
+            const float m_lse    = m_q == -numeric<float>::infinity() ? 0.f : m_q;
+            auto lse = make_static_distributed_tensor<LSEDataType>(MakeLseDistribution());
+            lse.get_thread_buffer()[0] =
+                m_lse * (kScaledScores ? kLn2 : scale_s * kLn2) + log(l_sum);
+            store_tile(lse_acc_dram_window_tmp, lse);
         }
-
-        block_sync_lds(); // the epilogue may reuse the LDS
         return o_acc;
     }
 
