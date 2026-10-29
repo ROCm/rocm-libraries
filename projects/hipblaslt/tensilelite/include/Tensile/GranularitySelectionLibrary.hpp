@@ -250,7 +250,7 @@ namespace TensileLite
                             // this local copy, so it is USO-gated like the widened
                             // predicate. Task holds a reference to problem, so the
                             // mutation is visible to taskPredicate either way.
-                            if(problem.getParams().uniformSummationOrder())
+                            if(problem.getParams().uniformSummationOrder() != 0)
                                 problem.setGroupedGemm(true);
                             if(!selectionPredicate(task, hardware, *(row.second), problem))
                                 useSolution = false;

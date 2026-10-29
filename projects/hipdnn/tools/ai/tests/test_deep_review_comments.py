@@ -190,7 +190,7 @@ def test_anchor_inside_hunk_is_inline_and_outside_or_removed_is_general(
     assert "Removed line mattered." in general
 
 
-def test_open_and_unverified_blocking_findings_are_drafted_suggestions_by_theme(
+def test_open_and_unverified_blocking_findings_are_drafted_suggestions_one_per_finding(
     comments, repo, tmp_path
 ):
     ev = build(
@@ -236,13 +236,17 @@ def test_open_and_unverified_blocking_findings_are_drafted_suggestions_by_theme(
     )
     assert out.count("###") == 1
     assert "CORR-1" not in out and "CORR-6" not in out
-    themed = [line for line in out.splitlines() if line.startswith("- **")]
-    assert len(themed) == 2
-    assert (
-        "rename it." in themed[0]
-        and "rename that too." in themed[0]
-        and "extract helper." in themed[1]
-    )
+    general = out.split("## General", 1)[1].splitlines()
+    groups = [line for line in general if line.startswith("**")]
+    assert groups == ["**SUGGESTION: source-claim**", "**FUTURE WORK: process**"]
+    lower = general[general.index(groups[0]) :]
+    items = [line for line in lower if line.startswith("- ")]
+    assert [item.split(" ")[2] for item in items] == [
+        "(CORR-3):",
+        "(CORR-4):",
+        "(CORR-5):",
+    ]
+    assert "rename it." in items[0] and "rename that too." in items[1]
 
 
 def test_draft_needs_the_rounds_id_map(comments, repo, tmp_path, capsys):
