@@ -51,7 +51,8 @@ class MAC_I8X4_Plain(MAC):
                 for iui in range(0, innerUnroll):
                     vars["iui"]  = iui
                     cidx         = a + b*kernel["ThreadTile0"] + 0
-                    cStr         = "ValuC+{a}+{b}*{ThreadTile0}".format_map(vars)
+                    vars["cidx"] = cidx
+                    cStr         = "ValuC+{cidx}".format_map(vars)
                     aStr         = "ValuA_X{m}_I{iui}+{a}".format_map(vars)
                     bStr         = "ValuB_X{m}_I{iui}+{b}".format_map(vars)
                     module.add(VDot4I32I8(dst=vgpr(cStr),

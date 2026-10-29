@@ -58,9 +58,14 @@ class FMA_I8_HPA_DOT4(MAC):
         for b in range(ThreadTile1):
             for a in range(ThreadTile0):
                 for iui in range(innerUnroll):
+                    # A carries the output dimension it owns and B the one it
+                    # owns, which the contraction decides: tPA['tileIdx'] says
+                    # which of the two output dimensions A belongs to.
+                    blockA = a if tPA["tileIdx"] == 0 else b
+                    blockB = b if tPB["tileIdx"] != 0 else a
                     cStr = f'ValuC+{a + b*ThreadTile0}'
-                    aStr = f'ValuA_X{m}_I{iui}+{a}'
-                    bStr = f'ValuB_X{m}_I{iui}+{b}'
+                    aStr = f'ValuA_X{m}_I{iui}+{blockA}'
+                    bStr = f'ValuB_X{m}_I{iui}+{blockB}'
                     if accumulate:
                         module.add(VDot4CI32I8(dst=vgpr(cStr),
                                                src0=vgpr(aStr),
