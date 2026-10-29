@@ -3340,6 +3340,38 @@ Tests:
   gpu_arch: '1201'
 
 ###############################################################################
+# Checks of D across solutions (ROCM-32357).
+#
+# A case that checks several solutions launches them all into the same D, in
+# the hipblaslt-test loop and in the hipblaslt-bench candidate search (timing
+# 1). D is filled with all ones before each solution, so a solution that never
+# stores D fails instead of passing on the previous solution's result.
+###############################################################################
+
+# Self-test: solution 1 is never launched. The case passes only if the allclose
+# check reports solution 1 and no other solution.
+# Runtime on gfx942: 4 cases, under 1 s.
+- name: matmul_check_reports_unlaunched_solution
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 131, N: 67, K: 200 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 4
+  skip_launch_solution: 1
+  unit_check: 0
+  allclose_check: 1
+  timing: [0, 1]
+  iters: 0
+  cold_iters: 0
+
+###############################################################################
 # fast_check: verification without a host reference GEMM.
 #
 # unit_check compares D against a host reference GEMM, which costs O(M*N*K) and
