@@ -120,3 +120,9 @@ def local_read_input_per_thread(localReadVectorWidth: int,
   if useF32XEmulation and (matrixInstM, matrixInstK) != (16, 16):
     return 4
   return miInputPerThread if inTailLoop else localReadVectorWidth
+
+
+def fp32_lds_read_bytes(lrvwTile: int) -> int:
+  if lrvwTile not in (1, 2, 4):
+    raise ValueError(f"FP32 LDS padding does not model lrvwTile={lrvwTile}")
+  return lrvwTile * 4
