@@ -406,7 +406,7 @@ jobs:
           LSAN_SUPP="${GITHUB_WORKSPACE}/rocm-libraries/test/therock/lsan.supp"
           {
             echo "ASAN_OPTIONS=quarantine_size_mb=600"
-            echo "LSAN_OPTIONS=suppressions=${LSAN_SUPP}:print_suppressions=0"
+            echo "LSAN_OPTIONS=suppressions=${LSAN_SUPP}"
             echo "HSA_XNACK=0"
             echo "ASAN_SYMBOLIZER_PATH=${OUT}/lib/llvm/bin/llvm-symbolizer"
             echo "LD_LIBRARY_PATH=${OUT}/lib:${ASAN_RT_DIR}:${LD_LIBRARY_PATH:-}"
