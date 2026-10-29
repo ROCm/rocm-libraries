@@ -90,7 +90,10 @@ repos:
         exclude: &opted_out_but_scanned |
           (?x)
           projects/hipblaslt/.*|
-          shared/tensile/.*
+          shared/tensile/.*|
+          # Vendored AOTriton test sources, kept byte-identical to their pin
+          # (tools/sdpa_conformance/aotriton/VENDOR.md, sync.py --check).
+          projects/hipdnn/tools/sdpa_conformance/aotriton/vendor/.*
       - id: end-of-file-fixer
         exclude: *opted_out_but_scanned
       - id: check-yaml
