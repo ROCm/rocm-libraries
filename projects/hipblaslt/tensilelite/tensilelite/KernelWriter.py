@@ -7667,7 +7667,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     isa = kernel["ISA"]
     isaInfo = getattr(kernel, 'isaInfoMap', {}).get(isa) if hasattr(kernel, 'isaInfoMap') else None
     if isaInfo:
-      self.states.archCaps["EnableXnackReplay"] = isaInfo.archCaps["EnableXnackReplay"]
+      # Rebuilt for the same reason as the deltas below: written in place, this
+      # key would reach the cache the caps came from, so an xnack- kernel would
+      # leave EnableXnackReplay=False behind for every later kernel in the
+      # process -- including unqualified ones, which then lose their drains
+      # without anything reporting it.
+      self.states.archCaps = {**self.states.archCaps,
+                              "EnableXnackReplay": isaInfo.archCaps["EnableXnackReplay"]}
 
     # rocisa keys caps by ISA, so both gfx1250 ASIC revisions share one entry;
     # the build's arch name is the only signal here (empty for v1). Rebuild the

@@ -159,10 +159,14 @@ def makeIsaInfoMap(targetIsas: List[IsaVersion], cxxCompiler: str) -> Dict[IsaVe
     ti = rocisa.rocIsa.getInstance()
     for v in targetIsas:
         ti.init(v, cxxCompiler, False)
-        asmCaps = ti.getIsaInfo(v).asmCaps
-        archCaps = ti.getIsaInfo(v).archCaps
-        regCaps = ti.getIsaInfo(v).regCaps
-        asmBugs = ti.getIsaInfo(v).asmBugs
-        isaInfoMap[v] = IsaInfo(asmCaps, archCaps, regCaps, asmBugs)
+        info = ti.getIsaInfo(v)
+        # Copied, not referenced: some backends hand back the live cached cap
+        # dicts, so the per-build overrides applied to this map would otherwise
+        # write through to the cache. Two builds in one process would then see
+        # each other's overrides -- a gfx1250:xnack- run leaving
+        # EnableXnackReplay=False behind for an unqualified gfx1250 run after it.
+        isaInfoMap[v] = IsaInfo(
+            dict(info.asmCaps), dict(info.archCaps), dict(info.regCaps), dict(info.asmBugs)
+        )
 
     return isaInfoMap

@@ -54,7 +54,7 @@ from tensilelite.Common.Architectures import (
 )
 from tensilelite import GpuArch
 from tensilelite.CustomYamlLoader import archMatch
-from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.Types import IsaInfo, IsaVersion
 from tensilelite.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin
@@ -4014,13 +4014,84 @@ def test_a_target_refused_for_another_reason_stays_refused(monkeypatch):
     assert compilerTargetOf("gfx9999:xnack-", compiler) == "gfx9999:xnack-"
 
 
-def test_a_build_alias_never_consults_the_compiler(monkeypatch):
-    """An alias names its own compiler target, so the probe is not reached."""
+def test_an_unqualified_build_alias_never_consults_the_compiler(monkeypatch):
+    """An unqualified alias names its own compiler target outright, so there is
+    nothing to ask about."""
 
     def refuse_everything(compiler, targetId):
-        raise AssertionError("the probe should not run for a build alias")
+        raise AssertionError("the probe should not run for an unqualified alias")
 
     import tensilelite.Common.Architectures as Arch
 
     monkeypatch.setattr(Arch, "_targetIdAccepted", refuse_everything)
     assert Arch.compilerTargetOf(GFX1250V0, "/stand-in/amdclang++") == GFX1250
+
+
+def test_a_build_alias_carries_the_qualifier_it_was_asked_with(monkeypatch):
+    """Only the base name is the alias's to replace. A qualifier names a driver
+    configuration, which the alias says nothing about, so it has to reach the
+    target the alias names -- and is then put to the compiler like any other."""
+    compiler, compilerTargetOf = _withProbeAnswering(monkeypatch, lambda t: True)
+    assert compilerTargetOf(f"{GFX1250V0}:xnack-", compiler) == f"{GFX1250}:xnack-"
+
+
+def test_a_build_alias_falls_back_to_the_bare_target(monkeypatch):
+    """Where the qualified form is refused, the alias lands on its bare target,
+    which is what it resolves to on a toolchain without the qualified target."""
+    compiler, compilerTargetOf = _withProbeAnswering(monkeypatch, lambda t: "xnack" not in t)
+    assert compilerTargetOf(f"{GFX1250V0}:xnack-", compiler) == GFX1250
+
+
+# Capabilities come from a per-ISA cache, and some backends hand back the live
+# dicts rather than copies. Per-build overrides are applied to what makeIsaInfoMap
+# returns, so if that is the cache, one build's overrides outlive it: a
+# gfx1250:xnack- run would leave EnableXnackReplay=False behind for an
+# unqualified run after it, in the same process, with nothing reporting it.
+
+
+class _SharedCacheIsa:
+    """A backend that hands back its live cap dicts, as the StinkyTofu adaptor does."""
+
+    def __init__(self):
+        self.archCaps = {"EnableXnackReplay": True, CAP_MULTICAST: True}
+        self.asmCaps = {"SupportedISA": True, CAP_FP4_32X16: True}
+        self.regCaps = {}
+        self.asmBugs = {}
+
+    def init(self, *_args, **_kwargs):
+        pass
+
+    def getIsaInfo(self, _isa):
+        return self  # same object, same dicts, every call
+
+
+def _withSharedCacheBackend(monkeypatch):
+    import tensilelite.Common.Capabilities as Caps
+
+    backend = _SharedCacheIsa()
+    monkeypatch.setattr(Caps.rocisa, "rocIsa", type("_", (), {"getInstance": lambda: backend}))
+    return backend
+
+
+def test_the_capability_map_does_not_alias_the_backend_cache(monkeypatch):
+    backend = _withSharedCacheBackend(monkeypatch)
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+
+    iim = makeIsaInfoMap([ISA_GFX1250], "/stand-in/amdclang++")
+    assert iim[ISA_GFX1250].archCaps is not backend.archCaps
+    assert iim[ISA_GFX1250].asmCaps is not backend.asmCaps
+
+
+def test_overrides_do_not_outlive_the_build_that_asked_for_them(monkeypatch):
+    backend = _withSharedCacheBackend(monkeypatch)
+    from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+
+    first = makeIsaInfoMap([ISA_GFX1250], "/stand-in/amdclang++")
+    applyArchCapOverrides(first, ["gfx1250:xnack-"])
+    assert first[ISA_GFX1250].archCaps["EnableXnackReplay"] is False
+
+    # A second build in the same process must see the probed values again.
+    second = makeIsaInfoMap([ISA_GFX1250], "/stand-in/amdclang++")
+    assert second[ISA_GFX1250].archCaps["EnableXnackReplay"] is True
+    assert second[ISA_GFX1250].archCaps[CAP_MULTICAST] is True
+    assert second[ISA_GFX1250].asmCaps[CAP_FP4_32X16] is True
