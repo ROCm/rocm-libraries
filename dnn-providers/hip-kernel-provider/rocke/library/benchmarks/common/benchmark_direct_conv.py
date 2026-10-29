@@ -2279,15 +2279,23 @@ def _measure_plans(
         return passed
 
     def row(ms, passed, label, idx) -> None:
-        """Append one measured plan's row and print its status line."""
-        results.append((flop / ms / 1e9, bytes_xfer / ms / 1e6, ms, passed, label))
+        """Print one measured plan's status line, and rank it unless it failed.
+
+        A plan that failed verification is still printed (its FAIL belongs in
+        the log), but kept out of ``results`` -- the list the ranking and the
+        recorded winner are built from -- so a fast wrong answer cannot become
+        ``Best:``.
+        """
+        tflops = flop / ms / 1e9
+        if passed is not False:
+            results.append((tflops, bytes_xfer / ms / 1e6, ms, passed, label))
         # One line per measured launch, as the implicit-GEMM sweep prints, so a
         # long run shows its progress and partial results rather than only the
         # ranked table at the end.
         verdict = "" if passed is None else ("  PASS" if passed else "  FAIL")
         print(
             f"  [{idx:>{width}}/{n_plans}] "
-            f"{results[-1][0]:7.1f} TFLOPS  {ms:8.3f} ms{verdict}  {label}",
+            f"{tflops:7.1f} TFLOPS  {ms:8.3f} ms{verdict}  {label}",
             flush=True,
         )
 
@@ -2675,6 +2683,10 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 per_chunk=per_chunk,
             )
             overall_rc = overall_rc or case_rc
+            # Safe only here: _measure_plans has drained the device by the
+            # time it returns, so no launch of this case can still be using a
+            # module end_case unloads.
+            modules.end_case()
 
             for ptr in ptrs.values():
                 rt.free(ptr)

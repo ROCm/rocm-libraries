@@ -197,6 +197,31 @@ def measured_keys(path, engine: str, timing: str = BLOCK_TIMING) -> set:
     }
 
 
+def expand_merged_for_skip(rows: Iterable[dict]) -> List[dict]:
+    """Per-engine skip rows from already-merged (:data:`MERGED_FIELDS`) rows.
+
+    A merged row carries both engines' times under ``{engine}_ms`` and no
+    ``engine`` field of its own, so it is not what :func:`measured_keys` (and
+    the sweeps' own ``--skip-measured`` reader) looks for. One output row per
+    engine side the merged row actually has a time for -- :func:`merge` leaves
+    a side ``None`` when that engine never reached the case, and that side is
+    not "measured" to skip.
+    """
+    out: List[dict] = []
+    for row in rows:
+        key = row.get("key")
+        if not key:
+            continue
+        for engine in ENGINES:
+            ms = row.get(f"{engine}_ms")
+            if ms is None:
+                continue
+            out.append(
+                {"key": key, "engine": engine, "ms": ms, "timing": row.get("timing")}
+            )
+    return out
+
+
 class ResultsWriter:
     """Appends one row per case to a JSON Lines file.
 
@@ -471,7 +496,12 @@ def merge(
     for row in rows:
         key = row.get("key")
         engine = row.get("engine")
-        if not key or engine not in ENGINES or row_timing(row) != timing:
+        if (
+            not key
+            or engine not in ENGINES
+            or row_timing(row) != timing
+            or row.get("passed") is False
+        ):
             continue
         merged = by_key.setdefault(
             key,

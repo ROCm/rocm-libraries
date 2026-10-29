@@ -8,9 +8,8 @@ its capabilities cover. The sweeps nonetheless built a
 :class:`~rocke.runtime.launcher.KernelLauncher` -- ``read_bytes`` plus
 ``hipModuleLoadData`` plus ``hipModuleGetFunction`` -- inside the loop over
 candidates, inside the loop over cases, so a run of *C* cases over *K*
-candidates loaded *C x K* modules of *K* distinct binaries. At a few hundred
-microseconds each that is the single largest fixed cost per candidate in a
-run that compiles nothing.
+candidates loaded *C x K* modules of *K* distinct binaries. Repeating these
+loads adds fixed overhead to a run that compiles nothing.
 
 :class:`ModuleCache` keys launchers by the binary and the entry point, so a
 blob is read and loaded once per run and every later shape reuses the loaded
@@ -75,12 +74,14 @@ class ModuleCache:
         self._hits = 0
         self._misses = 0
         self._full = False
-        # The one over-budget launcher handed out most recently, kept only
-        # long enough to unload it on the next miss -- by then its launch has
-        # drained, since callers gate/time each candidate before moving on.
-        # Without this a long sweep past the budget leaks one HIP module per
-        # miss for the rest of the run.
-        self._unadmitted: Any = None
+        # Every over-budget launcher handed out since the last end_of_case,
+        # kept until the caller says the case's launches have drained --
+        # unloading one any sooner would race a launch still in flight:
+        # --fast-rank binds a whole chunk before timing it, and a multi-step
+        # direct plan loads several steps before binding any. Without this
+        # list a long sweep past the budget leaks one HIP module per miss for
+        # the rest of the run.
+        self._unadmitted: list = []
 
     # -- query ------------------------------------------------------------
 
@@ -142,9 +143,6 @@ class ModuleCache:
                 return held
 
         self._misses += 1
-        if key is not None and self._unadmitted is not None:
-            self._unadmitted.unload()
-            self._unadmitted = None
         hsaco = Path(hsaco_path).read_bytes()
         launcher = KernelLauncher(
             hsaco=hsaco, kernel_name=kernel_name, signature=signature
@@ -155,8 +153,21 @@ class ModuleCache:
                 self._bytes += len(hsaco)
             else:
                 self._full = True
-                self._unadmitted = launcher
+                self._unadmitted.append(launcher)
         return launcher
+
+    def end_case(self) -> None:
+        """Unload this case's over-budget launchers, once its drain is done.
+
+        The caller must not call this until every launch it handed out for
+        the current case has finished -- :meth:`launcher` never unloads one
+        itself precisely so that timing it, verifying it or ranking it against
+        the rest of the case's candidates cannot race an unload. A case under
+        budget calls this for free: there is nothing to unload.
+        """
+        for launcher in self._unadmitted:
+            launcher.unload()
+        self._unadmitted.clear()
 
     def clear(self) -> None:
         """Drain the device, then unload every module held.
@@ -165,7 +176,7 @@ class ModuleCache:
         that the launches it handed out have finished, and unloading a module
         under a kernel in flight faults.
         """
-        if not self._held and self._unadmitted is None:
+        if not self._held and not self._unadmitted:
             return
         from rocke.runtime import synchronize_and_release
 
@@ -173,9 +184,7 @@ class ModuleCache:
         for launcher in self._held.values():
             launcher.unload()
         self._held.clear()
-        if self._unadmitted is not None:
-            self._unadmitted.unload()
-            self._unadmitted = None
+        self.end_case()
         self._bytes = 0
         self._full = False
 

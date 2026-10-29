@@ -3760,11 +3760,14 @@ def _run_wgrad_sweep(
                     return 1, []
 
             if _is_atomic_launch:
+                from rocke.runtime import resolve_stream
+
                 _vals_snap = dict(values)
                 _cfg_snap = cfg
+                _resolved_stream = resolve_stream(stream)
 
-                def _launch_spk(_v=_vals_snap, _c=_cfg_snap):
-                    rt.memset(dW_dev, 0, dW_t.nbytes)
+                def _launch_spk(_v=_vals_snap, _c=_cfg_snap, _s=_resolved_stream):
+                    rt.memset_async(dW_dev, 0, dW_t.nbytes, _s)
                     launcher(_v, config=_c)
 
                 timed_fn = _launch_spk
@@ -3982,6 +3985,9 @@ def _run_wgrad_sweep(
                 s1_cfg = LaunchConfig(
                     grid=s1_grid, block=(spec.block_size, 1, 1), stream=0
                 )
+                from rocke.runtime import resolve_stream
+
+                _2s_stream = resolve_stream(s1_cfg.stream)
 
                 def _launch_two_stage(
                     _s1=s1_launcher,
@@ -3992,12 +3998,14 @@ def _run_wgrad_sweep(
                     _c2=s2_cfg,
                     _ws=ws_dev,
                     _ws_nb=ws_nbytes,
+                    _s=_2s_stream,
                 ):
                     # Stage 1 accumulates into the scratch, so it has to start from
                     # zero; dW is a plain store target for Stage 2 and needs no
-                    # clearing, but zeroing it keeps a failed launch visible.
-                    rt2.memset(_ws, 0, _ws_nb)
-                    rt2.memset(dW_dev2, 0, dW_t.nbytes)
+                    # clearing, but zeroing it keeps a failed launch visible. Queued
+                    # on the launch stream, not drained for (see _streamk_launch).
+                    rt2.memset_async(_ws, 0, _ws_nb, _s)
+                    rt2.memset_async(dW_dev2, 0, dW_t.nbytes, _s)
                     _s1(_v1, config=_c1)
                     _s2(_v2, config=_c2)
 
@@ -4121,7 +4129,7 @@ def _run_wgrad_sweep(
                         kernel_name=artifact.kernel_name,
                         signature=wgrad_streamk_signature(spec),
                     )
-                    run, free_ws, pool = _streamk_launch(
+                    run, sk_extras, pool = _streamk_launch(
                         rt=rt3,
                         launcher=launcher,
                         spec=spec,
@@ -4168,7 +4176,7 @@ def _run_wgrad_sweep(
                         continue
                     synchronize_and_release(0)
                 finally:
-                    free_ws()
+                    rt3.free(sk_extras["ws_ptr"])
 
                 cur_tflops = (flop / ms) * 1e-9
                 cur_gbps = (bytes_xfer / ms) * 1e-6
@@ -4495,9 +4503,12 @@ def _run_dgrad_sweep(
                 return 1
 
         if _zero_init:
+            from rocke.runtime import resolve_stream
 
-            def _launch_atomic():
-                rt.memset(dX_dev, 0, dX_t.nbytes)
+            _atomic_stream = resolve_stream(stream)
+
+            def _launch_atomic(_s=_atomic_stream):
+                rt.memset_async(dX_dev, 0, dX_t.nbytes, _s)
                 launcher(values, config=cfg)
 
             timed_fn = _launch_atomic
@@ -5125,6 +5136,10 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 _free_extras(rt, sk_live)
 
             synchronize_and_release()
+            # Safe only here: every candidate of this case has drained by now
+            # (the device sync above), so no launch can still be using a
+            # module end_case unloads.
+            modules.end_case()
             _free_extras(rt, live_extras)
             for buf in (A_dev, B_dev, D_dev):
                 rt.free(buf)

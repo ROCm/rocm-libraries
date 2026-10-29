@@ -724,17 +724,32 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmp:
         # Direct conv's best time per case, handed to the implicit-GEMM sweep
-        # as its starting early-stop bound.
+        # as its starting early-stop bound. Scratch, not an artifact anyone
+        # reads back: a plain tempdir is fine for it.
         seed_file = str(Path(tmp) / "direct_best.json")
         seed = not args.skip_direct and not args.no_seed_from_direct
         if seed:
             direct_args += ["--early-stop-record", seed_file]
 
-        # Each sweep writes its own per-case rows; they are joined below on
-        # the case key both of them record. The files are the children's, not
-        # the user's: --results names the merged table.
-        rows_direct = str(Path(tmp) / "direct_rows.jsonl")
-        rows_implicit = str(Path(tmp) / "implicit_rows.jsonl")
+        # Each sweep writes its own per-case rows, flushed per case; they are
+        # joined below on the case key both of them record. The files are the
+        # children's, not the user's: --results names the merged table. With
+        # --results given, they are named from it and left beside it rather
+        # than under the tempdir this ``with`` block deletes on exit, so a run
+        # killed mid-sweep -- a sharded run's SIGKILL among them -- leaves the
+        # completed cases' rows somewhere the caller can find and resume from,
+        # not inside a tempdir whose name died with the process.
+        if args.results:
+            results_path = Path(args.results)
+            rows_direct = str(
+                results_path.with_name(results_path.stem + ".direct.jsonl")
+            )
+            rows_implicit = str(
+                results_path.with_name(results_path.stem + ".implicit.jsonl")
+            )
+        else:
+            rows_direct = str(Path(tmp) / "direct_rows.jsonl")
+            rows_implicit = str(Path(tmp) / "implicit_rows.jsonl")
         if args.results:
             direct_args += ["--results", rows_direct]
             implicit_args += ["--results", rows_implicit]

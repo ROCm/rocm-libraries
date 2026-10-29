@@ -300,8 +300,11 @@ def time_batch_staged(
     The gate itself (``hipStreamWaitValue32`` support) is checked once, before
     any candidate is timed: a device that lacks it would otherwise fail every
     candidate the same way, one caught exception at a time, and the case would
-    report no winner with nothing in the log to say why. Falls back to
-    :func:`time_batch` (block timing) with a warning rather than doing that.
+    report no winner with nothing in the log to say why. Raises rather than
+    silently falling back to :func:`time_batch` (block timing): a silent
+    fallback would still report these rows as ``timing: staged``, and resume
+    or merge would then compare block averages against real staged medians --
+    the mix :data:`TIMINGS`-by-row is meant to keep apart.
     """
     from statistics import median
 
@@ -315,12 +318,10 @@ def time_batch_staged(
     try:
         default_gate()
     except HipError as e:
-        print(
-            f"  [staged] {e}; this device cannot be timed with --timing staged, "
-            f"falling back to --timing block for this run",
-            flush=True,
-        )
-        return time_batch(runs, warmup=warmup, iters=iters, stream=stream)
+        raise HipError(
+            f"{e}; this device cannot be timed with --timing staged, rerun "
+            f"with --timing block"
+        ) from e
 
     out: List[Optional[float]] = []
     for i, run in enumerate(runs):
