@@ -7,6 +7,7 @@
 #include <miopen/tensor.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/conv/solvers.hpp>
+#include <miopen/solver/ck_impl_lib_loader.hpp>
 
 using Problem = miopen::conv::ProblemDescription;
 using Config  = miopen::solver::conv::PerformanceConfigHipImplicitGemm3DGroupBwdXdlops;
