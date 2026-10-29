@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <hip/hip_runtime.h>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -24,11 +25,15 @@ namespace
 // RAII fp32 device scratch for the backward row stats.
 struct DeviceScratch
 {
+    // validateInput() rejects non-positive dimensions, so an empty scratch is a caller bug.
     explicit DeviceScratch(int64_t count)
     {
-        detail::throwOnHipError(
-            hipMalloc(&data, static_cast<size_t>(count > 0 ? count : 1) * sizeof(float)),
-            "hipMalloc");
+        if(count <= 0)
+        {
+            throw std::invalid_argument("GpuFpReferenceSdpa: empty backward row-stats scratch");
+        }
+        detail::throwOnHipError(hipMalloc(&data, static_cast<size_t>(count) * sizeof(float)),
+                                "hipMalloc");
     }
     ~DeviceScratch()
     {

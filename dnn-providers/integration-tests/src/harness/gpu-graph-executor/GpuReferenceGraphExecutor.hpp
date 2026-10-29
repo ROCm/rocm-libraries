@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
@@ -65,9 +66,15 @@ private:
     struct DeviceBuffer
     {
         void* ptr = nullptr;
+        // Graph tensors have positive dimensions and empty sequence-length lists are not
+        // bound, so a zero-byte buffer is a caller bug.
         explicit DeviceBuffer(size_t bytes)
         {
-            hipdnn_gpu_ref::detail::throwOnHipError(hipMalloc(&ptr, bytes == 0 ? 1 : bytes),
+            if(bytes == 0)
+            {
+                throw std::invalid_argument("ragged SDPA densify: empty device buffer");
+            }
+            hipdnn_gpu_ref::detail::throwOnHipError(hipMalloc(&ptr, bytes),
                                                     "ragged SDPA densify: hipMalloc");
         }
         DeviceBuffer(const DeviceBuffer&) = delete;
