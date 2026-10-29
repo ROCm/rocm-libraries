@@ -2301,6 +2301,33 @@ def cases():
                 "waves_per_eu": 4,
             },
         ),
+        # Paged varlen, the same cases as the gfx950 ones of these names.
+        (
+            "paged_varlen_causal_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 96,
+            },
+        ),
+        (
+            "paged_varlen_swa_fp16_d64_sq500",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "seqlen_q": 500,
+                "seqlen_kv": 500,
+                "head_size": 64,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 96,
+                "sliding_window": 256,
+            },
+        ),
     ):
         add(
             "attention_dense",

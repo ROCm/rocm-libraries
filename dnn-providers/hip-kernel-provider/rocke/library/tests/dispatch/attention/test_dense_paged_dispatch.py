@@ -23,8 +23,6 @@ _PAGED_SPEC_IDS = {
     "gfx950": ("gfx950_dense_grid", "gfx950_dense_qbminor"),
 }
 _CASES = [(arch, sid) for arch, ids in _PAGED_SPEC_IDS.items() for sid in ids]
-# gfx942 has no paged varlen body yet.
-_VARLEN_CASES = [(arch, sid) for arch, sid in _CASES if arch == "gfx950"]
 _SQ, _HQ, _HKV, _D, _BS = 2048, 16, 4, 128, 16
 
 
@@ -110,16 +108,21 @@ def test_paged_outside_the_cohort_is_refused(arch, spec_id, overrides, error):
         dispatch_attention(pinned(_request(arch, **overrides), spec_id))
 
 
-@pytest.mark.parametrize(
-    "arch,spec_id", [(arch, sid) for arch, sid in _CASES if arch == "gfx950"]
-)
+@pytest.mark.parametrize("arch,spec_id", _CASES)
 def test_lse_is_refused_with_paged_varlen(arch, spec_id):
     req = _request(arch, batch=3, emit_lse=True)
     with pytest.raises(ValueError, match="emit_lse is not yet supported with paged"):
         dispatch_attention(pinned(req, spec_id))
 
 
-@pytest.mark.parametrize("arch,spec_id", _VARLEN_CASES)
+@pytest.mark.parametrize("seqlen_q", [1000, 2600])
+def test_gfx942_paged_partial_q_tile_needs_equal_lengths(seqlen_q):
+    req = _request("gfx942", seqlen_q=seqlen_q, sliding_window=0)
+    with pytest.raises(ValueError, match="partial Q tile needs seqlen_q == seqlen_k"):
+        dispatch_attention(pinned(req, "gfx942_dense"))
+
+
+@pytest.mark.parametrize("arch,spec_id", _CASES)
 @pytest.mark.parametrize("seqlen", [_SQ, 1000], ids=["aligned", "ragged_max"])
 def test_multi_seq_paged_request_builds_a_paged_varlen_spec(arch, spec_id, seqlen):
     """Several sequences take packed varlen Q; the lengths are maxima, so a
@@ -131,7 +134,7 @@ def test_multi_seq_paged_request_builds_a_paged_varlen_spec(arch, spec_id, seqle
     assert spec.num_kv_blocks == 3 * -(-seqlen // _BS)
 
 
-@pytest.mark.parametrize("arch,spec_id", _VARLEN_CASES)
+@pytest.mark.parametrize("arch,spec_id", _CASES)
 def test_one_sequence_ending_inside_a_kv_tile_takes_the_varlen_body(arch, spec_id):
     """The single-sequence kernel would read the padded keys of the partial last
     KV tile from stale page rows; the varlen body zeroes them."""
@@ -148,8 +151,10 @@ def test_one_sequence_ending_inside_a_kv_tile_takes_the_varlen_body(arch, spec_i
         ("gfx950", "gfx950_dense_grid", 1088, (256, 128), True),
         # A partial last KV tile at the default block_n, whole ones at 32.
         ("gfx950", "gfx950_dense_grid", 1056, (256, 32), False),
+        # Whole Q tiles at the default block_m, a partial last one at 512.
+        ("gfx942", "gfx942_dense", 1280, (512, 64), True),
     ],
-    ids=["gfx950_partial_kv", "gfx950_whole_kv"],
+    ids=["gfx950_partial_kv", "gfx950_whole_kv", "gfx942_partial_q"],
 )
 def test_swept_tile_picks_the_body_for_its_own_tails(
     arch, spec_id, seqlen, tile, varlen
@@ -170,27 +175,14 @@ def test_swept_tile_picks_the_body_for_its_own_tails(
 @pytest.mark.parametrize("window", [0, 1024], ids=["causal", "swa"])
 def test_paged_ragged_query_tail_follows_the_contiguous_kernel(arch, spec_id, window):
     req = _request(arch, seqlen_q=1088, seqlen_k=1088, sliding_window=window)
-    if arch == "gfx942":  # no partial-tile (ragged) body on gfx942
-        with pytest.raises(ValueError, match="seqlen_q 1088 is not a multiple of"):
-            dispatch_attention(pinned(req, spec_id))
-        return
     spec = dispatch_attention(pinned(req, spec_id)).spec.kernel_spec
     assert spec.paged
-    # gfx950's ragged body refuses a window: the varlen body takes it.
-    if window:
+    # gfx942 has no ragged body and gfx950's refuses a window: the varlen body
+    # takes those.
+    if arch == "gfx942" or window:
         assert spec.varlen and not spec.ragged
     else:
         assert spec.ragged and not spec.varlen
-
-
-@pytest.mark.parametrize(
-    "overrides",
-    [dict(batch=3), dict(seqlen_q=1000, seqlen_k=1000)],
-    ids=["multi_seq", "partial_kv_tile"],
-)
-def test_gfx942_refuses_paged_varlen(overrides):
-    with pytest.raises(ValueError, match="varlen"):
-        dispatch_attention(pinned(_request("gfx942", **overrides), "gfx942_dense"))
 
 
 _SMALL = dict(seqlen_q=512, seqlen_k=512, nhead_q=8, nhead_k=2, num_cus=256)
@@ -358,7 +350,7 @@ def _bind_until_compile(arch, result, tensors, **bind_kw):
     return seen
 
 
-@pytest.mark.parametrize("arch,spec_id", _VARLEN_CASES)
+@pytest.mark.parametrize("arch,spec_id", _CASES)
 def test_binding_forwards_packed_queries_and_cu_seqlens_q(arch, spec_id):
     lens = [_SQ, 1000, 17]
     cu = [0, lens[0], lens[0] + lens[1], sum(lens)]
@@ -433,7 +425,7 @@ def test_binding_views_one_packed_sequence_as_the_single_sequence_layout(arch, s
         result.bind_torch(tensors)
 
 
-@pytest.mark.parametrize("arch,spec_id", _VARLEN_CASES)
+@pytest.mark.parametrize("arch,spec_id", _CASES)
 def test_binding_packs_one_sequence_for_the_varlen_body(arch, spec_id):
     """One sequence on the varlen body: its [1, Sq, Hq, D] form is viewed packed,
     and cu_seqlens_q = [0, Sq] is built once at bind time when none is given."""
@@ -579,13 +571,13 @@ def _check_paged_varlen_dispatch_on_gpu(arch, spec_id, lens, *, one_seq_4d=False
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("arch,spec_id", _VARLEN_CASES)
+@pytest.mark.parametrize("arch,spec_id", _CASES)
 def test_multi_seq_paged_dispatch_matches_the_reference_on_gpu(arch, spec_id):
     _check_paged_varlen_dispatch_on_gpu(arch, spec_id, [_SQ, 1000, 17])
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("arch,spec_id", _VARLEN_CASES)
+@pytest.mark.parametrize("arch,spec_id", _CASES)
 @pytest.mark.parametrize(
     "seqlen", [1000, 1088], ids=["partial_kv_tile", "partial_q_tile"]
 )

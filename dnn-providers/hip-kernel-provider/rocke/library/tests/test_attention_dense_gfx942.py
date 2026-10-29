@@ -269,7 +269,6 @@ def test_kernel_name_pins_the_two_shipped_cache_collisions():
 # test_supports_rejects_modes_deferred_to_later_phases.
 _UNBUILDABLE_SPEC_FIELDS = frozenset(
     {
-        "varlen",
         "ragged",
     }
 )
@@ -301,7 +300,7 @@ _SPEC_PERTURBATIONS = {
     "dtype": ("bf16", "fp16"),
     "sliding_window": (64, 128),  # multiples of block_n=64; base is causal
     "ragged": (),  # unbuildable
-    "varlen": (),  # unbuildable
+    "varlen": (True,),  # legal only at the paged base
     "paged": (False, True),  # legal only at the paged base
     "block_size": (32, 64),  # paged-only
     "num_kv_blocks": (128, 512),  # paged-only
@@ -364,7 +363,7 @@ _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
 # also perturbed inside the combined pipeline body,
 # including iglp_mode (iglp base) and the persistent-grid fields (persistent base).
 # The paged base is the one baked-shape arm, and the only one paged/block_size/
-# num_kv_blocks can be perturbed at.
+# num_kv_blocks/varlen can be perturbed at.
 _INJECTIVITY_BASES = {
     "d128_fp16_cfvst": dict(head_size=128, dtype="fp16"),
     "d128_fp16_cfvst_iglp": dict(head_size=128, dtype="fp16", iglp=True),
@@ -3065,8 +3064,8 @@ def test_run_attention_dense_torch_rejects_unsupported_spec():
 
 
 def test_run_attention_dense_torch_rejects_cu_seqlens():
-    """gfx942 attention_dense is dense-only (varlen rejected), so the ABI has no
-    cu_seqlens args; passing them is a caller error, not a silently-ignored kwarg."""
+    """Only the paged varlen ABI has a cu_seqlens_q arg; passing cu_seqlens to any
+    other spec is a caller error, not a silently-ignored kwarg."""
     spec = _spec(head_size=128, dtype="fp16")
     with pytest.raises(ValueError, match="cu_seqlens"):
         run_attention_dense_torch(

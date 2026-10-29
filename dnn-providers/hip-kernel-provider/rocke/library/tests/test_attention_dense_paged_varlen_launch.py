@@ -12,7 +12,7 @@ import pytest
 
 from ._dense_paged_stand_ins import CacheStandIn, I32DeviceTensor
 
-_ARCHES = ("gfx950",)
+_ARCHES = ("gfx942", "gfx950")
 _B, _SQ, _HQ, _HKV, _D, _BS, _NB = 3, 1000, 16, 4, 128, 16, 128
 _GARBAGE = 0x7FFF_FFFF
 # Sequence lengths 1000, 17 and 0: a partial last page, a partial page and tile

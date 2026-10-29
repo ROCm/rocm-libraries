@@ -1,9 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Packed paged varlen inputs and checks for the dense numeric tests. The arch
-file passes its own runner, spec factory and reference, so every arch runs the
-same cases against the same poisoned cache."""
+"""Packed paged varlen inputs and checks shared by the gfx942 and gfx950 dense
+numeric tests. Each arch file passes its own runner, spec factory and reference,
+so both arches run the same cases against the same poisoned cache."""
 
 import math
 

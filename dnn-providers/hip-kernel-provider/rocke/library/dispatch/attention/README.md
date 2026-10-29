@@ -166,9 +166,8 @@ the maxima, and each sequence's query and KV lengths must be equal. One sequence
 takes the varlen body too when the single-sequence body cannot bound its tails:
 keys ending inside a KV tile (that body would read the padded keys from stale
 page rows, the varlen body zeroes them), or queries ending inside a Q tile where
-the single-sequence body has no ragged form (gfx950 with a sliding window).
-gfx942 has no paged varlen body yet and refuses these requests. For one
-sequence `cu_seqlens_q` is optional, and `[1, Sq, Hq, D]` is
+the single-sequence body has no ragged form (gfx942; gfx950 with a sliding
+window). For one sequence `cu_seqlens_q` is optional, and `[1, Sq, Hq, D]` is
 accepted as well; the binding builds `cu_seqlens_q` when the varlen body needs
 it. Selection checks the Q extent from the spec maxima (`batch` × the longest
 length), since the request carries no packed size, so a batch with one long

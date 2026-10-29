@@ -779,7 +779,8 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
         # A ragged or paged varlen Q goes through a buffer resource whose
         # num_records AND voffset are both i32 BYTES, so the ceiling is half the
         # element count the element-offset paths get. O stays element-addressed
-        # even here.
+        # even here. gfx942 paged varlen clamps its Q rows instead but keeps the
+        # limit, so both arches admit the same specs.
         qo_bytes = qo_elems * 2
         if qo_bytes >= INT32_LIMIT:
             return False, (

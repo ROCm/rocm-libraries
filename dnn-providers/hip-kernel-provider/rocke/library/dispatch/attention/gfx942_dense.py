@@ -26,10 +26,12 @@ kernel's own ``supports_attention_dense``.
 
 from __future__ import annotations
 
+from typing import Mapping
+
 from rocke.dispatch.core import CandidateRegistry, KernelCandidate
 
 from .candidate import make_dense_candidate
-from .dense_rules import dense_paged_fields, dense_paged_tile_fits
+from .dense_rules import dense_paged_fields, dense_paged_tile_fits, dense_paged_varlen
 from .common import (
     AttentionMaskType,
     AttentionRequest,
@@ -135,6 +137,22 @@ def _narrow_window_geometry(head_size, dtype):
     if dtype == "bf16":
         return 64, _DENSE_BLOCK_N, False
     return 128, _DENSE_BLOCK_N, False
+
+
+def _paged_varlen(batch: int, sq: int, sk: int, block_m: int, block_n: int) -> bool:
+    """Whether a paged problem takes the varlen body on this tile."""
+    # No ragged body on gfx942: the paged varlen body bounds a partial Q tile.
+    return dense_paged_varlen(batch, sk, block_n) or sq % block_m != 0
+
+
+def _derived(base, knobs: Mapping[str, object]) -> Mapping[str, object]:
+    """Paged ``varlen`` for the tile the knobs choose."""
+    if not base.paged:
+        return {}
+    block_m = int(knobs.get("block_m", base.block_m))
+    block_n = int(knobs.get("block_n", base.block_n))
+    sq, sk = int(base.seqlen_q), int(base.seqlen_kv)
+    return {"varlen": _paged_varlen(int(base.batch), sq, sk, block_m, block_n)}
 
 
 # Additive-bias geometry (see :func:`_bias_geometry_spec`).
@@ -371,6 +389,15 @@ def _make_spec(
     # validator. Paged varlen handles each sequence's tails itself; its lengths
     # are maxima.
     paged = dense_paged_fields(req, bn)
+    if paged and int(req.batch) == 1 and sq % bm and sq != sk:
+        # The varlen body that bounds the tile is self-attention only.
+        raise ValueError(
+            "gfx942 paged K/V with a partial Q tile needs seqlen_q == seqlen_k "
+            f"(no ragged body on gfx942): seqlen_q={sq} is not a multiple of "
+            f"block_m={bm}, seqlen_k={sk}"
+        )
+    if paged and _paged_varlen(int(req.batch), sq, sk, bm, bn):
+        paged["varlen"] = True
     ragged = (
         (sq == sk) and ((sq % bm != 0) or (sk % bn != 0)) and not paged.get("varlen")
     )
@@ -474,6 +501,7 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         recorded=frozenset(
             {"persistent", "waves_per_eu", "block_m", "block_n", "window_wave_skip"}
         ),
+        derived=_derived,
     )
 
 
