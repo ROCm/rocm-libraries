@@ -16,6 +16,7 @@
 #include <optional>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -43,6 +44,10 @@ namespace hipdnn_plugin_sdk::ingestor
 
 namespace detail
 {
+
+/// Lets tests build a UhdKernelHeuristic around an adapter of their own; create() builds
+/// adapters only from descriptors. Defined by the tests.
+class UhdKernelHeuristicAccess;
 
 /// Converts a scalar metadata value; `vector<int64_t>` yields nullopt and stays unbound,
 /// so a bare reference to it fails closed (RFC 0019 §5).
@@ -587,6 +592,8 @@ public:
     }
 
 private:
+    friend class detail::UhdKernelHeuristicAccess;
+
     /// tryCreate() without the ERROR: why the UHD was refused goes to @p failure, so a caller
     /// that retries can report it once. @p awaitingArtifact is set when the refusal is only
     /// that the model artifact is not deployed yet, so a later call may succeed.
@@ -919,6 +926,14 @@ private:
             const auto scoreStart = Clock::now();
             const auto raw = _adapter->scoreBatch(rows);
             const auto scoreNs = elapsedNs(scoreStart);
+            if(raw.size() != rows.size())
+            {
+                // Indexing a short result reads out of bounds, and a long one means the
+                // scores cannot be matched to candidates either.
+                throw std::runtime_error("the adapter returned " + std::to_string(raw.size())
+                                         + " scores for " + std::to_string(rows.size())
+                                         + " candidates");
+            }
 
             // Read the group from the scored row, not metadata, which derived or categorical
             // features could make disagree.
