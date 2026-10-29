@@ -289,6 +289,19 @@ if(BUILD_CODE_COVERAGE)
   # and then write the lcov and html reports to coverage-report
   #
 
+  # The unit tests run unfiltered: GTEST_FILTER selects rocalution-test cases,
+  # and make passes it to the environment, where gtest would read it. The
+  # lifecycle tests run through CTest, one process per test. The executables
+  # contain the same library objects as librocalution, and so the same %m
+  # signature, so their profiles get names of their own.
+  set(COVERAGE_UNIT_TEST_COMMANDS)
+  if(TARGET rocalution-unit-test)
+    set(COVERAGE_UNIT_TEST_COMMANDS
+      COMMAND ${CMAKE_COMMAND} -E env --unset=GTEST_FILTER LLVM_PROFILE_FILE="./coverage-report/profraw/rocalution-coverage_unit_%m.profraw" ./clients/staging/rocalution-unit-test
+      COMMAND ${CMAKE_COMMAND} -E env --unset=GTEST_FILTER LLVM_PROFILE_FILE="${CMAKE_BINARY_DIR}/coverage-report/profraw/rocalution-coverage_lifecycle_%m.profraw" ${CMAKE_CTEST_COMMAND} -R "^lifecycle" --output-on-failure
+    )
+  endif()
+
   #
   # Run coverage analysis
   #
@@ -296,11 +309,15 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
     COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocalution-coverage_%m.profraw" ./clients/staging/rocalution-test --gtest_filter=\"\${GTEST_FILTER}\"
+    ${COVERAGE_UNIT_TEST_COMMANDS}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running rocalution coverage analysis"
     )
 
   add_dependencies(coverage_analysis rocalution)
+  if(TARGET rocalution-unit-test)
+    add_dependencies(coverage_analysis rocalution-unit-test rocalution-unit-test-lifecycle)
+  endif()
 
   find_program(
     LLVM_PROFDATA
@@ -323,6 +340,12 @@ if(BUILD_CODE_COVERAGE)
   set(COVERAGE_OBJECTS -object $<TARGET_FILE:rocalution>)
   if(TARGET rocalution_hip)
     list(APPEND COVERAGE_OBJECTS -object $<TARGET_FILE:rocalution_hip>)
+  endif()
+  # The unit tests link the library objects instead of the library
+  if(TARGET rocalution-unit-test)
+    list(APPEND COVERAGE_OBJECTS
+      -object $<TARGET_FILE:rocalution-unit-test>
+      -object $<TARGET_FILE:rocalution-unit-test-lifecycle>)
   endif()
 
   # llvm-cov does not process the LCOV_EXCL_START/LCOV_EXCL_STOP markers. The
