@@ -31,11 +31,7 @@
 //    (library/src/level2/rocsparse_sptrsv.cpp). clients/tests/test_sptrsv_ell.yaml
 //    only drives it with transA none; this file adds a tiny device-level
 //    check of the numeric solution, plus a unit-diagonal case and an
-//    explicit-zero-pivot case. Gated the same way the library gates ELL
-//    TRSV support (BUILD_WITH_ELL_TRSV / ROCSPARSE_WITH_ELL_TRSV): when that
-//    symbol is not defined the test is skipped with a clear message instead
-//    of being compiled out, so it still shows up (as skipped) in a
-//    BUILD_WITH_ELL_TRSV=OFF build.
+//    explicit-zero-pivot case.
 //
 //  - Sliced ELL SpMV (sellmv), reached through rocsparse_v2_spmv for
 //    rocsparse_format_sell (library/src/level2/rocsparse_sellmv_impl.cpp,
@@ -80,11 +76,9 @@ namespace
         return c;
     }
 
-// ===========================================================================
-// ellsv : ELL triangular solve via the generic rocsparse_sptrsv descriptor.
-// Only built / exercised when the library is built with ELL TRSV support.
-// ===========================================================================
-#ifdef ROCSPARSE_WITH_ELL_TRSV
+    // ===========================================================================
+    // ellsv : ELL triangular solve via the generic rocsparse_sptrsv descriptor.
+    // ===========================================================================
 
     // Host reference for a tiny lower-triangular ELL solve, matching the
     // semantics of rocsparse::ellsv_device (library/src/level2/ellsv_device.h):
@@ -273,10 +267,8 @@ namespace
         EXPECT_EQ(rocsparse_destroy_sptrsv_descr(descr), rocsparse_status_success);
     }
 
-#endif // ROCSPARSE_WITH_ELL_TRSV
-
     // ===========================================================================
-    // sellmv : Sliced ELL SpMV helpers, used regardless of ROCSPARSE_WITH_ELL_TRSV.
+    // sellmv : Sliced ELL SpMV helpers.
     // ===========================================================================
 
     // Host reference for a sliced-ELL SpMV: y := alpha * op(A) * x + beta * y.
@@ -640,8 +632,6 @@ class EllSv : public HandleTest
 {
 };
 
-#ifdef ROCSPARSE_WITH_ELL_TRSV
-
 // Lower triangular, non-unit diagonal, no pivot. 3x3:
 //   [2       ]   [y0]   [4 ]
 //   [1  4    ] * [y1] = [12]
@@ -856,18 +846,6 @@ TEST_F(EllSv, zero_pivot)
     EXPECT_EQ(rocsparse_destroy_dnvec_descr(dy), rocsparse_status_success);
     EXPECT_EQ(rocsparse_destroy_spmat_descr(A), rocsparse_status_success);
 }
-
-#else // !ROCSPARSE_WITH_ELL_TRSV
-
-TEST_F(EllSv, skipped_ell_trsv_not_built)
-{
-    GTEST_SKIP()
-        << "ELL triangular solve support not built "
-           "(BUILD_WITH_ELL_TRSV=OFF / ROCSPARSE_WITH_ELL_TRSV not defined); "
-           "rocsparse_sptrsv on rocsparse_format_ell returns rocsparse_status_not_implemented.";
-}
-
-#endif // ROCSPARSE_WITH_ELL_TRSV
 
 // ===========================================================================
 // sellmv : Sliced ELL SpMV (rocsparse_v2_spmv on rocsparse_format_sell).
