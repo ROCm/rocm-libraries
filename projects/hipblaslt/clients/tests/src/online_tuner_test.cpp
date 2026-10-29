@@ -56,6 +56,40 @@ struct OnlineTunerTestAccess
 
         return bytes;
     }
+
+    // Pairs waiting in a device's pool, newest last.
+    static std::vector<std::pair<hipEvent_t, hipEvent_t>> pooledPairs(const OnlineTuner& tuner,
+                                                                       int               device)
+    {
+        std::vector<std::pair<hipEvent_t, hipEvent_t>> pairs;
+
+        const auto found = tuner.m_pairs.find(device);
+        if(found != tuner.m_pairs.end())
+            for(const OnlineTuner::EventPair& pair : found->second)
+                pairs.emplace_back(pair.m_start, pair.m_stop);
+
+        return pairs;
+    }
+
+    // Samples a problem has taken, over all its candidates.
+    static size_t samples(const OnlineTuner& tuner, size_t problemKey)
+    {
+        const auto found = tuner.m_problems.find(problemKey);
+        if(found == tuner.m_problems.end())
+            return 0;
+
+        size_t count = 0;
+        for(const std::vector<float>& candidate : found->second.m_samples)
+            count += candidate.size();
+        return count;
+    }
+
+    // Pairs created on a device and not yet retired, pooled or outstanding.
+    static int livePairs(const OnlineTuner& tuner, int device)
+    {
+        const auto found = tuner.m_livePairs.find(device);
+        return found == tuner.m_livePairs.end() ? 0 : found->second;
+    }
 };
 
 namespace
@@ -1242,6 +1276,151 @@ namespace
         EXPECT_GE(resolved->winner(), 0)
             << "sibling traffic starved a measurable shape into resolving with no winner";
         EXPECT_GT(resolved->winnerTimeUs(), 0.0f) << "a winner with no measured time";
+    }
+
+    // ----------------------------------------------------------------------
+    // The harvest's sign test.
+    //
+    // A pair queries as complete whether or not a launch recorded it, so the
+    // elapsed time is the only evidence that one did, and the harvest keeps a
+    // sample only when it is positive. Every way of missing a record has to
+    // read otherwise, and that holds because of how pairs are pooled: only a
+    // pair that produced a sample goes back, and it goes back inverted. The
+    // cases below are the ways of missing one, each of which must be dropped
+    // without crediting the candidate, and must retire the pair rather than
+    // pool it, since a rejected pair pooled again would be inverted twice.
+    // ----------------------------------------------------------------------
+
+    // The pairing the rest depends on, on one device: a sample is taken, and
+    // its pair goes back to the pool start-for-stop.
+    TEST(OnlineTuner, AnAcceptedPairIsPooledInverted)
+    {
+        if(deviceCount() < 1)
+            GTEST_SKIP() << "no HIP device";
+
+        const Device device(0);
+
+        constexpr size_t       key = 0x1022;
+        const std::vector<int> ranked{291, 292, 293};
+
+        ASSERT_EQ(tuner().selectCandidate(key, identityOf(key), ranked), 0);
+
+        hipEvent_t start = nullptr;
+        hipEvent_t stop  = nullptr;
+        ASSERT_TRUE(tuner().beginMeasurement(key, ranked[0], start, stop));
+        device.bracket(start, stop);
+        tuner().harvestPending(key);
+
+        const auto pooled = OnlineTunerTestAccess::pooledPairs(tuner(), device.id());
+        ASSERT_FALSE(pooled.empty()) << "a pair that produced a sample was not pooled";
+        EXPECT_EQ(pooled.back().first, stop) << "the pair was pooled the way round it was measured";
+        EXPECT_EQ(pooled.back().second, start)
+            << "the pair was pooled the way round it was measured";
+
+        EXPECT_EQ(OnlineTunerTestAccess::samples(tuner(), key), 1u) << "the sample was not kept";
+    }
+
+    // Each way a launch can fail to record its pair, read back by the harvest.
+    // Every one is dropped, credits nothing, and retires the pair.
+    TEST(OnlineTuner, EveryUnrecordedPairIsDroppedAndRetired)
+    {
+        if(deviceCount() < 1)
+            GTEST_SKIP() << "no HIP device";
+
+        const Device device(0);
+        const int    id = device.id();
+
+        // Nothing outstanding from earlier cases, so the counts below move
+        // only for what this case does.
+        tuner().reloadForTest();
+
+        const std::vector<int> ranked{301, 302, 303};
+
+        // One measurement of key on this thread, recorded as record() says,
+        // then harvested. Returns whether the pair it was handed came from
+        // the pool.
+        auto measure = [&](size_t key, const std::function<void(hipEvent_t, hipEvent_t)>& record) {
+            const size_t pooledBefore = OnlineTunerTestAccess::pooledPairs(tuner(), id).size();
+
+            EXPECT_EQ(tuner().selectCandidate(key, identityOf(key), ranked), 0) << key;
+
+            hipEvent_t start = nullptr;
+            hipEvent_t stop  = nullptr;
+            EXPECT_TRUE(tuner().beginMeasurement(key, ranked[0], start, stop)) << key;
+
+            record(start, stop);
+            EXPECT_EQ(hipStreamSynchronize(device.stream()), hipSuccess);
+
+            const int liveBefore = OnlineTunerTestAccess::livePairs(tuner(), id);
+            tuner().harvestPending(key);
+
+            EXPECT_EQ(OnlineTunerTestAccess::livePairs(tuner(), id), liveBefore - 1)
+                << "key " << key << ": a rejected pair was not retired";
+
+            EXPECT_EQ(OnlineTunerTestAccess::samples(tuner(), key), 0u)
+                << "key " << key << ": a pair no launch recorded was taken as a sample";
+
+            return pooledBefore > 0;
+        };
+
+        auto recordNothing = [](hipEvent_t, hipEvent_t) {};
+        auto recordStartOnly
+            = [&](hipEvent_t start, hipEvent_t) { EXPECT_EQ(hipEventRecord(start, device.stream()), hipSuccess); };
+
+        // A pooled pair first, so put one there with a real sample.
+        {
+            constexpr size_t warm = 0x1023;
+            ASSERT_EQ(tuner().selectCandidate(warm, identityOf(warm), ranked), 0);
+
+            hipEvent_t start = nullptr;
+            hipEvent_t stop  = nullptr;
+            ASSERT_TRUE(tuner().beginMeasurement(warm, ranked[0], start, stop));
+            device.bracket(start, stop);
+            tuner().harvestPending(warm);
+        }
+
+        // Every pooled pair but one is taken by an outstanding measurement, so
+        // what is handed out next is known.
+        size_t drain = 0x1100;
+        while(OnlineTunerTestAccess::pooledPairs(tuner(), id).size() > 1)
+        {
+            ASSERT_EQ(tuner().selectCandidate(drain, identityOf(drain), ranked), 0);
+            hipEvent_t start = nullptr;
+            hipEvent_t stop  = nullptr;
+            ASSERT_TRUE(tuner().beginMeasurement(drain, ranked[0], start, stop));
+            ++drain;
+        }
+
+        // A pooled pair reused with nothing recorded reads the negative of
+        // the duration it last measured.
+        EXPECT_TRUE(measure(0x1024, recordNothing)) << "the pooled case did not get a pooled pair";
+
+        // A pooled pair whose start was recorded and whose launch then
+        // failed reads its older stop against the newer start.
+        {
+            constexpr size_t warm = 0x1025;
+            ASSERT_EQ(tuner().selectCandidate(warm, identityOf(warm), ranked), 0);
+
+            hipEvent_t start = nullptr;
+            hipEvent_t stop  = nullptr;
+            ASSERT_TRUE(tuner().beginMeasurement(warm, ranked[0], start, stop));
+            device.bracket(start, stop);
+            tuner().harvestPending(warm);
+        }
+        EXPECT_TRUE(measure(0x1026, recordStartOnly)) << "the pooled case did not get a pooled pair";
+
+        // The pool is empty now, so the next pairs are fresh: one never
+        // recorded at all, and one with only its start recorded. Neither has
+        // a stop timestamp to read.
+        ASSERT_TRUE(OnlineTunerTestAccess::pooledPairs(tuner(), id).empty());
+        EXPECT_FALSE(measure(0x1027, recordNothing)) << "the fresh case got a pooled pair";
+        EXPECT_FALSE(measure(0x1028, recordStartOnly)) << "the fresh case got a pooled pair";
+
+        // None of the rejected pairs went back to the pool.
+        EXPECT_TRUE(OnlineTunerTestAccess::pooledPairs(tuner(), id).empty())
+            << "a rejected pair was pooled again";
+
+        tuner().reloadForTest();
     }
 
     // A shape dispatched once and never again keeps the event pair its one
