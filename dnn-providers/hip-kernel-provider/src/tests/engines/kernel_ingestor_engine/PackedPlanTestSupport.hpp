@@ -1,0 +1,278 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#pragma once
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include <gtest/gtest.h>
+
+#include <hip/hip_runtime_api.h>
+
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
+#include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
+#include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
+
+#include "PackedKernelSource.hpp"
+#include "TestDescriptorRoot.hpp"
+#include "core/Handle.hpp"
+#include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
+
+// Plans built from the packed kpack sets that this build stages for the local device.
+// Read the packed sets only through a copy in a scratch directory. Other suites corrupt
+// or delete the staged archives. Each pack describes its packed set with a PackedPlanCase
+// in its own header under packs/.
+namespace hip_kernel_provider::kernel_ingestor_engine::testing
+{
+
+// The packed Pointwise descriptor with block size 256 (workspace 1024).
+inline constexpr const char* POINTWISE_B256_DESCRIPTOR = "packed_pointwise_add_b256.ukd.json";
+// The packed Pointwise pack, whose inline kernel has block size 64 (workspace 0).
+inline constexpr const char* POINTWISE_B64_DESCRIPTOR = "packed_pointwise_add.kdp.json";
+// The packed ConvFwd descriptor with block size 64.
+inline constexpr const char* CONV_FWD_DESCRIPTOR = "conv_fwd_f16_block64.ukd.json";
+
+// The text of the save refusal for a benchmarking plan without a chosen kernel.
+inline constexpr const char* NO_WINNER_PHRASE = "has not chosen a kernel yet";
+// The text of the save refusal for a plan that no ingestor engine built.
+inline constexpr const char* NOT_AN_INGESTOR_ENGINE_PHRASE
+    = "does not support saving execution plans";
+
+// One packed set: where it is staged, the plan the tests build from it, and the exact
+// result that plan computes.
+struct PackedPlanCase
+{
+    // The test instance name.
+    std::string_view name;
+    // The descriptor of the kernel the tests build a plan for.
+    const char* descriptor;
+    const PackSymbols* pack;
+    int64_t outputUid;
+    // The root that holds one packed directory per arch.
+    const std::filesystem::path& (*root)();
+    // The graph that the capture tests run.
+    flatbuffers::FlatBufferBuilder (*captureGraph)();
+    // The graph that the round-trip tests run.
+    flatbuffers::FlatBufferBuilder (*roundTripGraph)();
+    // Writes a fixed pattern to the inputs of roundTripGraph.
+    void (*fillInputs)(hipdnn_test_sdk::utilities::GraphTensorBundle& tensors);
+    // Checks `output` against the exact result of roundTripGraph for the fillInputs values.
+    void (*expectExactOutput)(const std::vector<uint8_t>& output);
+};
+
+// The elements of `bytes` read as values of type T.
+template <typename T>
+std::vector<T> valuesOf(const std::vector<uint8_t>& bytes)
+{
+    std::vector<T> values(bytes.size() / sizeof(T));
+    std::memcpy(values.data(), bytes.data(), values.size() * sizeof(T));
+    return values;
+}
+
+// Copies the packed directory of device 0 under `root` into `scratch`. `copy` stays empty
+// when the build packed nothing for the device. `deviceProperties` receives the properties
+// of device 0, with the decorated arch name the device reports.
+//
+// Uses fatal assertions: call through ASSERT_NO_FATAL_FAILURE.
+inline void copyPackedArchForDevice(const std::filesystem::path& root,
+                                    const std::filesystem::path& scratch,
+                                    hipdnn_plugin_sdk::ingestor::DeviceProperties& deviceProperties,
+                                    std::filesystem::path& copy)
+{
+    hipDeviceProp_t properties{};
+    std::string arch;
+    std::filesystem::path packed;
+    ASSERT_NO_FATAL_FAILURE(
+        hip_kernel_provider::testing::findPackedArchDirectoryUnder(root, properties, arch, packed));
+
+    deviceProperties.gcnArchName = properties.gcnArchName;
+    deviceProperties.warpSize = properties.warpSize;
+    deviceProperties.multiProcessorCount = properties.multiProcessorCount;
+
+    if(!packed.empty())
+    {
+        copy = hip_kernel_provider::testing::copyPackedArchTree(packed, scratch);
+    }
+}
+
+// A GenericPlan over the registered handler of `packedCase` for `kernel`, on `graph`.
+// `tensors` receives the tensors of `graph` with every value zero and the output of
+// `packedCase` marked.
+//
+// Uses fatal assertions: call through ASSERT_NO_FATAL_FAILURE.
+inline void makePackedPlan(const PackedPlanCase& packedCase,
+                           flatbuffers::FlatBufferBuilder graph,
+                           const hipdnn_plugin_sdk::ingestor::DeviceProperties& deviceProperties,
+                           const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+                           std::unique_ptr<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>>& plan,
+                           hipdnn_test_sdk::utilities::GraphTensorBundle& tensors)
+{
+    const PackSymbols& pack = *packedCase.pack;
+    const GraphFixture fixture(std::move(graph), deviceProperties);
+    const auto bound = matchesGraph(pack, fixture.context());
+    ASSERT_TRUE(bound.has_value()) << "the test graph does not match its pack";
+    plan = std::make_unique<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>>(
+        hipdnn_plugin_sdk::ingestor::KernelDispatcher<Handle>{kernel, &dispatchHandler(pack)},
+        fixture.context(),
+        *bound);
+
+    tensors = hipdnn_test_sdk::utilities::GraphTensorBundle(fixture.context().graph.getTensorMap());
+    for(auto& entry : tensors.tensors)
+    {
+        entry.second->fillTensorWithValue(0.0F);
+    }
+    tensors.outputTensorIds = {packedCase.outputUid};
+}
+
+// A plan built from a copy of a packed set, the facts restore needs, and the tensors of
+// its test graph.
+struct PackedPlan
+{
+    std::filesystem::path copy;
+    hipdnn_plugin_sdk::ingestor::DeviceProperties deviceProperties;
+    hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
+    std::unique_ptr<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>> plan;
+    hipdnn_test_sdk::utilities::GraphTensorBundle tensors;
+
+    std::filesystem::path archive() const
+    {
+        return std::filesystem::weakly_canonical(kernel.originDirectory / kernel.source.library);
+    }
+};
+
+// Copies the packed set of `packedCase` into `scratch` and builds a plan for the kernel of
+// its descriptor on `graph`. `built.plan` stays null when nothing was packed for device 0.
+//
+// Uses fatal assertions: call through ASSERT_NO_FATAL_FAILURE.
+inline void buildPackedPlan(const PackedPlanCase& packedCase,
+                            flatbuffers::FlatBufferBuilder graph,
+                            const std::filesystem::path& scratch,
+                            PackedPlan& built)
+{
+    ASSERT_NO_FATAL_FAILURE(
+        copyPackedArchForDevice(packedCase.root(), scratch, built.deviceProperties, built.copy));
+    if(built.copy.empty())
+    {
+        return;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(hip_kernel_provider::testing::readPackedKernelDefinition(
+        built.copy, packedCase.descriptor, built.kernel));
+    ASSERT_NO_FATAL_FAILURE(makePackedPlan(packedCase,
+                                           std::move(graph),
+                                           built.deviceProperties,
+                                           built.kernel,
+                                           built.plan,
+                                           built.tensors));
+}
+
+// The device buffers of `tensors`, in the form that IPlan::execute takes.
+inline std::vector<hipdnnPluginDeviceBuffer_t>
+    deviceBuffersOf(hipdnn_test_sdk::utilities::GraphTensorBundle& tensors)
+{
+    std::vector<hipdnnPluginDeviceBuffer_t> buffers;
+    for(const auto& [uid, pointer] : tensors.toDeviceVariantPack())
+    {
+        buffers.push_back(hipdnnPluginDeviceBuffer_t{uid, pointer});
+    }
+    return buffers;
+}
+
+// Executes `plan` once on `handle` over `tensors` and writes the output bytes to `output`.
+// The output holds the sentinel before the launch, so an element that the launch does not
+// write cannot match.
+//
+// Uses fatal assertions: call through ASSERT_NO_FATAL_FAILURE.
+inline void runPlan(const hipdnn_plugin_sdk::IPlan<Handle>& plan,
+                    const Handle& handle,
+                    hipdnn_test_sdk::utilities::GraphTensorBundle& tensors,
+                    std::vector<uint8_t>& output)
+{
+    ASSERT_EQ(tensors.outputTensorIds.size(), 1U);
+    tensors.sentinelFillOutputTensors();
+
+    const auto buffers = deviceBuffersOf(tensors);
+    const hipdnn_data_sdk::utilities::Workspace<> workspace(plan.getWorkspaceSize(handle));
+    plan.execute(handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace.get());
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess) << "the launch failed";
+
+    auto& result = tensors.getTensor(*tensors.outputTensorIds.begin());
+    result.markDeviceModified();
+    const auto* bytes = static_cast<const uint8_t*>(result.rawHostData());
+    output.assign(bytes, bytes + (result.elementSpace() * result.elementSize()));
+}
+
+// A kernel definition of `kind` that names nothing on disk. A stub dispatch handler never
+// reads it.
+inline hipdnn_plugin_sdk::ingestor::KernelDefinition
+    stubKernel(uint8_t seed, hipdnn_plugin_sdk::ingestor::KernelSourceKind kind)
+{
+    hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
+    kernel.kernelId.fill(seed);
+    kernel.name = "stub_kernel";
+    kernel.source.kind = kind;
+    return kernel;
+}
+
+// A GenericPlan over `handler` for the stub kernel of `seed` and `kind`, on the Pointwise
+// test graph. Builds no code object and needs no device.
+inline std::unique_ptr<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>>
+    makeStubPlan(const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>& handler,
+                 uint8_t seed,
+                 hipdnn_plugin_sdk::ingestor::KernelSourceKind kind
+                 = hipdnn_plugin_sdk::ingestor::KernelSourceKind::KPACK)
+{
+    const GraphFixture fixture(buildPointwiseGraph());
+    const hipdnn_plugin_sdk::ingestor::BoundTokens bound;
+    return std::make_unique<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>>(
+        hipdnn_plugin_sdk::ingestor::KernelDispatcher<Handle>{stubKernel(seed, kind), &handler},
+        fixture.context(),
+        bound);
+}
+
+// A plan of an engine other than an ingestor engine. It has no saveable plan, and it does not
+// execute.
+class NonIngestorPlan final : public hipdnn_plugin_sdk::IPlan<Handle>
+{
+public:
+    size_t getWorkspaceSize(const Handle& /*handle*/) const override
+    {
+        return 0;
+    }
+
+    void execute(const Handle& /*handle*/,
+                 const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                 uint32_t /*numDeviceBuffers*/,
+                 void* /*workspace*/) const override
+    {
+    }
+};
+
+// The number of entries in the kpack module caches of all packs.
+inline size_t packModuleCacheEntries()
+{
+    return pointwiseKpackModuleCache().size() + convFwdKpackModuleCache().size()
+           + gfx950AttentionDenseKpackModuleCache().size();
+}
+
+} // namespace hip_kernel_provider::kernel_ingestor_engine::testing
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

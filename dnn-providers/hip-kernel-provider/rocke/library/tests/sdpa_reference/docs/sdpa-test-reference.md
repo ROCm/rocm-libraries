@@ -127,8 +127,8 @@ and a nonpersistent grid:
 |---|---|---|---|
 | FP16 | 64, 128 | 4 (MHA), 1 (GQA) | Full, causal |
 
-Both adapters use the production `WmmaFmhaFwdSpec` and builder from
-`kernels.gfx1151.wmma_fmha_fwd`, selecting the target's MMA implementation.
+Both adapters use the production `WmmaFmhaFwdV2Spec` and builder from
+`kernels.gfx1151.wmma_fmha_fwd_v2`, selecting the target's MMA implementation.
 They exercise the standalone verifier path. They do not exercise automatic
 unified attention selection, native hipDNN/provider execution, BF16, persistent
 kernels, sliding windows, unequal lengths, or paged KV.
@@ -138,14 +138,20 @@ softmax scale, sequence lengths, and eight element strides. The production grid
 helper selects `(4,4,2)` with block `(32,1,1)` for every case. Replay uses the
 exported scalars and code object. Existing dense bundles retain their original ABI.
 
-Current-source WMMA execution uses `wmma-strided-v2`, matching the production
-runtime-shape ABI. Head counts and batch strides are runtime arguments; the
-adapter supplies top-left masking, disabled windows, and a null LSE pointer with
-LSE writes disabled. It obtains the signature from the selected production spec.
-Qualification against older source snapshots still uses `wmma-strided-v1` when
-head counts are spec fields. The gfx1151 archive retains its frozen v1 runner,
-runtime, and code objects. The replacement gfx1201 archive uses v2 for both
-baseline replay and current-source execution.
+Current-source WMMA execution uses `wmma-strided-v3`, the multi-wave prefill's
+runtime-shape ABI. Batch, head counts, head widths and batch strides are runtime
+arguments; the adapter compiles the "causal" class with the runtime diagonal
+bound (`window_left=-1`, `window_right=0`, top-left) for causal cases and the
+"none" class for unmasked ones, and supplies a null LSE pointer with LSE writes
+disabled. It obtains the signature from the selected production spec and the grid
+from the production grid helper (a flat 1-D grid of batch x query tiles x query
+heads, `(8,1,1)` with block `(256,1,1)` for every case). Replay of frozen archives
+keeps the ABIs they were qualified under: `wmma-strided-v2` is the retired
+single-wave kernel's runtime-shape ABI, and qualification against an older source
+snapshot that has only that kernel still prepares it, under `wmma-strided-v1`
+when head counts are spec fields. The gfx1151 archive retains its frozen v1
+runner, runtime, and code objects. The gfx1201 archive replays its frozen v2
+baseline against current-source v3 execution.
 
 ### Generic gfx12 code and processor-specific certificates
 
