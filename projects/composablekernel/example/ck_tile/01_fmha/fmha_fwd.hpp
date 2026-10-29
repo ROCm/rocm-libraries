@@ -534,9 +534,6 @@ struct fmha_fwd_splitkv_args
     ck_tile::index_t window_size_right;
     ck_tile::index_t sink_size;
     ck_tile::index_t mask_type;
-
-    // If not null, receives the name of the split-KV kernel that runs.
-    std::string* selected_kernel_name = nullptr;
 };
 
 struct fmha_fwd_appendkv_args

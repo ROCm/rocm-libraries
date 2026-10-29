@@ -9,10 +9,12 @@ namespace ck_tile {
 
 namespace detail {
 
-// [KV buffer 0] ... [KV buffer kNumKVBuffers - 1][S]. One tile of the shared K/V tensor per
-// buffer serves as K (QK gemm) and as V (PV gemm, transposed reads). Q sits on the last
-// buffer: it is read before the main loop, and that buffer's first write follows the
-// loop-head barrier. S only takes space with the gemm_0 warps on N.
+// [KV buffer 0] ... [KV buffer kNumKVBuffers - 1][reserved]. One tile of the shared K/V
+// tensor per buffer serves as K (QK gemm) and as V (PV gemm, transposed reads). Q sits on
+// the last buffer: it is read before the main loop, and that buffer's first write follows
+// the loop-head barrier. The pipeline keeps S in registers and merges its warps in the
+// K/V buffers; the reserved 4 KiB only cap d128 at 8 workgroups per WGP, measured 2.5%
+// faster than 9 at seqlen_k 500 (4.5% slower at 128).
 template <typename Problem, typename QPadding, typename KVPadding, index_t kNumKVBuffers>
 struct QrTdmKVSharedLdsArenaLayout
 {
@@ -36,20 +38,14 @@ struct QrTdmKVSharedLdsArenaLayout
             .get_element_space_size() *
         sizeof(typename Problem::KDataType);
 
-    static constexpr index_t kSBytes =
-        BlockFmhaPipelineQRKSVSTdmDefaultPolicy::template GetSmemSizeS<Problem>();
-    static constexpr index_t kSAlignment =
-        BlockFmhaPipelineQRKSVSTdmDefaultPolicy::template GetSmemNPackS<Problem>() *
-        sizeof(typename Problem::SaccDataType);
+    static constexpr index_t kReservedBytes = 4 * 1024;
 
     static_assert(kNumKVBuffers >= 2);
     // KV buffer i at i * kKVStride
     static constexpr index_t kKVStride = integer_least_multiple(kKVBytes, kRegionAlignment);
     static constexpr index_t kQOffset  = (kNumKVBuffers - 1) * kKVStride;
-    static constexpr index_t kSOffset =
-        integer_least_multiple(kNumKVBuffers * kKVStride, kSAlignment);
     static constexpr index_t kArenaBytes =
-        integer_least_multiple(kSOffset + kSBytes, kArenaAlignment);
+        integer_least_multiple(kNumKVBuffers * kKVStride + kReservedBytes, kArenaAlignment);
 
     static_assert(kQBytes <= kKVBytes && kArenaBytes <= 128 * 1024);
 };
@@ -58,9 +54,10 @@ struct QrTdmKVSharedLdsArenaLayout
 
 // qr_tdm_kvshared: the qr_tdm_pingpong policy for K and V read from one tensor. Both
 // gemms read the same LDS tile, so K and V share one descriptor and one row padding,
-// V's (32 B per row, for the transposed reads). kNumKVBuffers_ K/V tiles in LDS keep
-// kNumKVBuffers_ - 1 of them in flight under the gemms; two measured fastest on gfx1250
-// (a third costs more in resident workgroups than it adds in loads in flight).
+// K's 16 B per row (V's 32 B costs d128 one workgroup per WGP, 5-7% slower at short
+// seqlen_k, and d256 1%). kNumKVBuffers_ K/V tiles in LDS keep kNumKVBuffers_ - 1 of them
+// in flight under the gemms; two measured fastest on gfx1250 (a third costs more in
+// resident workgroups than it adds in loads in flight).
 template <index_t kNumKVBuffers_ = 2>
 struct BlockFmhaPipelineQRKSVSTdmKVSharedPolicy : BlockFmhaPipelineQRKSVSTdmPingPongPolicy
 {
@@ -70,7 +67,7 @@ struct BlockFmhaPipelineQRKSVSTdmKVSharedPolicy : BlockFmhaPipelineQRKSVSTdmPing
     using LdsPaddingConfigQ = typename detail::QrTdmPingPongPadding<Problem>::Q;
 
     template <typename Problem>
-    using LdsPaddingConfigKV = typename detail::QrTdmPingPongPadding<Problem>::V;
+    using LdsPaddingConfigKV = typename detail::QrTdmPingPongPadding<Problem>::K;
 
     template <typename Problem>
     using LdsPaddingConfigK = LdsPaddingConfigKV<Problem>;

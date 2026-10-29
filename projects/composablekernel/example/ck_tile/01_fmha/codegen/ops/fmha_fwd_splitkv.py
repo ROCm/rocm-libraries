@@ -25,7 +25,6 @@ from codegen.cpp_symbol_map import (
 from codegen.utils import check_duplicates_and_paddings, if_, indent, update_file
 
 from codegen.ops.fmha_fwd import (
-    CppConstraint,
     FmhaFwdTileSize,
     DTYPE_BITS,
     K0_MAX_SUBMAX_MAP,
@@ -39,16 +38,7 @@ from codegen.ops.fmha_fwd import (
 FMHA_FWD_SPLITKV_PIPELINE_MAP = {
     "qr": "ck_tile::BlockFmhaFwdSplitKVPipelineQRKSVS",
     "qr_nwarp_sshuffle": "ck_tile::BlockFmhaFwdSplitKVPipelineNWarpSShuffleQRKSVS",
-    "qr_tdm": "ck_tile::BlockFmhaPipelineQRKSVSTdm",
-    "qr_tdm_pingpong": "ck_tile::BlockFmhaPipelineQRKSVSTdmPingPong",
-    "qr_tdm_sched": "ck_tile::BlockFmhaPipelineQRKSVSTdmSched",
-    "qr_tdm_kvshared": "ck_tile::BlockFmhaPipelineQRKSVSTdmKVShared",
 }
-
-# The TDM pipelines of fmha_fwd (gfx125) see their split through SplitKVTileMask
-# (BlockFmhaFwdSplitKVTdmPipelineProblem). qr_tdm keeps fmha_fwd's LDS options: double
-# K/V buffers below d256, progressive K loading. Dense K/V only.
-TDM_PIPELINES = ("qr_tdm", "qr_tdm_sched", "qr_tdm_pingpong", "qr_tdm_kvshared")
 
 FMHA_FWD_SPLITKV_KERNEL_BODY = """
 #include <iostream>
@@ -184,32 +174,6 @@ std::string fmha_fwd_splitkv_get_name_<trait_{F_idx}, {F_arch.tag}>()
 #endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
 """
 
-# TDM: the TDM split-KV problem, and one instance for even and uneven splits (the TDM
-# pipelines always mask the tail of a split).
-FMHA_FWD_SPLITKV_TDM_KERNEL_BODY = (
-    FMHA_FWD_SPLITKV_KERNEL_BODY.replace(
-        "using fmha_pipeline_problem = ck_tile::BlockFmhaFwdSplitKVPipelineProblem<",
-        "using fmha_pipeline_problem = ck_tile::BlockFmhaFwdSplitKVTdmPipelineProblem<",
-    )
-    .replace(
-        """    typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::BiasDataType,
-    typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::LSEDataType,""",
-        """    typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::BiasDataType,
-    typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::RandValOutputDataType,
-    typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::LSEDataType,""",
-    )
-    .replace("    fmha_trait>;", "    fmha_trait{F_problem_extra}>;")
-    .replace(
-        "            run_instance</*kHasUnevenSplits=*/false>(s, a);",
-        "            run_instance</*kHasUnevenSplits=*/true>(s, a);",
-    )
-)
-assert (
-    FMHA_FWD_SPLITKV_TDM_KERNEL_BODY.count("BlockFmhaFwdSplitKVTdmPipelineProblem") == 1
-)
-assert FMHA_FWD_SPLITKV_TDM_KERNEL_BODY.count("{F_problem_extra}") == 1
-assert FMHA_FWD_SPLITKV_TDM_KERNEL_BODY.count("RandValOutputDataType") == 1
-
 FMHA_FWD_SPLITKV_COMBINE_KERNEL_BODY = """
 #include <iostream>
 
@@ -296,8 +260,6 @@ FMHA_FWD_SPLITKV_API = """
 template<typename fmha_fwd_splitkv_traits_, typename fmha_fwd_splitkv_combine_traits_, typename Arch>
 float fmha_fwd_splitkv_(const ck_tile::stream_config& s, fmha_fwd_splitkv_args a)
 {{
-    if(a.selected_kernel_name != nullptr)
-        *a.selected_kernel_name = fmha_fwd_splitkv_get_name_<fmha_fwd_splitkv_traits_, Arch>();
     if(s.log_level_ > 0)
         std::cout
             << ", " << fmha_fwd_splitkv_get_name_<fmha_fwd_splitkv_traits_, Arch>()
@@ -312,15 +274,6 @@ float fmha_fwd_splitkv_(const ck_tile::stream_config& s, fmha_fwd_splitkv_args a
 
 float fmha_fwd_splitkv(fmha_fwd_splitkv_traits t, fmha_fwd_splitkv_args a, const ck_tile::stream_config& s) {{
     float r = -1;
-
-    // used by the gfx125 rules that choose between the TDM pipelines
-    [[maybe_unused]] const unsigned num_cus = [] {{
-        int device = 0;
-        hipDeviceProp_t props{{}};
-        if(hipGetDevice(&device) != hipSuccess || hipGetDeviceProperties(&props, device) != hipSuccess)
-            return 0u;
-        return static_cast<unsigned>(props.multiProcessorCount);
-    }}();
 
     [[maybe_unused]] const std::string device_name = ck_tile::get_device_name();
 
@@ -388,8 +341,6 @@ class FmhaFwdSplitKVApiTrait:
     # Metadata-only hint (occupancy of the splitkv kernel), see
     # fmha_fwd_traits_::kOccupancy for rationale.
     occupancy: int = -1
-    # TDM: the tile's dispatch rule, "{rows}" standing for the query rows of a block
-    constraint: Optional[CppConstraint] = None
 
     @property
     def name(self) -> str:
@@ -401,9 +352,6 @@ class FmhaFwdSplitKVApiTrait:
 
     @property
     def scheck(self) -> str:
-        if self.pipeline_tag in TDM_PIPELINES:
-            assert self.spad == "t"
-            return "true"
         if self.mode == "group":
             return "true/*group mode spad always true*/"  # group mode only generate spad/skpad == true
         if self.pipeline_tag == "qr_async":
@@ -420,15 +368,6 @@ class FmhaFwdSplitKVApiTrait:
             assert False
 
     def seqtune(self, max_bm0: int) -> str:
-        if self.pipeline_tag in TDM_PIPELINES:
-            if self.constraint is None:
-                return "true"
-            # the query rows of a block: with one query row and fewer K/V heads, the
-            # instances without bias or mask merge the heads of a K/V head into its rows
-            rows = "a.max_seqlen_q"
-            if self.bias == "no" and self.mask in ("no", "s_no"):
-                rows = "(a.max_seqlen_q == 1 && a.nhead_k < a.nhead_q ? a.nhead_q / a.nhead_k : a.max_seqlen_q)"
-            return str(self.constraint).replace("{rows}", rows)
         if self.bm0 == max_bm0:
             return "true/*fall back to largest tile*/"
         else:
@@ -438,9 +377,6 @@ class FmhaFwdSplitKVApiTrait:
 
     @property
     def skcheck(self) -> str:
-        if self.pipeline_tag in TDM_PIPELINES:
-            assert self.skpad == "t"
-            return "true"
         if self.mode == "group":
             return "true/*group mode skpad always true*/"  # group mode only generate spad/skpad == true
         if self.pipeline_tag == "qr_async":
@@ -458,11 +394,6 @@ class FmhaFwdSplitKVApiTrait:
 
     @property
     def dcheck(self) -> str:
-        if self.pipeline_tag in TDM_PIPELINES:
-            vec = int((32 * 4) / DTYPE_BITS[self.dtype])
-            if self.dpad == "t":
-                return f"a.hdim_q % {vec} == 0"
-            return f"a.hdim_q == {self.bk0max}"
         if self.pipeline_tag == "qr_async":
             vec = int((32 * 4) / DTYPE_BITS[self.dtype])
             if self.dpad == "t":
@@ -480,11 +411,6 @@ class FmhaFwdSplitKVApiTrait:
 
     @property
     def dvcheck(self) -> str:
-        if self.pipeline_tag in TDM_PIPELINES:
-            vec = int((32 * 4) / DTYPE_BITS[self.dtype])
-            if self.dvpad == "t":
-                return f"a.hdim_v % {vec} == 0"
-            return f"a.hdim_v == {self.bn1}"
         if self.pipeline_tag == "qr_async":
             vec = int((32 * 4) / DTYPE_BITS[self.dtype])
             if self.dvpad == "t":
@@ -646,15 +572,7 @@ class FmhaFwdSplitKVApiPool:
             for i_dtype, (dtype, pool_by_dtype) in enumerate(pool_by_arch.items()):
                 per_hdim_case = str()
                 for i_hdim, (hdim, pool_by_hdim) in enumerate(pool_by_dtype.items()):
-                    # the TDM tiles carry their own rules
-                    max_bm0 = max(
-                        (
-                            t.bm0
-                            for t in pool_by_hdim
-                            if t.pipeline_tag not in TDM_PIPELINES
-                        ),
-                        default=0,
-                    )
+                    max_bm0 = max((t.bm0 for t in pool_by_hdim), default=0)
                     inners = str()
                     for i_trait, trait in enumerate(pool_by_hdim):
                         inners += FMHA_FWD_SPLITKV_API_INNER_DISPATCH.format(
@@ -740,13 +658,7 @@ class FmhaFwdSplitKVKernel:
     @property
     def template(self) -> str:
         assert self.F_pipeline.F_lse == "t"
-        tdm = self.F_pipeline.tag in TDM_PIPELINES
-        body = FMHA_FWD_SPLITKV_TDM_KERNEL_BODY if tdm else FMHA_FWD_SPLITKV_KERNEL_BODY
-        problem_extra = ""
-        if self.F_pipeline.tag == "qr_tdm":
-            problem_extra = ", false, true" if self.F_hdim >= 256 else ", true, true"
-        return FMHA_FWD_KERNEL_HEADER + body.format(
-            F_problem_extra=problem_extra,
+        return FMHA_FWD_KERNEL_HEADER + FMHA_FWD_SPLITKV_KERNEL_BODY.format(
             F_idx=self.F_idx,
             F_arch=self.F_arch,
             F_hdim=self.F_hdim,
@@ -993,90 +905,15 @@ class KernelComponentFactoryGfx12(KernelComponentFactoryBase):
 class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
     arch = ArchTrait("gfx125")
 
-    # fp16/bf16 without sink or logits soft cap run the TDM pipelines of fmha_fwd on its
-    # tiles and rules: qr_tdm_pingpong on its grids (its 16-row tile up to 16 query rows:
-    # decode, the merged heads of a K/V head), qr_tdm_sched from 128 rows, then qr_tdm. qr
-    # keeps sink and logits soft cap.
-    #                            bm0, bn0, bk0, bn1, bk1, bk0max
-    _QR_TDM_TILES = {
-        32  : FmhaFwdTileSize( 64,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
-        64  : FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
-        128 : FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
-        256 : FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
-    }  # fmt: skip
-    # Measured on split grids (d128): qr_tdm_sched from 128 rows (3-5% ahead of the 64-row
-    # qr_tdm_pingpong tile even on big grids), below that the 64-row pingpong tile when the
-    # blocks of all splits make a big grid, else qr_tdm (5-30% ahead on smaller grids).
-    _PINGPONG_RANGE = (
-        "{rows} < 128"
-        " && a.batch * a.nhead_q * a.num_splits >= 4 * static_cast<ck_tile::index_t>(num_cus)"
-    )
-    _SCHED_ROWS = "{rows} >= 128"
-    _QR_TDM_SCHED_TILES = {
-        64  : FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  3, CppConstraint(_SCHED_ROWS)),
-        128 : FmhaFwdTileSize(128, 128,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, CppConstraint(_SCHED_ROWS)),
-    }  # fmt: skip
-    # K and V one tensor: qr_tdm_kvshared's 16-row tiles up to 16 query rows
-    _KV_SHARED = (
-        "a.k_ptr == a.v_ptr && a.hdim_q == a.hdim_v && t.is_v_rowmajor"
-        " && a.stride_k == a.stride_v && a.nhead_stride_k == a.nhead_stride_v"
-        " && a.batch_stride_k == a.batch_stride_v"
-    )
-    _QR_TDM_KVSHARED_TILES = {
-        128 : FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("{rows} <= 16 && " + _KV_SHARED)),
-        256 : FmhaFwdTileSize( 16,  64,  32, 256,  32,  256,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("{rows} <= 16 && " + _KV_SHARED)),
-    }  # fmt: skip
-    _QR_TDM_PINGPONG_TILES = {
-        128 : [FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("{rows} <= 16")),
-               FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(_PINGPONG_RANGE))],
-    }  # fmt: skip
-
-    @classmethod
-    def is_tile_supported(cls, tile, pipeline) -> bool:
-        # Pair by identity: the tiles of different pipelines share geometries.
-        if any(tile is t for t in cls._QR_TDM_KVSHARED_TILES.values()):
-            return pipeline.tag == "qr_tdm_kvshared"
-        if any(
-            tile is t for tiles in cls._QR_TDM_PINGPONG_TILES.values() for t in tiles
-        ):
-            return pipeline.tag == "qr_tdm_pingpong"
-        if any(tile is t for t in cls._QR_TDM_SCHED_TILES.values()):
-            return pipeline.tag == "qr_tdm_sched"
-        if any(tile is t for t in cls._QR_TDM_TILES.values()):
-            return pipeline.tag == "qr_tdm"
-        return pipeline.tag not in TDM_PIPELINES + ("qr_nwarp_sshuffle",)
-
-    @classmethod
-    def get_pipelines(cls, dtype, hdim, mask_impl) -> List[FmhaFwdSplitKVPipeline]:
-        Pipeline = FmhaFwdSplitKVPipeline
-        pipelines = []
-        if dtype in ["fp16", "bf16"]:
-            # dense K/V (pagedkv "f"); paged K/V keep qr
-            for mask, bias, pagedkv in itertools.product(
-                get_mask_map(mask_impl).keys(), BIAS_MAP.keys(), ["f"]
-            ):
-                if hdim in cls._QR_TDM_KVSHARED_TILES:
-                    pipelines.append(Pipeline("qr_tdm_kvshared", "row", "t", "t", "f", "f", "f", bias, "t", "f", pagedkv, "f", mask))  # fmt: skip
-                if hdim in cls._QR_TDM_PINGPONG_TILES:
-                    for head_pad in ["f", "t"]:
-                        pipelines.append(Pipeline("qr_tdm_pingpong", "row", "t", "t", head_pad, head_pad, "f", bias, "t", "f", pagedkv, "f", mask))  # fmt: skip
-                if hdim in cls._QR_TDM_SCHED_TILES and bias == "no":
-                    head_pad = "f" if hdim == 64 else "t"
-                    pipelines.append(Pipeline("qr_tdm_sched", "row", "t", "t", head_pad, head_pad, "f", bias, "t", "f", pagedkv, "f", mask))  # fmt: skip
-                pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "t", "t", "f", bias, "t", "f", pagedkv, "f", mask))  # fmt: skip
-        return pipelines + KernelComponentFactoryBase.get_pipelines(
-            dtype, hdim, mask_impl
-        )
-
-    @classmethod
-    def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
+    @staticmethod
+    def get_hdim_tile_size_dict(dtype: str) -> Optional[dict]:
         if dtype in ["fp16", "bf16"]:
             return {
                 #                      bm0, bn0, bk0, bn1, bk1,
-                "32" : [cls._QR_TDM_TILES[32],  FmhaFwdTileSize( 64,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                "64" : [cls._QR_TDM_SCHED_TILES[64], cls._QR_TDM_TILES[64],  FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                "128": [cls._QR_TDM_KVSHARED_TILES[128]] + cls._QR_TDM_PINGPONG_TILES[128] + [cls._QR_TDM_SCHED_TILES[128], cls._QR_TDM_TILES[128], FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                "256": [cls._QR_TDM_KVSHARED_TILES[256], cls._QR_TDM_TILES[256], FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
+                "32" : FmhaFwdTileSize( 64,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
+                "64" : FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
+                "128": FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
+                "256": FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
             }  # fmt: skip
         elif dtype in ["fp8", "bf8"]:
             return {
@@ -1124,11 +961,8 @@ def get_fwd_splitkv_blobs(
             for tile, pipeline in itertools.product(
                 tiles, factory.get_pipelines(dtype, hdim, mask_impl)
             ):
-                if hasattr(factory, "is_tile_supported"):
-                    if not factory.is_tile_supported(tile, pipeline):
-                        continue
                 # Use qr_nwarp_sshuffle with multiple N warps and qr otherwise
-                elif (tile.F_rn0 != 1) != (pipeline.tag == "qr_nwarp_sshuffle"):
+                if (tile.F_rn0 != 1) != (pipeline.tag == "qr_nwarp_sshuffle"):
                     continue
                 if mode == "group":
                     if pipeline.F_spad != "t" or pipeline.F_skpad != "t":
@@ -1342,9 +1176,6 @@ def write_blobs(
                 dvpad=kernel.F_pipeline.F_dvpad,
                 bn1comb=combine_kernel.F_tile.F_bn1,
                 occupancy=int(kernel.F_tile.F_occupancy),
-                constraint=kernel.F_tile.F_constraint
-                if kernel.F_pipeline.tag in TDM_PIPELINES
-                else None,
             )
         )
     write_fwd_splitkv_api(api_pool, output_dir)

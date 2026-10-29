@@ -849,39 +849,4 @@ make_generic_attention_mask_from_lr_window(index_t left_size,
         left_size, right_size, 0, y_total, x_total, is_top_left);
     return MaskType{r.at(number<0>{}), r.at(number<1>{}), 0, y_total, x_total};
 }
-
-// One split of the K axis for split-KV attention on pipelines that only know a mask's tile
-// range (the gfx125 TDM pipelines): the range of Mask cut to split i_split of num_splits.
-// The splits are whole kTileX tiles, so every split but the last starts and ends on a tile
-// boundary and a pipeline's own tail masking covers the last one.
-template <typename Mask, index_t kTileX>
-struct SplitKVTileMask : public Mask
-{
-    using Base                        = Mask;
-    static constexpr bool IsMasking   = Mask::IsMasking;
-    static constexpr const char* name = Mask::name;
-
-    CK_TILE_HOST_DEVICE SplitKVTileMask(const Mask& mask, index_t num_splits_, index_t i_split_)
-        : Mask(mask), num_splits(num_splits_), i_split(i_split_)
-    {
-    }
-
-    index_t num_splits;
-    index_t i_split;
-
-    template <index_t TileHeight, index_t TileWidth>
-    CK_TILE_HOST_DEVICE constexpr auto
-    GetTileRangeAlongX(index_t i_y, number<TileHeight> height, number<TileWidth> width) const
-    {
-        static_assert(TileWidth == kTileX);
-        const auto [start, end]   = Mask::GetTileRangeAlongX(i_y, height, width);
-        const index_t x_total     = Mask::GetXTotal();
-        const index_t tiles       = integer_divide_ceil(x_total, kTileX);
-        const index_t per_split   = integer_divide_ceil(tiles, num_splits) * kTileX;
-        const index_t split_start = per_split * i_split;
-        const index_t split_end   = min(x_total, split_start + per_split);
-        return ck_tile::make_tuple(max(start, split_start), min(end, split_end));
-    }
-};
-
 } // namespace ck_tile

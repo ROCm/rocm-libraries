@@ -1440,10 +1440,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
             args.head_start           = 0;
             args.selected_kernel_name = selected_kernel_name;
         }
-        if constexpr(std::is_same_v<fmha_fwd_splitkv_args, std::decay_t<decltype(args)>>)
-        {
-            args.selected_kernel_name = selected_kernel_name;
-        }
 
         args.stride_q       = stride_q;
         args.stride_k       = stride_k;

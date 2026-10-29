@@ -5,9 +5,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_kvcache_layout_enum.hpp"
-#include "ck_tile/ops/fmha/block/block_masking.hpp"
 #include "ck_tile/ops/fmha/block/block_rotary_embedding.hpp"
-#include "ck_tile/ops/fmha/pipeline/tile_fmha_traits.hpp"
 
 namespace ck_tile {
 
@@ -298,72 +296,6 @@ struct BlockFmhaFwdSplitKVPipelineProblem
     static constexpr bool kMergeNumHeadGroupsSeqLenQ = Traits::kMergeNumHeadGroupsSeqLenQ;
     static constexpr index_t kBlockPerCu             = Traits::kBlockPerCu;
     static constexpr bool kHasSink                   = Traits::kHasSink;
-};
-
-// split-KV attention on the TDM pipelines of fmha_fwd (gfx125): the pipeline sees one split
-// of the K axis through SplitKVTileMask, and the kernel the split-KV attributes of Traits_
-// (TileFmhaFwdSplitKVTraits). No fp8 static quant, no sink.
-template <typename QDataType_,
-          typename KDataType_,
-          typename VDataType_,
-          typename SaccDataType_,
-          typename SMPLComputeDataType_,
-          typename BiasDataType_,
-          typename RandValOutputDataType_,
-          typename LSEDataType_,
-          typename PDataType_,
-          typename OaccDataType_,
-          typename ODataType_,
-          typename BlockFmhaShape_,
-          bool kIsGroupMode_,
-          typename AttentionVariant_,
-          typename FmhaMask_,
-          typename Traits_,
-          bool kUseDoubleKVLdsBuffer_ = false,
-          bool kProgressiveDsLoadK_   = false>
-struct BlockFmhaFwdSplitKVTdmPipelineProblem
-    : public BlockFmhaPipelineProblem<
-          QDataType_,
-          KDataType_,
-          VDataType_,
-          SaccDataType_,
-          SMPLComputeDataType_,
-          BiasDataType_,
-          RandValOutputDataType_,
-          LSEDataType_,
-          PDataType_,
-          OaccDataType_,
-          ODataType_,
-          BlockFmhaShape_,
-          kIsGroupMode_,
-          AttentionVariant_,
-          SplitKVTileMask<remove_cvref_t<FmhaMask_>, BlockFmhaShape_::kN0>,
-          false,
-          TileFmhaTraits<Traits_::kPadSeqLenQ,
-                         Traits_::kPadSeqLenK,
-                         Traits_::kPadHeadDimQ,
-                         Traits_::kPadHeadDimV,
-                         Traits_::kHasLogitsSoftCap,
-                         Traits_::BiasEnum,
-                         false,
-                         Traits_::kStoreLSE,
-                         false,
-                         BlockAttentionQuantScaleEnum::NO_SCALE,
-                         Traits_::kBlockPerCu,
-                         false,
-                         Traits_::kHasSink>,
-          kUseDoubleKVLdsBuffer_,
-          kProgressiveDsLoadK_>
-{
-    static constexpr bool kDoFp8StaticQuant          = Traits_::kDoFp8StaticQuant;
-    static constexpr bool kIsPagedKV                 = Traits_::kIsPagedKV;
-    static constexpr bool kHasUnevenSplits           = true;
-    static constexpr bool kMergeNumHeadGroupsSeqLenQ = Traits_::kMergeNumHeadGroupsSeqLenQ;
-    static constexpr bool kKVGather                  = false;
-
-    static_assert(!kDoFp8StaticQuant && !Traits_::kHasSink,
-                  "split-KV on TDM: no fp8 static quant, no sink");
-    static_assert(BlockFmhaShape_::IsVLayoutRowMajor, "split-KV on TDM needs row-major V");
 };
 
 // extract tile size attributes to remove dependency on traits

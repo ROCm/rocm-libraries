@@ -7,7 +7,6 @@
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/variants.hpp"
-#include "ck_tile/ops/fmha/kernel/fmha_fwd_kernel.hpp"
 
 #include <string>
 #include <type_traits>
@@ -19,20 +18,6 @@
 // O[seqlen_q, hdim_v] = P[seqlen_q, seqlen_k] @ V^T[hdim_v, seqlen_k]
 
 namespace ck_tile {
-
-namespace detail {
-// The attention mask a split-KV pipeline's mask carries: SplitKVTileMask::Base, or the mask.
-template <typename Mask, typename = void>
-struct split_kv_attention_mask
-{
-    using type = Mask;
-};
-template <typename Mask>
-struct split_kv_attention_mask<Mask, std::void_t<typename Mask::Base>>
-{
-    using type = typename Mask::Base;
-};
-} // namespace detail
 
 template <typename FmhaPipeline_, typename EpiloguePipeline_>
 struct FmhaFwdSplitKVKernel
@@ -76,13 +61,6 @@ struct FmhaFwdSplitKVKernel
     static_assert(!kMergeNumHeadGroupsSeqLenQ ||
                   (kMergeNumHeadGroupsSeqLenQ && BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
                    !kHasMask));
-
-    // gfx125: the TDM pipelines of fmha_fwd (qr_tdm, qr_tdm_sched, qr_tdm_pingpong), which see
-    // their split of the K axis through SplitKVTileMask (FmhaMask::Base is the attention mask).
-    static constexpr bool kIsSegmentedTdmPipeline =
-        detail::uses_fixed_segmented_lds_arena_v<FmhaPipeline>;
-    static constexpr bool kIsTdmPipeline =
-        detail::uses_qr_tdm_lds_arena_v<FmhaPipeline> || kIsSegmentedTdmPipeline;
 
     // clang-format off
     template <typename T> struct t2s;
@@ -625,7 +603,7 @@ struct FmhaFwdSplitKVKernel
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
         // allocate LDS
-        alignas(kIsTdmPipeline ? 256 : 1) __shared__ char smem_ptr[GetSmemSize()];
+        __shared__ char smem_ptr[GetSmemSize()];
 
         // divide problem
         const auto [i_tile_m, i_tile_n, i_split, i_nhead, i_batch] = GetTileIndex(kargs);
@@ -1023,37 +1001,17 @@ struct FmhaFwdSplitKVKernel
             return make_tile_window(lse_acc_dram, lse_acc_dram_window_lengths, {i_m0});
         }();
 
-        FmhaMask mask = [&, i_split_ = i_split]() {
-            if constexpr(kIsTdmPipeline)
-            {
-                using AttentionMask = typename detail::split_kv_attention_mask<FmhaMask>::type;
-                const AttentionMask attention_mask = [&]() {
-                    if constexpr(kHasMask)
-                        return ck_tile::make_generic_attention_mask_from_lr_window<AttentionMask>(
-                            kargs.window_size_left,
-                            kargs.window_size_right,
-                            kargs.sink_size,
-                            kargs.seqlen_q,
-                            kargs.seqlen_k,
-                            kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
-                    else
-                        return AttentionMask{kargs.seqlen_q, kargs.seqlen_k};
-                }();
-                return FmhaMask{attention_mask, kargs.num_splits, i_split_};
-            }
+        FmhaMask mask = [&]() {
+            if constexpr(kHasMask)
+                return ck_tile::make_generic_attention_mask_from_lr_window<FmhaMask>(
+                    kargs.window_size_left,
+                    kargs.window_size_right,
+                    kargs.sink_size,
+                    kargs.seqlen_q,
+                    kargs.seqlen_k,
+                    kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
             else
-            {
-                if constexpr(kHasMask)
-                    return ck_tile::make_generic_attention_mask_from_lr_window<FmhaMask>(
-                        kargs.window_size_left,
-                        kargs.window_size_right,
-                        kargs.sink_size,
-                        kargs.seqlen_q,
-                        kargs.seqlen_k,
-                        kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
-                else
-                    return FmhaMask{kargs.seqlen_q, kargs.seqlen_k};
-            }
+                return FmhaMask{kargs.seqlen_q, kargs.seqlen_k};
         }();
 
         // WA i_batch capture structure binding before c++20
@@ -1105,90 +1063,7 @@ struct FmhaFwdSplitKVKernel
         BlockIndices block_indices{i_batch, i_nhead, i_nhead_k};
 
         auto o_acc_tile = [&, i_split_ = i_split]() {
-            if constexpr(kIsTdmPipeline)
-            {
-                // TDM needs affine views and clamps each box to the real lengths.
-                // kMergeNumHeadGroupsSeqLenQ runs one query row (max_seqlen_q == 1), so the
-                // merged rows are the heads of one K/V head, nhead_stride_q apart.
-                const auto q_dram_tdm = make_naive_tensor_view<address_space_enum::global>(
-                    q_ptr,
-                    make_tuple(kMergeNumHeadGroupsSeqLenQ ? kargs.nhead_ratio_qk : kargs.seqlen_q,
-                               kargs.hdim_q),
-                    make_tuple(kMergeNumHeadGroupsSeqLenQ ? kargs.nhead_stride_q : kargs.stride_q,
-                               1),
-                    number<FmhaPipeline::kAlignmentQ>{},
-                    number<1>{});
-                const auto q_window_tdm = make_tile_window(
-                    q_dram_tdm,
-                    make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kSubQKHeaddim>{}),
-                    {i_m0, 0});
-                // View of the first `rows` rows of K/V from `base`.
-                const auto make_view = [&](const auto* base,
-                                           index_t rows,
-                                           index_t row_stride,
-                                           index_t hdim,
-                                           auto alignment) {
-                    return make_naive_tensor_view<address_space_enum::global>(
-                        base,
-                        make_tuple(rows, hdim),
-                        make_tuple(row_stride, 1),
-                        alignment,
-                        number<1>{});
-                };
-                const auto invoke = [&](const auto& k_window, const auto& v_window) {
-                    if constexpr(kIsSegmentedTdmPipeline)
-                    {
-                        using Policy = typename FmhaPipeline::Policy;
-                        return FmhaPipeline{}(q_window_tdm,
-                                              k_window,
-                                              v_window,
-                                              bias_dram_window,
-                                              lse_acc_dram_window,
-                                              mask,
-                                              position_encoding,
-                                              kargs.scale_s,
-                                              sink_value,
-                                              smem_ptr + Policy::GetLdsOffsetK0(),
-                                              smem_ptr + Policy::GetLdsOffsetK1(),
-                                              smem_ptr + Policy::GetLdsOffsetV0(),
-                                              smem_ptr + Policy::GetLdsOffsetV1());
-                    }
-                    else
-                    {
-                        return FmhaPipeline{}(q_window_tdm,
-                                              k_window,
-                                              v_window,
-                                              bias_dram_window,
-                                              lse_acc_dram_window,
-                                              mask,
-                                              position_encoding,
-                                              kargs.scale_s,
-                                              sink_value,
-                                              static_cast<void*>(smem_ptr));
-                    }
-                };
-                static_assert(!kIsPagedKV, "split-KV on TDM: dense K/V");
-                {
-                    const auto k_window = make_tile_window(
-                        make_view(k_ptr,
-                                  kargs.seqlen_k,
-                                  kargs.stride_k,
-                                  kargs.hdim_q,
-                                  number<FmhaPipeline::kAlignmentK>{}),
-                        make_tuple(number<FmhaPipeline::kN0>{}, number<FmhaPipeline::kK0>{}),
-                        {0, 0});
-                    const auto v_window = make_tile_window(
-                        make_view(v_ptr,
-                                  kargs.seqlen_k,
-                                  kargs.stride_v,
-                                  kargs.hdim_v,
-                                  number<FmhaPipeline::kAlignmentV>{}),
-                        make_tuple(number<FmhaPipeline::kN1>{}, number<FmhaPipeline::kK1>{}),
-                        {0, 0});
-                    return invoke(k_window, v_window);
-                }
-            }
-            else if constexpr(kDoFp8StaticQuant)
+            if constexpr(kDoFp8StaticQuant)
             {
                 return FmhaPipeline{}(q_dram_window,
                                       identity{}, // q_element_func
