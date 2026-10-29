@@ -339,9 +339,9 @@ A boost model is checked when it loads (`nn/boost/load_validate.hpp`) and refuse
 
 ### Model Files
 
-Model files live under `shared/origami/data/nn/<backend>/<arch>/`, each directory with an `origami_nn_index` that maps a hipBLASLt logic file's stem to its model (`data/nn/README.md`). After a hipBLASLt build, every such directory is copied next to its arch's Tensile library under `Tensile/library/<arch>/`, with one `origami_nn_index` holding every backend's entries.
+Model files live under `shared/origami/data/nn/<backend>/<arch>/`, each directory with an `origami_nn_index` that maps a hipBLASLt logic file's stem to its model (`data/nn/README.md`). After a hipBLASLt build, every such directory is copied next to its arch's Tensile library under `Tensile/library/<arch>/`, with one `origami_nn_index` holding every backend's entries, and installed with the library (`lib/hipblaslt/library/<arch>/` on Linux).
 
-Boost models live under `shared/origami/data/nn/boost/<arch>/` (`origami_nn_index` tracked, `origami_boost_<arch>_<dtype>.orr` released separately) with index lines
+Boost models live under `shared/origami/data/nn/boost/<arch>/` (`origami_nn_index` and the `origami_boost_<arch>_<dtype>.orr` models, all tracked) with index lines
 
 ```
 <logic_stem>  boost  origami_boost_<arch>_<dtype>.orr
@@ -360,6 +360,24 @@ std::string detail;
 auto handle = origami::nn::load_boost_model(path, target, &status, &detail);
 // handle >= 0 on success; -1 with status / detail saying why the model was refused
 ```
+
+#### Shipped Origami Boost models
+
+`data/nn/boost/gfx950/` ships one model per dtype class (`origami_boost_gfx950_{bf16,tf32,fp8}.orr`, 2.1–2.5 MB each). hipBLASLt colocates them next to the gfx950 kernel library and installs them with it; they are used only with `HIPBLASLT_ORIGAMI_BOOST=1` (off by default). They were trained on hipBLASLt's default uniform summation order (on).
+
+Measured on MI350X (gfx950) on the held-out test set (plain shapes), Boost off vs on with the same build, library and card at 256 CUs; speedup is time off / time on, the per-shape geometric mean with a 95% bootstrap interval:
+
+| dtype | shapes | speedup | slower beyond noise | worst shape |
+|-------|-------:|---------|--------------------:|------------:|
+| BF16 | 715 | 1.0208 [1.0150, 1.0271] | 6.7% | 0.77× |
+| TF32 | 573 | 1.0298 [1.0230, 1.0370] | 4.4% | 0.61× |
+| FP8 | 713 | 1.0478 [1.0399, 1.0560] | 4.9% | 0.72× |
+
+The test shapes were never trained on: no training shape matches one in M, N, K and batch, or comes within 5% of it in all of M, N and K. The models were trained at 256 CUs; a CU budget (`--sm_count_target`) reaches them through their features.
+
+Boost adds about +108–127 µs (BF16), +113–119 µs (TF32) and +126–157 µs (FP8) to a warm `hipblasLtMatmulAlgoGetHeuristic` call (hipblaslt-bench "Solution selection time", uniform summation order on, the default), and +0.2–0.45 s once, to a process's first call, which loads the model and checks it against the kernel library. Host-only on one core, the warm extra is +96 / +86 / +111 µs with uniform summation order on and +63 / +55 / +58 µs with it off.
+
+Most of the difference comes from develop's uniform-summation-order predicate, which Boost evaluates on about 10 candidates per call (stock stops at the first valid one). Its ResolvedStaggerU clause (`uniformSummationOrderLaunchObstacle` in `ContractionSolution.cpp`) recomputes AutoWGM and AutoStaggerU, two Origami predictions, for every candidate, although under uniform summation order `calculateAutoStaggerU()` leaves only mapping 1 or StaggerU 0, so the clause cannot refuse. Fixing that clause in develop will remove most of the extra.
 
 ### Runtime Configuration
 

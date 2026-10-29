@@ -34,6 +34,6 @@ data/nn/boost/<arch>/
   origami_boost_<arch>_<dtype>.orr  # ORIBOOST model per dtype class (bf16, tf32, fp8)
 ```
 
-The `.orr` models are released separately and not tracked here; copy them into `boost/<arch>/`
-for a local build. A boost model loads only through `origami::nn::load_boost_model`, which checks
-it against the build and the kernel library it serves.
+The models are tracked (2.1–2.5 MB each; `*.orr binary` in `shared/origami/.gitattributes`). A
+boost model loads only through `origami::nn::load_boost_model`, which checks it against the build
+and the kernel library it serves.
