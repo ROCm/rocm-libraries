@@ -165,6 +165,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
             b->status = ROCKE_ERR_VALUE;
         return NULL;
     }
+    if(spec->cpl > 1)
+        return rocke_dconv_build_depthwise_tiled_packed(b, spec, arch);
 
     p = &spec->problem;
     BW = spec->block_w;

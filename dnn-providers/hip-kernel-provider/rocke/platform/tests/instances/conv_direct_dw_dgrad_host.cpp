@@ -14,7 +14,9 @@
  *     rather than read as PAD;
  *   - the kernel name of a tiled dgrad spec whose column padding differs from
  *     its row padding, which must differ from the same spec at another column
- *     padding (and stay unchanged when both paddings are equal).
+ *     padding (and stay unchanged when both paddings are equal);
+ *   - a tiled dgrad spec with more than one channel per lane, which the
+ *     rotated-filter mode does not implement and must refuse.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -165,12 +167,29 @@ static void test_tiled_dgrad_name_carries_per_axis_padding(void)
     CHECK(strstr(ndef, "_p2x") == NULL, "equal paddings gained a tag: %s", ndef);
 }
 
+/* The rotated-filter dgrad mode packs one channel per lane; cpl > 1 is the
+ * forward mode's packed kernel only. */
+static void test_tiled_dgrad_refuses_cpl(void)
+{
+    char reason[ERR_CAP];
+    rocke_direct_depthwise_tiled_spec_t t = tiled_dgrad(dw_problem(5, 5, 2, -1));
+    t.cpl = 2;
+    CHECK(rocke_direct_depthwise_tiled_validate(&t, reason, sizeof(reason)) != ROCKE_OK,
+          "tiled dgrad accepted cpl=2");
+    CHECK(strstr(reason, "cpl=2") != NULL, "reason names cpl: %s", reason);
+    t.dgrad = false;
+    CHECK(rocke_direct_depthwise_tiled_validate(&t, reason, sizeof(reason)) == ROCKE_OK,
+          "forward tiled refused cpl=2: %s",
+          reason);
+}
+
 int main(void)
 {
     test_stream_lower_name_overflow();
     test_pad_w_below_minus_one_refused();
     test_stream_refuses_per_axis_padding();
     test_tiled_dgrad_name_carries_per_axis_padding();
+    test_tiled_dgrad_refuses_cpl();
     if(g_failures != 0)
     {
         fprintf(stderr, "%d check(s) failed\n", g_failures);

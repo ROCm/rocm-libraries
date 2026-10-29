@@ -119,9 +119,10 @@ rocke_status_t rocke_direct_depthwise_dgrad_stream_lower_to_llvm(
  *  DirectDepthwiseTiledSpec dgrad mode / per-axis padding
  * ===================================================================== */
 
-/* The first two checks of DirectDepthwiseTiledSpec.validate(): with dgrad,
- * stride 1 and padding below the filter on both axes; without it, one padding
- * for both axes. Returns true (and the reason) when the spec fails them. */
+/* The padding checks of DirectDepthwiseTiledSpec.validate(): with dgrad,
+ * stride 1, padding below the filter on both axes and one channel per lane
+ * (cpl 1); without it, one padding for both axes. Returns true (and the
+ * reason) when the spec fails them. */
 bool rocke_dconv_dw_tiled_padding_reason(const rocke_direct_depthwise_tiled_spec_t* spec,
                                          char* reason,
                                          size_t reason_cap);

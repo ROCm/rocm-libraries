@@ -91,6 +91,11 @@ class TestDepthwiseDgradSpecs(unittest.TestCase):
             problem=_problem(KH=5, KW=3, PAD=2, pad_w=1), wave_size=32, **kn
         )
         self.assertFalse(ok(fwd, "gfx1250")[0])
+        # The rotated-filter mode packs one channel per lane; cpl > 1 is the
+        # forward mode's packed kernel only.
+        packed, why = ok(_tiled(_problem(), cpl=2, **kn), "gfx1250")
+        self.assertFalse(packed)
+        self.assertIn("cpl=2", why)
 
     def test_pad_w_gate(self):
         p = _problem(KH=5, KW=3, PAD=2, pad_w=1)

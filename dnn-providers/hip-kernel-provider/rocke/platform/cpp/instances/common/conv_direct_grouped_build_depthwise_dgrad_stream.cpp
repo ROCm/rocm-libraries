@@ -1067,6 +1067,16 @@ bool rocke_dconv_dw_tiled_padding_reason(const rocke_direct_depthwise_tiled_spec
                      pad_w);
         return true;
     }
+    if(spec->dgrad && spec->cpl != 1)
+    {
+        if(reason && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "DirectDepthwiseTiledSpec(dgrad=True) packs one channel per lane "
+                     "(got cpl=%d)",
+                     spec->cpl);
+        return true;
+    }
     if(!spec->dgrad && pad_w != p->PAD)
     {
         dgs_reason(reason, reason_cap, "DirectDepthwiseTiledSpec: one padding for both axes");

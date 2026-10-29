@@ -729,7 +729,17 @@ class DirectDepthwiseSpec:
     block_w: int = 8       # output W positions per workgroup
     block_waves: int = 1
     wave_size: int = 64
+    cpl: int = 1           # channels per lane: 1, 2 or 4
 ```
+
+`cpl > 1` (channel packing) gives every lane `cpl` adjacent channels: input
+rows load and output rows store as one `cpl`-wide vector per lane, and every
+tap is `cpl / 2` packed `<2 x f32>` FMAs over channel pairs. `groups` must be a
+multiple of `cpl`, `block_ch` grows by `cpl`, and the validator bounds the
+packed weights (`cpl * KH * KW <= 200`) and accumulator slots
+(`cpl * block_w * KH <= 192`). The kernel name gains `cpl{N}`. Both engines
+build it (`conv_direct_grouped_build_depthwise_packed.cpp`); the AOT grid
+emits the cpl knobs for wave32 targets only.
 
 Constraints (Python `is_valid_depthwise_spec` / C++ `rocke_direct_depthwise_is_valid_spec`):
 
@@ -815,6 +825,7 @@ class DirectDepthwiseTiledSpec:
     unroll_rows: bool = False
     wave_size: int = 64
     dgrad: bool = False     # stride-1 depthwise dgrad, rotated filter (below)
+    cpl: int = 1            # channels per lane: 1, 2 or 4 (see DirectDepthwiseSpec)
 ```
 
 The row-streaming `DirectDepthwiseSpec` holds all `KH x KW` weights and `KH`
@@ -835,15 +846,18 @@ and compiles slowly. This kernel is linear in the filter width:
 Outputs are indexed directly, so it is not tied to "same" padding. Constraints
 (`is_valid_depthwise_tiled_spec` / `rocke_direct_depthwise_tiled_is_valid_spec`):
 `cpg == kpg == 1`, `KH, KW <= 32`, `stride <= KH`, no dilation, `Ho, Wo >= 1`,
-and `live_regs = block_h*block_w + block_h*n_cols + 2*KW <= 256`
-(`n_cols = (block_w-1)*stride + KW`). The register budget and the unroll cap
+and `live_regs = cpl * (block_h*block_w + block_h*n_cols + 2*KW) <= 256`
+(`n_cols = (block_w-1)*stride + KW`); with `cpl > 1`, `groups` must be a
+multiple of `cpl`. The register budget and the unroll cap
 keep both rolled and unrolled configurations within a bounded register and
 code-size footprint.
 
 The sweeps skip a row-streaming config that would spill
 (`depthwise_stream_register_reason`) and leave its shape to this kernel.
 
-Parity gate: configs 57-62 in `library/tests/parity/conv_direct_grouped_emit.{c,py}`.
+Parity gate: configs 57-62 in `library/tests/parity/conv_direct_grouped_emit.{c,py}`;
+the wave32 configs 166-178 cover both depthwise forward kernels at wave size
+32, including their channel-packed (`cpl` 2 and 4) forms.
 
 **Rotated-filter dgrad mode (`dgrad=True`).** A stride-1 depthwise dgrad is the
 forward correlation of dY with the filter rotated by 180 degrees, at padding
@@ -857,16 +871,15 @@ filter row is register-resident, so the mode takes filters up to
 `_DW_TILED_DGRAD_MAX_K = 64` on a side, including non-square ones such as
 51x5 / 5x51, and it is the one direct kernel that accepts a per-axis padding
 (`DirectConvProblem.pad_w`, -1 meaning `PAD`; `PAD_W` is the effective column
-padding and `Wo` uses it; a `pad_w` below -1 is refused). It requires stride 1
-and `PAD <= KH-1`,
-`PAD_W <= KW-1`; the forward mode refuses a problem whose `PAD_W != PAD`, and
+padding and `Wo` uses it; a `pad_w` below -1 is refused). It requires stride 1,
+one channel per lane (`cpl = 1`), `PAD <= KH-1` and `PAD_W <= KW-1`; the forward mode refuses a problem whose `PAD_W != PAD`, and
 `direct_spec_for_problem` refuses such a problem for every other variant. AOT
 variant `direct_depthwise_tiled_dgrad` (`DIRECT_WAVE_PARAMETRIC`): 13x13 to
 31x31 and 51x5 / 5x51 at "same" padding, `DW_TILED_DGRAD_BLOCK_W` x
 `DW_TILED_DGRAD_BLOCK_H`. Like `conv_direct_dgrad_wmma` it is served by the
 direct-conv AOT cache; there is no dispatcher route. Both engines build it
 (C++ `rocke_build_direct_depthwise_tiled` with `dgrad = true`); parity configs
-178-182 and 189, and 183-185 and 190 are specs both engines reject (per-axis
+186-190 and 197, and 191-193 and 198 are specs both engines reject (per-axis
 padding on the forward mode, stride 2, a 65-row filter, `pad_w = -2`).
 
 ### Windowed Depthwise Dgrad Kernel (`DirectDepthwiseDgradWindowedSpec`)
@@ -1025,10 +1038,10 @@ The kernel name gains `cpl{N}`.
 Grid: `(ceil(W / block_w), ceil(groups / block_ch), N)` with
 `block_ch = block_waves * wave_size * cpl`.
 
-Parity gate: configs 171-177 in
+Parity gate: configs 179-185 in
 `library/tests/parity/conv_direct_grouped_emit.{c,py}` (scalar and `cpl` 2 / 4
-/ 8, fp16 and bf16, stride 1 and 2, wave32 and wave64), and 186-188 and
-191-192 are specs both engines reject (`groups % cpl != 0`, `cpl = 3`, the
+/ 8, fp16 and bf16, stride 1 and 2, wave32 and wave64), and 194-196 and
+199-200 are specs both engines reject (`groups % cpl != 0`, `cpl = 3`, the
 accumulator bound, a per-axis padding, `pad_w = -3`). The kernel offsets
 columns by `PAD`, so it refuses a problem whose `PAD_W != PAD`.
 
@@ -1135,6 +1148,74 @@ Build-time: filter, padding, dtype and the tile geometry. Constraints: stride
 1, no dilation, `PAD` in 0..K-1, every tensor below 2 GiB (i32 byte offsets), `cpg` and `kpg` multiples of 8, and the ring and the staged dX
 tile within the 320 KB LDS. The AOT grid is `DGRAD_WMMA_KNOBS`
 (`kernels/conv/direct_aot_jobs.py`, variant `direct_dgrad_wmma`).
+
+## Direct Forward on WMMA (gfx1250)
+
+`library/kernels/common/conv_direct_fwd_wmma.py`, spec `DirectFwdWmmaSpec`,
+builder `build_direct_fwd_wmma` (C++ twin `instance_conv_direct_fwd_wmma.h`).
+The forward counterpart of the WMMA dgrad, dense and grouped:
+
+    Y[n, p, q, k] = sum_{r, s, c} X[n, S*p + r*dh - PAD, S*q + s*dw - PAD, c] * W[k, r, s, c]
+
+A workgroup owns `block_k = waves_k * tiles_k * 16` output channels of one
+group and `tile_n` images of `tile_h x tile_w` output pixels
+(`waves_p * tiles_p * 16` in all). Its loop walks the group's input channels
+in chunks of `ck` through an LDS ring of `stages` slots: one 3-D TDM transfer
+per image stages the X halo (`S * (tile - 1) + (K - 1) * dil + 1` rows and
+columns, zero-filled past the image) and one stages the chunk's weights. Every
+tap reads a shifted window of the halo (no im2col); the Y tile is staged in
+LDS and stored with TDM.
+
+Knobs beyond the tile geometry (`prefetch`, `sched` as in the dgrad):
+
+- `pack_groups` packs `G` small groups (`cpg`, `kpg` in 2..16) into one
+  block-diagonal super-group; it bakes `cpg` and `kpg`.
+- `split_barrier` splits the per-chunk barrier into signal / wait;
+  `wave_epilogue` stores each wave's tiles with its own TDM transfer.
+- `phase_split` (stride 2) keeps the even and odd input columns in two
+  sub-halos so B fragments read consecutive LDS rows.
+- `row_ring` / `tap_ring` stage the weights one filter row / one tap per
+  ring slot, for wider tiles and deeper chunks.
+- `pingpong` (with `pp_group` steps per phase) runs the waves as two ranks
+  one barrier apart, so one reads LDS while the other multiplies.
+- `tap_reuse` reuses B fragments across filter rows (whole output rows per
+  wave); `tap_shift` builds the next filter column's fragments with an
+  in-wave lane rotation (`v_permlane16`).
+
+Runtime (kernargs): batch, extents, the group count and both channel counts
+(unless packed). Build-time: filter (square), stride 1 or 2, per-axis
+dilation, `PAD` in 0..(K-1)*dil, dtype and the tile geometry. Constraints:
+`cpg` and `kpg` (after packing) multiples of 8, `ck` a multiple of 32, every
+tensor below 2 GiB (i32 byte offsets), and the ring and the staged Y tile
+within the LDS. The AOT grid is `FWD_WMMA_*_KNOBS` (variant
+`direct_fwd_wmma`), filtered per problem by tile efficiency.
+
+### Tiny channel counts (`FwdSmallcWmmaSpec`, `FwdSmallkWmmaSpec`)
+
+`library/kernels/common/conv_fwd_small_wmma.py` (C++ twin
+`instance_conv_fwd_small_wmma.h`) serves the ungrouped, undilated forward
+layers where implicit GEMM leaves most of every WMMA tile empty:
+
+- `build_fwd_smallc_wmma` -- `C <= 4` input channels (stems). The reduction
+  `(r, s, c)` is flattened over the whole filter, so a 3x3x3 stem is one
+  16x16x32 WMMA step. A block stages its output tile's input window with one
+  2-D TDM transfer and each lane gathers its im2col fragment from it; the
+  weights stay in registers for the `tiles_per_block` tiles a block walks
+  (double-buffered window). `tdm_store` stores the output tile through LDS
+  with one TDM transfer. `K` must be a multiple of 8.
+- `build_fwd_smallk_wmma` -- `K` in (1, 2, 4, 8) output channels. A 1x1 GEMM
+  over the window's input pixels with the taps and output channels as its M
+  dimension (`Z[q, (r, s, k)]`), then the overlap-add into `Y` in fp32 LDS;
+  input channel chunks of `ck` stream through a TDM ring of `stages` slots.
+  `C` must be a multiple of 8.
+
+Both: square filters, `PAD` in 0..K-1, every tensor below 2 GiB. Batch,
+extents and the other channel count are kernargs; the filter, stride,
+padding, the small channel count and the tile geometry are baked. The AOT
+grid is `FWD_SMALLC_KNOBS` over `FWD_SMALLC_STEMS` (3x3, 7x7 / stride 2 and
+the 4x4, 14x14 and 16x16 patch-embedding stems) and `FWD_SMALLK_KNOBS` over
+`FWD_SMALLK_LAYERS` (variants `direct_fwd_smallc_wmma` /
+`direct_fwd_smallk_wmma`).
 
 ## Winograd Forward (gfx1250)
 

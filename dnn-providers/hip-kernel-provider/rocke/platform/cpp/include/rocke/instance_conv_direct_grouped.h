@@ -360,6 +360,10 @@ bool rocke_direct_conv_32c_is_valid_spec(const rocke_direct_conv_32c_spec_t* spe
  *      block_w: int = 8
  *      block_waves: int = 1
  *      wave_size: int = 64
+ *      cpl: int = 1          # channels per lane (1, 2 or 4)
+ *
+ *  cpl > 1 packs `cpl` adjacent channels per lane: cpl-wide vector loads and
+ *  stores, taps as packed <2 x f32> FMAs over channel pairs.
  * ===================================================================== */
 typedef struct rocke_direct_depthwise_spec
 {
@@ -368,12 +372,13 @@ typedef struct rocke_direct_depthwise_spec
     int block_w; /* default 8  */
     int block_waves; /* default 1  */
     int wave_size; /* default 64 */
+    int cpl; /* default 1  */
 } rocke_direct_depthwise_spec_t;
 
 rocke_direct_depthwise_spec_t rocke_direct_depthwise_spec_default(void);
 /* @property threads_per_block -> block_waves * wave_size */
 int rocke_direct_depthwise_threads_per_block(const rocke_direct_depthwise_spec_t* spec);
-/* @property block_ch -> block_waves * wave_size */
+/* @property block_ch -> block_waves * wave_size * cpl */
 int rocke_direct_depthwise_block_ch(const rocke_direct_depthwise_spec_t* spec);
 rocke_status_t rocke_direct_depthwise_kernel_name(const rocke_direct_depthwise_spec_t* spec,
                                                   char* out,
@@ -494,6 +499,7 @@ rocke_status_t rocke_direct_depthwise_spatial_validate(
  *      unroll_rows: bool = False
  *      wave_size: int = 64
  *      dgrad: bool = False
+ *      cpl: int = 1          # channels per lane (see DirectDepthwiseSpec)
  *
  *  A block owns a block_h x block_w output tile of block_ch channels; a
  *  runtime loop walks the filter rows with one weight row and a sliding
@@ -517,6 +523,7 @@ typedef struct rocke_direct_depthwise_tiled_spec
     bool unroll_rows; /* default false */
     int wave_size; /* default 64 */
     bool dgrad; /* default false */
+    int cpl; /* default 1  */
 } rocke_direct_depthwise_tiled_spec_t;
 
 /* Register budget and unrolled-FMA cap (Python: _DW_TILED_REG_BUDGET /
@@ -531,7 +538,7 @@ int rocke_direct_depthwise_tiled_threads_per_block(const rocke_direct_depthwise_
 int rocke_direct_depthwise_tiled_block_ch(const rocke_direct_depthwise_tiled_spec_t* spec);
 /* @property n_cols -> (block_w - 1) * stride + KW */
 int rocke_direct_depthwise_tiled_n_cols(const rocke_direct_depthwise_tiled_spec_t* spec);
-/* @property live_regs -> block_h * block_w + block_h * n_cols + 2 * KW */
+/* @property live_regs -> cpl * (block_h * block_w + block_h * n_cols + 2 * KW) */
 int rocke_direct_depthwise_tiled_live_regs(const rocke_direct_depthwise_tiled_spec_t* spec);
 /* @property unrolled_fmas -> KH * block_h * block_w * KW */
 int rocke_direct_depthwise_tiled_unrolled_fmas(const rocke_direct_depthwise_tiled_spec_t* spec);
