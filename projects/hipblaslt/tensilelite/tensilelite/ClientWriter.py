@@ -758,6 +758,9 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
           for policy in globalParameters["HybridAssignmentPolicy"]:
             param('hybrid-assignment-policy', policy)
 
+        if globalParameters["UniformSummationOrder"] != -1:
+          param('uniform-summation-order', globalParameters["UniformSummationOrder"])
+
         param("device-idx",               deviceId)
 
         param("init-seed",                globalParameters["DataInitSeed"])

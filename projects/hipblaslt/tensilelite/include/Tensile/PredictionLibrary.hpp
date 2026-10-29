@@ -179,7 +179,7 @@ namespace TensileLite
                 // The extra conjuncts in
                 // softwarePredicate() (taskPredicate, StreamK dynamic queue) are
                 // real filters, so they stay behind the check.
-                const bool swMatch = problem.getParams().uniformSummationOrder()
+                const bool swMatch = problem.getParams().uniformSummationOrder() != 0
                                          ? softwarePredicate(SolutionLibrarySearchType::DEFAULT,
                                                              task,
                                                              hardware,

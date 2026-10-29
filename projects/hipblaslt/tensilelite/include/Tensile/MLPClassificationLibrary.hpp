@@ -172,7 +172,7 @@ namespace TensileLite
                     // that mode off, keep the narrower filter and independently
                     // require device-scalar capability.
                     bool accept;
-                    if(problem.getParams().uniformSummationOrder())
+                    if(problem.getParams().uniformSummationOrder() != 0)
                     {
                         accept = (*solution->hardwarePredicate)(hardware)
                                  && softwarePredicate(SolutionLibrarySearchType::DEFAULT,

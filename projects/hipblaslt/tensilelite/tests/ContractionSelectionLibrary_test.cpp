@@ -49,6 +49,8 @@ TEST(ContractionSelectionLibraryTest, Single)
     lib.solution = std::make_shared<ContractionSolution>();
 
     auto problem = std::make_shared<ContractionProblemGemm>();
+    // Placeholder solutions exercise selection predicates without USO launch validation.
+    problem->setParams().setUniformSummationOrder(0);
 
     EXPECT_EQ(lib.findBestSolution(*problem, *hardware), lib.solution);
 }
@@ -98,6 +100,8 @@ TEST(ContractionSelectionLibraryTest, GPUSelection)
     ContractionHardwareSelectionLibrary      lib({v20Row_64CU, v20Row});
 
     auto problem = std::make_shared<ContractionProblemGemm>();
+    // Placeholder solutions exercise selection predicates without USO launch validation.
+    problem->setParams().setUniformSummationOrder(0);
 
     EXPECT_EQ(lib.findBestSolution(*problem, *v20), v20Solution);
     EXPECT_EQ(lib.findBestSolution(*problem, *v20_64CU), v20Solution_64CU);
@@ -157,6 +161,9 @@ TEST(ContractionSelectionLibraryTest, RegionSelection)
         = ContractionProblemGemm::GEMM(false, false, 7000, 7500, 1000, 7000, 1000, 7000, 1.0, false, 1);
     auto OutRegionProblem
         = ContractionProblemGemm::GEMM(false, false, 5000, 2000, 1000, 5000, 1000, 5000, 1.0, false, 1);
+    // These placeholder solutions test region routing rather than launch validity.
+    for(auto* problem : {&Region1Problem, &Region2Problem, &OutRegionProblem})
+        problem->setParams().setUniformSummationOrder(0);
 
     AMDGPU gpu;
     EXPECT_EQ(lib.findBestSolution(Region1Problem, gpu), region1Solution);
@@ -202,6 +209,9 @@ TEST(ContractionSelectionLibraryTest, TransposeSelection)
     auto NTProblem = ContractionProblemGemm::GEMM(false, true, 4, 4, 4, 4, 4, 4, 1.2, false, 1);
     auto TNProblem = ContractionProblemGemm::GEMM(true, false, 4, 4, 4, 4, 4, 4, 1.2, false, 1);
     auto TTProblem = ContractionProblemGemm::GEMM(true, true, 4, 4, 4, 4, 4, 4, 1.2, false, 1);
+    // These placeholder solutions test transpose routing rather than launch validity.
+    for(auto* problem : {&NNProblem, &NTProblem, &TNProblem, &TTProblem})
+        problem->setParams().setUniformSummationOrder(0);
 
     // auto WeirdProblemC = ContractionProblemGemm::FromBLAS( true,  true, 4,4,4,
     // 4,4,4, false, false, 1); WeirdProblemC.c.transpose(0,1);
@@ -227,6 +237,8 @@ TEST(ContractionSelectionLibraryTest, ConcurrentFindBestSolutionIsStable)
     std::shared_ptr<Hardware> hardware = std::make_shared<AMDGPU>(
         AMDGPU::Processor::gfx900, 64, "AMD Radeon Vega Frontier Edition");
     auto problem = std::make_shared<ContractionProblemGemm>();
+    // Placeholder solutions exercise selection predicates without USO launch validation.
+    problem->setParams().setUniformSummationOrder(0);
 
     auto selectedSolution = std::make_shared<ContractionSolution>();
     auto fallbackSolution = std::make_shared<ContractionSolution>();

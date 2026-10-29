@@ -1397,7 +1397,7 @@ void testing_aux_matmul_uniform_summation_order_ext(const Arguments& arg)
     hipblasLtMatmulDesc_t matmul      = nullptr;
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(&matmul, arg.compute_type, arg.scale_type));
 
-    // Default is OFF (0).
+    // Default is -1 (inherit from handle).
     int32_t value_r = -1;
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatmulDescGetAttribute(matmul,
@@ -1406,7 +1406,7 @@ void testing_aux_matmul_uniform_summation_order_ext(const Arguments& arg)
                                         sizeof(value_r),
                                         &sizeWritten),
         HIPBLAS_STATUS_SUCCESS);
-    ASSERT_TRUE(value_r == 0);
+    ASSERT_TRUE(value_r == -1);
     ASSERT_TRUE(sizeWritten == sizeof(int32_t));
 
     // ON / OFF / ON round-trip.
@@ -1429,8 +1429,8 @@ void testing_aux_matmul_uniform_summation_order_ext(const Arguments& arg)
         ASSERT_TRUE(value_r == value_set);
     }
 
-    // Anything outside {0,1} is rejected and must leave the stored value (1) intact.
-    for(int32_t bad : {int32_t{2}, int32_t{-1}, std::numeric_limits<int32_t>::min()})
+    // Anything outside {-1,0,1} is rejected and must leave the stored value (-1) intact.
+    for(int32_t bad : {int32_t{2}, int32_t{-2}, std::numeric_limits<int32_t>::min()})
     {
         EXPECT_HIPBLAS_STATUS(
             hipblasLtMatmulDescSetAttribute(
@@ -1444,7 +1444,7 @@ void testing_aux_matmul_uniform_summation_order_ext(const Arguments& arg)
                                             sizeof(value_r),
                                             &sizeWritten),
             HIPBLAS_STATUS_SUCCESS);
-        ASSERT_TRUE(value_r == 1);
+        ASSERT_TRUE(value_r == 1); // unchanged (last successful set was 1)
     }
 
     // An undersized get fails, but *sizeWritten is assigned before the size
@@ -1468,7 +1468,7 @@ void testing_aux_matmul_uniform_summation_order_ext(const Arguments& arg)
                                         sizeof(value_r),
                                         nullptr),
         HIPBLAS_STATUS_SUCCESS);
-    ASSERT_TRUE(value_r == 1);
+    ASSERT_TRUE(value_r == 1); // unchanged (last successful set was 1)
 
     // An undersized set is rejected.
     int32_t enable = 1;
