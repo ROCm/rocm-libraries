@@ -279,3 +279,9 @@ def rreduce_rows():
     for s in rreduce_host.final_classes("gfx950"):
         out.append(("final", asdict(s), "gfx950"))
     return out
+
+
+def ewf_rows():
+    """(row, nt) of the flat kernels: every plain row (the API's real 32-bit rows) without and
+    with streaming accesses (the pack has the streaming classes on gfx942 / gfx950)."""
+    return [(p, nt) for nt in (False, True) for p in plain_rows()]

@@ -47,11 +47,18 @@
 // gemm (the emulated-f32 GEMM bodies with their operand prologue: rocke_gemm_cf32_body,
 // rocke_build_universal_gemm), gett (the launches of the tuned and AOT GETT route tables the
 // engine carries: the tensor pack and GETT kernels of rocke/instance_tensor_gett.h) and gett64 /
-// gett32 (rocke_build_gett_f64 through the gett_f64 spec policy, f64 and f32 words).
+// gett32 (rocke_build_gett_f64 through the gett_f64 spec policy, f64 and f32 words), and ewf
+// (the flat elementwise kernel, rocke_build_htaot_ewf; gfx942 / gfx950).
 //
 // hipTensor's build compiles this tool against rocke_core and the COMGR library and runs it to
 // write the packs it ships (cmake/Functions/hiptensorRockePack.cmake). The packs carry no JIT
 // input: the backend's JIT builds its kernels with the same C++ builders (rocke_jit.cpp).
+//
+// --gemm-models DIR (rocKE's dispatch/gemm/selector_models) writes, next to the pack of every
+// target rocKE's tensor GETT planner serves, <out>/<arch>/gemm_models: the selection model files
+// the planner's loader reads for that target (rocke::gemm_dispatch::Models::load, exactly those)
+// and index.txt ("<sha256> <file>" per file), which the backend's contraction JIT
+// (rocke_gett_jit.cpp) loads and checks at run time. They are data, not part of the pack.
 //
 // --list writes, instead of the packs, each target's manifest <out>/<arch>.manifest: the
 // kernels with their attributes and argument names, the routes (no selection models) and the
@@ -63,7 +70,7 @@
 // Usage:
 //     rocke_pack_builder --arch gfx950 [--arch gfx942 ...] --out DIR [--jobs N]
 //                        [--cache-dir DIR] [--compile-timeout S] [--num-cus N]
-//                        [--select-models DIR] [--only REGEX]
+//                        [--select-models DIR] [--only REGEX] [--gemm-models DIR]
 //                        [--compiler-id STR] [--rocke-version STR]
 //     rocke_pack_builder --list --arch gfx950 [--arch ...] [--out DIR] [--check-manifests DIR]
 //                        [--num-cus N]
@@ -99,10 +106,12 @@
 
 #include "../rocke_comgr.hpp"
 #include "../rocke_ew_rows.hpp"
+#include "../rocke_rreduce_rule.hpp"
 #include "rocke_pack_format.hpp"
 
 #include "rocke/arch_num_cus.h"
 #include "rocke/compile_options.h"
+#include "rocke/gemm_dispatch.h"
 #include "rocke/instance_gemm_cf32.h"
 #include "rocke/instance_gemm_prologue.h"
 #include "rocke/instance_gemm_universal.h"
@@ -113,6 +122,7 @@
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/rocke_build_id.h"
+#include "rocke/tensor_gett_planner.h"
 
 namespace fs = std::filesystem;
 
@@ -1003,6 +1013,56 @@ namespace
         }
     }
 
+    // the flat classes of the plain rows whose tensors are all f16 or bf16 (ewf.ewf_classes:
+    // streaming accesses, gfx942 / gfx950)
+    void ewfDescriptors(Context const& ctx, std::vector<Descriptor>& out)
+    {
+        if(ctx.arch != "gfx942" && ctx.arch != "gfx950")
+        {
+            return;
+        }
+        auto sixteen = [](char const* t) {
+            return t == nullptr || std::string(t) == "f16" || std::string(t) == "bf16";
+        };
+        for(auto const& p : plainRows())
+        {
+            if(!sixteen(p.a) || !sixteen(p.b) || !sixteen(p.c) || !sixteen(p.d))
+            {
+                continue;
+            }
+            rocke_htaot_ewf_spec_t s = rocke_htaot_ewf_spec_default();
+            s.arity                  = p.arity;
+            s.a                      = p.a;
+            s.b                      = p.b;
+            s.c                      = p.c;
+            s.d                      = p.d;
+            s.nt                     = true;
+            Descriptor d;
+            d.family = "ewf";
+            d.label  = ewLabel(p) + " nt=1";
+            Builder b;
+            addKernel(ctx,
+                      d,
+                      b,
+                      rocke_build_htaot_ewf(&b.b, &s),
+                      {
+                          {"family", std::string("ewf")},
+                          {"abi", std::string(ROCKE_HTAOT_EWF_ABI)},
+                          {"arity", int64_t(s.arity)},
+                          {"a", str(s.a)},
+                          {"b", str(s.b)},
+                          {"c", str(s.c)},
+                          {"d", str(s.d)},
+                          {"block", int64_t(s.block)},
+                          {"vec", int64_t(rocke_htaot_ewf_vec(&s))},
+                          {"unroll", int64_t(ROCKE_HTAOT_EWF_UNROLL)},
+                          {"nt", int64_t(s.nt)},
+                          {"limit_index", kLimitIndex},
+                      });
+            out.push_back(std::move(d));
+        }
+    }
+
     // The direct GETT (every target with MFMA) and the ring GETT classes (gfx950).
     char const* const kDgettArches[] = {"gfx90a", "gfx942", "gfx950"};
     char const* const kRgettArches[] = {"gfx950"};
@@ -1581,6 +1641,12 @@ namespace
             }
             r[name.data()] = value.data();
         }
+        // the records the planner parses (rocke_rreduce_rule.hpp): a malformed one fails the
+        // build instead of silently changing the reduction choice
+        if(auto const why = hiptensor::rockebackend::rrule::rCheckRoutes(r); !why.empty())
+        {
+            throw std::runtime_error("rocKE pack " + arch + ": reduction routes: " + why);
+        }
         return r;
     }
 
@@ -1628,7 +1694,9 @@ namespace
             bool ascii = std::all_of(text.begin(), text.end(), [](char c) {
                 return static_cast<unsigned char>(c) < 0x80;
             });
-            if(!ascii || text.rfind("v1;schema=", 0) != 0 || text.find('\n') != std::string::npos
+            bool const format
+                = text.rfind("v1;schema=", 0) == 0 || text.rfind("v2;schema=", 0) == 0;
+            if(!ascii || !format || text.find('\n') != std::string::npos
                || text.find('\0') != std::string::npos)
             {
                 throw std::runtime_error("rocKE pack: " + (d / fn).string()
@@ -1650,6 +1718,7 @@ namespace
         rreduceDescriptors(ctx, descs);
         ewtDescriptors(ctx, descs);
         ewvDescriptors(ctx, descs);
+        ewfDescriptors(ctx, descs);
         gemmDescriptors(ctx, descs);
         gettPlanDescriptors(ctx, descs);
         dgettDescriptors(ctx, descs);
@@ -1785,10 +1854,12 @@ namespace
         int                      numCus         = 0;
         std::string              only;
         std::string              selectModels;
+        std::string              gemmModels; // --gemm-models DIR
         std::string              compilerId;
         std::string              rockeVersion;
         bool                     list = false; // --list
         std::string              checkManifests;
+        std::string              rreducePicks; // --rreduce-picks FILE
     };
 
     [[noreturn]] void usage(char const* msg)
@@ -1797,10 +1868,11 @@ namespace
             stderr,
             "%s\nusage: rocke_pack_builder --arch GFX [--arch GFX ...] --out DIR [--jobs N]\n"
             "       [--cache-dir DIR] [--compile-timeout S] [--num-cus N]\n"
-            "       [--select-models DIR] [--only REGEX]\n"
+            "       [--select-models DIR] [--only REGEX] [--gemm-models DIR]\n"
             "       [--compiler-id STR] [--rocke-version STR]\n"
             "       rocke_pack_builder --list --arch GFX [--arch GFX ...] [--out DIR]\n"
-            "       [--check-manifests DIR] [--num-cus N]\n",
+            "       [--check-manifests DIR] [--num-cus N]\n"
+            "       rocke_pack_builder --rreduce-picks FILE --arch GFX\n",
             msg);
         std::exit(2);
     }
@@ -1834,6 +1906,8 @@ namespace
                 o.only = val();
             else if(a == "--select-models")
                 o.selectModels = val();
+            else if(a == "--gemm-models")
+                o.gemmModels = val();
             else if(a == "--compiler-id")
                 o.compilerId = val();
             else if(a == "--rocke-version")
@@ -1842,6 +1916,8 @@ namespace
                 o.list = true;
             else if(a == "--check-manifests")
                 o.checkManifests = val();
+            else if(a == "--rreduce-picks")
+                o.rreducePicks = val();
             else
                 usage(("unknown argument " + a).c_str());
         }
@@ -1849,12 +1925,82 @@ namespace
         {
             usage("--check-manifests needs --list");
         }
+        if(!o.rreducePicks.empty())
+        {
+            if(o.arches.size() != 1 || o.list)
+            {
+                usage("--rreduce-picks takes one --arch and no --list");
+            }
+            return o;
+        }
         if(o.arches.empty() || (o.out.empty() && o.checkManifests.empty()))
         {
             usage(o.list ? "--arch and --out or --check-manifests are required"
                          : "--arch and --out are required");
         }
         return o;
+    }
+
+    // --gemm-models: the files Models::load reads, recorded.
+    struct RecordingReader
+    {
+        fs::path                           dir;
+        std::map<std::string, std::string> files;
+    };
+
+    bool recordModelFile(void* ctx, std::string const& name, std::string* text)
+    {
+        auto* r = static_cast<RecordingReader*>(ctx);
+        if(name.empty() || name.find_first_of("/\\") != std::string::npos || name == "index.txt")
+        {
+            return false;
+        }
+        std::ifstream f(r->dir / name, std::ios::binary);
+        if(!f)
+        {
+            return false;
+        }
+        std::string body((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        r->files[name] = body;
+        *text          = std::move(body);
+        return true;
+    }
+
+    // <out>/<arch>/gemm_models for a target the tensor GETT planner serves (removed for the
+    // others). Returns the number of files written; throws on errors.
+    size_t writeGemmModels(std::string const& modelDir,
+                           fs::path const&    packDir,
+                           std::string const& arch)
+    {
+        fs::path const  dst = packDir / "gemm_models";
+        std::error_code ec;
+        fs::remove_all(dst, ec);
+        if(!rocke::gett::planner::plans_arch(arch))
+        {
+            return 0;
+        }
+        RecordingReader r;
+        r.dir = modelDir;
+        rocke::gemm_dispatch::Models models;
+        std::string                  why;
+        if(!models.load(recordModelFile, &r, arch, &why))
+        {
+            throw std::runtime_error("gemm models of " + arch + ": " + why);
+        }
+        if(r.files.empty())
+        {
+            throw std::runtime_error("gemm models of " + arch + ": no model file in " + modelDir);
+        }
+        fs::create_directories(dst);
+        std::string index;
+        for(auto const& [name, body] : r.files)
+        {
+            writeFile(dst / name, body.data(), body.size());
+            auto d = hiptensor::rockepack::sha256(body.data(), body.size());
+            index += hiptensor::rockepack::hex(d.data(), d.size()) + " " + name + "\n";
+        }
+        writeFile(dst / "index.txt", index.data(), index.size());
+        return r.files.size();
     }
 
     // --list: writes and / or checks the manifests. 0, 1 when a manifest differs from the
@@ -1953,8 +2099,152 @@ namespace
         return status;
     }
 
+    // --rreduce-picks FILE: the untuned reduction choice of the planner (rocke_rreduce_rule.hpp
+    // untunedChoices, with the target's palette and prototypes) for each problem of FILE, one
+    // per line: "cus=N;limit=BYTES;una=0|1;a=T;d=T;op=add|mul|max|min;k=e:sa:sd,...;r=e:sa,..."
+    // (canonical kept / reduced modes, innermost first; limit -1: none). Prints one line per
+    // problem: the choices as "<class>:split<s>" separated by spaces, "-" for none. rocKE's
+    // cross-check test compares them with rreduce_host.untuned_choices.
+    int runRreducePicks(Options const& o)
+    {
+        namespace rr         = hiptensor::rockebackend::rrule;
+        auto const& arch     = o.arches[0];
+        char        err[512] = {0};
+        int const   n = rocke_htaot_rreduce_pack_classes(arch.c_str(), nullptr, 0, err, sizeof err);
+        if(n < 0)
+        {
+            throw std::runtime_error(std::string("rreduce: ") + err);
+        }
+        std::vector<rocke_htaot_rreduce_spec_t> specs(std::max(n, 1));
+        rocke_htaot_rreduce_pack_classes(arch.c_str(), specs.data(), n, err, sizeof err);
+        std::vector<rr::RClass> classes;
+        for(int i = 0; i < n; ++i)
+        {
+            auto const& s         = specs[i];
+            char        name[256] = {0};
+            rocke_htaot_rreduce_kernel_name(&s, name, sizeof name);
+            rr::RClass c;
+            c.name   = name;
+            c.mode   = str(s.mode);
+            c.a      = str(s.a);
+            c.d      = str(s.d);
+            c.op     = str(s.op);
+            c.nr     = s.nr;
+            c.block  = s.block;
+            c.vec    = s.vec;
+            c.lanes  = s.lanes;
+            c.unroll = s.unroll;
+            c.rows   = s.rows;
+            c.nt     = s.nt;
+            c.una    = s.una;
+            c.idx64  = s.idx64;
+            classes.push_back(c);
+        }
+        auto const              routes = routesFor(arch, o.numCus);
+        std::vector<rr::RProto> protos;
+        auto const              count  = routes.find("reduce.proto.count");
+        int64_t const           nproto = count == routes.end() ? 0 : std::stoll(count->second);
+        for(int64_t i = 0; i < nproto; ++i)
+        {
+            rr::RProto r;
+            if(!rr::rParseProto(routes.at("reduce.proto." + std::to_string(i)), r))
+            {
+                throw std::runtime_error("reduce.proto." + std::to_string(i));
+            }
+            protos.push_back(r);
+        }
+        bool const    streaming = arch == "gfx942" || arch == "gfx950";
+        std::ifstream in(o.rreducePicks);
+        if(!in)
+        {
+            throw std::runtime_error("cannot read " + o.rreducePicks);
+        }
+        auto split = [](std::string const& t, char sep) {
+            std::vector<std::string> out;
+            size_t                   at = 0;
+            while(at <= t.size())
+            {
+                size_t const e = t.find(sep, at);
+                out.push_back(t.substr(at, e == std::string::npos ? std::string::npos : e - at));
+                if(e == std::string::npos)
+                {
+                    break;
+                }
+                at = e + 1;
+            }
+            return out;
+        };
+        std::string line;
+        while(std::getline(in, line))
+        {
+            if(line.empty())
+            {
+                continue;
+            }
+            rr::RProblem p;
+            int64_t      cus   = 0;
+            uint64_t     limit = UINT64_MAX;
+            bool         una   = false;
+            for(auto const& field : split(line, ';'))
+            {
+                auto const eq = field.find('=');
+                if(eq == std::string::npos)
+                {
+                    throw std::runtime_error("bad field " + field + " in " + line);
+                }
+                auto const key = field.substr(0, eq), value = field.substr(eq + 1);
+                if(key == "cus")
+                    cus = std::stoll(value);
+                else if(key == "limit")
+                    limit = value == "-1" ? UINT64_MAX : std::stoull(value);
+                else if(key == "una")
+                    una = value == "1";
+                else if(key == "a")
+                    p.a = value;
+                else if(key == "d")
+                    p.d = value;
+                else if(key == "op")
+                    p.op = value;
+                else if(key == "k" || key == "r")
+                {
+                    for(auto const& dim :
+                        value.empty() ? std::vector<std::string>{} : split(value, ','))
+                    {
+                        auto const v = split(dim, ':');
+                        if(key == "k" && v.size() == 3)
+                            p.kept.push_back(
+                                {std::stoll(v[0]), std::stoll(v[1]), std::stoll(v[2])});
+                        else if(key == "r" && v.size() == 2)
+                            p.red.push_back({std::stoll(v[0]), std::stoll(v[1])});
+                        else
+                            throw std::runtime_error("bad mode " + dim + " in " + line);
+                    }
+                }
+                else
+                    throw std::runtime_error("bad field " + field + " in " + line);
+            }
+            if(cus <= 0 || p.a.empty() || p.d.empty() || p.op.empty())
+            {
+                throw std::runtime_error("incomplete problem " + line);
+            }
+            p.eb = p.a == "f64" ? 8 : p.a == "f32" ? 4 : 2;
+            std::string text;
+            for(auto const& c : rr::untunedChoices(p, classes, protos, una, cus, streaming, limit))
+            {
+                text += (text.empty() ? "" : " ") + classes[c.cls].name + ":split"
+                        + std::to_string(c.knobs.split);
+            }
+            std::printf("%s\n", text.empty() ? "-" : text.c_str());
+        }
+        return 0;
+    }
+
     int run(Options const& o)
     {
+        if(!o.rreducePicks.empty())
+        {
+            return runRreducePicks(o);
+        }
         if(o.list)
         {
             return runList(o);
@@ -2164,6 +2454,20 @@ namespace
                 status = 2;
                 continue;
             }
+            size_t gemmModelFiles = 0;
+            if(!o.gemmModels.empty())
+            {
+                try
+                {
+                    gemmModelFiles = writeGemmModels(o.gemmModels, dir, arch);
+                }
+                catch(std::exception const& e)
+                {
+                    std::fprintf(stderr, "rocKE pack ERROR %s: %s\n", arch.c_str(), e.what());
+                    status = 2;
+                    continue;
+                }
+            }
             std::string modelNames;
             for(auto const& kv : models)
             {
@@ -2173,7 +2477,8 @@ namespace
                 = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
             std::printf(
                 "rocKE pack %s: %zu kernels (%zu descriptors do not apply), %zu bytes, pack id "
-                "%.16s, %zu compiled, wall %.0f s, selection models: %s\n",
+                "%.16s, %zu compiled, wall %.0f s, selection models: %s, GETT planner models: "
+                "%zu files\n",
                 arch.c_str(),
                 kernels.size(),
                 skipped,
@@ -2181,7 +2486,8 @@ namespace
                 packId.c_str(),
                 work.size(),
                 wall,
-                modelNames.empty() ? "none" : modelNames.c_str());
+                modelNames.empty() ? "none" : modelNames.c_str(),
+                gemmModelFiles);
             for(auto const& d : descs)
             {
                 if(!d.applies)

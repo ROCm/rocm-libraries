@@ -207,15 +207,19 @@ Here are the available options to build the hipTensor library, with or without c
     *   -   ``HIPTENSOR_ROCKE_SOURCE_DIR``
         -   rocKE source tree whose C++ engine builds the rocKE kernel packs and the JIT (build time only). A C++ host
             tool of the build writes the packs; the build runs no Python. Besides ``platform/cpp``, the build reads
-            two data files of the tree, rocKE's tuned and AOT GETT route tables
-            (``platform/python/rocke/dispatch/families/tensor_gett_tuned.json`` and ``tensor_gett_aot.json``,
-            compiled into the engine), and,
+            three data files of the tree, rocKE's tuned and AOT GETT route tables and its reduction route table
+            (``platform/python/rocke/dispatch/families/tensor_gett_tuned.json``, ``tensor_gett_aot.json`` and
+            ``hiptensor_rreduce.json``, compiled into the engine; configuration fails when one is missing),
+            with the JIT the GEMM selection models of ``platform/python/rocke/dispatch/gemm/selector_models``
+            (text files, only read: the pack build copies the files of each target that rocKE's
+            tensor-contraction planner serves to ``share/hiptensor/rocke/<target>/gemm_models`` with their
+            SHA-256 digests, the contraction JIT's input), and,
             with the tests, the pack manifests of ``library/builders/hiptensor/manifests`` (the test
             ``rocke_pack_manifest_test`` checks that the C++ tool lists what rocKE's manifests list)
         -   ``../../dnn-providers/hip-kernel-provider/rocke``
     *   -   ``HIPTENSOR_ROCKE_PACK_DIR``
-        -   Directory of prebuilt rocKE kernel packs (``<target>/rocke.htpk``, ``<target>/rocke.index.json``); when
-            set, no pack is built
+        -   Directory of prebuilt rocKE kernel packs (``<target>/rocke.htpk``, ``<target>/rocke.index.json``, and
+            the contraction JIT's ``<target>/gemm_models`` where present); when set, no pack is built
         -   Empty
     *   -   ``HIPTENSOR_ROCKE_PACK_TARGETS``
         -   GPU targets to build rocKE kernel packs for

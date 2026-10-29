@@ -3,9 +3,10 @@
 """Host-side rules of the tuned reduction classes (:mod:`.rreduce`): knob validity, launch
 arguments, grids, workspace, the finalize launch and the untuned knob choice.
 
-hipTensor's rocKE backend implements the same rules in C++ (``rocke_plan.cpp``,
-``planTunedReduction``); this module is their Python statement, used by rocKE's tests and
-tuning tools. Problems are given in hipTensor's canonical form: ``kept`` = ``(extent, A stride,
+hipTensor's rocKE backend implements the same rules in C++ (``rocke_rreduce_rule.hpp``, used by
+``rocke_plan.cpp`` and by the C++ pack builder, whose ``--rreduce-picks`` mode rocKE's pack
+cross-check test compares with :func:`untuned_choices`); this module is their Python statement,
+used by rocKE's tests and tuning tools. Problems are given in hipTensor's canonical form: ``kept`` = ``(extent, A stride,
 D stride)`` and ``red`` = ``(extent, A stride)``, each ordered by A's strides, innermost first,
 extent-1 modes dropped and modes contiguous in every tensor merged (C has D's strides).
 """
@@ -240,6 +241,36 @@ def final_lanes(n_out: int, split: int, wave: int = 64) -> int:
     while lanes * 2 <= min(wave, split) and n_out * lanes * 2 <= FINAL_TARGET:
         lanes *= 2
     return max(x for x in FINAL_LANES if x <= lanes)
+
+
+#: hipTensor rounds every workspace size up to this many bytes.
+WORKSPACE_ALIGN = 256
+
+
+def split_workspace(kept, a: str, d: str, split: int) -> int:
+    """The workspace bytes of the partial results of a launch with ``split`` (compute-type
+    partials, one per output and split index; none without a split), rounded up to
+    :data:`WORKSPACE_ALIGN` as hipTensor's planner does."""
+    if split <= 1:
+        return 0
+    cb = 8 if "f64" in (a, d) else 4
+    n = math.prod(x[0] for x in kept) * split * cb
+    return -(-n // WORKSPACE_ALIGN) * WORKSPACE_ALIGN
+
+
+def cap_split(kept, a: str, d: str, split: int, limit: Optional[int]) -> int:
+    """``split``, or the largest power of two below it whose partial results fit ``limit``
+    bytes (1, no partial results, when none does; ``None``: no limit). hipTensor lowers a tuned
+    route's split with this rule when the plan's workspace limit is smaller than its need.
+    """
+    while (
+        limit is not None and split > 1 and split_workspace(kept, a, d, split) > limit
+    ):
+        s = 1
+        while s * 2 < split:
+            s *= 2
+        split = s
+    return split
 
 
 def needs_idx64(kept, red, k: Knobs) -> bool:
@@ -488,13 +519,15 @@ def untuned_choices(
     cus: int = 256,
     arch: str = "gfx950",
     n: int = 3,
+    workspace_limit: Optional[int] = None,
 ):
     """The untuned choice (hipTensor's rule): the prototypes of the problem's mode and element size
     nearest to it (same MAX / MIN class first, then by :func:`feature_distance`, then table
     order); each gives its knobs with the class of the pack that runs them (the fewest reduced
     slots at least the problem needs, 32-bit offsets when they fit) and the smallest power-of-two
-    split that reaches the prototype's wave count (scaled to ``cus``). Up to ``n`` distinct
-    ``(knobs, class)`` pairs, the first the rule's choice."""
+    split that reaches the prototype's wave count (scaled to ``cus``) and whose partial results
+    fit ``workspace_limit`` bytes (:func:`split_workspace`; ``None``: no limit, 0: no split).
+    Up to ``n`` distinct ``(knobs, class)`` pairs, the first the rule's choice."""
     mode = mode_of(kept, red)
     if (mode == "row" and not red) or (mode == "col" and not kept):
         # one element in all (every mode of extent 1): no class has work for it
@@ -512,6 +545,13 @@ def untuned_choices(
     pool = [
         s for s in classes if (s.mode, s.a, s.d, s.op, s.una) == (mode, a, d, op, una)
     ]
+
+    def fits(split: int) -> bool:
+        return (
+            workspace_limit is None
+            or split_workspace(kept, a, d, split) <= workspace_limit
+        )
+
     out, seen = [], set()
     for _, _, i in order:
         p = protos[i]
@@ -534,7 +574,9 @@ def untuned_choices(
         split = 1
         while launch_waves(kept, red, replace(k, split=split)) < target:
             nxt = replace(k, split=split * 2)
-            if check_knobs(kept, red, a, nxt, arch=arch) is not None:
+            if check_knobs(kept, red, a, nxt, arch=arch) is not None or not fits(
+                nxt.split
+            ):
                 break
             split *= 2
         k = replace(k, split=split)
@@ -561,7 +603,9 @@ def untuned_choices(
             target = UNIVERSAL_WAVES * cus // 256
             while launch_waves(kept, red, k) < target:
                 nxt = replace(k, split=k.split * 2)
-                if check_knobs(kept, red, a, nxt, arch=arch) is not None:
+                if check_knobs(kept, red, a, nxt, arch=arch) is not None or not fits(
+                    nxt.split
+                ):
                     break
                 k = nxt
             need64 = needs_idx64(kept, red, k)

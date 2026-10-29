@@ -320,3 +320,53 @@ def test_untuned_pick_is_hiptensors(case):
     )
     k, s = ch[0]
     assert f"rreduce:{s.kernel_name()}:split{k.split}" == want
+
+
+@pytest.mark.parametrize("arch", ARCHES)
+def test_untuned_choice_fits_the_workspace_limit(arch):
+    """A workspace limit lowers the split, never drops the choice: with limit 0 every candidate
+    runs without partial results (split 1), with a small limit the partial results fit it, and
+    the classes are those of the unlimited choice whenever the split stays."""
+    rng = random.Random(31 + ARCHES.index(arch))
+    classes = H.pack_classes(arch)
+    protos = H.prototypes()
+    lowered = 0
+    for _ in range(80):
+        kept, red = _random_problem(rng)
+        a = rng.choice(DTYPES)
+        op = rng.choice(tuple(OPS))
+        free = H.untuned_choices(kept, red, a, a, op, classes, protos, arch=arch)
+        for limit in (0, 256, 1 << 12, 1 << 16):
+            ch = H.untuned_choices(
+                kept, red, a, a, op, classes, protos, arch=arch, workspace_limit=limit
+            )
+            assert bool(ch) == bool(free), (kept, red, a, op, limit)
+            for k, s in ch:
+                assert H.split_workspace(kept, a, a, k.split) <= limit
+                assert H.check_knobs(kept, red, a, k, arch=arch) is None
+                if limit == 0:
+                    assert k.split == 1
+            lowered += [k.split for k, _ in ch] != [k.split for k, _ in free]
+    assert lowered > 0
+
+
+def test_cap_split():
+    """hipTensor lowers a tuned route's split to the largest power of two whose partial results
+    fit the workspace limit (1 when none does)."""
+    kept = [(1000, 1, 1)]
+    ws = H.split_workspace(kept, "f32", "f32", 64)
+    assert ws == 1000 * 64 * 4  # a multiple of 256 already
+    assert H.split_workspace(kept, "f16", "f16", 3) == 12032  # 12000 rounded up to 256
+    assert H.split_workspace(kept, "f64", "f64", 2) == 16128  # 16000 rounded up
+    assert H.split_workspace(kept, "f32", "f32", 1) == 0
+    assert H.cap_split(kept, "f32", "f32", 64, None) == 64
+    assert H.cap_split(kept, "f32", "f32", 64, ws) == 64
+    assert H.cap_split(kept, "f32", "f32", 64, ws - 1) == 32
+    assert H.cap_split(kept, "f32", "f32", 100, 1000 * 64 * 4) == 64
+    assert H.cap_split(kept, "f32", "f32", 64, 4000) == 1
+    assert H.cap_split(kept, "f32", "f32", 64, 0) == 1
+    for e in H.load_table()["entries"]:
+        k = H.knobs_of(e["knobs"])
+        assert H.cap_split(e["kept"], e["a"], e["d"], k.split, 0) == 1
+        need = H.split_workspace(e["kept"], e["a"], e["d"], k.split)
+        assert H.cap_split(e["kept"], e["a"], e["d"], k.split, need) == k.split

@@ -32,6 +32,7 @@
 #define HIPTENSOR_BACKENDS_ROCKE_ROCKE_PLAN_HPP
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -70,6 +71,10 @@ namespace hiptensor
             // reduction: a tuned class of rocKE's native strided reduction (the geometry as
             // kernel arguments), with its split finalize
             TunedReduction = 10,
+            // contraction: the route rocKE's tensor GETT planner chooses for a problem the GETT
+            // route tables do not hold (rocke_gett_jit.hpp), its kernels built for the problem's
+            // sizes and strides and compiled at plan creation (HIPTENSOR_JIT_MODE_DEFAULT)
+            JitGett = 11,
         };
 
         // How contractions of f32 / complex f32 (and mixed real) data with the 32F / C32F compute
@@ -120,15 +125,28 @@ namespace hiptensor
             uint64_t          bytes = 0; // estimated device bytes read and written by all steps
             uint64_t          flops = 0;
             PackKernel const* main  = nullptr; // the kernel that does most of the work
-            // The f32 recipe that decided the routes of a contraction, when it is not x6: the
-            // pack's selection models were trained on the x6 route set, so these candidates are
-            // ranked by the static order (selection cells <cell>.<tag>, which no pack has).
+            // JitGett: the kernel launches of the planned route (known before they are built),
+            // the route (1 MN-layout GETT, 2 MN-layout GETT after tensor_pack copies,
+            // 3 K-contiguous GETT after copies, 4 ring body, 5 K-contiguous GETT on the operands
+            // in place) and the planner's predicted time in nanoseconds (0: none)
+            int     launches    = 0;
+            int     gettKind    = 0;
+            int64_t predictedNs = 0;
+            // The f32 recipe that decided the routes of a contraction, when it is not x6: its
+            // candidates are ranked by the models of the selection cells <cell>.<tag> (the packs
+            // have them for the default recipe, native), else by the static order.
             std::string selectTag;
         };
+
+        struct GettJitPlan;
 
         // One way to run a problem: a complete program (kernel functions not loaded yet, see
         // loadFunctions) and its facts. `key` names it among the candidates of the problem and
         // is stable across processes for the same pack (plan cache, logs, KERNEL_RANK).
+        //
+        // A JitGett candidate's program is pending (Program::pending) until its kernels are
+        // built (buildJitCandidate): its workspace, checks and fallback are set, its launches
+        // are not.
         struct Candidate
         {
             std::string    key;
@@ -137,21 +155,28 @@ namespace hiptensor
             // position in the static order (0 = the rule's choice)
             int  staticRank = 0;
             bool tuned      = false;
-            // a candidate the rules put first when no tuned candidate exists (the ring GETT:
-            // the selection models were not trained on its route)
+            // a candidate the rules put first when no tuned candidate exists and the cell's
+            // selection model does not score its route (rocke_select.hpp)
             bool preferred = false;
+            // JitGett: the planned route its launches are built from
+            std::shared_ptr<GettJitPlan const> jitGett;
         };
 
         struct CandidateOptions
         {
             // Contractions: only the F64 route (HIPTENSOR_ROCKE_CONTRACTION_ROUTE=f64).
             bool f64Only = false;
-            // Contractions: skip rocKE's tuned and AOT GETT route tables
-            // (HIPTENSOR_ROCKE_DISABLE_TUNED).
+            // Contractions: skip rocKE's tuned and AOT GETT route tables; reductions: skip rocKE's
+            // tuned reduction classes (route table and untuned choice), the generic kernels only;
+            // elementwise operations: no flat kernel (HIPTENSOR_ROCKE_DISABLE_TUNED).
             bool disableTuned = false;
             // Contractions of f32 / complex f32 data with the 32F / C32F compute type: the recipe
             // (HIPTENSOR_ROCKE_F32_RECIPE; native by default).
             F32Recipe f32Recipe = F32Recipe::Native;
+            // Contractions the GETT route tables do not hold: the JitGett candidate of rocKE's
+            // tensor GETT planner (plans with HIPTENSOR_JIT_MODE_DEFAULT in a library built with
+            // the JIT; not the steps of a trinary contraction)
+            bool jitGett = false;
             // Trinary contractions: orders the candidates of one of the two steps (indices, best
             // first; the selection of rocke_select.hpp). Empty: the static order.
             std::function<std::vector<int>(backend::Problem const&, std::vector<Candidate> const&)>
@@ -178,8 +203,22 @@ namespace hiptensor
 
         char const* routeName(Route route);
 
-        // Loads the code objects of the program's kernels on the current device.
+        // Loads the code objects of the program's kernels on the current device (the pack's
+        // kernels; a JIT launch has its function already).
         hiptensorStatus_t loadFunctions(Program& program);
+
+        // Builds the launches of a pending candidate (a JitGett candidate: its kernels from the
+        // JIT's kernel cache, else compiled now while `budgetMs` (0: none) minus `spentMs` is not
+        // spent) and loads its functions; `spentMs` grows by the time the build took.
+        // HIPTENSOR_STATUS_SUCCESS (also for a candidate that is not pending);
+        // HIPTENSOR_STATUS_NOT_SUPPORTED with `reason` when the kernels cannot be had (the
+        // candidate stays pending and must not run). `note` gets the JIT log line.
+        hiptensorStatus_t buildJitCandidate(Candidate&                candidate,
+                                            backend::DeviceKey const& device,
+                                            double                    budgetMs,
+                                            double&                   spentMs,
+                                            std::string&              note,
+                                            std::string&              reason);
     } // namespace rockebackend
 } // namespace hiptensor
 

@@ -27,21 +27,25 @@
 // Kernel selection of the rocKE backend at plan creation, after the capability predicates
 // (enumerateCandidates admits only candidates the pack can run, without launching anything):
 //
-//   1. rocKE's tuned route table: a candidate from it (an exact problem rocKE measured) wins;
-//      otherwise the ring GETT (rocKE's native contraction body reading the operands in place)
-//      wins when the problem has one, and on a target without the GEMM routes the direct GETT
-//      of a 16-bit or f32 compute class. The routes the models were not trained on (the ring
-//      GETT, the direct GETT) are not scored: they follow the scored candidates in the static
-//      order;
+//   1. rocKE's tuned route tables: a candidate from them (an exact problem rocKE measured: the
+//      tuned and AOT GETT tables, the tuned reduction table) wins;
 //   2. the selection model of the problem's cell in the pack: gradient-boosted trees that
 //      predict each candidate's slowdown against the best candidate (log2) from integer
 //      features of the problem and the candidate; the lowest prediction wins, ties by the
-//      static order;
-//   3. the static order (rocKE's body and class rules) when the pack has no model for the cell
+//      static order. A model scores the routes it was trained on (format v2 names them: the
+//      route rocKE's tensor GETT planner chooses (JIT), the ring GETT, the direct GETT, the
+//      GEMM and strided GEMM routes; a format v1 model scores the GEMM and strided GEMM routes
+//      only);
+//   3. rules for the routes the model does not score (or every route without a model): the
+//      JIT route first, else a preferred candidate (the ring GETT; the direct GETT on a
+//      target without the GEMM routes; the tuned reduction classes); the remaining routes
+//      follow the scored candidates in the static order;
+//   4. the static order (rocKE's body and class rules) when the pack has no model for the cell
 //      or the model does not load.
 //
 // No timing, no allocation and no device call. Features are integers (log2 values in 1/256
 // steps), so the selection is the same on every host for the same problem, device and pack.
+// A JIT candidate has the same features before and after its launches are built.
 
 #ifndef HIPTENSOR_BACKENDS_ROCKE_ROCKE_SELECT_HPP
 #define HIPTENSOR_BACKENDS_ROCKE_ROCKE_SELECT_HPP
@@ -58,8 +62,9 @@ namespace hiptensor
     namespace rockebackend
     {
         // Version of the feature schema. A model names the schema it was trained on and the
-        // features it reads; a model of another schema is not used.
-        inline constexpr int kSelectSchema = 1;
+        // features it reads. Schemas are append only (schema 2 adds the JIT route's facts), so a
+        // model of an earlier schema is used; one of a later schema is not.
+        inline constexpr int kSelectSchema = 2;
 
         // log2(max(x, 1)) in 1/256 steps, exact integer arithmetic.
         int64_t log2Q8(uint64_t x);
@@ -84,7 +89,8 @@ namespace hiptensor
             Static,
             Model,
             Tuned,
-            Rule, // a candidate the rules put first (the ring GETT, the direct GETT)
+            Rule, // a candidate the rules put first (the ring GETT, the direct GETT, the tuned
+                  // reduction classes) because the model does not score its route
         };
 
         char const* sourceName(SelectSource source);

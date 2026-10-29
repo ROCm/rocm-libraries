@@ -48,6 +48,7 @@
 #endif
 
 #include "rocke/abi.h"
+#include "rocke/compile_options.h"
 #include "rocke/instance_hiptensor_aot.h"
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
@@ -662,15 +663,18 @@ namespace hiptensor
                                        char const*        api = "hiptensorReadKernelCacheFromFile");
 
             private:
-                // Drops the spec keys of another key scheme (kSpecKeyPrefix): nothing looks them
-                // up any more. The entry stays reachable by its identity.
+                // Drops the spec keys of another key scheme (kSpecKeyPrefix for the elementwise
+                // kernels, kGettJitSpecKeyPrefix for the GETT JIT's): nothing looks them up any
+                // more. The entry stays reachable by its identity.
                 static void dropForeignKeys(std::vector<std::string>& keys)
                 {
-                    std::string const prefix = std::string(kSpecKeyPrefix) + "|";
+                    std::string const ew   = std::string(kSpecKeyPrefix) + "|";
+                    std::string const gett = std::string(kGettJitSpecKeyPrefix) + "|";
                     keys.erase(std::remove_if(keys.begin(),
                                               keys.end(),
                                               [&](std::string const& k) {
-                                                  return k.compare(0, prefix.size(), prefix) != 0;
+                                                  return k.compare(0, ew.size(), ew) != 0
+                                                         && k.compare(0, gett.size(), gett) != 0;
                                               }),
                                keys.end());
                 }
@@ -927,7 +931,9 @@ namespace hiptensor
                         skipped++;
                         continue;
                     }
-                    entry->kernel.family  = kEwJitFamily;
+                    // the family the entry was compiled as (the elementwise JIT's, or the GETT
+                    // JIT's kernel families)
+                    entry->kernel.family  = entry->family.empty() ? kEwJitFamily : entry->family;
                     entry->kernel.specKey = entry->classKey;
                     entry->fromFile       = true;
                     stale += entry->compilerId != ci.id ? 1 : 0;
@@ -1195,25 +1201,30 @@ namespace hiptensor
                 return true;
             }
 
-            // Builds the kernel of class `cls` for the geometry `values` (in the order of the
-            // class's axes) with rocKE's C++ builder, lowers it for the linked compiler's flavor
-            // and compiles it (no lock held). nullptr with `reason`; nullptr without a reason when
-            // the kernel cache holds the kernel's identity already (the caller looks it up).
-            std::unique_ptr<Entry> build(EwClass const&              cls,
-                                         std::vector<int64_t> const& values,
-                                         std::string const&          arch,
-                                         std::string const&          specKey,
-                                         std::string&                reason,
-                                         Digest&                     id,
-                                         double&                     frontMs,
-                                         double&                     compileMs)
+            using BuildFn = std::function<rocke_kernel_def_t*(rocke_ir_builder_t*)>;
+
+            // Builds a kernel with one of rocKE's C++ builders (`buildFn`), lowers it for the
+            // linked compiler's flavor and compiles it (no lock held). The compile options are
+            // the elementwise JIT's (jitCompileOptions) or, with `kernelOptions`, rocKE's options
+            // for the kernel's attributes (rocke_comgr_options_for_kernel, as the pack builder
+            // compiles its kernels). nullptr with `reason`; nullptr without a reason when the
+            // kernel cache holds the kernel's identity already (the caller looks it up).
+            std::unique_ptr<Entry> buildKernel(BuildFn const&     buildFn,
+                                               std::string const& family,
+                                               std::string const& classKey,
+                                               bool               kernelOptions,
+                                               std::string const& arch,
+                                               std::string const& specKey,
+                                               std::string&       reason,
+                                               Digest&            id,
+                                               double&            frontMs,
+                                               double&            compileMs)
             {
                 using Clock            = std::chrono::steady_clock;
                 auto const&         ci = compilerInfo();
                 auto const          t0 = Clock::now();
                 rocke_ir_builder_t  builder{};
-                rocke_kernel_def_t* kernel = rocke_build_htaot_ew_jit(
-                    &builder, &cls.spec, values.data(), static_cast<int>(values.size()));
+                rocke_kernel_def_t* kernel = buildFn(&builder);
                 if(kernel == nullptr)
                 {
                     char const* error = rocke_ir_builder_error(&builder);
@@ -1221,15 +1232,32 @@ namespace hiptensor
                     rocke_ir_builder_free(&builder);
                     return nullptr;
                 }
-                char           err[1024] = {0};
-                char*          text      = nullptr;
-                rocke_status_t st
-                    = rocke_lower_kernel_to_llvm_ex(kernel,
-                                                    rocke_llvm_flavor_from_name(ci.flavor.c_str()),
-                                                    arch.c_str(),
-                                                    &text,
-                                                    err,
-                                                    sizeof(err));
+                auto const flavor = rocke_llvm_flavor_from_name(ci.flavor.c_str());
+                if(rocke_attr_get_bool(&kernel->attrs, ROCKE_COMGR_FRESH_PROCESS_ATTR, false))
+                {
+                    // its code depends on the compiles before it in the process
+                    reason = "the kernel needs a fresh compile process";
+                    rocke_ir_builder_free(&builder);
+                    return nullptr;
+                }
+                std::vector<std::string> opts      = jitCompileOptions();
+                char                     err[1024] = {0};
+                if(kernelOptions)
+                {
+                    char const* o[64];
+                    int const   n
+                        = rocke_comgr_options_for_kernel(kernel, flavor, o, 64, err, sizeof(err));
+                    if(n < 0)
+                    {
+                        reason = std::string("compile options: ") + err;
+                        rocke_ir_builder_free(&builder);
+                        return nullptr;
+                    }
+                    opts.assign(o, o + n);
+                }
+                char*          text = nullptr;
+                rocke_status_t st   = rocke_lower_kernel_to_llvm_ex(
+                    kernel, flavor, arch.c_str(), &text, err, sizeof(err));
                 std::string name = kernel->name != nullptr ? kernel->name : "";
                 rocke_ir_builder_free(&builder);
                 if(st != ROCKE_OK || text == nullptr)
@@ -1240,12 +1268,11 @@ namespace hiptensor
                 }
                 std::string ll(text);
                 std::free(text);
-                auto const  llSha = sha256(reinterpret_cast<uint8_t const*>(ll.data()), ll.size());
-                auto const  isa   = isaName(arch);
-                auto const& opts  = jitCompileOptions();
-                id                = entryIdOf(isa, llSha, opts, false, ci.id);
-                auto const t1     = Clock::now();
-                frontMs           = std::chrono::duration<double, std::milli>(t1 - t0).count();
+                auto const llSha = sha256(reinterpret_cast<uint8_t const*>(ll.data()), ll.size());
+                auto const isa   = isaName(arch);
+                id               = entryIdOf(isa, llSha, opts, false, ci.id);
+                auto const t1    = Clock::now();
+                frontMs          = std::chrono::duration<double, std::milli>(t1 - t0).count();
                 if(auto const* hit = KernelCache::instance().byEntryId(id, specKey))
                 {
                     static_cast<void>(hit);
@@ -1274,12 +1301,39 @@ namespace hiptensor
                 entry->compilerId     = ci.id;
                 entry->options        = opts;
                 entry->llvmSha        = llSha;
-                entry->family         = kEwJitFamily;
-                entry->classKey       = cls.key;
+                entry->family         = family;
+                entry->classKey       = classKey;
                 entry->codeSha        = sha256(entry->code.data(), entry->code.size());
-                entry->kernel.family  = kEwJitFamily;
-                entry->kernel.specKey = cls.key;
+                entry->kernel.family  = family;
+                entry->kernel.specKey = classKey;
                 return entry;
+            }
+
+            // Builds the kernel of class `cls` for the geometry `values` (in the order of the
+            // class's axes) with rocKE's C++ builder (see buildKernel).
+            std::unique_ptr<Entry> build(EwClass const&              cls,
+                                         std::vector<int64_t> const& values,
+                                         std::string const&          arch,
+                                         std::string const&          specKey,
+                                         std::string&                reason,
+                                         Digest&                     id,
+                                         double&                     frontMs,
+                                         double&                     compileMs)
+            {
+                return buildKernel(
+                    [&](rocke_ir_builder_t* b) {
+                        return rocke_build_htaot_ew_jit(
+                            b, &cls.spec, values.data(), static_cast<int>(values.size()));
+                    },
+                    kEwJitFamily,
+                    cls.key,
+                    false,
+                    arch,
+                    specKey,
+                    reason,
+                    id,
+                    frontMs,
+                    compileMs);
             }
 
             // HIPTENSOR_KERNEL_CACHE_DIR: a directory of kernel cache files, one per spec key, that
@@ -1301,6 +1355,105 @@ namespace hiptensor
             {
                 std::ifstream f(path, std::ios::binary);
                 return f.good();
+            }
+
+            // How obtain() got an entry.
+            struct Obtained
+            {
+                bool   compiled  = false;
+                double frontMs   = 0.0;
+                double compileMs = 0.0;
+            };
+
+            using EntryBuilder = std::function<std::unique_ptr<Entry>(
+                std::string& why, Digest& id, double& frontMs, double& compileMs)>;
+
+            // The served entry of `specKey`: from the kernel cache, else from its
+            // HIPTENSOR_KERNEL_CACHE_DIR file, else built by `make` (when `allowCompile`) and
+            // inserted (and persisted). Single flight per key; a refusal is remembered for the
+            // process (not one caused by HIPTENSOR_ROCKE_JIT_NO_COMPILE). nullptr with `reason`.
+            Entry const* obtain(std::string const&  specKey,
+                                EntryBuilder const& make,
+                                std::string const&  label,
+                                DeviceClass const&  dc,
+                                bool                allowCompile,
+                                Obtained&           got,
+                                std::string&        reason)
+            {
+                auto&        cache = KernelCache::instance();
+                Entry const* entry = cache.bySpecKey(specKey);
+                if(entry != nullptr)
+                {
+                    return entry;
+                }
+                if(cache.refused(specKey))
+                {
+                    reason = "refused before in this process";
+                    return nullptr;
+                }
+                if(!allowCompile)
+                {
+                    reason = "the plan's JIT time budget is spent";
+                    return nullptr;
+                }
+                std::shared_future<Entry const*> wait;
+                if(!cache.begin(specKey, wait))
+                {
+                    entry = wait.get();
+                    if(entry == nullptr)
+                    {
+                        reason = "the concurrent build of the kernel failed";
+                    }
+                    return entry;
+                }
+                std::string why;
+                Digest      id{};
+                double      frontMs = 0.0, compileMs = 0.0;
+                auto const  persisted = persistPath(specKey);
+                if(!persisted.empty() && fileExists(persisted))
+                {
+                    cache.read(persisted, dc, "hiptensorCreatePlan");
+                    entry = cache.bySpecKey(specKey);
+                }
+                std::unique_ptr<Entry> built;
+                if(entry == nullptr)
+                {
+                    built = make(why, id, frontMs, compileMs);
+                }
+                if(built != nullptr)
+                {
+                    entry         = cache.insert(std::move(built), specKey);
+                    got.compiled  = true;
+                    got.frontMs   = frontMs;
+                    got.compileMs = compileMs;
+                    if(!persisted.empty())
+                    {
+                        cache.write(persisted, dc, entry, "hiptensorCreatePlan");
+                    }
+                    char msg[160];
+                    snprintf(msg,
+                             sizeof(msg),
+                             " in %.2f ms (build and lowering %.2f ms, COMGR %.2f ms)",
+                             frontMs + compileMs,
+                             frontMs,
+                             compileMs);
+                    logJit("hiptensorCreatePlan", "rocKE JIT: compiled " + label + msg);
+                }
+                else if(entry == nullptr && why.empty())
+                {
+                    entry = cache.bySpecKey(specKey); // found by identity
+                }
+                bool remember = true;
+                if(entry == nullptr)
+                {
+                    reason = why.empty() ? std::string("the kernel is not in the cache") : why;
+                    logJit("hiptensorCreatePlan",
+                           "rocKE JIT: " + label + " not compiled: " + reason);
+                    // a disabled compile is a test setting, not a property of the kernel
+                    remember = !envFlag("HIPTENSOR_ROCKE_JIT_NO_COMPILE");
+                }
+                cache.finish(specKey, entry, remember);
+                return entry;
             }
 
             // The specialized launch of `step`, or false (the launch keeps its pack kernel).
@@ -1398,81 +1551,26 @@ namespace hiptensor
                     specKey += std::to_string(v) + ",";
                 }
 
-                auto&        cache = KernelCache::instance();
-                Entry const* entry = cache.bySpecKey(specKey);
-                bool         fresh = false;
+                Obtained     got;
+                Entry const* entry = obtain(
+                    specKey,
+                    [&](std::string& why, Digest& id, double& frontMs, double& compileMs) {
+                        return build(cls, values, arch, specKey, why, id, frontMs, compileMs);
+                    },
+                    cls.key,
+                    dc,
+                    allowCompile,
+                    got,
+                    reason);
                 if(entry == nullptr)
                 {
-                    if(cache.refused(specKey))
-                    {
-                        reason = "refused before in this process";
-                        return false;
-                    }
-                    if(!allowCompile)
-                    {
-                        reason = "the plan's JIT time budget is spent";
-                        return false;
-                    }
-                    std::shared_future<Entry const*> wait;
-                    if(cache.begin(specKey, wait))
-                    {
-                        std::string why;
-                        Digest      id{};
-                        double      frontMs = 0.0, compileMs = 0.0;
-                        auto const  persisted = persistPath(specKey);
-                        if(!persisted.empty() && fileExists(persisted))
-                        {
-                            cache.read(persisted, dc, "hiptensorCreatePlan");
-                            entry = cache.bySpecKey(specKey);
-                        }
-                        std::unique_ptr<Entry> built;
-                        if(entry == nullptr)
-                        {
-                            built = build(cls, values, arch, specKey, why, id, frontMs, compileMs);
-                        }
-                        if(built != nullptr)
-                        {
-                            entry = cache.insert(std::move(built), specKey);
-                            fresh = true;
-                            if(!persisted.empty())
-                            {
-                                cache.write(persisted, dc, entry, "hiptensorCreatePlan");
-                            }
-                            report.compiled++;
-                            char msg[160];
-                            snprintf(msg,
-                                     sizeof(msg),
-                                     " in %.2f ms (build and lowering %.2f ms, COMGR %.2f ms)",
-                                     frontMs + compileMs,
-                                     frontMs,
-                                     compileMs);
-                            logJit("hiptensorCreatePlan", "rocKE JIT: compiled " + cls.key + msg);
-                        }
-                        else if(entry == nullptr && why.empty())
-                        {
-                            entry = cache.bySpecKey(specKey); // found by identity
-                        }
-                        bool remember = true;
-                        if(entry == nullptr)
-                        {
-                            reason = why;
-                            logJit("hiptensorCreatePlan",
-                                   "rocKE JIT: " + cls.key + " not specialized: " + why);
-                            // a disabled compile is a test setting, not a property of the kernel
-                            remember = !envFlag("HIPTENSOR_ROCKE_JIT_NO_COMPILE");
-                        }
-                        cache.finish(specKey, entry, remember);
-                    }
-                    else
-                    {
-                        entry = wait.get();
-                    }
-                    if(entry == nullptr)
-                    {
-                        return false;
-                    }
+                    return false;
                 }
-                if(!fresh)
+                if(got.compiled)
+                {
+                    report.compiled++;
+                }
+                else
                 {
                     report.memoryHits++;
                     report.fileHits += entry->fromFile ? 1 : 0;
@@ -1526,8 +1624,10 @@ namespace hiptensor
             }
         } // namespace
 
-        void
-            specializeProgram(Program& program, backend::DeviceKey const& device, JitReport& report)
+        void specializeProgram(Program&                  program,
+                               backend::DeviceKey const& device,
+                               JitReport&                report,
+                               double                    spentMs)
         {
             using Clock     = std::chrono::steady_clock;
             auto const t0   = Clock::now();
@@ -1574,7 +1674,8 @@ namespace hiptensor
                     continue;
                 }
                 double const spent
-                    = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
+                    = spentMs
+                      + std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
                 bool const allow = budget <= 0.0 || spent < budget;
                 if(specializeStep(step, device.baseArch, dc, promoteAll, allow, report, reason))
                 {
@@ -1595,6 +1696,66 @@ namespace hiptensor
             {
                 report.note = firstReason;
             }
+        }
+
+        bool jitCompilerAvailable(std::string& reason)
+        {
+            auto const& ci = compilerInfo();
+            if(!ci.available)
+            {
+                reason = "no compiler: " + ci.reason;
+            }
+            return ci.available;
+        }
+
+        bool jitKernel(JitKernelSource const&    source,
+                       backend::DeviceKey const& device,
+                       bool                      allowCompile,
+                       JitKernel&                out,
+                       std::string&              reason)
+        {
+            out = JitKernel{};
+            if(!jitCompilerAvailable(reason))
+            {
+                return false;
+            }
+            auto const   dc   = deviceClassOf(device);
+            auto const&  arch = device.baseArch;
+            Obtained     got;
+            Entry const* entry = obtain(
+                source.specKey,
+                [&](std::string& why, Digest& id, double& frontMs, double& compileMs) {
+                    return buildKernel(source.build,
+                                       source.family,
+                                       source.label,
+                                       true,
+                                       arch,
+                                       source.specKey,
+                                       why,
+                                       id,
+                                       frontMs,
+                                       compileMs);
+                },
+                source.label,
+                dc,
+                allowCompile,
+                got,
+                reason);
+            if(entry == nullptr)
+            {
+                return false;
+            }
+            if(entry->function(out.function) != HIPTENSOR_STATUS_SUCCESS)
+            {
+                reason = "the code object of " + source.label + " does not load";
+                return false;
+            }
+            out.kernel    = &entry->kernel;
+            out.compiled  = got.compiled;
+            out.fileHit   = !got.compiled && entry->fromFile;
+            out.frontMs   = got.frontMs;
+            out.compileMs = got.compileMs;
+            return true;
         }
 
         hiptensorStatus_t writeKernelCacheFile(char const*               fileName,

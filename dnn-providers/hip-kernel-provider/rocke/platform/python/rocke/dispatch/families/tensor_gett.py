@@ -29,14 +29,19 @@ model:
 
 * ``single``: one MN-layout GETT launch (the operands read in place);
 * ``pack_hybrid``: each operand whose fastest free run is not 16-byte
-  DTL-able is first copied by a ``tensor_pack`` kernel so its free modes form
-  one contiguous run, then the MN-layout GETT reads the copy;
+  DTL-able (also one without any free-mode run, e.g. a K mode fastest:
+  :data:`TENSOR_GETT_PACK_ANY_RUN`) is first copied by a ``tensor_pack``
+  kernel so its free modes form one contiguous run, then the MN-layout GETT
+  reads the copy;
 * ``kc``: both operands are packed K-contiguous ([rows, K]) and the GETT runs
   on the GEMM dispatcher's RCR pick for the same problem (the row-interleave
   / hb_sched bodies, whose vector epilogue then writes the permuted D through
   the GETT epilogue hook).
 
-The ring-body candidate serves what none of these admits.
+The ring-body candidate serves what none of these admits; a problem with no
+MN-layout route at all takes the K-contiguous route. The K-contiguous GETT is
+a single-launch registry candidate only for operands that already are its
+K-contiguous copies (``_spec_kc_user``).
 
 Autotune mode: :func:`plan_tensor_gett_candidates` lists the candidate routes
 of a problem (the cost-model route, the MN-layout GETT on the selector's best
@@ -60,8 +65,13 @@ The C++ engine mirrors the route key and rebuilds the launch programs of both
 tables (``rocke::gett::table_plan``: single-launch MN, the pack hybrid, and the
 K-contiguous route with its operand packs; the tables are compiled into the
 engine); the ``tensor_gett_aot`` / ``tensor_gett_kc`` / ``tensor_pack`` parity
-families keep the two engines byte-identical. The cost-model routes and the
-tuning flow are Python engine only.
+families keep the two engines byte-identical. The C++ planner
+(``rocke/tensor_gett_planner.h``: ``rocke::gett::planner::plan_tensor_gett``, on
+the C++ GEMM dispatcher ``rocke/gemm_dispatch.h`` with its learned selector and
+time model) makes the same decision as :func:`plan_tensor_gett` -- route, GETT
+spec, packs and both routes' predicted times -- for any problem
+(``tests/dispatch/dispatch_tests/tensor_gett/test_tensor_gett_planner_cpp.py``).
+The environment overrides and the tuning flow are Python engine only.
 """
 
 from __future__ import annotations
@@ -665,15 +675,46 @@ def _kc_plan(p, role):
     )
 
 
-# the K-contiguous route as a candidate (after the MN-layout and ring bodies in
-# auto selection; plan_tensor_gett chooses it by the cost model)
+def _kc_in_place(p, sp) -> bool:
+    """Whether the user operands already are the K-contiguous copies the
+    K-contiguous GETT ``sp`` reads (:func:`kc_operand_modes`: packed row-major
+    in that mode order; extent-1 modes ignored), so one launch on the user
+    tensors is correct."""
+    from ...instances.common.tensor import kc_operand_modes, launch_operands
+    from ...instances.common.tensor.gett_plan import packed_strides
+
+    ext = dict(p.extents)
+    for nm, order in zip(launch_operands(sp), kc_operand_modes(sp)):
+        modes = p.modes_a if nm == "A" else p.modes_b
+        st = p.strides_a if nm == "A" else p.strides_b
+        st = packed_strides(modes, ext) if st is None else dict(st)
+        want = packed_strides(order, ext)
+        if any(ext[m] > 1 and st[m] != want[m] for m in modes):
+            return False
+    return True
+
+
+def _spec_kc_user(req: TensorGettRequest):
+    """:func:`_spec_kc` as a single launch on the user operands: only when
+    they already are the K-contiguous copies the kernel reads (otherwise the
+    K-contiguous route packs them first, :func:`_plan_kc`)."""
+    sp = _spec_kc(req)
+    if sp is None or not _kc_in_place(req.problem, sp):
+        return None
+    return sp
+
+
+# the K-contiguous GETT as a single-launch candidate (after the MN-layout and
+# ring bodies in auto selection) for operands that already are its
+# K-contiguous copies; plan_tensor_gett chooses the packed K-contiguous route
+# by the cost model
 TENSOR_GETT_REGISTRY.extend(
     (
         _make_candidate(
             name="tensor_gett_kc",
             spec_id="kc",
             priority=20,
-            spec_fn=_spec_kc,
+            spec_fn=_spec_kc_user,
         ),
     )
 )
@@ -715,6 +756,46 @@ class TensorGettPlan:
 TENSOR_GETT_PACK_ORDER = "local"
 
 
+#: Pack hybrid for operands without any 4-byte free-mode run as well (e.g. a K
+#: mode fastest, where the GETT plan of the unpacked problem does not exist):
+#: such operands are packed like the short-run ones (False: those problems
+#: have no MN-layout route).
+TENSOR_GETT_PACK_ANY_RUN = True
+
+
+def _hybrid_roles(p):
+    """``[(operand, needs a pack)]`` in GEMM role order (GEMM A owns D's
+    fastest mode) for the pack hybrid of a problem whose unpacked GETT plan
+    does not exist: an operand needs a pack when its free modes have no
+    16-byte DTL run (``gett_plan``'s operand vector width below 8). None when
+    the problem is not a plain contraction (batch / Hadamard modes)."""
+    from ...instances.common.tensor.gett_plan import (
+        _vec,
+        merge_digits,
+        packed_strides,
+    )
+
+    ext = dict(p.extents)
+    ma, mb, md = list(p.modes_a), list(p.modes_b), list(p.modes_d)
+    sa = dict(p.strides_a) if p.strides_a else packed_strides(ma, ext)
+    sb = dict(p.strides_b) if p.strides_b else packed_strides(mb, ext)
+    sd = dict(p.strides_d) if p.strides_d else packed_strides(md, ext)
+    m_modes = [x for x in md if x in ma and x not in mb]
+    n_modes = [x for x in md if x in mb and x not in ma]
+    k_modes = [x for x in ma if x in mb and x not in md]
+    if set(m_modes) | set(n_modes) != set(md) or not (k_modes and m_modes and n_modes):
+        return None
+    d_fast = min(md, key=lambda x: sd[x])
+    order = (("B", sb, n_modes), ("A", sa, m_modes))
+    if d_fast not in n_modes:
+        order = order[::-1]
+    out = []
+    for nm, st, free in order:
+        dig = merge_digits(sorted(free, key=lambda x: -st[x]), ext, st)
+        out.append((nm, _vec(dig, [st[m] for m in k_modes]) < 8))
+    return out
+
+
 def _pack_order(modes, k_modes, ext):
     """The packed mode order (row-major) of an operand: its free modes form an
     innermost contiguous run that is a multiple of 8 elements."""
@@ -750,9 +831,18 @@ def plan_tensor_gett(req: TensorGettRequest) -> TensorGettPlan:
         tuned = _tuned_plan(req)
         if tuned is not None:
             return tuned
-    mn_plan = _plan_mn(req)
     if policy == "mn":
-        return mn_plan
+        return _plan_mn(req)
+    try:
+        mn_plan = _plan_mn(req)
+    except ValueError:
+        # no MN-layout or ring-body route: the K-contiguous route alone
+        kc_plan = _plan_kc(req)
+        if kc_plan is None:
+            raise
+        return replace(
+            kc_plan, explanation=kc_plan.explanation + ("no MN-layout route",)
+        )
     kc_plan = _plan_kc(req)
     if kc_plan is None:
         return mn_plan
@@ -880,17 +970,19 @@ def _plan_mn(req: TensorGettRequest, bodies=None) -> "TensorGettPlan":
         plan = replace(p, tile_k=32, mn_tile=None, mn_trait=None).plan()
     except ValueError:
         plan = None
+    if plan is not None:
+        roles = [(plan.ops[r].name, plan.ops[r].vec < 8) for r in ("A", "B")]
+    else:
+        roles = _hybrid_roles(p) if TENSOR_GETT_PACK_ANY_RUN else None
     packs = []
     newp = p
     why = []
-    if plan is not None:
+    if roles is not None:
         ext = dict(p.extents)
         k_modes = [m for m in p.modes_a if m in p.modes_b and m not in p.modes_d]
-        for role in ("A", "B"):
-            op = plan.ops[role]
-            if op.vec >= 8:
+        for nm, short in roles:
+            if not short:
                 continue
-            nm = op.name
             modes = p.modes_a if nm == "A" else p.modes_b
             strides = p.strides_a if nm == "A" else p.strides_b
             order = _pack_order(modes, k_modes, ext)

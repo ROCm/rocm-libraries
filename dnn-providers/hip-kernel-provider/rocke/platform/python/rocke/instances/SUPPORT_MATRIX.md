@@ -66,9 +66,11 @@ catalog has no f32 atom); see `dsl_docs/instances/gett_f64.md`.
 One launch reads both operands in place through their mode strides and writes the
 permuted D; gfx950 only (`ds_read_b64_tr_b16`). Operands need an even fastest free
 run (16-byte DTL lanes when it is a multiple of 8, else 4-byte lanes); batch /
-Hadamard modes are not supported. Both engines build the ring and MN-layout bodies and the
-tuned route table's launches (`cpp/instances/common/tensor_gett_*.cpp`); the K-contiguous
-bodies, the pack hybrid and the tuning flow are Python engine only.
+Hadamard modes are not supported. Both engines build the ring, MN-layout and K-contiguous
+bodies, the pack kernel and the route tables' launches (`cpp/instances/common/tensor_gett_*.cpp`),
+and both plan any problem the same way (single launch, pack hybrid, K-contiguous route;
+`rocke/tensor_gett_planner.h` on the C++ GEMM dispatcher `rocke/gemm_dispatch.h`); the tuning
+flow is Python engine only.
 
 ---
 

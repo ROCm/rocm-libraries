@@ -264,6 +264,12 @@ namespace hiptensor
             std::shared_ptr<Program>                     fallback;
             std::vector<ScalarRole>                      fallbackOnZero;
             std::vector<std::pair<BufferRole, uint32_t>> fallbackAlign;
+            // The program's kernels exist only on the device it was created on (JIT kernels):
+            // on another device execution runs the fallback.
+            bool deviceBound = false;
+            // The launches are not built yet (a JIT candidate before buildJitCandidate): never
+            // executed.
+            bool pending = false;
         };
 
         // Builds argument buffers of one kernel by argument name.

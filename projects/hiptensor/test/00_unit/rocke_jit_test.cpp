@@ -79,6 +79,10 @@ namespace
     using hiptensor_test::ApiObjects;
     using hiptensor_test::ScopedEnvironmentVariable;
 
+    // The tests exercise the JIT's classes on packed layouts too, which on gfx942 and gfx950 take
+    // the flat kernel by default (no geometry to specialize, no JIT launch):
+    // HIPTENSOR_ROCKE_DISABLE_TUNED keeps the vector class of the generic kernel for them.
+    // RockeJit.FlatKernelIsNotSpecialized checks the default.
     struct RockeOnly : ::testing::Environment
     {
         void SetUp() override
@@ -86,9 +90,11 @@ namespace
 #ifdef _WIN32
             _putenv_s("HIPTENSOR_BACKEND", "rocke");
             _putenv_s("HIPTENSOR_BACKEND_FALLBACK", "0");
+            _putenv_s("HIPTENSOR_ROCKE_DISABLE_TUNED", "1");
 #else
             setenv("HIPTENSOR_BACKEND", "rocke", 1);
             setenv("HIPTENSOR_BACKEND_FALLBACK", "0", 1);
+            setenv("HIPTENSOR_ROCKE_DISABLE_TUNED", "1", 1);
 #endif
         }
     };
@@ -848,6 +854,8 @@ namespace
         JitLine              jit;
         int                  candidates = 0;
         bool                 planned    = false;
+        // kind 3: elements of D outside the host reference's bound (see runWidened)
+        int64_t refBad = -1;
     };
 
     WidenedRun runWidened(int kind, hiptensorJitMode_t jit, int32_t rank)
@@ -1007,6 +1015,82 @@ namespace
         out.d    = tensorBytes(*d);
         out.elem = bytesOf(d->type);
         out.jit  = jitOf(log);
+        if(kind == 3)
+        {
+            // an independent reference: long double over the inputs as stored (f16), with the
+            // programmer's guide's bound 2 (K + 4) u |alpha| sum |a b| + 2 u |d| + 4 u |beta c|
+            // (u = 2^-24: f32 accumulation and D); NaN must be NaN, infinities exact. It holds
+            // for every candidate, also those whose split order varies between runs. On gfx90a the
+            // f16 MFMA instructions of the 16-bit routes flush subnormal f16 operands to zero (a
+            // property of that target's matrix cores): there an element may instead match the
+            // reference of the operands with their f16 subnormals flushed.
+            std::vector<int64_t> const ext = {24, 40, 6, 5, 3};
+            hipDeviceProp_t            props{};
+            int                        dev = 0;
+            static_cast<void>(hipGetDevice(&dev));
+            static_cast<void>(hipGetDeviceProperties(&props, dev));
+            bool const ftz = std::string(props.gcnArchName).rfind("gfx90a", 0) == 0;
+            auto       val = [&](int i, int64_t at, bool flush) {
+                long double v = static_cast<long double>(
+                    static_cast<double>(static_cast<_Float16>(in[size_t(i)]->values[size_t(at)])));
+                if(flush && std::isfinite(v) && std::fabs(v) < std::ldexp(1.0L, -14))
+                {
+                    v = std::signbit(v) ? -0.0L : 0.0L;
+                }
+                return v;
+            };
+            long double const u = std::ldexp(1.0L, -24);
+            out.refBad          = 0;
+            forEach({ext[0], ext[1], ext[2]}, [&](std::vector<int64_t> const& mc) {
+                auto const at = linear(d->lens, mc);
+                float      g;
+                std::memcpy(&g, out.d.data() + size_t(at) * 4, 4);
+                long double const got   = g;
+                long double       want0 = 0.0L;
+                auto              check = [&](bool flush) {
+                    long double s = 0.0L, mag = 0.0L;
+                    for(int64_t k0 = 0; k0 < ext[3]; k0++)
+                    {
+                        for(int64_t k1 = 0; k1 < ext[4]; k1++)
+                        {
+                            long double const p
+                                = val(0, linear(in[0]->lens, {k0, mc[0], k1, mc[2]}), flush)
+                                  * val(1, linear(in[1]->lens, {mc[1], k1, k0}), flush);
+                            s += p;
+                            mag += std::isfinite(p) ? std::fabs(p) : 0.0L;
+                        }
+                    }
+                    long double const cv = val(2, at, false);
+                    long double const want
+                        = static_cast<long double>(alpha) * s + static_cast<long double>(beta) * cv;
+                    if(!flush)
+                    {
+                        want0 = want;
+                    }
+                    if(std::isnan(want))
+                    {
+                        return std::isnan(got);
+                    }
+                    if(std::isinf(want))
+                    {
+                        return got == want;
+                    }
+                    long double const tol
+                        = 2.0L * (ext[3] * ext[4] + 4) * u * std::fabs(alpha) * mag
+                          + 2.0L * u * std::fabs(want) + 4.0L * u * std::fabs(beta * cv)
+                          + std::ldexp(1.0L, -149);
+                    return !std::isnan(got) && std::fabs(got - want) <= tol;
+                };
+                bool const ok = check(false) || (ftz && check(true));
+                if(!ok && out.refBad++ < 3)
+                {
+                    ADD_FAILURE() << "kind 3 rank " << rank << " ("
+                                  << (jit == HIPTENSOR_JIT_MODE_NONE ? "pack" : "JIT") << "): D["
+                                  << at << "] = " << static_cast<double>(got) << ", reference "
+                                  << static_cast<double>(want0);
+                }
+            });
+        }
         return out;
     }
 } // namespace
@@ -1015,26 +1099,28 @@ namespace
 // input: their vec 1 class; the math rows' vector classes; the epilogue of a mixed-type
 // contraction, every candidate) are specialized, and write the same bits as the kernel-pack
 // kernels they replace (a NaN equals a NaN of any sign and payload), on data with NaN,
-// infinities, signed zeros, subnormals and values that overflow the output type.
+// infinities, signed zeros, subnormals and values that overflow the output type. Every
+// contraction candidate (pack and JIT) is also checked against a host reference, so the
+// candidates whose split results vary between runs stay covered.
 TEST(RockeJit, WidenedClassesMatchThePackKernels)
 {
     ScopedEnvironmentVariable all("HIPTENSOR_ROCKE_JIT", "all");
     for(int kind = 0; kind < 4; kind++)
     {
-        int  withLaunches = 0;
-        int  candidates   = 1;
-        auto ranks        = kind == 3 ? 64 : 1;
+        int  withLaunches = 0, varying = 0;
+        int  candidates = 1;
+        auto ranks      = kind == 3 ? 64 : 1;
         for(int32_t rank = 0; rank < std::min(candidates, ranks); rank++)
         {
             auto const pack = runWidened(kind, HIPTENSOR_JIT_MODE_NONE, kind == 3 ? rank : -1);
             auto const jit  = runWidened(kind, HIPTENSOR_JIT_MODE_DEFAULT, kind == 3 ? rank : -1);
             ASSERT_TRUE(pack.planned && jit.planned) << "kind " << kind << " rank " << rank;
             candidates = kind == 3 ? pack.candidates : 1;
-            // a candidate whose own results vary between runs (a split reduction in another
-            // order) is no reference for a bit-for-bit comparison
-            if(kind == 3 && runWidened(kind, HIPTENSOR_JIT_MODE_NONE, rank).d != pack.d)
+            if(kind == 3)
             {
-                continue;
+                // every candidate, pack and JIT, within the host reference's bound
+                EXPECT_EQ(pack.refBad, 0) << "rank " << rank;
+                EXPECT_EQ(jit.refBad, 0) << "rank " << rank;
             }
             EXPECT_FALSE(pack.jit.found) << "kind " << kind;
             if(!jit.jit.found)
@@ -1046,6 +1132,14 @@ TEST(RockeJit, WidenedClassesMatchThePackKernels)
             EXPECT_GE(jit.jit.launches, 1) << "kind " << kind << " rank " << rank;
             EXPECT_EQ(jit.jit.specialized, jit.jit.launches) << "kind " << kind << " rank " << rank;
             ASSERT_EQ(pack.d.size(), jit.d.size());
+            // a candidate whose own results vary between runs (a split reduction in another
+            // order) is no reference for a bit-for-bit comparison: the host reference above
+            // covers it
+            if(kind == 3 && runWidened(kind, HIPTENSOR_JIT_MODE_NONE, rank).d != pack.d)
+            {
+                varying++;
+                continue;
+            }
             // a NaN equals a NaN: which operand's NaN an operation of two NaN returns (sign and
             // payload) is unspecified, and the compiler may commute the operands
             size_t bad = 0;
@@ -1062,6 +1156,63 @@ TEST(RockeJit, WidenedClassesMatchThePackKernels)
                                << ": elements that differ between the JIT and the pack kernel";
         }
         EXPECT_GE(withLaunches, 1) << "kind " << kind << ": no plan with an elementwise launch";
+        if(varying > 0)
+        {
+            std::printf("[ INFO     ] kind %d: %d candidates vary between runs (checked against "
+                        "the host reference only)\n",
+                        kind,
+                        varying);
+        }
+    }
+}
+
+// Without HIPTENSOR_ROCKE_DISABLE_TUNED, a packed layout of 16-bit tensors takes the flat kernel on
+// gfx942 and gfx950 (kernels.common.hiptensor_aot.ewf: no geometry, nothing to specialize), so the JIT has
+// no launch to replace; the results are exact, also with buffers off the vector alignment (the
+// generic kernel then runs). gfx90a has no flat kernel: the JIT specializes the vector class.
+TEST(RockeJit, FlatKernelIsNotSpecialized)
+{
+    int             device = 0;
+    hipDeviceProp_t props;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    ASSERT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
+    std::string const arch  = std::string(props.gcnArchName).substr(0, 6);
+    bool const        flat  = arch == "gfx942" || arch == "gfx950";
+    char const*       prev  = std::getenv("HIPTENSOR_ROCKE_DISABLE_TUNED");
+    std::string const saved = prev != nullptr ? prev : "";
+#ifdef _WIN32
+    _putenv_s("HIPTENSOR_ROCKE_DISABLE_TUNED", "");
+#else
+    unsetenv("HIPTENSOR_ROCKE_DISABLE_TUNED");
+#endif
+    std::mt19937 rng(15);
+    for(auto skew : {size_t(0), size_t(1)})
+    {
+        for(auto c : cases())
+        {
+            if(c.name != "binary_f16_packed")
+            {
+                continue;
+            }
+            c.skew = skew;
+            auto j = runCase(c, HIPTENSOR_JIT_MODE_DEFAULT, rng);
+            if(flat)
+            {
+                EXPECT_TRUE(!j.found || j.launches == 0) << c.name << " " << j.launches;
+            }
+            else
+            {
+                EXPECT_EQ(j.specialized, 1) << c.name;
+            }
+        }
+    }
+    if(prev != nullptr)
+    {
+#ifdef _WIN32
+        _putenv_s("HIPTENSOR_ROCKE_DISABLE_TUNED", saved.c_str());
+#else
+        setenv("HIPTENSOR_ROCKE_DISABLE_TUNED", saved.c_str(), 1);
+#endif
     }
 }
 

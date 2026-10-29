@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -40,6 +41,10 @@
 #include <tuple>
 
 #include "rocke_plan.hpp"
+#include "rocke_rreduce_rule.hpp"
+#ifdef HIPTENSOR_ENABLE_ROCKE_JIT
+#include "rocke_gett_jit.hpp"
+#endif
 
 namespace hiptensor
 {
@@ -47,6 +52,7 @@ namespace hiptensor
     {
         namespace
         {
+            using namespace rrule;
             using backend::OpKind;
             using backend::Problem;
             using backend::TensorArg;
@@ -663,6 +669,8 @@ namespace hiptensor
                 return "tuned-reduction";
             case Route::Gett32:
                 return "gett32";
+            case Route::JitGett:
+                return "jit-gett";
             }
             return "?";
         }
@@ -923,6 +931,7 @@ namespace hiptensor
 
             constexpr char kEwt[] = "ewt";
             constexpr char kEwv[] = "ewv";
+            constexpr char kEwf[] = "ewf";
 
             // The value of integer argument `name` of a prepared launch.
             bool stepArg(LaunchStep const& step, std::string const& name, int64_t& value)
@@ -1137,6 +1146,149 @@ namespace hiptensor
                     = int64_t(prog.steps[0].grid.x) * prog.steps[0].grid.y * prog.steps[0].grid.z;
                 facts.block = block;
                 program     = std::move(prog);
+                return HIPTENSOR_STATUS_SUCCESS;
+            }
+
+            // The flat kernel (the kernel pack's ewf classes, kernels.common.hiptensor_aot.ewf) of
+            // an elementwise operation whose canonical problem is one mode with stride 1 in every
+            // tensor (every tensor contiguous, in the same order, no broadcast): element i of
+            // every tensor at offset i, no index arithmetic, two 16-byte vectors of D per thread
+            // with streaming accesses (gfx942 / gfx950 packs only). The element count must be a
+            // multiple of the vector (and, as the generic launch's, below 2^31; a permutation reads
+            // A everywhere: no padding limit). The generic launch is the fallback (buffers not
+            // aligned to the vectors).
+            hiptensorStatus_t planEwf(EwLayout const& lay,
+                                      Pack const&     pack,
+                                      Program const&  generic,
+                                      Program&        program,
+                                      CandidateFacts& facts,
+                                      std::string&    reason)
+            {
+                if(generic.steps.size() != 1)
+                {
+                    reason = "the generic program has several launches";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                auto const& g     = generic.steps.front();
+                auto const& k     = *g.kernel;
+                int const   nt    = static_cast<int>(lay.operands.size());
+                int const   arity = nt - 1;
+                if(k.attr("idx64") != 0 || k.attr("math") != 0 || k.attr("cplx") != 0)
+                {
+                    reason = "no flat class of 64-bit-offset, math or complex rows";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                bool ok = lay.dims.size() == 1;
+                for(int t = 0; ok && t < nt; t++)
+                {
+                    ok = lay.dims[0].stride[t] == 1;
+                }
+                if(!ok)
+                {
+                    reason = "the tensors are not one contiguous run in the same order";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                int64_t const        count = lay.dims[0].extent;
+                std::vector<int64_t> bytes;
+                for(auto const& op : lay.operands)
+                {
+                    std::string const key(1, char(std::tolower(op.name[0])));
+                    bytes.push_back(int64_t(elementBytes(k.attrStr(key))));
+                }
+                int64_t const vec  = 16 / bytes.back();
+                int64_t       lim0 = 0;
+                ok                 = count % vec == 0 && count < kI32Max
+                     && (arity != 1 || (stepArg(g, "lim0", lim0) && lim0 == count));
+                for(auto const& p : g.pointers)
+                {
+                    auto const name = argNameAtOffset(k, p.offset);
+                    for(int t = 0; ok && t < nt; t++)
+                    {
+                        if(name == lay.operands[t].name)
+                        {
+                            ok = p.bytes % uint64_t(bytes[t] * vec) == 0;
+                        }
+                    }
+                }
+                if(!ok)
+                {
+                    reason = "no flat class for this element count";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                auto const* kernel = pack.find(kEwf, {{"arity", int64_t(arity)}}, lay.strs);
+                if(kernel == nullptr)
+                {
+                    reason = "the pack has no flat class for this data type row";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                LaunchStep step;
+                step.kernel = kernel;
+                ArgWriter                                    w(step);
+                bool                                         good = true;
+                std::vector<std::pair<BufferRole, uint32_t>> align;
+                for(auto const& p : g.pointers)
+                {
+                    auto const name = argNameAtOffset(k, p.offset);
+                    good            = good && w.pointer(name, p.role, p.bytes);
+                    for(int t = 0; t < nt; t++)
+                    {
+                        if(name == lay.operands[t].name)
+                        {
+                            align.emplace_back(p.role, uint32_t(bytes[t] * vec));
+                        }
+                    }
+                }
+                for(auto const& sc : g.scalars)
+                {
+                    good = good && w.scalar(argNameAtOffset(k, sc.offset), sc.role, sc.imag);
+                }
+                for(auto const& a : kernel->args)
+                {
+                    if(a.pointer || a.name == "alpha" || a.name == "beta" || a.name == "gamma")
+                    {
+                        continue;
+                    }
+                    int64_t v = 0;
+                    if(a.name == "n")
+                    {
+                        v = count / vec;
+                    }
+                    else if(!stepArg(g, a.name, v)) // the operator codes
+                    {
+                        good = false;
+                        break;
+                    }
+                    good = good && w.set(a.name, v);
+                }
+                if(!good)
+                {
+                    reason = "flat class arguments do not fit the kernel arguments";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                uint32_t const block  = static_cast<uint32_t>(kernel->attr("block", 256));
+                int64_t const  unroll = kernel->attr("unroll", 1);
+                step.block            = dim3(block, 1, 1);
+                step.grid = dim3(static_cast<uint32_t>(ceilDiv(count / vec, block * unroll)), 1, 1);
+                if(auto st = finishStep(step, w, reason); st != HIPTENSOR_STATUS_SUCCESS)
+                {
+                    return st;
+                }
+                Program prog;
+                prog.pack            = &pack;
+                prog.scalarType      = generic.scalarType;
+                prog.nullStatus      = generic.nullStatus;
+                prog.requiredScalars = generic.requiredScalars;
+                prog.requiredBuffers = generic.requiredBuffers;
+                prog.steps.push_back(std::move(step));
+                prog.description   = kernel->name;
+                prog.fallback      = std::make_shared<Program>(generic);
+                prog.fallbackAlign = align;
+                facts              = CandidateFacts{};
+                facts.route        = Route::Elementwise;
+                facts.main         = kernel;
+                facts.ctas         = int64_t(prog.steps[0].grid.x);
+                facts.block        = block;
+                program            = std::move(prog);
                 return HIPTENSOR_STATUS_SUCCESS;
             }
 
@@ -2058,412 +2210,6 @@ namespace hiptensor
                 return HIPTENSOR_STATUS_SUCCESS;
             }
 
-            // ------------------------------------------- tuned reduction classes (rreduce)
-            //
-            // rocKE's native strided reduction bodies with the geometry as kernel arguments
-            // (library/kernels/common/hiptensor_aot/rreduce.py; the host rules of
-            // rreduce_host.py). A class fixes the operator, the data types, the mode and the knobs
-            // (block, vector width, threads per output / along the kept run, unroll, thread rows,
-            // streaming loads); the split is a launch argument. A problem of rocKE's reduction
-            // route table runs with its tuned knobs (pack routes reduce.tuned.<hash>); any other
-            // problem with the pack class the cost model ranks first.
-
-            constexpr char    kRreduce[]           = "rreduce";
-            constexpr char    kRreduceFinal[]      = "rreduce_final";
-            constexpr int64_t kRreduceFinalLanes[] = {1, 4, 16, 64};
-            constexpr int64_t kRreduceFinalTarget  = int64_t(1) << 20;
-            constexpr int64_t kRreduceSlotCounts[] = {1, 2, 3, 4, 8};
-            constexpr int64_t kI32Limit            = int64_t(1) << 31;
-            constexpr int64_t kMaxGridThreads      = (int64_t(1) << 32) - 1;
-            // heuristic candidates offered per problem (the first is the rule's choice)
-            constexpr size_t kRreduceCandidates = 3;
-            // the knobs (block, vec, lanes, unroll, rows) that run every problem of a mode (row:
-            // one thread per output; col: one thread per kept element and one reduction row per
-            // thread), and the wave count (of a 256-CU device) their split aims for
-            constexpr int64_t kRreduceUniversalRow[5] = {256, 1, 1, 4, 0};
-            constexpr int64_t kRreduceUniversalCol[5] = {256, 1, 1, 4, 1};
-            constexpr int64_t kRreduceUniversalWaves  = 4096;
-
-            // A launch's knobs (rreduce_host.Knobs)
-            struct RKnobs
-            {
-                bool    row    = true;
-                int64_t block  = 256;
-                int64_t vec    = 1;
-                int64_t lanes  = 64;
-                int64_t unroll = 1;
-                int64_t split  = 1;
-                int64_t rows   = 0;
-                bool    nt     = false;
-            };
-
-            // A reduction in the canonical form of the classes: kept modes (extent, A stride,
-            // D stride) and reduced modes (extent, A stride), innermost first; C has D's strides.
-            struct RProblem
-            {
-                std::vector<std::array<int64_t, 3>> kept;
-                std::vector<std::array<int64_t, 2>> red;
-                std::string                         a, d, op;
-                int64_t                             eb = 2; // A's element bytes
-            };
-
-            template <typename T>
-            int64_t rExtents(std::vector<T> const& dims)
-            {
-                int64_t n = 1;
-                for(auto const& x : dims)
-                {
-                    n *= x[0];
-                }
-                return n;
-            }
-
-            // rreduce_host.mode_of: row when A's innermost mode is reduced
-            bool rRow(RProblem const& p)
-            {
-                if(rExtents(p.red) <= 1)
-                {
-                    return false;
-                }
-                if(rExtents(p.kept) == 1)
-                {
-                    return true;
-                }
-                return std::llabs(p.red[0][1]) < std::llabs(p.kept[0][1]);
-            }
-
-            // rreduce_host.col_group: kept modes contiguous in A from the innermost one on
-            size_t rColGroup(RProblem const& p)
-            {
-                if(p.kept.empty())
-                {
-                    return 0;
-                }
-                size_t n = 1;
-                while(n < p.kept.size() && p.kept[n][1] == p.kept[n - 1][1] * p.kept[n - 1][0])
-                {
-                    n++;
-                }
-                return n;
-            }
-
-            // rreduce_host.chunk_dims: the reduced slots of a row class in `vec` chunks
-            std::vector<std::array<int64_t, 2>> rChunkDims(RProblem const& p, int64_t vec)
-            {
-                std::vector<std::array<int64_t, 2>> dims;
-                std::array<int64_t, 2> const        first{p.red[0][0] / vec, p.red[0][1] * vec};
-                if(first[0] != 1)
-                {
-                    dims.push_back(first);
-                }
-                for(size_t i = 1; i < p.red.size(); i++)
-                {
-                    if(p.red[i][0] != 1)
-                    {
-                        dims.push_back(p.red[i]);
-                    }
-                }
-                if(dims.empty())
-                {
-                    dims.push_back({1, 0});
-                }
-                return dims;
-            }
-
-            int64_t rSlotCount(size_t n)
-            {
-                for(int64_t c : kRreduceSlotCounts)
-                {
-                    if(int64_t(n) <= c)
-                    {
-                        return c;
-                    }
-                }
-                return -1;
-            }
-
-            bool rLoadVec(std::string const& a, int64_t v)
-            {
-                if(a == "f64")
-                {
-                    return v == 1 || v == 2;
-                }
-                if(a == "f32")
-                {
-                    return v == 1 || v == 2 || v == 4;
-                }
-                return v == 1 || v == 2 || v == 4 || v == 8;
-            }
-
-            // rreduce_host.max_vec
-            int64_t rMaxVec(RProblem const& p, bool row)
-            {
-                int64_t n = 0, s = 0;
-                if(row)
-                {
-                    n = p.red[0][0];
-                    s = p.red[0][1];
-                }
-                else
-                {
-                    if(p.kept.empty())
-                    {
-                        return 1;
-                    }
-                    n = p.kept[0][0];
-                    s = p.kept[0][1];
-                }
-                if(s != 1)
-                {
-                    return 1;
-                }
-                int64_t best = 1;
-                for(int64_t v : {1, 2, 4, 8})
-                {
-                    if(rLoadVec(p.a, v) && n % v == 0)
-                    {
-                        best = std::max(best, v);
-                    }
-                }
-                return best;
-            }
-
-            int64_t rRowThreads(RKnobs const& k)
-            {
-                return k.rows != 0 ? k.rows : k.block / k.lanes;
-            }
-
-            // rreduce_host.loop_geometry
-            void rLoop(RProblem const& p,
-                       RKnobs const&   k,
-                       int64_t&        nIdx,
-                       int64_t&        step,
-                       int64_t&        per,
-                       int64_t&        nIt)
-            {
-                if(k.row)
-                {
-                    nIdx = rExtents(rChunkDims(p, k.vec));
-                    step = k.lanes;
-                }
-                else
-                {
-                    nIdx = p.red.empty() ? 1 : rExtents(p.red);
-                    step = rRowThreads(k);
-                }
-                per = ceilDiv(nIdx, k.split);
-                nIt = ceilDiv(ceilDiv(per, step), k.unroll);
-            }
-
-            // rreduce_host.grid_x
-            int64_t rGridX(RProblem const& p, RKnobs const& k)
-            {
-                int64_t const nOut = rExtents(p.kept);
-                if(k.row)
-                {
-                    return ceilDiv(nOut, k.block / k.lanes);
-                }
-                size_t const ng = rColGroup(p);
-                int64_t      m  = 1;
-                for(size_t i = 0; i < ng; i++)
-                {
-                    m *= p.kept[i][0];
-                }
-                int64_t const tiles = ceilDiv(m, k.lanes * k.vec);
-                int64_t const items = k.block / (k.lanes * rRowThreads(k));
-                return ceilDiv((nOut / m) * tiles, items);
-            }
-
-            bool rPow2(int64_t x)
-            {
-                return x > 0 && (x & (x - 1)) == 0;
-            }
-
-            // rreduce_host.check_knobs: why `k` cannot run the problem ("" when it can)
-            std::string rCheck(RProblem const& p, RKnobs const& k, bool streaming)
-            {
-                for(auto const& x : p.kept)
-                {
-                    if(x[1] < 0 || x[2] < 0)
-                    {
-                        return "negative strides";
-                    }
-                }
-                for(auto const& x : p.red)
-                {
-                    if(x[1] < 0)
-                    {
-                        return "negative strides";
-                    }
-                }
-                if(p.kept.size() > size_t(kMaxRank) || p.red.size() > size_t(kMaxRank))
-                {
-                    return "more than 8 kept or reduced modes";
-                }
-                if(k.row != rRow(p))
-                {
-                    return "mode differs from the problem's";
-                }
-                if(k.nt && !streaming)
-                {
-                    return "streaming loads need gfx942 / gfx950";
-                }
-                if(!rPow2(k.block) || k.block < kWave || k.block > 1024)
-                {
-                    return "block";
-                }
-                if(!rPow2(k.lanes) || k.lanes > k.block)
-                {
-                    return "lanes";
-                }
-                if(!rLoadVec(p.a, k.vec) || (k.vec > 1 && k.vec > rMaxVec(p, k.row)))
-                {
-                    return "vec";
-                }
-                if(k.unroll != 1 && k.unroll != 2 && k.unroll != 4 && k.unroll != 8)
-                {
-                    return "unroll";
-                }
-                if(k.split < 1 || k.split > kGridYZMax)
-                {
-                    return "split";
-                }
-                int64_t const nOut = rExtents(p.kept);
-                if(!k.row)
-                {
-                    if(k.rows != 0 && (!rPow2(k.rows) || k.lanes * k.rows > k.block))
-                    {
-                        return "rows";
-                    }
-                    if(p.kept.empty())
-                    {
-                        return "col mode needs a kept mode";
-                    }
-                    size_t const ng = rColGroup(p);
-                    int64_t      m  = 1;
-                    for(size_t i = 0; i < ng; i++)
-                    {
-                        m *= p.kept[i][0];
-                    }
-                    if(k.lanes > 1 && (k.lanes / 2) * k.vec >= m)
-                    {
-                        return "lanes x vec exceed the run";
-                    }
-                    int64_t const rt    = rRowThreads(k);
-                    int64_t const nRows = p.red.empty() ? 1 : rExtents(p.red);
-                    if(rt > 1 && rt / 2 >= nRows)
-                    {
-                        return "more than half the thread rows idle";
-                    }
-                    if(k.split > std::max<int64_t>(1, ceilDiv(nRows, rt)))
-                    {
-                        return "split exceeds the reduction rows per thread row";
-                    }
-                    int64_t const items = k.block / (k.lanes * rt);
-                    int64_t const tiles = ceilDiv(m, k.lanes * k.vec);
-                    if((nOut / m) * tiles + items >= kI32Limit)
-                    {
-                        return "work items >= 2^31";
-                    }
-                }
-                else
-                {
-                    if(k.rows != 0)
-                    {
-                        return "rows is a col knob";
-                    }
-                    if(p.red.empty())
-                    {
-                        return "row mode needs a reduced mode";
-                    }
-                    auto const    dims   = rChunkDims(p, k.vec);
-                    int64_t const chunks = rExtents(dims);
-                    if(k.split > std::max<int64_t>(1, ceilDiv(chunks, k.lanes)))
-                    {
-                        return "split exceeds the chunks per lane";
-                    }
-                    if(k.lanes > 1 && (k.lanes / 2) >= chunks)
-                    {
-                        return "lanes exceed the chunks";
-                    }
-                    if(dims.size() > size_t(kMaxRank))
-                    {
-                        return "more than 8 reduced slots";
-                    }
-                }
-                if(nOut + k.block * k.vec >= kI32Limit)
-                {
-                    return "outputs >= 2^31";
-                }
-                int64_t nIdx = 0, step = 0, per = 0, nIt = 0;
-                rLoop(p, k, nIdx, step, per, nIt);
-                int64_t const last = (k.split - 1) * per + (step - 1) + (nIt * k.unroll - 1) * step;
-                if(std::max(last, k.split * per) >= kI32Limit)
-                {
-                    return "reduction indices >= 2^31";
-                }
-                if(rGridX(p, k) * k.block > kMaxGridThreads)
-                {
-                    return "launch grid exceeds the HIP limit";
-                }
-                return "";
-            }
-
-            // rreduce_host.needs_idx64
-            bool rIdx64(RProblem const& p, RKnobs const& k)
-            {
-                int64_t aSpan = 0, dSpan = 0;
-                for(auto const& x : p.kept)
-                {
-                    aSpan += (x[0] - 1) * x[1];
-                    dSpan += (x[0] - 1) * x[2];
-                }
-                for(auto const& x : p.red)
-                {
-                    aSpan += (x[0] - 1) * x[1];
-                }
-                int64_t const nOut  = rExtents(p.kept);
-                int64_t const wSpan = k.split > 1 ? (nOut + k.block * k.vec) * k.split : 0;
-                return std::max({aSpan, dSpan, wSpan}) >= kI32Limit;
-            }
-
-            // rreduce_host.final_lanes
-            int64_t rFinalLanes(int64_t nOut, int64_t split)
-            {
-                int64_t lanes = 1;
-                while(lanes * 2 <= std::min<int64_t>(kWave, split)
-                      && nOut * lanes * 2 <= kRreduceFinalTarget)
-                {
-                    lanes *= 2;
-                }
-                int64_t out = 1;
-                for(int64_t l : kRreduceFinalLanes)
-                {
-                    if(l <= lanes)
-                    {
-                        out = l;
-                    }
-                }
-                return out;
-            }
-
-            // The canonical problem of a tuned route record (rreduce_host.problem_key)
-            std::string rKey(RProblem const& p)
-            {
-                std::string k, r;
-                for(size_t i = 0; i < p.kept.size(); i++)
-                {
-                    k += (i ? "," : "") + std::to_string(p.kept[i][0]) + ":"
-                         + std::to_string(p.kept[i][1]) + ":" + std::to_string(p.kept[i][2]);
-                }
-                for(size_t i = 0; i < p.red.size(); i++)
-                {
-                    r += (i ? "," : "") + std::to_string(p.red[i][0]) + ":"
-                         + std::to_string(p.red[i][1]);
-                }
-                return "a=" + p.a + ";d=" + p.d + ";op=" + p.op + ";k=" + k + ";r=" + r;
-            }
-
             // Fills a slot set of a class launch (rreduce_host._slots): `dims` innermost first,
             // padded to `n` slots with extent 1, magic (0, 0) and stride 0.
             bool rSlots(ArgWriter&                               w,
@@ -2494,79 +2240,6 @@ namespace hiptensor
                     }
                 }
                 return ok;
-            }
-
-            // A tuned route record (rreduce_host.route_record): "v1;mode=...;block=...;..."
-            bool rParseRecord(std::string const& text, RKnobs& k)
-            {
-                size_t start = 0;
-                bool   head  = true;
-                int    seen  = 0;
-                while(start <= text.size())
-                {
-                    size_t      end   = text.find(';', start);
-                    std::string field = text.substr(
-                        start, end == std::string::npos ? std::string::npos : end - start);
-                    if(head)
-                    {
-                        if(field != "v1")
-                        {
-                            return false;
-                        }
-                        head = false;
-                    }
-                    else
-                    {
-                        auto const eq = field.find('=');
-                        if(eq == std::string::npos)
-                        {
-                            return false;
-                        }
-                        auto const name  = field.substr(0, eq);
-                        auto const value = field.substr(eq + 1);
-                        int64_t    v     = 0;
-                        if(name != "mode")
-                        {
-                            char* stop = nullptr;
-                            v          = std::strtoll(value.c_str(), &stop, 10);
-                            if(stop == value.c_str() || *stop != '\0')
-                            {
-                                return false;
-                            }
-                        }
-                        if(name == "mode")
-                        {
-                            if(value != "row" && value != "col")
-                            {
-                                return false;
-                            }
-                            k.row = value == "row";
-                        }
-                        else if(name == "block")
-                            k.block = v;
-                        else if(name == "vec")
-                            k.vec = v;
-                        else if(name == "lanes")
-                            k.lanes = v;
-                        else if(name == "unroll")
-                            k.unroll = v;
-                        else if(name == "split")
-                            k.split = v;
-                        else if(name == "rows")
-                            k.rows = v;
-                        else if(name == "nt")
-                            k.nt = v != 0;
-                        else if(name != "nr" && name != "idx64")
-                            return false;
-                        seen++;
-                    }
-                    if(end == std::string::npos)
-                    {
-                        break;
-                    }
-                    start = end + 1;
-                }
-                return seen == 10;
             }
 
             // The pack class of knobs `k` (nullptr when the pack has none).
@@ -2763,209 +2436,68 @@ namespace hiptensor
                 return HIPTENSOR_STATUS_SUCCESS;
             }
 
-            // rreduce_host.log_q: `x` on a quarter-octave scale (integers only)
-            int64_t rLogQ(int64_t x)
+            // The tuned reduction classes and prototypes of a pack, read once per pack (Pack::load
+            // has checked the reduce.* routes with rCheckRoutes, so every record parses)
+            struct RTables
             {
-                if(x <= 1)
-                {
-                    return 0;
-                }
-                int64_t const e    = 63 - __builtin_clzll(static_cast<unsigned long long>(x));
-                int64_t const frac = e >= 2 ? (x >> (e - 2)) & 3 : (x << (2 - e)) & 3;
-                return 4 * e + frac;
-            }
-
-            // rreduce_host.features
-            std::array<int64_t, 5> rFeatures(RProblem const& p)
-            {
-                int64_t const nOut  = rExtents(p.kept);
-                int64_t const nRed  = p.red.empty() ? 1 : rExtents(p.red);
-                int64_t       inner = 1;
-                if(rRow(p))
-                {
-                    inner = p.red[0][1] == 1 ? p.red[0][0] : 1;
-                }
-                else
-                {
-                    size_t const ng = rColGroup(p);
-                    int64_t      m  = 1;
-                    for(size_t i = 0; i < ng; i++)
-                    {
-                        m *= p.kept[i][0];
-                    }
-                    inner = p.kept[0][1] == 1 ? m : 1;
-                }
-                return {rLogQ(nOut),
-                        rLogQ(nRed),
-                        rLogQ(inner),
-                        int64_t(p.red.size()),
-                        int64_t(p.kept.size())};
-            }
-
-            // rreduce_host.feature_distance
-            int64_t rDistance(std::array<int64_t, 5> const& f, std::array<int64_t, 5> const& g)
-            {
-                return 2 * std::llabs(f[0] - g[0]) + 2 * std::llabs(f[1] - g[1])
-                       + std::llabs(f[2] - g[2]) + 2 * std::llabs(f[3] - g[3])
-                       + 2 * std::llabs(f[4] - g[4]);
-            }
-
-            // rreduce_host.Prototype: a measured problem of the untuned choice (pack routes
-            // reduce.proto.<i>, reduce.proto.count)
-            struct RProto
-            {
-                bool                   row    = true;
-                int64_t                eb     = 0;
-                bool                   maxmin = false;
-                std::array<int64_t, 5> f{};
-                RKnobs                 knobs;
-                int64_t                waves = 0;
-                int64_t                cus   = 1;
+                std::vector<RClass>            classes;
+                std::vector<PackKernel const*> kernels; // per class
+                std::vector<RProto>            protos;
             };
 
-            // A prototype record (rreduce_host.proto_record): "v1;mode=row;eb=2;mm=0;f=a,b,c,d,e;
-            // block=..;vec=..;lanes=..;unroll=..;rows=..;nt=..;waves=..;cus=.."
-            bool rParseProto(std::string const& text, RProto& out)
+            RTables const& rTables(Pack const& pack)
             {
-                size_t                start = 0;
-                int                   seen  = 0;
-                bool                  head  = true;
-                std::set<std::string> names;
-                while(start <= text.size())
-                {
-                    size_t const      end   = text.find(';', start);
-                    std::string const field = text.substr(
-                        start, end == std::string::npos ? std::string::npos : end - start);
-                    if(head)
-                    {
-                        if(field != "v1")
-                        {
-                            return false;
-                        }
-                        head = false;
-                    }
-                    else
-                    {
-                        auto const eq = field.find('=');
-                        if(eq == std::string::npos)
-                        {
-                            return false;
-                        }
-                        auto const name  = field.substr(0, eq);
-                        auto const value = field.substr(eq + 1);
-                        if(!names.insert(name).second)
-                        {
-                            return false; // a field twice
-                        }
-                        if(name == "mode")
-                        {
-                            if(value != "row" && value != "col")
-                            {
-                                return false;
-                            }
-                            out.row = value == "row";
-                        }
-                        else if(name == "f")
-                        {
-                            size_t s = 0;
-                            for(int i = 0; i < 5; i++)
-                            {
-                                size_t const e = value.find(',', s);
-                                if((i < 4) == (e == std::string::npos))
-                                {
-                                    return false;
-                                }
-                                std::string const part = value.substr(
-                                    s, e == std::string::npos ? std::string::npos : e - s);
-                                char*         stop = nullptr;
-                                int64_t const v    = std::strtoll(part.c_str(), &stop, 10);
-                                if(part.empty() || *stop != '\0')
-                                {
-                                    return false;
-                                }
-                                out.f[i] = v;
-                                s        = e + 1;
-                            }
-                        }
-                        else
-                        {
-                            char*         stop = nullptr;
-                            int64_t const v    = std::strtoll(value.c_str(), &stop, 10);
-                            if(value.empty() || *stop != '\0')
-                            {
-                                return false;
-                            }
-                            if(name == "eb")
-                                out.eb = v;
-                            else if(name == "mm")
-                                out.maxmin = v != 0;
-                            else if(name == "block")
-                                out.knobs.block = v;
-                            else if(name == "vec")
-                                out.knobs.vec = v;
-                            else if(name == "lanes")
-                                out.knobs.lanes = v;
-                            else if(name == "unroll")
-                                out.knobs.unroll = v;
-                            else if(name == "rows")
-                                out.knobs.rows = v;
-                            else if(name == "nt")
-                                out.knobs.nt = v != 0;
-                            else if(name == "waves")
-                                out.waves = v;
-                            else if(name == "cus")
-                                out.cus = v;
-                            else
-                                return false;
-                        }
-                        seen++;
-                    }
-                    if(end == std::string::npos)
-                    {
-                        break;
-                    }
-                    start = end + 1;
-                }
-                out.knobs.row = out.row;
-                // mode, eb, mm, f, block, vec, lanes, unroll, rows, nt, waves, cus: each once
-                return seen == 12 && out.cus > 0;
-            }
-
-            // The prototypes of a pack, parsed once per pack (a malformed record ends the list).
-            std::vector<RProto> const& rProtos(Pack const& pack)
-            {
-                static std::mutex                                 lock;
-                static std::map<Pack const*, std::vector<RProto>> cache;
-                std::lock_guard<std::mutex>                       guard(lock);
-                auto                                              it = cache.find(&pack);
+                static std::mutex                     lock;
+                static std::map<Pack const*, RTables> cache;
+                std::lock_guard<std::mutex>           guard(lock);
+                auto                                  it = cache.find(&pack);
                 if(it != cache.end())
                 {
                     return it->second;
                 }
-                std::vector<RProto> out;
-                int64_t const       n
+                RTables t;
+                for(auto const& kernel : pack.kernels())
+                {
+                    if(kernel.family != kRreduce)
+                    {
+                        continue;
+                    }
+                    RClass c;
+                    c.name   = kernel.name;
+                    c.mode   = kernel.attrStr("mode");
+                    c.a      = kernel.attrStr("a");
+                    c.d      = kernel.attrStr("d");
+                    c.op     = kernel.attrStr("op");
+                    c.nr     = kernel.attr("nr", 0);
+                    c.block  = kernel.attr("block", 0);
+                    c.vec    = kernel.attr("vec", 0);
+                    c.lanes  = kernel.attr("lanes", 0);
+                    c.unroll = kernel.attr("unroll", 0);
+                    c.rows   = kernel.attr("rows", 0);
+                    c.nt     = kernel.attr("nt", 0) != 0;
+                    c.una    = kernel.attr("una", 0) != 0;
+                    c.idx64  = kernel.attr("idx64", 0) != 0;
+                    t.classes.push_back(c);
+                    t.kernels.push_back(&kernel);
+                }
+                int64_t const n
                     = std::strtoll(pack.route("reduce.proto.count", "0").c_str(), nullptr, 10);
                 for(int64_t i = 0; i < n; i++)
                 {
                     RProto r;
-                    if(!rParseProto(pack.route("reduce.proto." + std::to_string(i)), r))
+                    if(rParseProto(pack.route("reduce.proto." + std::to_string(i)), r))
                     {
-                        break;
+                        t.protos.push_back(r);
                     }
-                    out.push_back(r);
                 }
-                return cache.emplace(&pack, std::move(out)).first->second;
-            }
-
-            int64_t rWaves(RProblem const& p, RKnobs const& k)
-            {
-                return rGridX(p, k) * k.split * k.block / kWave;
+                return cache.emplace(&pack, std::move(t)).first->second;
             }
 
             // The tuned reduction candidates of a problem: its tuned route (table problems), else
-            // up to kRreduceCandidates class launches of the untuned choice. Every program falls
-            // back to the generic no-split program when a buffer misses the alignment of its vector
-            // accesses.
+            // up to kRreduceCandidates class launches of the untuned choice. A split whose
+            // partial results exceed the workspace limit is lowered to the largest power of two
+            // that fits (no split when the limit is zero). Every program falls back to the
+            // generic no-split program when a buffer misses the alignment of its vector accesses.
             hiptensorStatus_t enumerateTunedReduction(Problem const&          problem,
                                                       Pack const&             pack,
                                                       uint64_t                workspaceLimit,
@@ -3086,7 +2618,8 @@ namespace hiptensor
                           return true;
                       };
 
-                // 1. rocKE's reduction route table (problems with opA IDENTITY)
+                // 1. rocKE's reduction route table (problems with opA IDENTITY): the tuned knobs,
+                // the split lowered to the workspace limit
                 if(!una)
                 {
                     auto const key = rKey(p);
@@ -3097,6 +2630,7 @@ namespace hiptensor
                     RKnobs            k;
                     if(pack.route(route + ".key") == key && rParseRecord(pack.route(route), k))
                     {
+                        k.split = rCapSplit(p, k.split, workspaceLimit);
                         Candidate c;
                         if(make(k, true, nullptr, c))
                         {
@@ -3107,175 +2641,21 @@ namespace hiptensor
                     }
                 }
 
-                // 2. the untuned choice (rreduce_host.untuned_choices): the prototypes of the
-                // problem's mode and element size nearest to it (same MAX / MIN class first, then
-                // by feature distance, then pack order), each with its knobs, the pack class that
-                // runs them (the fewest reduced slots the problem allows, 32-bit offsets when they
-                // fit) and the smallest power-of-two split that reaches its wave count (scaled to
-                // the device's compute units)
-                bool const row = rRow(p);
-                bool const mm  = p.op == "max" || p.op == "min";
-                if((row && p.red.empty()) || (!row && p.kept.empty()))
+                // 2. the untuned choice (rocke_rreduce_rule.hpp untunedChoices, rocKE's
+                // rreduce_host.untuned_choices), the first preferred
+                auto const&  tables = rTables(pack);
+                size_t const first  = out.size();
+                for(auto const& choice : untunedChoices(
+                        p, tables.classes, tables.protos, una, cus, streaming, workspaceLimit))
                 {
-                    // one element in all (every mode of extent 1): no class has work for it
-                    return HIPTENSOR_STATUS_SUCCESS;
-                }
-                std::vector<PackKernel const*> pool;
-                for(auto const& kernel : pack.kernels())
-                {
-                    if(kernel.family == kRreduce && kernel.attrStr("a") == p.a
-                       && kernel.attrStr("d") == p.d && kernel.attrStr("op") == p.op
-                       && (kernel.attrStr("mode") == "row") == row
-                       && (kernel.attr("una", 0) != 0) == una)
-                    {
-                        pool.push_back(&kernel);
-                    }
-                }
-                auto const&                                    protos = rProtos(pack);
-                auto const                                     f      = rFeatures(p);
-                std::vector<std::tuple<bool, int64_t, size_t>> order;
-                for(size_t i = 0; i < protos.size(); i++)
-                {
-                    if(protos[i].row == row && protos[i].eb == p.eb)
-                    {
-                        order.emplace_back(protos[i].maxmin != mm, rDistance(f, protos[i].f), i);
-                    }
-                }
-                std::sort(order.begin(), order.end());
-                std::set<std::pair<std::string, int64_t>> seen;
-                size_t                                    made = 0;
-                for(auto const& o : order)
-                {
-                    if(made == kRreduceCandidates)
-                    {
-                        break;
-                    }
-                    auto const& proto = protos[std::get<2>(o)];
-                    RKnobs      k     = proto.knobs;
-                    k.row             = row;
-                    k.split           = 1;
-                    k.nt              = k.nt && streaming;
-                    if(!rCheck(p, k, streaming).empty())
-                    {
-                        continue;
-                    }
-                    int64_t const need = rSlotCount(k.row ? rChunkDims(p, k.vec).size()
-                                                          : std::max<size_t>(1, p.red.size()));
-                    std::vector<PackKernel const*> fit;
-                    for(auto const* kernel : pool)
-                    {
-                        if(kernel->attr("block", 0) == k.block && kernel->attr("vec", 0) == k.vec
-                           && kernel->attr("lanes", 0) == k.lanes
-                           && kernel->attr("unroll", 0) == k.unroll
-                           && kernel->attr("rows", 0) == k.rows
-                           && (kernel->attr("nt", 0) != 0) == k.nt && need > 0
-                           && kernel->attr("nr", 0) >= need)
-                        {
-                            fit.push_back(kernel);
-                        }
-                    }
-                    if(fit.empty())
-                    {
-                        continue;
-                    }
-                    int64_t const target = proto.waves * cus / proto.cus;
-                    while(rWaves(p, k) < target)
-                    {
-                        RKnobs next = k;
-                        next.split  = k.split * 2;
-                        if(!rCheck(p, next, streaming).empty())
-                        {
-                            break;
-                        }
-                        k = next;
-                    }
-                    bool const        need64 = rIdx64(p, k);
-                    PackKernel const* kernel = nullptr;
-                    for(auto const* x : fit)
-                    {
-                        bool const wide = x->attr("idx64", 0) != 0;
-                        if(need64 && !wide)
-                        {
-                            continue;
-                        }
-                        if(kernel == nullptr
-                           || std::make_pair(x->attr("nr", 0), wide) < std::make_pair(
-                                  kernel->attr("nr", 0), kernel->attr("idx64", 0) != 0))
-                        {
-                            kernel = x;
-                        }
-                    }
-                    if(kernel == nullptr || !seen.emplace(kernel->name, k.split).second)
-                    {
-                        continue;
-                    }
                     Candidate c;
-                    if(!make(k, false, kernel, c))
+                    if(!make(choice.knobs, false, tables.kernels[choice.cls], c))
                     {
                         continue;
                     }
-                    c.preferred  = made == 0;
+                    c.preferred  = out.size() == first;
                     c.staticRank = static_cast<int>(out.size());
                     out.push_back(std::move(c));
-                    made++;
-                }
-                if(made == 0)
-                {
-                    // no prototype's knobs run the problem: the universal knobs of the mode (one
-                    // thread per output or per kept element, scalar loads), which run every
-                    // problem (rreduce_host.UNIVERSAL_KNOBS / UNIVERSAL_WAVES)
-                    int64_t const* u = row ? kRreduceUniversalRow : kRreduceUniversalCol;
-                    RKnobs         k;
-                    k.row              = row;
-                    k.block            = u[0];
-                    k.vec              = u[1];
-                    k.lanes            = u[2];
-                    k.unroll           = u[3];
-                    k.rows             = row ? 0 : u[4];
-                    k.split            = 1;
-                    k.nt               = streaming;
-                    int64_t const need = rSlotCount(k.row ? rChunkDims(p, k.vec).size()
-                                                          : std::max<size_t>(1, p.red.size()));
-                    if(need > 0 && rCheck(p, k, streaming).empty())
-                    {
-                        int64_t const target = kRreduceUniversalWaves * cus / 256;
-                        while(rWaves(p, k) < target)
-                        {
-                            RKnobs next = k;
-                            next.split  = k.split * 2;
-                            if(!rCheck(p, next, streaming).empty())
-                            {
-                                break;
-                            }
-                            k = next;
-                        }
-                        bool const        need64 = rIdx64(p, k);
-                        PackKernel const* kernel = nullptr;
-                        for(auto const* x : pool)
-                        {
-                            bool const wide = x->attr("idx64", 0) != 0;
-                            if(x->attr("block", 0) != k.block || x->attr("vec", 0) != k.vec
-                               || x->attr("lanes", 0) != k.lanes || x->attr("unroll", 0) != k.unroll
-                               || x->attr("rows", 0) != k.rows || (x->attr("nt", 0) != 0) != k.nt
-                               || x->attr("nr", 0) < need || (need64 && !wide))
-                            {
-                                continue;
-                            }
-                            if(kernel == nullptr
-                               || std::make_pair(x->attr("nr", 0), wide) < std::make_pair(
-                                      kernel->attr("nr", 0), kernel->attr("idx64", 0) != 0))
-                            {
-                                kernel = x;
-                            }
-                        }
-                        Candidate c;
-                        if(kernel != nullptr && make(k, false, kernel, c))
-                        {
-                            c.preferred  = true;
-                            c.staticRank = static_cast<int>(out.size());
-                            out.push_back(std::move(c));
-                        }
-                    }
                 }
                 return HIPTENSOR_STATUS_SUCCESS;
             }
@@ -6197,7 +5577,8 @@ namespace hiptensor
                     candidate.facts           = facts;
                     candidate.facts.selectTag = routes.tag;
                     candidate.staticRank      = static_cast<int>(out.size());
-                    candidate.tuned           = facts.route == Route::TunedGett;
+                    candidate.tuned
+                        = facts.route == Route::TunedGett || facts.route == Route::JitGett;
                     out.push_back(std::move(candidate));
                 };
 
@@ -6249,9 +5630,73 @@ namespace hiptensor
                     }
                 }
 
+#ifdef HIPTENSOR_ENABLE_ROCKE_JIT
+                // a problem the route tables do not hold: the route rocKE's tensor GETT planner
+                // chooses, built at plan creation (HIPTENSOR_JIT_MODE_DEFAULT). The direct GETT
+                // is its fallback for zero scales (the GETT epilogue reads every term), buffers
+                // not aligned to its 16-byte accesses and another device than the plan's (the
+                // JIT kernels are loaded there only); without one it is not a candidate.
+                if(options.jitGett && !f64Only && !options.disableTuned
+                   && (out.empty() || !out.back().tuned))
+                {
+                    std::shared_ptr<GettJitPlan const> jit;
+                    GettJitPlanInfo                    info;
+                    std::string                        why;
+                    Program                            fallback;
+                    CandidateFacts                     fbFacts;
+                    std::string                        fbWhy;
+                    if(!planGettJit(problem, pack, workspaceLimit, jit, info, why))
+                    {
+                        note("GETT JIT: " + why);
+                    }
+                    else if(planDgett(problem, pack, c, fallback, fbFacts, fbWhy)
+                            != HIPTENSOR_STATUS_SUCCESS)
+                    {
+                        note("GETT JIT: no direct GETT fallback: " + fbWhy);
+                    }
+                    else
+                    {
+                        contractionChecks(problem, fallback);
+                        Program program;
+                        program.pack           = &pack;
+                        program.pending        = true;
+                        program.deviceBound    = true;
+                        program.scalarType     = HIPTENSOR_R_32F;
+                        program.workspaceBytes = alignUp(info.workspaceBytes, kWorkspaceAlign);
+                        program.description    = "jit-gett:" + info.route + ":" + info.kernel;
+                        program.fallback       = std::make_shared<Program>(std::move(fallback));
+                        program.fallbackOnZero = {ScalarRole::Alpha};
+                        program.fallbackAlign
+                            = {{BufferRole::A, 16u}, {BufferRole::B, 16u}, {BufferRole::Out, 16u}};
+                        if(C.present)
+                        {
+                            program.fallbackOnZero.push_back(ScalarRole::Beta);
+                            program.fallbackAlign.emplace_back(BufferRole::C, 16u);
+                        }
+                        if(program.workspaceBytes > 0)
+                        {
+                            program.fallbackAlign.emplace_back(BufferRole::Workspace, 16u);
+                        }
+                        auto facts         = contractionFacts(problem, c, cplx);
+                        facts.route        = Route::JitGett;
+                        facts.tileM        = info.tileM;
+                        facts.tileN        = info.tileN;
+                        facts.tileK        = info.tileK;
+                        facts.block        = info.block;
+                        facts.ctas         = info.ctas;
+                        facts.paddedVolume = facts.M * facts.N * facts.K * facts.L;
+                        facts.launches     = info.launches;
+                        facts.gettKind     = info.kind;
+                        facts.predictedNs  = info.predictedNs;
+                        add("jit:" + info.kernel, std::move(program), facts);
+                        out.back().jitGett = std::move(jit);
+                    }
+                }
+#endif
+
                 // rocKE's ring GETT body with runtime index maps: the operands read and D
-                // written in place, ahead of the routes the selection models rank (f32
-                // accumulation: not under the f64 recipe)
+                // written in place, preferred when the cell's selection model does not score it
+                // (f32 accumulation: not under the f64 recipe)
                 if(!f64Only)
                 {
                     // the pack-hybrid form first (the operands with short runs packed), then the
@@ -6673,13 +6118,16 @@ namespace hiptensor
 
                 std::vector<Candidate> c1, c2;
                 std::string            why;
-                if(auto status = enumerateContraction(first, pack, options, subLimit, c1, why);
+                // the steps take the pack's kernels (no JIT route)
+                CandidateOptions stepOptions = options;
+                stepOptions.jitGett          = false;
+                if(auto status = enumerateContraction(first, pack, stepOptions, subLimit, c1, why);
                    status != HIPTENSOR_STATUS_SUCCESS)
                 {
                     reason = "step 1 (T = A * B) of the trinary contraction: " + why;
                     return status;
                 }
-                if(auto status = enumerateContraction(second, pack, options, subLimit, c2, why);
+                if(auto status = enumerateContraction(second, pack, stepOptions, subLimit, c2, why);
                    status != HIPTENSOR_STATUS_SUCCESS)
                 {
                     reason = "step 2 (E = alpha * T * C + beta * D) of the trinary contraction: "
@@ -6772,14 +6220,26 @@ namespace hiptensor
                     return status;
                 }
                 candidate.key = "ew:" + candidate.program.description;
-                // the tiled kernel first when an input is fastest along another mode than the
-                // output (the generic program is its fallback)
-                Candidate   tiled;
                 std::string why;
+                // the flat kernel first when every tensor is one contiguous run in the same order
+                // (not with HIPTENSOR_ROCKE_DISABLE_TUNED)
+                Candidate flat;
+                if(!options.disableTuned
+                   && planEwf(layout, pack, candidate.program, flat.program, flat.facts, why)
+                          == HIPTENSOR_STATUS_SUCCESS)
+                {
+                    flat.key        = "ewf:" + flat.program.description;
+                    flat.staticRank = static_cast<int>(out.size());
+                    out.push_back(std::move(flat));
+                }
+                // the tiled kernel when an input is fastest along another mode than the output
+                // (the generic program is its fallback)
+                Candidate tiled;
                 if(planEwt(layout, pack, candidate.program, tiled.program, tiled.facts, why)
                    == HIPTENSOR_STATUS_SUCCESS)
                 {
-                    tiled.key = "ewt:" + tiled.program.description;
+                    tiled.key        = "ewt:" + tiled.program.description;
+                    tiled.staticRank = static_cast<int>(out.size());
                     out.push_back(std::move(tiled));
                 }
                 // then the vector class of the generic kernel when an input is read with vector
@@ -6802,10 +6262,14 @@ namespace hiptensor
                 // the classes of the nearest measured prototypes), then the generic kernels: the
                 // rule's mode and split first, then fewer and more partial ranges, then the
                 // other mode. Two choices that plan the same launches are one candidate.
-                if(auto status = enumerateTunedReduction(problem, pack, workspaceLimit, out);
-                   status != HIPTENSOR_STATUS_SUCCESS)
+                // HIPTENSOR_ROCKE_DISABLE_TUNED: the generic kernels only.
+                if(!options.disableTuned)
                 {
-                    return status;
+                    if(auto status = enumerateTunedReduction(problem, pack, workspaceLimit, out);
+                       status != HIPTENSOR_STATUS_SUCCESS)
+                    {
+                        return status;
+                    }
                 }
                 struct Choice
                 {
@@ -6879,14 +6343,93 @@ namespace hiptensor
             }
         }
 
+        hiptensorStatus_t buildJitCandidate(Candidate&                candidate,
+                                            backend::DeviceKey const& device,
+                                            double                    budgetMs,
+                                            double&                   spentMs,
+                                            std::string&              note,
+                                            std::string&              reason)
+        {
+            auto& program = candidate.program;
+            if(!program.pending)
+            {
+                return HIPTENSOR_STATUS_SUCCESS;
+            }
+#ifdef HIPTENSOR_ENABLE_ROCKE_JIT
+            if(candidate.jitGett != nullptr)
+            {
+                GettJitReport report;
+                Program       built = program;
+                built.steps.clear();
+                // the budget left (a remainder of 0 still serves cache hits, compiles nothing)
+                double const left = budgetMs <= 0.0 ? 0.0 : std::max(budgetMs - spentMs, 1e-9);
+                auto const   t0   = std::chrono::steady_clock::now();
+                bool const   ok
+                    = buildGettJitProgram(*candidate.jitGett, device, left, built, report, reason);
+                spentMs += std::chrono::duration<double, std::milli>(
+                               std::chrono::steady_clock::now() - t0)
+                               .count();
+                if(!ok)
+                {
+                    note = "rocKE GETT JIT: " + candidate.key + " not built: " + reason;
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                built.pending = false;
+                if(hipGetDevice(&built.device) != hipSuccess)
+                {
+                    reason = "hipGetDevice failed";
+                    return HIPTENSOR_STATUS_HIP_ERROR;
+                }
+                if(built.fallback != nullptr)
+                {
+                    if(auto status = loadFunctions(*built.fallback);
+                       status != HIPTENSOR_STATUS_SUCCESS)
+                    {
+                        reason = "the fallback's kernels do not load";
+                        return status;
+                    }
+                }
+                program              = std::move(built);
+                candidate.facts.main = program.steps.back().kernel;
+                char msg[256];
+                snprintf(msg,
+                         sizeof(msg),
+                         "rocKE GETT JIT: %d kernels (compiled %d, kernel cache hits %d, of which "
+                         "from a file %d) in %.3f ms",
+                         report.kernels,
+                         report.compiled,
+                         report.memoryHits,
+                         report.fileHits,
+                         report.milliseconds);
+                note = msg;
+                return HIPTENSOR_STATUS_SUCCESS;
+            }
+#else
+            static_cast<void>(device);
+            static_cast<void>(budgetMs);
+            static_cast<void>(spentMs);
+            static_cast<void>(note);
+#endif
+            reason = "the candidate has no launches";
+            return HIPTENSOR_STATUS_NOT_SUPPORTED;
+        }
+
         hiptensorStatus_t loadFunctions(Program& program)
         {
+            if(program.pending)
+            {
+                return HIPTENSOR_STATUS_INTERNAL_ERROR;
+            }
             if(hipGetDevice(&program.device) != hipSuccess)
             {
                 return HIPTENSOR_STATUS_HIP_ERROR;
             }
             for(auto& step : program.steps)
             {
+                if(step.deviceBound && step.function != nullptr)
+                {
+                    continue; // a JIT kernel, loaded when it was built
+                }
                 if(auto status = program.pack->function(*step.kernel, step.function);
                    status != HIPTENSOR_STATUS_SUCCESS)
                 {

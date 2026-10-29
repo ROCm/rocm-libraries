@@ -27,8 +27,11 @@
 """Problem corpus of the rocKE selection training sweep.
 
 Space-filling design (scrambled Halton over the log2 extents of the GEMM view) per data-type row,
-with random mode splits and random storage orders; a refinement round adds jittered neighbours of
-problems where the selector lost (refine).
+with random mode splits and random storage orders; --aligned makes a share of the problems' extents
+multiples of 8 (the GEMM bodies' K tiles divide them, so rocKE's tensor GETT planner serves more of
+them), --padded pads a share of the tensors' strides. A refinement round adds jittered neighbours of
+problems where the selector lost (refine); `pick` writes the lines of chosen problem ids (the
+problems train_select.py propose chose from a pool).
 
 Spec lines (one problem each, read by sweep_driver.cpp):
   C <id> <dtype> <compute> <bilinear> <nA> <nB> <nD> modesA.. extA.. strA.. modesB.. extB.. strB..
@@ -37,8 +40,10 @@ Spec lines (one problem each, read by sweep_driver.cpp):
 
 usage:
   gen_corpus.py contraction --seed S --per-row N --out FILE [--rows h16f,h16b,s,c,d,z]
+                            [--aligned 0.6] [--padded 0.15] [--first-id I]
   gen_corpus.py reduction   --seed S --per-row N --out FILE
   gen_corpus.py refine      --from SPECS --worst IDS --seed S --per 3 --out FILE
+  gen_corpus.py pick        --from SPECS --worst IDS --out FILE
 """
 
 import argparse
@@ -103,15 +108,27 @@ def round_extent(v, rng):
     return max(1, int(round(v)))
 
 
-def packed_strides(modes, ext, rng):
+def packed_strides(modes, ext, rng, pad=0.0):
+    """Strides of a random storage order; with probability `pad` the second and later
+    dimensions start a few elements further than packed (padded strides)."""
     order = list(range(len(modes)))
     rng.shuffle(order)
+    padded = len(modes) > 1 and rng.random() < pad
     strides = [0] * len(modes)
     s = 1
     for j in order:
         strides[j] = s
         s *= ext[modes[j]]
+        if padded:
+            s += rng.choice((1, 3, 8, 16))
     return strides
+
+
+def align8(v, rng):
+    """v rounded to a multiple of 8 (small extents kept)."""
+    if v < 8:
+        return v
+    return max(8, int(round(v / 8)) * 8)
 
 
 def tensor_fields(modes, ext, strides):
@@ -122,7 +139,7 @@ def tensor_fields(modes, ext, strides):
     )
 
 
-def contraction_spec(pid, row, lgm, lgn, lgk, rng):
+def contraction_spec(pid, row, lgm, lgn, lgk, rng, aligned=0.0, padded=0.0):
     dtype, compute, es, cap, (lo, hi) = CROWS[row]
     M = round_extent(2**lgm, rng)
     N = round_extent(2**lgn, rng)
@@ -145,6 +162,8 @@ def contraction_spec(pid, row, lgm, lgn, lgk, rng):
         split_extent(N, nn, rng),
         split_extent(K, nk, rng),
     )
+    if rng.random() < aligned:
+        em, en, ek = ([align8(e, rng) for e in g] for g in (em, en, ek))
     ext = {}
     mm, mn, mk = [], [], []
     code = 1
@@ -159,9 +178,9 @@ def contraction_spec(pid, row, lgm, lgn, lgk, rng):
     for x in (ma, mb, md):
         rng.shuffle(x)
     bil = 1 if rng.random() < 0.5 else 0
-    sa = packed_strides(ma, ext, rng)
-    sb = packed_strides(mb, ext, rng)
-    sd = packed_strides(md, ext, rng)
+    sa = packed_strides(ma, ext, rng, padded)
+    sb = packed_strides(mb, ext, rng, padded)
+    sd = packed_strides(md, ext, rng, padded)
     f = [
         "C",
         str(pid),
@@ -208,7 +227,7 @@ def reduction_spec(pid, row, lgtotal, frac_kept, rng):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("kind", choices=("contraction", "reduction", "refine"))
+    ap.add_argument("kind", choices=("contraction", "reduction", "refine", "pick"))
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--per-row", type=int, default=100)
     ap.add_argument("--rows", default="")
@@ -216,6 +235,8 @@ def main():
     ap.add_argument("--from", dest="src", default="")
     ap.add_argument("--worst", default="")
     ap.add_argument("--per", type=int, default=3)
+    ap.add_argument("--aligned", type=float, default=0.0)
+    ap.add_argument("--padded", type=float, default=0.0)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     rng = random.Random(a.seed)
@@ -229,7 +250,9 @@ def main():
             for i in range(a.per_row):
                 u = [(halton(i + 1, PRIMES[d]) + shift[d]) % 1.0 for d in range(3)]
                 lg = [lo + (hi - lo) * x for x in u]
-                lines.append(contraction_spec(pid, row, *lg, rng))
+                lines.append(
+                    contraction_spec(pid, row, *lg, rng, a.aligned, a.padded)
+                )
                 pid += 1
     elif a.kind == "reduction":
         rows = a.rows.split(",") if a.rows else list(RROWS)
@@ -239,6 +262,13 @@ def main():
                 u = [(halton(i + 1, PRIMES[d]) + shift[d]) % 1.0 for d in range(2)]
                 lines.append(reduction_spec(pid, row, 8 + 18 * u[0], u[1], rng))
                 pid += 1
+    elif a.kind == "pick":
+        chosen = set(int(x) for x in open(a.worst).read().split())
+        for line in open(a.src):
+            f = line.split()
+            if f and int(f[1]) in chosen:
+                lines.append(line.strip())
+        pid = a.first_id + len(lines)
     else:
         # jittered neighbours of the worst problems: every extent scaled by 2^U(-0.5, 0.5),
         # storage orders redrawn

@@ -41,6 +41,7 @@
 #include "data_types.hpp"
 #include "logger.hpp"
 #include "rocke_backend.hpp"
+#include "rocke_rreduce_rule.hpp"
 #include "rocke_runtime.hpp"
 
 namespace hiptensor
@@ -449,6 +450,11 @@ namespace hiptensor
                     return bad("bad route record");
                 }
                 pack->mRoutes[key] = value;
+            }
+            // the tuned reduction routes: a malformed record would silently change the choice
+            if(auto const why = rrule::rCheckRoutes(pack->mRoutes); !why.empty())
+            {
+                return bad("reduction routes: " + why);
             }
             pack->mKernels.resize(kernelCount);
             for(uint32_t i = 0; i < kernelCount; i++)
@@ -871,6 +877,10 @@ namespace hiptensor
                                      uint64_t                workspaceSize,
                                      hipStream_t             stream)
         {
+            if(program.pending)
+            {
+                return HIPTENSOR_STATUS_INTERNAL_ERROR;
+            }
             void const* const scalarPtrs[] = {scalars.alpha, scalars.beta, scalars.gamma};
             for(auto s : program.requiredScalars)
             {
@@ -891,6 +901,21 @@ namespace hiptensor
                 {1.0, 0.0},
                 {0.0, 0.0},
             };
+            int device = 0;
+            if(hipGetDevice(&device) != hipSuccess)
+            {
+                return HIPTENSOR_STATUS_HIP_ERROR;
+            }
+            if(program.deviceBound && device != program.device)
+            {
+                // the JIT kernels were loaded on the device of the plan only
+                if(program.fallback == nullptr)
+                {
+                    return HIPTENSOR_STATUS_ARCH_MISMATCH;
+                }
+                return runProgram(
+                    *program.fallback, scalars, buffers, workspace, workspaceSize, stream);
+            }
             if(program.fallback != nullptr)
             {
                 bool use = false;
@@ -939,11 +964,6 @@ namespace hiptensor
                 return HIPTENSOR_STATUS_SUCCESS;
             };
 
-            int device = 0;
-            if(hipGetDevice(&device) != hipSuccess)
-            {
-                return HIPTENSOR_STATUS_HIP_ERROR;
-            }
             for(size_t index = 0; index < program.steps.size(); index++)
             {
                 if(auto status = memsetsBefore(index); status != HIPTENSOR_STATUS_SUCCESS)

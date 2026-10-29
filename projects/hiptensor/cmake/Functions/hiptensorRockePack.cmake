@@ -36,8 +36,10 @@
 # pack build nor the library runs Python. (rocKE's tests check that the packs equal the ones
 # rocKE's Python engine writes for the same sources; that check is rocKE's, not this build's.)
 #
-# The JIT (HIPTENSOR_ENABLE_ROCKE_JIT) needs nothing from the pack directory but the packs: it
-# builds its kernels with rocKE's C++ kernel builders linked into the library.
+# The JIT (HIPTENSOR_ENABLE_ROCKE_JIT) builds its kernels with rocKE's C++ kernel builders linked
+# into the library. Its contraction route (rocKE's tensor GETT planner) also reads the GEMM
+# selection models the pack build writes next to the packs of the targets that planner serves
+# (<target>/gemm_models: rocKE's model text files and an index of their SHA-256 digests).
 
 set(HIPTENSOR_ROCKE_SUPPORTED_TARGETS gfx90a gfx942 gfx950)
 
@@ -180,8 +182,21 @@ function(hiptensor_add_rocke_pack LIBRARY_TARGET)
     endforeach()
 
     if(HIPTENSOR_ROCKE_PACK_DIR)
-        # Prebuilt packs: copied into the build tree
+        # Prebuilt packs: copied into the build tree (with the GEMM selection models of the
+        # contraction JIT where the prebuilt tree has them)
         foreach(target IN LISTS pack_targets)
+            if(IS_DIRECTORY "${HIPTENSOR_ROCKE_PACK_DIR}/${target}/gemm_models")
+                file(GLOB prebuilt_models "${HIPTENSOR_ROCKE_PACK_DIR}/${target}/gemm_models/*")
+                add_custom_command(
+                    OUTPUT "${pack_root}/${target}/gemm_models/index.txt"
+                    COMMAND ${CMAKE_COMMAND} -E copy_directory
+                            "${HIPTENSOR_ROCKE_PACK_DIR}/${target}/gemm_models"
+                            "${pack_root}/${target}/gemm_models"
+                    DEPENDS ${prebuilt_models}
+                    COMMENT "Copying the prebuilt GEMM selection models for ${target}"
+                    VERBATIM)
+                list(APPEND pack_outputs "${pack_root}/${target}/gemm_models/index.txt")
+            endif()
             add_custom_command(
                 OUTPUT "${pack_root}/${target}/rocke.htpk" "${pack_root}/${target}/rocke.index.json"
                 COMMAND ${CMAKE_COMMAND} -E make_directory "${pack_root}/${target}"
@@ -229,6 +244,21 @@ function(hiptensor_add_rocke_pack LIBRARY_TARGET)
         # The kernel selection models (<dir>/<target>/<cell>.model) go into the packs' route
         # tables; a target without models selects by rocKE's static rules.
         file(GLOB_RECURSE select_models "${HIPTENSOR_ROCKE_SELECT_MODEL_DIR}/*.model")
+        # With the JIT: the GEMM selection models of rocKE's tensor GETT planner (data files of
+        # rocKE's Python package tree, only read) go next to each pack the planner serves
+        # (<target>/gemm_models, the contraction JIT's input; see rocke_gett_jit.hpp)
+        set(gemm_model_args)
+        set(gemm_models)
+        if(HIPTENSOR_ENABLE_ROCKE_JIT)
+            set(gemm_model_dir
+                "${HIPTENSOR_ROCKE_SOURCE_DIR}/platform/python/rocke/dispatch/gemm/selector_models")
+            if(NOT IS_DIRECTORY "${gemm_model_dir}")
+                message(FATAL_ERROR "HIPTENSOR_ENABLE_ROCKE_JIT: the rocKE tree has no GEMM "
+                                    "selection models (${gemm_model_dir})")
+            endif()
+            file(GLOB gemm_models "${gemm_model_dir}/*")
+            set(gemm_model_args --gemm-models "${gemm_model_dir}")
+        endif()
         add_custom_command(
             OUTPUT ${pack_outputs}
             COMMAND hiptensor_rocke_pack_builder
@@ -236,8 +266,9 @@ function(hiptensor_add_rocke_pack LIBRARY_TARGET)
                     --out "${pack_root}"
                     --cache-dir "${PROJECT_BINARY_DIR}/rocke_pack_cache"
                     --select-models "${HIPTENSOR_ROCKE_SELECT_MODEL_DIR}"
+                    ${gemm_model_args}
                     ${jobs_args}
-            DEPENDS hiptensor_rocke_pack_builder ${select_models}
+            DEPENDS hiptensor_rocke_pack_builder ${select_models} ${gemm_models}
             COMMENT "Building the rocKE kernel packs (${pack_targets})"
             VERBATIM)
         message(STATUS "rocKE packs: built from ${HIPTENSOR_ROCKE_SOURCE_DIR} (${pack_targets})")
@@ -257,6 +288,10 @@ function(hiptensor_add_rocke_pack LIBRARY_TARGET)
     foreach(target IN LISTS pack_targets)
         install(FILES "${pack_root}/${target}/rocke.htpk" "${pack_root}/${target}/rocke.index.json"
                 DESTINATION "${install_dir}/${target}")
+        # the contraction JIT's GEMM selection models (targets of rocKE's tensor GETT planner)
+        install(DIRECTORY "${pack_root}/${target}/gemm_models"
+                DESTINATION "${install_dir}/${target}"
+                OPTIONAL)
     endforeach()
 endfunction()
 

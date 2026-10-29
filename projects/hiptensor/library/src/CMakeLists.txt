@@ -206,6 +206,7 @@ if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
         list(APPEND HIPTENSOR_CORE_SOURCES
             ${CMAKE_CURRENT_SOURCE_DIR}/backends/rocke/rocke_codeobject.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/backends/rocke/rocke_comgr.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/backends/rocke/rocke_gett_jit.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/backends/rocke/rocke_jit.cpp
         )
     endif()

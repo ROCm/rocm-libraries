@@ -56,6 +56,10 @@ Kernel families (attribute "family"):
     ewt      the tiled elementwise kernel of permutations and elementwise operations whose inputs
              are fastest along another mode than the output (an LDS tile per transposed input,
              16-byte vectors on both sides; kernels.common.hiptensor_aot.ewt)
+    ewf      the flat elementwise kernel of operations whose tensors are all contiguous with the
+             same layout (no index arithmetic, two 16-byte vectors per thread, streaming
+             accesses; kernels.common.hiptensor_aot.ewf), for the all-16-bit rows on gfx942 and
+             gfx950
 
 The backend's JIT (HIPTENSOR_ENABLE_ROCKE_JIT) needs nothing from this script: hipTensor builds
 the problem-specialized kernels (kernels.common.hiptensor_aot.jit_ew) at run time with their C++
@@ -331,6 +335,14 @@ def rocke_features():
     except (ImportError, AttributeError) as e:
         out["jit"] = f"no vector classes of the elementwise kernel ({e})"
     try:
+        from kernels.common.hiptensor_aot import ewf
+
+        for name in ("EwfSpec", "build_ewf", "ewf_classes", "EWF_ABI"):
+            getattr(ewf, name)
+        out["ewf"] = ""
+    except (ImportError, AttributeError) as e:
+        out["ewf"] = f"no flat elementwise kernel ({e})"
+    try:
         from kernels.common.hiptensor_aot import rreduce, rreduce_host
 
         for name in (
@@ -419,6 +431,15 @@ def kernel_descriptors(arch, num_cus):
                     out.append(
                         ("ewv", dict(base=dict(p), vec=c.vec, unit=tuple(c.unit)))
                     )
+    if not features["ewf"]:
+        # the flat classes of the same rows (streaming targets)
+        from dataclasses import asdict
+
+        from kernels.common.hiptensor_aot.ewf import ewf_classes
+
+        out.extend(
+            ("ewf", asdict(c)) for c in ewf_classes(ew_params(False, mixed=False), arch)
+        )
     if arch in GEMM_ARCHES and not features["gemm"]:
         for route, bodies in GEMM_BODIES.items():
             dts = ("fp16", "bf16") if route == "h16" else ("bf16",)
@@ -918,6 +939,30 @@ def build_kernel(family, params, arch, num_cus):
             limit_index=(1 << 31) - 1,
         )
         return build_ew_jit(spec, None), attrs
+    if family == "ewf":
+        from kernels.common.hiptensor_aot.ewf import (
+            EWF_ABI,
+            EWF_UNROLL,
+            EwfSpec,
+            build_ewf,
+        )
+
+        spec = EwfSpec(**params)
+        attrs = dict(
+            family="ewf",
+            abi=EWF_ABI,
+            arity=spec.arity,
+            a=spec.a,
+            b=spec.b or "",
+            c=spec.c or "",
+            d=spec.d,
+            block=spec.block,
+            vec=spec.vec,
+            unroll=EWF_UNROLL,
+            nt=int(spec.nt),
+            limit_index=(1 << 31) - 1,
+        )
+        return build_ewf(spec), attrs
     if family == "ewt":
         from kernels.common.hiptensor_aot import ewt as et
 
@@ -1547,7 +1592,11 @@ def select_models(model_dir, arch):
             continue
         with open(os.path.join(d, fn), encoding="ascii") as f:
             text = f.read().strip()
-        if not text.startswith("v1;schema=") or "\n" in text or "\0" in text:
+        if (
+            not text.startswith(("v1;schema=", "v2;schema="))
+            or "\n" in text
+            or "\0" in text
+        ):
             raise SystemExit(
                 f"rocKE pack: {os.path.join(d, fn)} is not a selection model"
             )

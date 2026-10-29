@@ -13,6 +13,7 @@
  *                                           rocke_build_htaot_rreduce_final
  *   jit_ew.EwJitSpec / build_ew_jit         rocke_htaot_ew_jit_spec_t / rocke_build_htaot_ew_jit
  *   ewt.EwtSpec / build_ewt                 rocke_htaot_ewt_spec_t / rocke_build_htaot_ewt
+ *   ewf.EwfSpec / build_ewf                 rocke_htaot_ewf_spec_t / rocke_build_htaot_ewf
  *
  * Every builder makes the same builder calls in the same order as its Python
  * twin, so both engines lower every kernel to the same LLVM IR (enforced by the
@@ -39,7 +40,7 @@
 extern "C" {
 #endif
 
-/* Kernel ABI names (Python EW_ABI, REDUCE_ABI, EW_JIT_ABI, EWV_ABI, EWT_ABI). */
+/* Kernel ABI names (Python EW_ABI, REDUCE_ABI, EW_JIT_ABI, EWV_ABI, EWT_ABI; EWF_ABI below). */
 #define ROCKE_HTAOT_EW_ABI "hiptensor-aot-ew/v1"
 #define ROCKE_HTAOT_REDUCE_ABI "hiptensor-aot-reduce/v1"
 #define ROCKE_HTAOT_EW_JIT_ABI "hiptensor-jit-ew/v1"
@@ -224,6 +225,32 @@ typedef struct rocke_htaot_ewt_spec
 rocke_status_t rocke_htaot_ewt_kernel_name(const rocke_htaot_ewt_spec_t* s, char* out, size_t cap);
 int rocke_htaot_ewt_tile_t(const rocke_htaot_ewt_spec_t* s);
 rocke_kernel_def_t* rocke_build_htaot_ewt(rocke_ir_builder_t* b, const rocke_htaot_ewt_spec_t* s);
+
+/* ----------------------------------------------------------------- ewf */
+
+/* Python ewf.EWF_ABI / EWF_UNROLL (vectors per thread). */
+#define ROCKE_HTAOT_EWF_ABI "hiptensor-aot-ewf/v1"
+#define ROCKE_HTAOT_EWF_UNROLL 2
+
+/* Python ewf.EwfSpec (frozen dataclass; defaults block 256, nt false): the flat kernel of
+ * tensors that are all contiguous with the same layout. */
+typedef struct rocke_htaot_ewf_spec
+{
+    int arity;
+    const char* a;
+    const char* d;
+    const char* b;
+    const char* c;
+    int block;
+    bool nt; /* streaming vector loads / stores (gfx942 / gfx950) */
+} rocke_htaot_ewf_spec_t;
+
+rocke_htaot_ewf_spec_t rocke_htaot_ewf_spec_default(void);
+bool rocke_htaot_ewf_check(const rocke_htaot_ewf_spec_t* s, char* reason, size_t cap);
+/* EwfSpec.vec: elements per vector (16 bytes of D). */
+int rocke_htaot_ewf_vec(const rocke_htaot_ewf_spec_t* s);
+rocke_status_t rocke_htaot_ewf_kernel_name(const rocke_htaot_ewf_spec_t* s, char* out, size_t cap);
+rocke_kernel_def_t* rocke_build_htaot_ewf(rocke_ir_builder_t* b, const rocke_htaot_ewf_spec_t* s);
 
 /* --------------------------------------------------------------- dgett */
 

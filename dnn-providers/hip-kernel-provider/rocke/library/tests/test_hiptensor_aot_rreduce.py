@@ -389,3 +389,193 @@ def test_rreduce_forced_idx64():
             Dd.fill_(float("nan"))
             _launch(p64, Ad, Dd, Dd, 1.0, 0.0, C.OP_IDENTITY, C.OP_IDENTITY)
             assert torch.equal(Dd.cpu().double(), ref), k
+
+
+# The operators of the una classes and of opC that are not exact, with hipTensor's bounds in ulp
+# of the compute type (f32 compute, f64 compute; the programmer's guide's table).
+_OP_BOUND = {
+    C.OP_SQRT: (0.5, 0.5),
+    C.OP_RCP: (0.5, 0.5),
+    C.OP_EXP: (1.0, 1.0),
+    C.OP_LOG: (2.25, 1.0),
+    C.OP_TANH: (2.0, 1.0),
+    C.OP_SIGMOID: (3.0, 2.0),
+}
+_SPECIAL = (float("nan"), math.inf, -math.inf, 0.0, -0.0, -1.0)
+
+
+def _op_ref(code, x):
+    """The exact result of the operator (a 60-digit Decimal) for finite arguments and results;
+    the C special values (a float) otherwise. Independent of the kernels' f32 / f64 programs.
+    """
+    import decimal
+
+    ctx = decimal.Context(prec=60)
+    if math.isnan(x):
+        return math.nan
+    if code == C.OP_SQRT:
+        if x < 0:
+            return math.nan
+        if x == 0 or math.isinf(x):
+            return x
+        return ctx.sqrt(decimal.Decimal(x))
+    if code == C.OP_RCP:
+        if x == 0:
+            return math.copysign(math.inf, x)
+        if math.isinf(x):
+            return math.copysign(0.0, x)
+        return ctx.divide(1, decimal.Decimal(x))
+    if code == C.OP_SIGMOID:
+        if math.isinf(x):
+            return 1.0 if x > 0 else 0.0
+        return ctx.divide(1, ctx.add(1, ctx.exp(decimal.Decimal(-x))))
+    if code == C.OP_TANH:
+        if math.isinf(x):
+            return math.copysign(1.0, x)
+        if x == 0:
+            return x
+        e = ctx.exp(decimal.Decimal(2 * x))
+        return ctx.divide(e - 1, e + 1)
+    if code == C.OP_EXP:
+        if math.isinf(x):
+            return math.inf if x > 0 else 0.0
+        return ctx.exp(decimal.Decimal(x))
+    assert code == C.OP_LOG
+    if x < 0:
+        return math.nan
+    if x == 0:
+        return -math.inf
+    if math.isinf(x):
+        return math.inf
+    return ctx.ln(decimal.Decimal(x))
+
+
+def _op_arg(code, rng):
+    """An argument in the operator's domain whose result keeps sums of 64 terms far from the
+    f16 range and in the compute type's normal range."""
+    x = rng.random()
+    return {
+        C.OP_SQRT: 100.0 * x,
+        C.OP_RCP: rng.choice((1.0, -1.0)) * (0.25 + 7.75 * x),
+        C.OP_SIGMOID: -30.0 + 60.0 * x,
+        C.OP_TANH: -5.0 + 10.0 * x,
+        C.OP_EXP: -4.0 + 8.0 * x,
+        C.OP_LOG: 1e-3 + 100.0 * x,
+    }[code]
+
+
+def _combine(terms, op):
+    """Sum or maximum of exact terms (Decimal) and special terms (float) with IEEE semantics:
+    NaN if a term is NaN (MAX propagates NaN) or for inf - inf, an infinity if one is there.
+    Returns (value, size): size = sum (or max) of the terms' magnitudes (finite ones).
+    """
+    import decimal
+
+    vals = [t for t in terms if not isinstance(t, decimal.Decimal)]
+    exact = [t for t in terms if isinstance(t, decimal.Decimal)]
+    if any(math.isnan(t) for t in vals):
+        return math.nan, 0
+    infs = {t for t in vals if math.isinf(t)}
+    fin = exact + [decimal.Decimal(t) for t in vals if not math.isinf(t)]
+    mags = [abs(t) for t in fin]
+    if op == "add":
+        if len(infs) == 2:
+            return math.nan, 0
+        if infs:
+            return infs.pop(), 0
+        return sum(fin, decimal.Decimal(0)), sum(mags, decimal.Decimal(0))
+    if math.inf in infs:
+        return math.inf, 0
+    if not fin:
+        return -math.inf, 0
+    return max(fin), max(mags)
+
+
+@pytest.mark.parametrize("dt", ["f32", "f64", "f16", "bf16"])
+@pytest.mark.parametrize("on", ["A", "C"])
+@pytest.mark.parametrize("op", ["add", "max"])
+@pytest.mark.parametrize("mode", ["row", "col"])
+@pytest.mark.parametrize("code", sorted(_OP_BOUND))
+def test_rreduce_unary_math_bounds(code, mode, op, on, dt):
+    """Square root, reciprocal, sigmoid, tanh, exp and log as opA (the ``una`` classes) and as
+    opC: within hipTensor's per-operator bounds (ulp of the compute type) plus the reduction's
+    and the output rounding's error, against an exact (60-digit) reference; the special arguments
+    (NaN, infinities, signed zeros, -1 outside the domains of sqrt and log, the poles of rcp and
+    log), one per output, give the C results (NaN, infinities exact)."""
+    import decimal
+
+    rng = random.Random(code * 97 + len(mode) * 7 + len(op) + (on == "C") * 3 + len(dt))
+    wave = _wave()
+    # torch layouts: the last mode is innermost (row: reduced, col: kept)
+    shape = [33, 48] if mode == "row" else [40, 64]
+    kept = [0] if mode == "row" else [1]
+    n_out, n_red = shape[kept[0]], shape[1 - kept[0]]
+    f64 = dt == "f64"
+    vals = torch.empty(shape, dtype=torch.float64)
+    cvals = torch.empty([n_out], dtype=torch.float64)
+    for o in range(n_out):
+        where = rng.randrange(n_red)
+        for r in range(n_red):
+            v = rng.choice(range(-2, 3)) if on == "C" else _op_arg(code, rng)
+            if on == "A" and o < len(_SPECIAL) and r == where:
+                v = _SPECIAL[o]
+            idx = (o, r) if mode == "row" else (r, o)
+            vals[idx] = v
+        if on == "C":
+            cvals[o] = _SPECIAL[o] if o < len(_SPECIAL) else _op_arg(code, rng)
+        else:
+            cvals[o] = rng.choice(range(-2, 3))
+    Ad = vals.to(TD[dt]).cuda()
+    Cd = cvals.to(TD[dt]).cuda()
+    A = Ad.cpu().double()  # the stored values
+    Cm = Cd.cpu().double()
+    kd, rd = _problem(shape, kept, list(Ad.stride()), list(Cd.stride()))
+    assert H.mode_of(kd, rd) == mode
+    beta = 1.0 if on == "C" else 0.0
+    opa = code if on == "A" else C.OP_IDENTITY
+    opc = code if on == "C" else C.OP_IDENTITY
+    uc = 2.0**-53 if f64 else 2.0**-24
+    ud = {"f16": 2.0**-11, "bf16": 2.0**-8, "f32": 2.0**-24, "f64": 2.0**-53}[dt]
+    floor_d = {"f16": 2.0**-24, "bf16": 2.0**-133, "f32": 2.0**-149, "f64": 5e-324}[dt]
+    bound = _OP_BOUND[code][1 if f64 else 0]
+    want, tol = [], []
+    for o in range(n_out):
+        xs = [float(A[o, r] if mode == "row" else A[r, o]) for r in range(n_red)]
+        terms = [_op_ref(code, x) if on == "A" else decimal.Decimal(x) for x in xs]
+        r_val, size = _combine(terms, op)
+        ct = _op_ref(code, float(Cm[o])) if on == "C" else decimal.Decimal(0)
+        if isinstance(r_val, float) or isinstance(ct, float):
+            w = float(r_val) + beta * float(
+                ct
+            )  # specials: IEEE in double is exact here
+            want.append(w)
+            tol.append(0.0)
+            continue
+        w = r_val + decimal.Decimal(beta) * ct
+        op_err = 2 * bound * uc * float(abs(ct) if on == "C" else size)
+        sum_err = (
+            (2 if op == "max" else n_red + 2)
+            * uc
+            * (float(size) + beta * float(abs(ct)))
+        )
+        want.append(float(w))
+        tol.append(op_err + sum_err + ud * abs(float(w)) + floor_d)
+    want_t = torch.tensor(want, dtype=torch.float64)
+    tol_t = torch.tensor(tol, dtype=torch.float64)
+    nonfinite = ~torch.isfinite(want_t)
+    assert int(nonfinite.sum()) >= 1  # the NaN argument at least
+    for k in _knob_sets(kd, rd, dt, wave, rng)[:2]:
+        p = H.plan(kd, rd, dt, dt, op, k, una=on == "A", wave=wave, arch=_arch())
+        Dd = torch.full([n_out], float("nan"), dtype=TD[dt], device="cuda")
+        _launch(p, Ad, Cd, Dd, 1.0, beta, opa, opc)
+        got = Dd.cpu().double()
+        assert torch.equal(got.isnan(), want_t.isnan()), (k, got, want_t)
+        inf = torch.isinf(want_t)
+        assert torch.equal(got[inf], want_t[inf]), (k, got[inf], want_t[inf])
+        fin = ~nonfinite
+        err = (got[fin] - want_t[fin]).abs()
+        assert bool((err <= tol_t[fin]).all()), (
+            p.spec.kernel_name(),
+            k,
+            float((err / tol_t[fin]).max()),
+        )

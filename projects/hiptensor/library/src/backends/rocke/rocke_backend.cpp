@@ -150,9 +150,30 @@ namespace hiptensor
                 return recipe;
             }
 
-            CandidateOptions candidateOptions(Pack const& pack, std::string* note = nullptr)
+            // Whether plans of `pref` take the JIT's routes (HIPTENSOR_JIT_MODE_DEFAULT in a
+            // library built with the JIT).
+            bool jitPlan(hiptensorPlanPreference const* pref)
+            {
+#ifdef HIPTENSOR_ENABLE_ROCKE_JIT
+                return pref != nullptr && pref->mJit == HIPTENSOR_JIT_MODE_DEFAULT;
+#else
+                static_cast<void>(pref);
+                return false;
+#endif
+            }
+
+            // HIPTENSOR_JIT_MAX_MS: the compile budget of one plan (0: none).
+            double jitBudgetMs()
+            {
+                auto v = getEnvironmentVariable("HIPTENSOR_JIT_MAX_MS");
+                return v && !v->empty() ? std::atof(v->c_str()) : 0.0;
+            }
+
+            CandidateOptions
+                candidateOptions(Pack const& pack, bool jit, std::string* note = nullptr)
             {
                 CandidateOptions options;
+                options.jitGett = jit;
                 // HIPTENSOR_ROCKE_CONTRACTION_ROUTE=f64 (debug and test): only the F64 route.
                 auto route      = getEnvironmentVariable("HIPTENSOR_ROCKE_CONTRACTION_ROUTE");
                 options.f64Only = route && *route == "f64";
@@ -207,14 +228,17 @@ namespace hiptensor
                 return out + "\"";
             }
 
-            // HIPTENSOR_ROCKE_SELECT_DUMP=<file>: appends one JSON line per timed candidate
-            // (features, the selector's view and the measured time), the training data of the
-            // selection models.
+            // HIPTENSOR_ROCKE_SELECT_DUMP=<file>: appends one JSON line per candidate (features,
+            // the selector's view, whether the plan took it, and the measured time when the
+            // measured selection timed it), the training data of the selection models. A measured
+            // selection writes its timed candidates; any other plan writes every candidate
+            // without a time (the features of a problem pool, the picks of an evaluation).
             void dumpTimings(Problem const&                problem,
                              std::vector<Candidate> const& candidates,
                              Selection const&              sel,
-                             AutotuneResult const&         result,
-                             int                           reps)
+                             AutotuneResult const*         result,
+                             int                           reps,
+                             int                           chosen)
             {
                 auto path = getEnvironmentVariable("HIPTENSOR_ROCKE_SELECT_DUMP");
                 if(!path || path->empty())
@@ -235,7 +259,7 @@ namespace hiptensor
                 std::vector<int64_t> x;
                 for(size_t i = 0; i < candidates.size(); i++)
                 {
-                    if(result.medianUs[i] < 0.0)
+                    if(result != nullptr && result->medianUs[i] < 0.0)
                     {
                         continue;
                     }
@@ -251,6 +275,7 @@ namespace hiptensor
                                        + ",\"static_rank\":" + std::to_string(c.staticRank)
                                        + ",\"tuned\":" + (c.tuned ? "1" : "0")
                                        + ",\"rank\":" + std::to_string(modelRank)
+                                       + ",\"pick\":" + (int(i) == chosen ? "1" : "0")
                                        + ",\"source\":" + jsonString(sourceName(sel.source))
                                        + ",\"model\":" + jsonString(sel.model);
                     char num[64];
@@ -259,9 +284,13 @@ namespace hiptensor
                         snprintf(num, sizeof(num), "%.17g", sel.scores[i]);
                         line += std::string(",\"score\":") + num;
                     }
-                    snprintf(num, sizeof(num), "%.4f", result.medianUs[i]);
-                    line += std::string(",\"us\":") + num + ",\"reps\":" + std::to_string(reps)
-                            + ",\"f\":{";
+                    if(result != nullptr)
+                    {
+                        snprintf(num, sizeof(num), "%.4f", result->medianUs[i]);
+                        line += std::string(",\"us\":") + num
+                                + ",\"reps\":" + std::to_string(reps);
+                    }
+                    line += ",\"f\":{";
                     for(size_t k = 0; k < names.size(); k++)
                     {
                         line += (k ? ",\"" : "\"") + std::string(names[k])
@@ -306,9 +335,12 @@ namespace hiptensor
                     }
                     std::vector<Candidate> candidates;
                     std::string            recipeNote;
+                    auto*                  plan = context.plan;
+                    auto const*            pref = plan != nullptr ? plan->mPref : nullptr;
+                    bool const             jit  = jitPlan(pref);
                     if(auto status = enumerateCandidates(problem,
                                                          *pack,
-                                                         candidateOptions(*pack, &recipeNote),
+                                                         candidateOptions(*pack, jit, &recipeNote),
                                                          context.workspaceSizeLimit,
                                                          candidates,
                                                          reason);
@@ -318,8 +350,29 @@ namespace hiptensor
                     }
                     auto const sel = rankCandidates(problem, *pack, candidates, useModel());
 
-                    auto*             plan  = context.plan;
-                    auto const*       pref  = plan != nullptr ? plan->mPref : nullptr;
+                    // A JIT candidate's launches are built when it is selected (or timed): its
+                    // kernels from the kernel cache, else compiled now. One that cannot be built
+                    // (a compiler or builder refusal, the time budget) is not selected; the next
+                    // candidate of the order is.
+                    double const budget   = jitBudgetMs();
+                    double       jitSpent = 0.0;
+                    std::string  jitNotes;
+                    auto         built = [&](int i) {
+                        std::string jitNote, why;
+                        auto        status = buildJitCandidate(
+                            candidates[i], problem.device, budget, jitSpent, jitNote, why);
+                        if(!jitNote.empty())
+                        {
+                            Logger::instance()->logHeuristics("hiptensorCreatePlan",
+                                                              jitNote.c_str());
+                        }
+                        if(status != HIPTENSOR_STATUS_SUCCESS && jitNotes.empty())
+                        {
+                            jitNotes = candidates[i].key + " not built: " + why;
+                        }
+                        return status == HIPTENSOR_STATUS_SUCCESS;
+                    };
+
                     auto*             cache = context.handle != nullptr && pref != nullptr
                                           && pref->mCacheMode == HIPTENSOR_CACHE_MODE_PEDANTIC
                                           && plan->mOpDesc != nullptr
@@ -376,11 +429,22 @@ namespace hiptensor
                     {
                         int const topK = envInt("HIPTENSOR_ROCKE_AUTOTUNE_TOPK", kAutotuneTopK);
                         int const reps = envInt("HIPTENSOR_ROCKE_AUTOTUNE_REPS", kAutotuneReps);
-                        std::vector<int> timed(sel.order.begin(),
-                                               sel.order.begin()
-                                                   + std::min<size_t>(topK, sel.order.size()));
-                        AutotuneResult   result;
-                        if(auto status = autotune(problem, candidates, timed, reps, result);
+                        std::vector<int> timed;
+                        for(int i : sel.order)
+                        {
+                            if(timed.size() >= size_t(std::max(topK, 1)))
+                            {
+                                break;
+                            }
+                            if(built(i))
+                            {
+                                timed.push_back(i);
+                            }
+                        }
+                        AutotuneResult result;
+                        if(auto status = timed.empty()
+                                             ? HIPTENSOR_STATUS_SUCCESS
+                                             : autotune(problem, candidates, timed, reps, result);
                            status != HIPTENSOR_STATUS_SUCCESS)
                         {
                             reason = "the measured selection failed";
@@ -393,12 +457,41 @@ namespace hiptensor
                         {
                             chosen = result.winner;
                             source = "AUTOTUNE";
-                            dumpTimings(problem, candidates, sel, result, reps);
+                            dumpTimings(problem, candidates, sel, &result, reps, chosen);
                             if(cache != nullptr)
                             {
                                 cache->addCacheLine(hash, candidateUid(*pack, candidates[chosen]));
                             }
                         }
+                    }
+
+                    // the selected candidate's launches (a JIT candidate's), else the next
+                    // candidate of the order that has them
+                    if(candidates[chosen].program.pending && !built(chosen))
+                    {
+                        auto pos  = std::find(sel.order.begin(), sel.order.end(), chosen);
+                        int  next = -1;
+                        for(auto it = pos == sel.order.end() ? sel.order.begin() : pos + 1;
+                            it != sel.order.end();
+                            ++it)
+                        {
+                            if(!candidates[*it].program.pending || built(*it))
+                            {
+                                next = *it;
+                                break;
+                            }
+                        }
+                        if(next < 0)
+                        {
+                            reason = "no rocKE candidate could be built: " + jitNotes;
+                            return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                        }
+                        chosen = next;
+                        source += "+NEXT";
+                    }
+                    if(!jitNotes.empty())
+                    {
+                        note += std::string(note.empty() ? "" : "; ") + jitNotes;
                     }
 
                     // the plan's kernel goes to the plan cache (PEDANTIC), as the measured winner
@@ -407,6 +500,10 @@ namespace hiptensor
                     if(!decided && source != "AUTOTUNE" && cache != nullptr)
                     {
                         cache->addCacheLine(hash, candidateUid(*pack, candidates[chosen]));
+                    }
+                    if(source != "AUTOTUNE")
+                    {
+                        dumpTimings(problem, candidates, sel, nullptr, 0, chosen);
                     }
                     logSelection(
                         problem, candidates, sel, chosen, source, note, context.workspaceSizeLimit);
@@ -423,7 +520,7 @@ namespace hiptensor
                     {
                         auto&     program = candidates[chosen].program;
                         JitReport report;
-                        specializeProgram(program, problem.device, report);
+                        specializeProgram(program, problem.device, report, jitSpent);
                         if(report.launches > 0)
                         {
                             char msg[256];
@@ -484,8 +581,13 @@ namespace hiptensor
                         return HIPTENSOR_STATUS_ARCH_MISMATCH;
                     }
                     std::vector<Candidate> candidates;
-                    if(auto status = enumerateCandidates(
-                           problem, *pack, candidateOptions(*pack), kUnlimited, candidates, reason);
+                    if(auto status
+                       = enumerateCandidates(problem,
+                                             *pack,
+                                             candidateOptions(*pack, jitPlan(context.planPref)),
+                                             kUnlimited,
+                                             candidates,
+                                             reason);
                        status != HIPTENSOR_STATUS_SUCCESS)
                     {
                         return status;

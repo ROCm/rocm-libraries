@@ -2071,8 +2071,13 @@ namespace
             return std::fabs(x);
         case HIPTENSOR_OP_RELU:
             return x > 0 ? x : 0;
-        default:
+        case HIPTENSOR_OP_IDENTITY:
+        case HIPTENSOR_OP_CONJ:
             return x;
+        default:
+            // the exact operators only (RockeOperatorReduction checks the others within bounds)
+            ADD_FAILURE() << "unaryRef: operator " << int(op) << " is not an exact operator";
+            return std::numeric_limits<double>::quiet_NaN();
         }
     }
 
@@ -2942,6 +2947,17 @@ namespace
     // The problems of rocKE's reduction route table run with their tuned knobs (the reduction doc
     // rows, packed column-major, as hipTensor's benchmarks describe them): device-format data
     // generated in place (no per-element host records), an exact reference over A's storage.
+    // With a workspace limit of zero or the minimum estimate they keep the tuned kernels with
+    // the split lowered to fit (no split at zero); HIPTENSOR_ROCKE_DISABLE_TUNED runs the generic
+    // kernels instead.
+    enum class TableWorkspace
+    {
+        Estimate, // the default estimate
+        Zero, // a workspace limit of zero
+        Minimum, // HIPTENSOR_WORKSPACE_MIN
+        DisableTuned, // HIPTENSOR_ROCKE_DISABLE_TUNED set
+    };
+
     struct TableReductionCase
     {
         hiptensorDataType_t  type;
@@ -2949,12 +2965,13 @@ namespace
         std::string          modesA;
         std::string          modesD;
         std::vector<int64_t> extents;
+        TableWorkspace       ws = TableWorkspace::Estimate;
     };
 
     std::ostream& operator<<(std::ostream& os, TableReductionCase const& c)
     {
         return os << "type " << int(c.type) << " op " << int(c.op) << " A " << c.modesA << " D '"
-                  << c.modesD << "'";
+                  << c.modesD << "' workspace " << int(c.ws);
     }
 
     class RockeTableReduction : public ::testing::TestWithParam<TableReductionCase>
@@ -3079,14 +3096,43 @@ namespace
         api.keep(desc);
         uint64_t     workspaceSize = 0;
         SelectionLog sel;
-        auto         plan = planWith(api, desc, {}, log, workspaceSize, &sel);
-        ASSERT_NE(plan, nullptr);
-        if(deviceArch() == "gfx950")
+        Choice       choice;
+        choice.zeroWorkspace = c.ws == TableWorkspace::Zero;
+        if(c.ws == TableWorkspace::Minimum)
         {
-            // the table's tuned route
+            choice.workspace = HIPTENSOR_WORKSPACE_MIN;
+        }
+        std::unique_ptr<ScopedEnv> disable;
+        if(c.ws == TableWorkspace::DisableTuned)
+        {
+            disable = std::make_unique<ScopedEnv>("HIPTENSOR_ROCKE_DISABLE_TUNED", "1");
+        }
+        auto plan = planWith(api, desc, choice, log, workspaceSize, &sel);
+        disable.reset();
+        ASSERT_NE(plan, nullptr);
+        if(c.ws == TableWorkspace::DisableTuned)
+        {
+            // the generic kernels only
+            EXPECT_EQ(sel.pick.rfind("reduce:", 0), 0u) << sel.pick << "\n" << log.all();
+        }
+        else if(deviceArch() == "gfx950")
+        {
+            // the table's tuned route, its split lowered to the workspace limit
             EXPECT_EQ(sel.source, "TUNED") << log.all();
             EXPECT_EQ(sel.pick.rfind("rreduce:tuned:", 0), 0u) << sel.pick;
         }
+        else
+        {
+            // the untuned choice, its split lowered to the workspace limit
+            EXPECT_EQ(sel.pick.rfind("rreduce:", 0), 0u) << sel.pick << "\n" << log.all();
+        }
+        if(c.ws == TableWorkspace::Zero)
+        {
+            EXPECT_EQ(workspaceSize, 0u);
+            EXPECT_EQ(sel.required, 0u) << sel.pick;
+            EXPECT_EQ(sel.pick.substr(sel.pick.size() - 7), ":split1") << sel.pick;
+        }
+        EXPECT_LE(sel.required, workspaceSize) << sel.pick;
         bool const           pm1 = c.op == HIPTENSOR_OP_MUL;
         std::vector<uint8_t> a(size_t(nA) * eb);
         for(int64_t i = 0; i < nA; i++)
@@ -3192,12 +3238,338 @@ namespace
         add(HIPTENSOR_R_16BF, HIPTENSOR_OP_MUL, r4);
         add(HIPTENSOR_R_16F, HIPTENSOR_OP_MAX, r5);
         add(HIPTENSOR_R_32F, HIPTENSOR_OP_ADD, r6);
+        // with a workspace limit of zero: every doc row (f32 sums), the full reduction of
+        // f16 and f64 data, a MAX; with the minimum estimate and with the tuned kernels disabled:
+        // a few rows
+        for(auto const* s : {&r1, &r2, &r3, &r4, &r5, &r6})
+        {
+            out.push_back(
+                {HIPTENSOR_R_32F, HIPTENSOR_OP_ADD, s->a, s->d, s->ext, TableWorkspace::Zero});
+        }
+        out.push_back(
+            {HIPTENSOR_R_16F, HIPTENSOR_OP_ADD, r1.a, r1.d, r1.ext, TableWorkspace::Zero});
+        out.push_back(
+            {HIPTENSOR_R_64F, HIPTENSOR_OP_ADD, r1.a, r1.d, r1.ext, TableWorkspace::Zero});
+        out.push_back(
+            {HIPTENSOR_R_64F, HIPTENSOR_OP_MAX, r6.a, r6.d, r6.ext, TableWorkspace::Zero});
+        for(auto const* s : {&r1, &r2, &r4})
+        {
+            out.push_back(
+                {HIPTENSOR_R_32F, HIPTENSOR_OP_ADD, s->a, s->d, s->ext, TableWorkspace::Minimum});
+        }
+        out.push_back(
+            {HIPTENSOR_R_16F, HIPTENSOR_OP_ADD, r1.a, r1.d, r1.ext, TableWorkspace::Minimum});
+        for(auto const* s : {&r1, &r5})
+        {
+            out.push_back({HIPTENSOR_R_32F,
+                           HIPTENSOR_OP_ADD,
+                           s->a,
+                           s->d,
+                           s->ext,
+                           TableWorkspace::DisableTuned});
+        }
         return out;
     }
 
     INSTANTIATE_TEST_SUITE_P(Rocke,
                              RockeTableReduction,
                              ::testing::ValuesIn(tableReductionCases()));
+
+    // The operators of the tuned classes that are not exact (square root, reciprocal, sigmoid,
+    // tanh, exp, log), as opA (the una classes) and as opC, on data with each operator's special
+    // arguments (NaN, infinities, signed zeros, -1 outside the domain of sqrt and log, 0 at the
+    // pole of the reciprocal and log): against a long double reference, within the error bounds
+    // of the programmer's guide (ulp of the compute type per operator, then the sum and the one
+    // rounding to D). NaN must be NaN, infinities and zeros exact.
+    struct OperatorReductionCase
+    {
+        hiptensorDataType_t type;
+        hiptensorOperator_t op; // ADD or MAX
+        hiptensorOperator_t unary;
+        bool                onC; // the operator on C (opA identity), else on A
+        bool                row; // A's innermost mode reduced (row classes), else kept (col)
+    };
+
+    std::ostream& operator<<(std::ostream& os, OperatorReductionCase const& c)
+    {
+        return os << "type " << int(c.type) << " op " << int(c.op) << " unary " << int(c.unary)
+                  << (c.onC ? " on C" : " on A") << (c.row ? " row" : " col");
+    }
+
+    // The programmer's guide's bound of `u` in ulp of the compute type (f32, or f64 for f64).
+    double operatorUlp(hiptensorOperator_t u, bool f64)
+    {
+        switch(u)
+        {
+        case HIPTENSOR_OP_SQRT:
+        case HIPTENSOR_OP_RCP:
+            return 0.5;
+        case HIPTENSOR_OP_EXP:
+            return 1.0;
+        case HIPTENSOR_OP_LOG:
+            return f64 ? 1.0 : 2.25;
+        case HIPTENSOR_OP_TANH:
+            return f64 ? 1.0 : 2.0;
+        case HIPTENSOR_OP_SIGMOID:
+            return f64 ? 2.0 : 3.0;
+        default:
+            return 0.0;
+        }
+    }
+
+    long double operatorRef(hiptensorOperator_t u, long double x)
+    {
+        switch(u)
+        {
+        case HIPTENSOR_OP_SQRT:
+            return std::sqrt(x);
+        case HIPTENSOR_OP_RCP:
+            return 1.0L / x;
+        case HIPTENSOR_OP_SIGMOID:
+            // 1 / (1 + e^-x): 0 at -inf, 1 at +inf, NaN for NaN
+            return 1.0L / (1.0L + std::exp(-x));
+        case HIPTENSOR_OP_TANH:
+            return std::tanh(x);
+        case HIPTENSOR_OP_EXP:
+            return std::exp(x);
+        case HIPTENSOR_OP_LOG:
+            return std::log(x);
+        default:
+            return x;
+        }
+    }
+
+    // An argument of `u` inside its domain whose result keeps sums of 64 terms far from the f16
+    // range (and the compute type's normal range: no subnormal results).
+    double operatorArg(hiptensorOperator_t u, std::mt19937& rng)
+    {
+        std::uniform_real_distribution<double> unit(0.0, 1.0);
+        double const                           x = unit(rng);
+        switch(u)
+        {
+        case HIPTENSOR_OP_SQRT:
+            return 100.0 * x;
+        case HIPTENSOR_OP_RCP:
+            return (rng() & 1 ? 1.0 : -1.0) * (0.25 + 7.75 * x);
+        case HIPTENSOR_OP_SIGMOID:
+            return -30.0 + 60.0 * x;
+        case HIPTENSOR_OP_TANH:
+            return -5.0 + 10.0 * x;
+        case HIPTENSOR_OP_EXP:
+            return -4.0 + 8.0 * x;
+        default: // LOG
+            return 1.0e-3 + 100.0 * x;
+        }
+    }
+
+    class RockeOperatorReduction : public ::testing::TestWithParam<OperatorReductionCase>
+    {
+    };
+
+    TEST_P(RockeOperatorReduction, WithinTheBounds)
+    {
+        auto const c = GetParam();
+        ApiObjects api;
+        if(!api.supports(c.type))
+        {
+            GTEST_SKIP() << "data type not supported on this device";
+        }
+        LogCapture   log;
+        std::mt19937 rng(7000 + int(c.unary) * 16 + int(c.type) * 4 + c.onC * 2 + c.row);
+        // A "ab" packed: row = reduce a (innermost) into D "b", col = keep a, reduce b
+        int64_t const        nOut = c.row ? 24 : 48, nRed = c.row ? 64 : 40;
+        std::vector<int64_t> ext
+            = c.row ? std::vector<int64_t>{nRed, nOut} : std::vector<int64_t>{nOut, nRed};
+        std::string const modesD = c.row ? "b" : "a";
+        size_t const      eb     = sizeOf(c.type);
+        bool const        f64    = c.type == HIPTENSOR_R_64F;
+        // the special arguments, one per output (outputs past them: regular arguments only)
+        double const special[] = {std::nan(""), HUGE_VAL, -HUGE_VAL, 0.0, -0.0, -1.0};
+        size_t const nSpecial  = std::size(special);
+        // A and C as stored (the data type's values), as long double
+        std::vector<long double> a(static_cast<size_t>(nOut * nRed)), cv(static_cast<size_t>(nOut));
+        std::vector<uint8_t>     rawA(a.size() * eb), rawC(cv.size() * eb);
+        auto                     at = [&](int64_t o, int64_t r) {
+            // A's storage offset of output o, reduced index r
+            return size_t(c.row ? r + nRed * o : o + nOut * r);
+        };
+        auto store = [&](std::vector<uint8_t>& raw, size_t i, double v) {
+            putRaw(raw.data() + i * eb, c.type, v);
+            return static_cast<long double>(getRaw(raw.data() + i * eb, c.type));
+        };
+        std::uniform_int_distribution<int> small(-2, 2);
+        for(int64_t o = 0; o < nOut; o++)
+        {
+            int64_t const where = int64_t(rng() % uint32_t(nRed));
+            for(int64_t r = 0; r < nRed; r++)
+            {
+                double v = c.onC ? double(small(rng)) : operatorArg(c.unary, rng);
+                if(!c.onC && size_t(o) < nSpecial && r == where)
+                {
+                    v = special[o];
+                }
+                a[at(o, r)] = store(rawA, at(o, r), v);
+            }
+            double v      = c.onC ? (size_t(o) < nSpecial ? special[o] : operatorArg(c.unary, rng))
+                                  : double(small(rng));
+            cv[size_t(o)] = store(rawC, size_t(o), v);
+        }
+        std::vector<int64_t> strideA = {1, ext[0]};
+        std::vector<int32_t> ma      = {'a', 'b'};
+        std::vector<int32_t> md(modesD.begin(), modesD.end());
+        auto const           dA = api.tensor(ext, strideA, c.type);
+        auto const           dD = api.tensor({nOut}, {1}, c.type);
+        auto const compute      = f64 ? HIPTENSOR_COMPUTE_DESC_64F : HIPTENSOR_COMPUTE_DESC_32F;
+        hiptensorOperationDescriptor_t desc = nullptr;
+        ASSERT_EQ(hiptensorCreateReduction(api.handle,
+                                           &desc,
+                                           dA,
+                                           ma.data(),
+                                           c.onC ? HIPTENSOR_OP_IDENTITY : c.unary,
+                                           dD,
+                                           md.data(),
+                                           c.onC ? c.unary : HIPTENSOR_OP_IDENTITY,
+                                           dD,
+                                           md.data(),
+                                           c.op,
+                                           compute),
+                  HIPTENSOR_STATUS_SUCCESS);
+        api.keep(desc);
+        uint64_t     workspaceSize = 0;
+        SelectionLog sel;
+        auto         plan = planWith(api, desc, {}, log, workspaceSize, &sel);
+        ASSERT_NE(plan, nullptr);
+        // the tuned classes run these operators (opA: the una classes)
+        EXPECT_EQ(sel.pick.rfind("rreduce:", 0), 0u) << sel.pick << "\n" << log.all();
+        void *pA = nullptr, *pC = nullptr, *pD = nullptr, *ws = nullptr;
+        ASSERT_EQ(hipMalloc(&pA, rawA.size()), hipSuccess);
+        ASSERT_EQ(hipMalloc(&pC, rawC.size()), hipSuccess);
+        ASSERT_EQ(hipMalloc(&pD, rawC.size()), hipSuccess);
+        ASSERT_EQ(hipMemcpy(pA, rawA.data(), rawA.size(), hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemcpy(pC, rawC.data(), rawC.size(), hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemset(pD, 0xFF, rawC.size()), hipSuccess);
+        if(workspaceSize > 0)
+        {
+            ASSERT_EQ(hipMalloc(&ws, workspaceSize), hipSuccess);
+            ASSERT_EQ(hipMemset(ws, 0xFF, workspaceSize), hipSuccess);
+        }
+        // opA: D = sum / max of opA(A) (beta 0, C NaN-free but unread); opC: D = sum / max of A +
+        // opC(C)
+        double const beta       = c.onC ? 1.0 : 0.0;
+        auto const   scalarType = f64 ? HIPTENSOR_R_64F : HIPTENSOR_R_32F;
+        Scalar       alpha, betaS;
+        alpha.re = 1.0;
+        betaS.re = beta;
+        Stream stream;
+        EXPECT_EQ(hiptensorReduce(api.handle,
+                                  plan,
+                                  alpha.as(scalarType),
+                                  pA,
+                                  betaS.as(scalarType),
+                                  pC,
+                                  pD,
+                                  ws,
+                                  workspaceSize,
+                                  stream.s),
+                  HIPTENSOR_STATUS_SUCCESS)
+            << log.all();
+        EXPECT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
+        std::vector<uint8_t> rawD(rawC.size());
+        EXPECT_EQ(hipMemcpy(rawD.data(), pD, rawD.size(), hipMemcpyDeviceToHost), hipSuccess);
+        for(void* p : {pA, pC, pD, ws})
+        {
+            static_cast<void>(hipFree(p));
+        }
+        long double const uc     = f64 ? std::ldexp(1.0L, -53) : std::ldexp(1.0L, -24);
+        long double const ud     = unitRoundoff(c.type);
+        long double const floorD = c.type == HIPTENSOR_R_16F    ? std::ldexp(1.0L, -24)
+                                   : c.type == HIPTENSOR_R_16BF ? std::ldexp(1.0L, -133)
+                                   : c.type == HIPTENSOR_R_32F  ? std::ldexp(1.0L, -149)
+                                                                : std::ldexp(1.0L, -1074);
+        long double const ulpOp  = operatorUlp(c.unary, f64);
+        bool const        isMax  = c.op == HIPTENSOR_OP_MAX;
+        int64_t           bad = 0, specials = 0;
+        for(int64_t o = 0; o < nOut; o++)
+        {
+            // terms of the reduction (opA applied), their size, the C term
+            long double r = isMax ? -HUGE_VALL : 0.0L, size = 0.0L;
+            bool        nan = false;
+            for(int64_t rr = 0; rr < nRed; rr++)
+            {
+                long double const t = c.onC ? a[at(o, rr)] : operatorRef(c.unary, a[at(o, rr)]);
+                nan                 = nan || std::isnan(t);
+                r                   = isMax ? std::max(r, t) : r + t;
+                size                = isMax ? std::max(size, std::fabs(t)) : size + std::fabs(t);
+            }
+            if(nan)
+            {
+                r = std::numeric_limits<long double>::quiet_NaN();
+            }
+            long double const ct   = c.onC ? operatorRef(c.unary, cv[size_t(o)]) : 0.0L;
+            long double const want = r + beta * ct;
+            // the operator's error on each term (or the C term), the sum's and D's rounding
+            long double const opErr  = 2.0L * ulpOp * uc * (c.onC ? std::fabs(ct) : size);
+            long double const sumErr = (isMax ? 2.0L : static_cast<long double>(nRed + 2)) * uc
+                                       * (size + std::fabs(beta * ct));
+            long double const tol = opErr + sumErr + ud * std::fabs(want) + floorD;
+            double const      got = getRaw(rawD.data() + size_t(o) * eb, c.type);
+            bool              ok;
+            if(std::isnan(want))
+            {
+                ok = std::isnan(got);
+                specials++;
+            }
+            else if(std::isinf(want))
+            {
+                ok = static_cast<long double>(got) == want;
+                specials++;
+            }
+            else
+            {
+                ok = !std::isnan(got) && std::fabs(static_cast<long double>(got) - want) <= tol;
+            }
+            if(!ok && bad++ < 5)
+            {
+                ADD_FAILURE() << "output " << o << " got " << got << " want "
+                              << static_cast<double>(want) << " tol " << static_cast<double>(tol)
+                              << " (" << sel.pick << ")";
+            }
+        }
+        EXPECT_EQ(bad, 0) << sel.pick;
+        // the special arguments reached the outputs (a NaN argument at least gives NaN)
+        EXPECT_GE(specials, 1) << sel.pick;
+    }
+
+    std::vector<OperatorReductionCase> operatorReductionCases()
+    {
+        std::vector<OperatorReductionCase> out;
+        for(auto type : {HIPTENSOR_R_16F, HIPTENSOR_R_16BF, HIPTENSOR_R_32F, HIPTENSOR_R_64F})
+        {
+            for(auto unary : {HIPTENSOR_OP_SQRT,
+                              HIPTENSOR_OP_RCP,
+                              HIPTENSOR_OP_SIGMOID,
+                              HIPTENSOR_OP_TANH,
+                              HIPTENSOR_OP_EXP,
+                              HIPTENSOR_OP_LOG})
+            {
+                for(bool onC : {false, true})
+                {
+                    for(auto op : {HIPTENSOR_OP_ADD, HIPTENSOR_OP_MAX})
+                    {
+                        for(bool row : {true, false})
+                        {
+                            out.push_back({type, op, unary, onC, row});
+                        }
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    INSTANTIATE_TEST_SUITE_P(Rocke,
+                             RockeOperatorReduction,
+                             ::testing::ValuesIn(operatorReductionCases()));
 
     // ---------------------------------------------------------------------- selection
 
@@ -3372,8 +3744,9 @@ namespace
         EXPECT_EQ(a.pick, b.pick);
         EXPECT_TRUE(a.source == "MODEL" || a.source == "STATIC" || a.source == "RULE") << a.source;
         // a rule names itself and picks its route: the ring GETT when the layout admits it, the
-        // direct GETT on targets without the GEMM routes; otherwise the model decides (gfx950
-        // has a model for this problem class)
+        // direct GETT on targets without the GEMM routes, when the cell's model does not score
+        // their routes; otherwise the model decides (gfx950's model of this class scores every
+        // route: the ring GETT and the direct GETT too)
         bool const rule = a.source == "RULE";
         if(rule)
         {
@@ -3382,19 +3755,22 @@ namespace
             EXPECT_EQ(a.pick.rfind(ring ? "rgett:" : "dgett:", 0), 0u)
                 << a.pick << " (" << a.reason << ")";
         }
-        else if(deviceArch() == "gfx950")
+        if(deviceArch() == "gfx950")
         {
             EXPECT_EQ(a.source, "MODEL") << a.reason;
+            EXPECT_EQ(a.reason.rfind("contraction.h@", 0), 0u) << a.reason;
         }
         SelectionLog st;
         {
             ScopedEnv env("HIPTENSOR_ROCKE_SELECT", "static");
             runContraction(c, all, &st);
         }
-        // the rules apply to the static selection too
-        EXPECT_EQ(st.source, rule ? "RULE" : "STATIC");
+        // without a model the rules order every route (the ring GETT and the direct GETT go
+        // first as above); a rule of the model selection applies to the static one too
+        EXPECT_TRUE(st.source == "RULE" || st.source == "STATIC") << st.source;
         if(rule)
         {
+            EXPECT_EQ(st.source, "RULE");
             EXPECT_EQ(st.pick, a.pick);
         }
         EXPECT_EQ(st.candidates, a.candidates);
@@ -3424,6 +3800,155 @@ namespace
             {
                 EXPECT_EQ(red.source, "MODEL");
             }
+        }
+    }
+
+    // A selection model file <dir>/<target>/<cell>.model for HIPTENSOR_ROCKE_SELECT_MODELS (a new
+    // directory per name: the library reads a model once per process and source).
+    std::string writeSelectModel(std::string const& name,
+                                 std::string const& cell,
+                                 std::string const& text)
+    {
+        std::string const dir = ::testing::TempDir() + "rocke_select_models_" + name;
+        std::string const sub = dir + "/" + deviceArch();
+        EXPECT_EQ(std::system(("mkdir -p \"" + sub + "\"").c_str()), 0);
+        FILE* f = std::fopen((sub + "/" + cell + ".model").c_str(), "w");
+        EXPECT_NE(f, nullptr);
+        if(f != nullptr)
+        {
+            std::fputs((text + "\n").c_str(), f);
+            std::fclose(f);
+        }
+        return dir;
+    }
+
+    // One tree on the feature "route": 0 for `route`, 1 for every other route.
+    std::string favourRoute(int route)
+    {
+        char tree[96];
+        std::snprintf(tree,
+                      sizeof(tree),
+                      "3;0 0;%d.5 %d.5;-1 -2;1 -3;1 0 1",
+                      route - 1,
+                      route);
+        return tree;
+    }
+
+    // A model scores the routes it was trained on: a format v2 model names them (here the ring
+    // GETT (7) and the direct GETT (8) among them), a format v1 model scores the GEMM and f64
+    // routes only and the rules order the others; a model the library cannot use (malformed
+    // routes, a later feature schema, an unknown feature) leaves the rules' selection.
+    // HIPTENSOR_ROCKE_SELECT_MODELS replaces the pack's models.
+    TEST(RockeSelection, ModelScoresItsRoutes)
+    {
+        ContractionCase const c{
+            HIPTENSOR_R_16F, HIPTENSOR_COMPUTE_DESC_32F, 1503, true, true, false};
+        Choice all;
+        all.workspace = HIPTENSOR_WORKSPACE_MAX;
+        SelectionLog rules;
+        {
+            ScopedEnv env("HIPTENSOR_ROCKE_SELECT", "static");
+            runContraction(c, all, &rules);
+        }
+        if(HasFatalFailure() || IsSkipped())
+        {
+            return;
+        }
+        ASSERT_GE(rules.candidates, 2);
+        auto const cell = std::string("contraction.h");
+        auto       with = [&](std::string const& name, std::string const& text) {
+            SelectionLog out;
+            ScopedEnv    env("HIPTENSOR_ROCKE_SELECT_MODELS",
+                          writeSelectModel(name, cell, text).c_str());
+            runContraction(c, all, &out);
+            EXPECT_EQ(out.candidates, rules.candidates) << name;
+            return out;
+        };
+        auto const tree = favourRoute(8);
+        // every route scored: the direct GETT (every contraction has it) wins
+        auto v2 = with("v2_all", "v2;schema=2;routes=3,6,7,8,9;margin=0;features=route;trees=1|" + tree);
+        EXPECT_EQ(v2.source, "MODEL") << v2.reason;
+        EXPECT_EQ(v2.reason.rfind(cell + "@", 0), 0u) << v2.reason;
+        EXPECT_EQ(v2.pick.rfind("dgett:", 0), 0u) << v2.pick;
+        // schema 1 features with the v2 format: the same
+        auto s1 = with("v2_schema1", "v2;schema=1;routes=3,6,7,8,9;margin=0;features=route;trees=1|" + tree);
+        EXPECT_EQ(s1.source, "MODEL") << s1.reason;
+        EXPECT_EQ(s1.pick, v2.pick);
+        // a margin: the model's best (the direct GETT, predicted 1 better than every other route)
+        // replaces the first candidate of the static order (never the direct GETT, the last
+        // route of the static order) only when its prediction is lower by more than the margin
+        auto keep = with("v2_margin_keep",
+                         "v2;schema=2;routes=3,6,7,8,9;margin=1.5;features=route;trees=1|" + tree);
+        EXPECT_EQ(keep.source, "MODEL") << keep.reason;
+        EXPECT_NE(keep.pick.rfind("dgett:", 0), 0u) << keep.pick;
+        auto take = with("v2_margin_take",
+                         "v2;schema=2;routes=3,6,7,8,9;margin=0.5;features=route;trees=1|" + tree);
+        EXPECT_EQ(take.source, "MODEL") << take.reason;
+        EXPECT_EQ(take.pick.rfind("dgett:", 0), 0u) << take.pick;
+        // the ring GETT not scored: its rule applies when it is a candidate
+        bool const ring = rules.pick.rfind("rgett:", 0) == 0;
+        auto       noRing = with("v2_no_ring", "v2;schema=2;routes=3,6,8,9;margin=0;features=route;trees=1|" + tree);
+        if(ring)
+        {
+            EXPECT_EQ(noRing.source, "RULE") << noRing.reason;
+            EXPECT_EQ(noRing.reason, "the ring GETT rule");
+            EXPECT_EQ(noRing.pick, rules.pick);
+            // a model that scores the ring GETT picks it when it predicts it fastest
+            auto r = with("v2_ring", "v2;schema=2;routes=3,6,7,8,9;margin=0;features=route;trees=1|"
+                                         + favourRoute(7));
+            EXPECT_EQ(r.source, "MODEL") << r.reason;
+            EXPECT_EQ(r.pick.rfind("rgett:", 0), 0u) << r.pick;
+        }
+        else
+        {
+            EXPECT_EQ(noRing.source, "MODEL") << noRing.reason;
+            EXPECT_EQ(noRing.pick, v2.pick);
+        }
+        // format v1: the direct GETT and the ring GETT are not scored
+        auto v1 = with("v1", "v1;schema=1;features=route;trees=1|" + tree);
+        if(rules.source == "RULE")
+        {
+            EXPECT_EQ(v1.source, "RULE") << v1.reason;
+            EXPECT_EQ(v1.pick, rules.pick);
+        }
+        else
+        {
+            EXPECT_EQ(v1.source, "MODEL") << v1.reason;
+            EXPECT_NE(v1.pick.rfind("dgett:", 0), 0u) << v1.pick;
+        }
+        // models the library does not use: the rules' selection
+        for(auto const& [name, text] :
+            {std::pair<std::string, std::string>{"bad_routes",
+                                                 "v2;schema=2;routes=3,x;margin=0;features=route;trees=1|"
+                                                     + tree},
+             {"bad_route_id", "v2;schema=2;routes=3,99;margin=0;features=route;trees=1|" + tree},
+             {"later_schema", "v2;schema=3;routes=3,6,7,8,9;margin=0;features=route;trees=1|" + tree},
+             {"unknown_feature", "v2;schema=2;routes=3,6,7,8,9;margin=0;features=nosuch;trees=1|" + tree},
+             {"no_routes_field", "v2;schema=2;features=route;trees=1|" + tree},
+             {"no_margin_field", "v2;schema=2;routes=3,6,7,8,9;features=route;trees=1|" + tree},
+             {"bad_margin", "v2;schema=2;routes=3,6,7,8,9;margin=x;features=route;trees=1|" + tree},
+             {"negative_margin",
+              "v2;schema=2;routes=3,6,7,8,9;margin=-1;features=route;trees=1|" + tree},
+             {"empty_margin", "v2;schema=2;routes=3,6,7,8,9;margin=;features=route;trees=1|" + tree},
+             {"bad_tree", "v2;schema=2;routes=3,6,7,8,9;margin=0;features=route;trees=1|3;0 0;7.5"}})
+        {
+            auto bad = with(name, text);
+            EXPECT_EQ(bad.pick, rules.pick) << name;
+            EXPECT_EQ(bad.source, rules.source) << name;
+            if(rules.source == "STATIC")
+            {
+                EXPECT_NE(bad.reason.find("not used"), std::string::npos)
+                    << name << ": " << bad.reason;
+            }
+        }
+        // no file for the cell in the directory: no model
+        {
+            SelectionLog none;
+            ScopedEnv    env("HIPTENSOR_ROCKE_SELECT_MODELS",
+                          (::testing::TempDir() + "rocke_select_models_empty").c_str());
+            runContraction(c, all, &none);
+            EXPECT_EQ(none.pick, rules.pick);
+            EXPECT_EQ(none.source, rules.source);
         }
     }
 
@@ -7360,6 +7885,8 @@ namespace
         bool transposed = true;
         // extents of a (D's fastest mode) and b (input 0's fastest mode) and of the batch mode c
         int64_t ea = 72, eb = 40, ec = 3;
+        // every input laid out as D (one contiguous run: the flat kernel on gfx942 / gfx950)
+        bool flat = false;
     };
 
     // A packed tensor stored in `order` (fastest first), integer values in [-3, 3].
@@ -7418,6 +7945,10 @@ namespace
             if(!c.transposed)
             {
                 order = i == 0 ? std::vector<int32_t>{'a', 'b', 'c', 'd'} : orders[1 + rng() % 2];
+            }
+            if(c.flat)
+            {
+                order = {'a', 'b', 'c', 'd'};
             }
             ins.push_back(packedTensor(c.in, modes, order, ext, rng));
         }
@@ -7685,8 +8216,90 @@ namespace
                     auto      pick = runTiled(c);
                     if(rank == 0 && skew == 0)
                     {
-                        EXPECT_EQ(pick.rfind("ewv:", 0), 0u) << pick;
+                        // a 16-bit permutation laid out as D is one contiguous run: the flat
+                        // kernel on gfx942 / gfx950
+                        bool const flat = r.arity == 1 && r.in == r.out
+                                          && (r.in == HIPTENSOR_R_16F || r.in == HIPTENSOR_R_16BF)
+                                          && (deviceArch() == "gfx942" || deviceArch() == "gfx950");
+                        EXPECT_EQ(pick.rfind(flat ? "ewf:" : "ewv:", 0), 0u) << pick;
                     }
+                }
+            }
+            ASSERT_FALSE(HasFailure()) << "arity " << r.arity << " type " << int(r.in);
+        }
+    }
+
+    // Every tensor laid out as D (one contiguous run of elements in the same order): on gfx942 and
+    // gfx950 for 16-bit rows the flat kernel (KERNEL_RANK 0; kernels.common.hiptensor_aot.ewf),
+    // then the vector class of the generic kernel and the generic kernel, all exact for every data
+    // type row (other rows: the vector class first), with aligned and unaligned buffers (the flat program's fallback), with an input whose
+    // scale is zero (its NaN is not read), with an element count whose last vectors leave part of
+    // the last block idle, and with HIPTENSOR_ROCKE_DISABLE_TUNED (no flat kernel).
+    TEST(RockeFlatElementwise, EveryRowExact)
+    {
+        struct Row
+        {
+            int                 arity;
+            hiptensorDataType_t in, out, scalar;
+        };
+        Row const  rows[] = {{1, HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_16F},
+                             {1, HIPTENSOR_R_16F, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
+                             {1, HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
+                             {1, HIPTENSOR_R_64F, HIPTENSOR_R_64F, HIPTENSOR_R_64F},
+                             {2, HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_32F},
+                             {2, HIPTENSOR_R_16BF, HIPTENSOR_R_16BF, HIPTENSOR_R_32F},
+                             {2, HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
+                             {2, HIPTENSOR_R_64F, HIPTENSOR_R_64F, HIPTENSOR_R_64F},
+                             {3, HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_16F},
+                             {3, HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
+                             {3, HIPTENSOR_R_64F, HIPTENSOR_R_64F, HIPTENSOR_R_64F}};
+        bool const arch16 = deviceArch() == "gfx942" || deviceArch() == "gfx950";
+        int        seed   = 3300;
+        for(auto const& r : rows)
+        {
+            bool const flatTarget
+                = arch16 && r.in == r.out && (r.in == HIPTENSOR_R_16F || r.in == HIPTENSOR_R_16BF);
+            for(auto ec : {int64_t(3), int64_t(1)})
+            {
+                for(size_t skew : {size_t(0), size_t(1)})
+                {
+                    // the flat kernel (flat targets), the vector class, the generic kernel
+                    int32_t const ranks = flatTarget ? 3 : 2;
+                    for(int32_t rank = 0; rank < ranks; rank++)
+                    {
+                        TiledCase c{r.arity, r.in, r.out, r.scalar, seed++, rank, skew};
+                        c.ec      = ec; // 72 x 40 x 1 x 5: 14400 elements
+                        c.flat    = true;
+                        auto pick = runTiled(c);
+                        if(pick.empty())
+                        {
+                            break; // data type not supported on this device
+                        }
+                        char const* want = rank + (flatTarget ? 0 : 1) == 0   ? "ewf:"
+                                           : rank + (flatTarget ? 0 : 1) == 1 ? "ewv:"
+                                                                              : "ew:";
+                        EXPECT_EQ(pick.rfind(want, 0), 0u) << pick;
+                    }
+                }
+            }
+            for(int z = 0; z < r.arity; z++)
+            {
+                TiledCase c{r.arity, r.in, r.out, r.scalar, seed++, 0, 0, z};
+                c.flat    = true;
+                auto pick = runTiled(c);
+                if(flatTarget && !pick.empty())
+                {
+                    EXPECT_EQ(pick.rfind("ewf:", 0), 0u) << pick;
+                }
+            }
+            {
+                ScopedEnv off("HIPTENSOR_ROCKE_DISABLE_TUNED", "1");
+                TiledCase c{r.arity, r.in, r.out, r.scalar, seed++};
+                c.flat    = true;
+                auto pick = runTiled(c);
+                if(!pick.empty())
+                {
+                    EXPECT_EQ(pick.rfind("ewv:", 0), 0u) << pick;
                 }
             }
             ASSERT_FALSE(HasFailure()) << "arity " << r.arity << " type " << int(r.in);

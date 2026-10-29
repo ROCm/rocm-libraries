@@ -21,10 +21,16 @@ checks that its C++ builder writes the same manifests (``--list --check-manifest
 change of a kernel row, attribute, route or JIT class on either side fails a default test until
 both sides and the manifests agree. The kernel ABI names of rocKE's C header must equal the
 Python ones.
+
+With the built C++ builder, its ``--rreduce-picks`` mode (hipTensor's untuned reduction choice,
+``rocke_rreduce_rule.hpp``) must return the candidates of ``rreduce_host.untuned_choices`` for
+random problems, compute-unit counts and workspace limits on every pack target.
 """
 
 import json
+import math
 import os
+import random
 import re
 import shutil
 import struct
@@ -163,6 +169,7 @@ def test_writer_descriptor_families():
         "rreduce_final",
         "ewt",
         "ewv",
+        "ewf",
         "gemm",
         "gett_plan",
         "dgett",
@@ -305,6 +312,7 @@ def test_kernel_abi_names_match_the_c_header():
     from kernels.common.hiptensor_aot import (
         dgett,
         ew,
+        ewf,
         ewt,
         jit_ew,
         reduce,
@@ -328,6 +336,7 @@ def test_kernel_abi_names_match_the_c_header():
         "EW_JIT": jit_ew.EW_JIT_ABI,
         "EWV": jit_ew.EWV_ABI,
         "EWT": ewt.EWT_ABI,
+        "EWF": ewf.EWF_ABI,
         "DGETT": dgett.DGETT_ABI,
         "RGETT": rgett.RGETT_ABI,
     }
@@ -382,6 +391,103 @@ def test_cpp_manifests_equal_the_committed_ones(tmp_path):
     for arch in _PACK_TARGETS:
         cmd += ["--arch", arch]
     _run(cmd, dict(os.environ), tmp_path / "list.log")
+
+
+def _rreduce_problem(rng):
+    """A random reduction in hipTensor's canonical form (kept: extent, A stride, D stride; red:
+    extent, A stride), A stored in a random mode order with padding, D in another order; at
+    most 2^40 elements (the counts stay far from int64 overflow in the C++ rule)."""
+    from kernels.common.hiptensor_aot.host import canonicalize
+
+    rank = rng.randrange(1, 7)
+    shape = [
+        rng.choice([1, 2, 3, 5, 8, 16, 33, 64, 128, 1000, 4096, 1 << 16, 3 << 18])
+        for _ in range(rank)
+    ]
+    while math.prod(shape) > 1 << 40:
+        i = max(range(rank), key=lambda j: shape[j])
+        shape[i] = max(1, shape[i] // 7)
+    perm = list(range(rank))
+    rng.shuffle(perm)
+    sa, acc = [0] * rank, 1
+    for i in perm:
+        sa[i] = acc
+        acc *= shape[i] + (rng.choice([0, 0, 3]) if i == perm[0] else 0)
+    kept = sorted(rng.sample(range(rank), rng.randrange(0, rank + 1)))
+    sd, acc = {}, 1
+    order = list(kept)
+    rng.shuffle(order)
+    for i in order:
+        sd[i] = acc
+        acc *= shape[i]
+    kd = canonicalize([(shape[i], [sa[i], sd[i]]) for i in kept], 0)
+    rd = canonicalize([(shape[i], [sa[i]]) for i in range(rank) if i not in kept], 0)
+    return [(e, s[0], s[1]) for e, s in kd], [(e, s[0]) for e, s in rd]
+
+
+@pytest.mark.parametrize("arch", _PACK_TARGETS)
+def test_cpp_rreduce_picks_equal_python(arch, tmp_path):
+    """hipTensor's untuned reduction choice is rocKE's: the C++ rule (rocke_rreduce_rule.hpp,
+    which hipTensor's planner runs; here through the C++ builder's --rreduce-picks with the
+    target's palette and prototypes) returns exactly the candidates (class and split, in order)
+    of rreduce_host.untuned_choices, for random problems (data types, operators, opA, layouts),
+    compute-unit counts of the targets' devices and workspace limits (none, zero, small).
+    """
+    from kernels.common.hiptensor_aot import rreduce_host as H
+    from kernels.common.hiptensor_aot.rreduce import OPS
+
+    tool = _builder()
+    classes = H.pack_classes(arch)
+    protos = H.prototypes()
+    rng = random.Random(4096 + _PACK_TARGETS.index(arch))
+    lines, want = [], []
+    capped = split = 0
+    for _ in range(1500):
+        kept, red = _rreduce_problem(rng)
+        a = rng.choice(("f16", "bf16", "f32", "f64"))
+        op = rng.choice(tuple(OPS))
+        una = rng.random() < 0.25
+        cus = rng.choice((80, 104, 110, 120, 220, 228, 256, 304))
+        limit = rng.choice((None, None, None, 0, 256, 4096, 1 << 16, 1 << 20))
+        ch = H.untuned_choices(
+            kept,
+            red,
+            a,
+            a,
+            op,
+            classes,
+            protos,
+            una=una,
+            cus=cus,
+            arch=arch,
+            workspace_limit=limit,
+        )
+        free = H.untuned_choices(
+            kept, red, a, a, op, classes, protos, una=una, cus=cus, arch=arch
+        )
+        if [k.split for k, _ in ch] != [k.split for k, _ in free]:
+            capped += 1
+        split += any(k.split > 1 for k, _ in ch)
+        want.append(" ".join(f"{s.kernel_name()}:split{k.split}" for k, s in ch) or "-")
+        lines.append(
+            f"cus={cus};limit={-1 if limit is None else limit};una={int(una)};a={a};d={a};"
+            f"op={op};k={','.join(f'{e}:{x}:{y}' for e, x, y in kept)};"
+            f"r={','.join(f'{e}:{x}' for e, x in red)}"
+        )
+    # the sample exercises splits and the workspace limit
+    assert split > 100 and capped > 50, (split, capped)
+    problems = tmp_path / "problems.txt"
+    problems.write_text("\n".join(lines) + "\n")
+    got = _run(
+        [tool, "--rreduce-picks", str(problems), "--arch", arch],
+        dict(os.environ),
+        tmp_path / "picks.log",
+    ).splitlines()
+    assert len(got) == len(want)
+    bad = [(p, g, w) for p, g, w in zip(lines, got, want) if g != w]
+    assert not bad, f"{len(bad)} of {len(want)} differ:\n" + "\n".join(
+        f"{p}\n  C++    {g}\n  Python {w}" for p, g, w in bad[:10]
+    )
 
 
 def test_cpp_pack_equals_python_pack(tmp_path):

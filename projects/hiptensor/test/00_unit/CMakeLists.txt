@@ -105,6 +105,11 @@ if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
             ${HIPTENSOR_COMMON_TEST_SOURCES}
             ${CMAKE_CURRENT_SOURCE_DIR}/rocke_jit_test.cpp
             )
+        # The contraction JIT (rocKE's tensor GETT planner at plan creation).
+        add_hiptensor_unit_test(rocke_gett_jit_test
+            ${HIPTENSOR_COMMON_TEST_SOURCES}
+            ${CMAKE_CURRENT_SOURCE_DIR}/rocke_gett_jit_test.cpp
+            )
         add_test(NAME rocke_backend_test_jit COMMAND rocke_backend_test)
         set_tests_properties(rocke_backend_test_jit PROPERTIES
             ENVIRONMENT "HIPTENSOR_ROCKE_TEST_JIT=1;HIPTENSOR_ROCKE_JIT=all"

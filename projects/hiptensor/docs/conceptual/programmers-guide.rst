@@ -88,10 +88,18 @@ These environment variables, read at every plan creation and workspace estimate,
             operands converted to f64 and the result rounded once to the output type.
     *   -   ``HIPTENSOR_ROCKE_DISABLE_TUNED``
         -   Any value, for debugging and testing: the rocKE backend does not use the launches it has for the
-            contractions of its tuned and AOT route tables, and plans them like any other contraction.
+            contractions of its tuned and AOT route tables, and plans them like any other contraction (without
+            the contraction JIT's planner route either), it runs
+            reductions on the generic reduction kernels only (no tuned reduction kernel: neither the launches of
+            its reduction route table nor the untuned choice), and it doesn't use the flat elementwise kernel.
     *   -   ``HIPTENSOR_ROCKE_SELECT``
-        -   ``static``, for debugging and testing: the rocKE backend selects kernels by rocKE's rules instead of
-            the selection model of its kernel pack.
+        -   ``static``, for debugging and testing: the rocKE backend selects kernels by rocKE's rules (the
+            contraction JIT's route first, then the ring GETT, ...) instead of the selection model of its kernel
+            pack.
+    *   -   ``HIPTENSOR_ROCKE_SELECT_MODELS``
+        -   A directory, for training and evaluating selection models: the rocKE backend reads the selection model
+            of a problem class from ``<directory>/<target>/<class>.model`` instead of its kernel pack (a class
+            without a file there has no model). See ``library/src/backends/rocke/select/README.md``.
     *   -   ``HIPTENSOR_ROCKE_AUTOTUNE_TOPK``
         -   The number of candidates ``HIPTENSOR_ALGO_DEFAULT_PATIENT`` times on the rocKE backend (default 4), or
             ``all``.
@@ -99,19 +107,20 @@ These environment variables, read at every plan creation and workspace estimate,
         -   The timed repetitions per candidate of ``HIPTENSOR_ALGO_DEFAULT_PATIENT`` on the rocKE backend
             (default 5).
     *   -   ``HIPTENSOR_ROCKE_SELECT_DUMP``
-        -   A file to which ``HIPTENSOR_ALGO_DEFAULT_PATIENT`` on the rocKE backend appends, for every timed
-            candidate, one line of JSON with its features, the selector's view of it and its median time. It
-            is the training data of the selection models. ``HIPTENSOR_ROCKE_SELECT_DUMP_TAG`` adds a tag to the
-            lines.
+        -   A file to which the rocKE backend appends one line of JSON per candidate of a plan, with its features,
+            the selector's view of it and whether the plan took it: for ``HIPTENSOR_ALGO_DEFAULT_PATIENT``, every
+            timed candidate with its median time; for other plans, every candidate without a time. It is the
+            training data of the selection models. ``HIPTENSOR_ROCKE_SELECT_DUMP_TAG`` adds a tag to the lines.
     *   -   ``HIPTENSOR_ROCKE_JIT``
         -   ``all`` or ``0``, for plans created with ``HIPTENSOR_JIT_MODE_DEFAULT`` on the rocKE backend: ``all``
             also specializes the elementwise launches the default rule leaves on the kernel pack (no vector
             form, or no input read with vector loads: every input gathered or broadcast along the output's
-            fastest mode); ``0`` turns the JIT off.
+            fastest mode); ``0`` turns the JIT off (the contraction JIT too).
     *   -   ``HIPTENSOR_JIT_MAX_MS``
         -   The compile time, in milliseconds, one ``hiptensorCreatePlan`` may spend on JIT compiles. Past it, the
             remaining launches of the plan keep their kernel-pack kernels (kernels already in the kernel cache are
-            still used). Unset or ``0``: no limit.
+            still used), and a contraction whose planner route still needs a compile takes the next candidate.
+            Unset or ``0``: no limit.
     *   -   ``HIPTENSOR_KERNEL_CACHE_DIR``
         -   A directory (of the user, not writable by others unless sticky) where plans created with
             ``HIPTENSOR_JIT_MODE_DEFAULT`` look for a kernel before they compile it and store every kernel they
@@ -129,28 +138,47 @@ The rocKE backend selects kernels when the plan is created. It lists the candida
 programs that its kernel pack can run the problem with within the plan's workspace limit (for a contraction, the
 ring GETT, the universal GEMM bodies of the data type's route, the f64 strided GEMM classes and the direct GETT;
 for a reduction, the tuned reduction kernels of the pack and the generic row and column kernels with several
-splits of the reduced modes; for a permutation or an elementwise operation, the tiled kernel and the generic
-kernel), checking every capability on the host without launching anything. It then orders them:
+splits of the reduced modes; for a permutation or an elementwise operation, the flat kernel, the tiled kernel
+and the generic kernel), checking every capability on the host without launching anything. It then orders them:
 
 1. A contraction of rocKE's tuned or AOT route table (f16 and bf16 on gfx950) takes the launches of that
    table: a GETT on one of rocKE's GEMM bodies reading the operands in place, optionally after packing one or
    both operands into the workspace, or a GETT on K-contiguous copies of both operands made in the workspace.
+   These tables hold fixed problems, and their kernels have the problem's sizes and strides built in: a
+   contraction takes them only when its extents, strides, mode order and data types are those of a table
+   problem. Any other contraction, including one that differs from a table problem in one extent or in its
+   padding, is planned on the routes below; in a plan created with ``HIPTENSOR_JIT_MODE_DEFAULT``, the route
+   rocKE's tensor-contraction planner chooses for it (see "Contraction JIT" below) is one of its candidates.
    A reduction of rocKE's reduction route table (gfx950) takes the launch of that table: a tuned reduction
    kernel with the knobs measured for the problem.
 2. Otherwise, a reduction takes the knobs of the nearest of the measured reductions that the pack carries
    (same kind and element size; distance over the sizes of the output, the reduced elements, the fastest run and
    the mode counts), on the tuned reduction kernel of the pack with those knobs, and a split of the reduced modes
    that gives the launch as many wavefronts per compute unit as the measured one had; the next two nearest follow
-   it, then the generic kernels. A contraction the
-   ring GETT serves takes it (with the operands whose fastest free run is not a multiple of 8 elements first
-   packed into the workspace when the limit allows, else read in place), and on a target without the GEMM
-   routes (gfx90a, gfx942) the direct GETT of a 16-bit or f32 compute class takes it.
+   it, then the generic kernels. The measured reductions are gfx950 measurements: on gfx90a and gfx942 the
+   same knobs apply, with the split scaled to the device's compute units. On the reduction rows of hipTensor's
+   benchmarks this choice ran faster than the generic kernels on gfx942, and on gfx90a on all but an f64
+   reduction over the slow mode of a large matrix; ``HIPTENSOR_ALGO_DEFAULT_PATIENT`` times the candidates,
+   the generic kernels included. When the partial results of a split
+   (of the table's launch or of the untuned choice) need more workspace than the plan's limit, the split is
+   lowered to the largest power of two that fits, down to no split for a limit of zero, so a plan created with
+   ``HIPTENSOR_WORKSPACE_MIN`` or a zero limit still runs the tuned reduction kernels.
 3. Otherwise, the selection model of the kernel pack for the problem's class (gradient-boosted trees over
    integer features of the problem and the candidate, trained on measured timings of every candidate) ranks
-   the candidates of the routes it was trained on; the direct GETT follows them. Selection takes no timing, no
-   allocation and no device call, and is the same on every host for the same problem, device and pack.
-4. Without a model for the class, rocKE's rules order the candidates (a permutation or elementwise operation:
-   the tiled kernel, then the vector form of the generic kernel, then the generic kernel).
+   the candidates of the routes it was trained on. The contraction models of the gfx950 and gfx942 packs
+   (f16, bf16 and f32 with a 16-bit compute type; f32 and complex f32 with the default recipe; f64; complex
+   f64) are trained on cold timings of every route of their class: on gfx950 the contraction JIT's route,
+   the ring GETT, the GEMM routes, the native f32 route, the f64 route and the direct GETT. They choose
+   among all of them, so a contraction takes, for example, the ring GETT, the contraction JIT's route or a
+   GEMM route, whichever its model predicts fastest. Selection takes no timing, no allocation and no device
+   call, and is the same on every host for the same problem, device and pack.
+4. Routes the model of the class doesn't score, and every route of a class without a model, follow rocKE's
+   rules: the contraction JIT's route first; then a contraction the ring GETT serves takes it (with the
+   operands whose fastest free run is not a multiple of 8 elements first packed into the workspace when the
+   limit allows, else read in place), and on a target without the GEMM routes (gfx90a, gfx942) the direct
+   GETT of a 16-bit or f32 compute class; the other routes not scored follow the scored candidates in the
+   static order (a permutation or elementwise operation: the flat kernel, then the tiled kernel, then the
+   vector form of the generic kernel, then the generic kernel).
 
 The plan preference changes this:
 
@@ -206,6 +234,20 @@ kernel runs). Otherwise, when an input is contiguous along the output's fastest 
 kernel handles 16 bytes of the output per thread, with vector loads of those inputs (the classes of the JIT's
 vector kernels, with the sizes and strides as kernel arguments). When the output's two tiled modes span less
 than half a tile, one workgroup of the tiled kernel computes the planes of several consecutive batch indices.
+On gfx942 and gfx950, a permutation or an elementwise operation of f16 tensors, or an elementwise binary
+operation of bf16 tensors, that are all one contiguous run of elements in the same order (no broadcast, the
+element count a multiple of 16 bytes of D) runs on
+a flat kernel first: no index arithmetic, two 16-byte vectors of D per thread with streaming loads and stores, and, when no
+scale is zero, the loads of every input issued without branches. Buffers not aligned to its vectors run the
+generic kernel. The JIT doesn't specialize the flat kernel (it has no sizes or strides to build in).
+
+Permutations and elementwise operations accept the same data type combinations on both backends (the API's
+rows): a permutation of f16 data with f16 or f32 scalars, of f32 data with f32 scalars and of f64 data with f64
+scalars; an elementwise binary operation of f16 or bf16 data with scalars of the data type or f32, of f32 data
+with f32 scalars and of f64 data with f64 scalars; an elementwise trinary operation of f16, f32 or f64 data with
+scalars of the data type. Other combinations, for example a bf16 permutation or an f16 trinary operation with
+f32 scalars, are declined: ``hiptensorEstimateWorkspaceSize`` and ``hiptensorCreatePlan`` return
+``HIPTENSOR_STATUS_NOT_SUPPORTED``.
 
 A reduction runs on rocKE's tuned reduction kernels: A is read in its own layout (no permutation), with the
 kept and reduced modes merged where they are contiguous. When A's fastest mode is reduced, several threads
@@ -231,7 +273,9 @@ from its start, and its GEMM routes read them with vector accesses.
 The data types of a contraction's A, B, C and D may differ: each is f16, bf16, f32 or f64, or each is complex f32
 or complex f64. The compute type sets the precision of the products. With ``HIPTENSOR_COMPUTE_DESC_16F`` and
 ``HIPTENSOR_COMPUTE_DESC_16BF`` every operand is rounded once to that type (to nearest even, from any type
-including f64; values past its range become infinities). With ``HIPTENSOR_COMPUTE_DESC_32F`` and
+including f64; values past its range become infinities). On gfx90a the matrix instructions of the 16-bit routes (the
+direct GETT's f16 classes) treat subnormal f16 operands as zero, a property of that target's matrix cores: their
+products are zero there, and an infinity times such an operand gives NaN. With ``HIPTENSOR_COMPUTE_DESC_32F`` and
 ``HIPTENSOR_COMPUTE_DESC_C32F`` the operands keep their values (every f16 and bf16 value is an f32 value) and
 operands of f64 data run on the f64 route. With ``HIPTENSOR_COMPUTE_DESC_64F`` and ``HIPTENSOR_COMPUTE_DESC_C64F``
 every contraction runs on the f64 route or, in the direct GETT, in f64. Products accumulate in f32 (f64 on the
@@ -335,8 +379,9 @@ For the f32-class recipes, the error of an element of D against the exact result
 ``2 (n K + 4) u |alpha| sum |a b| + e |alpha| sum |a b| + 2 u_d |d| + 4 u |beta c|``, with ``u`` = 2^-24, ``n`` the part
 products per product (1 for ``native``, 9, 6, 4 or 3) and ``e`` the relative error of a product's representation (0
 for ``native`` and ``x9``, 2^-21 for ``x6``, 2^-14 for ``x4`` and ``x3``); for ``f64`` the bound above with
-``u_c`` = 2^-53 applies. ``x6`` ranks its candidates with the selection models of the kernel pack; the other recipes
-rank them by rocKE's rules (the models are trained on ``x6``). A plan-cache entry written under one recipe names a
+``u_c`` = 2^-53 applies. ``native`` (the default) and ``x6`` rank their candidates with the selection models of the
+kernel pack trained on their route sets (classes ``contraction.s.native`` and ``contraction.c.native`` for
+``native``); the other recipes rank them by rocKE's rules. A plan-cache entry written under one recipe names a
 kernel the other recipes do not list, so plans under another recipe select their kernel as if the entry were not
 there.
 
@@ -370,13 +415,48 @@ broadcast along the output's fastest mode, for example a permutation that moves 
 kernel-pack kernel (``HIPTENSOR_ROCKE_JIT=all`` specializes it too). The choice is made when the plan is created
 and is kept by the plans the plan cache restores. The library builds the kernels with rocKE's C++ kernel builders
 (the same builders that wrote the kernel pack) and compiles them with COMGR, without Python and without any data
-file besides the kernel pack. Every elementwise launch the kernel pack serves has a JIT kernel, including the
+file besides the kernel pack (the contraction JIT below also reads rocKE's GEMM selection models). Every
+elementwise launch the kernel pack serves has a JIT kernel, including the
 operand packing and epilogue launches of mixed-type contractions, launches with 64-bit offsets, and launches with
 the operators ``HIPTENSOR_OP_SIN`` to ``HIPTENSOR_OP_FLOOR``. Launches with 64-bit offsets or with those operators
 use vector accesses only when the output and every input are contiguous in the output's fastest mode, and constant
 geometry without vector accesses otherwise (by default only the former are specialized; ``HIPTENSOR_ROCKE_JIT=all``
 specializes both). A specialized launch keeps its kernel-pack launch, which execution takes when a buffer is not
 aligned to the vector width or the plan runs on another device than the one it was created on.
+
+Contraction JIT
+"""""""""""""""
+
+On gfx950, a plan created with ``HIPTENSOR_JIT_MODE_DEFAULT`` for a contraction that rocKE's tuned and AOT route
+tables don't hold runs rocKE's tensor-contraction planner when the plan is created. It serves f16 and bf16
+contractions (A, B, C and D of one type, ``HIPTENSOR_COMPUTE_DESC_32F``, no operators, C laid out as D) with
+contracted, M and N modes and no batch modes. The planner is the C++ twin of rocKE's product planner: rocKE's
+GEMM dispatcher (its rules, its selection models and its time model) picks a GEMM body for the contraction's
+GEMM view, and a cost model chooses between a GETT on that body that reads the operands in place (after packing
+the operands whose fastest free run is too short for its 16-byte loads into the workspace) and a GETT on
+K-contiguous copies of both operands made in the workspace. rocKE's tests check that the C++ planner decides as
+rocKE's Python planner does, and that the kernels the library builds are the ones rocKE's Python engine builds,
+on random contractions. The library builds the route's kernels (the pack steps and the GETT) with rocKE's C++
+kernel builders, every size and stride a constant, and compiles them with COMGR. The route is a candidate
+of the selection: the gfx950 selection model of the class ranks it with the ring GETT, the GEMM routes, the
+f64 route and the direct GETT, and the plan builds and compiles its kernels only when it selects (or, with
+``HIPTENSOR_ALGO_DEFAULT_PATIENT``, times) the route; without a model that scores it, the route goes first. The
+planner reads rocKE's GEMM selection models, which the build installs next to the kernel pack
+(``<target>/gemm_models``, with the SHA-256 digest of each file; a file that doesn't match its digest, or a
+missing directory, leaves contractions on their other routes, and the plan log says why).
+
+The route's kernels go to the kernel cache like the elementwise JIT's kernels (keys of their own kind): a second
+plan of the problem, or of a problem with the same memory layout whose descriptors list the modes under other
+labels or in another order, takes them without compiling, and the kernel cache files and
+``HIPTENSOR_KERNEL_CACHE_DIR`` carry them to other processes. A route whose kernels can't be compiled (a compiler
+or builder error, ``HIPTENSOR_JIT_MAX_MS`` spent before a compile) isn't selected: the plan takes the next
+candidate. Like the route tables' launches, the route runs the direct GETT when alpha is zero, or beta is zero
+for a contraction with C, when a buffer or the workspace isn't aligned to its 16-byte accesses, and on another
+device than the plan's (its kernels are loaded on the plan's device only). Its workspace (the packed operands) is
+in the estimate of ``hiptensorEstimateWorkspaceSize`` for a ``HIPTENSOR_JIT_MODE_DEFAULT`` preference; with a
+smaller limit the plan takes another route. Contractions the planner doesn't serve (other data types or
+operators, batch modes, K extents that the GEMM bodies' K tiles don't divide, layouts without a 4-byte run)
+keep their other routes. Steps of trinary contractions don't take this route.
 
 Plans created with ``HIPTENSOR_JIT_MODE_NONE`` (the default) never compile and never use JIT kernels; every
 problem the rocKE backend serves runs without JIT. Plan creation with ``HIPTENSOR_JIT_MODE_DEFAULT`` can take as

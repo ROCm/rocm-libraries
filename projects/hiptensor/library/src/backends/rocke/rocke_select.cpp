@@ -28,13 +28,17 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <numeric>
+#include <tuple>
 #include <type_traits>
 
+#include "platform.hpp"
 #include "rocke_select.hpp"
 
 namespace hiptensor
@@ -56,7 +60,19 @@ namespace hiptensor
                 "tile_n",       "tile_k",        "block",     "persistent", "streamk",  "kblock",
                 "direct",       "steps",         "memsets",   "lg_ws",      "lg_bytes", "lg_flops",
                 "intensity_q8", "ctas",          "waves_q8",  "tiles_q8",   "tail_q8",  "pad_q8",
-                "split",        "lg_chunk",      "lds",       "scratch",    "cus"};
+                "split",        "lg_chunk",      "lds",       "scratch",    "cus",
+                // schema 2
+                "gett_kind", "lg_pred_ns"};
+
+            // The routes a model of format v1 scores (the routes of the schema-1 corpus); a
+            // model of format v2 names its routes.
+            bool legacyRoute(Route route)
+            {
+                return route != Route::RingGett && route != Route::DirectGett
+                       && route != Route::TunedReduction && route != Route::JitGett;
+            }
+
+            constexpr size_t kRoutes = 32;
 
             int dtypeCode(hiptensorDataType_t type)
             {
@@ -99,6 +115,16 @@ namespace hiptensor
                 std::string          id;
                 std::vector<int32_t> featureIndex; // model feature -> schema index
                 std::vector<Tree>    trees;
+                // the routes the model was trained on (Route values), which it scores
+                std::vector<bool> routes = std::vector<bool>(kRoutes, false);
+                // the prediction by which the model's best candidate must beat the first scored
+                // candidate of the static order to be selected instead of it (0: none)
+                double margin = 0.0;
+
+                bool scores(Route route) const
+                {
+                    return size_t(route) < routes.size() && routes[size_t(route)];
+                }
 
                 double predict(std::vector<int64_t> const& x) const
                 {
@@ -184,9 +210,11 @@ namespace hiptensor
             }
 
             // Parses a model of the pack's route table:
+            //   v2;schema=<n>;routes=<route>,...;margin=<m>;features=<name>,...;trees=<n>|<tree>...
             //   v1;schema=<n>;features=<name>,...;trees=<n>|<tree>|<tree>...
             //   tree: <leaves>;<split features>;<thresholds>;<left>;<right>;<leaf values>
-            // (lists space separated; a one-leaf tree has empty node lists).
+            // (lists space separated; a one-leaf tree has empty node lists). A v1 model scores
+            // the routes of the schema-1 corpus (legacyRoute).
             bool parseModel(std::string const& cell,
                             std::string const& text,
                             Model&             model,
@@ -194,15 +222,63 @@ namespace hiptensor
             {
                 auto parts = split(text, '|');
                 auto head  = split(parts[0], ';');
-                if(head.size() != 4 || head[0] != "v1")
+                if(!((head.size() == 4 && head[0] == "v1")
+                     || (head.size() == 6 && head[0] == "v2")))
                 {
                     why = "unknown model format";
                     return false;
                 }
-                if(head[1] != "schema=" + std::to_string(kSelectSchema))
+                // feature schemas are append only: a model of an older schema reads features
+                // this library still computes with the same meaning
+                bool knownSchema = false;
+                for(int s = 1; s <= kSelectSchema; s++)
+                {
+                    knownSchema = knownSchema || head[1] == "schema=" + std::to_string(s);
+                }
+                if(!knownSchema)
                 {
                     why = "model of another feature schema (" + head[1] + ")";
                     return false;
+                }
+                if(head[0] == "v2")
+                {
+                    if(head[2].rfind("routes=", 0) != 0)
+                    {
+                        why = "malformed model header";
+                        return false;
+                    }
+                    for(auto const& r : split(head[2].substr(7), ','))
+                    {
+                        char*      end   = nullptr;
+                        auto const route = std::strtol(r.c_str(), &end, 10);
+                        if(r.empty() || *end != '\0' || route < 0 || size_t(route) >= kRoutes)
+                        {
+                            why = "malformed model routes";
+                            return false;
+                        }
+                        model.routes[size_t(route)] = true;
+                    }
+                    char* end   = nullptr;
+                    bool  valid = head[3].rfind("margin=", 0) == 0 && head[3].size() > 7;
+                    if(valid)
+                    {
+                        model.margin = std::strtod(head[3].c_str() + 7, &end);
+                        valid        = *end == '\0' && std::isfinite(model.margin)
+                                && model.margin >= 0.0;
+                    }
+                    if(!valid)
+                    {
+                        why = "malformed model margin";
+                        return false;
+                    }
+                    head.erase(head.begin() + 2, head.begin() + 4);
+                }
+                else
+                {
+                    for(size_t r = 0; r < kRoutes; r++)
+                    {
+                        model.routes[r] = legacyRoute(static_cast<Route>(r));
+                    }
                 }
                 if(head[2].rfind("features=", 0) != 0 || head[3].rfind("trees=", 0) != 0)
                 {
@@ -269,26 +345,55 @@ namespace hiptensor
                 return true;
             }
 
-            // The model of a cell in a pack, parsed once per process. nullptr with `why` when
-            // the pack has none or it does not load.
+            // The text of a cell's model: the pack's route select.model.<cell>, or with
+            // HIPTENSOR_ROCKE_SELECT_MODELS=<dir> the file <dir>/<target>/<cell>.model (models
+            // being trained or evaluated without a new pack; a cell without a file there has no
+            // model). Empty when there is none.
+            std::string modelText(Pack const& pack, std::string const& dir, std::string const& cell)
+            {
+                if(dir.empty())
+                {
+                    return pack.route("select.model." + cell);
+                }
+                std::ifstream in(dir + "/" + pack.arch() + "/" + cell + ".model",
+                                 std::ios::binary);
+                if(!in)
+                {
+                    return {};
+                }
+                std::string text((std::istreambuf_iterator<char>(in)),
+                                 std::istreambuf_iterator<char>());
+                while(!text.empty()
+                      && (text.back() == '\n' || text.back() == '\r' || text.back() == ' '))
+                {
+                    text.pop_back();
+                }
+                return text;
+            }
+
+            // The model of a cell (modelText), parsed once per process and source. nullptr with
+            // `why` when there is none or it does not load.
             std::shared_ptr<Model const>
                 modelFor(Pack const& pack, std::string const& cell, std::string& why)
             {
                 static std::mutex mutex;
-                static std::map<std::pair<Pack const*, std::string>,
+                static std::map<std::tuple<Pack const*, std::string, std::string>,
                                 std::pair<std::shared_ptr<Model const>, std::string>>
-                                 cache;
-                std::scoped_lock lock(mutex);
-                auto             key = std::make_pair(&pack, cell);
-                auto             it  = cache.find(key);
+                                  cache;
+                auto const        env = getEnvironmentVariable("HIPTENSOR_ROCKE_SELECT_MODELS");
+                std::string const dir = env ? *env : std::string();
+                std::scoped_lock  lock(mutex);
+                auto              key = std::make_tuple(&pack, dir, cell);
+                auto              it  = cache.find(key);
                 if(it == cache.end())
                 {
                     std::shared_ptr<Model const> model;
                     std::string                  reason;
-                    auto                         text = pack.route("select.model." + cell);
+                    auto                         text = modelText(pack, dir, cell);
                     if(text.empty())
                     {
-                        reason = "no model for " + cell;
+                        reason = "no model for " + cell
+                                 + (dir.empty() ? "" : " in HIPTENSOR_ROCKE_SELECT_MODELS");
                     }
                     else
                     {
@@ -385,8 +490,11 @@ namespace hiptensor
             put(f.streamK ? 1 : 0);
             put(f.kBlock ? 1 : 0);
             put(f.direct ? 1 : 0);
-            put(static_cast<int64_t>(p.steps.size()));
-            put(static_cast<int64_t>(p.memsets.size()));
+            // a JitGett candidate's features are the same before and after its launches are
+            // built (the planned launches; no kernel metadata)
+            bool const jit = f.route == Route::JitGett;
+            put(jit ? int64_t(f.launches) : static_cast<int64_t>(p.steps.size()));
+            put(jit ? 0 : static_cast<int64_t>(p.memsets.size()));
             put(log2Q8(p.workspaceBytes));
             put(log2Q8(f.bytes));
             put(log2Q8(f.flops));
@@ -407,9 +515,12 @@ namespace hiptensor
             put(f.paddedVolume > 0 && volume > 0 ? f.paddedVolume * 256 / volume : 256);
             put(f.split);
             put(log2Q8(uint64_t(std::max<int64_t>(f.chunk, 1))));
-            put(f.main != nullptr ? f.main->groupSegment : 0);
-            put(f.main != nullptr ? f.main->privateSegment : 0);
+            put(f.main != nullptr && !jit ? f.main->groupSegment : 0);
+            put(f.main != nullptr && !jit ? f.main->privateSegment : 0);
             put(cus);
+            // schema 2
+            put(f.gettKind);
+            put(log2Q8(uint64_t(std::max<int64_t>(f.predictedNs, 0))));
         }
 
         std::vector<std::string> selectionCells(Problem const& problem, std::string const& tag)
@@ -472,9 +583,9 @@ namespace hiptensor
                 return candidates[a].staticRank < candidates[b].staticRank;
             });
 
-            // 1. rocKE's tuned route table
+            // 1. rocKE's tuned route tables (exact problems rocKE measured)
             auto tuned = std::find_if(sel.order.begin(), sel.order.end(), [&candidates](int i) {
-                return candidates[i].tuned;
+                return candidates[i].tuned && candidates[i].facts.route != Route::JitGett;
             });
             if(tuned != sel.order.end())
             {
@@ -483,16 +594,60 @@ namespace hiptensor
                 sel.model  = "tuned route table";
                 return sel;
             }
-            // 1b. the routes the selection models were not trained on (the ring GETT, the direct
-            // GETT, the tuned reduction classes) keep the static order after the others; a
-            // preferred one goes first
-            auto modelRoute = [&candidates](int i) {
-                auto r = candidates[i].facts.route;
-                return r != Route::RingGett && r != Route::DirectGett && r != Route::TunedReduction;
+
+            // 2. the model of the problem's cell (an f32 recipe other than the ones the pack has
+            // models for: cells no pack has a model for, so the rules)
+            auto const cells
+                = selectionCells(problem, n > 0 ? candidates[0].facts.selectTag : std::string());
+            std::shared_ptr<Model const> model;
+            if(cells.empty() || n < 2)
+            {
+                sel.model = n < 2 ? "one candidate" : "no model for this operation";
+            }
+            else if(!useModel)
+            {
+                sel.model = "model disabled";
+            }
+            else
+            {
+                for(auto const& cell : cells)
+                {
+                    std::string why;
+                    model = modelFor(pack, cell, why);
+                    if(model != nullptr)
+                    {
+                        break;
+                    }
+                    if(sel.model.empty() || why.find("not used") != std::string::npos)
+                    {
+                        sel.model = why;
+                    }
+                }
+            }
+            // the candidates the model scores: the routes it was trained on (without a model,
+            // the routes of the schema-1 corpus, so that the rules below order the others)
+            auto scored = [&candidates, &model](int i) {
+                auto const route = candidates[i].facts.route;
+                return model != nullptr ? model->scores(route) : legacyRoute(route);
             };
-            std::stable_partition(sel.order.begin(), sel.order.end(), modelRoute);
-            auto preferred = std::find_if(sel.order.begin(), sel.order.end(), [&candidates](int i) {
-                return candidates[i].preferred;
+
+            // 3. the rules for the routes the model does not score: the route rocKE's tensor
+            // GETT planner chooses (JIT) first, then a preferred candidate (the ring GETT, the
+            // direct GETT on a target without the GEMM routes, the tuned reduction classes);
+            // the others keep the static order after the scored ones
+            auto jit = std::find_if(sel.order.begin(), sel.order.end(), [&](int i) {
+                return candidates[i].facts.route == Route::JitGett && !scored(i);
+            });
+            if(jit != sel.order.end())
+            {
+                std::rotate(sel.order.begin(), jit, jit + 1);
+                sel.source = SelectSource::Tuned;
+                sel.model  = "rocKE's tensor GETT planner (JIT)";
+                return sel;
+            }
+            std::stable_partition(sel.order.begin(), sel.order.end(), scored);
+            auto preferred = std::find_if(sel.order.begin(), sel.order.end(), [&](int i) {
+                return candidates[i].preferred && !scored(i);
             });
             if(preferred != sel.order.end())
             {
@@ -504,57 +659,39 @@ namespace hiptensor
                                                               : "the direct GETT rule";
                 return sel;
             }
-
-            // 2. the model of the problem's cell (an f32 recipe other than x6: cells no pack has
-            // a model for, so 3.)
-            auto const cells
-                = selectionCells(problem, n > 0 ? candidates[0].facts.selectTag : std::string());
-            if(cells.empty() || n < 2)
-            {
-                sel.model = n < 2 ? "one candidate" : "no model for this operation";
-                return sel;
-            }
-            if(!useModel)
-            {
-                sel.model = "model disabled";
-                return sel;
-            }
-            std::shared_ptr<Model const> model;
-            for(auto const& cell : cells)
-            {
-                std::string why;
-                model = modelFor(pack, cell, why);
-                if(model != nullptr)
-                {
-                    break;
-                }
-                if(sel.model.empty() || why.find("not used") != std::string::npos)
-                {
-                    sel.model = why;
-                }
-            }
             if(model == nullptr)
             {
-                // 3. the static order
+                // 4. the static order
                 return sel;
             }
             std::vector<int64_t> x;
             for(size_t i = 0; i < n; i++)
             {
-                if(modelRoute(static_cast<int>(i)))
+                if(scored(static_cast<int>(i)))
                 {
                     features(problem, candidates[i], x);
                     sel.scores[i] = model->predict(x);
                 }
             }
-            auto const scored = std::find_if_not(sel.order.begin(), sel.order.end(), modelRoute);
-            std::stable_sort(sel.order.begin(), scored, [&](int a, int b) {
+            auto const last = std::find_if_not(sel.order.begin(), sel.order.end(), scored);
+            // the static order's first scored candidate (before sorting: the scored candidates
+            // keep the static order)
+            int const anchor = sel.order.begin() != last ? sel.order.front() : -1;
+            std::stable_sort(sel.order.begin(), last, [&](int a, int b) {
                 if(sel.scores[a] != sel.scores[b])
                 {
                     return sel.scores[a] < sel.scores[b];
                 }
                 return candidates[a].staticRank < candidates[b].staticRank;
             });
+            // the model's best replaces the static order's first only when it is predicted
+            // better by more than the model's margin
+            if(anchor >= 0 && model->margin > 0.0
+               && sel.scores[anchor] - sel.scores[sel.order.front()] <= model->margin)
+            {
+                auto it = std::find(sel.order.begin(), last, anchor);
+                std::rotate(sel.order.begin(), it, it + 1);
+            }
             sel.source = SelectSource::Model;
             sel.model  = model->id;
             return sel;

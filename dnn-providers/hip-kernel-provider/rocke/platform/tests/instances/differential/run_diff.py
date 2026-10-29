@@ -118,6 +118,7 @@ EXHAUSTIVE_FAMILIES = frozenset(
         "gett_f64_pack",
         "hiptensor_aot_dgett",
         "hiptensor_aot_ew",
+        "hiptensor_aot_ewf",
         "hiptensor_aot_ewt",
         "hiptensor_aot_ewv",
         "hiptensor_aot_jit_ew",
