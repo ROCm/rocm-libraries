@@ -783,6 +783,150 @@ TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWhenPerWmmaBudgetsSeparateWindo
     EXPECT_EQ(waits, 2);
 }
 
+// The two LDS tokens are different banks, but both rounds use physical barrier -1.
+// Model the rotating pipeline: read the old bank, make the next bank available, then
+// release/refill the old bank. Barrier placement heuristics must never overlap rounds.
+TEST_F(DAGSchedulerPassTest, WorkgroupBarrierRoundsMayReorderWithoutOverlapping) {
+    bb->addSuccessor(bb);
+    for (int i = 0; i < 8; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100 + i * 16, /*src0Start=*/0);
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/300, /*ldsToken=*/0);
+    auto [readySignal, readyWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/32, /*addrReg=*/304, /*ldsToken=*/1);
+    for (int i = 0; i < 8; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100 + i * 16, /*src0Start=*/0);
+    auto [releaseSignal, releaseWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    auto* refill = createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224,
+                                           /*ldsToken=*/0);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/400, /*src0Start=*/32);
+
+    runPassWithUnrollGemm();
+
+    std::vector<StinkyInstruction*> actual;
+    for (IRBase& ir : *bb) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst != nullptr && isBarrier(*inst)) actual.push_back(inst);
+    }
+    const std::vector<StinkyInstruction*> swapped{releaseSignal, releaseWait, readySignal,
+                                                  readyWait};
+    // The placement model prefers releasing the old bank first. Require the
+    // whole-round exchange, so preserving source order cannot hide a regression.
+    EXPECT_EQ(actual, swapped) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, releaseWait), positionOf(*bb, refill)) << scheduleOrder(*bb);
+}
+
+TEST_F(DAGSchedulerPassTest, WorkgroupBarrierRoundCycleRejectsOtherwiseAcyclicPolicyEdges) {
+    bb->addSuccessor(bb);
+    for (int i = 0; i < 8; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100 + i * 16, /*src0Start=*/0);
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/300, /*ldsToken=*/0);
+    auto [readySignal, readyWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/32, /*addrReg=*/304, /*ldsToken=*/1);
+    for (int i = 0; i < 8; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100 + i * 16, /*src0Start=*/0);
+    auto [releaseSignal, releaseWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    auto* refill = createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224,
+                                           /*ldsToken=*/0);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/400, /*src0Start=*/32);
+
+    // A signal in the first round feeds the second round's wait. Reversing
+    // complete rounds is illegal, but releaseSignal -> readySignal alone
+    // would leave the instruction DAG acyclic. Reject the round-level cycle
+    // before optional placement constraints force overlapping rounds.
+    readySignal->addDestReg(StinkyRegister("s", 310, 1));
+    releaseWait->addSrcReg(StinkyRegister("s", 310, 1));
+
+    runPassWithUnrollGemm();
+
+    const std::vector<StinkyInstruction*> expected{readySignal, readyWait, releaseSignal,
+                                                   releaseWait};
+    std::vector<StinkyInstruction*> actual;
+    for (IRBase& ir : *bb) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst != nullptr && isBarrier(*inst)) actual.push_back(inst);
+    }
+    EXPECT_EQ(actual, expected) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, releaseWait), positionOf(*bb, refill)) << scheduleOrder(*bb);
+}
+
+// A signal-to-other-wait dependency permits both signals to be instruction-ready,
+// but only the first complete round can legally go first. This is the deadlock
+// case for an ownership gate that does not lift mandatory round precedence.
+TEST_F(DAGSchedulerPassTest, WorkgroupReservationHonorsSignalToOtherWaitDependency) {
+    bb->addSuccessor(bb);
+    for (int i = 0; i < 8; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100 + i * 16, /*src0Start=*/0);
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/300, /*ldsToken=*/0);
+    auto [signalB, waitB] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/32, /*addrReg=*/304, /*ldsToken=*/1);
+    for (int i = 0; i < 8; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100 + i * 16, /*src0Start=*/0);
+    auto [signalA, waitA] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    // No tensor refill, so the after/before overlap policy has no reason to
+    // request the competing reverse order. This tests required precedence itself.
+    signalB->addDestReg(StinkyRegister("s", 310, 1));
+    waitA->addSrcReg(StinkyRegister("s", 310, 1));
+    createWmmaF32_16x16x16_bf16(/*destStart=*/400, /*src0Start=*/32);
+
+    runPassWithUnrollGemm();
+
+    EXPECT_LT(positionOf(*bb, signalB), positionOf(*bb, waitB));
+    EXPECT_LT(positionOf(*bb, waitB), positionOf(*bb, signalA)) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, signalA), positionOf(*bb, waitA));
+}
+
+TEST_F(DAGSchedulerPassTest, WorkgroupReservationIncludesLegacyBarriers) {
+    auto [signalA, waitA] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    AsmIRBuilder builder(*bb, arch);
+    auto* legacy = builder.create(getMCIDByUOp(GFX::s_barrier, arch));
+    legacy->addSrcReg(StinkyRegister(RegType::LDS, 1, 1));
+    legacy->addDestReg(StinkyRegister(RegType::LDS, 1, 1));
+    auto [signalB, waitB] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/2);
+    // Existing dependencies select A -> legacy -> B at the round level. Their
+    // transitive closing-wait edges must treat the legacy barrier as one round.
+    signalA->addDestReg(StinkyRegister("s", 310, 1));
+    legacy->addSrcReg(StinkyRegister("s", 310, 1));
+    legacy->addDestReg(StinkyRegister("s", 311, 1));
+    waitB->addSrcReg(StinkyRegister("s", 311, 1));
+
+    runPassWithUnrollGemm();
+
+    EXPECT_LT(positionOf(*bb, signalA), positionOf(*bb, waitA));
+    EXPECT_LT(positionOf(*bb, waitA), positionOf(*bb, legacy));
+    EXPECT_LT(positionOf(*bb, legacy), positionOf(*bb, signalB));
+    EXPECT_LT(positionOf(*bb, signalB), positionOf(*bb, waitB));
+}
+
+// A region can begin with a wait or end with a signal. Their partners are fixed
+// across region boundaries, so the in-region order must include these unpaired halves.
+TEST_F(DAGSchedulerPassTest, WorkgroupBarrierOrderIncludesHalvesAcrossRegionBoundaries) {
+    auto insertFenceBeforeWait = [&](StinkyInstruction* wait) {
+        bb->removeIR(wait);
+        AsmIRBuilder builder(*bb, arch);
+        auto* fence = builder.create(getMCIDByUOp(GFX::s_wait_dscnt, arch));
+        fence->addSrcReg(StinkyRegister(0));
+        bb->insertIR(bb->end(), wait);
+        return fence;
+    };
+
+    auto [firstSignal, firstWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    auto* firstFence = insertFenceBeforeWait(firstWait);
+    auto [middleSignal, middleWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    auto [lastSignal, lastWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/2);
+    auto* lastFence = insertFenceBeforeWait(lastWait);
+
+    runPassWithUnrollGemm();
+
+    const std::vector<StinkyInstruction*> expected{firstSignal, firstFence, firstWait, middleSignal,
+                                                   middleWait,  lastSignal, lastFence, lastWait};
+    std::vector<StinkyInstruction*> actual;
+    for (IRBase& ir : *bb) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst != nullptr && (isBarrier(*inst) || isWaitCnt(*inst))) actual.push_back(inst);
+    }
+    EXPECT_EQ(actual, expected) << scheduleOrder(*bb);
+}
+
 // A non-overlapping pair stays on one threshold and issues together.
 TEST_F(DAGSchedulerPassTest, NonOverlappingBarrierPairStaysTogether) {
     bb->addSuccessor(bb);

@@ -154,6 +154,9 @@ struct CDNA5ReadyQueueTestPeer {
     static bool overlaps(CDNA5ReadyQueue& q, DAGNode* n) {
         return q.destOverlapsActiveWmmaSrc(n);
     }
+    static void barrierThreshold(CDNA5ReadyQueue& q, StinkyInstruction* inst, int threshold) {
+        q.barrierWmmaThresholds_[inst] = threshold;
+    }
     static constexpr uint8_t kBlocked = CDNA5ReadyQueue::kBlockedSlot;
 };
 
@@ -185,6 +188,117 @@ TEST_F(CDNA5ReadyQueueTest, OpenSccChainWithOnlyBarriersReadyAborts) {
             pickWithOpenChainAndOnlyBarriersReady(queue, *bb);
         },
         "open SCC chain but only barriers are ready");
+}
+
+// The existing priority_queue comparator picks the largest id first, despite
+// the nearby CompareByDAGid comment. Barrier gating must preserve that policy
+// for ordinary instructions, rather than switch this queue to ascending order.
+TEST_F(CDNA5ReadyQueueTest, DefaultReadyQueuePreservesExistingLargestIdPriority) {
+    PassContext ctx = makeClusterBarrierCtx(/*clusterBarrier=*/false);
+    ReadyQueueByDAGid queue(ctx);
+    DAGNode low(makeSCmpDef(*bb), 0);
+    DAGNode middle(makeSCmpDef(*bb), 1);
+    DAGNode high(makeSCmpDef(*bb), 2);
+    queue.push(&middle);
+    queue.push(&low);
+    queue.push(&high);
+    EXPECT_EQ(queue.pickOne(), &high);
+    EXPECT_EQ(queue.pickOne(), &middle);
+    EXPECT_EQ(queue.pickOne(), &low);
+    EXPECT_TRUE(queue.empty());
+}
+
+// Simulate ordinary DAG readiness with fixed source ids. Either round can become
+// ready first, and its wait must finish before an already queued competing signal.
+// The independent SALU instruction demonstrates that a round is not an atomic
+// instruction bundle: useful work can still be selected between its halves.
+TEST_F(CDNA5ReadyQueueTest, WorkgroupReservationAllowsEitherReadyRoundFirst) {
+    for (bool useCdna5 : {false, true}) {
+        for (bool secondFirst : {false, true}) {
+            SCOPED_TRACE(::testing::Message()
+                         << "CDNA5=" << useCdna5 << " secondFirst=" << secondFirst);
+            PassContext ctx = makeClusterBarrierCtx(/*clusterBarrier=*/false);
+            std::unique_ptr<ReadyQueue> queue;
+            if (useCdna5)
+                queue = std::make_unique<CDNA5ReadyQueue>(ctx);
+            else
+                queue = std::make_unique<ReadyQueueByDAGid>(ctx);
+
+            DAGNode signalA(makeWorkgroupBarrierSignal(*bb, 0), 0);
+            DAGNode waitA(makeWorkgroupBarrierWait(*bb, 0), 1);
+            DAGNode signalB(makeWorkgroupBarrierSignal(*bb, 1), 2);
+            DAGNode waitB(makeWorkgroupBarrierWait(*bb, 1), 3);
+            DAGNode compute(makeSCmpDef(*bb), 4);
+            signalA.workgroupBarrier = waitA.workgroupBarrier = true;
+            signalB.workgroupBarrier = waitB.workgroupBarrier = true;
+            signalA.workgroupRoundWait = &waitA;
+            signalB.workgroupRoundWait = &waitB;
+            DAGNode* firstSignal = secondFirst ? &signalB : &signalA;
+            DAGNode* firstWait = secondFirst ? &waitB : &waitA;
+            DAGNode* nextSignal = secondFirst ? &signalA : &signalB;
+            DAGNode* nextWait = secondFirst ? &waitA : &waitB;
+
+            queue->push(firstSignal);
+            ASSERT_EQ(queue->pickOne(), firstSignal);
+            queue->push(nextSignal);
+            queue->push(&compute);
+            EXPECT_EQ(queue->pickOne(), &compute);
+            queue->push(firstWait);
+            EXPECT_EQ(queue->pickOne(), firstWait);
+            EXPECT_EQ(queue->pickOne(), nextSignal);
+            queue->push(nextWait);
+            EXPECT_EQ(queue->pickOne(), nextWait);
+            EXPECT_TRUE(queue->empty());
+            queue->assertWorkgroupBarrierClosed();
+        }
+    }
+}
+
+// Both signals are already queued before the reservation opens. The competing
+// signal has a due promotion while the owning wait is below its threshold;
+// neither promotion nor the unpromoted cluster-off drain may bypass ownership.
+TEST_F(CDNA5ReadyQueueTest, WorkgroupReservationBlocksQueuedPromotedSignal) {
+    PassContext ctx = makeClusterBarrierCtx(/*clusterBarrier=*/false);
+    CDNA5ReadyQueue queue(ctx);
+    DAGNode signalA(makeWorkgroupBarrierSignal(*bb, 0), 0);
+    DAGNode signalB(makeWorkgroupBarrierSignal(*bb, 1), 1);
+    DAGNode waitA(makeWorkgroupBarrierWait(*bb, 0), 2);
+    DAGNode waitB(makeWorkgroupBarrierWait(*bb, 1), 3);
+    signalA.workgroupBarrier = waitA.workgroupBarrier = true;
+    signalB.workgroupBarrier = waitB.workgroupBarrier = true;
+    signalA.workgroupRoundWait = &waitA;
+    signalB.workgroupRoundWait = &waitB;
+    queue.push(&signalA);
+    queue.push(&signalB);
+    ASSERT_EQ(queue.pickOne(), &signalA);
+    CDNA5ReadyQueueTestPeer::barrierThreshold(queue, signalB.inst, 0);
+    CDNA5ReadyQueueTestPeer::barrierThreshold(queue, waitA.inst, 100);
+    queue.push(&waitA);
+    EXPECT_EQ(queue.pickOne(), &waitA);
+    EXPECT_EQ(queue.pickOne(), &signalB);
+    queue.push(&waitB);
+    EXPECT_EQ(queue.pickOne(), &waitB);
+    EXPECT_TRUE(queue.empty());
+    queue.assertWorkgroupBarrierClosed();
+}
+
+TEST_F(CDNA5ReadyQueueTest, LegacyBarrierCannotEnterOpenWorkgroupRound) {
+    PassContext ctx = makeClusterBarrierCtx(/*clusterBarrier=*/false);
+    CDNA5ReadyQueue queue(ctx);
+    AsmIRBuilder builder(*bb, GfxArchID::Gfx1250);
+    DAGNode legacy(builder.create(getMCIDByUOp(GFX::s_barrier, GfxArchID::Gfx1250)), 0);
+    DAGNode signal(makeWorkgroupBarrierSignal(*bb, 0), 1);
+    DAGNode wait(makeWorkgroupBarrierWait(*bb, 0), 2);
+    legacy.workgroupBarrier = signal.workgroupBarrier = wait.workgroupBarrier = true;
+    signal.workgroupRoundWait = &wait;
+    queue.push(&signal);
+    ASSERT_EQ(queue.pickOne(), &signal);
+    queue.push(&legacy);
+    queue.push(&wait);
+    EXPECT_EQ(queue.pickOne(), &wait);
+    EXPECT_EQ(queue.pickOne(), &legacy);
+    EXPECT_TRUE(queue.empty());
+    queue.assertWorkgroupBarrierClosed();
 }
 
 TEST_F(CDNA5ReadyQueueTest, DsLoadDescCarriesDrainParams) {

@@ -129,6 +129,67 @@ static std::vector<HandshakeBarrier> collectHandshakeBarriers(DAGNodeList& dagNo
     return barriers;
 }
 
+// A path between endpoints of different rounds forces their serial order.
+// Keep only this required precedence: independent rounds compete in the ready
+// queue, and the selected signal reserves the workgroup barrier until its wait.
+// A cycle here is invalid even if the instruction DAG itself is acyclic.
+static bool buildWorkgroupRoundGraph(const std::vector<HandshakeBarrier>& rounds,
+                                     const std::vector<std::unordered_set<unsigned>>& graph,
+                                     std::vector<std::unordered_set<unsigned>>& roundGraph) {
+    roundGraph.assign(rounds.size(), {});
+    std::vector<unsigned> degree(rounds.size(), 0);
+    for (unsigned a = 0; a < rounds.size(); ++a) {
+        std::vector<char> reached(graph.size(), false);
+        std::vector<unsigned> stack{rounds[a].signal->id, rounds[a].wait->id};
+        while (!stack.empty()) {
+            unsigned node = stack.back();
+            stack.pop_back();
+            if (reached[node]) continue;
+            reached[node] = true;
+            for (unsigned successor : graph[node]) stack.push_back(successor);
+        }
+        for (unsigned b = 0; b < rounds.size(); ++b) {
+            if (a == b) continue;
+            if (reached[rounds[b].signal->id] || reached[rounds[b].wait->id]) {
+                roundGraph[a].insert(b);
+                ++degree[b];
+            }
+        }
+    }
+    std::vector<unsigned> ready;
+    for (unsigned i = 0; i < rounds.size(); ++i)
+        if (degree[i] == 0) ready.push_back(i);
+    unsigned visited = 0;
+    while (!ready.empty()) {
+        unsigned current = ready.back();
+        ready.pop_back();
+        ++visited;
+        for (unsigned successor : roundGraph[current])
+            if (--degree[successor] == 0) ready.push_back(successor);
+    }
+    return visited == rounds.size();
+}
+
+// A half whose partner lies outside this scheduling region cannot exchange
+// rounds across the region boundary. Complete pairs retain signal -> wait.
+static void constrainWorkgroupBarrierHalves(const std::vector<HandshakeBarrier>& rounds,
+                                            std::vector<std::unordered_set<unsigned>>& graph) {
+    for (const HandshakeBarrier& round : rounds) {
+        round.signal->workgroupBarrier = true;
+        round.wait->workgroupBarrier = true;
+        if (round.signal != round.wait) {
+            round.signal->workgroupRoundWait = round.wait;
+            addEdgeById(round.signal, round.wait, graph);
+        } else if (isBarrierWait(*round.wait->inst)) {
+            for (const HandshakeBarrier& other : rounds)
+                addEdgeById(round.wait, other.signal, graph);
+        } else if (isBarrierSignal(*round.signal->inst)) {
+            for (const HandshakeBarrier& other : rounds)
+                addEdgeById(other.wait, round.signal, graph);
+        }
+    }
+}
+
 static std::vector<SccChain> collectSccChains(
     DAGNodeList& dagNodes, const std::unordered_map<StinkyInstruction*, unsigned>& instToId) {
     std::vector<SccChain> chains;
@@ -344,6 +405,10 @@ static void scheduleRegionWithMovableSideEffects(
 
     if (regionSize == 0) return;
 
+    const auto workgroupRounds = collectHandshakeBarriers(dagNodes);
+    constrainWorkgroupBarrierHalves(workgroupRounds, dagGraph);
+    std::vector<std::unordered_set<unsigned>> workgroupRoundGraph;
+
     // The region's estimated length in original program order (WMMA -> latencyCycles, its full
     // co-issue window; otherwise issueCycles): where the terminator that follows it sits, which
     // DAGNode::earliestClock is built from.
@@ -506,17 +571,34 @@ static void scheduleRegionWithMovableSideEffects(
             continue;
         }
         dagGraph[predecessorId].insert(successorId);
+        if (!buildWorkgroupRoundGraph(workgroupRounds, dagGraph, workgroupRoundGraph)) {
+            dagGraph[predecessorId].erase(successorId);
+            PASS_DEBUG(std::cerr << "[DAG hard constraint] reject overlapping barrier rounds "
+                                 << predecessorId << " -> " << successorId << "\n");
+            continue;
+        }
         ++dagNodes[successorId].inDegree;
         mergedHardConstraintEdges.emplace(predecessorId, successorId);
         PASS_DEBUG(std::cerr << "[DAG hard constraint] add link " << predecessorId << " -> "
                              << successorId << "\n");
     }
 
+    if (!buildWorkgroupRoundGraph(workgroupRounds, dagGraph, workgroupRoundGraph))
+        STINKY_UNREACHABLE("Workgroup barrier rounds have cyclic data dependencies");
+    // Lift only required round precedence into instruction readiness. Without
+    // this, a ready signal could reserve the barrier while its wait still needs
+    // another round's signal, leaving no legal next pick. Independent rounds
+    // receive no edge and are ordered by the normal instruction selector.
+    for (unsigned a = 0; a < workgroupRounds.size(); ++a)
+        for (unsigned b : workgroupRoundGraph[a])
+            addEdgeById(workgroupRounds[a].wait, workgroupRounds[b].signal, dagGraph);
+
     PASS_DEBUG(dag::dumpDAGGraph(regionDag, std::cerr, mergedHardConstraintEdges));
 
     // Kahn's algorithm with stable pick (by original order)
 
     assert(readyQueue.empty() && "Ready queue must be empty before scheduling a region");
+    readyQueue.assertWorkgroupBarrierClosed();
 
     // Initialize the ready queue with instructions that have in-degree 0.
     for (unsigned i = 0; i < regionSize; ++i) {
@@ -564,6 +646,7 @@ static void scheduleRegionWithMovableSideEffects(
     }
     assert(orderInRegion == regionSize &&
            "Hard scheduling constraints must not leave unscheduled DAG nodes");
+    readyQueue.assertWorkgroupBarrierClosed();
 }
 
 // Schedule the instructions in the given IRList.

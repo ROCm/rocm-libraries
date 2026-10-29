@@ -12,17 +12,21 @@
 #   - signal must precede wait
 #   - wait must precede post-barrier ds_load
 #
-# Group 1 signal/wait are before group 0 signal/wait in the source; the scheduler
-# must not let group 0's wait slip past group 1's post-barrier load.
+# Both groups use hardware barrier -1. Start with complete source rounds;
+# the scheduler may reorder whole rounds, but must not overlap their halves.
 #
 # Pre-barrier loads appear before signals (within-group ordering preserved)
 # CHECK: ds_load_b128 v[0:3], v16
 # CHECK: ds_load_b128 v[4:7], v20
-# Both signals appear (one per group, scheduler may interleave)
-# CHECK-COUNT-2: s_barrier_signal
-# Both waits appear
-# CHECK-COUNT-2: s_barrier_wait
-# Post-barrier loads appear somewhere after the first wait (exact interleaving is scheduler-chosen)
+# A second signal must not overtake the wait for the preceding round.
+# CHECK: s_barrier_signal -1
+# CHECK-NOT: s_barrier_signal
+# CHECK: s_barrier_wait -1
+# CHECK-NOT: s_barrier_wait
+# CHECK: s_barrier_signal -1
+# CHECK-NOT: s_barrier_signal
+# CHECK: s_barrier_wait -1
+# Post-barrier loads retain their dependencies; either load may issue first.
 # CHECK-DAG: ds_load_b128 v[8:11], v24
 # CHECK-DAG: ds_load_b128 v[12:15], v28
 
@@ -31,8 +35,8 @@ token_start:
     ds_load_b128 v[4:7], v20 offset:0    // st.token:1  pre-barrier load, group 1
     v_wmma_f32_16x16x32_bf16 a[0:7], v[0:7], v[0:7], a[0:7]
     s_barrier_signal -1                  // st.token:1
-    s_barrier_signal -1                  // st.token:0
     s_barrier_wait -1                    // st.token:1
+    s_barrier_signal -1                  // st.token:0
     s_barrier_wait -1                    // st.token:0
     ds_load_b128 v[8:11], v24 offset:0   // st.token:0  post-barrier load, group 0
     ds_load_b128 v[12:15], v28 offset:0  // st.token:1  post-barrier load, group 1

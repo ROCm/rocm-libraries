@@ -739,9 +739,15 @@ class CDNA5ReadyQueue : public ReadyQueue {
     }
 
     // True when decidePromote() / pickOne() may consider issuing this barrier
-    // now. No-op when clusterBarrier is off (see sccChainBlocks()).
-    bool isBarrierEligibleNow(const DAGNode* node) const {
-        return !sccChainBlocks(node) && !(singleStageLoop() && stageBarrierAwaitsPrefetch(node));
+    // now. Physical workgroup-barrier ownership applies with or without cluster
+    // handshakes; it is a legality condition, not a placement preference.
+    bool isBarrierEligibleNow(const DAGNode* node, bool draining = false) const {
+        // Preserve the existing drain policy: without cluster handshakes, the
+        // final drain ignores the optional prefetch hold. Ownership is hard in
+        // both paths, so falling back can never start an overlapping round.
+        const bool holdForPrefetch = !draining || clusterBarrierEnabled();
+        return isWorkgroupBarrierEligible(node) && !sccChainBlocks(node) &&
+               !(holdForPrefetch && singleStageLoop() && stageBarrierAwaitsPrefetch(node));
     }
     // Single-stage loop: the stage barrier waits for its released prefetch group, so the group
     // issues right before it (in the tensor_load's window).
@@ -2445,6 +2451,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                   << "\n");
     auto rememberPick = [this](DAGNode* node) {
         lastPickedNode_ = node;
+        noteWorkgroupBarrierIssue(node);
         noteSccChainIssue(node);
         return node;
     };
@@ -2637,18 +2644,15 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         DAGNode* barrier = nullptr;
         if (promotedPhase_ == PromotePhase::Barrier) {
             barrier = extractForcedBarrier();  // removes the promoted (threshold-met) node
-        } else if (clusterBarrierEnabled()) {
-            // Skip barriers held back by an open SCC chain; a later phase issues them
-            // once the chain's last reader has gone out.
+        } else {
+            // Ownership, SCC protection and promotion must agree about which
+            // barrier can issue, including the unpromoted cluster-disabled path.
             for (DAGNode* cand : barrierQueue) {
-                if (!isBarrierEligibleNow(cand)) continue;
+                if (!isBarrierEligibleNow(cand, /*draining=*/true)) continue;
                 barrier = cand;
                 break;
             }
             if (barrier) barrierQueue.erase(barrier);
-        } else {
-            barrier = barrierQueue.top();
-            barrierQueue.pop();
         }
         if (barrier) {
             updateWMMAStatus(barrier);
@@ -2674,6 +2678,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         STINKY_UNREACHABLE("CDNA5ReadyQueue::pickOne: open SCC chain but only barriers are ready");
     }
 
+    if (!barrierQueue.empty())
+        STINKY_UNREACHABLE("CDNA5ReadyQueue::pickOne: barrier eligibility blocks all ready nodes");
     assert(false && "CDNA5ReadyQueue::pickOne: all buckets empty");
     return nullptr;
 }

@@ -32,6 +32,7 @@
 
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 
@@ -84,6 +85,10 @@ struct DAGNode {
     // Packed s_set_vgpr_msb immediate this op needs (computeRequiredMsb); -1 = no MSB
     // opinion. Filled by the pre-scan; drives the MSB-affinity tiebreak in pickFreeBest.
     int requiredMsb = -1;
+    // Physical workgroup barrier use. Only a complete round's signal has a
+    // matching wait pointer; legacy barriers and boundary halves are singletons.
+    bool workgroupBarrier = false;
+    DAGNode* workgroupRoundWait = nullptr;
     // --- Cluster-barrier SCC (ClusterBarrier kernels; see cluster-barrier.md) ---
     bool handshakeBarrier = false;
     unsigned sccChainId = 0;
@@ -183,6 +188,18 @@ class ReadyQueue {
 
     virtual ~ReadyQueue() = default;
 
+    // Complete workgroup rounds share one physical barrier. Candidate queues
+    // retain blocked nodes; every selection path must consult this predicate.
+    bool isWorkgroupBarrierEligible(const DAGNode* node) const {
+        return !node->workgroupBarrier || openWorkgroupWait_ == nullptr ||
+               node == openWorkgroupWait_;
+    }
+
+    void assertWorkgroupBarrierClosed() const {
+        assert(openWorkgroupWait_ == nullptr &&
+               "Scheduling region ended with an incomplete workgroup barrier round");
+    }
+
     // Pick one node from the ready queue based on some strategy.
     virtual DAGNode* pickOne() = 0;
 
@@ -248,7 +265,20 @@ class ReadyQueue {
         return loop_;
     }
 
+   protected:
+    // Commit only an actual pick, never a promotion/eligibility probe. Matching
+    // is established in source before scheduling, rather than guessed from the
+    // order in which waits later become ready.
+    void noteWorkgroupBarrierIssue(DAGNode* node) {
+        assert(isWorkgroupBarrierEligible(node) && "Overlapping workgroup barrier rounds");
+        if (node == openWorkgroupWait_)
+            openWorkgroupWait_ = nullptr;
+        else if (node->workgroupRoundWait != nullptr)
+            openWorkgroupWait_ = node->workgroupRoundWait;
+    }
+
    private:
+    DAGNode* openWorkgroupWait_ = nullptr;
     const PassContext& passCtx_;
     const Loop* loop_ = nullptr;
     ScheduleAnalysisCache* analysisCache_ = nullptr;
@@ -326,9 +356,26 @@ class ReadyQueueByDAGid : public ReadyQueue {
 
 inline DAGNode* ReadyQueueByDAGid::pickOne() {
     assert(!queue.empty() && "Ready queue must not be empty");
-    DAGNode* node = queue.top();
-    queue.pop();
-    return node;
+    // Preserve this queue's existing priority order (largest DAG id first).
+    // Temporarily remove resource-blocked candidates so a lower-priority wait
+    // or independent instruction can make progress, then restore them unchanged.
+    std::vector<DAGNode*> held;
+    DAGNode* picked = nullptr;
+    while (!queue.empty()) {
+        DAGNode* node = queue.top();
+        queue.pop();
+        if (isWorkgroupBarrierEligible(node)) {
+            picked = node;
+            break;
+        }
+        held.push_back(node);
+    }
+    for (DAGNode* node : held) queue.push(node);
+    if (picked == nullptr)
+        STINKY_UNREACHABLE(
+            "ReadyQueueByDAGid: workgroup barrier reservation blocks all ready nodes");
+    noteWorkgroupBarrierIssue(picked);
+    return picked;
 }
 
 struct MFMAIssueConfig {
