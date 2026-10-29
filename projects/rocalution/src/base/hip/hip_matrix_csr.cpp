@@ -95,9 +95,10 @@ namespace rocalution
         this->L_mat_descr_ = 0;
         this->U_mat_descr_ = 0;
 
-        this->mat_descr_     = 0;
-        this->mat_info_      = 0;
-        this->mat_info_itsv_ = 0;
+        this->mat_descr_       = 0;
+        this->mat_info_        = 0;
+        this->mat_info_itsv_   = 0;
+        this->mat_info_itsv_U_ = 0;
 
         this->mat_buffer_size_ = 0;
         this->mat_buffer_      = NULL;
@@ -122,6 +123,9 @@ namespace rocalution
 
         status = rocsparse_create_mat_info(&this->mat_info_itsv_);
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+
+        status = rocsparse_create_mat_info(&this->mat_info_itsv_U_);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
     }
 
     template <typename ValueType>
@@ -140,6 +144,9 @@ namespace rocalution
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         status = rocsparse_destroy_mat_info(this->mat_info_itsv_);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+
+        status = rocsparse_destroy_mat_info(this->mat_info_itsv_U_);
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
     }
 
@@ -1902,7 +1909,7 @@ namespace rocalution
             this->mat_.val,
             this->mat_.row_offset,
             this->mat_.col,
-            this->mat_info_itsv_,
+            this->mat_info_itsv_U_,
             &U_buffer_size);
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
@@ -1950,7 +1957,7 @@ namespace rocalution
                                          this->mat_.val,
                                          this->mat_.row_offset,
                                          this->mat_.col,
-                                         this->mat_info_itsv_,
+                                         this->mat_info_itsv_U_,
                                          rocsparse_analysis_policy_reuse,
                                          rocsparse_solve_policy_auto,
                                          this->mat_buffer_);
@@ -1980,7 +1987,7 @@ namespace rocalution
             status
                 = rocsparse_csritsv_clear(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
                                           this->U_mat_descr_,
-                                          this->mat_info_itsv_);
+                                          this->mat_info_itsv_U_);
             CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
         }
 
@@ -2030,6 +2037,7 @@ namespace rocalution
             assert(this->L_mat_descr_ != 0);
             assert(this->U_mat_descr_ != 0);
             assert(this->mat_info_itsv_ != 0);
+            assert(this->mat_info_itsv_U_ != 0);
             assert(this->ncol_ == this->nrow_);
             assert(this->tmp_vec_ != NULL);
 
@@ -2093,7 +2101,7 @@ namespace rocalution
                                           this->mat_.val,
                                           this->mat_.row_offset,
                                           this->mat_.col,
-                                          this->mat_info_itsv_,
+                                          this->mat_info_itsv_U_,
                                           this->tmp_vec_->vec_,
                                           cast_out->vec_,
                                           rocsparse_solve_policy_auto,
@@ -3105,7 +3113,7 @@ namespace rocalution
             this->mat_.val,
             this->mat_.row_offset,
             this->mat_.col,
-            this->mat_info_itsv_,
+            this->mat_info_itsv_U_,
             &buffer_size);
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
@@ -3134,7 +3142,7 @@ namespace rocalution
                                          this->mat_.val,
                                          this->mat_.row_offset,
                                          this->mat_.col,
-                                         this->mat_info_itsv_,
+                                         this->mat_info_itsv_U_,
                                          rocsparse_analysis_policy_reuse,
                                          rocsparse_solve_policy_auto,
                                          this->mat_buffer_);
@@ -3152,7 +3160,7 @@ namespace rocalution
             status
                 = rocsparse_csritsv_clear(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
                                           this->U_mat_descr_,
-                                          this->mat_info_itsv_);
+                                          this->mat_info_itsv_U_);
             CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
         }
 
@@ -3186,7 +3194,7 @@ namespace rocalution
         {
             assert(out != NULL);
             assert(this->U_mat_descr_ != 0);
-            assert(this->mat_info_itsv_ != 0);
+            assert(this->mat_info_itsv_U_ != 0);
             assert(this->ncol_ == this->nrow_);
             assert(this->mat_buffer_size_ > 0);
             assert(this->mat_buffer_ != NULL);
@@ -3225,7 +3233,7 @@ namespace rocalution
                                           this->mat_.val,
                                           this->mat_.row_offset,
                                           this->mat_.col,
-                                          this->mat_info_itsv_,
+                                          this->mat_info_itsv_U_,
                                           cast_in->vec_,
                                           cast_out->vec_,
                                           rocsparse_solve_policy_auto,
@@ -3247,7 +3255,7 @@ namespace rocalution
                 = dynamic_cast<HIPAcceleratorVector<ValueType>*>(vec_diag);
 
             assert(cast_vec_diag != NULL);
-            assert(cast_vec_diag->size_ >= this->nrow_);
+            assert(cast_vec_diag->size_ >= std::min(this->nrow_, this->ncol_));
 
             int     nrow            = this->nrow_;
             int64_t avg_nnz_per_row = this->nnz_ / nrow;
@@ -3361,7 +3369,7 @@ namespace rocalution
                 = dynamic_cast<HIPAcceleratorVector<ValueType>*>(vec_inv_diag);
 
             assert(cast_vec_inv_diag != NULL);
-            assert(cast_vec_inv_diag->size_ == this->nrow_);
+            assert(cast_vec_inv_diag->size_ >= std::min(this->nrow_, this->ncol_));
 
             int  nrow = this->nrow_;
             dim3 BlockSize(this->local_backend_.HIP_block_size);
@@ -4245,7 +4253,7 @@ namespace rocalution
             = dynamic_cast<const HIPAcceleratorVector<ValueType>*>(&diag);
 
         assert(cast_diag != NULL);
-        assert(cast_diag->size_ == this->ncol_);
+        assert(cast_diag->size_ == this->nrow_);
 
         if(this->nnz_ > 0)
         {
@@ -9579,8 +9587,6 @@ namespace rocalution
             = dynamic_cast<const HIPAcceleratorVector<int64_t>*>(&aggregates);
         const HIPAcceleratorVector<int64_t>* cast_agg_nodes
             = dynamic_cast<const HIPAcceleratorVector<int64_t>*>(&aggregate_root_nodes);
-        const HIPAcceleratorMatrixCSR<ValueType>* cast_gst
-            = dynamic_cast<const HIPAcceleratorMatrixCSR<ValueType>*>(&ghost);
         HIPAcceleratorVector<int>* cast_f2c = dynamic_cast<HIPAcceleratorVector<int>*>(f2c);
         HIPAcceleratorMatrixCSR<ValueType>* cast_pi
             = dynamic_cast<HIPAcceleratorMatrixCSR<ValueType>*>(prolong_int);
@@ -9608,7 +9614,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
-            assert(cast_gst != NULL);
+            assert(dynamic_cast<const HIPAcceleratorMatrixCSR<ValueType>*>(&ghost) != NULL);
             assert(cast_pg != NULL);
 
             // Start with fresh P ghost
@@ -9680,8 +9686,6 @@ namespace rocalution
             = dynamic_cast<const HIPAcceleratorVector<int64_t>*>(&aggregate_root_nodes);
         const HIPAcceleratorVector<int>* cast_f2c
             = dynamic_cast<const HIPAcceleratorVector<int>*>(&f2c);
-        const HIPAcceleratorMatrixCSR<ValueType>* cast_gst
-            = dynamic_cast<const HIPAcceleratorMatrixCSR<ValueType>*>(&ghost);
         HIPAcceleratorMatrixCSR<ValueType>* cast_pi
             = dynamic_cast<HIPAcceleratorMatrixCSR<ValueType>*>(prolong_int);
         HIPAcceleratorMatrixCSR<ValueType>* cast_pg
@@ -9742,7 +9746,7 @@ namespace rocalution
 
         if(global == true)
         {
-            assert(cast_gst != NULL);
+            assert(dynamic_cast<const HIPAcceleratorMatrixCSR<ValueType>*>(&ghost) != NULL);
             assert(cast_pg != NULL);
             assert(cast_glo != NULL);
 

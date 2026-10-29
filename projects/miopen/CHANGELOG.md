@@ -14,6 +14,27 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   used an inverted `NextLinear` exit condition in `SetNextValue`: enumeration stopped after the
   first step, so an exhaustive Find tuned only the GenericSearch fallback config, and with exactly
   one applicable CK instance the enumeration never terminated.
+* [RNN] Fixed an intermittent wrong forward output from the multi-stream LSTM path (bias, more than
+  one layer, `seq_len` >= 32) caused by an unordered bias add and input GEMM on different streams.
+* [Conv] Fixed incorrect gfx1200 backward-weights results for the bf16 problem
+  `96-18-18-3x3-96-35-35-256`, pad 1, stride 2, by removing the Composable Kernel
+  `DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<96, 96, 96, 48, ...>` entry the system database
+  served for it. That kernel returned a weight gradient with a relative error of about 0.306.
+  The problem now uses the next recorded solver, `GemmWrwUniversal`.
+
+### Added
+* [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
+  RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
+  filters up to 7x7 and is selected through Find mode.
+
+### Changed
+* [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
+  never uses split-K, so these solvers are deterministic; previously, deterministic forward
+  convolutions could only use the GEMM and naive solvers.
+
+### Removed
+* Removed the unused `miopenOperatorDescriptor` type from `miopen.h` (source-level only, ABI-neutral).
+* Removed `miopenAlphaBetaCase_t` and its unprefixed enumerators `DEFAULT`, `SCALE`, `BILINEAR` and `ERROR_STATE` from `miopen.h` (source-level only, ABI-neutral).
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 

@@ -2946,6 +2946,48 @@ def kv_addr_width_for_builder(
     return False
 
 
+def gfx942_3d_kv_needs_i64_addr(
+    num_kv_blocks: int,
+    block_bytes: int,
+    *,
+    kv_fp8: bool,
+    use_wide_kv_load: bool,
+    tile_size: int,
+    head_size: int,
+) -> bool:
+    """``use_i64_kv_addr`` for the gfx942 tiled 3D kernel on this paged cache.
+
+    The kernel has no i64 path, so its spec refuses the flag: True means the
+    cache is past what the selected K/V loader reads. The single rule for the
+    spec builder, the cache key and the dispatcher's tuning specs.
+    """
+    from ..gfx942.attention_tiled_3d import i32_kv_cache_bytes
+
+    limit = i32_kv_cache_bytes(
+        kv_fp8=kv_fp8,
+        use_wide_kv_load=use_wide_kv_load,
+        tile_size=tile_size,
+        head_size=head_size,
+    )
+    return num_kv_blocks > 0 and num_kv_blocks * block_bytes > limit
+
+
+def _enable_i64_kv_addr_3d(problem: UnifiedAttentionProblem, arch: str) -> bool:
+    """3D ``use_i64_kv_addr``: ``_enable_i64_kv_addr``, except on gfx942, whose
+    limit depends on the K/V loader (``gfx942_3d_kv_needs_i64_addr``)."""
+    # Below the buffer range every loader is i32, so skip the selector walk.
+    if arch != "gfx942" or not _enable_i64_kv_addr(problem):
+        return _enable_i64_kv_addr(problem)
+    return gfx942_3d_kv_needs_i64_addr(
+        problem.num_kv_blocks,
+        _kv_block_bytes(problem),
+        kv_fp8=_kv_storage_dtype(problem) is not None,
+        use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem, arch),
+        tile_size=_gfx942_3d_tile_size_override(problem, arch) or problem.block_size,
+        head_size=problem.head_size,
+    )
+
+
 def _kv_block_bytes(problem: UnifiedAttentionProblem) -> int:
     """Byte size of one paged K (or V) block for ``problem``."""
     elem_bytes = 1 if problem.use_fp8 else 2
@@ -2958,11 +3000,11 @@ def _enable_i64_kv_addr(problem: UnifiedAttentionProblem) -> bool:
     The default load path puts the full byte offset (incl.
     ``physical_block * block_stride``) in a 32-bit buffer voffset, bounded at
     ``_I32_KV_BUFFER_BYTES``; past that, loads silently return zeros. When the
-    cache is that large we fold the per-block offset into a
-    64-bit buffer base (a tiny, wave-uniform ``make_buffer_rsrc`` per
-    block; measured within ~1-2% of the i32 path). Below the cap we keep
-    the fast i32 path. ``num_kv_blocks == 0`` means the cache size is
-    unknown (caller did not supply it) -> assume small / fast path.
+    cache is that large we fold the per-block offset into a 64-bit buffer
+    base (a wave-uniform ``make_buffer_rsrc`` per block; the gfx942 tiled 2D
+    K/V copies build one per page of a tile, not one per copy). Below the cap
+    we keep the i32 path. ``num_kv_blocks == 0`` means the cache size is
+    unknown (caller did not supply it) -> assume small / i32 path.
     """
     return kv_cache_needs_i64_addr(problem.num_kv_blocks, _kv_block_bytes(problem))
 
@@ -3044,15 +3086,35 @@ def _spec_kv_addr_limit(
     return min(limits, key=lambda limit: limit.nbytes, default=None)
 
 
+def _3d_spec_kv_addr_limit(
+    problem: UnifiedAttentionProblem, spec, arch: str
+) -> _KvAddrLimit | None:
+    """Largest paged K cache, in bytes, the 3D segment kernel built from ``spec``
+    reads. gfx942 has no i64 path, so its K/V loader sets the limit."""
+    if arch == "gfx942":
+        from ..gfx942.attention_tiled_3d import i32_kv_cache_bytes
+
+        return _KvAddrLimit(
+            i32_kv_cache_bytes(
+                kv_fp8=spec.kv_storage_dtype is not None,
+                use_wide_kv_load=spec.use_wide_kv_load,
+                tile_size=spec.tile_size,
+                head_size=spec.head_size,
+            ),
+            _KV_LIMIT_NO_I64_PATH,
+        )
+    return _spec_kv_addr_limit(problem, spec)
+
+
 def _kv_addr_fix(
     problem: UnifiedAttentionProblem, num_kv_blocks: int, kv_addr_limit: _KvAddrLimit
 ) -> str:
     """What a caller can do about a cache past ``kv_addr_limit``."""
     if kv_addr_limit.cause == _KV_LIMIT_NO_I64_PATH:
         return (
-            "This kernel has no i64 KV path (the scalar, gfx942 4-warp GQA and "
-            "gfx1250 kernels index at most 2^31 elements), so fixing "
-            "num_kv_blocks will not help. Use a smaller cache."
+            "This kernel has no i64 KV path (the scalar, gfx942 4-warp GQA, "
+            "gfx942 tiled 3D and gfx1250 kernels), so fixing num_kv_blocks "
+            "will not help. Use a smaller cache."
         )
     if kv_addr_limit.cause != _KV_LIMIT_I32_BUFFER:
         return (
@@ -4030,7 +4092,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         _select_3d_waves_per_eu(problem, arch),
         _enable_gfx942_3d_wide_kv_load(problem, arch),
         _kv_storage_dtype(problem),
-        _enable_i64_kv_addr(problem),
+        _enable_i64_kv_addr_3d(problem, arch),
         decode_grid,
         _kv_cache_policy_3d(problem, arch),
         _gfx950_3d_tile_size_override(problem, arch),
@@ -4195,9 +4257,9 @@ def _attn_values(
     _require_additive_bias(problem, additive_bias)
     # Production 2D and scalar launches and the torch direct-launch harnesses
     # pack kernargs here, so check the real K cache against what the compiled
-    # kernel addresses (``kv_addr_limit``, from ``_spec_kv_addr_limit``). Not
-    # covered: the 3D path and the gfx1250 tiled_2d_verify harness, which pack
-    # their own.
+    # kernel addresses (``kv_addr_limit``, from ``_spec_kv_addr_limit``). The 3D
+    # path checks in ``_run_3d_tiled_on_stream``; the gfx1250 tiled_2d_verify
+    # harness packs its own and is not covered.
     _check_kv_addr_width(problem, k, kv_addr_limit)
     vals = {
         "output_ptr": out,
@@ -4421,6 +4483,19 @@ def _run_3d_tiled_on_stream(
     else:
         num_segments = _num_segments(problem, _launch_arch)
         cache_key = _tiled_3d_cache_key(problem, _launch_arch)
+    # The spec saw problem.num_kv_blocks, which a caller can leave stale, so
+    # check the real paged cache. gfx1250's 3D spec makes no i64 decision.
+    if kv_cache_layout is None and _launch_arch in ("gfx942", "gfx950"):
+        if cache_key not in _3D_KV_ADDR_LIMITS:
+            segment_spec = (
+                tuning_spec.kernel_spec
+                if tuning_spec is not None
+                else _tiled_3d_spec_from_problem(problem, _launch_arch)
+            )
+            _3D_KV_ADDR_LIMITS[cache_key] = _3d_spec_kv_addr_limit(
+                problem, segment_spec, _launch_arch
+            )
+        _check_kv_addr_width(problem, k, _3D_KV_ADDR_LIMITS[cache_key])
     if kv_cache_layout is not None:
         cache_key = cache_key + ("strided_kv",)
     capturing = _torch_stream_capturing()
@@ -4814,6 +4889,8 @@ _2D_LAUNCH_META: Dict[Tuple, _Attention2DLaunchMeta] = {}
 # Per-cache-key ``_spec_kv_addr_limit`` of the default-route spec. The spec is a
 # function of the cache key, so it is built once per kernel, not per total_q.
 _2D_KV_ADDR_LIMITS: dict[tuple, _KvAddrLimit | None] = {}
+# The same for the 3D segment kernel, from ``_3d_spec_kv_addr_limit``.
+_3D_KV_ADDR_LIMITS: dict[tuple, _KvAddrLimit | None] = {}
 _2D_GRAPHS: Dict[Tuple, Any] = {}
 _2D_GRAPH_REFS: Dict[Tuple, Tuple[Any, ...]] = {}
 _SCALAR_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}

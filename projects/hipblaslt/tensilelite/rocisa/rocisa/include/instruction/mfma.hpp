@@ -299,7 +299,8 @@ namespace rocisa
                 = !neg ? "" : (capOrDefault(getAsmCaps(), "HasWMMA_V1") ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
             std::string inputPermuteStr = "";
             std::string scaleStr        = "";
-            if(capOrDefault(getAsmCaps(), "HasMFMA_f8f6f4"))
+            // Only f8f6f4 opcodes use CBSZ/BLGP to select operand formats.
+            if(capOrDefault(getAsmCaps(), "HasMFMA_f8f6f4") && typeConvert(instType) == "f8f6f4")
             {
                 switch(instType)
                 {
