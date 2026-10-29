@@ -10,6 +10,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "GraphTest.hpp"
+#include "asm_fmha_v3_bwd_configs.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaBwdPlanBuilder.hpp"
@@ -1436,6 +1437,226 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsWindowMask)
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+// =============================================================================
+// Kernarg range guards
+// =============================================================================
+//
+// The predicates these guards are built from are covered at their exact
+// boundaries by the TestSdpaKernargRanges suite in TestSdpaFwdPlanBuilder.cpp.
+// What follows is the backward builder's use of them.
+
+// Build a backward graph with per-tensor dims and one explicit stride set, so a
+// dimension can be driven to the limit of its field without the contiguous
+// stride for that shape tripping the byte-stride guard first. Only descriptors
+// are built, so the dims cost no memory. The graph utility derives the stats
+// strides from qDims, which is why the accepted cases below drive the k-side
+// dims: an nhead_q or seqlen_q at its own limit makes the (legitimate,
+// unchanged) stats stride guard decline the graph first.
+auto createSdpaBwdGraphForDims(const std::vector<int64_t>& qDims,
+                               const std::vector<int64_t>& kDims,
+                               const std::vector<int64_t>& vDims)
+{
+    const std::vector<int64_t> oDims = {qDims[0], qDims[1], qDims[2], vDims[3]};
+    const std::vector<int64_t> strides = {32768, 32768, 128, 1};
+    return hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+        qDims,
+        strides,
+        kDims,
+        strides,
+        vDims,
+        strides,
+        oDims,
+        strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+}
+
+struct BwdDimRangeCase
+{
+    const char* label;
+    std::vector<int64_t> qDims;
+    std::vector<int64_t> kDims;
+    std::vector<int64_t> vDims;
+};
+
+constexpr int64_t K_U32_DIM_LIMIT = static_cast<int64_t>(UINT32_MAX);
+constexpr int64_t K_I32_DIM_LIMIT = static_cast<int64_t>(INT32_MAX);
+
+// Batch reaches the kernels only as gridDimZ, a uint32; seqlen_k takes the
+// signed limit because it becomes an int32 mask coordinate on the window path
+// and drives a ceil-division evaluated in unsigned int.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsDimensionsAtTheir32BitLimits)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<BwdDimRangeCase> cases = {
+        {"batch at UINT32_MAX",
+         {K_U32_DIM_LIMIT, 8, 256, 128},
+         {K_U32_DIM_LIMIT, 8, 256, 128},
+         {K_U32_DIM_LIMIT, 8, 256, 128}},
+        {"seqlen_k at INT32_MAX",
+         {4, 8, 256, 128},
+         {4, 8, K_I32_DIM_LIMIT, 128},
+         {4, 8, K_I32_DIM_LIMIT, 128}},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.label);
+        auto builder = createSdpaBwdGraphForDims(testCase.qDims, testCase.kDims, testCase.vDims);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, gw));
+    }
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableDeclinesDimensionsPastTheir32BitLimits)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<BwdDimRangeCase> cases = {
+        {"batch one past UINT32_MAX",
+         {K_U32_DIM_LIMIT + 1, 8, 256, 128},
+         {K_U32_DIM_LIMIT + 1, 8, 256, 128},
+         {K_U32_DIM_LIMIT + 1, 8, 256, 128}},
+        {"nhead one past UINT32_MAX",
+         {4, K_U32_DIM_LIMIT + 1, 256, 128},
+         {4, K_U32_DIM_LIMIT + 1, 256, 128},
+         {4, K_U32_DIM_LIMIT + 1, 256, 128}},
+        {"seqlen_q one past INT32_MAX",
+         {4, 8, K_I32_DIM_LIMIT + 1, 128},
+         {4, 8, 256, 128},
+         {4, 8, 256, 128}},
+        {"seqlen_k one past INT32_MAX",
+         {4, 8, 256, 128},
+         {4, 8, K_I32_DIM_LIMIT + 1, 128},
+         {4, 8, K_I32_DIM_LIMIT + 1, 128}},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.label);
+        auto builder = createSdpaBwdGraphForDims(testCase.qDims, testCase.kDims, testCase.vDims);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, gw));
+    }
+}
+
+// The head dims are narrowed to int before the {64, 128, 192} membership test
+// and the registry lookup, so a head dim whose low 32 bits are a supported
+// value used to resolve a kernel built for that supported value. That registry
+// set is what bounds the head dims in practice, which is why there is no case
+// at INT32_MAX here.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableDeclinesHeadDimsThatTruncateToASupportedValue)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    constexpr int64_t K_WRAPS_TO_128 = (int64_t{1} << 32) + 128;
+
+    const std::vector<BwdDimRangeCase> cases = {
+        {"supported head dims (control)", {4, 8, 256, 128}, {4, 8, 256, 128}, {4, 8, 256, 128}},
+        {"head_dim_q wraps to 128",
+         {4, 8, 256, K_WRAPS_TO_128},
+         {4, 8, 256, K_WRAPS_TO_128},
+         {4, 8, 256, 128}},
+        {"head_dim_v wraps to 128",
+         {4, 8, 256, 128},
+         {4, 8, 256, 128},
+         {4, 8, 256, K_WRAPS_TO_128}},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.label);
+        auto builder = createSdpaBwdGraphForDims(testCase.qDims, testCase.kDims, testCase.vDims);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
+            builder.GetBufferPointer(), builder.GetSize());
+        const bool isControl = testCase.label == std::string("supported head dims (control)");
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, gw), isControl);
+    }
+}
+
+// The `ts` of the DQDKDV row isApplicable resolves for a bf16 hd128 no-mask
+// batch graph on the default A32 accumulator path.
+std::optional<int> resolveBwdTileSizeKv()
+{
+    for(const auto& entry : cfg_fmha_bwd_dqdkdv)
+    {
+        const auto& cfg = entry.second;
+        if(cfg.arch == "gfx942" && cfg.dtype == "bf16" && cfg.hdim_q == 128 && cfg.hdim_v == 128
+           && cfg.mask == 0 && cfg.atomic32 == 1 && cfg.pssk == 1 && cfg.pddv == 1 && cfg.mode == 0
+           && cfg.bf16_cvt == 0)
+        {
+            return cfg.ts;
+        }
+    }
+    return std::nullopt;
+}
+
+// The Ts kernarg is tsKv * stride_k * sizeof(bf16). The per-field stride guard
+// only bounds stride_k * 2, so the tile factor is what this guard adds: the
+// accepted K sequence stride shrinks by tsKv.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableBoundsTheTsProductByTheResolvedTileSize)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    const auto tileSizeKv = resolveBwdTileSizeKv();
+    ASSERT_TRUE(tileSizeKv.has_value()) << "no gfx942 bf16 hd128 no-mask a32 dqdkdv row";
+
+    constexpr int64_t K_BF16_BYTES = 2;
+    const int64_t limit = static_cast<int64_t>(UINT32_MAX) / (K_BF16_BYTES * *tileSizeKv);
+    // One past the Ts limit must still clear the per-field stride guard, or the
+    // test would prove nothing about Ts.
+    ASSERT_LE((limit + 1) * K_BF16_BYTES, static_cast<int64_t>(UINT32_MAX));
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> normalStrides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    auto buildWithKSeqStride = [&](int64_t kSeqStride) {
+        const std::vector<int64_t> kStrides = {kSeqStride, kSeqStride, kSeqStride, 1};
+        return hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+            dims,
+            normalStrides,
+            dims,
+            kStrides,
+            dims,
+            normalStrides,
+            dims,
+            normalStrides,
+            hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+    };
+
+    auto builderAtLimit = buildWithKSeqStride(limit);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwAtLimit(
+        builderAtLimit.GetBufferPointer(), builderAtLimit.GetSize());
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwAtLimit));
+
+    auto builderPastLimit = buildWithKSeqStride(limit + 1);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwPastLimit(
+        builderPastLimit.GetBufferPointer(), builderPastLimit.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwPastLimit));
 }
 
 // =============================================================================

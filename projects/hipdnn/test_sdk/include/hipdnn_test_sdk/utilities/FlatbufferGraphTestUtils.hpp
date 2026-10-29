@@ -941,7 +941,8 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormFwdTrainingActivGraph(
     hipdnn_flatbuffers_sdk::data_objects::PointwiseMode activMode
     = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
     const std::vector<int64_t>& strides = {588, 196, 14, 1},
-    const std::vector<int64_t>& dims = {1, 3, 14, 14})
+    const std::vector<int64_t>& dims = {1, 3, 14, 14},
+    std::optional<float> reluLowerClipSlope = std::nullopt)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -1143,7 +1144,7 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormFwdTrainingActivGraph(
         activMode,
         flatbuffers::nullopt, // relu_lower_clip
         flatbuffers::nullopt, // relu_upper_clip
-        flatbuffers::nullopt, // relu_lower_clip_slope
+        reluLowerClipSlope, // relu_lower_clip_slope
         flatbuffers::nullopt, // axis_tensor_uid
         yBnTensorUid, // in_0_tensor_uid (virtual)
         flatbuffers::nullopt, // in_1_tensor_uid
@@ -2688,7 +2689,8 @@ inline flatbuffers::FlatBufferBuilder
                                     std::optional<float> reluUpperClip = std::nullopt,
                                     std::optional<float> swishBeta = std::nullopt,
                                     hipdnn_flatbuffers_sdk::data_objects::DataType dataType
-                                    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+                                    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                    std::optional<float> reluLowerClipSlope = std::nullopt)
 {
     flatbuffers::FlatBufferBuilder builder;
 
@@ -2772,7 +2774,7 @@ inline flatbuffers::FlatBufferBuilder
             activMode,
             reluLowerClip,
             reluUpperClip,
-            flatbuffers::nullopt, // relu_lower_clip_slope
+            reluLowerClipSlope,
             flatbuffers::nullopt, // axis_tensor_uid
             doBias ? cBiasTensorUid : cMatmulTensorUid,
             flatbuffers::nullopt, // in_1_tensor_uid
