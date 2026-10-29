@@ -604,6 +604,11 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_fwd_small_wmma.py"
         "tests/library/tests/test_direct_dgrad_wmma.py"
         "tests/library/tests/test_direct_fwd_wmma.py"
+        "tests/library/tests/test_conv_winograd_fwd_cpu.py"
+        "tests/library/tests/test_conv_winograd_gemm_wmma.py"
+        "tests/library/tests/test_conv_winograd_gen_cpu.py"
+        "tests/library/tests/test_conv_winograd_select.py"
+        "tests/library/tests/dispatch/test_conv_winograd_dispatch.py"
         "tests/library/tests/test_direct_kernel_cache.py"
         "tests/library/tests/test_direct_depthwise_fwd_cpl.py"
         "tests/library/tests/test_conv_gradient_contract.py"
@@ -742,6 +747,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_gdn_decode_tune.py"
         "tests/library/tests/dispatch/gdn/test_gfx950_registry.py"
         "tests/library/tests/dispatch/gdn/test_gfx950_wiring.py"
+        "tests/library/tests/dispatch/gdn/test_tuning_contract.py"
         "tests/library/tests/dispatch/gdn/test_gfx950_prefill_wiring.py")
     set(_ROCKE_LIBRARY_GDN_TESTS "")
     foreach(_rocke_gdn_test ${_ROCKE_LIBRARY_GDN_TEST_RELPATHS})
@@ -831,6 +837,10 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_dgrad_4c.py"
         "tests/library/tests/test_conv_dgrad_fused_weights.py"
         "tests/library/tests/test_direct_mfma_dgrad_correctness.py"
+        "tests/library/tests/test_conv_winograd_fwd_gpu.py"
+        "tests/library/tests/test_conv_winograd_gemm_wmma.py"
+        "tests/library/tests/test_conv_winograd_gen_gpu.py"
+        "tests/library/tests/test_conv_winograd_dispatch_gpu.py"
         "tests/library/tests/test_attention_dense_gfx942_numeric.py"
         "tests/library/tests/test_attention_unified_lse_numeric.py"
         "tests/library/tests/test_attn_bf16_d128_ring.py"

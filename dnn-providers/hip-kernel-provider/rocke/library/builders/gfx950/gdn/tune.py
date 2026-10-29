@@ -29,7 +29,11 @@ import dataclasses as dc
 import sys
 
 
-from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode, dispatch_gdn_decode_all
+from dispatch.gdn import (
+    GdnDecodeRequest,
+    dispatch_gdn_decode,
+    dispatch_gdn_decode_bases,
+)
 from dispatch.gdn.gfx950 import BLOCKS_PER_V_DIM, NUM_WARPS, WARP_THREADS_K, work_for
 from kernels.gfx950.gdn_decode import GdnDecodeSpec, is_valid_spec
 
@@ -126,7 +130,7 @@ def sweep_registry_batch(batch: int, results):
     if not results:
         return []
 
-    base = results[0].spec
+    base = results[0].spec.kernel_spec
     inp = make_inputs(base, batch)
     ref_out, ref_state = ref_fp32(base, inp)
     # Every candidate is compared against this snapshot, not against
@@ -146,7 +150,7 @@ def sweep_registry_batch(batch: int, results):
 
     rows = []
     for result in results:
-        spec = result.spec
+        spec = result.spec.kernel_spec
         tile = (spec.num_warps, spec.warp_threads_k, spec.blocks_per_v_dim)
         try:
             launcher = launcher_for(spec, arch=ARCH)
@@ -321,7 +325,7 @@ def main() -> int:
                 # every validator-admitted tile rather than the current band's
                 # dispatcher result.
                 auto = dispatch_gdn_decode(request)
-                base = auto.spec
+                base = auto.spec.kernel_spec
                 configs = legal_configs(base)
                 print(f"legal KDA configurations for batch {batch}: {len(configs)}")
                 rows = sweep_batch(base, batch, configs)
@@ -351,7 +355,8 @@ def main() -> int:
                 )
                 continue
 
-            results = dispatch_gdn_decode_all(request)
+            # Each registered tile's base configuration.
+            results = dispatch_gdn_decode_bases(request)
             print(f"legal registry candidates for batch {batch}: {len(results)}")
             rows = sweep_registry_batch(batch, results)
             if not rows:

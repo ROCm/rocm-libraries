@@ -30,6 +30,7 @@
 #include <libloaderapi.h>
 #endif
 
+#include "../../../library/src/amd_detail/rocblaslt/src/include/rocblaslt_adaptive_sm_count.hpp"
 #include "d_vector.hpp"
 #include "utility.hpp"
 #include <atomic>
@@ -475,4 +476,14 @@ void hipblasltDispatchValuesToFile(hipblasOperation_t transA, hipDataType T,
                    << " is Unsupported and could be added to the if-else "
                       "condition to write to file"
                    << std::endl;
+}
+
+bool hipblaslt_timing_allowed_with_adaptive_sm_count()
+{
+    using namespace rocblaslt::adaptive_sm;
+    if(!Config::fromEnv().hintVaries())
+        return true;
+    hipblaslt_cerr << "error: " << kEnvEnable << " changes the timed solution during timing; set "
+                   << kEnvForce << "=<cus> to time a fixed hint" << std::endl;
+    return false;
 }
