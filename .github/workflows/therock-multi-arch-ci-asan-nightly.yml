@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@7440cb8578f4daae0d85a428fadd6645dc5464a0 # 2026-09-28
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
     with:
       build_variant: "asan"
       linux_amdgpu_families: "gfx94X,gfx950,gfx125X"
@@ -37,8 +37,16 @@ jobs:
       build_pytorch: false
       build_jax: false
       repository: ROCm/TheRock
-      ref: 7440cb8578f4daae0d85a428fadd6645dc5464a0 # 2026-09-28
-      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
+      ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
+      # event_name tells TheRock this is a schedule/workflow_dispatch run with no
+      # meaningful diff, so it always runs CI. Without it, TheRock falls back to
+      # `git diff HEAD^` against a depth-1 checkout, which fails.
+      external_repo: >-
+        {
+          "repository": "${{ github.repository }}",
+          "ref": "${{ github.sha }}",
+          "event_name": "${{ github.event_name }}"
+        }
 
   log_therock_ref:
     name: Locked TheRock ref
@@ -64,7 +72,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@7440cb8578f4daae0d85a428fadd6645dc5464a0 # 2026-09-28
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -75,7 +83,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: 7440cb8578f4daae0d85a428fadd6645dc5464a0 # 2026-09-28
+      ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
     permissions:
       contents: read
       id-token: write
@@ -92,7 +100,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: 7440cb8578f4daae0d85a428fadd6645dc5464a0 # 2026-09-28
+          ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

@@ -17,7 +17,7 @@ module builds on it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence, Tuple
+from typing import Any, Mapping, Optional, Sequence, Tuple
 
 
 @dataclass(frozen=True)
@@ -103,6 +103,7 @@ def launch_torch_kernel(
     warmup: int = 5,
     attempts: int = 100,
     stream: int = 0,
+    cluster_dims: Optional[Sequence[int]] = None,
 ) -> TorchLaunchSummary:
     """Compile, time, and launch a CK DSL kernel on torch tensors.
 
@@ -121,6 +122,9 @@ def launch_torch_kernel(
     (no device sync, no event creation). That single-shot mode is
     required for HIP graph capture, where ``hipDeviceSynchronize`` and
     ``hipEventRecord`` are illegal on the captured stream.
+
+    ``cluster_dims`` is the kernel's compiled cluster shape, if any; every
+    launch then uses it (see :class:`KernelLauncher`).
     """
     # Local import to avoid a runtime/__init__ circular at module load.
     from .launcher import KernelLauncher, LaunchConfig, time_launches
@@ -129,6 +133,7 @@ def launch_torch_kernel(
         hsaco=hsaco,
         kernel_name=kernel_name,
         signature=signature,
+        cluster_dims=cluster_dims,
     )
     cfg = LaunchConfig(grid=grid, block=block, stream=stream)
 

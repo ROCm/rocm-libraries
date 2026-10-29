@@ -465,7 +465,12 @@ RUN for tool in /usr/bin/llvm*-20; do \
 # entries DISABLED ("hkp: pytest not importable by ... python3; registering
 # descriptor-packaging pytest tests as DISABLED"), so the whole suite goes
 # quietly unexercised instead of erroring.
-RUN python3 -m pip install --break-system-packages pre-commit 'msgpack>=1.0.0' 'zstandard>=0.20.0' pytest
+#
+# PyYAML/Jinja2: the IngestorGenerator's requirements (tools/IngestorGenerator/
+# requirements.txt), so generate.py runs from the base interpreter without the
+# runbook's per-checkout venv. Keep the pins in step with that file.
+RUN python3 -m pip install --break-system-packages pre-commit 'msgpack>=1.0.0' 'zstandard>=0.20.0' pytest \
+    'PyYAML>=6.0' 'Jinja2>=3.1'
 
 # Create mount point for /opt/rocm (will be empty unless mounted or built upon)
 RUN mkdir -p /opt/rocm

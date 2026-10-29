@@ -6,6 +6,8 @@
  * target_intrinsics_emit.py so run_diff.py can byte-compare the two engines'
  * .ll; see that file for why substring smoke tests were not enough.
  *
+ * Configs 8..10 cover arith.fdot2 (f16, bf16) and the bf16 4x4x4 MFMA atom.
+ *
  * arch = gfx950, flavor = AUTO (matches the Python side).
  */
 #include <stdio.h>
@@ -149,6 +151,16 @@ static void build_quad_perm(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+static void build_warp_shuffle_xor_dpp(rocke_ir_builder_t* b)
+{
+    static const int masks[] = {1, 2, 3, 7, 8, 15};
+    rocke_value_t* v = rocke_b_const_i32(b, 1);
+    for(int i = 0; i < (int)(sizeof(masks) / sizeof(masks[0])); ++i)
+        v = rocke_b_warp_shuffle_xor_dpp(b, v, masks[i]);
+    rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_f32(b, 1.0), 7);
+    rocke_b_ret(b);
+}
+
 static void build_av_b128(rocke_ir_builder_t* b)
 {
     rocke_value_t* p = global_ptr_param(b, "p", rocke_i32(), 16);
@@ -166,6 +178,44 @@ static void build_scheduler_hints(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+static void build_fdot2(rocke_ir_builder_t* b, const rocke_type_t* elem)
+{
+    rocke_value_t* a_ptr = global_ptr_param(b, "A", elem, 4);
+    rocke_value_t* d_ptr = global_ptr_param(b, "D", rocke_f32(), 4);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* two = rocke_b_const_i32(b, 2);
+    rocke_value_t* idx = rocke_b_mul(b, tid, two);
+    rocke_value_t* a = rocke_b_global_load_vN(b, a_ptr, idx, elem, 2, 0);
+    rocke_value_t* acc = rocke_b_global_load(b, d_ptr, tid, rocke_f32(), 4);
+    rocke_value_t* dot = rocke_b_fdot2(b, a, a, acc);
+    rocke_b_global_store(b, d_ptr, tid, dot, 4);
+    rocke_b_ret(b);
+}
+
+static void build_fdot2_f16(rocke_ir_builder_t* b)
+{
+    build_fdot2(b, rocke_f16());
+}
+
+static void build_fdot2_bf16(rocke_ir_builder_t* b)
+{
+    build_fdot2(b, rocke_bf16());
+}
+
+static void build_mfma_4x4x4_bf16(rocke_ir_builder_t* b)
+{
+    rocke_value_t* a_ptr = global_ptr_param(b, "A", rocke_bf16(), 8);
+    rocke_value_t* d_ptr = global_ptr_param(b, "D", rocke_f32(), 16);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* four = rocke_b_const_i32(b, 4);
+    rocke_value_t* idx = rocke_b_mul(b, tid, four);
+    rocke_value_t* a = rocke_b_global_load_vN(b, a_ptr, idx, rocke_bf16(), 4, 0);
+    rocke_value_t* acc = rocke_b_zero_vec_f32(b, 4);
+    rocke_value_t* out = rocke_b_mfma_f32_4x4x4_bf16(b, a, a, acc);
+    rocke_b_global_store_vN(b, d_ptr, idx, out, 4, 0);
+    rocke_b_ret(b);
+}
+
 typedef void (*build_fn_t)(rocke_ir_builder_t*);
 
 static const build_fn_t BUILDERS[] = {
@@ -177,6 +227,10 @@ static const build_fn_t BUILDERS[] = {
     build_quad_perm,
     build_av_b128,
     build_scheduler_hints,
+    build_warp_shuffle_xor_dpp,
+    build_fdot2_f16,
+    build_fdot2_bf16,
+    build_mfma_4x4x4_bf16,
 };
 
 static const int NUM_BUILDERS = (int)(sizeof(BUILDERS) / sizeof(BUILDERS[0]));

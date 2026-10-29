@@ -4,7 +4,7 @@
 AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
 
 Generated from: arch_specs.json
-Generated at: 2026-09-16T15:00:49.738739
+Generated at: 2026-10-20T17:02:31.490288
 
 To update this file:
 1. Edit arch_specs.json
@@ -107,15 +107,23 @@ WARP_TILE_SUPPORTED_COMBINATIONS: Dict[str, Dict[str, List[List[int]]]] = {
         "int8_int8_int32": [[16, 16, 16]],
     },
     "gfx1250": {
+        "fp32_fp32_fp32": [[16, 16, 4]],
         "fp16_fp16_fp32": [[16, 16, 32]],
         "bf16_bf16_fp32": [[16, 16, 32]],
         "fp8_fp8_fp32": [[16, 16, 64], [16, 16, 128]],
         "bf8_bf8_fp32": [[16, 16, 64], [16, 16, 128]],
+        "int8_int8_int32": [[16, 16, 64]],
     },
 }
 
 # Preshuffle-specific warp tile combinations (subset of standard GEMM)
 PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS: Dict[str, Dict[str, List[List[int]]]] = {
+    "gfx1250": {
+        "fp16_fp16_fp32": [[16, 16, 32]],
+        "bf16_bf16_fp32": [[16, 16, 32]],
+        "fp8_fp8_fp32": [[16, 16, 64]],
+        "bf8_bf8_fp32": [[16, 16, 64]],
+    },
     "gfx90a": {
         "fp16_fp16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [64, 4, 16]],
         "bf16_bf16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [64, 4, 16]],
@@ -138,7 +146,7 @@ PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS: Dict[str, Dict[str, List[List[int]]
 }
 
 # Preshuffle-supported pipelines
-PRESHUFFLE_PIPELINES: List[str] = ['preshufflev2']
+PRESHUFFLE_PIPELINES: List[str] = ['preshufflev2', 'preshuffle_tdm', 'comp_tdm', 'comp_tdm_v2', 'comp_async']
 
 # LDS staging budget in bytes: arch -> pipeline -> bytes.
 # Resolved from each architecture's lds_capacity_kb in arch_specs.json.
@@ -152,6 +160,7 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 65536,
         "compv4": 32768,
         "preshufflev2": 32768,
+        "preshuffle_tdm": 32768,
         "comp_async": 32768,
         "wavelet": 65536,
         "compv6": 32768,
@@ -167,6 +176,7 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 65536,
         "compv4": 32768,
         "preshufflev2": 32768,
+        "preshuffle_tdm": 32768,
         "comp_async": 32768,
         "wavelet": 65536,
         "compv6": 32768,
@@ -182,6 +192,7 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 65536,
         "compv4": 32768,
         "preshufflev2": 32768,
+        "preshuffle_tdm": 32768,
         "comp_async": 32768,
         "wavelet": 65536,
         "compv6": 32768,
@@ -197,6 +208,7 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 163840,
         "compv4": 81920,
         "preshufflev2": 81920,
+        "preshuffle_tdm": 81920,
         "comp_async": 81920,
         "wavelet": 163840,
         "compv6": 81920,
@@ -212,6 +224,7 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 65536,
         "compv4": 32768,
         "preshufflev2": 32768,
+        "preshuffle_tdm": 32768,
         "comp_async": 32768,
         "wavelet": 65536,
         "compv6": 32768,
@@ -227,6 +240,7 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 65536,
         "compv4": 32768,
         "preshufflev2": 32768,
+        "preshuffle_tdm": 32768,
         "comp_async": 32768,
         "wavelet": 65536,
         "compv6": 32768,
@@ -242,6 +256,7 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 65536,
         "compv4": 32768,
         "preshufflev2": 32768,
+        "preshuffle_tdm": 32768,
         "comp_async": 32768,
         "wavelet": 65536,
         "compv6": 32768,
@@ -257,6 +272,7 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 327680,
         "compv4": 163840,
         "preshufflev2": 163840,
+        "preshuffle_tdm": 163840,
         "comp_async": 163840,
         "wavelet": 327680,
         "compv6": 163840,

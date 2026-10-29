@@ -37,6 +37,12 @@
 #define BS2 \
     ROCSOLVER_ASAN_VALUE(16, 32) // generic 2 dimensional thread-block size used to call common kernels
 
+#ifdef DEBUG
+#define MAX_BATCH_COUNT 100
+#else
+#define MAX_BATCH_COUNT 64 * 1024 - 1
+#endif
+
 /******************************* larf ****************************************
 *******************************************************************************/
 #ifndef LARF_SSKER_THREADS

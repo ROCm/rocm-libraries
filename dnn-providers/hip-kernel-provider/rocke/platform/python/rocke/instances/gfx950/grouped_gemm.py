@@ -352,9 +352,9 @@ def build_custom_grouped(
         )
         return b.vec_bitcast(raw, frag_ty)
 
-    # tr128 (param): ds_read_b128_tr_b16 would halve the B LDS-read ops, but
-    # llvm.amdgcn.ds.read.tr16.b128 is not in this ROCm's LLVM (only the b64
-    # variant links) -> default off.
+    # tr128 (param): a b128 transpose read would halve the B LDS-read ops, but
+    # LLVM has no llvm.amdgcn.ds.read.tr16.b128 (only the b64 variant exists),
+    # so lowering with tr128 on gfx950 raises. Keep it off.
 
     def _read_b_rrr(bi, kk):
         # B-operand from the plain [TK,TN] LDS tile via CK transpose-reads.

@@ -42,18 +42,19 @@ rocblas_status rocsolver_getrs_batched_impl(rocblas_handle handle,
                                             U B,
                                             const I ldb,
                                             const bool pivot,
-                                            const I batch_count)
+                                            const I batch_count_arg)
 try
 {
-    ROCSOLVER_ENTER_TOP("getrs_batched", "--trans", trans, "-n", n, "--nrhs", nrhs, "--lda", lda,
-                        "--strideP", strideP, "--ldb", ldb, "--batch_count", batch_count);
+    const char* name = (pivot ? "getrs_batched" : "getrs_npvt_batched");
+    ROCSOLVER_ENTER_TOP(name, "--trans", trans, "-n", n, "--nrhs", nrhs, "--lda", lda, "--strideP",
+                        strideP, "--ldb", ldb, "--batch_count", batch_count_arg);
 
     if(!handle)
         return rocblas_status_invalid_handle;
 
     // argument checking
-    rocblas_status st
-        = rocsolver_getrs_argCheck(handle, trans, n, nrhs, lda, ldb, A, B, ipiv, pivot, batch_count);
+    rocblas_status st = rocsolver_getrs_argCheck(handle, trans, n, nrhs, lda, ldb, A, B, ipiv,
+                                                 pivot, batch_count_arg);
     if(st != rocblas_status_continue)
         return st;
 
@@ -66,6 +67,10 @@ try
     I incb = 1;
     rocblas_stride strideA = 0;
     rocblas_stride strideB = 0;
+
+    // split batch
+    I nsweep = ceildiv(batch_count_arg, MAX_BATCH_COUNT);
+    I batch_count = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
     // memory workspace sizes:
     rocsolver_workspace_helper work_helper;
@@ -84,10 +89,21 @@ try
 
     ROCBLAS_CHECK(work_helper.assign_buffer<T>(handle, mem[0]));
 
-    // execution
-    return rocsolver_getrs_template<true, false, T>(handle, trans, n, nrhs, A, shiftA, inca, lda,
-                                                    strideA, ipiv, strideP, B, shiftB, incb, ldb,
-                                                    strideB, batch_count, &work_helper, pivot);
+    if(n == 0 || nrhs == 0)
+        return rocblas_status_success;
+
+    for(I isweep = 0; isweep < nsweep; isweep++)
+    {
+        I const bid = isweep * batch_count;
+        batch_count = std::min(batch_count_arg - bid, batch_count);
+
+        // execution
+        ROCBLAS_CHECK(rocsolver_getrs_template<true, false, T>(
+            handle, trans, n, nrhs, A + bid, shiftA, inca, lda, strideA, ipiv + bid * strideP,
+            strideP, B + bid, shiftB, incb, ldb, strideB, batch_count, &work_helper, pivot));
+    }
+
+    return rocblas_status_success;
 }
 catch(...)
 {

@@ -10,15 +10,18 @@
 
 Known bugs:
   # ROCM-1545: TF32 matmul with INF inputs returns NaN on gfx950 (MI355)
-  - { name: matmul_tf32_inf_ROCM1545, function: matmul, initialization: inf, known_bug_platforms: "gfx950, gfx1250" }
+  # gfx1250-strict is listed alongside gfx1250 because the match is an exact
+  # token comparison against the name the runtime reports, and a v0 part reports
+  # the revision; the defect is in silicon the revision shares.
+  - { name: matmul_tf32_inf_ROCM1545, function: matmul, initialization: inf, known_bug_platforms: "gfx950, gfx1250, gfx1250-strict" }
   # ROCM-1545 (same root cause): the special-FP sweep hits it on the TF32 (xf32)
   # compute type when the input is +Inf or -Inf -- the GPU returns -nan where the
   # CPU reference is +Inf, failing check_special_value_consistency(). Only the xf32
   # Inf/-Inf cases fail; the f16/bf16/f32/f64 Inf cases and the xf32 NaN case pass,
   # so scope the quarantine to compute_type xf32_r + inf/neg_inf. REMOVE once the
   # TF32 Inf fix lands so these re-activate as an enforced consistency gate.
-  - { name: matmul_special_fp_64x64, function: matmul, compute_type: c_xf32_r, initialization: inf, known_bug_platforms: "gfx950, gfx1250" }
-  - { name: matmul_special_fp_64x64, function: matmul, compute_type: c_xf32_r, initialization: neg_inf, known_bug_platforms: "gfx950, gfx1250" }
+  - { name: matmul_special_fp_64x64, function: matmul, compute_type: c_xf32_r, initialization: inf, known_bug_platforms: "gfx950, gfx1250, gfx1250-strict" }
+  - { name: matmul_special_fp_64x64, function: matmul, compute_type: c_xf32_r, initialization: neg_inf, known_bug_platforms: "gfx950, gfx1250, gfx1250-strict" }
   # ROCM-26455: bf16 matmul output-store address overflow -- an output element
   # offset > 2^31 (from an oversized output leading dimension ldc/ldd) wraps in the
   # 32-bit global-write address path and produces silent wrong results. The gate
@@ -28,6 +31,24 @@ Known bugs:
   # REMOVE this entry once the output-store path is fixed so the case re-activates
   # as an enforced bit-exact regression gate.
 
+  # ROCM-32343: on gfx950 the custom-schedule MT256x160x64 bf16 kernels give wrong
+  # values in the TN every-solution cases. REMOVE these entries in the PR that fixes
+  # ROCM-32343. Review by 2026-11-01.
+  - { name: matmul_fast_check_every_solution_repeat, function: matmul, a_type: bf16_r, known_bug_platforms: gfx950 }
+  - { name: matmul_fast_check_streamk_every_solution_repeat, function: matmul, a_type: bf16_r, known_bug_platforms: gfx950 }
+  # ROCM-32153: on MI350P (Device 75a8) two custom-schedule MT256x160x64 f16 kernels
+  # in gfx950_id75a8/Equality still write wrong values in the TN cases at
+  # 4099 x 2053 x 129. The custom schedule is tracked in ROCM-32343. REMOVE these
+  # entries in the PR that removes or fixes those kernels. Review by 2026-11-01.
+  - { name: matmul_fast_check_every_solution_repeat, function: matmul, a_type: f16_r, M: 4099, transA: T, transB: N, known_bug_platforms: gfx950 }
+  - { name: matmul_fast_check_streamk_every_solution_repeat, function: matmul, a_type: f16_r, M: 4099, transA: T, transB: N, known_bug_platforms: gfx950 }
+  # ROCM-32344: on gfx950 the custom MT256x256x64 bf16 kernels give wrong values at
+  # K = 64. REMOVE this entry in the PR that fixes ROCM-32344. Review by 2026-11-01.
+  - { name: matmul_fast_check_short_k, function: matmul, a_type: bf16_r, transA: T, known_bug_platforms: gfx950 }
+  # ROCM-32050: an illegal memory access on gfx1250 in f32 NN 32768 x 32768 x 4096,
+  # where C and D are exactly 4 GiB; it kills the test process there. REMOVE this
+  # entry in the PR that fixes ROCM-32050. Review by 2026-11-01.
+  - { name: matmul_fast_check_threshold_cd_4gib_ROCM32050, function: matmul, known_bug_platforms: "gfx1250, gfx1250-strict" }
   # ROCM-27082: gfx950 MXFP4 subtile scaleAlphaVec TN cases fail the norm/accuracy
   # check on asymmetric (M!=N) tiles. Square tiles (128x128, 192x192) still pass and
   # remain covered. Suspected TensileLite codegen regression; remove once root-caused.

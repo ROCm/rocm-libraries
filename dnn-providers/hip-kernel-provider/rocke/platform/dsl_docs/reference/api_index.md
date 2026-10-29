@@ -39,7 +39,8 @@ SoftwarePipeline
 
 # Manifests
 make_gemm_manifest, make_conv_manifest, make_attention_manifest
-attention_args_signature, conv_args_signature, gemm_args_signature
+attention_args_signature, gemm_args_signature
+# (conv signatures live next to the conv instances: kernels.common.conv_abi)
 write_artifact
 
 # Attention helpers
@@ -51,6 +52,8 @@ select_2d_config, select_3d_config, use_2d_kernel
 # Transforms (CK Tile coord-DAG)
 CoordVar, Indirect, PadDynamic, TensorDescriptor
 pass_through, pad, pad_dynamic, embed, merge, unmerge, indirect
+# (runtime-shape variants are imported from rocke.helpers.transforms:
+#  embed_dynamic, unmerge_magic_dynamic, DynamicTensorDescriptor)
 
 # Analysis / benchmark
 BenchmarkSummary, benchmark_manifest, summarize_runs
@@ -58,6 +61,18 @@ HsacoAnalysis, IsaStats, ResourceInfo, VariantReport, LlvmIrStats
 analyze_hsaco, analyze_llvm_ir, compare_variant_reports
 parse_isa, parse_resources
 ```
+
+## Keeping arithmetic operations separate
+
+`IRBuilder.optimization_barrier(value)` returns the same scalar value and type
+and prevents the compiler from combining operations across that value. Use
+the returned value when an intermediate result must round before the next
+operation. The C API is `rocke_b_optimization_barrier(builder, value)`.
+The supported compilation path is AMDGPU LLVM IR through COMGR; native
+HIP-source lowering is unsupported.
+
+See [the value-barrier guide](../primitives/intrinsics_and_primitives.md#keeping-operations-separate)
+for examples, supported types, and the difference from `sched_barrier`.
 
 ## `from rocke.helpers import ...` (extras not in top-level)
 
@@ -156,6 +171,8 @@ load_block_count # BlockCount[q_block]
 IOSpecRule, validate_io
 SignatureBuilder, kernel_name_join
 ceil_div_grid, ptr_type_str, sig_param, sig_scalar
+ceil_div, align_up # host integer math (no IR)
+non_default_fields, salted_kernel_name # spec-keyed kernel names
 
 # Quantization (helpers/quant.py)
 QDType, QUANT_MAX_ABS
@@ -166,7 +183,7 @@ quant_ir_type, quant_max_abs, ir_to_qdtype
 NUM_XCDS_MI300X, NUM_XCDS_MI325X, NUM_XCDS_MI350X
 SuperTileSwizzleResult
 chiplet_aware_super_tile, chiplet_aware_super_tile_dynamic
-chiplet_transform_chunked, chiplet_transform_chunked_dynamic
+chiplet_transform_chunked, chiplet_transform_chunked_dynamic, chiplet_transform_chunked_runtime
 super_tile_swizzle, super_tile_swizzle_dynamic
 
 # Autotune (helpers/autotune.py)
@@ -233,6 +250,7 @@ GroupedGemmLauncher, grouped_gemm_problems
 ConvProblem, ImplicitGemmConvSpec, build_implicit_gemm_conv
 DirectConvProblem, DirectConv16cSpec, build_direct_conv_16c
 DirectConv4cSpec, build_direct_conv_4c
+DirectNongroupedConvSpec, build_direct_conv_nongrouped, is_valid_nongrouped_spec, nongrouped_specs, nongrouped_knobs
 Img2ColSpec, build_img2col
 PoolingProblem, Pooling2DSpec, PoolOp, build_pooling2d
 
@@ -336,6 +354,11 @@ b.clamp_f32(v, lo, hi) # fmin(hi, fmax(lo, v)) -- folds to v_med3_f32
 # and FMHA-backward dQ accumulate)
 b.global_atomic_add(ptr, idx, val, *, ordering="monotonic")
 b.lds_atomic_add(smem, [idx], val, *, ordering="monotonic")
+
+# : cross-workgroup synchronisation (stream-K fixup)
+b.fence(*, scope="agent", ordering="acq_rel") # memref.fence
+b.global_flag_store(ptr, idx, val_i32, *, scope="agent", ordering="release")
+b.global_flag_wait_eq(ptr, idx, expect_i32, *, scope="agent") # acquire spin
 
 # : bitwise integer helpers (also used by i4 unpack)
 b.xor(a, b) # arith.xor; same type on both operands

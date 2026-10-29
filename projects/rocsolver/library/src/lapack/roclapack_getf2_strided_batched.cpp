@@ -41,12 +41,12 @@ rocblas_status rocsolver_getf2_strided_batched_impl(rocblas_handle handle,
                                                     const rocblas_stride strideP,
                                                     I* info,
                                                     const bool pivot,
-                                                    const I batch_count)
+                                                    const I batch_count_arg)
 try
 {
     const char* name = (pivot ? "getf2_strided_batched" : "getf2_npvt_strided_batched");
     ROCSOLVER_ENTER_TOP(name, "-m", m, "-n", n, "--lda", lda, "--strideA", strideA, "--strideP",
-                        strideP, "--batch_count", batch_count);
+                        strideP, "--batch_count", batch_count_arg);
 
     using S = decltype(std::real(T{}));
 
@@ -55,7 +55,7 @@ try
 
     // argument checking
     rocblas_status st
-        = rocsolver_getf2_getrf_argCheck(handle, m, n, lda, A, ipiv, info, pivot, batch_count);
+        = rocsolver_getf2_getrf_argCheck(handle, m, n, lda, A, ipiv, info, pivot, batch_count_arg);
     if(st != rocblas_status_continue)
         return st;
 
@@ -65,6 +65,10 @@ try
 
     // strided batched execution
     I inca = 1;
+
+    // split batch
+    I nsweep = ceildiv(batch_count_arg, MAX_BATCH_COUNT);
+    I batch_count = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
     // memory workspace sizes:
     rocsolver_workspace_helper work_helper;
@@ -82,9 +86,18 @@ try
 
     ROCBLAS_CHECK(work_helper.assign_buffer<T>(handle, mem[0]));
 
-    // execution
-    return rocsolver_getf2_template<true, T>(handle, m, n, A, shiftA, inca, lda, strideA, ipiv,
-                                             shiftP, strideP, info, batch_count, &work_helper, pivot);
+    for(I isweep = 0; isweep < nsweep; isweep++)
+    {
+        I const bid = isweep * batch_count;
+        batch_count = std::min(batch_count_arg - bid, batch_count);
+
+        // execution
+        ROCBLAS_CHECK(rocsolver_getf2_template<true, T>(
+            handle, m, n, A + bid * strideA, shiftA, inca, lda, strideA, ipiv + bid * strideP,
+            shiftP, strideP, info + bid, batch_count, &work_helper, pivot));
+    }
+
+    return rocblas_status_success;
 }
 catch(...)
 {
