@@ -657,13 +657,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 
     # The test packing roots are wired under this gate, each unless it has nothing to pack
     # for this build, in which case it is dormant and writes no output. The install rule
-    # ships whatever the wired roots and the fixture archive staged into this tree. A census
-    # shard here is also runnable in place, and CTest leaves its Testing/ scratch directory
-    # beside it, which is a build-machine log rather than content.
+    # ships whatever the wired roots and the fixture archive staged into this tree.
     if(HIPKERNELPROVIDER_ENABLE_TESTS)
         install(DIRECTORY "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/"
                 DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}"
                 PATTERN "${HKP_PACK_STAMP_NAME}" EXCLUDE
+                # A census shard also runs in place; the Testing/ directory CTest leaves
+                # beside it is a build-machine log, not content.
                 REGEX "/census/[^/]+/Testing$" EXCLUDE)
     endif()
 endif()

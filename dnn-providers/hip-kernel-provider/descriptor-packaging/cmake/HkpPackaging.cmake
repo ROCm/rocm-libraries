@@ -2338,10 +2338,16 @@ endfunction()
 #   FILES names files an entry routed to this shard reads by bare name, such as the
 #   --test-config TOML of an engine-pinned external suite. The finalizer copies each one
 #   beside the shard's CTest file in the build tree, so the shard resolves them wherever
-#   CTest runs it and the wholesale install ships them with it.
+#   CTest runs it and the wholesale install ships them with it. A *.toml the shard names
+#   that no reservation placed fails configuration.
 # ---------------------------------------------------------------------------
 function(hkp_reserve_census_shard out_var arch)
     cmake_parse_arguments(PARSE_ARGV 2 ARG "" "" "FILES")
+    if(ARG_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR
+            "hkp_reserve_census_shard: unrecognised argument(s): "
+            "${ARG_UNPARSED_ARGUMENTS}")
+    endif()
     set_property(GLOBAL APPEND PROPERTY HKP_CENSUS_SHARD_ARCHES "${arch}")
     if(ARG_FILES)
         set_property(GLOBAL APPEND PROPERTY HKP_CENSUS_SHARD_FILES_${arch} ${ARG_FILES})
@@ -2355,8 +2361,8 @@ endfunction()
 # ---------------------------------------------------------------------------
 # _hkp_write_census_shard(<arch> <text>)
 #   Write <arch>'s shard CTest file into the test descriptor build tree, copy the files
-#   reserved with the shard beside it, and fail if the text names a *.toml that is not
-#   there.
+#   reserved with the shard beside it, and fail if the text names a *.toml, by bare name,
+#   that is not there.
 # ---------------------------------------------------------------------------
 function(_hkp_write_census_shard arch text)
     set(_shard_dir "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/census/${arch}")
@@ -2371,8 +2377,9 @@ function(_hkp_write_census_shard arch text)
         configure_file("${_file}" "${_shard_dir}/${_name}" COPYONLY)
     endforeach()
 
-    # Both quoting forms an entry can carry -- "name.toml" and [[name.toml]] -- leave the
-    # bare name intact, so matching the name alone covers either.
+    # Bare names only: the emitters write a TOML's file name, never a path. Both quoting
+    # forms an entry can carry -- "name.toml" and [[name.toml]] -- leave that name intact,
+    # so matching the name alone covers either.
     string(REGEX MATCHALL "[A-Za-z0-9_.-]+\\.toml" _named "${text}")
     list(REMOVE_DUPLICATES _named)
     foreach(_name IN LISTS _named)
@@ -2406,11 +2413,9 @@ endfunction()
 #   therefore reached without a second install rule, and an architecture pruned out of an
 #   artifact takes its CTest file with it.
 #
-#   The same tree is the build tree's copy of each shard, and it must run there too: its
-#   paths resolve because the build tree mirrors the install layout. A file an entry reads
-#   by bare name is installed beside the shard by its own install(FILES), which a build
-#   tree never sees, so the files reserved with the shard are copied beside it here. Every
-#   *.toml the shard text names must then sit beside it, or configuration fails.
+#   The same tree is the build tree's copy of each shard and runs there too, because the
+#   build tree mirrors the install layout; hkp_reserve_census_shard() covers the files an
+#   entry reads by bare name.
 #
 #   Discovery is a working-directory-relative glob plus subdirs(), deliberately. It must
 #   survive the prefix being moved, so it cannot hold a configure-time absolute path; and

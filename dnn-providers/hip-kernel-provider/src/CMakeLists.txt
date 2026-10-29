@@ -386,9 +386,8 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         # Route the installed entry and its TOML into the gfx950 shard, so pruning to
         # another architecture removes them along with the engine they name. Reserved
         # here rather than earlier so the shard is claimed exactly when something is
-        # registered into it. The TOML goes to the reservation as well as TEST_CONFIG:
-        # the shard names it by bare name, and the reservation puts it beside the
-        # build-tree copy of the shard.
+        # registered into it. The TOML goes to the reservation as well as TEST_CONFIG;
+        # hkp_reserve_census_shard() says why.
         #
         # Both YAML modes. Each gets a common entrypoint further down -- the categorized
         # file, or the one install_provider_ctest_files() writes -- and the discovery

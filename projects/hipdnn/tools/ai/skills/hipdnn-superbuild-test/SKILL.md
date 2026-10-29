@@ -38,11 +38,13 @@ Infer options from the user request:
      `<build-dir>/dnn-providers/hip-kernel-provider/src`. It registers the categorized
      engine-pinned suites with absolute paths; list one engine's with
      `ctest --test-dir <build-ctest-root> -N -L <engine-label>`, where the label is the
-     engine ID with `:` mapped to `_` (for example `hipkernel_Gfx950AttentionDense`). The
-     provider's `install_CTestTestfile.cmake` (or `CTestTestfile.cmake.install`) in the build
-     tree is install-only: CTest does not read it there. The per-arch census shard,
-     `<engines>/test_arch_content/hip-kernel-provider/census/<arch>/CTestTestfile.cmake`,
-     runs in either tree.
+     engine ID with every character outside `[A-Za-z0-9_.-]` mapped to `_` (for example
+     `hipkernel_Gfx950AttentionDense`). The provider's `install_CTestTestfile.cmake` (or
+     `CTestTestfile.cmake.install`) in the build tree is install-only: CTest does not read
+     it there. The per-arch census shard runs in either tree, at
+     `<build-dir>/lib/hipdnn_plugins/engines/test_arch_content/hip-kernel-provider/census/<arch>`
+     in the build tree (`<build-dir>/bin/...` on Windows) and the same relative path under the
+     install prefix.
    - `<PY>`: for the corpus-sweep command below, the Python interpreter the active
      workspace or repository instructions mandate, otherwise the active venv's
      `python`. Resolve it once and substitute the full path.
