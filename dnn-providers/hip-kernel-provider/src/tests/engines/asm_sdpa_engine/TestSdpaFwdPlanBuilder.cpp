@@ -65,7 +65,8 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
                         bool causalMask = false,
                         bool overrideShapeEnabled = false,
                         hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode
-                        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
+                        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
+                        bool withCuSeqLen = false)
 {
     if(qDims.size() != 4 || vDims.size() != 4)
     {
@@ -92,7 +93,47 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
         paddingMask,
         causalMask,
         overrideShapeEnabled,
-        mmaCoreMode);
+        mmaCoreMode,
+        withCuSeqLen);
+}
+
+// No ASM forward kernel implements cu_seq_len_*. padding_mask stays false so only the
+// cu_seq_len reject can decline the graph.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsCuSeqLen)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    auto baseline = createSdpaFwdGraph(dims, dims);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper baselineWrapper(
+        baseline.GetBufferPointer(), baseline.GetSize());
+    ASSERT_TRUE(_planBuilder.isApplicable(_handle, baselineWrapper));
+
+    auto withCuSeqLen = createSdpaFwdGraph(dims,
+                                           dims,
+                                           DataType::BFLOAT16,
+                                           DataType::FLOAT,
+                                           /*withAttnMask=*/false,
+                                           /*withScale=*/false,
+                                           /*withStats=*/false,
+                                           /*alibiMask=*/false,
+                                           /*paddingMask=*/false,
+                                           /*causalMask=*/false,
+                                           /*overrideShapeEnabled=*/false,
+                                           DataType::UNSET,
+                                           /*withCuSeqLen=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper cuWrapper(
+        withCuSeqLen.GetBufferPointer(), withCuSeqLen.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, cuWrapper));
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)

@@ -994,6 +994,12 @@ typedef enum
     /** @brief Compute data type for SDPA forward */
     HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT = 2641,
 
+    /** @brief Cumulative sequence length Q tensor for SDPA forward, shape (B+1,1,1,1) */
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC = 2642,
+
+    /** @brief Cumulative sequence length KV tensor for SDPA forward, shape (B+1,1,1,1) */
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC = 2643,
+
     /** @} */
 
     /**

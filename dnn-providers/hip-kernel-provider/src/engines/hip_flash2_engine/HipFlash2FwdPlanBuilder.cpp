@@ -75,6 +75,9 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_q_tensor_uid().has_value()
                                    || attrs.seq_len_kv_tensor_uid().has_value(),
                                "variable-length (group) batch mode not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.cu_seq_len_q_tensor_uid().has_value()
+                                   || attrs.cu_seq_len_kv_tensor_uid().has_value(),
+                               "cumulative sequence lengths (cu_seq_len_q/kv) not supported");
 
     // Tensor shapes
     const auto& tensorMap = opGraph.getTensorMap();

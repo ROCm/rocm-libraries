@@ -533,6 +533,10 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT),
                  "HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC),
+                 "HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC),
+                 "HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC");
 
     // SDPA bwd operation attributes
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_SDPA_BWD_Q_EXT),

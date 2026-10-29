@@ -150,6 +150,9 @@ struct GraphSpec
     // Elements of padding after each Q row: a row stride that is not a multiple of 8
     // elements leaves rows off the kernels' 16-byte vector alignment.
     int64_t qRowPad = 0;
+    // Cumulative sequence length tensor UIDs; the matcher declines on presence alone.
+    std::optional<int64_t> cuSeqLenQUid;
+    std::optional<int64_t> cuSeqLenKvUid;
 };
 
 // The default device is gfx12: the dispatcher's rule keeps a small-query graph with a
@@ -306,6 +309,14 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     attributes.add_causal_mask(spec.causalMask);
     attributes.add_causal_mask_bottom_right(spec.causalMaskBottomRight);
     attributes.add_right_bound(spec.rightBound);
+    if(spec.cuSeqLenQUid.has_value())
+    {
+        attributes.add_cu_seq_len_q_tensor_uid(*spec.cuSeqLenQUid);
+    }
+    if(spec.cuSeqLenKvUid.has_value())
+    {
+        attributes.add_cu_seq_len_kv_tensor_uid(*spec.cuSeqLenKvUid);
+    }
     attributes.add_diagonal_alignment(spec.bottomRight
                                           ? data_objects::DiagonalAlignment::BOTTOM_RIGHT
                                           : data_objects::DiagonalAlignment::TOP_LEFT);
@@ -589,6 +600,21 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeclinesRaggedOperands)
         spec.raggedOperand = uid;
         EXPECT_FALSE(matchGraph(spec).has_value()) << "ragged operand uid " << uid;
     }
+}
+
+// cu_seq_len_* (variable-length batching) is unsupported. padding_mask stays false in
+// GraphSpec, so only the cu_seq_len decline can reject these.
+TEST(TestGfx1151WmmaAttentionMatchers, DeclinesCuSeqLenBothSpellings)
+{
+    ASSERT_TRUE(matchGraph(GraphSpec{}).has_value());
+
+    GraphSpec q;
+    q.cuSeqLenQUid = 900;
+    EXPECT_FALSE(matchGraph(q).has_value());
+
+    GraphSpec kv;
+    kv.cuSeqLenKvUid = 901;
+    EXPECT_FALSE(matchGraph(kv).has_value());
 }
 
 // Launch arguments are bound from the graph's shapes at prepare, so a graph whose

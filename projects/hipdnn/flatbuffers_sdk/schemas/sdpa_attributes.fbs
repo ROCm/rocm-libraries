@@ -87,4 +87,8 @@ table SdpaAttributes {
     diagonal_alignment:       DiagonalAlignment = TOP_LEFT;
     mma_core_mode:            DataType = UNSET;
     implementation:           AttentionImplementation = AUTO;
+    // Cumulative sequence lengths (forward only): (B+1) prefix sums starting at 0.
+    // Appended last to keep the existing field order stable.
+    cu_seq_len_q_tensor_uid:  long = null (cache_uid);
+    cu_seq_len_kv_tensor_uid: long = null (cache_uid);
 }

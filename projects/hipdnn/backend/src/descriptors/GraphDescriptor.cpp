@@ -10,6 +10,7 @@
 #include "HipdnnException.hpp"
 #include "NodeFactory.hpp"
 #include "PlatformUtils.hpp"
+#include "SdpaFwdOperationDescriptor.hpp"
 
 #include <functional>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
@@ -163,7 +164,8 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
                                                                   anyRuntimePassByValue,
                                                                   hasRaggedTensors(),
                                                                   hasNonDefaultTensorAlignment(),
-                                                                  hasRaggedOffsetMultiplier());
+                                                                  hasRaggedOffsetMultiplier(),
+                                                                  hasCuSeqLen());
     graph->min_required_engine_api_version
         = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion>(
             hipdnn_plugin_sdk::toEngineApiVersion(requiredVersion));
@@ -698,6 +700,24 @@ bool GraphDescriptor::hasRaggedOffsetMultiplier() const
             {
                 return true;
             }
+        }
+    }
+    return false;
+}
+
+bool GraphDescriptor::hasCuSeqLen() const
+{
+    for(const auto& desc : _operations)
+    {
+        // Backend builds with -fno-rtti, so dispatch on the descriptor type and static_cast.
+        if(desc->getType() != HIPDNN_BACKEND_OPERATION_SDPA_FWD_DESCRIPTOR)
+        {
+            continue;
+        }
+        const auto& data = static_cast<const SdpaFwdOperationDescriptor&>(*desc).getData();
+        if(data.cu_seq_len_q_tensor_uid.has_value() || data.cu_seq_len_kv_tensor_uid.has_value())
+        {
+            return true;
         }
     }
     return false;

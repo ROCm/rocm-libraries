@@ -736,6 +736,10 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT";
     case HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT:
         return "HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT";
+    case HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC:
+        return "HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC";
+    case HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC:
+        return "HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC";
 
     // Layernorm operation attributes
     case HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT:

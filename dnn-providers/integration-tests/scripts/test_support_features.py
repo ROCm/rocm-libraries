@@ -1289,6 +1289,16 @@ class TestSdpaExtract:
             "fp8:amax",
         } <= features
 
+    def test_cumulative_sequence_lengths_are_their_own_feature(self) -> None:
+        # Either side alone drives the feature, and it is not the per-batch
+        # sequence-length feature.
+        for port in ("cu_seq_len_q_tensor_uid", "cu_seq_len_kv_tensor_uid"):
+            features = self._extract(inputs={port: 16}, padding_mask=True)
+            assert "varlen:cu_seq_lens" in features
+            assert "varlen:seq_lens" in features  # padding_mask drives this one
+        features = self._extract(inputs={"cu_seq_len_q_tensor_uid": None})
+        assert "varlen:cu_seq_lens" not in features
+
     def test_null_ports_are_absent(self) -> None:
         features = self._extract(
             inputs={"attn_mask_tensor_uid": None}, outputs={"stats_tensor_uid": None}
@@ -1329,6 +1339,7 @@ class TestSdpaExtract:
                     "page_table_v_tensor_uid": 13,
                     "block_mask_tensor_uid": 14,
                     "sink_token_tensor_uid": 15,
+                    "cu_seq_len_kv_tensor_uid": 16,
                 },
                 "outputs": {
                     "sum_exp_tensor_uid": 21,

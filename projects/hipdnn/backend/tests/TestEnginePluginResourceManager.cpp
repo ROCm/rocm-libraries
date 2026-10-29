@@ -3224,6 +3224,82 @@ TEST(TestEnginePluginResourceManager, RaggedOffsetMultiplierGraphIncludesMultipl
     EXPECT_EQ(engineIds[0], 100);
 }
 
+// A cu_seq_len graph needs a plugin at or above K_CU_SEQ_LEN_MIN_API_VERSION. Older plugins
+// would silently ignore the fields, so they must be excluded before getApplicableEngineIds.
+// - 1.4.0: predates the ragged-offset multiplier too.
+// - 1.5.0: UHD prediction entry points, no cu_seq_len support.
+namespace
+{
+void expectCuSeqLenGraphExcludesPluginAt(std::string_view pluginApiVersion)
+{
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
+    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*plugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return("PreCuSeqLenPlugin"));
+    EXPECT_CALL(*plugin, apiVersion()).WillRepeatedly(::testing::Return(pluginApiVersion));
+    EXPECT_CALL(*plugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getApplicableEngineIds(_, _)).Times(0);
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    programOverrideFlag(mockGraphDesc, /*flag=*/false);
+    EXPECT_CALL(mockGraphDesc, hasCuSeqLen()).WillRepeatedly(::testing::Return(true));
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+    auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
+    EXPECT_TRUE(engineIds.empty());
+}
+} // namespace
+
+TEST(TestEnginePluginResourceManager, CuSeqLenGraphExcludesPluginBelowRaggedOffsetMultiplier)
+{
+    expectCuSeqLenGraphExcludesPluginAt(hipdnn_plugin_sdk::K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION);
+}
+
+TEST(TestEnginePluginResourceManager, CuSeqLenGraphExcludesUhdApiVersionPlugin)
+{
+    expectCuSeqLenGraphExcludesPluginAt("1.5.0");
+}
+
+TEST(TestEnginePluginResourceManager, CuSeqLenGraphIncludesCuSeqLenCapablePlugin)
+{
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
+    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*plugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return("CuSeqLenPlugin"));
+    EXPECT_CALL(*plugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_CU_SEQ_LEN_MIN_API_VERSION));
+    EXPECT_CALL(*plugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getApplicableEngineIds(hipdnnEnginePluginHandle_t(0xdeadbeef), _))
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    programOverrideFlag(mockGraphDesc, /*flag=*/false);
+    EXPECT_CALL(mockGraphDesc, hasCuSeqLen()).WillRepeatedly(::testing::Return(true));
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+    auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
+    ASSERT_EQ(engineIds.size(), 1u);
+    EXPECT_EQ(engineIds[0], 100);
+}
+
 // =============================================================================
 // Ragged-tensor applicability filter (mock-based matrix).
 //

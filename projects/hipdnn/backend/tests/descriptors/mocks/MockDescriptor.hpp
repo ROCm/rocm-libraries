@@ -139,6 +139,10 @@ public:
         ON_CALL(*this, hasRaggedOffsetMultiplier()).WillByDefault(::testing::Invoke([this]() {
             return this->GraphDescriptor::hasRaggedOffsetMultiplier();
         }));
+        // Same rationale as hasRaggedTensors above, for the cu_seq_len floor.
+        ON_CALL(*this, hasCuSeqLen()).WillByDefault(::testing::Invoke([this]() {
+            return this->GraphDescriptor::hasCuSeqLen();
+        }));
     }
 
     MOCK_METHOD(void, finalize, (), (override));
@@ -165,6 +169,7 @@ public:
     MOCK_METHOD(bool, hasRaggedTensors, (), (const, override));
     MOCK_METHOD(bool, hasNonDefaultTensorAlignment, (), (const, override));
     MOCK_METHOD(bool, hasRaggedOffsetMultiplier, (), (const, override));
+    MOCK_METHOD(bool, hasCuSeqLen, (), (const, override));
     MOCK_METHOD(bool, isRuntimePassByValueEnabled, (), (const, override));
 
     static hipdnnBackendDescriptorType_t getStaticType()

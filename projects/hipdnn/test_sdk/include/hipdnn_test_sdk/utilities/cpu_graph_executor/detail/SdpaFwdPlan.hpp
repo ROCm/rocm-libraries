@@ -238,9 +238,11 @@ public:
             return false;
         }
 
-        // Unsupported: variable sequence lengths
+        // Unsupported: variable sequence lengths (per-batch or cumulative)
         if(nodeAttributes->seq_len_q_tensor_uid().has_value()
-           || nodeAttributes->seq_len_kv_tensor_uid().has_value())
+           || nodeAttributes->seq_len_kv_tensor_uid().has_value()
+           || nodeAttributes->cu_seq_len_q_tensor_uid().has_value()
+           || nodeAttributes->cu_seq_len_kv_tensor_uid().has_value())
         {
             return false;
         }

@@ -101,6 +101,8 @@ public:
         Scale_S = 18,
         Scale_O = 19,
         SINK_TOKEN = 20,
+        CU_SEQ_LEN_Q = 21, // Cumulative sequence lengths (B+1), forward only
+        CU_SEQ_LEN_KV = 22,
     };
     typedef InputNames input_names;
 
@@ -188,6 +190,16 @@ public:
     std::shared_ptr<TensorAttributes> get_seq_len_kv() const
     {
         return getInput(InputNames::SEQ_LEN_KV);
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> get_cu_seq_len_q() const
+    {
+        return getInput(InputNames::CU_SEQ_LEN_Q);
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> get_cu_seq_len_kv() const
+    {
+        return getInput(InputNames::CU_SEQ_LEN_KV);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_seed() const
@@ -369,6 +381,33 @@ public:
     SdpaAttributes& set_seq_len_kv(std::shared_ptr<TensorAttributes>&& value)
     {
         return setInput(InputNames::SEQ_LEN_KV, std::move(value));
+    }
+    // Accepts a 1-D (B+1) tensor like cuDNN and promotes it in place to (B+1,1,1,1), so the
+    // backend always gets rank-4. Set dims first: dims set afterwards are not promoted and
+    // fail Rule 6d's rank check.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_cu_seq_len_q(const std::shared_ptr<TensorAttributes>& value)
+    {
+        promoteIndexTensorTo4d(value);
+        return setInput(InputNames::CU_SEQ_LEN_Q, value);
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_cu_seq_len_q(std::shared_ptr<TensorAttributes>&& value)
+    {
+        promoteIndexTensorTo4d(value);
+        return setInput(InputNames::CU_SEQ_LEN_Q, std::move(value));
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_cu_seq_len_kv(const std::shared_ptr<TensorAttributes>& value)
+    {
+        promoteIndexTensorTo4d(value);
+        return setInput(InputNames::CU_SEQ_LEN_KV, value);
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_cu_seq_len_kv(std::shared_ptr<TensorAttributes>&& value)
+    {
+        promoteIndexTensorTo4d(value);
+        return setInput(InputNames::CU_SEQ_LEN_KV, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_seed(const std::shared_ptr<TensorAttributes>& value)
@@ -808,6 +847,21 @@ public:
     {
         unfuse_fma_hint = value;
         return *this;
+    }
+
+private:
+    // Promotes a 1-D (n) tensor to (n,1,1,1) in place, as cuDNN's promote_1d_index_tensor_to_4d
+    // does (keeps the leading stride if set). In place so the caller's handle and uid stay valid.
+    static void promoteIndexTensorTo4d(const std::shared_ptr<TensorAttributes>& tensor)
+    {
+        if(!tensor || tensor->get_dim().size() != 1)
+        {
+            return;
+        }
+        const int64_t n = tensor->get_dim()[0];
+        const auto& stride = tensor->get_stride();
+        const int64_t leadingStride = stride.size() == 1 ? stride[0] : 1;
+        tensor->set_dim({n, 1, 1, 1}).set_stride({leadingStride, 1, 1, 1});
     }
 };
 

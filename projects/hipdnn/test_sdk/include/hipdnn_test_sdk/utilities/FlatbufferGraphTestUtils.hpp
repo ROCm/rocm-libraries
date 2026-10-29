@@ -2749,7 +2749,8 @@ inline flatbuffers::FlatBufferBuilder
                             bool causalMask = false,
                             bool overrideShapeEnabled = false,
                             hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode
-                            = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
+                            = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
+                            bool withCuSeqLen = false)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -2825,6 +2826,35 @@ inline flatbuffers::FlatBufferBuilder
         statsUid = flatbuffers::Optional<int64_t>(stUid);
     }
 
+    flatbuffers::Optional<int64_t> cuSeqLenQUid = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> cuSeqLenKvUid = flatbuffers::nullopt;
+    if(withCuSeqLen)
+    {
+        // cu_seq_len_q / cu_seq_len_kv: INT32 [batch + 1, 1, 1, 1]
+        const std::vector<int64_t> cuSeqLenDims = {qDims[0] + 1, 1, 1, 1};
+        const std::vector<int64_t> cuSeqLenStrides = {1, 1, 1, 1};
+        const auto cuQUid = uid++;
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                cuQUid,
+                "cu_seq_len_q",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                &cuSeqLenStrides,
+                &cuSeqLenDims));
+        cuSeqLenQUid = flatbuffers::Optional<int64_t>(cuQUid);
+        const auto cuKvUid = uid++;
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                cuKvUid,
+                "cu_seq_len_kv",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                &cuSeqLenStrides,
+                &cuSeqLenDims));
+        cuSeqLenKvUid = flatbuffers::Optional<int64_t>(cuKvUid);
+    }
+
     auto sdpaAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateSdpaAttributes(
         builder,
         qUid,
@@ -2866,7 +2896,10 @@ inline flatbuffers::FlatBufferBuilder
         flatbuffers::nullopt, // right_bound
         flatbuffers::nullopt, // max_seq_len_kv
         hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT,
-        mmaCoreMode);
+        mmaCoreMode,
+        hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation::AUTO,
+        cuSeqLenQUid,
+        cuSeqLenKvUid);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -2910,7 +2943,8 @@ inline flatbuffers::FlatBufferBuilder
                             bool causalMask = false,
                             bool overrideShapeEnabled = false,
                             hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode
-                            = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
+                            = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
+                            bool withCuSeqLen = false)
 {
     return createValidSdpaFwdGraph(qDims,
                                    qStrides,
@@ -2929,7 +2963,8 @@ inline flatbuffers::FlatBufferBuilder
                                    paddingMask,
                                    causalMask,
                                    overrideShapeEnabled,
-                                   mmaCoreMode);
+                                   mmaCoreMode,
+                                   withCuSeqLen);
 }
 
 inline flatbuffers::FlatBufferBuilder createValidBlockScaleQuantizeGraph(
