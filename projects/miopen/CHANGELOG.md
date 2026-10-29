@@ -6,6 +6,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [Conv] Fixed `ConvDirectNaiveConvWrw` results that changed from run to run in deterministic mode
+  for FP32 when N·Do·Ho·Wo > 262144. The spatial tiles added their sums with `atomicAdd`. In
+  deterministic mode, each tile now writes its sums to a workspace, and a second kernel adds them
+  in a fixed order. The solver asks for a workspace of up to 256 MiB in deterministic mode.
 * [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
   `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
   the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first

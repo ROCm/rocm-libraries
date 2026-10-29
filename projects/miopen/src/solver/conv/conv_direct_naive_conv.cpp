@@ -177,12 +177,23 @@ static size_t WrwSpatialTileCount(const ExecutionContext& ctx, const ProblemDesc
         return tiles;
 
     if(ConvDirectNaiveConvIsAssemblyKernel(ctx, problem) || !problem.GetWeights().IsPacked())
+    {
+        MIOPEN_LOG_I2("Deterministic mode: no spatial tiling (assembly kernel or weights not "
+                      "packed). Each weight element uses one chain of "
+                      << spatial << " terms.");
         return 1;
+    }
     const size_t slice_bytes = problem.GetWeights().GetElementSize() * sizeof(float);
-    const size_t det_tiles   = std::min({tiles,
-                                       WRW_DETERMINISTIC_MAX_TILES,
-                                       WRW_DETERMINISTIC_MAX_WORKSPACE / slice_bytes});
-    return det_tiles < 2 ? 1 : det_tiles;
+    const size_t det_tiles   = std::min(
+        {tiles, WRW_DETERMINISTIC_MAX_TILES, WRW_DETERMINISTIC_MAX_WORKSPACE / slice_bytes});
+    if(det_tiles < 2)
+    {
+        MIOPEN_LOG_I2("Deterministic mode: no spatial tiling (workspace limit). Each weight "
+                      "element uses one chain of "
+                      << spatial << " terms.");
+        return 1;
+    }
+    return det_tiles;
 }
 
 size_t ConvDirectNaiveConvWrwWorkspaceSize(const ExecutionContext& ctx,
