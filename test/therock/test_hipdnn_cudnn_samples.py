@@ -12,9 +12,11 @@ compatibility shim.
 
 This is not hipDNN's own sample suite; that one is test_hipdnn_samples.py.
 
-The harness owns every policy decision: whether the shim is present at all,
-which translation units are expected to compile, and which are expected to
-fail. This driver only configures, builds, tests, and reports.
+The driver skips (exit 0) when the installed hipdnn_frontend package lacks the
+cudnn_compatibility component, before touching the harness. Otherwise the
+harness owns every policy decision: which translation units are expected to
+compile, and which are expected to fail. This driver only configures, builds,
+tests, and reports.
 """
 
 import argparse
@@ -23,6 +25,7 @@ import logging
 import os
 import platform
 import shlex
+import re
 import subprocess
 import sys
 import tempfile
@@ -34,9 +37,26 @@ THEROCK_DIR = SCRIPT_DIR.parent.parent.parent
 
 SHARD_INDEX = os.getenv("SHARD_INDEX", "1")
 TOTAL_SHARDS = os.getenv("TOTAL_SHARDS", "1")
+AMDGPU_FAMILIES = os.getenv("AMDGPU_FAMILIES")
+
+# CI-only ctest exclusions (regexes), keyed by AMDGPU family then OS
+# (platform.system() lowercased), e.g.
+# {"gfx110X-all": {"windows": ["run_convolution_dgrads_cpp"]}}. Expected
+# per-sample failures belong in the harness manifest.json instead, where they
+# are checked for staleness; this is for runner- or arch-specific problems.
+TESTS_TO_IGNORE: dict[str, dict[str, list[str]]] = {}
 
 # Location of the harness project inside the installed artifact tree.
 PAYLOAD_RELPATH = Path("share") / "hipdnn" / "cudnn_samples"
+
+# Installed with hipDNN's dev component. Records whether hipDNN was built with
+# the cudnn_compatibility component, which is what find_package reports.
+FRONTEND_CONFIG_RELPATH = (
+    Path("lib") / "cmake" / "hipdnn_frontend" / "hipdnn_frontendConfig.cmake"
+)
+
+# CMake's false constants, for reading a boolean out of the package config.
+CMAKE_FALSE_VALUES = {"", "0", "OFF", "NO", "FALSE", "N", "IGNORE", "NOTFOUND"}
 
 # These two are coupled and must stay together. The keep-going flag is Ninja's,
 # not cmake's, so it travels after "--" and is only valid while the generator
@@ -46,8 +66,9 @@ PAYLOAD_RELPATH = Path("share") / "hipdnn" / "cudnn_samples"
 CMAKE_GENERATOR = "Ninja"
 BUILD_KEEP_GOING_ARGS = ["-k", "0"]
 
-# The single test the harness registers when the compatibility shim is absent.
-SKIP_TEST_NAME = "cudnn_samples_skipped"
+# The single placeholder test the harness registers when the compatibility shim
+# is absent. Not a skip list: see TESTS_TO_IGNORE for that.
+SHIM_ABSENT_PLACEHOLDER_TEST = "cudnn_samples_skipped"
 
 # Per-translation-unit JSON sidecars, written by the harness.
 REPORT_DIR_NAME = "cudnn_samples_report"
@@ -56,6 +77,7 @@ REPORT_DIR_NAME = "cudnn_samples_report"
 # artifact did not ship it -- a wiring bug, distinct from the shim being off.
 EXIT_PAYLOAD_MISSING = 11
 EXIT_FLAG_REQUIRED_BUT_OFF = 10
+EXIT_FRONTEND_CONFIG_MISSING = 12
 
 # Outcome tokens the harness writes into the sidecars. Any other value is
 # surfaced as an anomaly instead of being folded into a count.
@@ -97,6 +119,14 @@ RAN_OUTCOMES = {
 }
 COMPILED_OUTCOMES = RAN_OUTCOMES | {OUTCOME_COMPILED, OUTCOME_XFAIL_NOW_COMPILES}
 
+# Verdicts on legacy Catch2 case sidecars. A case's outcome is judged against a
+# per-case expectation, so an expected crash is not a failure.
+VERDICT_EXPECTED = "expected"
+VERDICT_UNEXPECTED = "unexpected"
+KNOWN_VERDICTS = {VERDICT_EXPECTED, VERDICT_UNEXPECTED}
+# A case that never reaches the shim; the harness reports it to ctest as skipped.
+TIER_VACUOUS = "VACUOUS"
+
 logging.basicConfig(level=logging.INFO)
 
 
@@ -127,6 +157,11 @@ def get_default_build_dir() -> Path:
     return Path(temp_root) / "cdnns"
 
 
+def prepend_env_paths(env: dict, var_name: str, paths: list):
+    existing = env.get(var_name)
+    env[var_name] = os.pathsep.join(paths + ([existing] if existing else []))
+
+
 def build_environment(artifacts_path: Path) -> dict:
     """Environment for CMake, the compiler, and the sample executables."""
     environ_vars = os.environ.copy()
@@ -137,18 +172,18 @@ def build_environment(artifacts_path: Path) -> dict:
         # runtime DLLs live in those subdirectories, and Windows resolves imports off
         # PATH. Missing them surfaces as exit 0xC0000135 (STATUS_DLL_NOT_FOUND) from
         # every sample, which the launcher correctly-but-unhelpfully reports as a crash.
-        prefixes = [
-            str(artifacts_path / "bin"),
-            str(artifacts_path / "lib"),
-            str(artifacts_path),
-        ]
-        existing = environ_vars.get("PATH", "")
-        environ_vars["PATH"] = ";".join(prefixes + ([existing] if existing else []))
+        prepend_env_paths(
+            environ_vars,
+            "PATH",
+            [
+                str(artifacts_path / "bin"),
+                str(artifacts_path / "lib"),
+                str(artifacts_path),
+            ],
+        )
     else:
-        existing = environ_vars.get("LD_LIBRARY_PATH", "")
-        rocm_lib = str(artifacts_path / "lib")
-        environ_vars["LD_LIBRARY_PATH"] = ":".join(
-            [rocm_lib] + ([existing] if existing else [])
+        prepend_env_paths(
+            environ_vars, "LD_LIBRARY_PATH", [str(artifacts_path / "lib")]
         )
 
     return environ_vars
@@ -159,9 +194,9 @@ def configure(
 ):
     """Configure the harness as an external consumer of the installed hipDNN.
 
-    The harness decides skip-vs-run here, from its find_package query for the
-    cudnn_compatibility component, and acquires the sample corpus itself.
-    Neither is this driver's business.
+    Only reached when the cudnn_compatibility component is installed. The
+    harness acquires the sample corpus itself; that is not this driver's
+    business.
     """
     is_windows = platform.system() == "Windows"
     compiler_ext = ".exe" if is_windows else ""
@@ -213,6 +248,12 @@ def build(build_dir: Path, jobs: int, environ_vars: dict):
     )
 
 
+def get_tests_to_ignore() -> list:
+    """CI exclusions for the current AMDGPU family and OS."""
+    by_os = TESTS_TO_IGNORE.get(AMDGPU_FAMILIES or "", {})
+    return by_os.get(platform.system().lower(), [])
+
+
 def run_ctest(build_dir: Path, jobs: int, environ_vars: dict) -> int:
     """Run the harness test suite. Failures are reported, never raised."""
     test_cmd = [
@@ -223,6 +264,13 @@ def run_ctest(build_dir: Path, jobs: int, environ_vars: dict) -> int:
         "--parallel",
         str(jobs),
     ]
+    ignored_tests = get_tests_to_ignore()
+    if ignored_tests:
+        logging.info(
+            f"++ Ignoring {len(ignored_tests)} test(s) for "
+            f"{AMDGPU_FAMILIES}/{platform.system().lower()}: {ignored_tests}"
+        )
+        test_cmd.extend(["--exclude-regex", "|".join(ignored_tests)])
     logging.info(f"++ Test: {shlex.join(test_cmd)}")
     result = subprocess.run(test_cmd, check=False, cwd=THEROCK_DIR, env=environ_vars)
     logging.info(f"++ Test exited with {result.returncode}")
@@ -253,17 +301,50 @@ def list_registered_tests(build_dir: Path, environ_vars: dict) -> list:
 
 def is_skip_run(test_names: list) -> bool:
     """True when the harness registered only its shim-absent placeholder."""
-    return test_names == [SKIP_TEST_NAME]
+    return test_names == [SHIM_ABSENT_PLACEHOLDER_TEST]
+
+
+def is_cudnn_compatibility_installed(frontend_config: Path) -> bool:
+    """Whether find_package would report the cudnn_compatibility component.
+
+    Read straight from the installed config so no toolchain is needed. A config
+    that predates the component never sets the variable, which find_package also
+    reports as not found.
+    """
+    match = re.search(
+        r"^\s*set\(\s*hipdnn_frontend_cudnn_compatibility_FOUND\s*([^\s)]*)\s*\)",
+        frontend_config.read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    raw_value = match.group(1) if match else "<not set>"
+    logging.info(
+        f"hipdnn_frontend_cudnn_compatibility_FOUND={raw_value} in {frontend_config}"
+    )
+    if not match:
+        return False
+    value = match.group(1).strip('"').upper()
+    return value not in CMAKE_FALSE_VALUES and not value.endswith("-NOTFOUND")
+
+
+def append_step_summary(text: str):
+    """Append to the GitHub job summary; a no-op outside GitHub Actions."""
+    step_summary = os.getenv("GITHUB_STEP_SUMMARY")
+    if step_summary:
+        with open(step_summary, "a", encoding="utf-8") as summary_file:
+            summary_file.write(text)
+            summary_file.write("\n")
 
 
 def report_skip() -> int:
     """Announce that nothing was tested, and decide whether that is fatal."""
-    print(
-        "::notice title=cuDNN samples skipped::"
+    reason = (
         "hipDNN was built with HIPDNN_ENABLE_CUDNN_COMPATIBILITY off, so the "
-        "cuDNN compatibility shim is not installed. No sample was compiled or "
-        "run: this job tested the wiring and nothing else."
+        "cuDNN compatibility shim is not installed. Skipping: 0 samples "
+        "configured, built, or run."
     )
+    logging.info(reason)
+    print(f"::notice title=cuDNN samples skipped::{reason}")
+    append_step_summary(f"## hipDNN cuDNN sample corpus: skipped\n\n{reason}\n")
     if os.getenv("HIPDNN_CUDNN_SAMPLES_REQUIRE_FLAG") == "1":
         print(
             "::error title=cuDNN samples required but skipped::"
@@ -291,8 +372,9 @@ def load_sidecars(report_dir: Path):
     unit must still own exactly one sidecar; a second one would be counted
     twice, so it is an anomaly.
 
-    The legacy corpus writes its sidecars to a subdirectory, one per Catch2
-    case, so the directory is read recursively.
+    The directory is read recursively: newer harnesses write one sidecar per
+    legacy Catch2 case into a subdirectory. Older harnesses write only
+    top-level sidecars, which read the same either way.
     """
     entries = []
     anomalies = []
@@ -323,6 +405,10 @@ def load_sidecars(report_dir: Path):
             anomalies.append(
                 f"{entry['tu']}: unrecognized outcome {entry.get('outcome')!r}"
             )
+        if is_case_entry(entry) and entry["verdict"] not in KNOWN_VERDICTS:
+            anomalies.append(
+                f"{entry['tu']}: unrecognized verdict {entry['verdict']!r}"
+            )
         previous = sidecar_by_tu.setdefault(entry["tu"], sidecar)
         if previous != sidecar:
             anomalies.append(
@@ -334,8 +420,17 @@ def load_sidecars(report_dir: Path):
     return entries, anomalies
 
 
+def is_case_entry(entry: dict) -> bool:
+    """A legacy Catch2 case, judged against a per-case expectation.
+
+    Only case sidecars carry a verdict. They are not translation units, so they
+    stay out of the translation-unit counts.
+    """
+    return "verdict" in entry
+
+
 def summarize(entries: list) -> dict:
-    """The headline counts."""
+    """The headline counts, over translation units only."""
     counts = {
         "compiled": 0,
         "ran": 0,
@@ -343,9 +438,10 @@ def summarize(entries: list) -> dict:
         "ran-no-assertions": 0,
         "ran-with-assertion-failures": 0,
         "xfail-still-failing": 0,
-        "unexpected": 0,
     }
     for entry in entries:
+        if is_case_entry(entry):
+            continue
         outcome = normalize_outcome(entry.get("outcome", ""))
         if outcome in COMPILED_OUTCOMES:
             counts["compiled"] += 1
@@ -359,10 +455,22 @@ def summarize(entries: list) -> dict:
             counts["ran-with-assertion-failures"] += 1
         if outcome == OUTCOME_XFAIL_STILL_FAILING:
             counts["xfail-still-failing"] += 1
-        # Only legacy cases carry a verdict: their outcome is judged against a
-        # per-case expectation, so an expected crash is not a failure.
-        if entry.get("verdict") == "unexpected":
+    return counts
+
+
+def summarize_cases(entries: list) -> dict:
+    """Counts over legacy cases; all zero for a harness that has none."""
+    counts = {"cases": 0, "expected": 0, "unexpected": 0, "vacuous": 0}
+    for entry in entries:
+        if not is_case_entry(entry):
+            continue
+        counts["cases"] += 1
+        if entry["verdict"] == VERDICT_EXPECTED:
+            counts["expected"] += 1
+        elif entry["verdict"] == VERDICT_UNEXPECTED:
             counts["unexpected"] += 1
+        if str(entry.get("tier", "")).upper() == TIER_VACUOUS:
+            counts["vacuous"] += 1
     return counts
 
 
@@ -382,11 +490,19 @@ def _detail(entry: dict) -> str:
     return " / ".join(parts) if parts else "-"
 
 
-def format_report(entries: list, anomalies: list, counts: dict) -> str:
+def format_report(
+    entries: list, anomalies: list, counts: dict, case_counts: dict
+) -> str:
     lines = ["## hipDNN cuDNN sample corpus", ""]
     lines.append(
         "Counts: " + ", ".join(f"{name} {value}" for name, value in counts.items())
     )
+    if case_counts["cases"]:
+        lines.append("")
+        lines.append(
+            "Legacy cases: "
+            + ", ".join(f"{name} {value}" for name, value in case_counts.items())
+        )
     lines.append("")
 
     # An XFAIL entry that started compiling means the manifest has rotted. It is
@@ -412,11 +528,14 @@ def format_report(entries: list, anomalies: list, counts: dict) -> str:
         outcome = entry.get("outcome", "?")
         if normalize_outcome(outcome) == OUTCOME_XFAIL_NOW_COMPILES:
             outcome = f"**{outcome}**"
+        verdict = entry.get("verdict", "-")
+        if verdict == VERDICT_UNEXPECTED:
+            verdict = f"**{verdict}**"
         lines.append(
             f"| {_cell(entry.get('tu', '?'))} "
             f"| {_cell(entry.get('tier', '?'))} "
             f"| {_cell(outcome)} "
-            f"| {_cell(entry.get('verdict', '-'))} "
+            f"| {_cell(verdict)} "
             f"| {_cell(_detail(entry))} |"
         )
     if not entries:
@@ -436,17 +555,12 @@ def emit_report(build_dir: Path):
     """Aggregate the sidecars into the job summary and onto stdout."""
     entries, anomalies = load_sidecars(build_dir / REPORT_DIR_NAME)
     counts = summarize(entries)
-    report = format_report(entries, anomalies, counts)
+    report = format_report(entries, anomalies, counts, summarize_cases(entries))
 
     # Always print: the step summary only exists under GitHub Actions, and a
     # local run needs to be readable too.
     print(report)
-
-    step_summary = os.getenv("GITHUB_STEP_SUMMARY")
-    if step_summary:
-        with open(step_summary, "a", encoding="utf-8") as summary_file:
-            summary_file.write(report)
-            summary_file.write("\n")
+    append_step_summary(report)
 
     for anomaly in anomalies:
         logging.warning(f"Report anomaly: {anomaly}")
@@ -473,6 +587,18 @@ def main() -> int:
     logging.info(f"Shard {SHARD_INDEX} of {TOTAL_SHARDS}")
 
     artifacts_path = Path(OUTPUT_ARTIFACTS_DIR).resolve()
+
+    frontend_config = artifacts_path / FRONTEND_CONFIG_RELPATH
+    if not frontend_config.is_file():
+        logging.error(
+            f"hipdnn_frontend package config not found at {frontend_config}, so "
+            "the cudnn_compatibility component cannot be checked. The hipDNN dev "
+            "component was not fetched."
+        )
+        return EXIT_FRONTEND_CONFIG_MISSING
+    if not is_cudnn_compatibility_installed(frontend_config):
+        return report_skip()
+
     source_dir = artifacts_path / PAYLOAD_RELPATH
     if not source_dir.is_dir():
         logging.error(
@@ -499,7 +625,7 @@ def main() -> int:
         if ctest_returncode == 0:
             return report_skip()
         logging.error(
-            f"The harness registered only {SKIP_TEST_NAME}, but ctest exited "
+            f"The harness registered only {SHIM_ABSENT_PLACEHOLDER_TEST}, but ctest exited "
             f"with {ctest_returncode} instead of reporting it as skipped."
         )
         return ctest_returncode

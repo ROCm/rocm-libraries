@@ -623,7 +623,7 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           # The superbuild installs the shim, so the harness's shim-off placeholder can only
           # mean the installed package lost the component; that must not pass as a skip.
-          if ctest --test-dir "$B" -N | grep -q cudnn_samples_skipped; then
+          if ctest --test-dir "$B" -N | grep cudnn_samples_skipped >/dev/null; then
             echo "::error::installed hipDNN does not report the cudnn_compatibility component" >&2
             exit 1
           fi

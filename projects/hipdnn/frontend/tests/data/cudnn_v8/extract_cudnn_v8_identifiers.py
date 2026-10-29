@@ -83,14 +83,15 @@ EXCLUDED = {
     "cudnnBackendFinalize": "out of scope: only cudnnBackendExecute is shimmed",
 }
 
-# Whole enums the scan finds that the shim does not declare: no shim code names
-# them (only cudnnBackendExecute of the descriptor C API is shimmed) or only type
-# converters did. Their enumerators are dropped with them; their pinned values are
-# retired.
+# Whole enums the scan finds that the shim does not declare: out of scope (only
+# cudnnBackendExecute of the descriptor C API is shimmed), or named only by
+# upstream's type converters, which the shim omits. Their enumerators are excluded too.
 EXCLUDED_ENUMS = {
     "cudnnBackendAttributeName_t": "out of scope: only cudnnBackendExecute is shimmed",
     "cudnnBackendAttributeType_t": "out of scope: only cudnnBackendExecute is shimmed",
-    "cudnnMoeGroupedMatmulMode_t": "named only by type converters",
+    "cudnnMoeGroupedMatmulMode_t": (
+        "named only by upstream's type converters, which the shim omits"
+    ),
 }
 
 # The v9 shim surface: emitted under ALREADY_DECLARED so the test still checks
@@ -571,9 +572,15 @@ C_TYPES_PROLOGUE = """\
 // Declares identifiers matching the NVIDIA cuDNN C API, for source compatibility.
 //
 // Portions derived from NVIDIA cuDNN frontend, used under the MIT license:
-//   include/cudnn_frontend_*.h, include/cudnn_backend_base.h
+//   include/cudnn_frontend.h, include/cudnn_backend_base.h and the other
+//   include/cudnn_frontend_*.h headers that name these identifiers
 //     Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
-//   include/cudnn_frontend/knobs.h
+//   include/cudnn_frontend_EngineFallbackList.h, include/cudnn_frontend_ExecutionPlan.h,
+//   include/cudnn_frontend_get_plan.h
+//     Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+//   include/cudnn_frontend_Tensor.h, include/cudnn_frontend_shim.h
+//     Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+//   include/cudnn_frontend/knobs.h, which carries no notice of its own (repository LICENSE.txt)
 //     Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
 // License text and pinned upstream version: THIRD_PARTY_LICENSES.md
 // (installed to share/doc/hipdnn_frontend).
@@ -651,8 +658,8 @@ def render_c_types(table: dict[str, dict[str, int]]) -> str:
         )
     parts.append(
         "\nnamespace hipdnn_frontend::compatibility::cudnn_frontend::detail\n{\n\n"
-        "// Largest value of each enum above; the shim rejects anything past it as\n"
-        "// BAD_PARAM.\n"
+        "// Largest declared value of each enum above; requireEnumerator rejects a raw\n"
+        "// value past it as BAD_PARAM.\n"
         "template <typename CEnum>\ninline constexpr int LAST_ENUMERATOR = -1;\n\n"
         + "\n\n".join(last_enumerators)
         + "\n\n} // namespace hipdnn_frontend::compatibility::cudnn_frontend::detail\n"

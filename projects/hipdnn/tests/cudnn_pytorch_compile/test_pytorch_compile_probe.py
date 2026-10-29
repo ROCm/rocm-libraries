@@ -48,7 +48,7 @@ class ProbeTest(unittest.TestCase):
                 probe.main()
         self.assertEqual(seen, {"mha": "EXCLUDED"})
 
-    def test_every_compiled_tier_requires_a_canary(self):
+    def test_compile_tiers_require_a_canary(self):
         for tier in ("COMPILE", "COMPILE_ASIS"):
             entry = {"id": "x", "source": "a.cpp", "compiled": "b.cpp", "tier": tier}
             with tempfile.TemporaryDirectory() as tmp:

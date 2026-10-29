@@ -47,7 +47,7 @@ _FAILED_RE = re.compile(r"(\d+)\s+failed", re.IGNORECASE)
 _SKIPPED_RE = re.compile(r"(\d+)\s+skipped", re.IGNORECASE)
 _CASE_COUNT_RE = re.compile(r"in (\d+) test case|test cases:\s+(\d+)", re.IGNORECASE)
 # Printed under --warn UnmatchedTestSpec. The exit code cannot stand in for it: before
-# Catch2 3.8 a run exits with its failed-assertion count, so 3 failures also exit 3.
+# Catch2 3.7.1 a run exits with its failed-assertion count, so 3 failures also exit 3.
 _NO_MATCH_TEXT = "No test cases matched"
 # Windows surfaces crashes as a 0xC0000005-style exception code rather than a signal.
 _WINDOWS_EXCEPTION_MIN = 0xC0000000

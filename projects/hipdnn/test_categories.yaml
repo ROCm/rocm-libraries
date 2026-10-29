@@ -68,6 +68,10 @@ test_categories:
       - "hipdnn_ingestor_generator_pytest"
       # Build tree only; see plugin_sdk/tests/CMakeLists.txt.
       - "hipdnn_gpu_generic_targets_.*"
+      # Build tree only, with HIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON; see
+      # frontend/tests/CMakeLists.txt.
+      - "hipdnn_cudnn_v8_extractor_tests"
+      - "hipdnn_pytorch_compile_probe_tests"
 
   integration:
     description: "Current hipDNN integration-check coverage"

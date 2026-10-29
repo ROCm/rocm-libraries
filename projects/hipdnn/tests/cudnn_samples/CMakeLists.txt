@@ -32,6 +32,12 @@ enable_testing()
 
 set(HIPDNN_CUDNN_SAMPLES_CORPUS_DIR "" CACHE PATH
     "Existing cudnn-frontend checkout to use instead of cloning the pinned corpus")
+# Fetches by default, as the drivers that configure this project expect. An explicit
+# -DALLOW_FETCH_DEPS=OFF, hipDNN's fetch policy switch, turns each fetch into an error.
+set(_fetch_disallowed FALSE)
+if(DEFINED ALLOW_FETCH_DEPS AND NOT ALLOW_FETCH_DEPS)
+    set(_fetch_disallowed TRUE)
+endif()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
@@ -84,6 +90,15 @@ set_tests_properties(sample_probe_selftest PROPERTIES LABELS "cudnn_samples;comp
 # this repo rather than upstream cudnn-frontend's older floor.
 find_package(Catch2 3.3.0 QUIET)
 if(NOT Catch2_FOUND)
+    # An explicitly supplied source tree needs no acquisition.
+    if(_fetch_disallowed AND
+       (NOT FETCHCONTENT_SOURCE_DIR_CATCH2 OR
+        NOT IS_DIRECTORY "${FETCHCONTENT_SOURCE_DIR_CATCH2}"))
+        message(FATAL_ERROR
+            "E28 FETCH: Catch2 >= 3.3.0 was not found and ALLOW_FETCH_DEPS is OFF. Put a "
+            "Catch2 package on CMAKE_PREFIX_PATH, set FETCHCONTENT_SOURCE_DIR_CATCH2 to a "
+            "source tree, or drop -DALLOW_FETCH_DEPS=OFF to fetch v3.13.0.")
+    endif()
     message(STATUS "Catch2 >= 3.3.0 not found; fetching v3.13.0")
     # Pinned by commit (v3.13.0), not by tag: a tag can be moved.
     FetchContent_Declare(Catch2
@@ -138,6 +153,12 @@ else()
     # A cached clone from before a sparse path was added, or of another commit, is re-cloned
     # rather than updated: one code path, and a depth-1 blob-less clone is cheap.
     if(NOT _corpus_complete)
+        if(_fetch_disallowed)
+            message(FATAL_ERROR
+                "E28 FETCH: no pinned corpus at ${CORPUS_ROOT} and ALLOW_FETCH_DEPS is OFF. "
+                "Set HIPDNN_CUDNN_SAMPLES_CORPUS_DIR to a checkout at ${CORPUS_COMMIT}, or "
+                "drop -DALLOW_FETCH_DEPS=OFF to clone ${CORPUS_REPO}.")
+        endif()
         message(STATUS "Cloning ${CORPUS_REPO} ${CORPUS_TAG} (sparse)")
         file(REMOVE_RECURSE "${CORPUS_ROOT}")
         execute_process(
@@ -263,7 +284,7 @@ endif()
 
 # Each public shim header must compile first in a TU against the install alone. The
 # overlay is deliberately absent: its forwarders would mask a broken include.
-set(_e25_headers
+set(_e27_headers
     cudnn.h
     cudnn_graph.h
     cudnn_frontend.h
@@ -271,7 +292,7 @@ set(_e25_headers
     cudnn_frontend_find_plan.h
     cudnn_frontend_get_plan.h)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
-foreach(_hdr IN LISTS _e25_headers)
+foreach(_hdr IN LISTS _e27_headers)
     string(MAKE_C_IDENTIFIER "${_hdr}" _hdr_id)
     set(_hdr_probe "${CMAKE_BINARY_DIR}/header_probe_${_hdr_id}.cpp")
     file(WRITE "${_hdr_probe}" "\
@@ -286,7 +307,7 @@ int main() { return 0; }
         OUTPUT_VARIABLE _hdr_probe_output)
     if(NOT _hdr_probe_ok)
         message(FATAL_ERROR
-            "E25 HEADER: <hipdnn_compatibility/cudnn/${_hdr}> does not compile alone "
+            "E27 HEADER: <hipdnn_compatibility/cudnn/${_hdr}> does not compile alone "
             "against the installed hipDNN\n${_hdr_probe_output}")
     endif()
 endforeach()

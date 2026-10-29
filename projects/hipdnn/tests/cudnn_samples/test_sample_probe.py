@@ -66,7 +66,7 @@ class CaseModeTest(unittest.TestCase):
         return code, json.loads(self.sidecar.read_text(encoding="utf-8"))
 
     def test_three_failed_assertions_are_not_an_unmatched_spec(self):
-        # Catch2 < 3.8 exits with the failed-assertion count, so this run exits 3.
+        # Catch2 < 3.7.1 exits with the failed-assertion count, so this run exits 3.
         entry = {
             "tier": "XFAIL_RUN",
             "reason": "r",

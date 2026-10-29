@@ -20,7 +20,7 @@ compiled with the tree's flags, AT_CUDNN_ENABLED() forced to 1, and two substitu
 replaced by a copy truncated before its v7 descriptor wrappers, which need the v7
 descriptor C API the shim does not provide, and ATen/cudnn/Handle.h by the overlay that
 forwards to the hipDNN integration header. COMPILE_ASIS entries compile unmodified.
-Every compiled entry must define its canary, so a body preprocessed out fails.
+COMPILE and COMPILE_ASIS entries must define a canary, so a body preprocessed out fails.
 """
 
 import argparse

@@ -4,9 +4,15 @@
 // Declares identifiers matching the NVIDIA cuDNN C API, for source compatibility.
 //
 // Portions derived from NVIDIA cuDNN frontend, used under the MIT license:
-//   include/cudnn_frontend_*.h, include/cudnn_backend_base.h
+//   include/cudnn_frontend.h, include/cudnn_backend_base.h and the other
+//   include/cudnn_frontend_*.h headers that name these identifiers
 //     Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
-//   include/cudnn_frontend/knobs.h
+//   include/cudnn_frontend_EngineFallbackList.h, include/cudnn_frontend_ExecutionPlan.h,
+//   include/cudnn_frontend_get_plan.h
+//     Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+//   include/cudnn_frontend_Tensor.h, include/cudnn_frontend_shim.h
+//     Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+//   include/cudnn_frontend/knobs.h, which carries no notice of its own (repository LICENSE.txt)
 //     Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
 // License text and pinned upstream version: THIRD_PARTY_LICENSES.md
 // (installed to share/doc/hipdnn_frontend).
@@ -396,8 +402,8 @@ static_assert(sizeof(cudnnTensorFormat_t) == 4, "cudnnTensorFormat_t must be 4 b
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail
 {
 
-// Largest value of each enum above; the shim rejects anything past it as
-// BAD_PARAM.
+// Largest declared value of each enum above; requireEnumerator rejects a raw
+// value past it as BAD_PARAM.
 template <typename CEnum>
 inline constexpr int LAST_ENUMERATOR = -1;
 

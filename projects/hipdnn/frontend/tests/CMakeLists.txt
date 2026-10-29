@@ -345,4 +345,22 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
         ${_hipdnn_cudnn_v8_header_targets}
         ${_hipdnn_cudnn_v8_cpp20_targets}
     )
+
+    # Build tree only. Both suites use stand-in inputs: no network, upstream tree or GPU.
+    if(Python3_FOUND)
+        add_test(
+            NAME hipdnn_cudnn_v8_extractor_tests
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/data/cudnn_v8/test_extract_cudnn_v8_identifiers.py
+        )
+        add_test(
+            NAME hipdnn_pytorch_compile_probe_tests
+            COMMAND
+                ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/cudnn_pytorch_compile/test_pytorch_compile_probe.py
+        )
+        _apply_hipdnn_test_category_labels(
+            hipdnn_cudnn_v8_extractor_tests hipdnn_pytorch_compile_probe_tests
+        )
+    endif()
 endif()
