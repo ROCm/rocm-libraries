@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <iomanip>
+#include <iostream>
+#include <map>
 #include <numeric>
 #include <type_traits>
 #include <vector>
@@ -81,7 +84,7 @@ struct sobol_qrng_tests : public ::testing::Test
         return ROCRAND_STATUS_SUCCESS;
     }
 
-private:
+protected:
     rocrand_status get_scramble_constants(const constant_t** scramble_constants)
     {
         static_assert(generator_t::is_scrambled);
@@ -657,6 +660,194 @@ TYPED_TEST_P(sobol_qrng_tests, continuity_test)
     }
 }
 
+// Check equidistribution across dyadic intervals (Joe & Kuo 2008):
+// The first 2^m points of each dimension must fall into exactly one cell
+// across 2^m equal subintervals.
+TYPED_TEST_P(sobol_qrng_tests, equidistribution_test)
+{
+    using generator_t  = typename TestFixture::generator_t;
+    using constant_t   = typename TestFixture::constant_t;
+    constexpr size_t B = sizeof(constant_t) * 8;
+
+    constexpr unsigned int NUM_DIMS = 4;
+    constexpr unsigned int MAX_M    = 14;
+
+    const size_t max_points = 1ULL << MAX_M;
+
+    generator_t g;
+    ROCRAND_CHECK(g.set_dimensions(NUM_DIMS));
+    ROCRAND_CHECK(g.init());
+
+    constant_t* dev_data;
+    HIP_CHECK(hipMallocHelper(&dev_data, NUM_DIMS * max_points * sizeof(constant_t)));
+    std::vector<constant_t> host_data(NUM_DIMS * max_points);
+
+    ROCRAND_CHECK(g.generate(dev_data, NUM_DIMS * max_points));
+    HIP_CHECK(hipMemcpy(host_data.data(),
+                        dev_data,
+                        NUM_DIMS * max_points * sizeof(constant_t),
+                        hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(dev_data));
+
+    for(unsigned int d = 0; d < NUM_DIMS; d++)
+    {
+        const constant_t* dim_data = host_data.data() + d * max_points;
+
+        for(unsigned int m = 1; m <= MAX_M; m++)
+        {
+            const size_t num_points = 1ULL << m;
+
+            std::vector<uint32_t> cell_counts(num_points, 0);
+            for(size_t i = 0; i < num_points; i++)
+            {
+                const size_t cell = static_cast<size_t>(dim_data[i] >> (B - m));
+                ASSERT_LT(cell, num_points);
+                cell_counts[cell]++;
+            }
+
+            // Strict equidistribution: every cell must contain exactly 1 point
+            for(size_t cell = 0; cell < num_points; cell++)
+            {
+                ASSERT_EQ(cell_counts[cell], 1u)
+                    << "Equidistribution failed for dim=" << d << " m=" << m << " at cell " << cell;
+            }
+        }
+
+        if constexpr(generator_t::is_scrambled)
+        {
+            // Scrambling must shift the origin: point 0 must not be all-zeros
+            EXPECT_NE(dim_data[0], static_cast<constant_t>(0))
+                << "Scrambled Sobol dim=" << d << " should not have point 0 at index 0";
+        }
+    }
+}
+
+// Diagnostic report over NUM_DIMS dimensions on CPU engines.
+//
+// For each dimension d, an engine is constructed directly from the raw
+// direction-vector table (and scramble constants if applicable) and stepped
+// sequentially on the CPU.  The test scans
+// m = 1 … MAX_M and records the first m at which equidistribution breaks.
+//
+// Failure metric: fill ratio = distinct_cells / 2^m  (must equal 1.00 for a
+// correct (t,s)-sequence).
+TYPED_TEST_P(sobol_qrng_tests, equidistribution_report_test)
+{
+    using generator_t            = typename TestFixture::generator_t;
+    using engine_t               = typename TestFixture::engine_t;
+    using constant_t             = typename TestFixture::constant_t;
+    constexpr size_t B           = sizeof(constant_t) * 8;
+    constexpr size_t VECTOR_SIZE = B; // direction vectors stored per dimension
+
+    // Covers the m=13/16/17/18/22
+    // clusters from Joe & Kuo.
+    constexpr unsigned int NUM_DIMS = 256;
+    constexpr unsigned int MAX_M    = 22;
+    const size_t           max_pts  = size_t(1) << MAX_M;
+
+    const constant_t* direction_vectors  = nullptr;
+    const constant_t* scramble_constants = nullptr;
+    ROCRAND_CHECK(this->get_direction_vectors(&direction_vectors));
+    if constexpr(generator_t::is_scrambled)
+    {
+        ROCRAND_CHECK(this->get_scramble_constants(&scramble_constants));
+    }
+
+    struct DimResult
+    {
+        unsigned int first_fail_m   = 0;
+        size_t       distinct_cells = 0;
+        size_t       total_cells    = 0;
+    };
+    std::vector<DimResult> results(NUM_DIMS);
+
+    std::vector<constant_t> values(max_pts);
+    std::vector<uint32_t>   hist(max_pts);
+
+    for(unsigned int d = 0; d < NUM_DIMS; d++)
+    {
+        const constant_t* dim_vecs = direction_vectors + d * VECTOR_SIZE;
+
+        engine_t engine;
+        if constexpr(generator_t::is_scrambled)
+            engine = engine_t(dim_vecs, scramble_constants[d], /*offset=*/0);
+        else
+            engine = engine_t(dim_vecs, /*offset=*/0);
+
+        for(size_t i = 0; i < max_pts; i++)
+            values[i] = engine.next();
+
+        unsigned int first_fail = 0;
+        size_t       fail_dist  = 0;
+        size_t       fail_total = 0;
+
+        for(unsigned int m = 1; m <= MAX_M && first_fail == 0; m++)
+        {
+            const size_t n = size_t(1) << m;
+            std::fill(hist.begin(), hist.begin() + n, 0u);
+            for(size_t i = 0; i < n; i++)
+                hist[static_cast<size_t>(values[i] >> (B - m))]++;
+
+            size_t distinct = 0;
+            bool   broken   = false;
+            for(size_t cell = 0; cell < n; cell++)
+            {
+                if(hist[cell] > 0)
+                    ++distinct;
+                if(hist[cell] != 1)
+                    broken = true;
+            }
+            if(broken)
+            {
+                first_fail = m;
+                fail_dist  = distinct;
+                fail_total = n;
+            }
+        }
+        results[d] = {first_fail, fail_dist, fail_total};
+    }
+
+    size_t                         broken = 0;
+    std::map<unsigned int, size_t> fail_by_m;
+    int                            first_broken_dim = -1;
+
+    for(unsigned int d = 0; d < NUM_DIMS; d++)
+    {
+        if(results[d].first_fail_m > 0)
+        {
+            if(first_broken_dim < 0)
+                first_broken_dim = static_cast<int>(d);
+            ++broken;
+            fail_by_m[results[d].first_fail_m]++;
+        }
+    }
+
+    const char* label = generator_t::is_scrambled ? "SCRAMBLED" : "NON-SCRAMBLED";
+    std::cout << "\nequidistribution -- " << label << " table\n";
+    std::cout << "  dimensions that break at some m: " << broken << "  (" << std::fixed
+              << std::setprecision(2) << (100.0 * broken / NUM_DIMS) << "%)" << "   [first "
+              << NUM_DIMS << " dims, tested m <= " << MAX_M << "]\n";
+
+    for(auto& [m, cnt] : fail_by_m)
+    {
+        std::cout << "    first fails at m=" << m << " (2^" << m << " =" << std::setw(10)
+                  << (size_t(1) << m) << " points): " << cnt << " dims\n";
+    }
+
+    if(first_broken_dim >= 0)
+    {
+        const DimResult& r    = results[first_broken_dim];
+        const double     fill = static_cast<double>(r.distinct_cells) / r.total_cells;
+        std::cout << "  brute-force confirm dim " << first_broken_dim << " at m=" << r.first_fail_m
+                  << ": " << r.distinct_cells << " distinct cells of " << r.total_cells
+                  << "  fill ratio " << std::fixed << std::setprecision(3) << fill << " (FAIL)\n";
+    }
+    std::cout << std::flush;
+
+    EXPECT_EQ(broken, size_t(0)) << broken << " of " << NUM_DIMS
+                                 << " dimensions fail equidistribution (see stdout report above)";
+}
+
 REGISTER_TYPED_TEST_SUITE_P(sobol_qrng_tests,
                             init_test,
                             uniform_uint_test,
@@ -673,6 +864,8 @@ REGISTER_TYPED_TEST_SUITE_P(sobol_qrng_tests,
                             discard_test,
                             discard_stride_test,
                             offsets_test,
-                            continuity_test);
+                            continuity_test,
+                            equidistribution_test,
+                            equidistribution_report_test);
 
 #endif // ROCRAND_TEST_INTERNAL_TEST_ROCRAND_SOBOL_QRNG_HPP_
