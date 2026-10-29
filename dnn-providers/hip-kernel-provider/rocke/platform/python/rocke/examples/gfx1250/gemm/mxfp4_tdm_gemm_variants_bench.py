@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import csv
 import ctypes
-import dataclasses
 import statistics
 import struct
 import sys
@@ -22,7 +21,6 @@ from pathlib import Path
 
 import numpy as np
 
-from ....examples.common.scaled_gemm_reference import pack_fp4_codes
 from ....helpers.compile import compile_kernel
 from ....instances.gfx1250.mxfp4_tdm_gemm import (
     build_mxfp4_tdm_gemm,
@@ -35,7 +33,7 @@ from ....instances.gfx1250.mxfp4_tdm_gemm_variants import (
     variant_spec,
 )
 from ....runtime.hip_module import Runtime, get_device_arch
-from .mxfp4_tdm_gemm import _u8_buffer, kernel_inputs, make_inputs, reference
+from .mxfp4_tdm_gemm import _u8_buffer, make_inputs, reference
 
 _YAML_PROBLEM = (4096, 4096, 65536)
 _YAML_TILE = {
@@ -45,52 +43,6 @@ _YAML_TILE = {
     "warp_m": 2,
     "warp_n": 2,
 }
-
-
-# E2M1 magnitudes are 0, 0.5, 1, 1.5, 2, 3, 4, 6; these are the midpoints.
-_E2M1_MIDPOINTS = np.array([0.25, 0.75, 1.25, 1.75, 2.5, 3.5, 5.0], dtype=np.float32)
-# Tensile client InitMode::Random for E8: 127 + rand() % 7 - 3.
-_TENSILE_E8_RANDOM = (124, 131)
-_TRIG_CHUNK_ELEMENTS = 1 << 24
-
-
-def _fp4_codes_rne(values: np.ndarray) -> np.ndarray:
-    """Float32 -> E2M1 codes, round to nearest even, saturating (OCP cvt)."""
-    mag = np.abs(values)
-    codes = np.searchsorted(_E2M1_MIDPOINTS, mag, side="left").astype(np.uint8)
-    tie = mag == _E2M1_MIDPOINTS[np.minimum(codes, len(_E2M1_MIDPOINTS) - 1)]
-    codes[tie & (codes % 2 == 1)] += 1
-    codes |= np.signbit(values).astype(np.uint8) << 3
-    return codes
-
-
-def _trig_fp4_packed(rows: int, cols: int, *, use_cos: bool) -> np.ndarray:
-    """Tensile ``TrigSin``/``TrigCos``: element ``i`` in memory order is
-    ``float(sin(i))`` or ``float(cos(i))``, converted to FP4."""
-    trig = np.cos if use_cos else np.sin
-    packed = np.empty((rows, cols // 2), dtype=np.uint8)
-    chunk_rows = max(1, _TRIG_CHUNK_ELEMENTS // cols)
-    for r0 in range(0, rows, chunk_rows):
-        r1 = min(rows, r0 + chunk_rows)
-        index = np.arange(r0 * cols, r1 * cols, dtype=np.float64)
-        codes = _fp4_codes_rne(trig(index).astype(np.float32))
-        packed[r0:r1] = pack_fp4_codes(codes.reshape(r1 - r0, cols))
-    return packed
-
-
-def tensile_data_inputs(spec, inputs, seed: int = 0):
-    """``inputs`` with A/B/scales replaced by the mxf4_tn_maf.yaml client data:
-    A = TrigSin, B = TrigCos, MX scales = Random. C is kept."""
-    rng = np.random.default_rng(seed)
-    groups = spec.K // spec.block_k
-    lo, hi = _TENSILE_E8_RANDOM
-    return (
-        _trig_fp4_packed(spec.M, spec.K, use_cos=False),
-        _trig_fp4_packed(spec.N, spec.K, use_cos=True),
-        rng.integers(lo, hi, (spec.M, groups), dtype=np.uint8),
-        rng.integers(lo, hi, (groups, spec.N), dtype=np.uint8),
-        inputs[4],
-    )
 
 
 def _parse_variants(text: str) -> list[str]:
@@ -137,9 +89,6 @@ def _bench_one(
     iters: int,
     samples: int,
     emit_dir: Path | None,
-    extra_flags: tuple[str, ...] = (),
-    batch: int = 0,
-    data: str = "exact",
 ) -> dict:
     import ml_dtypes
 
@@ -147,8 +96,6 @@ def _bench_one(
     if arch != "gfx1250":
         raise RuntimeError(f"visible HIP device 0 must be gfx1250, got {arch!r}")
     spec = variant_spec(variant, m, n, k, **geometry)
-    if extra_flags:
-        spec = dataclasses.replace(spec, **dict.fromkeys(extra_flags, True))
     ok, reason = is_valid_spec(spec)
     if not ok:
         return {
@@ -160,7 +107,6 @@ def _bench_one(
             "min_ms": "",
             "tflops": "",
             "ratio_vs_base": "",
-            "batch_ms": "",
         }
 
     alpha32 = np.float32(1.0 / max(spec.K, 256))
@@ -185,7 +131,7 @@ def _bench_one(
     check = "FAIL"
     try:
         function = module.get_function(artifact.kernel_name)
-        for array in (*kernel_inputs(spec, inputs), out):
+        for array in (*inputs[:5], out):
             pointer = runtime.alloc(array.nbytes)
             allocations.append(pointer)
             runtime.memcpy_h2d(pointer, _u8_buffer(array), array.nbytes)
@@ -241,18 +187,7 @@ def _bench_one(
                 "min_ms": "",
                 "tflops": "",
                 "ratio_vs_base": "",
-                "batch_ms": "",
             }
-
-        if data == "tensile":
-            # The check above runs on exactly representable data; timing runs
-            # on the Tensile client's data, which has no bit-exact reference.
-            timed = kernel_inputs(spec, tensile_data_inputs(spec, inputs))
-            for pointer, array in zip(allocations, timed):
-                runtime.memcpy_h2d(pointer, _u8_buffer(array), array.nbytes)
-            for _ in range(max(warmup, 1)):
-                _launch()
-            runtime.sync()
 
         for _ in range(iters):
             start = runtime.event()
@@ -262,18 +197,6 @@ def _bench_one(
             end.record()
             runtime.sync()
             times.append(start.elapsed_to(end))
-        # Back-to-back launches between one event pair, like the Tensile
-        # client's enqueue loop: launch gaps overlap with execution.
-        batch_ms = None
-        if batch > 0:
-            start = runtime.event()
-            end = runtime.event()
-            start.record()
-            for _ in range(batch):
-                _launch()
-            end.record()
-            runtime.sync()
-            batch_ms = start.elapsed_to(end) / batch
     finally:
         module.unload()
         for pointer in allocations:
@@ -292,33 +215,24 @@ def _bench_one(
         "min_ms": f"{min_ms:.4f}",
         "tflops": f"{tflops:.3f}",
         "ratio_vs_base": "",
-        "batch_ms": f"{batch_ms:.4f}" if batch_ms is not None else "",
         "_median": median_ms,
     }
 
 
-_BOOL_FLAGS = (
-    "local_read_prefetch",
-    "prefetch_gl2",
-    "scale_double_buffer",
-    "wave_separated_tdm",
-    "scale_tdm",
-    "lds_pad",
-    "lds_segment_interleave",
-    "lds_segment_b_rotate",
-    "tdm_plus_lds_buf",
-    "init_c_wmma",
-    "b_scale_n_major",
-    "tdm_multicast",
-    "cross_tile_prefetch",
-    "cluster_gl2_prefetch",
-    "a_scale_lds_pad",
-)
-
-
 def _flag_summary(spec) -> str:
     bits = []
-    for name in _BOOL_FLAGS:
+    for name in (
+        "local_read_prefetch",
+        "prefetch_gl2",
+        "scale_double_buffer",
+        "wave_separated_tdm",
+        "scale_tdm",
+        "lds_pad",
+        "lds_segment_interleave",
+        "lds_segment_b_rotate",
+        "tdm_plus_lds_buf",
+        "init_c_wmma",
+    ):
         if getattr(spec, name):
             bits.append(name)
     if spec.cluster_dim is not None:
@@ -342,31 +256,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--samples", type=int, default=256)
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--iters", type=int, default=20)
-    parser.add_argument(
-        "--batch",
-        type=int,
-        default=0,
-        help="also time this many back-to-back launches with one event pair",
-    )
-    parser.add_argument(
-        "--data",
-        choices=("exact", "tensile"),
-        default="exact",
-        help=(
-            "timing inputs: 'exact' = the verification data (FP4 0/1, scales "
-            "125-128); 'tensile' = mxf4_tn_maf.yaml client data (A TrigSin, "
-            "B TrigCos, scales Random 124-130), uploaded after the check"
-        ),
-    )
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--emit-dir", type=Path, default=None)
-    parser.add_argument(
-        "--with-flag",
-        action="append",
-        default=[],
-        choices=_BOOL_FLAGS,
-        help="turn on one extra boolean spec flag for every variant (repeatable)",
-    )
     args = parser.parse_args(argv)
 
     if args.shape == "yaml":
@@ -417,11 +308,7 @@ def main(argv: list[str] | None = None) -> int:
             iters=args.iters,
             samples=args.samples,
             emit_dir=args.emit_dir,
-            extra_flags=tuple(args.with_flag),
-            batch=args.batch,
-            data=args.data,
         )
-        row["data"] = args.data
         if variant == BASE_VARIANT and "_median" in row:
             base_median = row["_median"]
         rows.append(row)
@@ -440,8 +327,6 @@ def main(argv: list[str] | None = None) -> int:
         "min_ms",
         "tflops",
         "ratio_vs_base",
-        "batch_ms",
-        "data",
     ]
     print("\t".join(fields))
     for row in rows:

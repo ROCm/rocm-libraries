@@ -3520,12 +3520,9 @@ class _Lowerer:
         )
         self._need("s.cluster.barrier")
         cur = self._current()
-        fences = op.attrs.get("fences", True)
-        if fences:
-            cur.emit('  fence syncscope("cluster") release')
+        cur.emit('  fence syncscope("cluster") release')
         cur.emit("  call void @llvm.amdgcn.s.cluster.barrier()")
-        if fences:
-            cur.emit('  fence syncscope("cluster") acquire')
+        cur.emit('  fence syncscope("cluster") acquire')
 
     # memory
 

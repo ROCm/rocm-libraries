@@ -53,11 +53,6 @@ typedef struct rocke_mxfp4_tdm_gemm_spec
     int cluster_dim_x;
     int cluster_dim_y;
     int cluster_dim_z;
-    bool b_scale_n_major;
-    bool tdm_multicast;
-    bool cross_tile_prefetch;
-    bool cluster_gl2_prefetch;
-    bool a_scale_lds_pad;
 } rocke_mxfp4_tdm_gemm_spec_t;
 
 rocke_mxfp4_tdm_gemm_spec_t rocke_mxfp4_tdm_gemm_spec_default(void);
