@@ -43,8 +43,26 @@ ROCSOLVER_BEGIN_NAMESPACE
 
 #define MIN_CHUNK_SIZE 64
 
-/* ROCSOLVER_WORKSPACE_HELPER provides a wrapper for workspace arrays, allowing workspace arrays to be passed
-   between functions using a single object rather than individually, and improving device memory utilization. */
+/*
+   ROCSOLVER_WORKSPACE_HELPER provides a wrapper for workspace arrays, allowing workspace arrays to be passed
+   between functions using a single object rather than individually, and improving device memory utilization.
+
+
+   General workflow:
+   [In _getMemorySize method] Call assign_sizes to inform the helper about the sizes of all workspace arrays
+   (except the scalars array). If necessary, call add_scalars (to add the optional scalars array) and/or
+   set_optim_mem. If the function will have nested functions, optionally call set_nested_capacity with the
+   number of nested functions that require a workspace helper. Then call add_nested for each of these nested
+   functions and populate the nested helper with workspace sizes.
+
+   [In _impl method] Use get_total_size to get the total amount of device memory required by the function, and
+   then allocate it (e.g. with rocblas_device_malloc). Call assign_buffer with a pointer to the allocated memory.
+   This will partition  the device memory into individual workspace arrays and zero them out.
+
+   [In _template method] Now, you can get pointers to the individual workspace arrays using the [] operator.
+   The size of each array can be obtained with the get_size method. Pointers to the workspace helpers for each
+   nested function can be obtained with the get_nested method.
+*/
 class rocsolver_workspace_helper
 {
 private:
