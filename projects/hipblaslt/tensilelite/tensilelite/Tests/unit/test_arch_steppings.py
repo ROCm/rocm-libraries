@@ -4101,3 +4101,164 @@ def test_overrides_do_not_outlive_the_build_that_asked_for_them(monkeypatch):
     assert second[ISA_GFX1250].archCaps["EnableXnackReplay"] is True
     assert second[ISA_GFX1250].archCaps[CAP_MULTICAST] is True
     assert second[ISA_GFX1250].asmCaps[CAP_FP4_32X16] is True
+
+
+# ---------------------------------------------------------------------------
+# The xnack qualifier on the three paths that carry a build's identity onward:
+# the rename map read against logic files, the argument handed to the re-spawned
+# TensileCreateLibrary, and the benchmark cache key. Each drops the qualifier
+# somewhere it matters, and each drops it silently -- the bare name is a valid
+# name, so nothing downstream can tell it was meant to say more.
+# ---------------------------------------------------------------------------
+
+
+def _archRenames(archs):
+    from tensilelite.TensileCreateLibrary.Run import archRenamesOf
+
+    # No compiler: compilerTargetOf then resolves aliases and leaves every
+    # qualifier alone, which is the future a toolchain that accepts
+    # gfx1250:xnack- brings, and the case the keying has to be right for.
+    return archRenamesOf(archs, None)
+
+
+def test_arch_renames_are_keyed_by_the_name_logic_files_carry():
+    # gfx1250v0 is built as gfx1250 but tuned as gfx1250-strict, so its logic
+    # files say gfx1250-strict and that is what the key has to be.
+    assert _archRenames([GFX1250V0]) == {GFX1250_STRICT: GFX1250}
+
+
+def test_arch_renames_stay_bare_on_both_sides():
+    # The alias carries its request's qualifier to the compiler, but neither
+    # side of this map may show it: the key is matched against a logic file's
+    # declared name, and the value becomes a runtime hardware predicate that
+    # only a bare processor name can satisfy.
+    assert _archRenames([GFX1250V0 + ":xnack-"]) == {GFX1250_STRICT: GFX1250}
+    assert _archRenames([GFX1250V0]) == {GFX1250_STRICT: GFX1250}
+
+
+def test_arch_renames_qualifier_alone_is_not_a_rename():
+    # gfx1250:xnack- is tuned and built as the same architecture; only the
+    # driver configuration differs, and that is not a rename.
+    assert _archRenames([GFX1250 + ":xnack-"]) == {}
+    assert _archRenames([GFX1250_STRICT + ":xnack-"]) == {}
+
+
+def test_arch_renames_mutation_keying_on_the_requested_spec():
+    """The pre-fix map: both sides as requested, so neither side is usable."""
+    from tensilelite.Common.Architectures import compilerTargetOf, tuningArchOf
+
+    def mutated(archs):
+        return {
+            tuningArchOf(a): compilerTargetOf(a, None)
+            for a in archs
+            if tuningArchOf(a) != compilerTargetOf(a, None)
+        }
+
+    # A key no logic file can equal, so the rename never fires...
+    assert mutated([GFX1250_STRICT + ":xnack-"]) == {}
+    assert _archRenames([GFX1250_STRICT + ":xnack-"]) == {}
+    # ...and for the alias, a value no runtime predicate can match.
+    assert mutated([GFX1250V0 + ":xnack-"]) == {GFX1250_STRICT: GFX1250 + ":xnack-"}
+    assert _archRenames([GFX1250V0 + ":xnack-"]) == {GFX1250_STRICT: GFX1250}
+
+
+def test_rebuild_target_restores_the_qualifier_for_the_respawned_build():
+    from tensilelite.ClientWriter import rebuildTargetGfx
+
+    # gfxName is bare, because it names the directory the rebuild fills; the
+    # argument that tells the rebuild what to be must not be.
+    assert rebuildTargetGfx(GFX1250, [GFX1250 + ":xnack-"]) == GFX1250 + ":xnack-"
+    assert (
+        rebuildTargetGfx(GFX1250_STRICT, [GFX1250_STRICT + ":xnack-"])
+        == GFX1250_STRICT + ":xnack-"
+    )
+
+
+def test_rebuild_target_drops_the_predicate_but_not_the_qualifier():
+    from tensilelite.ClientWriter import rebuildTargetGfx
+
+    # A predicate selects hardware and says nothing about capabilities, so it is
+    # not this process's to forward; the qualifier selects capabilities and is.
+    assert (
+        rebuildTargetGfx(GFX1250, [GFX1250 + ":xnack-[cu=64]"]) == GFX1250 + ":xnack-"
+    )
+
+
+def test_rebuild_target_leaves_an_unqualified_request_alone():
+    from tensilelite.ClientWriter import rebuildTargetGfx
+
+    assert rebuildTargetGfx(GFX1250, [GFX1250]) == GFX1250
+    assert rebuildTargetGfx(GFX1250, None) == GFX1250
+    # A request naming a different architecture must not qualify this one.
+    assert rebuildTargetGfx(GFX1250, [GFX1250_STRICT + ":xnack-"]) == GFX1250
+
+
+def _cacheKey(archNames):
+    from tensilelite.BenchmarkProblems import _computeCacheKey, _CACHE_FIELDS
+
+    step = type("Step", (), {attr: () for attr in _CACHE_FIELDS.values()})()
+    # cmdLineArchs is what archNamesByIsa produced: bare for both requests,
+    # which is exactly why it cannot tell them apart on its own.
+    return _computeCacheKey(step, [GFX1250], archNames)
+
+
+def test_benchmark_cache_separates_the_two_xnack_modes():
+    # Same benchmark parameters, same compiler target, different code objects:
+    # without this the second run executes the first's kernels, and an
+    # unqualified run can end up on kernels built without the drains it needs.
+    assert _cacheKey([GFX1250]) != _cacheKey([GFX1250 + ":xnack-"])
+
+
+def test_benchmark_cache_shares_an_entry_across_predicates():
+    # A predicate picks which card to run on; it changes nothing in a code
+    # object, so splitting the entry would only lose cache hits.
+    assert _cacheKey([GFX1250 + ":xnack-"]) == _cacheKey([GFX1250 + ":xnack-[cu=64]"])
+
+
+def test_benchmark_cache_key_is_unchanged_without_a_qualifier():
+    """An unqualified build must keep the key it had before this field existed.
+
+    The field is absent, not empty: a dict that never gains the key hashes as it
+    always did, so every existing cache survives. An empty value would move the
+    key for builds that never mention xnack, to distinguish nothing.
+    """
+    import hashlib
+    import json
+    from tensilelite.BenchmarkProblems import (
+        _CACHE_FIELDS,
+        _CACHE_KEY_LEN,
+        _KERNEL_NAMING_VERSION,
+        _computeCacheKey,
+    )
+
+    def keyBeforeThisField(cmdLineArchs):
+        fields = {f: () for f in _CACHE_FIELDS}
+        fields["KernelNamingVersion"] = _KERNEL_NAMING_VERSION
+        fields["_Architectures"] = ",".join(sorted(cmdLineArchs))
+        canonical = json.dumps(fields, sort_keys=True, default=str)
+        return hashlib.sha256(canonical.encode()).hexdigest()[:_CACHE_KEY_LEN]
+
+    step = type("Step", (), {attr: () for attr in _CACHE_FIELDS.values()})()
+    for cmdLineArchs, requested in (
+        (["gfx942:xnack+", "gfx942:xnack-"], ["gfx942"]),  # gfxToVariants expansion
+        ([GFX1250], [GFX1250]),
+        ([GFX1250_STRICT], [GFX1250_STRICT]),
+    ):
+        assert _computeCacheKey(step, cmdLineArchs, requested) == keyBeforeThisField(
+            cmdLineArchs
+        )
+
+
+def test_benchmark_cache_key_mutation_without_the_requested_names():
+    """Dropping the requested names collapses the two modes onto one entry."""
+    from tensilelite.BenchmarkProblems import _computeCacheKey, _CACHE_FIELDS
+
+    step = type("Step", (), {attr: () for attr in _CACHE_FIELDS.values()})()
+    # The pre-fix call: cmdLineArchs only, which archNamesByIsa had made bare.
+    # Both modes reach it spelled alike, so it cannot tell them apart.
+    preFix = _computeCacheKey(step, [GFX1250])
+    assert preFix == _computeCacheKey(step, [GFX1250])
+    # The bare run still hashes that way -- its caches are untouched -- while
+    # the qualified one no longer lands on the same entry.
+    assert _cacheKey([GFX1250]) == preFix
+    assert _cacheKey([GFX1250 + ":xnack-"]) != preFix
