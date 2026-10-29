@@ -571,6 +571,58 @@ def is_ok_reason(t: str) -> bool:
     return items is not None and len(items) == 2 and items[0] == T.BOOL and T.is_str(items[1])
 
 
+# C int returns a Python int (int64_t inside) narrows to, with a range check
+NARROW_INTS = ("int", "int32_t")
+
+
+def header_doc(env: Env, cf) -> str:
+    """The comment block right above a header declaration, markers dropped and
+    whitespace collapsed ("" when there is none)."""
+    path = env.headers.paths.get(cf.file)
+    if path is None or not cf.line:
+        return ""
+    text = open(path).read().splitlines()
+    i = cf.line - 2
+    if i < 0 or not text[i].rstrip().endswith("*/"):
+        return ""
+    block = []
+    while i >= 0:
+        block.insert(0, text[i])
+        if text[i].lstrip().startswith("/*"):
+            break
+        i -= 1
+    doc = re.sub(r"/\*+|\*+/", " ", "\n".join(block))
+    doc = re.sub(r"^\s*\*", " ", doc, flags=re.M)
+    return re.sub(r"\s+", " ", doc).strip()
+
+
+def documented_fail(env: Env, cf) -> tuple[str, str, list[str]] | None:
+    """What the hand header says an int entry returns when the Python raises:
+    (value, the sentence, the pointer parameters it names as NULL), from a
+    doc comment that documents a failure value, such as "Returns 0 for a
+    NULL spec or vec == 0 (where the Python raises ZeroDivisionError)." None
+    when the header documents no such value (then the C entry has no
+    convention for a Python failure)."""
+    doc = header_doc(env, cf)
+    m = re.search(
+        r"\b[Rr]eturns?\s+(-?\d+)\s+((?:for|on|when|if)\b[^.()]*(?:\([^)]*\))?[^.]*)",
+        doc,
+    )
+    # a failure case: a NULL argument, a raise, an error, or a zero divisor
+    # ("vec == 0"); "Returns 1 if the spec is valid" is not one
+    fails = r"\bNULL\b|rais|error|invalid|fail|==\s*0\b|\bzero\b"
+    if not m or not re.search(fails, m.group(2), re.I):
+        return None
+    cond = m.group(2).strip()
+    ptrs = {n for t, n in cf.params if t.endswith("*")}
+    named = {
+        a or b_
+        for a, b_ in re.findall(r"\bNULL\s+(\w+)|\b(\w+)\s*(?:==|is)\s*NULL", cond)
+    }
+    guards = [n for _, n in cf.params if n in ptrs and n in named]
+    return m.group(1), f"Returns {m.group(1)} {cond}", guards
+
+
 def make_shim(
     env: Env,
     mod: Module,
@@ -731,6 +783,45 @@ def make_shim(
             body.append("return rocke_ir_builder_ok(b);")
         elif cf.ret != "void":
             raise Refuse(fn, f"shim: list return as {cf.ret}")
+    elif T.is_int(r) and cf.ret in NARROW_INTS and r != cf.ret and not outs:
+        # a Python int (int64_t) as a narrower C int: checked, never truncated
+        body.append(f"const int64_t r_ = {call};")
+        if "b" in used and any(t == T.B and n == "b" for t, n in cf.params):
+            # a builder entry: out of range is a raise on the builder (-1)
+            body.append(
+                f'if((int64_t)({cf.ret})r_ != r_) throw ckc::ValueError("result does not fit in C {cf.ret}");'
+            )
+            body.append(f"return ({cf.ret})r_;")
+        else:
+            # the value the header documents for a Python raise, also for a
+            # result C cannot hold; no documented value, no convention: a hole
+            doc = documented_fail(env, cf)
+            if doc is None:
+                raise Refuse(
+                    fn,
+                    f"shim: Python return {r} as C {cf.ret}: the header documents"
+                    " no return value for a Python raise",
+                )
+            val, why, guards = doc
+            ps = [f"{t} {n}" if n in used else f"[[maybe_unused]] {t} {n}" for t, n in cf.params]
+            out = [f"{cf.ret} {cf.name}({', '.join(ps)})", "{"]
+            import textwrap
+
+            note = textwrap.wrap(
+                f"the header: {why.replace('*/', '* /')}; the same for a result"
+                f" out of {cf.ret} range",
+                80,
+            )
+            out.append("    /* " + "\n     * ".join(note) + " */")
+            for g in guards:
+                out.append(f"    if({g} == nullptr) return {val};")
+            out.append("    try {")
+            out += ["        " + x for x in body]
+            out.append(f"        if((int64_t)({cf.ret})r_ == r_) return ({cf.ret})r_;")
+            out.append("    } catch(const ckc::Error&) {}")
+            out.append(f"    return {val};")
+            out.append("}")
+            return out
     else:
         raise Refuse(fn, f"shim: Python return {r} as C {cf.ret}")
     if (
@@ -1426,9 +1517,11 @@ def translate(modname: str, rocke: str, abi_dir: str | None = None) -> Result:
                     )
             except Refuse as sr:
                 # the function translated; only its C entry does not fit the kept
-                # hand declaration: an ABI hole, the function stays usable inside
+                # hand declaration: an ABI hole (a hole of the report: the source
+                # does not compile), the function stays usable inside
                 shim = [f'#error "abi hole: {cf.name}: {sr.reason}"']
                 rec["shim_hole"] = sr.reason
+                rec["shim_at"] = sr.line or fn.lineno
             if fence and fence_var is not None:
                 import copy as _copy
 
@@ -1596,6 +1689,22 @@ def translate(modname: str, rocke: str, abi_dir: str | None = None) -> Result:
             rec["reason"] = "dispatch fill: C-only field of the hand callers"
             rec["at"] = rec.get("line", 0)
             rec["fill_lines"] = len([x for x in forced if x.strip()])
+        elif r is None and rec.get("shim_hole"):
+            # an ABI hole: the internal stays; a hand fill of the function
+            # replaces its C entry, else the entry is a hole of the report
+            internals.append(body)
+            fill = load_fill(modname, name.replace(".", "_"))
+            reason = f"abi hole: {rec['shim_hole']}"
+            rec.update(reason=reason, at=rec["shim_at"])
+            if fill is not None:
+                shims.append(fill)
+                emitted_c.update(names)
+                rec["status"] = "filled"
+                rec["fill_lines"] = len([x for x in fill if x.strip()])
+            else:
+                shims.append(shim)
+                emitted_c.update(names)
+                rec["status"] = "hole"
         elif r is None:
             internals.append(body)
             shims.append(shim)

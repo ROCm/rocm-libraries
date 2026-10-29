@@ -201,6 +201,18 @@ A hole is a function with no translation rule. The generated `.cpp` then holds
   struct field. That field is declared in `holes/<module>/<Class>.fields`,
   which `tr.abi` adds to the generated struct.
 
+- An ABI hole is a function that translates but whose C entry does not fit
+  the existing header (the hand ABI), for example a Python int behind a C
+  `int` when the header documents no value for a failure. The source holds
+  `#error "abi hole: <c name>: <reason>"`, and it is a hole like any other:
+  `--analyze` lists it (`hole <name> (abi hole: ...)`), it is counted, and
+  `tr.regen` writes nothing while it is open. A fill of the function
+  (`holes/<module>/<function>.cpp`) replaces its C entry. A Python int
+  behind a narrower C `int` is narrowed, with a range check, when the
+  header's comment documents the entry's failure value ("Returns 0 for a
+  NULL spec or vec == 0"): a NULL argument it names, a Python raise and an
+  out-of-range result return that value.
+
 Fills and the hand routines in `tr/adapters.py` and the prelude are data
 keyed by module and function name.
 
