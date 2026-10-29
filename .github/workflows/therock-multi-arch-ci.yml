@@ -83,6 +83,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  random_gemm_runner_tests:
+    name: Random GEMM runner tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - name: Test sampling and failure handling
+        run: python3 -B -m unittest discover -s .github/scripts/tests -p test_random_hipblaslt_gemms.py
+
   ci-env:
     name: Load CI Environment
     runs-on: ubuntu-24.04
@@ -265,20 +277,33 @@ jobs:
       contents: read
       id-token: write
 
-  rocjitsu_race_check:
-    name: rocjitsu race check (${{ matrix.amdgpu_families }})
+  rocjitsu_race_checks:
+    name: rocjitsu ${{ matrix.mode }} (${{ matrix.amdgpu_families }})
     # A caller cannot depend on an individual job inside a reusable workflow,
     # so start after the Linux workflow has finished publishing its artifacts.
     # This sidecar remains advisory and is not part of the required summary.
-    needs: [ci-env, configure, linux_build_and_test]
+    needs: [ci-env, configure, setup, linux_build_and_test]
     strategy:
       fail-fast: false
       matrix:
         include:
-          - amdgpu_families: gfx94X-dcgpu
+          # Smoke tests: 2 GEMMs each, both architectures
+          - mode: smoke
+            amdgpu_families: gfx94X-dcgpu
             amdgpu_targets: gfx942
-          - amdgpu_families: gfx950-dcgpu
+            random_gemm_count: 0
+            rocjitsu_ref: 6f5d9658a4b13656e0c1a3719d86a320c9206dbe
+          - mode: smoke
+            amdgpu_families: gfx950-dcgpu
             amdgpu_targets: gfx950
+            random_gemm_count: 0
+            rocjitsu_ref: 6f5d9658a4b13656e0c1a3719d86a320c9206dbe
+          # Random GEMMs: 100 samples, gfx950 only
+          - mode: random-100
+            amdgpu_families: gfx950-dcgpu
+            amdgpu_targets: gfx950
+            random_gemm_count: 100
+            rocjitsu_ref: 29656a8dcc052615e1ca49cafde98d684b6b81f2
     if: >-
       ${{
         !cancelled() &&
@@ -286,17 +311,26 @@ jobs:
         (
           contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt,') ||
           contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt/tensilelite,') ||
-          contains(github.event.pull_request.labels.*.name, 'test:hipblaslt')
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblas-common,') ||
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',shared/origami,') ||
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',shared/stinkytofu,') ||
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',shared/mxdatagenerator,') ||
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',shared/rocroller,') ||
+          contains(github.event.pull_request.labels.*.name, 'test:hipblaslt') ||
+          needs.configure.outputs.run_all_tests == 'true'
         ) &&
         needs.linux_build_and_test.result != 'skipped'
       }}
     uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
     with:
       therock_ref: ${{ needs.ci-env.outputs.therock-ref }}
-      build_runs_on: ${{ needs.ci-env.outputs.linux-runner }}
+      build_runs_on: ${{ fromJSON(needs.setup.outputs.linux_build_config).build_runs_on_medium }}
       amdgpu_families: ${{ matrix.amdgpu_families }}
       amdgpu_targets: ${{ matrix.amdgpu_targets }}
-      # TODO(newling): Add gfx1151 after validating a target-specific workload.
+      random_gemm_count: ${{ matrix.random_gemm_count }}
+      random_gemm_seed: 0
+      random_gemm_threads: 8
+      rocjitsu_ref: ${{ matrix.rocjitsu_ref }}
 
   notify_teams_on_failure:
     name: Notify Teams Channel on Failure
@@ -345,6 +379,7 @@ jobs:
     name: Multi-Arch CI Summary
     if: always()
     needs:
+      - random_gemm_runner_tests
       - ci-env
       - configure
       - setup

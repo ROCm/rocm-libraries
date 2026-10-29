@@ -1,12 +1,36 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # This reusable workflow is a narrow post-build instrumentation job for
 # hipBLASLt. It fetches BLAS artifacts from the just-finished TheRock build and
-# runs two small workloads under rocjitsu's race detector. The workloads run
-# entirely under CPU-side emulation, so the workflow uses the CPU build runner
-# instead of consuming GPU test capacity.
+# runs smoke workloads or sampled GEMMs under rocjitsu's race detector.
+# CPU emulation uses the build runner pool without requiring GPU hardware.
 
 name: TheRock rocjitsu race check Linux
 
 on:
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: "Completed rocm-libraries Multi-Arch run to test"
+        type: string
+        required: true
+      random_gemm_count:
+        description: "Number of random gfx950 GEMMs"
+        type: number
+        default: 100
+      random_gemm_seed:
+        description: "Sampler seed"
+        type: number
+        default: 0
+      random_gemm_threads:
+        description: "Concurrent GEMMs"
+        type: number
+        default: 8
+      rocjitsu_ref:
+        description: "rocm-systems revision containing rocjitsu"
+        type: string
+        default: "29656a8dcc052615e1ca49cafde98d684b6b81f2"
   workflow_call:
     inputs:
       therock_ref:
@@ -21,19 +45,48 @@ on:
       amdgpu_targets:
         type: string
         default: ""
+      random_gemm_count:
+        type: number
+        default: 0
+      random_gemm_seed:
+        type: number
+        default: 0
+      random_gemm_threads:
+        type: number
+        default: 8
+      rocjitsu_ref:
+        type: string
+        default: "6f5d9658a4b13656e0c1a3719d86a320c9206dbe"
 
 permissions:
   contents: read
 
 jobs:
+  ci-env:
+    runs-on: ubuntu-24.04
+    outputs:
+      therock-ref: ${{ steps.env.outputs.therock-ref }}
+      linux-runner: ${{ steps.env.outputs.linux-runner }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/ci-env
+          persist-credentials: false
+      - id: env
+        uses: ./.github/actions/ci-env
+
   rocjitsu-race-check-linux:
-    name: rocjitsu race check (${{ inputs.amdgpu_families }})
+    name: rocjitsu ${{ inputs.random_gemm_count > 0 && 'GEMM race checks' || 'race check' }} (${{ inputs.amdgpu_families || 'gfx950-dcgpu' }})
+    needs: ci-env
     # This job is advisory. Failures remain visible, but continue-on-error keeps
     # the calling Linux workflow successful. ROCm/rocm-libraries#10072 verifies
     # this behavior.
     # TODO(AIHPBLAS-3605): Remove after the check is reliably green.
     continue-on-error: true
-    runs-on: ${{ inputs.build_runs_on }}
+    runs-on: ${{ inputs.build_runs_on || needs.ci-env.outputs.linux-runner }}
+    concurrency:
+      group: rocjitsu-${{ github.workflow }}-${{ github.event.number || github.ref }}-${{ inputs.amdgpu_families || 'gfx950-dcgpu' }}-${{ inputs.random_gemm_count }}
+      cancel-in-progress: true
     timeout-minutes: 90
     container:
       # Use a plain Ubuntu image without ROCm preinstalled. The ROCm runtime,
@@ -49,17 +102,18 @@ jobs:
         shell: bash
     env:
       VENV_DIR: ${{ github.workspace }}/.venv
-      ARTIFACT_RUN_ID: ${{ github.run_id }}
+      ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id || github.run_id }}
       OUTPUT_ARTIFACTS_DIR: ./build
       ROCM_PATH: ${{ github.workspace }}/build
-      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families || 'gfx950-dcgpu' }}
+      RANDOM_GEMM_COUNT: ${{ inputs.random_gemm_count }}
+      RANDOM_GEMM_SEED: ${{ inputs.random_gemm_seed }}
+      RANDOM_GEMM_THREADS: ${{ inputs.random_gemm_threads }}
       ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
       ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
       RACE_REPORT_DIR: ${{ github.workspace }}/race-reports
-      # The driver uses these values for its two timeout commands. Both are
-      # shorter than the job timeout, so reports can still upload after a
-      # workload timeout.
-      RACE_TIMEOUT_SECONDS: "180"
+      # Per-command limits leave time for reports after a workload timeout.
+      RACE_TIMEOUT_SECONDS: "210"
       TENSILELITE_TIMEOUT_SECONDS: "420"
     steps:
       # The job needs three inputs in one workspace:
@@ -71,7 +125,12 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: ${{ inputs.therock_ref }}
+          ref: ${{ inputs.therock_ref || needs.ci-env.outputs.therock-ref }}
+          sparse-checkout: |
+            .github/actions/setup_test_environment
+            build_tools
+            requirements-test.txt
+          persist-credentials: false
 
       - name: Checkout rocm-libraries repository for scripts
         timeout-minutes: 30
@@ -80,21 +139,21 @@ jobs:
           path: rocm-libraries
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       - name: Checkout rocm-systems for rocjitsu
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: ROCm/rocm-systems
-          # Keep the validated tool revision stable instead of following
-          # rocm-systems develop, where rocjitsu interfaces can change independently.
-          # Pinned 2026-10-21.
-          ref: 6f5d9658a4b13656e0c1a3719d86a320c9206dbe
+          # Callers pin the emulator independently of the library under test.
+          ref: ${{ inputs.rocjitsu_ref }}
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
             runtimes/api-headers
             shared/machine-readable-isa/isa
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       # The pinned base image already provides CA certificates, CMake, Git, and
       # Ninja. Install only the remaining host development files needed for the
@@ -116,33 +175,47 @@ jobs:
         uses: ./.github/actions/setup_test_environment
         with:
           ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
-          ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
-          AMDGPU_TARGETS: ${{ inputs.amdgpu_targets }}
+          ARTIFACT_GROUP: ${{ inputs.amdgpu_families || 'gfx950-dcgpu' }}
+          AMDGPU_TARGETS: ${{ inputs.amdgpu_targets || (github.event_name == 'workflow_dispatch' && 'gfx950' || '') }}
           OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
           VENV_DIR: ${{ env.VENV_DIR }}
-          FETCH_ARTIFACT_ARGS: --blas --tests
+          FETCH_ARTIFACT_ARGS: --blas --tests --run-github-repo ${{ github.repository }}
 
       # setup_test_environment installs only TheRock's common test
       # requirements. Install TensileLite's requirements explicitly from its
       # test artifact instead of relying on them to remain in that shared
       # environment.
       - name: Install TensileLite test requirements
+        if: inputs.random_gemm_count == 0
         run: |
           python ./build_tools/install_additional_requirements.py \
             --requirements-files "${ROCM_PATH}/share/hipblaslt/tensilelite/requirements-test.txt"
+
+      - name: Install bench input conversion dependency
+        if: inputs.random_gemm_count > 0
+        run: uv pip install PyYAML
 
       - name: Run rocjitsu race check
         timeout-minutes: 75
         run: bash rocm-libraries/.github/scripts/run_rocjitsu_hipblaslt_race_check.sh
 
-      # Upload even on failure. The report directory contains the per-workload
-      # stdout logs, rocjitsu sink files, race.log files, generated reduced
-      # TensileLite input/output, and timing.tsv; without this artifact a failed
-      # detector run is usually not actionable from the console log alone.
+      - name: Show random GEMM counts
+        if: ${{ always() && inputs.random_gemm_count > 0 }}
+        run: |
+          if [ -f race-reports/random-gemms/summary.json ]; then
+            {
+              echo '### GEMM race and numerical checks (gfx950)'
+              echo '```json'
+              cat race-reports/random-gemms/summary.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Preserve inputs, results, detector logs and timings even after a failure.
       - name: Upload race reports
         if: ${{ always() }}
         uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
         with:
-          name: rocjitsu-race-reports-${{ inputs.amdgpu_families }}
+          name: rocjitsu-${{ inputs.random_gemm_count > 0 && 'random-gemms' || 'race-reports' }}-${{ inputs.amdgpu_families || 'gfx950-dcgpu' }}
           path: race-reports/
           if-no-files-found: ignore
