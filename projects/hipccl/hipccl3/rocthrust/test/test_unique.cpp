@@ -15,6 +15,7 @@
  *  limitations under the License.
  */
 
+#include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/distance.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
@@ -511,4 +512,47 @@ TEST(UniqueTests, TestUniqueWithLargeNumberOfItems)
   {
     TestUniqueWithMagnitude(mag);
   }
+}
+
+struct check_valid_item_op
+{
+  std::uint32_t* error_counter{};
+  int expected_upper_bound{};
+
+  __device__ bool operator()(const int lhs, const int rhs) const
+  {
+    if (lhs > expected_upper_bound || rhs > expected_upper_bound)
+    {
+      if (error_counter)
+      {
+        atomicAdd(error_counter, 1);
+      }
+      return false;
+    }
+    return lhs == rhs;
+  }
+};
+
+TEST(UniqueTests, TestUniqueWithCustomEqualityOp)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
+
+  auto constexpr num_items = 1000;
+  auto data                = thrust::make_counting_iterator(T{0});
+
+  thrust::device_vector<std::uint32_t> error_counter(1, 0);
+  auto const error_counter_ptr = thrust::raw_pointer_cast(error_counter.data());
+
+  Vector unique_out(num_items);
+  auto unique_out_end = thrust::unique_copy(
+    data, data + num_items, unique_out.begin(), check_valid_item_op{error_counter_ptr, num_items - 1});
+
+  auto num_selected_out = thrust::distance(unique_out.begin(), unique_out_end);
+  ASSERT_EQ(num_selected_out, num_items);
+  ASSERT_EQ(error_counter[0], std::uint32_t{0});
+  bool all_results_correct = thrust::equal(unique_out.cbegin(), unique_out.cend(), data);
+  ASSERT_TRUE(all_results_correct);
 }
