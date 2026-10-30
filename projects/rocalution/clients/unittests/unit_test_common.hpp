@@ -25,6 +25,7 @@
 
 // utils/def.hpp enables assert even with NDEBUG, but only until the next
 // inclusion of <assert.h>. Include everything else before the library headers.
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -76,8 +77,8 @@ namespace rocalution_unit
     }
 
     // Death tests have no timeout of their own. A statement that hangs, for example
-    // in the exit handlers after an assert, ends with exit code 124 and a message
-    // that no expected regex matches, so the death test fails.
+    // in the exit handlers after an assert, ends with exit code 124, which no death
+    // test expects, so the death test fails.
     inline void death_test_watchdog(unsigned timeout_s = 120)
     {
 #ifndef _WIN32
@@ -151,14 +152,16 @@ namespace rocalution_unit
         GTEST_SKIP() << "no accelerator available";                                      \
     }
 
-    // Library preconditions are asserts
+    // Library preconditions are asserts. exit_on_abort turns the abort into exit(1),
+    // so another exit code, such as the one of the watchdog, fails the test.
 #define EXPECT_ASSERT_DEATH(statement, regex)                     \
-    EXPECT_DEATH(                                                 \
+    EXPECT_EXIT(                                                  \
         {                                                         \
             rocalution_unit::death_test_watchdog();               \
             std::signal(SIGABRT, rocalution_unit::exit_on_abort); \
             statement;                                            \
         },                                                        \
+        testing::ExitedWithCode(1),                               \
         regex)
 
     // The statement ends the program with exit(1), and the log matches regex
@@ -715,6 +718,8 @@ namespace rocalution_unit
     // all their objects. A skip inside the checks fails the test, as the child
     // cannot report it. A nonzero timeout_s ends a child that hangs with SIGALRM
     // (not on Windows).
+    // gtest does not report the results of a death test child, so the child
+    // writes them to stderr, which the failure message of the parent shows.
     inline void expect_in_child(const std::function<void()>& checks, unsigned timeout_s = 0)
     {
         EXPECT_EXIT(
@@ -725,8 +730,32 @@ namespace rocalution_unit
                     alarm(timeout_s);
                 }
 #endif
-                checks();
-                std::exit(testing::Test::HasFailure() ? 1 : testing::Test::IsSkipped() ? 3 : 0);
+                testing::TestPartResultArray results;
+                {
+                    testing::ScopedFakeTestPartResultReporter reporter(
+                        testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, &results);
+                    checks();
+                }
+
+                int code = 0;
+                for(int i = 0; i < results.size(); ++i)
+                {
+                    const testing::TestPartResult& r = results.GetTestPartResult(i);
+                    std::fprintf(stderr,
+                                 "%s:%d: %s\n",
+                                 r.file_name() != nullptr ? r.file_name() : "unknown file",
+                                 r.line_number(),
+                                 r.message());
+                    if(r.failed())
+                    {
+                        code = 1;
+                    }
+                    else if(r.skipped() && code == 0)
+                    {
+                        code = 3;
+                    }
+                }
+                std::exit(code);
             },
             testing::ExitedWithCode(0),
             "");

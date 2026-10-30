@@ -86,7 +86,9 @@ namespace
 // utils/def.hpp enables assert with NDEBUG, but the HIP sources include ROCm
 // headers afterwards that disable it again, so release builds have no asserts there
 #ifdef NDEBUG
-#define REQUIRE_HIP_ASSERTS() GTEST_SKIP() << "the HIP backend sources have no asserts with NDEBUG"
+#define REQUIRE_HIP_ASSERTS()                                                            \
+    KNOWN_BUG("the HIP sources include ROCm headers after utils/def.hpp, which disable " \
+              "assert again with NDEBUG")
 #else
 #define REQUIRE_HIP_ASSERTS()
 #endif

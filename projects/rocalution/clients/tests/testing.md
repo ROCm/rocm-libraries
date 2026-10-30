@@ -190,11 +190,13 @@ skip.
   it goes after the checks that the bug does not affect, directly before the checks that it does. A
   bug that ends the process (an illegal memory access, an abort, a hang) puts its checks into
   `expect_in_child(checks, timeout_s)` after the `KNOWN_BUG`. With known bugs enabled, the bug then
-  fails one test instead of ending the run. The checks build all their objects inside the child,
-  and checks that can hang get a timeout. Once the bug is fixed, the `KNOWN_BUG` and the
-  `expect_in_child` wrapper are removed.
+  fails one test instead of ending the run, and the child prints the failed checks. The checks build
+  all their objects inside the child, and checks that can hang get a timeout. Once the bug is fixed,
+  the `KNOWN_BUG` and the `expect_in_child` wrapper are removed.
 * **Preconditions and fatal errors.** Library preconditions are asserts, and they are tested with
-  `EXPECT_ASSERT_DEATH(statement, regex)`. `utils/def.hpp` keeps them enabled in Release builds. An
+  `EXPECT_ASSERT_DEATH(statement, regex)`. `utils/def.hpp` keeps them enabled in Release builds of
+  the host sources. The HIP sources include ROCm headers after it that disable them again, so the
+  death tests of HIP asserts are known bugs in Release builds. An
   exit with a logged message is tested with `EXPECT_LOGGED_EXIT(statement, regex)`, and a
   `FATAL_ERROR` with `EXPECT_FATAL_ERROR(statement, file)`. Death tests use the `threadsafe` style,
   which re-executes the binary instead of forking the initialized process. All three macros start a
