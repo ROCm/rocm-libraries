@@ -62,20 +62,27 @@ _COHORT = [
 ]
 
 
-# (dtype, persist_decode, interleave, sliding_window, configs): one persistent
-# binary per row serves every (B, S, Hq, Hkv). With NP = 256 and block_m 256 at
-# D128 the work counts are W < NP, NP < W < 2*NP and W > 2*NP, with W % NP != 0.
-# GQA rows mix ratios 4 and 5 and a non-pow2 Hq; hq_minor_swz needs MHA. The
-# window-free causal D128 rows run the wide-DMA candidate.
+# (dtype, persist_decode, interleave, sliding_window, configs, tile): one
+# persistent binary per row serves every (B, S, Hq, Hkv). GQA rows mix ratios 4
+# and 5 and a non-pow2 Hq; hq_minor_swz needs MHA. The window-free causal D128
+# rows run the wide-DMA candidate.
+#
+# The tile is pinned rather than left to the tuner. ``block_m`` is baked, so two
+# configs on different tiles are two binaries and can never share a cache key,
+# and the tuner halves the query tile for a launch too small to fill the device
+# -- which is exactly the W < NP config every row opens with. Each row names the
+# tile its work counts were sized against: at the 256 tile they straddle NP = 256
+# (W < NP, NP < W < 2*NP, W > 2*NP, W % NP != 0), while the windowed row runs
+# NP = 512, where only the 128 tile reaches past 2*NP.
 _PERSIST_GQA = ((1, 512, 16, 4), (2, 1024, 40, 8), (3, 2048, 28, 4))
 _PERSIST_MHA = ((1, 512, 16, 16), (2, 1024, 48, 48), (3, 2048, 32, 32))
 _PERSIST_ONE_BINARY = [
-    ("bf16", "qb_major", False, 0, _PERSIST_GQA),
-    ("fp16", "qb_major", True, 0, _PERSIST_GQA),
-    ("bf16", "hkv_major", False, 0, _PERSIST_GQA),
-    ("fp16", "bt_hkv_minor", False, 0, _PERSIST_GQA),
-    ("bf16", "hq_minor_swz", False, 0, _PERSIST_MHA),
-    ("bf16", "qb_major", False, 128, _PERSIST_GQA),
+    ("bf16", "qb_major", False, 0, _PERSIST_GQA, "default"),
+    ("fp16", "qb_major", True, 0, _PERSIST_GQA, "default"),
+    ("bf16", "hkv_major", False, 0, _PERSIST_GQA, "default"),
+    ("fp16", "bt_hkv_minor", False, 0, _PERSIST_GQA, "default"),
+    ("bf16", "hq_minor_swz", False, 0, _PERSIST_MHA, "default"),
+    ("bf16", "qb_major", False, 128, _PERSIST_GQA, "bm128"),
 ]
 
 
@@ -531,22 +538,23 @@ class TestDenseNumeric:
     @requires_gfx950_gpu
     @pytest.mark.gpu
     @pytest.mark.parametrize(
-        "dtype,persist_decode,interleave,window,configs", _PERSIST_ONE_BINARY
+        "dtype,persist_decode,interleave,window,configs,tile", _PERSIST_ONE_BINARY
     )
     def test_one_persistent_binary_serves_every_shape_and_head_config(
-        self, dtype, persist_decode, interleave, window, configs
+        self, dtype, persist_decode, interleave, window, configs, tile
     ):
         """The persistent twin of the one-binary tests above.
 
         The persistent body takes batch, both seqlens and both head counts as kernel
-        params; only D, dtype, mask, window, ``num_persistent`` and the decode order
-        stay baked. Its work count is derived in the prologue and the grid-stride
-        decode divides by runtime B / Hq / gqa / NQB through host-computed
-        fast-division magics. A decode that kept a baked shape term, or a magic for
-        the wrong divisor, would map work items to the wrong (qb, hq, bt) for every
-        config but the first compiled: duplicated or skipped tiles only the numeric
-        check sees. The configs straddle NP (W < NP, NP < W < 2*NP, W > 2*NP,
-        W % NP != 0), so idle CTAs, partial last rounds and multiple trips all run.
+        params; only D, dtype, mask, window, the tile geometry, ``num_persistent``
+        and the decode order stay baked. Its work count is derived in the prologue
+        and the grid-stride decode divides by runtime B / Hq / gqa / NQB through
+        host-computed fast-division magics. A decode that kept a baked shape term,
+        or a magic for the wrong divisor, would map work items to the wrong
+        (qb, hq, bt) for every config but the first compiled: duplicated or skipped
+        tiles only the numeric check sees. The configs straddle NP (W < NP,
+        NP < W < 2*NP, W > 2*NP, W % NP != 0), so idle CTAs, partial last rounds
+        and multiple trips all run.
         """
         import torch
 
@@ -558,11 +566,14 @@ class TestDenseNumeric:
         tdt = getattr(torch, _TORCH_DT[dtype])
         scale = 1.0 / math.sqrt(d)
 
+        geometry = DENSE_TILE_GEOMETRIES[tile]
         specs = [
             replace(
                 _spec(dtype, d, hq, hkv, True, batch=b, sq=s, sliding_window=window),
                 persist_decode=persist_decode,
                 interleave=interleave,
+                block_m=int(geometry["block_m"]),
+                block_n=int(geometry["block_n"]),
             )
             for b, s, hq, hkv in configs
         ]

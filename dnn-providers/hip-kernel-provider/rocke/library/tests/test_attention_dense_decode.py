@@ -444,3 +444,47 @@ def test_sliding_window_orders_blocks_as_without_causal_masking(persistent):
         if orders[2] != orders[1]:
             moved.add(name)
     assert moved, "without a window some decode should balance causal work"
+
+
+@pytest.mark.parametrize("segments", (2, 4))
+def test_split_kv_store_reads_the_head_count_at_runtime(segments):
+    """Split-KV writes partial results to a workspace indexed by the head count,
+    and ``check_kv_segments`` does not bar runtime shape, so one binary serves
+    every head count on that path. The whole kernel is built here rather than
+    decoded on ints: the segment store is in the epilogue, past the decode, so
+    only the emitted IR shows whether it took the count from the kernarg or from
+    the spec it happened to be compiled for. A baked count sends another launch's
+    partials to the wrong offsets, and the reduction then reads them back as if
+    they were its own, which no single-head numeric test can see."""
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+    from kernels.gfx950.attention_dense import build_attention_dense
+
+    def spec_for(hq, hkv):
+        return Gfx950AttentionDenseSpec(
+            batch=2,
+            seqlen_q=2048,
+            seqlen_kv=2048,
+            num_query_heads=hq,
+            num_kv_heads=hkv,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+            persistent=False,
+            kv_segments=segments,
+        )
+
+    heads = ((8, 1), (16, 2), (40, 8))
+    specs = [spec_for(hq, hkv) for hq, hkv in heads]
+    for (hq, _), spec in zip(heads, specs):
+        assert (
+            spec.runtime_shape
+        ), f"Hq={hq} is not runtime-shape, so this proves nothing"
+
+    keys = {attention_dense_cache_key(s, arch="gfx950") for s in specs}
+    assert len(keys) == 1, f"expected one cache key over {heads}, got {len(keys)}"
+
+    irs = {str(build_attention_dense(s, arch="gfx950")) for s in specs}
+    assert len(irs) == 1, (
+        f"segments={segments}: {heads} share one cache key but emit {len(irs)} "
+        "distinct kernels, so a head count is baked into the shared binary"
+    )

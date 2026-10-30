@@ -128,16 +128,17 @@ def _compile_or_skip(kernel, *, arch: str):
 _KERNEL_RESOURCE_BUDGETS = {
     # gfx950 dense persistent prefill (runtime shape, so no hq/kv/sq/sk tokens): the
     # 512-thread (8-wave) workgroup pins VGPR at the 256 ceiling independent of
-    # waves_per_eu. The baked body spilled ~20 B; the runtime body keeps the K/V DMA
-    # row offset wave-uniform and fits without spilling, so 32 B is headroom, not
-    # need. Tuned for 2 waves/SIMD (512 VGPR/SIMD // 256).
+    # waves_per_eu, so the occupancy floor is the live constraint. No
+    # ``max_scratch_bytes``: these take the default 0, the same no-spill gate every
+    # other kernel gets. How much a given toolchain spills is a property of that
+    # toolchain, not of the kernel -- the figure moved between ROCm releases while this
+    # body did not -- so the budget asserts the invariant (no spill) rather than
+    # recording any one compiler's number. Tuned for 2 waves/SIMD (512 VGPR/SIMD // 256).
     "rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist256_bthkvmin": {
-        "max_scratch_bytes": 32,
         "min_waves_per_simd": 2,
     },
-    # LSE retains the same persistent occupancy/scratch limits.
+    # LSE retains the same persistent occupancy limit.
     "rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_lse_persist256_bthkvmin": {
-        "max_scratch_bytes": 32,
         "min_waves_per_simd": 2,
     },
     # gfx942 fp16 D128 tiled-2d (shipped default geometry): 2 waves/EU caps VGPR at

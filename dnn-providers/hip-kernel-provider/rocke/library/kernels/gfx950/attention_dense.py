@@ -1723,7 +1723,7 @@ def build_attention_dense(
             segment_params,
             token=b.add(b.mul(bt, seqlen_q_p), qtok),
             head=hq,
-            num_heads=b.const_i32(Hq),
+            num_heads=_hq_count(),
             seg=seg,
             segments=KVS,
             head_size=D,
