@@ -383,15 +383,16 @@ def _decline_lines(out):
 
 
 def _same_engine(inventory_name, logged):
-    """The backend logs an ingestor engine by name and an ASM builder by class name."""
+    """The backend logs an ingestor engine by its name and an ASM builder by class name.
+
+    Rules: equal names, or one a ``:``-suffix of the other; or the logged name is a
+    ``...PlanBuilder`` class and the inventory name is a built-in engine (no ``:``) naming SDPA
+    (``ASM_SDPA_ENGINE`` against ``SdpaFwdPlanBuilder`` / ``SdpaBwdPlanBuilder``).
+    """
     a, b = inventory_name.lower(), logged.lower()
-    squash = lambda t: re.sub(r"[^a-z0-9]", "", t)
-    return (
-        a == b
-        or a.endswith(":" + b)
-        or squash(b) in squash(a)
-        or squash(a) in squash(b)
-    )
+    if a == b or a.endswith(":" + b) or b.endswith(":" + a):
+        return True
+    return b.endswith("planbuilder") and ":" not in a and "sdpa" in a and "sdpa" in b
 
 
 def inventory_summary(out, rows, reasons=3):
