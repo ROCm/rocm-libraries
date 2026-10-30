@@ -1,0 +1,293 @@
+{
+  "version": "1.0",
+  "id": "9bc46486-77db-4d50-9766-4e985a5e8099",
+  "name": "hipkernel:gfx942_conv_fwd_aot_fp16_compv4_plain",
+  "matchers": [
+    "f6e2dbe3-be08-4080-8044-889c4d10da1e"
+  ],
+  "engine": "345e0669-1b0a-491d-8f17-495d60c6e0ce",
+  "dispatch": "62111e0e-b616-4115-aab6-59da30191168",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "345e0669-1b0a-491d-8f17-495d60c6e0ce",
+          "kmd_id": "3a83a52f-392f-4a05-bfbf-20b027ede0fd",
+          "metadata_fields": [
+            "dtype",
+            "tile_m",
+            "tile_n",
+            "tile_k",
+            "warp_m",
+            "warp_n",
+            "warp_tile_m",
+            "warp_tile_n",
+            "warp_tile_k",
+            "wave_size",
+            "pipeline",
+            "epilogue",
+            "vector_size_a",
+            "vector_size_b",
+            "vector_size_c",
+            "unroll_k",
+            "async_dma",
+            "async_chunk_a",
+            "async_chunk_b",
+            "grouped",
+            "instance_id",
+            "layout",
+            "kernel_family",
+            "direct_variant",
+            "filter_h",
+            "filter_w",
+            "stride_h",
+            "stride_w",
+            "pad_h",
+            "pad_w",
+            "dilation_h",
+            "dilation_w",
+            "block_w",
+            "block_waves",
+            "block_h",
+            "unroll_rows",
+            "block_q",
+            "block_groups",
+            "double_buffer",
+            "cpg",
+            "kpg",
+            "tile_h",
+            "tile_w",
+            "tile_k_out",
+            "ck",
+            "waves_m",
+            "waves_n",
+            "atom",
+            "swizzle_wgm",
+            "iglp",
+            "waves_per_eu",
+            "group_merge",
+            "split_c",
+            "prefetch_rows",
+            "w_fold"
+          ],
+          "matcher_only_fields": [],
+          "bindings": {
+            "dtype": {
+              "field": "dtype"
+            },
+            "tile_m": {
+              "field": "tile_m"
+            },
+            "tile_n": {
+              "field": "tile_n"
+            },
+            "tile_k": {
+              "field": "tile_k"
+            },
+            "warp_m": {
+              "field": "warp_m"
+            },
+            "warp_n": {
+              "field": "warp_n"
+            },
+            "warp_tile_m": {
+              "field": "warp_tile_m"
+            },
+            "warp_tile_n": {
+              "field": "warp_tile_n"
+            },
+            "warp_tile_k": {
+              "field": "warp_tile_k"
+            },
+            "wave_size": {
+              "field": "wave_size"
+            },
+            "pipeline": {
+              "field": "pipeline"
+            },
+            "epilogue": {
+              "field": "epilogue"
+            },
+            "vector_size_a": {
+              "field": "vector_size_a"
+            },
+            "vector_size_b": {
+              "field": "vector_size_b"
+            },
+            "vector_size_c": {
+              "field": "vector_size_c"
+            },
+            "unroll_k": {
+              "field": "unroll_k"
+            },
+            "async_dma": {
+              "field": "async_dma"
+            },
+            "async_chunk_a": {
+              "field": "async_chunk_a"
+            },
+            "async_chunk_b": {
+              "field": "async_chunk_b"
+            },
+            "grouped": {
+              "field": "grouped"
+            },
+            "instance_id": {
+              "field": "instance_id"
+            },
+            "layout": {
+              "field": "layout"
+            },
+            "kernel_family": {
+              "field": "kernel_family"
+            },
+            "direct_variant": {
+              "field": "direct_variant"
+            },
+            "filter_h": {
+              "field": "filter_h"
+            },
+            "filter_w": {
+              "field": "filter_w"
+            },
+            "stride_h": {
+              "field": "stride_h"
+            },
+            "stride_w": {
+              "field": "stride_w"
+            },
+            "pad_h": {
+              "field": "pad_h"
+            },
+            "pad_w": {
+              "field": "pad_w"
+            },
+            "dilation_h": {
+              "field": "dilation_h"
+            },
+            "dilation_w": {
+              "field": "dilation_w"
+            },
+            "block_w": {
+              "field": "block_w"
+            },
+            "block_waves": {
+              "field": "block_waves"
+            },
+            "block_h": {
+              "field": "block_h"
+            },
+            "unroll_rows": {
+              "field": "unroll_rows"
+            },
+            "block_q": {
+              "field": "block_q"
+            },
+            "block_groups": {
+              "field": "block_groups"
+            },
+            "double_buffer": {
+              "field": "double_buffer"
+            },
+            "cpg": {
+              "field": "cpg"
+            },
+            "kpg": {
+              "field": "kpg"
+            },
+            "tile_h": {
+              "field": "tile_h"
+            },
+            "tile_w": {
+              "field": "tile_w"
+            },
+            "tile_k_out": {
+              "field": "tile_k_out"
+            },
+            "ck": {
+              "field": "ck"
+            },
+            "waves_m": {
+              "field": "waves_m"
+            },
+            "waves_n": {
+              "field": "waves_n"
+            },
+            "atom": {
+              "field": "atom"
+            },
+            "swizzle_wgm": {
+              "field": "swizzle_wgm"
+            },
+            "iglp": {
+              "field": "iglp"
+            },
+            "waves_per_eu": {
+              "field": "waves_per_eu"
+            },
+            "group_merge": {
+              "field": "group_merge"
+            },
+            "split_c": {
+              "field": "split_c"
+            },
+            "prefetch_rows": {
+              "field": "prefetch_rows"
+            },
+            "w_fold": {
+              "field": "w_fold"
+            }
+          },
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {"version":"1.0","id":"f18bb02c-5944-48f1-9659-d57cd4df8271","name":"gfx942_conv_fwd_aot_fp16_01ae01d57ed78f81de093aa74dfd9ffb30e8d1fb","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":256,"tile_n":128,"tile_k":64,"warp_m":8,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"01ae01d57ed78f81de093aa74dfd9ffb30e8d1fb","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":256,"tile_n":128,"tile_k":64,"warp_m":8,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"01ae01d57ed78f81de093aa74dfd9ffb30e8d1fb","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"e513c7d7-58ef-4624-b3d1-477ac6699da2","name":"gfx942_conv_fwd_aot_fp16_0d31fa19ae43ac77a6609249f56dc8a5a835dfe7","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":64,"tile_k":64,"warp_m":4,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"0d31fa19ae43ac77a6609249f56dc8a5a835dfe7","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":64,"tile_k":64,"warp_m":4,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"0d31fa19ae43ac77a6609249f56dc8a5a835dfe7","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"043a3697-a46b-4527-bd3b-5e2e2da02184","name":"gfx942_conv_fwd_aot_fp16_14efb7782fcaadd16f9c6fd3e363a6f039f0ecde","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":16,"tile_k":64,"warp_m":2,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"14efb7782fcaadd16f9c6fd3e363a6f039f0ecde","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":16,"tile_k":64,"warp_m":2,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"14efb7782fcaadd16f9c6fd3e363a6f039f0ecde","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"9e283985-879d-481f-9605-ff82b96b32c8","name":"gfx942_conv_fwd_aot_fp16_16aea976bb0199f30750ac4e0415be9841fdc6b5","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":32,"tile_k":16,"warp_m":2,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"16aea976bb0199f30750ac4e0415be9841fdc6b5","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":32,"tile_k":16,"warp_m":2,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"16aea976bb0199f30750ac4e0415be9841fdc6b5","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"18b5e2fb-c5a3-49c2-80cf-ae920b71d8be","name":"gfx942_conv_fwd_aot_fp16_1a31be16678ed484cacfa9e412965e44a9f11b45","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":32,"tile_n":32,"tile_k":32,"warp_m":1,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"1a31be16678ed484cacfa9e412965e44a9f11b45","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":32,"tile_n":32,"tile_k":32,"warp_m":1,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"1a31be16678ed484cacfa9e412965e44a9f11b45","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"b30824dc-dd5e-4e0d-a5b0-57e1f94328e4","name":"gfx942_conv_fwd_aot_fp16_34c05a6cd0462430df6c501dd275b84e980129f0","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":256,"tile_k":64,"warp_m":2,"warp_n":4,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"34c05a6cd0462430df6c501dd275b84e980129f0","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":256,"tile_k":64,"warp_m":2,"warp_n":4,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"34c05a6cd0462430df6c501dd275b84e980129f0","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"6a74f9ce-da5a-42d9-b540-d43ec694581d","name":"gfx942_conv_fwd_aot_fp16_36d9fdedfa01f75c7200b6d2176cd67a767ad0b8","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":16,"tile_k":64,"warp_m":2,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"default","vector_size_a":8,"vector_size_b":8,"vector_size_c":1,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"36d9fdedfa01f75c7200b6d2176cd67a767ad0b8","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":16,"tile_k":64,"warp_m":2,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"default","vector_size_a":8,"vector_size_b":8,"vector_size_c":1,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"36d9fdedfa01f75c7200b6d2176cd67a767ad0b8","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"e236bf8f-2049-436c-a2d5-e4e0e7277d74","name":"gfx942_conv_fwd_aot_fp16_4a1e9ef379d1c997895f9239cd447d83c3bfcaac","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":64,"tile_n":128,"tile_k":64,"warp_m":2,"warp_n":2,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"4a1e9ef379d1c997895f9239cd447d83c3bfcaac","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":64,"tile_n":128,"tile_k":64,"warp_m":2,"warp_n":2,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"4a1e9ef379d1c997895f9239cd447d83c3bfcaac","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"431efc6c-f91f-43c4-817d-8c523a57772a","name":"gfx942_conv_fwd_aot_fp16_4a2473326d0fbee726b1ad96ec70696dca2d4216","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":64,"tile_n":128,"tile_k":32,"warp_m":2,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"4a2473326d0fbee726b1ad96ec70696dca2d4216","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":64,"tile_n":128,"tile_k":32,"warp_m":2,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"4a2473326d0fbee726b1ad96ec70696dca2d4216","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"840de2cf-5302-429f-9abc-bb1d980bf192","name":"gfx942_conv_fwd_aot_fp16_4ebd6fdd3ee95bc90eb9d83f2bd2f82bb6f3aa1b","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":64,"tile_n":16,"tile_k":32,"warp_m":1,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"default","vector_size_a":8,"vector_size_b":8,"vector_size_c":1,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"4ebd6fdd3ee95bc90eb9d83f2bd2f82bb6f3aa1b","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":64,"tile_n":16,"tile_k":32,"warp_m":1,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"default","vector_size_a":8,"vector_size_b":8,"vector_size_c":1,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"4ebd6fdd3ee95bc90eb9d83f2bd2f82bb6f3aa1b","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"dd7a20c1-0172-4217-953d-5fe2069e6181","name":"gfx942_conv_fwd_aot_fp16_4fb99c68e4669d986f2b4f85a697d2010b9926de","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":64,"tile_k":64,"warp_m":4,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"4fb99c68e4669d986f2b4f85a697d2010b9926de","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":64,"tile_k":64,"warp_m":4,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"4fb99c68e4669d986f2b4f85a697d2010b9926de","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"d984d74a-ebd6-4bfe-85a6-e25bdd201143","name":"gfx942_conv_fwd_aot_fp16_57439efdb39deff7fb5434da9d4129dbf4b41e02","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":16,"tile_k":32,"warp_m":1,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"57439efdb39deff7fb5434da9d4129dbf4b41e02","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":16,"tile_k":32,"warp_m":1,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"57439efdb39deff7fb5434da9d4129dbf4b41e02","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"ab9958c1-9795-4ad3-b978-e0345c5169e6","name":"gfx942_conv_fwd_aot_fp16_59c9ce3aeb72fc1b596a75ae379713d6c197b5e9","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":128,"tile_k":32,"warp_m":2,"warp_n":4,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"59c9ce3aeb72fc1b596a75ae379713d6c197b5e9","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":128,"tile_k":32,"warp_m":2,"warp_n":4,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"59c9ce3aeb72fc1b596a75ae379713d6c197b5e9","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"f9465fe6-45b4-48c5-8d9d-271eb5ae4af6","name":"gfx942_conv_fwd_aot_fp16_5e92aed36b398fd680d6b4ce62a087364b8bb880","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":64,"tile_k":64,"warp_m":2,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"5e92aed36b398fd680d6b4ce62a087364b8bb880","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":64,"tile_k":64,"warp_m":2,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"5e92aed36b398fd680d6b4ce62a087364b8bb880","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"24ec8954-64d3-4637-854e-3879b32ac6f5","name":"gfx942_conv_fwd_aot_fp16_62030794290be773f130312a850a1c402536bbbd","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":256,"tile_n":64,"tile_k":32,"warp_m":4,"warp_n":1,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"62030794290be773f130312a850a1c402536bbbd","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":256,"tile_n":64,"tile_k":32,"warp_m":4,"warp_n":1,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"62030794290be773f130312a850a1c402536bbbd","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"1ef71f95-de2a-4752-856c-656192dcd6cd","name":"gfx942_conv_fwd_aot_fp16_6357be0e0ee6276904c13481de4bed5bb6e2bc52","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":32,"tile_k":64,"warp_m":4,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":4,"vector_size_b":4,"vector_size_c":4,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"6357be0e0ee6276904c13481de4bed5bb6e2bc52","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":32,"tile_k":64,"warp_m":4,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":4,"vector_size_b":4,"vector_size_c":4,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"6357be0e0ee6276904c13481de4bed5bb6e2bc52","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"3eae5d91-427c-4c95-b6b9-71161fa0f5ef","name":"gfx942_conv_fwd_aot_fp16_63a1e1e84176300937f52b7a084f24c135c5afd2","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":32,"tile_k":16,"warp_m":4,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"63a1e1e84176300937f52b7a084f24c135c5afd2","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":32,"tile_k":16,"warp_m":4,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"63a1e1e84176300937f52b7a084f24c135c5afd2","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"1bd9be8f-bd1f-4451-8e08-3fd7b8de319d","name":"gfx942_conv_fwd_aot_fp16_68b5dbfeee97c519e03b5045552e9dc885f0eb18","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":64,"tile_n":128,"tile_k":64,"warp_m":2,"warp_n":4,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"68b5dbfeee97c519e03b5045552e9dc885f0eb18","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":64,"tile_n":128,"tile_k":64,"warp_m":2,"warp_n":4,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"68b5dbfeee97c519e03b5045552e9dc885f0eb18","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"52661fbc-63ca-45f3-ab5b-300a98b56e59","name":"gfx942_conv_fwd_aot_fp16_69c23d8548b45c6993e6894e68ed45f66a07c6c4","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":64,"tile_n":32,"tile_k":64,"warp_m":2,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"69c23d8548b45c6993e6894e68ed45f66a07c6c4","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":64,"tile_n":32,"tile_k":64,"warp_m":2,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"69c23d8548b45c6993e6894e68ed45f66a07c6c4","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"e00f6b60-f3ba-4ac0-ba78-2e50b5139c68","name":"gfx942_conv_fwd_aot_fp16_6f5fe1c5f4890d44efb4490dac5ad3d61c1d39fb","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":128,"tile_k":32,"warp_m":2,"warp_n":4,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"6f5fe1c5f4890d44efb4490dac5ad3d61c1d39fb","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":128,"tile_k":32,"warp_m":2,"warp_n":4,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"6f5fe1c5f4890d44efb4490dac5ad3d61c1d39fb","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"d225c0bb-ee6a-46a7-9950-529105eb1e19","name":"gfx942_conv_fwd_aot_fp16_71fc133078b602beb22fcb15db64d07a572af61e","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":64,"tile_n":32,"tile_k":32,"warp_m":1,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"71fc133078b602beb22fcb15db64d07a572af61e","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":64,"tile_n":32,"tile_k":32,"warp_m":1,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"71fc133078b602beb22fcb15db64d07a572af61e","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"61f04919-131f-4b21-bf4d-de8824a45a5c","name":"gfx942_conv_fwd_aot_fp16_78b3242d9f9599e54b6e4a17a53b1506e8c45266","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":64,"tile_k":64,"warp_m":2,"warp_n":2,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"78b3242d9f9599e54b6e4a17a53b1506e8c45266","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":64,"tile_k":64,"warp_m":2,"warp_n":2,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"78b3242d9f9599e54b6e4a17a53b1506e8c45266","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"5a330cd7-56e7-4cdc-aa73-a74591ba4052","name":"gfx942_conv_fwd_aot_fp16_8a5257ad99ff437641ccb2eaed7642d91f4cd591","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":16,"tile_k":64,"warp_m":2,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":1,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"8a5257ad99ff437641ccb2eaed7642d91f4cd591","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":16,"tile_k":64,"warp_m":2,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":1,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"8a5257ad99ff437641ccb2eaed7642d91f4cd591","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"d90e3d3a-9e51-4abf-b625-e55f368118c5","name":"gfx942_conv_fwd_aot_fp16_8b30a7236afbf0d97857f5e19a63d55511636f77","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":64,"tile_n":32,"tile_k":64,"warp_m":4,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"8b30a7236afbf0d97857f5e19a63d55511636f77","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":64,"tile_n":32,"tile_k":64,"warp_m":4,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"8b30a7236afbf0d97857f5e19a63d55511636f77","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"cf08eb1b-9f0d-4911-82c8-793c0a47692f","name":"gfx942_conv_fwd_aot_fp16_8e97bd97a45fd71634603bb3ff7527bc5d0c8076","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":256,"tile_n":64,"tile_k":16,"warp_m":4,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"8e97bd97a45fd71634603bb3ff7527bc5d0c8076","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":256,"tile_n":64,"tile_k":16,"warp_m":4,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"8e97bd97a45fd71634603bb3ff7527bc5d0c8076","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"7bd1ae99-7943-48d9-9173-c0cf6c7d8f42","name":"gfx942_conv_fwd_aot_fp16_8f9b891f15f426181a931a37cfbc257d77004473","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":64,"tile_n":128,"tile_k":64,"warp_m":2,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"8f9b891f15f426181a931a37cfbc257d77004473","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":64,"tile_n":128,"tile_k":64,"warp_m":2,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"8f9b891f15f426181a931a37cfbc257d77004473","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"f315b675-327d-4e73-954b-34fc9bc6fa4f","name":"gfx942_conv_fwd_aot_fp16_9382f81ca625fd08d08cd5929a7022a357840600","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":64,"tile_k":16,"warp_m":1,"warp_n":4,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"9382f81ca625fd08d08cd5929a7022a357840600","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":64,"tile_k":16,"warp_m":1,"warp_n":4,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"9382f81ca625fd08d08cd5929a7022a357840600","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"b4fb9079-c3a4-4395-88b5-b12bfd8f7e18","name":"gfx942_conv_fwd_aot_fp16_9d65e1c4f0f00b90f3c880ebd98f97562a9b7205","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":256,"tile_n":32,"tile_k":16,"warp_m":4,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"9d65e1c4f0f00b90f3c880ebd98f97562a9b7205","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":256,"tile_n":32,"tile_k":16,"warp_m":4,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"9d65e1c4f0f00b90f3c880ebd98f97562a9b7205","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"570a778c-4710-44a9-a504-f2ac4f050c2b","name":"gfx942_conv_fwd_aot_fp16_9eb2fcb6c6b11e0d78fff183838e9ee1e579735e","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":256,"tile_n":128,"tile_k":64,"warp_m":4,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"9eb2fcb6c6b11e0d78fff183838e9ee1e579735e","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":256,"tile_n":128,"tile_k":64,"warp_m":4,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"9eb2fcb6c6b11e0d78fff183838e9ee1e579735e","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"12accb8c-04c5-4360-99df-d76ec2b33e45","name":"gfx942_conv_fwd_aot_fp16_a8beeb1fe5d017f58fc32e80d092775a25dc5853","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":256,"tile_n":128,"tile_k":64,"warp_m":2,"warp_n":4,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"a8beeb1fe5d017f58fc32e80d092775a25dc5853","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":256,"tile_n":128,"tile_k":64,"warp_m":2,"warp_n":4,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"a8beeb1fe5d017f58fc32e80d092775a25dc5853","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"4b46cd00-f71b-47bf-b45f-784b2350538a","name":"gfx942_conv_fwd_aot_fp16_c2334e1272a35fe73a26d2d1e94f861777495480","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":64,"tile_n":64,"tile_k":64,"warp_m":2,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"c2334e1272a35fe73a26d2d1e94f861777495480","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":64,"tile_n":64,"tile_k":64,"warp_m":2,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"c2334e1272a35fe73a26d2d1e94f861777495480","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"ef417ab5-5717-4c0e-8b00-d5e8addda429","name":"gfx942_conv_fwd_aot_fp16_dd8ccf97d42cf461fd58bf3eb2ca38f93931ddae","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":32,"tile_k":16,"warp_m":1,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"dd8ccf97d42cf461fd58bf3eb2ca38f93931ddae","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":32,"tile_k":16,"warp_m":1,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"dd8ccf97d42cf461fd58bf3eb2ca38f93931ddae","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"2af538fb-2cfb-46ad-8087-5e00cc067537","name":"gfx942_conv_fwd_aot_fp16_e3218e2feaf3acd1031748b356e870b7ecf95783","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":64,"tile_n":128,"tile_k":16,"warp_m":4,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"e3218e2feaf3acd1031748b356e870b7ecf95783","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":64,"tile_n":128,"tile_k":16,"warp_m":4,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"e3218e2feaf3acd1031748b356e870b7ecf95783","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"6602b132-e787-488f-ba8c-f8aeab9e0a52","name":"gfx942_conv_fwd_aot_fp16_e862906b91dfcf4c948a8b90d065097c6c0e7a20","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":32,"tile_k":32,"warp_m":4,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":4,"vector_size_b":4,"vector_size_c":4,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"e862906b91dfcf4c948a8b90d065097c6c0e7a20","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":32,"tile_k":32,"warp_m":4,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":4,"vector_size_b":4,"vector_size_c":4,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"e862906b91dfcf4c948a8b90d065097c6c0e7a20","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"ec64f0fa-eca6-4191-a559-b3918f73616e","name":"gfx942_conv_fwd_aot_fp16_f7141e376213497727b0dda00c75e6063302cd47","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":64,"tile_k":32,"warp_m":2,"warp_n":2,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"f7141e376213497727b0dda00c75e6063302cd47","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":64,"tile_k":32,"warp_m":2,"warp_n":2,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"f7141e376213497727b0dda00c75e6063302cd47","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"92b193a5-b02f-4c2f-86d0-22ab9483cc2f","name":"gfx942_conv_fwd_aot_merged_fp16_259891002a7d95b4014d79c2796aeb6135f2ea77","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":64,"tile_n":16,"tile_k":32,"warp_m":1,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":0,"vector_size_b":0,"vector_size_c":0,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"259891002a7d95b4014d79c2796aeb6135f2ea77","layout":"NHWC","group_merge":16}},"metadata":{"dtype":"fp16","tile_m":64,"tile_n":16,"tile_k":32,"warp_m":1,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":0,"vector_size_b":0,"vector_size_c":0,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"259891002a7d95b4014d79c2796aeb6135f2ea77","layout":"NHWC","group_merge":16},"priority":0},
+    {"version":"1.0","id":"b5276392-75c7-4ec2-ba03-0a39a11b4fdb","name":"gfx942_conv_fwd_aot_merged_fp16_29faafedb30cc6749024f2442b325193955a81a2","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":16,"tile_k":64,"warp_m":2,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":0,"vector_size_b":0,"vector_size_c":0,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"29faafedb30cc6749024f2442b325193955a81a2","layout":"NHWC","group_merge":16}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":16,"tile_k":64,"warp_m":2,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":0,"vector_size_b":0,"vector_size_c":0,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"29faafedb30cc6749024f2442b325193955a81a2","layout":"NHWC","group_merge":16},"priority":0},
+    {"version":"1.0","id":"0c305056-d79c-4aac-a214-2ad187a58776","name":"gfx942_conv_fwd_aot_merged_fp16_49b044534c931ab140d69ce470aa2590db014f6a","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":256,"tile_n":32,"tile_k":32,"warp_m":2,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":0,"vector_size_b":0,"vector_size_c":0,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"49b044534c931ab140d69ce470aa2590db014f6a","layout":"NHWC","group_merge":32}},"metadata":{"dtype":"fp16","tile_m":256,"tile_n":32,"tile_k":32,"warp_m":2,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":0,"vector_size_b":0,"vector_size_c":0,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"49b044534c931ab140d69ce470aa2590db014f6a","layout":"NHWC","group_merge":32},"priority":0},
+    {"version":"1.0","id":"544c750a-a086-495f-a7b7-dee584bfb233","name":"gfx942_conv_fwd_aot_merged_fp16_4bb9ab7366fd1bc51f5a54815000a917a3f3dc66","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":32,"tile_n":16,"tile_k":32,"warp_m":1,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":0,"vector_size_b":0,"vector_size_c":0,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"4bb9ab7366fd1bc51f5a54815000a917a3f3dc66","layout":"NHWC","group_merge":16}},"metadata":{"dtype":"fp16","tile_m":32,"tile_n":16,"tile_k":32,"warp_m":1,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":0,"vector_size_b":0,"vector_size_c":0,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"4bb9ab7366fd1bc51f5a54815000a917a3f3dc66","layout":"NHWC","group_merge":16},"priority":0},
+    {"version":"1.0","id":"8e764fae-de00-4194-8086-8ae6a5b6c227","name":"gfx942_conv_fwd_aot_merged_fp16_bae75e488fc1fedbe964205c9df076fd143bf1dd","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":32,"tile_k":32,"warp_m":2,"warp_n":1,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":0,"vector_size_b":0,"vector_size_c":0,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"bae75e488fc1fedbe964205c9df076fd143bf1dd","layout":"NHWC","group_merge":32}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":32,"tile_k":32,"warp_m":2,"warp_n":1,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":0,"vector_size_b":0,"vector_size_c":0,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"bae75e488fc1fedbe964205c9df076fd143bf1dd","layout":"NHWC","group_merge":32},"priority":0},
+    {"version":"1.0","id":"dbd62d16-dd57-4b8b-9132-3041e6d66b81","name":"gfx942_conv_fwd_aot_merged_fp16_ebb4b0c0bfd96f3cdc607178a45f0dfbb35d6bba","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward_gfx942.py","builder":"build_gfx942_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":32,"tile_k":64,"warp_m":4,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":0,"vector_size_b":0,"vector_size_c":0,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"ebb4b0c0bfd96f3cdc607178a45f0dfbb35d6bba","layout":"NHWC","group_merge":32}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":32,"tile_k":64,"warp_m":4,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"compv4","epilogue":"cshuffle","vector_size_a":0,"vector_size_b":0,"vector_size_c":0,"unroll_k":0,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"ebb4b0c0bfd96f3cdc607178a45f0dfbb35d6bba","layout":"NHWC","group_merge":32},"priority":0}
+  ],
+  "arch": [
+    "gfx942"
+  ]
+}

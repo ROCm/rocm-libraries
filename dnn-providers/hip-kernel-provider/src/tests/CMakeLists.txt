@@ -361,6 +361,34 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "gfx950, so its census is not registered.")
     endif()
 
+    # Census for the gfx942 (MI300X) shape-generic AOT-instance pack,
+    # hipkernel:Gfx942ConvFwdAot. No hipkernel:Gfx942ConvFwd (exact-shape) or
+    # hipkernel:Gfx942ConvFwdAotSeed is shipped, so there is nothing to mirror those
+    # two blocks above for gfx942.
+    hkp_gfx942_conv_fwd_aot_available(_hkp_gfx942_conv_fwd_aot)
+    if(_hkp_gfx942_conv_fwd_aot)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx942
+            SUITES TestGfx942ConvFwdAotPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx942ConvFwdAot for "
+            "gfx942, so its census is not registered.")
+    endif()
+
     # Census for hipkernel:Gfx950ConvFwdAotSeed, the test-only seed catalog the
     # integration root carries. It reads that root's own shard, which this binary
     # otherwise never loads, so it also needs that pack built.

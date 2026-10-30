@@ -1474,6 +1474,40 @@ function(_hkp_root_ships_for_gfx950 out_var root engine)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_root_ships_for_gfx942(<out> <root> <engine>)
+#   The gfx942 (MI300X) counterpart of _hkp_root_ships_for_gfx950() above: same
+#   conjuncts, probe and fallback, for the gfx942 architecture. Not parametrized into
+#   one shared _hkp_root_ships_for_arch(), to match that function's own established
+#   per-arch duplication rather than refactor working gfx950 code as a side effect of
+#   this change.
+# ---------------------------------------------------------------------------
+function(_hkp_root_ships_for_gfx942 out_var root engine)
+    set(${out_var} FALSE PARENT_SCOPE)
+
+    get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
+    if(NOT "${root}" IN_LIST _labels)
+        return()
+    endif()
+
+    get_property(_arches GLOBAL PROPERTY HKP_PACK_ARCHES_${root})
+    if(NOT "gfx942" IN_LIST _arches)
+        return()
+    endif()
+
+    get_property(_probe_ok GLOBAL PROPERTY HKP_PACK_PROBE_OK_${root})
+    if(NOT _probe_ok)
+        set(${out_var} "${HIPKERNELPROVIDER_ENABLE_ROCKE}" PARENT_SCOPE)
+        return()
+    endif()
+
+    get_property(_shipped GLOBAL PROPERTY HKP_PACK_SHIPPED_ENGINES_${root})
+    _hkp_shipped_engines_for_arch(_engines "${_shipped}" gfx942)
+    if("${engine}" IN_LIST _engines)
+        set(${out_var} TRUE PARENT_SCOPE)
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_gfx950_conv_fwd_available(<out>)
 #   TRUE when this configuration actually ships the gfx950 forward-convolution bundle,
 #   hipkernel:Gfx950ConvFwd, from the `product` root; see _hkp_root_ships_for_gfx950().
@@ -1490,6 +1524,18 @@ endfunction()
 # ---------------------------------------------------------------------------
 function(hkp_gfx950_conv_fwd_aot_available out_var)
     _hkp_root_ships_for_gfx950(_ships product "hipkernel:Gfx950ConvFwdAot")
+    set(${out_var} "${_ships}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_gfx942_conv_fwd_aot_available(<out>)
+#   The same predicate for the gfx942 (MI300X) shape-generic AOT-instance engine,
+#   hipkernel:Gfx942ConvFwdAot, which ships its own bundle. No gfx942 exact-shape
+#   engine (hipkernel:Gfx942ConvFwd) is shipped, so there is no
+#   hkp_gfx942_conv_fwd_available() to mirror hkp_gfx950_conv_fwd_available() above.
+# ---------------------------------------------------------------------------
+function(hkp_gfx942_conv_fwd_aot_available out_var)
+    _hkp_root_ships_for_gfx942(_ships product "hipkernel:Gfx942ConvFwdAot")
     set(${out_var} "${_ships}" PARENT_SCOPE)
 endfunction()
 

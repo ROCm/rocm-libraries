@@ -65,6 +65,14 @@ void resetGfx950ConvFwdModuleCache();
 /// @see packs/Gfx950ConvFwdNative.cpp (hipkernel:Gfx950ConvFwdAot)
 void registerGfx950ConvFwdAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950ConvFwdAotModuleCache();
+
+/// @see packs/Gfx942ConvFwdNative.cpp (hipkernel:Gfx942ConvFwdAot; the file's
+/// registerGfx942ConvFwdSymbols()/resetGfx942ConvFwdModuleCache(), mirroring gfx950's
+/// exact-shape hipkernel:Gfx950ConvFwd, are ported but intentionally not declared or
+/// wired here: this integration ships the AOT engine only, see mi300plan.md)
+void registerGfx942ConvFwdAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx942ConvFwdAotModuleCache();
+
 /// @see packs/Gfx1151WmmaAttentionNative.cpp
 void registerGfx1151WmmaAttentionSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx1151WmmaAttentionModuleCache();

@@ -19,6 +19,8 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdAotSelection.cpp
+    # No TestGfx942ConvFwd{Matchers,Geometry,AotSelection}.cpp yet: this integration
+    # ships only the AOT engine's generated census test (below), see mi300plan.md.
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestIngestorDispatchAliases.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPackLaunchValues.cpp
@@ -53,6 +55,7 @@ target_sources(hip_kernel_provider_census_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdAotPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdAotSeedPacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942ConvFwdAotPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseCatalogTiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionPacks.cpp
 )
