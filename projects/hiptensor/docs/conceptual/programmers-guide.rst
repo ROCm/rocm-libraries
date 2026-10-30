@@ -179,8 +179,8 @@ and the generic kernel), checking every capability on the host without launching
    among all of them, so a contraction takes, for example, the ring GETT, the contraction JIT's route or a
    GEMM route, whichever its model predicts fastest. Whether the plan specializes its elementwise launches
    with the JIT (``HIPTENSOR_JIT_MODE_DEFAULT``) is a feature: those launches (the operand packing and
-   epilogue of the GEMM routes, for example) then run faster, so the gfx950 models are trained on timings of
-   both plan modes. Their training problems include contractions without contracted modes (outer products).
+   epilogue of the GEMM routes, for example) then run faster, so the gfx950 and gfx942 models are trained on
+   timings of both plan modes. Their training problems include contractions without contracted modes (outer products).
    A model whose features include the contraction JIT planner's predicted time names the GEMM selection
    models of that planner it was trained with; with other ones (another ``gemm_models`` directory next to
    the pack) it isn't used for problems with a contraction JIT candidate, and the plan log says why. Selection
@@ -466,7 +466,8 @@ labels or in another order, takes them without compiling, and the kernel cache f
 or builder error, ``HIPTENSOR_JIT_MAX_MS`` spent before a compile) isn't selected: the plan takes the next
 candidate. Like the route tables' launches, the route runs the direct GETT when alpha is zero, or beta is zero
 for a contraction with C, when a buffer or the workspace isn't aligned to its 16-byte accesses, and on another
-device than the plan's (its kernels are loaded on the plan's device only). Its workspace (the packed operands) is
+device than the plan's (its kernels are loaded on the plan's device only); the heuristics log of
+``hiptensorContract`` says when a plan runs its fallback and why. Its workspace (the packed operands) is
 in the estimate of ``hiptensorEstimateWorkspaceSize`` for a ``HIPTENSOR_JIT_MODE_DEFAULT`` preference; with a
 smaller limit the plan takes another route. Contractions the planner doesn't serve (other data types or
 operators, batch modes, K extents that the GEMM bodies' K tiles don't divide, layouts without a 4-byte run)

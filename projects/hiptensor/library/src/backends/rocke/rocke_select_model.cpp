@@ -142,10 +142,10 @@ namespace hiptensor
                 }
                 if(model.format == 3)
                 {
-                    auto const gemm   = head[4].rfind("gemm=", 0) == 0 ? head[4].substr(5) : "?";
-                    bool const hex256 = gemm.size() == 64
-                                        && gemm.find_first_not_of("0123456789abcdef")
-                                               == std::string::npos;
+                    auto const gemm = head[4].rfind("gemm=", 0) == 0 ? head[4].substr(5) : "?";
+                    bool const hex256
+                        = gemm.size() == 64
+                          && gemm.find_first_not_of("0123456789abcdef") == std::string::npos;
                     if(gemm != "-" && !hex256)
                     {
                         why = "malformed model header (gemm)";
@@ -264,57 +264,57 @@ namespace hiptensor
                 // The feature schema (version kSelectSchema). Append only; a change of meaning is a
                 // new schema version.
                 static std::vector<char const*> const names = {"op",
-                                                                "dtype",
-                                                                "out_dtype",
-                                                                "compute16",
-                                                                "bilinear",
-                                                                "opnd_op",
-                                                                "lg_m",
-                                                                "lg_n",
-                                                                "lg_k",
-                                                                "lg_l",
-                                                                "lg_mnk",
-                                                                "modes_m",
-                                                                "modes_n",
-                                                                "modes_k",
-                                                                "modes_l",
-                                                                "unit_a",
-                                                                "unit_b",
-                                                                "unit_d",
-                                                                "lg_inner",
-                                                                "lg_inner_kept",
-                                                                "route",
-                                                                "f64route",
-                                                                "body",
-                                                                "tile_m",
-                                                                "tile_n",
-                                                                "tile_k",
-                                                                "block",
-                                                                "persistent",
-                                                                "streamk",
-                                                                "kblock",
-                                                                "direct",
-                                                                "steps",
-                                                                "memsets",
-                                                                "lg_ws",
-                                                                "lg_bytes",
-                                                                "lg_flops",
-                                                                "intensity_q8",
-                                                                "ctas",
-                                                                "waves_q8",
-                                                                "tiles_q8",
-                                                                "tail_q8",
-                                                                "pad_q8",
-                                                                "split",
-                                                                "lg_chunk",
-                                                                "lds",
-                                                                "scratch",
-                                                                "cus",
-                                                                // schema 2
-                                                                "gett_kind",
-                                                                "lg_pred_ns",
-                                                                // schema 3
-                                                                "jit_mode"};
+                                                               "dtype",
+                                                               "out_dtype",
+                                                               "compute16",
+                                                               "bilinear",
+                                                               "opnd_op",
+                                                               "lg_m",
+                                                               "lg_n",
+                                                               "lg_k",
+                                                               "lg_l",
+                                                               "lg_mnk",
+                                                               "modes_m",
+                                                               "modes_n",
+                                                               "modes_k",
+                                                               "modes_l",
+                                                               "unit_a",
+                                                               "unit_b",
+                                                               "unit_d",
+                                                               "lg_inner",
+                                                               "lg_inner_kept",
+                                                               "route",
+                                                               "f64route",
+                                                               "body",
+                                                               "tile_m",
+                                                               "tile_n",
+                                                               "tile_k",
+                                                               "block",
+                                                               "persistent",
+                                                               "streamk",
+                                                               "kblock",
+                                                               "direct",
+                                                               "steps",
+                                                               "memsets",
+                                                               "lg_ws",
+                                                               "lg_bytes",
+                                                               "lg_flops",
+                                                               "intensity_q8",
+                                                               "ctas",
+                                                               "waves_q8",
+                                                               "tiles_q8",
+                                                               "tail_q8",
+                                                               "pad_q8",
+                                                               "split",
+                                                               "lg_chunk",
+                                                               "lds",
+                                                               "scratch",
+                                                               "cus",
+                                                               // schema 2
+                                                               "gett_kind",
+                                                               "lg_pred_ns",
+                                                               // schema 3
+                                                               "jit_mode"};
                 return names;
             }
 
@@ -339,7 +339,7 @@ namespace hiptensor
                     while(node >= 0)
                     {
                         auto const value = static_cast<double>(x[featureIndex[t.feature[node]]]);
-                        node             = value <= t.threshold[node] ? t.left[node] : t.right[node];
+                        node = value <= t.threshold[node] ? t.left[node] : t.right[node];
                     }
                     sum += t.leaf[~node];
                 }

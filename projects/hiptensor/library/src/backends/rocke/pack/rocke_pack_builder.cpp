@@ -1693,12 +1693,11 @@ namespace
             {
                 ++b;
             }
-            text             = text.substr(b);
-            bool       ascii = std::all_of(text.begin(), text.end(), [](char c) {
+            text              = text.substr(b);
+            bool       ascii  = std::all_of(text.begin(), text.end(), [](char c) {
                 return static_cast<unsigned char>(c) < 0x80;
             });
-            bool const format = text.rfind("v1;schema=", 0) == 0
-                                || text.rfind("v2;schema=", 0) == 0
+            bool const format = text.rfind("v1;schema=", 0) == 0 || text.rfind("v2;schema=", 0) == 0
                                 || text.rfind("v3;schema=", 0) == 0;
             if(!ascii || !format || text.find('\n') != std::string::npos
                || text.find('\0') != std::string::npos)

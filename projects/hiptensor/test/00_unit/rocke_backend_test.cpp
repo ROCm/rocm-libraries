@@ -4006,8 +4006,8 @@ namespace
         }
         // format v3 (the planner's GEMM selection models named; a model that does not read the
         // planner's predicted time names none): as v2
-        auto v3 = with("v3", "v3;schema=3;routes=3,6,7,8,9;margin=0;gemm=-;features=route;trees=1|"
-                                 + tree);
+        auto v3 = with(
+            "v3", "v3;schema=3;routes=3,6,7,8,9;margin=0;gemm=-;features=route;trees=1|" + tree);
         EXPECT_EQ(v3.source, "MODEL") << v3.reason;
         EXPECT_EQ(v3.pick, v2.pick);
     }

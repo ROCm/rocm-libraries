@@ -180,7 +180,8 @@ namespace hiptensor
                 }
             }
 
-            void markJitMode(std::vector<Candidate>& candidates, hiptensorPlanPreference const* pref)
+            void markJitMode(std::vector<Candidate>&        candidates,
+                             hiptensorPlanPreference const* pref)
             {
                 markJitMode(candidates, jitPlan(pref));
             }
@@ -366,12 +367,13 @@ namespace hiptensor
                     auto*                  plan = context.plan;
                     auto const*            pref = plan != nullptr ? plan->mPref : nullptr;
                     bool const             jit  = jitPlan(pref);
-                    auto const status = enumerateCandidates(problem,
-                                                            *pack,
-                                                            candidateOptions(*pack, jit, &recipeNote),
-                                                            context.workspaceSizeLimit,
-                                                            candidates,
-                                                            reason);
+                    auto const             status
+                        = enumerateCandidates(problem,
+                                              *pack,
+                                              candidateOptions(*pack, jit, &recipeNote),
+                                              context.workspaceSizeLimit,
+                                              candidates,
+                                              reason);
                     markJitMode(candidates, pref);
                     if(status != HIPTENSOR_STATUS_SUCCESS)
                     {

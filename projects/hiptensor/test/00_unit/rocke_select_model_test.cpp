@@ -25,7 +25,8 @@
  *******************************************************************************/
 
 // The rocKE backend's shipped kernel selection models (the selection models of
-// HIPTENSOR_ROCKE_SELECT_MODEL_DIR, <target>/<cell>.model, which the build writes into the packs),
+// HIPTENSOR_ROCKE_SELECT_MODEL_DIR, <target>/<cell>.model, which the build writes into the packs;
+// HIPTENSOR_ROCKE_TEST_SELECT_MODEL_DIR at run time names another copy, e.g. of an install),
 // read and walked by the library's own code (rocke_select_model.cpp), against the exporter
 // (select/tools/train_select.py): every model loads, and a model with a <cell>.check file
 // (written by the exporter next to every model of format v3: feature vectors of its training rows,
@@ -75,10 +76,18 @@ namespace
         return text;
     }
 
+    // The model directory: HIPTENSOR_ROCKE_TEST_SELECT_MODEL_DIR, else the build's
+    // HIPTENSOR_ROCKE_SELECT_MODEL_DIR (the source tree; a test binary run elsewhere skips).
+    fs::path modelDir()
+    {
+        char const* env = std::getenv("HIPTENSOR_ROCKE_TEST_SELECT_MODEL_DIR");
+        return fs::path(env != nullptr && *env != 0 ? env : HIPTENSOR_ROCKE_SELECT_MODEL_DIR);
+    }
+
     std::vector<fs::path> shippedModels()
     {
         std::vector<fs::path> out;
-        fs::path const        dir(HIPTENSOR_ROCKE_SELECT_MODEL_DIR);
+        fs::path const        dir = modelDir();
         if(!fs::is_directory(dir))
         {
             return out;
@@ -105,8 +114,13 @@ namespace
 // Every shipped model is one the library uses (format, schema, features, trees).
 TEST(RockeSelectModels, ShippedModelsLoad)
 {
+    if(!fs::is_directory(modelDir()))
+    {
+        GTEST_SKIP() << "no model directory " << modelDir()
+                     << " (set HIPTENSOR_ROCKE_TEST_SELECT_MODEL_DIR)";
+    }
     auto const models = shippedModels();
-    ASSERT_FALSE(models.empty()) << "no model in " << HIPTENSOR_ROCKE_SELECT_MODEL_DIR;
+    ASSERT_FALSE(models.empty()) << "no model in " << modelDir();
     for(auto const& path : models)
     {
         sm::Model   model;
@@ -122,6 +136,11 @@ TEST(RockeSelectModels, ShippedModelsLoad)
 // the vectors cover every route the model scores.
 TEST(RockeSelectModels, ShippedModelsScoreLikeTheExporter)
 {
+    if(!fs::is_directory(modelDir()))
+    {
+        GTEST_SKIP() << "no model directory " << modelDir()
+                     << " (set HIPTENSOR_ROCKE_TEST_SELECT_MODEL_DIR)";
+    }
     auto const& names  = sm::featureNames();
     int         models = 0, rows = 0;
     for(auto const& path : shippedModels())
@@ -150,21 +169,18 @@ TEST(RockeSelectModels, ShippedModelsScoreLikeTheExporter)
             std::string       name;
             while(std::getline(list, name, ','))
             {
-                auto it = std::find_if(names.begin(), names.end(), [&name](char const* n) {
-                    return name == n;
-                });
+                auto it = std::find_if(
+                    names.begin(), names.end(), [&name](char const* n) { return name == n; });
                 ASSERT_NE(it, names.end()) << "feature " << name;
                 index.push_back(size_t(it - names.begin()));
             }
         }
-        size_t const   routeAt = size_t(std::find_if(names.begin(),
-                                                   names.end(),
-                                                   [](char const* n) {
-                                                       return std::string(n) == "route";
-                                                   })
-                                      - names.begin());
-        std::set<int>  routes;
-        int            n = 0;
+        size_t const routeAt = size_t(
+            std::find_if(
+                names.begin(), names.end(), [](char const* n) { return std::string(n) == "route"; })
+            - names.begin());
+        std::set<int> routes;
+        int           n = 0;
         while(std::getline(in, line))
         {
             if(line.empty())

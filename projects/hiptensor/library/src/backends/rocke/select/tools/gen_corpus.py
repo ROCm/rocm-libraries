@@ -273,7 +273,9 @@ def api_spec(pid, seed):
         for m in t:
             st.append(s)
             s *= ext[m]
-        return [str(code[m]) for m in t] + [str(ext[m]) for m in t] + [str(x) for x in st]
+        return (
+            [str(code[m]) for m in t] + [str(ext[m]) for m in t] + [str(x) for x in st]
+        )
 
     dt, compute = API_DTYPES[dtype]
     f = ["C", str(pid), dt, compute, str(bil), str(len(A)), str(len(B)), str(len(D))]
@@ -320,7 +322,10 @@ def main():
     ap.add_argument("--padded", type=float, default=0.0)
     ap.add_argument("--big", action="store_true")
     ap.add_argument(
-        "--outer", type=float, default=0.0, help="share of outer products (no contracted mode)"
+        "--outer",
+        type=float,
+        default=0.0,
+        help="share of outer products (no contracted mode)",
     )
     ap.add_argument("--style", choices=("halton", "api"), default="halton")
     ap.add_argument("--out", required=True)
@@ -345,7 +350,10 @@ def main():
                 lg = [lo + (hi - lo) * x for x in u]
                 # outer products draw from a stream of their own (a corpus without them is the
                 # one of the earlier generator for the same seed)
-                outer = a.outer > 0.0 and random.Random(a.seed * 1000003 + pid).random() < a.outer
+                outer = (
+                    a.outer > 0.0
+                    and random.Random(a.seed * 1000003 + pid).random() < a.outer
+                )
                 lines.append(
                     contraction_spec(
                         pid, row, *lg, rng, a.aligned, a.padded, a.big, outer

@@ -1660,7 +1660,11 @@ def gemm_model_files(model_dir, arch):
         if m.get("feature_version") == "r3sk-v1" and m.get("arch") == arch:
             bags = m.get("bags")
             names = [m.get("model") if isinstance(m.get("model"), str) else ""]
-            names += [b for b in (bags if isinstance(bags, list) else []) if isinstance(b, str)]
+            names += [
+                b
+                for b in (bags if isinstance(bags, list) else [])
+                if isinstance(b, str)
+            ]
             for n in names:
                 if read(n) is None:
                     raise SystemExit(

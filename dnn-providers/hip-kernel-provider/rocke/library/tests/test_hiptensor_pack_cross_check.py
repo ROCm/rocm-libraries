@@ -366,7 +366,9 @@ def test_writer_gemm_models_and_digest_check(tmp_path):
             assert digest == "" and not d.exists(), arch
             continue
         files = w.gemm_model_files(str(src), arch)
-        assert files and sorted(p.name for p in d.iterdir()) == sorted([*files, "index.txt"])
+        assert files and sorted(p.name for p in d.iterdir()) == sorted(
+            [*files, "index.txt"]
+        )
         index = (d / "index.txt").read_bytes()
         assert digest == hashlib.sha256(index).hexdigest()
         lines = index.decode().splitlines()
@@ -375,7 +377,11 @@ def test_writer_gemm_models_and_digest_check(tmp_path):
             sha, name = ln.split(" ", 1)
             assert sha == hashlib.sha256((src / name).read_bytes()).hexdigest(), name
         # the sidecars name the guard bags and skinny models the loader reads
-        assert any(".bag" in n for n in files) and any(n.startswith("skinny_") for n in files)
+        rcr = json.loads((src / f"gemm_rcr_{arch}.meta.json").read_text())
+        skinny = json.loads((src / f"skinny_cfg_{arch}.meta.json").read_text())
+        named = list(rcr.get("guard", {}).get("bags", [])) + [skinny["model"]]
+        named += list(skinny.get("bags", []))
+        assert named and set(named) <= set(files), sorted(set(named) - set(files))
         head = "v3;schema=3;routes=11;margin=0;batched=1;gemm=%s;features=route,lg_pred_ns;trees=0"
         good = {"select.model.contraction.h": head % digest}
         bad = {"select.model.contraction.h": head % ("0" * 64)}
@@ -383,7 +389,12 @@ def test_writer_gemm_models_and_digest_check(tmp_path):
         assert w.gemm_digest_errors(good, digest) == []
         assert w.gemm_digest_errors(none, digest) == []
         assert len(w.gemm_digest_errors(bad, digest)) == 1
-        assert w.select_model_gemm_digest("v2;schema=2;routes=3;margin=0;features=x;trees=0") == ""
+        assert (
+            w.select_model_gemm_digest(
+                "v2;schema=2;routes=3;margin=0;features=x;trees=0"
+            )
+            == ""
+        )
 
 
 # ------------------------------------------------------------------------------------------------
@@ -557,7 +568,9 @@ def test_cpp_pack_equals_python_pack(tmp_path):
     if jobs:
         common += ["--jobs", jobs]
     # the planner's GEMM selection models (no compile: cheap), next to the packs
-    gemm_models = _LIBROOT.parent / "platform" / "python" / "rocke" / "dispatch" / "gemm"
+    gemm_models = (
+        _LIBROOT.parent / "platform" / "python" / "rocke" / "dispatch" / "gemm"
+    )
     common += ["--gemm-models", str(gemm_models / "selector_models")]
 
     env = dict(os.environ, ROCKE_COMGR_LIB=comgr, PYTHONDONTWRITEBYTECODE="1")
@@ -628,6 +641,8 @@ def test_cpp_pack_equals_python_pack(tmp_path):
             assert cf == pf, f"{arch}/gemm_models: {cf} vs {pf}"
             assert "index.txt" in cf and len(cf) > 1
             for name in cf:
-                assert (cg / name).read_bytes() == (pg / name).read_bytes(), (
+                assert (cg / name).read_bytes() == (
+                    pg / name
+                ).read_bytes(), (
                     f"{arch}/gemm_models/{name}: the C++ builder's file differs"
                 )

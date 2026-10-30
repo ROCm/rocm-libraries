@@ -169,10 +169,13 @@ def test_planner_equals_python(cli, tmp_path, arch):
     lonely = [
         i
         for i, p in enumerate(problems)
-        if (set(p["a"]) - set(p["b"]) - set(p["d"])) or (set(p["b"]) - set(p["a"]) - set(p["d"]))
+        if (set(p["a"]) - set(p["b"]) - set(p["d"]))
+        or (set(p["b"]) - set(p["a"]) - set(p["d"]))
     ]
     assert lonely, "the sample has no problem with a mode of one operand only"
-    assert all(py[i] == "none" for i in lonely), [problems[i] for i in lonely if py[i] != "none"][:3]
+    assert all(py[i] == "none" for i in lonely), [
+        problems[i] for i in lonely if py[i] != "none"
+    ][:3]
     # every chosen spec without a Python-engine-only lever is the C++ builders' spec
     assert not [c for c in cpp if " builder=DIFF" in c]
 
@@ -209,11 +212,21 @@ def test_engine_archive_is_rebuilt(tmp_path, monkeypatch):
     )
     root = tmp_path / "rocke_verify"
     root.mkdir()
-    (root / "CMakeCache.txt").write_text(f"CMAKE_HOME_DIRECTORY:INTERNAL={PR.PLATFORM}\n")
+    (root / "CMakeCache.txt").write_text(
+        f"CMAKE_HOME_DIRECTORY:INTERNAL={PR.PLATFORM}\n"
+    )
     (root / "librocke_core.a").write_bytes(b"!<arch>\n")
     assert PR.ensure_archive(root) == root / "librocke_core.a"
     assert calls == [
-        ["cmake", "--build", str(root), "--target", "rocke_core", "-j", str(os.cpu_count() or 1)]
+        [
+            "cmake",
+            "--build",
+            str(root),
+            "--target",
+            "rocke_core",
+            "-j",
+            str(os.cpu_count() or 1),
+        ]
     ], calls
     # no cache yet: configure, then build
     calls.clear()
@@ -225,7 +238,9 @@ def test_engine_archive_is_rebuilt(tmp_path, monkeypatch):
     monkeypatch.setattr(PR.tempfile, "gettempdir", lambda: str(tmp_path / "t"))
     other = tmp_path / "t" / "rocke_verify"
     other.mkdir(parents=True)
-    (other / "CMakeCache.txt").write_text("CMAKE_HOME_DIRECTORY:INTERNAL=/elsewhere/platform\n")
+    (other / "CMakeCache.txt").write_text(
+        "CMAKE_HOME_DIRECTORY:INTERNAL=/elsewhere/platform\n"
+    )
     got = PR.ensure_archive()
     assert got.parent != other and got.parent.name.startswith("rocke_verify_"), got
     assert [c[:2] for c in calls] == [["cmake", "-S"], ["cmake", "--build"]], calls

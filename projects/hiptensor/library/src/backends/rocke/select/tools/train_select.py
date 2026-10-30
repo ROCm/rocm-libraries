@@ -656,16 +656,33 @@ def search(a, entry, crow, probs, cprobs, names):
     # per plan mode (HIPTENSOR_JIT_MODE_NONE problems are tagged "<id>#none"), and the worst
     # held-out-fold picks
     pick = pick_by(cv_scores, margin)
-    for mode, sel in (("jit", lambda t: not t.endswith("#none")), ("none", lambda t: t.endswith("#none"))):
+    for mode, sel in (
+        ("jit", lambda t: not t.endswith("#none")),
+        ("none", lambda t: t.endswith("#none")),
+    ):
         sub = {t: rs for t, rs in probs.items() if sel(t)}
         if sub:
-            entry.setdefault("model_cv_by_mode", {})[mode] = summary(efficiencies(sub, pick))
-            entry.setdefault("static_by_mode", {})[mode] = summary(efficiencies(sub, static_pick))
+            entry.setdefault("model_cv_by_mode", {})[mode] = summary(
+                efficiencies(sub, pick)
+            )
+            entry.setdefault("static_by_mode", {})[mode] = summary(
+                efficiencies(sub, static_pick)
+            )
     worst = sorted(
-        ((pick(rs)["us"] / min(r["us"] for r in rs), t, pick(rs)["key"], best_pick(rs)["key"]) for t, rs in probs.items()),
+        (
+            (
+                pick(rs)["us"] / min(r["us"] for r in rs),
+                t,
+                pick(rs)["key"],
+                best_pick(rs)["key"],
+            )
+            for t, rs in probs.items()
+        ),
         reverse=True,
     )[:12]
-    entry["model_cv_worst"] = [{"slow": round(w[0], 3), "tag": w[1], "pick": w[2], "best": w[3]} for w in worst]
+    entry["model_cv_worst"] = [
+        {"slow": round(w[0], 3), "tag": w[1], "pick": w[2], "best": w[3]} for w in worst
+    ]
     return objective, trees, leaves, margin
 
 
@@ -737,7 +754,9 @@ def cmd_train(a):
         st = summary(efficiencies(probs, static_pick))
         # the training domain is what the API admits: no contraction has a batch mode (a mode of
         # A, B and D; hiptensorCreateContraction refuses them)
-        assert not any(r["f"].get("modes_l", 0) for r in crow), "a row with a batch mode"
+        assert not any(
+            r["f"].get("modes_l", 0) for r in crow
+        ), "a row with a batch mode"
         entry = {
             "problems": len(probs),
             "rows": len(crow),

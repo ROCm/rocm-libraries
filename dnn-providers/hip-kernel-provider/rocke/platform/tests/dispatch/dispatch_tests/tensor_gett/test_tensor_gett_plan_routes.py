@@ -167,4 +167,6 @@ def test_mode_of_one_operand_only_is_refused(operand):
     with pytest.raises(ValueError):
         plan_tensor_gett(req)
     # the same problem without X0 has a route
-    assert plan_tensor_gett(_req([m for m in a if m != "X0"], [m for m in b if m != "X0"]))
+    assert plan_tensor_gett(
+        _req([m for m in a if m != "X0"], [m for m in b if m != "X0"])
+    )

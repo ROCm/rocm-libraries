@@ -768,8 +768,9 @@ namespace
                       hipSuccess);
             float  alpha = float(v.alpha), beta = float(v.beta);
             Stream stream;
-            void*  w  = static_cast<uint8_t*>(bufW.p) + v.wsSkew;
-            auto   st = hiptensorContract(api->handle,
+            void*  w = static_cast<uint8_t*>(bufW.p) + v.wsSkew;
+            log.clear();
+            auto st = hiptensorContract(api->handle,
                                         plan,
                                         &alpha,
                                         pA,
@@ -782,6 +783,22 @@ namespace
                                         stream.s);
             EXPECT_EQ(st, HIPTENSOR_STATUS_SUCCESS) << log.all();
             EXPECT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
+            // the JIT route runs the direct GETT for a zero scale and for buffers (here A and the
+            // workspace) not aligned to its 16-byte accesses, and only then (on the plan's device)
+            if(o.jit && opt.execDevice < 0)
+            {
+                bool const want = v.alpha == 0.0 || (p.bilinear && v.beta == 0.0)
+                                  || (v.aSkew * 2) % 16 != 0
+                                  || (o.workspace > 0 && v.wsSkew % 16 != 0);
+                EXPECT_EQ(log.contains("runs its fallback"), want) << v.what << "\n" << log.all();
+            }
+            else if(o.jit)
+            {
+                // on another device: always the fallback (its kernels are not loaded there)
+                EXPECT_TRUE(log.contains("runs its fallback (another device than the plan's)"))
+                    << v.what << "\n"
+                    << log.all();
+            }
             std::vector<uint16_t> got(size_t(D.span));
             EXPECT_EQ(hipMemcpy(got.data(), bufD.p, got.size() * 2, hipMemcpyDeviceToHost),
                       hipSuccess);
@@ -1136,7 +1153,8 @@ TEST(RockeGettJit, FixedRoutesExact)
         EXPECT_TRUE(kinds.count("single") && kinds.count("pack_hybrid")
                     && kinds.count("tensor_gett_mn") && kinds.count("tensor_gett_kc"))
             << ::testing::PrintToString(routes);
-        EXPECT_TRUE(routes.count("single/tensor_gett_kc") && routes.count("pack_hybrid/tensor_gett_kc"))
+        EXPECT_TRUE(routes.count("single/tensor_gett_kc")
+                    && routes.count("pack_hybrid/tensor_gett_kc"))
             << ::testing::PrintToString(routes);
     }
 }
@@ -1840,9 +1858,10 @@ TEST(RockeGettJitSelection, PlanModeIsAFeature)
         char const*        env; // HIPTENSOR_ROCKE_JIT
         char const*        want;
     };
-    for(auto const& m : {Mode{"mode_none", HIPTENSOR_JIT_MODE_NONE, nullptr, "\"jit_mode\":0"},
-                         Mode{"mode_default", HIPTENSOR_JIT_MODE_DEFAULT, nullptr, "\"jit_mode\":1"},
-                         Mode{"mode_off", HIPTENSOR_JIT_MODE_DEFAULT, "off", "\"jit_mode\":0"}})
+    for(auto const& m :
+        {Mode{"mode_none", HIPTENSOR_JIT_MODE_NONE, nullptr, "\"jit_mode\":0"},
+         Mode{"mode_default", HIPTENSOR_JIT_MODE_DEFAULT, nullptr, "\"jit_mode\":1"},
+         Mode{"mode_off", HIPTENSOR_JIT_MODE_DEFAULT, "off", "\"jit_mode\":0"}})
     {
         ScopedEnvironmentVariable tag("HIPTENSOR_ROCKE_SELECT_DUMP_TAG", m.tag);
         ScopedEnvironmentVariable jit("HIPTENSOR_ROCKE_JIT", m.env);
@@ -1879,10 +1898,9 @@ TEST(RockeGettJitSelection, ModelNamesThePlannersModels)
     std::string pack;
     {
         ScopedEnvironmentVariable child("HIPTENSOR_ROCKE_TEST_GETT_JIT_CHILD", "print");
-        FILE* pipe = popen(("\"" + selfExecutable()
-                            + "\" --gtest_filter=RockeGettJitChild.PrintsThePack")
-                               .c_str(),
-                           "r");
+        FILE*                     pipe = popen(
+            ("\"" + selfExecutable() + "\" --gtest_filter=RockeGettJitChild.PrintsThePack").c_str(),
+            "r");
         ASSERT_NE(pipe, nullptr);
         std::string printed;
         char        buf[4096];
@@ -1920,8 +1938,9 @@ TEST(RockeGettJitSelection, ModelNamesThePlannersModels)
     EXPECT_EQ(same.source, "MODEL") << sameLine;
     EXPECT_EQ(same.pick.rfind("dgett:", 0), 0u) << sameLine;
     EXPECT_TRUE(same.exact);
-    for(auto const& [name, gemm] : {std::pair<std::string, std::string>{"gemm_other", std::string(64, 'a')},
-                                     {"gemm_none", "-"}})
+    for(auto const& [name, gemm] :
+        {std::pair<std::string, std::string>{"gemm_other", std::string(64, 'a')},
+         {"gemm_none", "-"}})
     {
         auto [o, line] = with(name, gemm);
         EXPECT_TRUE(o.jit) << name << ": " << line;
@@ -1951,8 +1970,7 @@ TEST(RockeGettJitSelection, EarlierSchemaSeesItsFeatures)
     std::string const tree = "2;0;0.5;-1;-2;1 0";
     auto              with = [&](std::string const& name, int schema) {
         auto const text = "v3;schema=" + std::to_string(schema)
-                          + ";routes=3,6,7,8,11;margin=0;gemm=-;features=lg_bytes;trees=1|"
-                          + tree;
+                          + ";routes=3,6,7,8,11;margin=0;gemm=-;features=lg_bytes;trees=1|" + tree;
         ScopedEnvironmentVariable models("HIPTENSOR_ROCKE_SELECT_MODELS",
                                          writeSelectModel(name, "contraction.h", text).c_str());
         return runProblem(p, opt);
@@ -2096,14 +2114,16 @@ namespace
         int src[2];
         rocke::gett::gett_operand_sources(plan, src);
         auto const ops = rocke::gett::launch_operands(plan.gett);
-        binds["A"] = src[0] >= 0 ? "W+" + std::to_string(offsets[size_t(src[0])]) : ops.first + "+0";
+        binds["A"]
+            = src[0] >= 0 ? "W+" + std::to_string(offsets[size_t(src[0])]) : ops.first + "+0";
         binds["B"]
             = src[1] >= 0 ? "W+" + std::to_string(offsets[size_t(src[1])]) : ops.second + "+0";
         int grid[3];
         rocke::gett::tensor_gett_grid(plan.gett, grid);
         return "v1;ws=" + std::to_string(off) + ";steps=" + std::to_string(plan.packs.size() + 1)
                + packs
-               + launch(plan.gett.kernel_name(), grid, rocke::gett::tensor_gett_block(plan.gett), binds);
+               + launch(
+                   plan.gett.kernel_name(), grid, rocke::gett::tensor_gett_block(plan.gett), binds);
     }
 
     // The entry with its modes named as the request of the same memory layout is named
@@ -2177,8 +2197,8 @@ TEST(RockeGettJitBoundary, TablesPlanLikeRocke)
         tunedEntries += json == rocke_tensor_gett_tuned_json() ? int(entries.size()) : 0;
         for(auto const& entry : entries)
         {
-            auto const              canon = canonicalEntry(entry);
-            rocke::gett::TablePlan  plan;
+            auto const             canon = canonicalEntry(entry);
+            rocke::gett::TablePlan plan;
             ASSERT_TRUE(rocke::gett::table_plan(canon, "gfx950", &plan, &why))
                 << entry.key << ": " << why;
             auto const want    = tableRecord(plan);
@@ -2238,11 +2258,12 @@ TEST(RockeGettJitBoundary, TablesPlanLikeRocke)
                     d.strides.insert(d.strides.begin() + long(at), stride);
                 };
                 // (the API admits at most six modes per group)
-                auto count = [](std::vector<std::string> const& x, std::vector<std::string> const& y) {
-                    return std::count_if(x.begin(), x.end(), [&y](std::string const& m) {
-                        return std::find(y.begin(), y.end(), m) != y.end();
-                    });
-                };
+                auto count
+                    = [](std::vector<std::string> const& x, std::vector<std::string> const& y) {
+                          return std::count_if(x.begin(), x.end(), [&y](std::string const& m) {
+                              return std::find(y.begin(), y.end(), m) != y.end();
+                          });
+                      };
                 if(count(entry.modes_a, entry.modes_d) < 6)
                 {
                     unit(A, 5, true, 7);

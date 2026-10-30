@@ -150,9 +150,9 @@ namespace hiptensor
             // packs: only the plans of the same pack wait for it.
             LoadedModels const& loadedModelsFor(Pack const& pack)
             {
-                static std::mutex                                          mutex;
+                static std::mutex                                           mutex;
                 static std::map<std::string, std::shared_ptr<LoadedModels>> loaded;
-                std::shared_ptr<LoadedModels>                              slot;
+                std::shared_ptr<LoadedModels>                               slot;
                 {
                     std::scoped_lock lock(mutex);
                     auto&            s = loaded[pack.path() + "|" + pack.arch()];
@@ -163,9 +163,9 @@ namespace hiptensor
                     slot = s;
                 }
                 std::call_once(slot->once, [&pack, &lm = *slot] {
-                    using Clock     = std::chrono::steady_clock;
-                    auto const   t0 = Clock::now();
-                    ModelReader  r;
+                    using Clock    = std::chrono::steady_clock;
+                    auto const  t0 = Clock::now();
+                    ModelReader r;
                     r.dir = directoryOf(pack.path()) + "/" + kModelDir;
                     std::string index;
                     if(!readWhole(r.dir + "/" + kModelIndex, index))
@@ -494,11 +494,11 @@ namespace hiptensor
                               + ";steps=" + std::to_string(plan.packs.size() + 1);
                 for(auto const& pk : plan.packs)
                 {
-                    plan.record += launch(pk.name,
-                                          pk.grid,
-                                          pk.block,
-                                          {{"X", pk.operand + "+0"},
-                                           {"Y", "W+" + std::to_string(pk.offset)}});
+                    plan.record += launch(
+                        pk.name,
+                        pk.grid,
+                        pk.block,
+                        {{"X", pk.operand + "+0"}, {"Y", "W+" + std::to_string(pk.offset)}});
                 }
                 std::map<std::string, std::string> binds = {
                     {"C", "O+0"},
@@ -658,7 +658,8 @@ namespace hiptensor
                 reason = planned.reason;
                 return false;
             }
-            logGett("rocKE GETT JIT plan " + planned.plan->info.route + ": " + planned.plan->record);
+            logGett("rocKE GETT JIT plan " + planned.plan->info.route + ": "
+                    + planned.plan->record);
             if(planned.plan->workspace > workspaceLimit)
             {
                 reason = "the planned GETT route needs more workspace than the limit";

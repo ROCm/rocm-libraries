@@ -906,6 +906,19 @@ namespace hiptensor
             {
                 return HIPTENSOR_STATUS_HIP_ERROR;
             }
+            // the heuristics log says when and why a program runs its fallback (nothing is
+            // formatted when that level is off)
+            auto logFallback = [&program](char const* why) {
+                auto const& logger = Logger::instance();
+                if((logger->getLogMask()
+                    & static_cast<int32_t>(Logger::LogLevel_t::LOG_LEVEL_HEURISTICS_TRACE))
+                   != 0)
+                {
+                    std::string const msg
+                        = "rocKE: " + program.description + " runs its fallback (" + why + ")";
+                    logger->logHeuristics("hiptensorContract", msg.c_str());
+                }
+            };
             if(program.deviceBound && device != program.device)
             {
                 // the JIT kernels were loaded on the device of the plan only
@@ -913,24 +926,33 @@ namespace hiptensor
                 {
                     return HIPTENSOR_STATUS_ARCH_MISMATCH;
                 }
+                logFallback("another device than the plan's");
                 return runProgram(
                     *program.fallback, scalars, buffers, workspace, workspaceSize, stream);
             }
             if(program.fallback != nullptr)
             {
-                bool use = false;
+                char const* why = nullptr;
                 for(auto role : program.fallbackOnZero)
                 {
                     auto const& v = values[static_cast<int>(role)];
-                    use           = use || (v.re == 0.0 && v.im == 0.0);
+                    if(why == nullptr && v.re == 0.0 && v.im == 0.0)
+                    {
+                        why = "a zero scale";
+                    }
                 }
                 for(auto const& [role, align] : program.fallbackAlign)
                 {
                     auto const* base = bufferOf(role, buffers, workspace);
-                    use = use || (base != nullptr && reinterpret_cast<uint64_t>(base) % align != 0);
+                    if(why == nullptr && base != nullptr
+                       && reinterpret_cast<uint64_t>(base) % align != 0)
+                    {
+                        why = "a buffer not aligned to the kernels' accesses";
+                    }
                 }
-                if(use)
+                if(why != nullptr)
                 {
+                    logFallback(why);
                     return runProgram(
                         *program.fallback, scalars, buffers, workspace, workspaceSize, stream);
                 }
