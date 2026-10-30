@@ -163,6 +163,27 @@ def test_engine_env_vars_pin_engines(fake_sdpa, mode_record, monkeypatch):
     assert [c[1]["engine"] for c in fake_sdpa.calls] == ["eng_f", "eng_b"]
 
 
+def test_reference_pin_runs_the_reference_forward_without_calling_hipdnn(
+    fake_sdpa, mode_record, monkeypatch
+):
+    monkeypatch.setenv("HIPDNN_FWD_ENGINE", "reference")
+    q, k, v, o, M = dense(dtype=torch.float32)
+    fwd(q, k, v, M, o, causal=CausalType.TOP_LEFT)
+    out, lse = flash.reference_attention(q, k, v, 0.5, fake_sdpa.Mask("tl", None, 0))
+    assert fake_sdpa.calls == []
+    assert torch.equal(o, out) and torch.equal(M.view(2, 3, 5), lse)
+    assert mode_record == [("fwd", "ref", "pinned reference")]
+
+
+def test_reference_pin_leaves_the_backward_on_hipdnn(
+    fake_sdpa, mode_record, monkeypatch
+):
+    monkeypatch.setenv("HIPDNN_FWD_ENGINE", "reference")
+    q, k, v, o, M = dense()
+    bwd(q, k, v, o, M)
+    assert [(name, c["engine"]) for name, c in fake_sdpa.calls] == [("bwd", None)]
+
+
 def test_fwd_no_stats_env_var_drops_stats_from_the_forward_only(
     fake_sdpa, mode_record, monkeypatch
 ):

@@ -14,7 +14,10 @@ The vendored suite reaches the GPU only through this module's ``attn_fwd``, ``at
 * The plugin wraps ``sdpa_fwd`` / ``sdpa_bwd`` to record hipDNN calls and declines; the shim records
   only ``ref:`` entries (``hipdnn_aotriton_plugin.record``) for the reference fallback.
 
-Engine pinning comes from ``HIPDNN_FWD_ENGINE`` / ``HIPDNN_BWD_ENGINE``. With
+Engine pinning comes from ``HIPDNN_FWD_ENGINE`` / ``HIPDNN_BWD_ENGINE``. ``HIPDNN_FWD_ENGINE=reference``
+(``conformance_contract.REFERENCE_PIN``) skips hipDNN for the forward: the reference forward runs and
+the call records ``ref`` with the reason ``pinned reference``, so a backward can be tested on a forward
+no hipDNN engine produced. With
 ``HIPDNN_SDPA_CONFORMANCE_FWD_NO_STATS`` set, the forward asks hipDNN for no Stats and fills the M buffer
 with zeros: AOTriton's wrapper rejects NaN in M under ``is_testing``, and ``test_forward.py`` compares
 only O. The reference fallback still fills M with the real LSE.
@@ -23,6 +26,7 @@ only O. The reference fallback still fills M with the real LSE.
 import os
 import sys
 
+import conformance_contract as contract
 import torch
 
 from pyaotriton import hipError_t, hipGetLastError  # noqa: F401  (re-exported)
@@ -276,7 +280,10 @@ def _forward(
 ):
     sdpa = _sdpa()
     no_stats = _fwd_no_stats()
+    pin = _engine("fwd")
     try:
+        if pin == contract.REFERENCE_PIN:  # a decline that never reaches hipDNN
+            raise sdpa.EngineDeclined("fwd", "pinned reference")
         sdpa.sdpa_fwd(
             q,
             k,
@@ -288,7 +295,7 @@ def _forward(
             mask=mask,
             dropout=dropout,
             varlen=varlen,
-            engine=_engine("fwd"),
+            engine=pin,
         )
         if no_stats:
             stats.zero_()
