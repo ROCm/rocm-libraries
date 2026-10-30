@@ -147,6 +147,9 @@ def ctest_ready(build_root: Path, config: str) -> bool:
 # instead of skipping: (env var, CTest name, label). The installed rocke_pytest
 # CTest entry (platform/CMakeLists.txt) sets the same variables to the installed
 # binaries; add a new pair in both places.
+_ARCH_DOMAIN_COMPLETE_ENV = "ROCKE_RUN_ALL_ARCH_DOMAIN_COMPLETE"
+
+
 NATIVE_PARITY_TESTS = (
     ("ROCKE_STORAGE_TEST", "rocke_storage", "native storage parity"),
     ("ROCKE_IR_TYPES_TEST", "rocke_ir_types", "native IR type rule parity"),
@@ -243,6 +246,9 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     env.pop("ROCKE_ONLINE_LIB", None)
     env.pop("ROCKE_REPLAY_CLI", None)
     env.pop("ROCKE_PROVENANCE_MANIFEST", None)
+    # Only this runner may claim that its own complete corpus gate succeeded.
+    # An ambient value must not suppress the standalone pytest delegation.
+    env.pop(_ARCH_DOMAIN_COMPLETE_ENV, None)
     if (build_root / "CMakeCache.txt").is_file():
         subprocess.run(
             [
@@ -437,6 +443,7 @@ def main() -> int:
     args = ap.parse_args()
 
     status = 0
+    arch_domain_complete = False
 
     if not args.no_guard:
         status |= relative_path_guard()
@@ -478,13 +485,17 @@ def main() -> int:
         # check_ir_validity. See the note at the top of this file.
         if args.only_ir:
             ad_gate += ["--only", args.only_ir]
-        status |= subprocess.run(ad_gate).returncode
+        arch_domain_status = subprocess.run(ad_gate).returncode
+        status |= arch_domain_status
+        arch_domain_complete = arch_domain_status == 0 and not args.only_ir
 
     if not args.no_pytest:
         try:
             build_root = Path(args.build_root).resolve()
             configure_pytest_build(build_root, args.config)
             pytest_env = native_pytest_env(build_root, args.config)
+            if arch_domain_complete:
+                pytest_env[_ARCH_DOMAIN_COMPLETE_ENV] = "1"
         except (OSError, ValueError, subprocess.CalledProcessError) as exc:
             print(f"native parity test setup failed: {exc}", file=sys.stderr)
             return 1
