@@ -3251,11 +3251,17 @@ namespace rocwmma
                   typename ComputeT_in,
                   uint32_t BlockM_In,
                   uint32_t BlockN_In,
-                  uint32_t BlockK_In>
-        struct is_wmma<
-            detail::
-                amdgcn_wmma<InputTA_In, InputTB_In, ComputeT_in, BlockM_In, BlockN_In, BlockK_In>>
-            : public true_type
+                  uint32_t BlockK_In,
+                  uint32_t GfxTargetId_In,
+                  typename Enabler_In>
+        struct is_wmma<detail::amdgcn_wmma<InputTA_In,
+                                           InputTB_In,
+                                           ComputeT_in,
+                                           BlockM_In,
+                                           BlockN_In,
+                                           BlockK_In,
+                                           GfxTargetId_In,
+                                           Enabler_In>> : public true_type
         {
         };
 
@@ -3288,14 +3294,27 @@ namespace rocwmma
                   typename ComputeT_In,
                   uint32_t BlockM_In,
                   uint32_t BlockN_In,
-                  uint32_t BlockK_In>
-        struct wmma_traits<
-            detail::
-                amdgcn_wmma<InputTA_In, InputTB_In, ComputeT_In, BlockM_In, BlockN_In, BlockK_In>>
+                  uint32_t BlockK_In,
+                  uint32_t GfxTargetId_In,
+                  typename Enabler_In>
+        struct wmma_traits<detail::amdgcn_wmma<InputTA_In,
+                                               InputTB_In,
+                                               ComputeT_In,
+                                               BlockM_In,
+                                               BlockN_In,
+                                               BlockK_In,
+                                               GfxTargetId_In,
+                                               Enabler_In>>
         {
             // Base implementation
-            using Impl = detail::
-                amdgcn_wmma<InputTA_In, InputTB_In, ComputeT_In, BlockM_In, BlockN_In, BlockK_In>;
+            using Impl = detail::amdgcn_wmma<InputTA_In,
+                                             InputTB_In,
+                                             ComputeT_In,
+                                             BlockM_In,
+                                             BlockN_In,
+                                             BlockK_In,
+                                             GfxTargetId_In,
+                                             Enabler_In>;
 
             // Operand types
             using InputTA  = InputTA_In;
