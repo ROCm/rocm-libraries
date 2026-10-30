@@ -193,7 +193,7 @@ double generatedValue(const detail::PreparedNumericalGenerator& generator, const
 }
 
 size_t generationRecipeIndex(const MxGenerationInvocation& problem, size_t row, size_t column) {
-    const auto order = problem.data.recipe().indexOrder(problem.shape.rank());
+    const auto order = detail::axesOf(problem.data.recipe().indexOrder(problem.shape.rank()));
     return !order.empty() && order.front() == 1 ? row + column * problem.shape.dimensions()[0]
                                                 : column + row * problem.shape.dimensions()[1];
 }
@@ -425,8 +425,9 @@ void validateInvocation(const MxGenerationInvocation& problem) {
 MxTensor generateMx(Shape shape, MxDataGeneration generation, const MxGenerationOptions& options) {
     const MxGenerationInvocation problem(std::move(shape), std::move(generation), options);
     validateInvocation(problem);
-    (void)detail::validatedIndexOrder(problem.shape.rank(),
-                                      problem.data.recipe().indexOrder(problem.shape.rank()));
+    (void)detail::validatedIndexOrder(
+        problem.shape.rank(),
+        detail::axesOf(problem.data.recipe().indexOrder(problem.shape.rank())));
     const size_t rows = problem.shape.dimensions()[0];
     const size_t columns = problem.shape.dimensions()[1];
     const size_t leadingDimension = problem.physicalLeadingDimension();

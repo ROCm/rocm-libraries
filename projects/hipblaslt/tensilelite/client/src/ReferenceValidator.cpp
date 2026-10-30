@@ -497,7 +497,7 @@ namespace TensileLite
                                             expected,
                                             options,
                                             IndexRange::all(expected.elementCount()),
-                                            std::array<size_t, 2>{1, 0});
+                                            roc::hostnumerics::Permutation{1, 0});
                 for(const auto& sample : report.reportedMismatches)
                     std::cerr << "[fused-a2a] RECV MISMATCH card=" << dst << " src=" << src
                               << " t=" << sample.coordinates[1] << " f=" << sample.coordinates[0]

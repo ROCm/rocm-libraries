@@ -55,14 +55,12 @@ namespace hipblaslt::hostnumerics::maf
         dataRecipe(Mode mode, size_t operand, size_t batch, size_t rank, size_t indexOffset = 0)
     {
         using namespace roc::hostnumerics;
-        std::vector<size_t> order(rank);
-        std::iota(order.rbegin(), order.rend(), size_t{0});
         return GenerationRecipe::realOnly(
             mode == Mode::Maf1
                 ? (operand == 0 ? GenerationRecipe::sine() : GenerationRecipe::cosine())
                 : GenerationRecipe::normal({}),
             {.seed        = seed(operand, batch),
-             .indexOrder  = std::move(order),
+             .indexOrder  = Permutation::reverse(rank),
              .indexOffset = indexOffset});
     }
 
@@ -94,8 +92,7 @@ namespace hipblaslt::hostnumerics::maf
         const Shape originalBatches(
             std::vector<size_t>(shape.dimensions().begin() + std::min(size_t{2}, shape.rank()),
                                 shape.dimensions().end()));
-        std::vector<size_t> batchOrder(batches.rank());
-        std::iota(batchOrder.rbegin(), batchOrder.rend(), size_t{0});
+        const auto          batchOrder = Permutation::reverse(batches.rank());
         std::vector<size_t> lastBatch(batches.rank());
         for(size_t axis = 0; axis < batches.rank(); ++axis)
             lastBatch[axis] = batches[axis] - 1;
@@ -178,7 +175,7 @@ namespace hipblaslt::hostnumerics::maf
                 GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::zero(), 0))
                           : MxDataGeneration::preserveGeneratedEncoding(GenerationRecipe::realOnly(
                               GenerationRecipe::uniformFiniteEncodedValue(),
-                              {.seed = seed(operand, batch), .indexOrder = {1, 0}})),
+                              {.seed = seed(operand, batch), .indexOrder = roc::hostnumerics::Permutation{1, 0}})),
             options);
         if(numericalData)
             fill(generated.data, mode, operand, batch);

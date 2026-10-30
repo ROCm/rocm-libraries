@@ -21,7 +21,8 @@ void testParallelSparseSelection() {
     GemmTestCase problem = makeProblem(a, b, output, rows, reductionElements, columns);
     roc::hostnumerics::detail::bindIndices(
         problem, problem.d.shape(),
-        primeIndexRange(output.elementCount(), output.elementCount(), 128), LastDimensionFastest{});
+        primeIndexRange({.logicalElements = output.elementCount(), .requestedElements = 128}),
+        LastDimensionFastest{});
 
     const GemmTestRunInfo run = referenceGemm(problem, GemmBackend::Blocked);
 

@@ -258,9 +258,7 @@ GenerationRecipe::Component GenerationRecipe::rawSerialDimension(
 }
 
 GenerationRecipe::GenerationRecipe(GenerationRecipeSettings settings, ComplexPolicy complexPolicy)
-    : settings_(std::move(settings)), complexPolicy_(std::move(complexPolicy)) {
-    (void)detail::validatedIndexOrder(settings_.indexOrder.size(), settings_.indexOrder);
-}
+    : settings_(std::move(settings)), complexPolicy_(std::move(complexPolicy)) {}
 
 GenerationRecipe GenerationRecipe::realOnly(Component component,
                                             GenerationRecipeSettings settings) {
@@ -335,8 +333,8 @@ GenerationRecipe GenerationRecipe::cartesianLastDimensionFastest(Component real,
         .withLastDimensionFastestIndexOrder();
 }
 
-std::vector<size_t> GenerationRecipe::indexOrder(size_t rank) const {
-    if (lastDimensionFastest_) return detail::ascendingIndexOrder(rank);
+Permutation GenerationRecipe::indexOrder(size_t rank) const {
+    if (lastDimensionFastest_) return Permutation::identity(rank);
     if (settings_.indexOrder.size() != rank)
         throw std::runtime_error("Generation index order rank does not match tensor rank.");
     return settings_.indexOrder;
@@ -348,18 +346,17 @@ GenerationRecipe GenerationRecipe::withSeed(uint64_t seed) const {
     return result;
 }
 
-GenerationRecipe GenerationRecipe::withIndexOrder(std::span<const size_t> order) const {
-    (void)detail::validatedIndexOrder(order.size(), order);
+GenerationRecipe GenerationRecipe::withIndexOrder(const Permutation& order) const {
     GenerationRecipe result = *this;
     result.lastDimensionFastest_ = false;
-    result.settings_.indexOrder.assign(order.begin(), order.end());
+    result.settings_.indexOrder = order;
     return result;
 }
 
 GenerationRecipe GenerationRecipe::withLastDimensionFastestIndexOrder() const {
     GenerationRecipe result = *this;
     result.lastDimensionFastest_ = true;
-    result.settings_.indexOrder.clear();
+    result.settings_.indexOrder = Permutation::identity(0);
     return result;
 }
 

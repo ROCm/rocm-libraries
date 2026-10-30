@@ -68,8 +68,8 @@ detail::StructuredSparsityWorkCounts applyStructuredSparsityInvocation(
         problem.twoOfFourMetadata ? problem.twoOfFourMetadata->layout().strides()[axis] : 0;
 
     for (size_t line = firstSlice; line < endSlice; ++line) {
-        detail::coordinatesForLine(line, problem.input.shape(), axis, problem.pattern.indexOrder,
-                                   inputCoordinates);
+        detail::coordinatesForLine(line, problem.input.shape(), axis,
+                                   problem.pattern.indexOrder.entries(), inputCoordinates);
         const ptrdiff_t inputBase =
             detail::preparedElementOffset(problem.input.layout(), inputCoordinates);
         const ptrdiff_t prunedBase =

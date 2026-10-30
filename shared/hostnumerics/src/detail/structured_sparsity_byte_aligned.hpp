@@ -62,7 +62,7 @@ inline StructuredSparsityWorkCounts applyTwoOfFourByteAligned(
 
     std::vector<size_t> coordinates(problem.input.shape().rank(), 0);
     for (size_t line = firstSlice; line < endSlice; ++line) {
-        coordinatesForLine(line, problem.input.shape(), axis, problem.pattern.indexOrder,
+        coordinatesForLine(line, problem.input.shape(), axis, problem.pattern.indexOrder.entries(),
                            coordinates);
         const ptrdiff_t inputBase = preparedElementOffset(problem.input.layout(), coordinates);
         const ptrdiff_t prunedBase = preparedElementOffset(problem.pruned.layout(), coordinates);
@@ -189,7 +189,7 @@ inline StructuredSparsityWorkCounts applyTwoOfFourByteAlignedStrided(
 
     std::vector<size_t> coordinates(problem.input.shape().rank(), 0);
     for (size_t line = firstSlice; line < endSlice; ++line) {
-        coordinatesForLine(line, problem.input.shape(), axis, problem.pattern.indexOrder,
+        coordinatesForLine(line, problem.input.shape(), axis, problem.pattern.indexOrder.entries(),
                            coordinates);
         const ptrdiff_t inputBase = preparedElementOffset(problem.input.layout(), coordinates);
         const ptrdiff_t prunedBase = preparedElementOffset(problem.pruned.layout(), coordinates);

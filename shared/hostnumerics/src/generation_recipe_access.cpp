@@ -987,7 +987,7 @@ struct GenerationRecipeAccess {
     static bool generateContiguousNumericalType(Tensor destination, const GenerationRecipe& recipe,
                                                 const GenerationRecipe::BoundComponent& bound,
                                                 const Pattern& pattern) {
-        const auto indexOrder = recipe.indexOrder(destination.shape().rank());
+        const auto indexOrder = detail::axesOf(recipe.indexOrder(destination.shape().rank()));
         if (!detail::isContiguous(destination.layout(), indexOrder)) return false;
 
         constexpr auto& info = scalarTypeInfo(Tag::type);
@@ -1085,7 +1085,7 @@ struct GenerationRecipeAccess {
     static bool generateCommonRawType(Tensor destination, const GenerationRecipe& recipe,
                                       const GenerationRecipe::BoundComponent& bound,
                                       const Pattern& pattern) {
-        const auto indexOrder = recipe.indexOrder(destination.shape().rank());
+        const auto indexOrder = detail::axesOf(recipe.indexOrder(destination.shape().rank()));
         if (usesCoordinates<Pattern>(bound.component) ||
             !detail::isContiguous(destination.layout(), indexOrder))
             return false;
@@ -1122,7 +1122,7 @@ struct GenerationRecipeAccess {
 
     static void generateNonComplex(Tensor destination, const GenerationRecipe& recipe,
                                    const GenerationRecipe::BoundComponent& bound) {
-        const auto indexOrder = recipe.indexOrder(destination.shape().rank());
+        const auto indexOrder = detail::axesOf(recipe.indexOrder(destination.shape().rank()));
         const auto storage = destination.rawEncodedBackingStorage();
         std::visit(
             [&](const auto& pattern) {
@@ -1187,7 +1187,7 @@ struct GenerationRecipeAccess {
                                                 const PreparedNumericalGenerator& real,
                                                 const PreparedNumericalGenerator* imaginary,
                                                 ComplexGenerationKind kind) {
-        const auto indexOrder = recipe.indexOrder(destination.shape().rank());
+        const auto indexOrder = detail::axesOf(recipe.indexOrder(destination.shape().rank()));
         if (!detail::isContiguous(destination.layout(), indexOrder)) return false;
         const auto storage = destination.rawEncodedBackingStorage();
         const size_t byteOffset =
@@ -1228,7 +1228,7 @@ struct GenerationRecipeAccess {
     }
 
     static void generateComplex(Tensor destination, const GenerationRecipe& recipe) {
-        const auto indexOrder = recipe.indexOrder(destination.shape().rank());
+        const auto indexOrder = detail::axesOf(recipe.indexOrder(destination.shape().rank()));
         const auto storage = destination.rawEncodedBackingStorage();
         const ComplexWriter write = complexWriter(destination.type());
         std::visit(
@@ -1340,7 +1340,7 @@ struct GenerationRecipeAccess {
 
     static void validateRecipe(const GenerationRecipe& recipe, const Shape& shape,
                                ScalarType type) {
-        (void)validatedIndexOrder(shape.rank(), recipe.indexOrder(shape.rank()));
+        (void)validatedIndexOrder(shape.rank(), recipe.indexOrder(shape.rank()).entries());
         if (shape.elementCount() == 0) return;
         if (recipe.settings_.indexOffset >
             std::numeric_limits<size_t>::max() - (shape.elementCount() - 1))
@@ -1363,7 +1363,7 @@ struct GenerationRecipeAccess {
                                const ScalarConversionOptions& options) {
         validateRecipe(recipe, destination.shape(), destination.type());
         if (destination.elementCount() == 0) return;
-        const auto order = recipe.indexOrder(destination.shape().rank());
+        const auto order = detail::axesOf(recipe.indexOrder(destination.shape().rank()));
         if (scalarTypeInfo(destination.type()).category == ScalarCategory::Complex) {
             generateComplex(destination, recipe);
         } else if (realComponent(recipe).component.isRaw()) {

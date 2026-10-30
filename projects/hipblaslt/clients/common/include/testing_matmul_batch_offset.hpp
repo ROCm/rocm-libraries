@@ -371,7 +371,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                           expectedD.shareStorageWithLayout(expectedLayout),
                           options,
                           roc::hostnumerics::IndexRange::all(observedLayout.shape().elementCount()),
-                          std::vector<size_t>{1, 0});
+                          roc::hostnumerics::Permutation{1, 0});
             matched &= comparison.passed();
             maximumDifference = std::max(maximumDifference, comparison.maxAbsoluteDifference);
         }

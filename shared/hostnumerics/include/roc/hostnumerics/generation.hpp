@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <roc/hostnumerics/permutation.hpp>
 #include <roc/hostnumerics/tensor.hpp>
 #include <span>
 #include <type_traits>
@@ -22,9 +23,9 @@ struct GenerationRecipeSettings {
     // regardless of traversal order or thread count.
     uint64_t seed = 0;
 
-    // Owned axes from slowest to fastest; empty is valid only for rank zero.
-    // Indexed recipes and generateAt use this coordinate-to-index mapping.
-    std::vector<size_t> indexOrder;
+    // Axes from slowest to fastest. Indexed recipes and generateAt use this
+    // coordinate-to-index mapping; the default suits only rank-zero tensors.
+    Permutation indexOrder = Permutation::identity(0);
 
     // Added to the sampling index without changing coordinates or storage offsets.
     size_t indexOffset = 0;
@@ -338,10 +339,9 @@ class GenerationRecipe {
                                                                         uint64_t seed);
 
     // Returns the chosen order for the supplied rank, checking explicit orders.
-    [[nodiscard]] std::vector<size_t> indexOrder(size_t rank) const;
+    [[nodiscard]] Permutation indexOrder(size_t rank) const;
     [[nodiscard]] GenerationRecipe withSeed(uint64_t seed) const;
-    // Copies the axes; the returned recipe does not borrow the supplied span.
-    [[nodiscard]] GenerationRecipe withIndexOrder(std::span<const size_t> order) const;
+    [[nodiscard]] GenerationRecipe withIndexOrder(const Permutation& order) const;
     [[nodiscard]] GenerationRecipe withLastDimensionFastestIndexOrder() const;
 
    private:

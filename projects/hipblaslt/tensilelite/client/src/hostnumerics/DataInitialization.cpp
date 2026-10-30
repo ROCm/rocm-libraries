@@ -297,8 +297,7 @@ namespace TensileLite::Client
             sparsePatternLastDimensionFastest(PruneSparseMode mode, size_t sparseAxis, size_t rank)
         {
             StructuredSparsityPattern pattern;
-            pattern.indexOrder.resize(rank);
-            std::iota(pattern.indexOrder.begin(), pattern.indexOrder.end(), size_t{0});
+            pattern.indexOrder = roc::hostnumerics::Permutation::identity(rank);
             pattern.axis = sparseAxis;
             switch(mode)
             {
@@ -367,14 +366,12 @@ namespace TensileLite::Client
                     destination, hostnumerics::detail::mafMode(mode), operand, key.batchIndex);
                 return;
             }
-            std::vector<size_t> order(destination.shape().rank());
-            for(size_t axis = 0; axis < order.size(); ++axis)
-                order[axis] = order.size() - 1 - axis;
+            const auto order = roc::hostnumerics::Permutation::reverse(destination.shape().rank());
             roc::hostnumerics::generate(
                 destination,
                 generationRecipe(
                     dataType, mode, problemDependent, key.seed, key.semanticStream, freeValue)
-                    .withIndexOrder(std::move(order)));
+                    .withIndexOrder(order));
         }
     } // namespace
 

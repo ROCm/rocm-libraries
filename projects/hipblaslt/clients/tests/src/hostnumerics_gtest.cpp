@@ -810,7 +810,7 @@ TEST(HostNumericsDataInitializationBridge,
                                   hipblaslt_initialization::norm_dist,
                                   seedForMatrixRole(oneSpecialInitializationSeed, MatrixRole::A),
                                   hipblaslt::hostnumerics::TrigonometricComponent::Cosine)
-                 .withIndexOrder(std::vector<size_t>{2, 1, 0}));
+                 .withIndexOrder(roc::hostnumerics::Permutation{2, 1, 0}));
 
     constexpr size_t  expectedSpecialLogicalIndex = 6;
     const size_t      storageElements = actual.rawEncodedBackingStorage().size() / sizeof(float);
@@ -2153,9 +2153,7 @@ TEST(HostNumericsDataInitializationBridge, ExplicitOrderPreservesVectorAndBatche
                          std::nullopt,
                          false,
                          {});
-        std::vector<size_t> order(shape.rank());
-        for(size_t axis = 0; axis < order.size(); ++axis)
-            order[axis] = order.size() - 1 - axis;
+        const auto order = roc::hostnumerics::Permutation::reverse(shape.rank());
         Tensor     expected(ScalarType::Float32, shape);
         const auto recipe
             = initializationRecipe(ScalarType::Float32,

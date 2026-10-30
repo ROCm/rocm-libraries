@@ -1720,10 +1720,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                                               const roc::hostnumerics::GenerationRecipe& recipe) {
             auto tensor = buffer.tensor(hipblaslt::hostnumerics::scalarType(type), layout);
             std::ranges::fill(tensor.rawEncodedBackingStorage(), std::byte{0});
-            std::vector<size_t> order(layout.shape().rank());
-            for(size_t axis = 0; axis < order.size(); ++axis)
-                order[axis] = order.size() - 1 - axis;
-            roc::hostnumerics::generate(tensor, recipe.withIndexOrder(std::move(order)));
+            const auto order = roc::hostnumerics::Permutation::reverse(layout.shape().rank());
+            roc::hostnumerics::generate(tensor, recipe.withIndexOrder(order));
         };
         const auto randomInitializationRecipe =
             [&](hipDataType                                              type,

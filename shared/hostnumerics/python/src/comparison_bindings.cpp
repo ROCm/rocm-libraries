@@ -8,6 +8,7 @@
 
 #include <optional>
 #include <roc/hostnumerics/comparison.hpp>
+#include <roc/hostnumerics/permutation.hpp>
 #include <vector>
 
 #include "bindings.hpp"
@@ -131,7 +132,7 @@ void registerComparisonBindings(nb::module_& module) {
     module.def(
         "compare",
         [](const Tensor& observed, const Tensor& expected, const ComparisonOptions& options,
-           const IndexRange& indices, const std::vector<size_t>& order) {
+           const IndexRange& indices, const Permutation& order) {
             return compare(observed, expected, options, indices, order);
         },
         "observed"_a, "expected"_a, "options"_a, "indices"_a, "index_order"_a);
@@ -145,7 +146,7 @@ void registerComparisonBindings(nb::module_& module) {
     module.def(
         "compare",
         [](const Tensor& observed, const Tensor& expected, const ComparisonOptions& options,
-           const std::set<size_t>& indices, const std::vector<size_t>& order) {
+           const std::set<size_t>& indices, const Permutation& order) {
             return compare(observed, expected, options, indices, order);
         },
         "observed"_a, "expected"_a, "options"_a, "indices"_a, "index_order"_a);

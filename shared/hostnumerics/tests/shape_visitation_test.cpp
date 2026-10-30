@@ -13,7 +13,7 @@ void testShapeVisitation() {
     const auto check = [&](const auto& indices) {
         Tensor d =
             Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{-99, -99, -99, -99});
-        matmulInto(a, b, d, MatmulOptions(ScalarType::Float32), indices, std::vector<size_t>{1, 0},
+        matmulInto(a, b, d, MatmulOptions(ScalarType::Float32), indices, Permutation{1, 0},
                    GemmBackend::Blocked);
         require(d.loadAs<float>({1, 0}) == 43 && d.loadAs<float>({0, 1}) == -99 &&
                     d.loadAs<float>({0, 0}) == -99 && d.loadAs<float>({1, 1}) == -99,

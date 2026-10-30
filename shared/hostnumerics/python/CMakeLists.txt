@@ -24,6 +24,7 @@ nanobind_add_module(
     src/bindings.cpp
     src/core_bindings.cpp
     src/index_range_bindings.cpp
+    src/permutation_bindings.cpp
     src/shape_bindings.cpp
     src/layout_bindings.cpp
     src/comparison_bindings.cpp

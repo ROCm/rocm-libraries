@@ -68,7 +68,7 @@ TEST(PreparedIteration, CheckedAndPreparedOffsetsAgreeForEveryPermutation) {
     const Shape shape{2, 3, 4};
     std::array<size_t, 3> order{0, 1, 2};
     do {
-        const Layout layout = Layout::contiguous(shape, order);
+        const Layout layout = Layout::contiguous(shape, Permutation(order));
         const detail::IndexIteration plan(shape, order);
         std::array<size_t, 3> point{};
         for (size_t index = 0; index < plan.count(); ++index) {
@@ -88,7 +88,7 @@ TEST(PreparedIteration, PermutationsAndScalarHaveCorrectLoopBounds) {
         const detail::IndexIteration plan(shape, order);
         std::array<size_t, 3> point{};
         for (size_t index = 0; index < plan.count(); ++index) {
-            EXPECT_EQ(shape.coordinates(index, order),
+            EXPECT_EQ(shape.coordinates(index, Permutation(order)),
                       (std::vector<size_t>(point.begin(), point.end())));
             EXPECT_EQ(plan.linearIndex(point), index);
             EXPECT_EQ(plan.advance(point), index + 1 < plan.count());
@@ -107,12 +107,12 @@ TEST(PreparedIteration, IndexOrdersAgreeWithShapeAndLayout) {
     std::vector<size_t> order{0, 1, 2};
     do {
         const detail::IndexIteration plan(shape, order);
-        const Layout layout = Layout::contiguous(shape, order);
+        const Layout layout = Layout::contiguous(shape, Permutation(order));
         std::vector<size_t> point(shape.rank());
         for (const size_t index : std::set<size_t>{1, 7, 23}) {
             plan.coordinates(index, point);
-            EXPECT_EQ(point, shape.coordinates(index, order));
-            EXPECT_EQ(shape.linearIndex(point, order), index);
+            EXPECT_EQ(point, shape.coordinates(index, Permutation(order)));
+            EXPECT_EQ(shape.linearIndex(point, Permutation(order)), index);
             const auto offset = layout.elementOffset(point);
             ASSERT_TRUE(offset);
             EXPECT_EQ(*offset, static_cast<ptrdiff_t>(index));
@@ -173,7 +173,7 @@ TEST(PreparedIteration, ElementwiseSelectionUsesPermutationAndRejectsInvalidEmpt
     generate(input,
              GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::serialIndex(), 0));
     const Tensor one = Tensor::scalar(ScalarType::Float32, 1.0f);
-    const std::vector<size_t> order{1, 0, 2};
+    const Permutation order{1, 0, 2};
     const auto check = [&](const auto& selection) {
         generate(output, GenerationRecipe::realOnlyLastDimensionFastest(
                              GenerationRecipe::constant({.value = -7}), 0));
@@ -194,7 +194,7 @@ TEST(PreparedIteration, ElementwiseSelectionUsesPermutationAndRejectsInvalidEmpt
     check(std::set<size_t>{1, 7, 19});
     for (const Shape& emptyOrScalar : {Shape{2, 0, 4}, Shape{}}) {
         Tensor tensor(ScalarType::Float32, emptyOrScalar);
-        const std::array<size_t, 2> invalidOrder{0, 1};
+        const Permutation invalidOrder{0, 1};
         const auto checkEmpty = [&](const auto& selection) {
             EXPECT_THROW(addInto(tensor, one, tensor, ScalarType::Float32, selection, invalidOrder),
                          std::runtime_error);
@@ -207,19 +207,20 @@ TEST(PreparedIteration, ElementwiseSelectionUsesPermutationAndRejectsInvalidEmpt
     }
 }
 
-TEST(PreparedIteration, RecipesOwnOrdersPassedAsSpans) {
-    static_assert(std::is_same_v<decltype(std::declval<GenerationRecipe>().indexOrder(3)),
-                                 std::vector<size_t>>);
+TEST(PreparedIteration, RecipesOwnTheirOrders) {
+    static_assert(
+        std::is_same_v<decltype(std::declval<GenerationRecipe>().indexOrder(3)), Permutation>);
     const auto recipe =
         GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::serialIndex(), 0);
-    std::array<size_t, 3> order{2, 1, 0};
+    Permutation order{2, 1, 0};
     const auto ordered = recipe.withIndexOrder(order);
-    order = {0, 1, 2};
+    order = Permutation{0, 1, 2};
     const std::array<size_t, 3> expected{2, 1, 0};
     EXPECT_TRUE(std::ranges::equal(ordered.indexOrder(3), expected));
     const auto tensor = generate(ScalarType::Float32, Shape{2, 3, 4}, ordered);
     EXPECT_EQ(tensor.loadAs<float>({1, 0, 2}), 13.0f);
-    const Tensor selected = tensor.copySelectedElements(std::array<size_t, 2>{1, 7}, expected);
+    const Tensor selected =
+        tensor.copySelectedElements(std::array<size_t, 2>{1, 7}, ordered.indexOrder(3));
     EXPECT_EQ(selected.loadAs<float>({0}), 1.0f);
     EXPECT_EQ(selected.loadAs<float>({1}), 7.0f);
 }

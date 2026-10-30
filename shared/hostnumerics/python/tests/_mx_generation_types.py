@@ -67,7 +67,7 @@ class Recipe:
                 component,
                 hv.GenerationRecipeSettings(
                     seed=seed,
-                    index_order=[1, 0],
+                    index_order=hv.Permutation([1, 0]),
                 ),
             )
 

@@ -12,6 +12,7 @@ namespace nb = nanobind;
 NB_MODULE(_hostnumerics, module) {
     module.attr("__version__") = roc::hostnumerics::version().data();
     roc::hostnumerics::python_bindings::registerCoreBindings(module);
+    roc::hostnumerics::python_bindings::registerPermutationBindings(module);
     roc::hostnumerics::python_bindings::registerShapeBindings(module);
     roc::hostnumerics::python_bindings::registerLayoutBindings(module);
     roc::hostnumerics::python_bindings::registerGenerationBindings(module);

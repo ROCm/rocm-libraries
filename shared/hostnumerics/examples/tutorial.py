@@ -69,7 +69,7 @@ class HostNumericsTutorial(unittest.TestCase):
                 hn.GenerationRecipe.uniform_integer(
                     hn.UniformIntegerGenerationParameters(lower=-4, upper=-1)
                 ),
-                hn.GenerationRecipeSettings(seed=37, index_order=[0]),
+                hn.GenerationRecipeSettings(seed=37, index_order=hn.Permutation([0])),
             ),
         )
         self.assertTrue(np.all(hn.to_numpy(complex_values, dtype=None).imag != 0))
@@ -223,7 +223,7 @@ class HostNumericsTutorial(unittest.TestCase):
         self.assertEqual(normalized.mean.shape, [2])
 
         pattern = hn.StructuredSparsityPattern()
-        pattern.index_order = [0, 1]
+        pattern.index_order = hn.Permutation([0, 1])
         pattern.axis = 1
         pattern.fixed_positions = [0, 2]
         sparse = hn.apply_structured_sparsity(

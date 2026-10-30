@@ -69,7 +69,7 @@ class ComparisonAccumulator {
 
     ComparisonOptions m_options;
     const Shape* m_shape = nullptr;
-    std::vector<size_t> m_indexOrder;
+    Permutation m_indexOrder;
     ComparisonReport m_result;
     long double m_differenceSquares = 0.0;
     long double m_observedSquares = 0.0;

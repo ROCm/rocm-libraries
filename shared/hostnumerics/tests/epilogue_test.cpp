@@ -226,13 +226,13 @@ void testReferenceEpilogue() {
 
     EpilogueOptions emptyOptions = ownedOptions;
 
-    const EpilogueOutputs empty = referenceEpilogue(
-        ownedInput,
-        {.output = ScalarType::Float16,
-         .rawOutput = ScalarType::Float32,
-         .auxiliaryOutput = ScalarType::BFloat16,
-         .amax = ScalarType::Float32},
-        emptyOptions, IndexRange(4, std::numeric_limits<size_t>::max(), 1), LastDimensionFastest{});
+    const EpilogueOutputs empty =
+        referenceEpilogue(ownedInput,
+                          {.output = ScalarType::Float16,
+                           .rawOutput = ScalarType::Float32,
+                           .auxiliaryOutput = ScalarType::BFloat16,
+                           .amax = ScalarType::Float32},
+                          emptyOptions, IndexRange(4, 4, 1), LastDimensionFastest{});
     require(empty.output.loadAs<float>({0, 0}) == 0 && empty.rawOutput &&
                 empty.rawOutput->loadAs<float>({0, 0}) == 0 && empty.auxiliaryOutput &&
                 empty.auxiliaryOutput->loadAs<float>({0, 0}) == 0 && empty.amax &&

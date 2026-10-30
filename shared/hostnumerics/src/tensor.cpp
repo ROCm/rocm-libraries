@@ -5,6 +5,7 @@
 #include <functional>
 #include <limits>
 #include <roc/hostnumerics/tensor.hpp>
+#include <set>
 #include <span>
 #include <vector>
 
@@ -17,7 +18,7 @@ namespace roc::hostnumerics {
 namespace {
 template <typename Function>
 void forEachLinearIndex(const Tensor& tensor, std::span<const size_t> linearIndices,
-                        std::span<const size_t> indexOrder, Function&& function) {
+                        const Permutation& indexOrder, Function&& function) {
     const detail::IndexIteration iteration(tensor.shape(), indexOrder);
     const size_t count = iteration.count();
     for (size_t index : linearIndices)
@@ -143,7 +144,7 @@ void Tensor::copyLogicalElementsToEncodedStorage(std::span<std::byte> destinatio
 
 void Tensor::copySelectedElementsToEncodedStorage(std::span<std::byte> destination,
                                                   const IndexRange& indices,
-                                                  std::span<const size_t> order) const {
+                                                  const Permutation& order) const {
     const size_t required = storageBytesForLayout(m_type, m_layout);
     if (destination.size() < required)
         throw std::runtime_error("Tensor copy destination storage is too small.");
@@ -163,7 +164,7 @@ void Tensor::copySelectedElementsToEncodedStorage(std::span<std::byte> destinati
 }
 void Tensor::copySelectedElementsToEncodedStorage(std::span<std::byte> destination,
                                                   const std::set<size_t>& indices,
-                                                  std::span<const size_t> order) const {
+                                                  const Permutation& order) const {
     const size_t required = storageBytesForLayout(m_type, m_layout);
     if (destination.size() < required)
         throw std::runtime_error("Tensor copy destination storage is too small.");
@@ -183,7 +184,7 @@ void Tensor::copySelectedElementsToEncodedStorage(std::span<std::byte> destinati
 }
 
 Tensor Tensor::copySelectedElements(std::span<const size_t> linearIndices,
-                                    std::span<const size_t> indexOrder) const {
+                                    const Permutation& indexOrder) const {
     Tensor result(m_type, Shape{linearIndices.size()});
     const uint16_t bits = scalarTypeInfo(m_type).storageBits;
     // The result layout has already validated that all offsets fit ptrdiff_t.

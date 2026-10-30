@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <optional>
 #include <roc/hostnumerics/generation.hpp>
+#include <roc/hostnumerics/permutation.hpp>
 #include <utility>
 #include <vector>
 
@@ -63,7 +64,7 @@ void registerGenerationBindings(nb::module_& module) {
     nb::class_<GenerationRecipeSettings>(
         module, "GenerationRecipeSettings",
         "Seed and logical index order shared by one immutable recipe.")
-        .def(nb::init<uint64_t, std::vector<size_t>>(), "seed"_a, "index_order"_a)
+        .def(nb::init<uint64_t, Permutation>(), "seed"_a, "index_order"_a)
         .def_rw("seed", &GenerationRecipeSettings::seed)
         .def_rw("index_order", &GenerationRecipeSettings::indexOrder)
         .def_rw("index_offset", &GenerationRecipeSettings::indexOffset);
@@ -215,7 +216,7 @@ void registerGenerationBindings(nb::module_& module) {
         .def("with_seed", &GenerationRecipe::withSeed, "seed"_a)
         .def(
             "with_index_order",
-            [](const GenerationRecipe& recipe, const std::vector<size_t>& order) {
+            [](const GenerationRecipe& recipe, const Permutation& order) {
                 return recipe.withIndexOrder(order);
             },
             "index_order"_a);
