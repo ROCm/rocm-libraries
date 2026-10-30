@@ -51,6 +51,8 @@ def _probe(mode):
     parent_path = json.dumps([os.path.abspath(p) for p in sys.path])
     result = subprocess.run(
         [sys.executable, "-c", _PROBE, parent_path, json.dumps(_ISAS), _assembler(), mode],
+        # Probe for real: cached capabilities would skip what this test compares.
+        env={**os.environ, "TENSILE_DISABLE_ASM_CAPS_CACHE": "1"},
         capture_output=True,
         text=True,
     )

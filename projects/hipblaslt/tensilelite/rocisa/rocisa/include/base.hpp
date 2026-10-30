@@ -33,9 +33,13 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <typeinfo>
+#include <utility>
+#include <vector>
 
+#include "asm_caps_cache.hpp"
 #include "hardware_caps.hpp"
 #include "helper.hpp"
 
@@ -103,7 +107,19 @@ namespace rocisa
                 = {nb::cast<int>(arch[0]), nb::cast<int>(arch[1]), nb::cast<int>(arch[2])};
             if(m_isainfo.find(isaVersion) != m_isainfo.end())
                 return;
-            addIsaInfo(isaVersion, initAsmCaps(isaVersion, assemblerPath, debug));
+            // debug prints every assembler run, so it always probes.
+            std::optional<std::map<std::string, int>> cached;
+            if(!debug)
+                cached = loadAsmCaps(isaVersion, assemblerPath);
+            if(cached)
+            {
+                addIsaInfo(isaVersion, std::move(*cached));
+                return;
+            }
+            auto [asmCaps, cacheable] = probeAsmCaps(isaVersion, assemblerPath, debug);
+            if(cacheable && !debug)
+                storeAsmCaps(isaVersion, assemblerPath, asmCaps);
+            addIsaInfo(isaVersion, std::move(asmCaps));
         }
 
         // Same as calling init() for each arch, but probes the assembler
@@ -125,29 +141,47 @@ namespace rocisa
                     isaVersions.push_back(isaVersion);
             }
             std::vector<std::map<std::string, int>> asmCaps(isaVersions.size());
-            std::vector<std::exception_ptr>         errors(isaVersions.size());
+            std::vector<char> fromCache(isaVersions.size(), 0);
+            // char, not bool: each probe thread writes its own element.
+            std::vector<char> cacheable(isaVersions.size(), 0);
+            if(!debug)
+                for(size_t i = 0; i < isaVersions.size(); ++i)
+                    if(auto cached = loadAsmCaps(isaVersions[i], assemblerPath))
+                    {
+                        asmCaps[i]   = std::move(*cached);
+                        fromCache[i] = 1;
+                    }
+            std::vector<std::exception_ptr> errors(isaVersions.size());
             {
                 nb::gil_scoped_release release;
                 // jthread joins on destruction, so the probes already started are
                 // joined even if starting a later thread throws.
                 std::vector<std::jthread> threads;
                 for(size_t i = 0; i < isaVersions.size(); ++i)
-                    threads.emplace_back([&, i]() {
-                        try
-                        {
-                            asmCaps[i] = initAsmCaps(isaVersions[i], assemblerPath, debug);
-                        }
-                        catch(...)
-                        {
-                            errors[i] = std::current_exception();
-                        }
-                    });
+                    if(!fromCache[i])
+                        threads.emplace_back([&, i]() {
+                            try
+                            {
+                                auto [caps, ok]
+                                    = probeAsmCaps(isaVersions[i], assemblerPath, debug);
+                                asmCaps[i]   = std::move(caps);
+                                cacheable[i] = ok;
+                            }
+                            catch(...)
+                            {
+                                errors[i] = std::current_exception();
+                            }
+                        });
             }
             for(auto& e : errors)
                 if(e)
                     std::rethrow_exception(e);
             for(size_t i = 0; i < isaVersions.size(); ++i)
+            {
+                if(cacheable[i] && !debug)
+                    storeAsmCaps(isaVersions[i], assemblerPath, asmCaps[i]);
                 addIsaInfo(isaVersions[i], std::move(asmCaps[i]));
+            }
         }
 
         bool isInit()
@@ -282,6 +316,16 @@ namespace rocisa
 
     private:
         rocIsa() = default;
+
+        // The capabilities can be cached only if every assembler run accepted or
+        // rejected its source normally.
+        static std::pair<std::map<std::string, int>, bool>
+            probeAsmCaps(const IsaVersion& isaVersion, const std::string& assemblerPath, bool debug)
+        {
+            unusualAssemblerExit() = false;
+            auto asmCaps           = initAsmCaps(isaVersion, assemblerPath, debug);
+            return {std::move(asmCaps), !unusualAssemblerExit()};
+        }
 
         void addIsaInfo(const IsaVersion& isaVersion, std::map<std::string, int> asmCaps)
         {
