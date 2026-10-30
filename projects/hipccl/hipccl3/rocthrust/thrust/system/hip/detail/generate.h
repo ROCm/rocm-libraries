@@ -40,45 +40,44 @@
 #if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/distance.h>
-#  include <thrust/system/hip/detail/for_each.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
+#  include <thrust/system/hip/detail/parallel_for.h>
+#  include <thrust/system/hip/detail/util.h>
 
-#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
-
-#  include <iterator>
+#  include _THRUST_STD_INCLUDE(iterator)
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
-// for_each functor
-template <class Generator>
-struct generate_f
+namespace __generate
 {
+// generate functor
+template <class OutputIt, class Generator>
+struct functor
+{
+  OutputIt result;
   Generator generator;
 
-  THRUST_HIP_FUNCTION
-  generate_f(Generator generator_)
-      : generator(generator_)
-  {}
-
-  template <class T>
-  THRUST_HIP_DEVICE_FUNCTION void operator()(T const& value)
+  template <class Size>
+  THRUST_HIP_DEVICE_FUNCTION void operator()(Size idx)
   {
-    T& lvalue = const_cast<T&>(value);
-    lvalue    = generator();
+    result[idx] = generator();
   }
-};
+}; // struct functor
 
-// for_each_n
+} // namespace __generate
+
+THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class OutputIt, class Size, class Generator>
 OutputIt THRUST_HOST_DEVICE
 generate_n(execution_policy<Derived>& policy, OutputIt result, Size count, Generator generator)
 {
-  return hip_rocprim::for_each_n(policy, result, count, generate_f<Generator>(generator));
+  hip_rocprim::parallel_for(policy, __generate::functor<OutputIt, Generator>{result, generator}, count);
+
+  return result + count;
 }
 
-// for_each
 template <class Derived, class OutputIt, class Generator>
 void THRUST_HOST_DEVICE generate(execution_policy<Derived>& policy, OutputIt first, OutputIt last, Generator generator)
 {
