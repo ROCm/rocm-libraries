@@ -78,7 +78,8 @@ select_rocjitsu_target() {
 }
 
 # Record the duration and exit status of each stage in a file that is uploaded
-# with the other race reports. The same information is also printed at exit.
+# with the other race reports. The same information is also printed at exit,
+# and added to the GitHub job summary when running in Actions.
 print_timing_summary() {
   if [[ -f "${TIMING_FILE}" ]]; then
     echo ""
@@ -87,6 +88,23 @@ print_timing_summary() {
     while IFS=$'\t' read -r label seconds status; do
       printf "%-36s %10s %6s\n" "${label}" "${seconds}" "${status}"
     done <"${TIMING_FILE}"
+    echo "Timeouts: ${RACE_TIMEOUT_SECONDS} s per race-check command," \
+      "${TENSILELITE_TIMEOUT_SECONDS} s for the TensileLite client"
+    if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+      {
+        echo "### rocjitsu race check stages (${AMDGPU_FAMILIES:-local})"
+        echo ""
+        echo "| Stage | Seconds | Exit status |"
+        echo "| --- | ---: | ---: |"
+        while IFS=$'\t' read -r label seconds status; do
+          echo "| ${label} | ${seconds} | ${status} |"
+        done <"${TIMING_FILE}"
+        echo ""
+        echo "Timeouts: ${RACE_TIMEOUT_SECONDS} s per race-check command," \
+          "${TENSILELITE_TIMEOUT_SECONDS} s for the TensileLite client."
+        echo ""
+      } >>"${GITHUB_STEP_SUMMARY}"
+    fi
   fi
 }
 trap print_timing_summary EXIT

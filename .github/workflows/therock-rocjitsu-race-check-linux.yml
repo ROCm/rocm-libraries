@@ -205,16 +205,13 @@ jobs:
         timeout-minutes: 75
         run: bash rocm-libraries/.github/scripts/run_rocjitsu_hipblaslt_race_check.sh
 
-      - name: Show random GEMM counts
+      # The driver adds per-stage timings to the job summary; add the runner's
+      # totals, per-case timings, slowest cases and failures after them.
+      - name: Show random GEMM results
         if: ${{ always() && inputs.random_gemm_count > 0 }}
         run: |
-          if [ -f race-reports/random-gemms/summary.json ]; then
-            {
-              echo '### GEMM race and numerical checks (gfx950)'
-              echo '```json'
-              cat race-reports/random-gemms/summary.json
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
+          if [ -f race-reports/random-gemms/summary.md ]; then
+            cat race-reports/random-gemms/summary.md >> "$GITHUB_STEP_SUMMARY"
           fi
 
       # Preserve inputs, results, detector logs and timings even after a failure.

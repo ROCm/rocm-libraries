@@ -285,6 +285,27 @@ class RandomGemmTests(unittest.TestCase):
                 "race reported", (output / "case-0002/result.json").read_text()
             )
             self.assertIn("passed", (output / "case-0003/result.json").read_text())
+            # Every executed case reports its timing and the kernel it ran.
+            self.assertEqual(summary["distinct_kernels"], 1)
+            self.assertEqual(
+                json.loads((output / "kernels.json").read_text()),
+                {"gemm_kernel": ["case-0001", "case-0002", "case-0003"]},
+            )
+            self.assertEqual(summary["timeout_seconds"], 180)
+            self.assertEqual(len(summary["slowest_cases"]), 3)
+            self.assertGreaterEqual(summary["case_seconds"]["min"], 0.1)
+            self.assertLessEqual(
+                summary["case_seconds"]["min"], summary["case_seconds"]["max"]
+            )
+            seconds = json.loads((output / "case-0001/result.json").read_text())[
+                "seconds"
+            ]
+            self.assertEqual(set(seconds), {"conversion", "bench", "total"})
+            self.assertGreaterEqual(seconds["total"], seconds["bench"])
+            report = (output / "summary.md").read_text()
+            self.assertIn("2 passed, 1 failed, 0 without a solution", report)
+            self.assertIn("Distinct kernels: 1", report)
+            self.assertIn("| case-0002 | failed | race reported |", report)
 
             for threads, early_stop in ((3, False), (2, True)):
                 with self.subTest(threads=threads, early_stop=early_stop):
@@ -333,7 +354,7 @@ class RandomGemmTests(unittest.TestCase):
                 ("allclose", "missing or failed numerical checks", 0),
                 ("emulator-exit", "bench exited 7", 7),
                 ("no-solution", "no heuristic solution", 0),
-                ("timeout", "bench exited 124", 124),
+                ("timeout", "bench timed out after 1 s", 124),
             ):
                 for early_stop in (False, True):
                     with self.subTest(mode=mode, early_stop=early_stop):
@@ -457,15 +478,21 @@ class RandomGemmTests(unittest.TestCase):
 
     def test_timeout_terminates_case_and_returns_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self.assertEqual(
-                runner.run_command(
-                    [sys.executable, "-c", "import time; time.sleep(60)"],
-                    Path(tmp),
-                    0.1,
-                    "timeout.log",
-                ),
-                124,
+            status, seconds, timed_out = runner.run_command(
+                [sys.executable, "-c", "import time; time.sleep(60)"],
+                Path(tmp),
+                0.1,
+                "timeout.log",
             )
+            self.assertEqual((status, timed_out), (124, True))
+            self.assertLess(seconds, 30)
+            status, seconds, timed_out = runner.run_command(
+                [sys.executable, "-c", "raise SystemExit(3)"],
+                Path(tmp),
+                30,
+                "exit.log",
+            )
+            self.assertEqual((status, timed_out), (3, False))
 
     def test_execution_requires_gfx950(self):
         with tempfile.TemporaryDirectory() as tmp:
