@@ -127,6 +127,7 @@ from kernels.common.attention_dense_kv_split import (
 from kernels.common._attention_additive_bias import (
     add_additive_bias_at,
     add_additive_bias_x4_at,
+    additive_bias_elem_ptr,
     additive_bias_launch_values,
     additive_bias_row,
     append_additive_bias_signature,
@@ -1347,30 +1348,37 @@ def build_attention_dense(
         exp2 needs the bias in log2 units. So each score is scaled and biased once,
         here, and softmax_max and _p_exp skip the scale on this path."""
         tile_key0 = b.mul(tile_idx, b.const_i32(BN))
+        # The x4 bias loads lift the D128 LSE kernels past the 256-VGPR budget
+        # (2 waves/SIMD, LDS-bound) into a scratch spill; they keep the scalar loads.
+        x4 = not RAGGED and not (spec.emit_lse and D == 128)
+        if x4:
+            # One bias pointer per KV tile, at the lane's first key; the x4 loads
+            # below read at constant element offsets from it, which the backend
+            # folds into their immediates instead of extending and scaling an i32
+            # index per load.
+            c_row_lane = _mfma_32x32_c_row(b, lane, 0)
+            key0 = b.add(tile_key0, c_row_lane)
+            tile_ptr = additive_bias_elem_ptr(b, additive_bias, row=bias_row, col=key0)
         for nsub in range(N_SUB):
-            sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
-            # The x4 bias loads lift the D128 LSE kernels past the 256-VGPR budget
-            # (2 waves/SIMD, LDS-bound) into a scratch spill; they keep the scalar loads.
-            if not RAGGED and not (spec.emit_lse and D == 128):
+            if x4:
                 # C elements i0..i0+3 are keys c_row(i0)..c_row(i0)+3 of the
                 # lane's bias row (_mfma_32x32_c_row: c_row(i) = (i//4)*8 +
                 # (lane//32)*4 + i%4), so one 16-byte load per group replaces
-                # four scalar ones. Every key is in range here, so the scalar
-                # path's per-key mask is not needed.
+                # four scalar ones, at nsub*32 + c_row(i0) - c_row(0) =
+                # nsub*32 + (i0//4)*8 keys past the tile pointer. Every key is in
+                # range here, so the scalar path's per-key mask is not needed.
                 for i0 in range(0, 16, 4):
-                    c_row0 = _mfma_32x32_c_row(b, lane, i0)
-                    ktok0 = b.add(sub_base, c_row0)
                     scaled = [b.fmul(s_reg[nsub][i0 + j], qk_scale) for j in range(4)]
                     s_reg[nsub][i0 : i0 + 4] = add_additive_bias_x4_at(
                         b,
                         scaled,
-                        additive_bias,
-                        row=bias_row,
-                        col=ktok0,
+                        tile_ptr,
+                        offset=nsub * 32 + (i0 // 4) * 8,
                         rcp_ln2=bias_log2e,
                         floor=bias_floor,
                     )
             else:
+                sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
                 # Scalar loads: masked per key on the ragged body (the last tile
                 # and padded query rows can be out of range), plain otherwise.
                 for i in range(16):

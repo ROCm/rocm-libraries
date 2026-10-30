@@ -318,13 +318,17 @@ def test_misaligned_bias_view(mask, d):
     assert _max_abs(out, ref) < _tolerance(dtype)
 
 
+@pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
 @pytest.mark.parametrize("d", [64, 128])
-def test_vector_bias_loads_match_the_scalar_path_bitwise(d):
+def test_vector_bias_loads_match_the_scalar_path_bitwise(d, lse):
     """At tile-multiple lengths the ragged body (masked scalar bias loads) reads the
     same keys as the aligned body (16-byte loads) with the same clamp, scale and add,
-    so the outputs are bitwise equal: on the misaligned view of the test above."""
+    so the outputs (and the LSE) are bitwise equal: on the misaligned view of the test
+    above. D128 with LSE keeps scalar loads in both bodies (a cheap control)."""
     dtype, hq, hkv, batch, sq, skv = "bf16", 4, 2, 2, 256, 512
-    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask="top_left")
+    spec = _spec(
+        dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask="top_left", lse=lse
+    )
     assert not spec.ragged
     q, k, v, _ = _inputs(dtype, d, hq, hkv, batch, sq, skv, (1,))
     pitch = skv + 5
@@ -334,11 +338,13 @@ def test_vector_bias_loads_match_the_scalar_path_bitwise(d):
     storage[1 + 3 :: 7] = -np.inf
     scale = 1.0 / math.sqrt(d)
     view = (storage, 1, strides)
-    vec, _ = _launch(spec, q, k, v, None, scale, bias_view=view)
-    scalar, _ = _launch(
+    vec, vec_lse = _launch(spec, q, k, v, None, scale, bias_view=view)
+    scalar, scalar_lse = _launch(
         replace(spec, ragged=True), q, k, v, None, scale, bias_view=view
     )
     np.testing.assert_array_equal(vec, scalar)
+    if lse:
+        np.testing.assert_array_equal(vec_lse, scalar_lse)
 
 
 @pytest.mark.parametrize(

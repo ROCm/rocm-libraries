@@ -54,6 +54,7 @@ _MODES = {
     "varlen": {"varlen": True},
     "sinks": {"use_sinks": True},
     "lse": {"emit_lse": True},
+    "lse_d64": {"emit_lse": True, "head_size": 64, "dtype": "fp16"},
     "lookahead": {"right_bound": 16},
 }
 
@@ -87,14 +88,25 @@ def test_bias_is_in_the_name_and_the_cache_key(mode):
 
 
 _BIAS_X4_LOAD = re.compile(r"load <4 x float>, ptr addrspace\(1\) [^,]+, align (\d+)")
+# The tile's bias pointer: additive_bias_elem_ptr's byte GEP off the bias kernarg.
+_BIAS_TILE_PTR = re.compile(
+    r"%(\S+) = getelementptr inbounds i8, ptr addrspace\(1\) %additive_bias_ptr, i64 %\S+\n"
+)
+# An x4 bias load at a constant element offset from a tile pointer.
+_BIAS_X4_AT = re.compile(
+    r"%(\S+) = getelementptr inbounds float, ptr addrspace\(1\) %(\S+), i32 (\d+)\n"
+    r"\s*%\S+ = load <4 x float>, ptr addrspace\(1\) %\1, align 4\n"
+)
 
 
 @pytest.mark.parametrize("mode", list(_MODES))
 def test_the_aligned_body_reads_the_bias_four_keys_per_element_aligned_load(mode):
     """The non-ragged body reads the bias with one <4 x float> load per four keys,
-    element-aligned only (the host contract promises no 16-byte alignment); the
-    ragged body keeps masked scalar loads, the D128 LSE body keeps plain scalar ones
-    (the vector form would spill it), and bias off emits no such load."""
+    element-aligned only (the host contract promises no 16-byte alignment), all
+    from ONE pointer per KV tile at constant element offsets 0, 8, ... (so the
+    backend folds them into load immediates); the ragged body keeps masked scalar
+    loads, the D128 LSE body plain scalar ones (the vector form would spill it),
+    and bias off emits no such load."""
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
     def llvm(spec):
@@ -105,11 +117,23 @@ def test_the_aligned_body_reads_the_bias_four_keys_per_element_aligned_load(mode
         )
 
     spec = _bias(_MODES[mode])
-    aligns = _BIAS_X4_LOAD.findall(llvm(spec))
+    ll = llvm(spec)
+    aligns = _BIAS_X4_LOAD.findall(ll)
     if spec.ragged or (spec.emit_lse and spec.head_size == 128):
         assert aligns == []
     else:
         assert aligns and set(aligns) == {"4"}
+        groups: dict[str, list[int]] = {}
+        for m in _BIAS_X4_AT.finditer(ll):
+            groups.setdefault(m.group(2), []).append(int(m.group(3)))
+        # Every x4 load is a constant offset from a tile pointer ...
+        assert sum(map(len, groups.values())) == len(aligns)
+        assert set(groups) <= set(_BIAS_TILE_PTR.findall(ll))
+        # ... and each tile pointer serves the whole tile: BN // 32 * 4 groups, 8 keys
+        # apart.
+        per_tile = spec.block_n // 32 * 4
+        for offsets in groups.values():
+            assert offsets == list(range(0, 8 * per_tile, 8))
     assert _BIAS_X4_LOAD.findall(llvm(replace(spec, use_additive_bias=False))) == []
 
 

@@ -85,18 +85,18 @@
         },
         "attention_dense/gfx950/bias_sq512": {
           "arch": "gfx950",
-          "bytes": 362046,
+          "bytes": 354087,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_causal_lazyrs_addb_npbthkvmin",
-          "sha256": "aa849fa8323ebc33cff651b2c0bf8980f2ee47092c07d95526dd0f5f20b49d9d",
+          "sha256": "b81ef7fa88a45a270122d960aa2a2e58cd610332e8b20092cdc1f0d76abbe60a",
           "status": "ok"
         },
         "attention_dense/gfx950/bias_varlen_window_sq512": {
           "arch": "gfx950",
-          "bytes": 496499,
+          "bytes": 485910,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa64_varlen_lazyrs_addb",
-          "sha256": "46d4409b1be924cd0aff550ab6df05876b2856932ce1045fc9c6f86269d64802",
+          "sha256": "cc0d7c0804fd7d11fb2b8c4572eac1584695c332018a690efe6dcb8aeef2d829",
           "status": "ok"
         },
         "attention_dense/gfx950/bn128_sq512": {
@@ -562,18 +562,18 @@
         },
         "attention_dense/gfx950/bias_sq512": {
           "arch": "gfx950",
-          "bytes": 362146,
+          "bytes": 354187,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_causal_lazyrs_addb_npbthkvmin",
-          "sha256": "564fcb790e73136290ecfc1dd08b31a6b4a7b8ed6acb654e6c1a7e90788a952a",
+          "sha256": "b1d34a1d23a151c0243edecb13d270267d7200e87b23f421dc9ed346641f36c1",
           "status": "ok"
         },
         "attention_dense/gfx950/bias_varlen_window_sq512": {
           "arch": "gfx950",
-          "bytes": 496599,
+          "bytes": 486010,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa64_varlen_lazyrs_addb",
-          "sha256": "5c5e6da860912aa359a48d61a3b84479c21d75ae922bab274cacde8b2d941825",
+          "sha256": "a32e716b13b0671ac584ba547b5a3c713dd50782b35f1865a0e1fddf0d882daa",
           "status": "ok"
         },
         "attention_dense/gfx950/bn128_sq512": {
@@ -1039,18 +1039,18 @@
         },
         "attention_dense/gfx950/bias_sq512": {
           "arch": "gfx950",
-          "bytes": 362210,
+          "bytes": 354251,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_causal_lazyrs_addb_npbthkvmin",
-          "sha256": "a87f1c9953d7538801e587ff93546a58a7cd63697942931530cc35c9f9a9b143",
+          "sha256": "f42cc706bade6e2f2467a15cc41a79ea5873b0b0ff241891491fb4e971dd21ff",
           "status": "ok"
         },
         "attention_dense/gfx950/bias_varlen_window_sq512": {
           "arch": "gfx950",
-          "bytes": 496663,
+          "bytes": 486074,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa64_varlen_lazyrs_addb",
-          "sha256": "876f78f688a9a25e28a31b6682c784a7d490a2508a8df1ce4bd754289b6ffdaa",
+          "sha256": "381b3e81010910eb7407a180682b313067f0bc90d5dbaa88dca528f7afb561ce",
           "status": "ok"
         },
         "attention_dense/gfx950/bn128_sq512": {
@@ -1516,18 +1516,18 @@
         },
         "attention_dense/gfx950/bias_sq512": {
           "arch": "gfx950",
-          "bytes": 362210,
+          "bytes": 354251,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_causal_lazyrs_addb_npbthkvmin",
-          "sha256": "a87f1c9953d7538801e587ff93546a58a7cd63697942931530cc35c9f9a9b143",
+          "sha256": "f42cc706bade6e2f2467a15cc41a79ea5873b0b0ff241891491fb4e971dd21ff",
           "status": "ok"
         },
         "attention_dense/gfx950/bias_varlen_window_sq512": {
           "arch": "gfx950",
-          "bytes": 496663,
+          "bytes": 486074,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa64_varlen_lazyrs_addb",
-          "sha256": "876f78f688a9a25e28a31b6682c784a7d490a2508a8df1ce4bd754289b6ffdaa",
+          "sha256": "381b3e81010910eb7407a180682b313067f0bc90d5dbaa88dca528f7afb561ce",
           "status": "ok"
         },
         "attention_dense/gfx950/bn128_sq512": {
