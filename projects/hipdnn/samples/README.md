@@ -457,7 +457,7 @@ Shows the runtime-load frontend target `hipdnn_frontend_dynamic`. The sample lin
 
 ## cuDNN Compatibility Shim Samples
 
-Built only with `-DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON`. They use cuDNN frontend spellings through the shim; see the [cuDNN shim guide](../docs/cudnn-shim.md).
+Built when hipDNN is built with `-DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON`, or, in a standalone samples build, when the installed `hipdnn_frontend` provides the `cudnn_compatibility` component. They use cuDNN frontend spellings through the shim; see the [cuDNN shim guide](../docs/cudnn-shim.md).
 
 - [`cudnn_shim/ConvFprop.cpp`](./cudnn_shim/ConvFprop.cpp): builds and validates a convolution forward graph (host only).
 - [`cudnn_shim/Matmul.cpp`](./cudnn_shim/Matmul.cpp): builds and validates a batched matmul graph (host only).
@@ -465,3 +465,15 @@ Built only with `-DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON`. They use cuDNN fronten
 - [`cudnn_shim/Pointwise.cpp`](./cudnn_shim/Pointwise.cpp): builds and validates a binary pointwise graph (host only).
 - [`cudnn_shim/SdpaRoundTrip.cpp`](./cudnn_shim/SdpaRoundTrip.cpp): builds and validates an SDPA forward graph (host only; also needs `HIPDNN_ENABLE_SDPA`).
 - [`cudnn_shim/HipifyConvFprop.cpp`](./cudnn_shim/HipifyConvFprop.cpp): a cuDNN frontend convolution forward program after textual hipify, with each rewritten line marked `// cuDNN:`. Runs on a GPU and checks the output.
+- [`cudnn_shim/ConvFpropV8.cpp`](./cudnn_shim/ConvFpropV8.cpp): a convolution forward built with the v0.x builders (cuDNN v8 API). Runs on a GPU and checks the output; `--overhead` reports the shim's per-call cost, and `--enforce-budget` makes that report fail when over budget.
+- [`cudnn_shim/ConvDgradV8.cpp`](./cudnn_shim/ConvDgradV8.cpp), [`cudnn_shim/ConvWgradV8.cpp`](./cudnn_shim/ConvWgradV8.cpp): convolution backward data and backward filter built the way PyTorch builds them. Run on a GPU and check the output. Each also tries a true-convolution (`CUDNN_CONVOLUTION`) and an asymmetric-padding variant; MIOpen rejects both, so they are skipped and their output has not been checked on any provider.
+- [`cudnn_shim/ConvBiasReluV8.cpp`](./cudnn_shim/ConvBiasReluV8.cpp): a fused convolution, bias and ReLU built with the v0.x builders. Runs on a GPU and checks the output.
+- [`cudnn_shim/MatmulBiasActV8.cpp`](./cudnn_shim/MatmulBiasActV8.cpp): a matmul with bias and activation built with the v0.x builders. Runs on a GPU and checks the output when the hipBLASLt provider is loaded; skipped elsewhere, including gfx115x on Windows, where hipBLASLt declines matmul.
+- [`cudnn_shim/PointwiseReluV8.cpp`](./cudnn_shim/PointwiseReluV8.cpp): a pointwise ReLU built with the v0.x builders. Runs on a GPU and checks the output; the bf16 variants have no MIOpen engine and are skipped.
+- [`cudnn_shim/BatchnormV8.cpp`](./cudnn_shim/BatchnormV8.cpp): batch norm forward training and backward built with the v0.x norm builders. Runs on a GPU and checks the output.
+- [`cudnn_shim/LayernormV8.cpp`](./cudnn_shim/LayernormV8.cpp), [`cudnn_shim/ResampleV8.cpp`](./cudnn_shim/ResampleV8.cpp): layer norm forward training and backward, and average and max pooling forward and backward, built with the v0.x builders. Run on a GPU and check the output only when hip-kernel-provider is loaded; skipped otherwise.
+- [`cudnn_shim/ReductionV8.cpp`](./cudnn_shim/ReductionV8.cpp): per-channel ADD and MAX reductions built with the v0.x builders. No provider implements reduction yet, so every variant is skipped and its output check has never run; the sample starts checking when a provider claims reduction.
+
+The v8 samples print `RESULT ran=<n> skipped=<m>`; a variant with no applicable engine is skipped, and a sample in which no variant ran prints `SKIPPED`. `--require-ran <n>` fails the run when fewer than `n` variants ran, and `--require-variant <name>` (repeatable) fails it when the named variant did not run; the name is the one a `Skipping variant:` line shows, without a parenthesized note after it, such as resample backward max-pooling's `(needs the forward plan for its index)`. They run the heuristics' first engine config, so they reject `--engine-id` and `--engine-name`.
+
+Each v8 ctest passes a floor, the number of fp32 variants MIOpen runs on every device, and, where the floor is above 0, names fp32 NCHW variants that must run (see `CMakeLists.txt`). Matmul needs the hipBLASLt provider, and layer norm and resample need hip-kernel-provider. TheRock's `hipdnn-samples` job loads only the MIOpen provider, so these three samples report Skipped there and their floors are 0. A TheRock change makes that job load the hipBLASLt and hip-kernel providers; their floors rise once the TheRock version that rocm-libraries CI uses includes it. The `hipdnn-samples` superbuild preset builds the hipBLASLt provider but not hip-kernel-provider.

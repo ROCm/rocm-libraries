@@ -612,6 +612,27 @@ jobs:
       - name: Patch ROCm SDK with superbuild outputs
         run: cmake --install build --prefix "$ROCM_SDK_PATH"
 
+      - name: cuDNN sample corpus (compile always; run when a GPU is present)
+        run: |
+          set -euo pipefail
+          B="$RUNNER_TEMP/cdnns"
+          cmake -S "$ROCM_SDK_PATH/share/hipdnn/cudnn_samples" -B "$B" -GNinja \
+            -DCMAKE_PREFIX_PATH="$ROCM_SDK_PATH" \
+            -DCMAKE_CXX_COMPILER="$ROCM_SDK_PATH/lib/llvm/bin/clang++" \
+            -DCMAKE_C_COMPILER="$ROCM_SDK_PATH/lib/llvm/bin/clang" \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          # The superbuild installs the shim, so the harness's shim-off placeholder can only
+          # mean the installed package lost the component; that must not pass as a skip.
+          if ctest --test-dir "$B" -N | grep cudnn_samples_skipped >/dev/null; then
+            echo "::error::installed hipDNN does not report the cudnn_compatibility component" >&2
+            exit 1
+          fi
+          # XFAIL_COMPILE TUs fail by design; compilation is judged per TU by ctest.
+          cmake --build "$B" -- -k 0 || true
+          export LD_LIBRARY_PATH="$ROCM_SDK_PATH/lib:${LD_LIBRARY_PATH:-}"
+          if [ -r /dev/kfd ]; then label=cudnn_samples; else label=compile; fi
+          ctest --test-dir "$B" -L "$label" --no-tests=error --output-on-failure -j "$(nproc)"
+
       - name: Pack frontend wheel
         run: |
           "$VENV_PYTHON" projects/hipdnn/python/frontend_wheel_package/pack_frontend_wheel.py \

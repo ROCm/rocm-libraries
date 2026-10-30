@@ -1,16 +1,20 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Coverage for the shim's is_supported_ext() probe: a hipDNN extension with no
-// upstream cuDNN frontend equivalent, so the contract asserted here is hipDNN's.
+// Coverage for the shim's is_supported_ext() probe, a hipDNN extension with no
+// upstream cuDNN frontend equivalent, so the contract asserted here is hipDNN's;
+// and for the once-per-process warning on heuristic modes the graph API does not honor.
 #include "CudnnShimTestSupport.hpp"
 #include "fake_backend/MockBackendFixture.hpp"
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
+#include <string>
 #include <vector>
 
 namespace
@@ -90,6 +94,29 @@ TEST_F(TestCudnnShimGraphSupportCheck, AcceptsNonFallbackHeuristicModes)
 
     auto error = graph.is_supported_ext(_handle, {fe::HeurMode_t::A, fe::HeurMode_t::FALLBACK});
     EXPECT_TRUE(error.is_good()) << error.get_message();
+}
+
+TEST_F(TestCudnnShimGraphSupportCheck, OpensourceModeWarnsOncePerProcess)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    fe::detail::warnedHeuristicModes().store(0);
+
+    fe::graph::Graph graph;
+    EXPECT_TRUE(graph.create_execution_plans({fe::HeurMode_t::A}).is_good());
+    EXPECT_TRUE(graph.create_execution_plans({fe::HeurMode_t::B}).is_good());
+    EXPECT_TRUE(graph.create_execution_plans({fe::HeurMode_t::OPENSOURCE}).is_good());
+    EXPECT_TRUE(graph.create_execution_plans({fe::HeurMode_t::OPENSOURCE}).is_good());
+    EXPECT_TRUE(graph.create_execution_plans({fe::HeurMode_t::FALLBACK}).is_good());
+
+    const auto logs = recorder.getRecordedLogs();
+    const auto warnings = [&logs](const std::string& text) {
+        return std::count_if(logs.begin(), logs.end(), [&text](const auto& log) {
+            return log.severity == HIPDNN_SEV_WARN && log.message.find(text) != std::string::npos;
+        });
+    };
+    EXPECT_EQ(warnings("heuristic mode OPENSOURCE "), 1);
+    EXPECT_EQ(warnings("not honored"), 1);
 }
 
 TEST_F(TestCudnnShimGraphSupportCheck, InvalidOwnedTensorFailsBeforeBackendCall)

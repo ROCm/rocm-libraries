@@ -423,7 +423,8 @@ defaults match upstream (logging off) — no decision needed.
 
 ## 6. The `<cudnn.h>` / v0.x umbrella-header problem
 
-The shim provides **source-level** compatibility for cuDNN frontend v9 only.
+The shim provides **source-level** compatibility for the cuDNN frontend v9
+graph API (this RFC) and the v0.x builders ([RFC 0022](./0022_CuDNN_V8_Shim.md)).
 Explicitly out of scope:
 
 - **ABI compatibility**: a `.so`/`.dll` built against real cuDNN cannot be
@@ -467,19 +468,17 @@ Consequences:
 
 ### Decision in this RFC
 
-Ship a **v9-only umbrella header** that does not mirror upstream's
-include-everything pattern. The shim's `cudnn_frontend.h` is hand-curated:
-it pulls in only the v9 graph API surface, the FE-namespace enums, the
-error / logging machinery, and the stub `cudnn.h` for C-API types.
+The shim's `cudnn_frontend.h` includes `cudnn.h` and, as upstream, the
+v0.x headers and the `_v8` aliases, which
+[RFC 0022](./0022_CuDNN_V8_Shim.md) designs. This RFC covers the part of
+`cudnn.h` the v9 graph API needs.
 
-The stub `cudnn.h` covers the C-API **types** the v9 method signatures
-reference:
+`cudnn.h` covers the C-API **types** the v9 method signatures reference:
 
-- `cudnnHandle_t` — aliased: `using cudnnHandle_t =
-  hipdnn_frontend::hipdnnHandle_t;`
+- `cudnnHandle_t` — aliased: `using cudnnHandle_t = ::hipdnnHandle_t;`
 - `cudnnStatus_t` enum (mapped to `hipdnnStatus_t`)
 - `cudnnDataType_t`, `cudnnTensorFormat_t`, `cudnnConvolutionMode_t`,
-  `cudnnReduceTensorOp_t`, `cudnnNormFwdPhase_t`, `cudnnBackendHeurMode_t`,
+  `cudnnReduceTensorOp_t`, `cudnnBackendNormFwdPhase_t`, `cudnnBackendHeurMode_t`,
   `cudnnBackendNumericalNote_t`, `cudnnBackendBehaviorNote_t`,
   `cudnnBackendDescriptorType_t`
 
@@ -489,43 +488,27 @@ outside the frontend and to build the mirrored samples (§8.3):
 
 - `cudnnCreate`, `cudnnDestroy`, `cudnnSetStream`, `cudnnGetStream`
 - `cudnnGetErrorString`
-- `cudnnGetVersion`
+- `cudnnGetVersion`, `cudnnGetCudartVersion`
 - `create_cudnn_handle()` helper (mirrors cuDNN FE's convenience helper)
 
-The remainder of the cuDNN C library (convolution descriptor APIs, etc.)
-stays out of scope. Open implementation item: confirm which of the above
-hipDNN C-API entry points already exist and add any that are missing.
+The remainder of the cuDNN C library (convolution descriptor APIs, the
+backend descriptor API, etc.) stays out of scope. The v0.x C++ surface,
+including `cudnn_frontend::Tensor` (`Tensor_v8`, as upstream), is RFC 0022's.
 
-If implementation finds that any v9 surface item refers to a v0.x C++
-type by name (e.g., `cudnn_frontend::Tensor` appearing in some
-nominally-public-but-internal `INode` signatures), the shim provides a
-minimal stub for that specific type only. The full v0.x C++ surface
-is **out of scope** for this RFC (main RFC §1, §9).
+### Options considered for v0.x source compatibility
 
-### Considered-but-deferred options for v0.x source compatibility
-
-These were considered while authoring this RFC and were all deferred to
-the follow-up "v0.x compile-only stub layer" RFC enumerated in main
-RFC §9:
-
-- **(A) Compile-only stubs for v0.x types** in this RFC. Declare every
-  v0.x class/builder in the shim's umbrella with the same signatures,
-  with method bodies that return `error_code_t::GRAPH_NOT_SUPPORTED` at
-  runtime. Lets `Conv_v8.cpp` *compile* against the shim; convolution
-  path is effectively disabled at runtime until consumers are rewritten
-  to v9 or a fuller v0.x shim is built. **Deferred** because the v0.x
-  surface PyTorch alone uses is significant (13+ builder classes plus
-  free functions); the cost is comparable to the v9 wrapper itself and
-  this RFC needs to ship.
-- **(B) Require the consumer to gate v0.x usage**. Ship a v9-only
-  umbrella (the chosen approach above); require consumers to keep v0.x
-  TUs out of the build via their existing platform-gating mechanism
-  (e.g., excluding `Conv_v8.cpp` from the ROCm build of PyTorch).
-  Increases the friction of the "textual hipify" workflow for projects
-  that mix v9 and v0.x. **This is what this RFC effectively does**, but
-  framed as a non-goal rather than a workflow we recommend — consumers
-  who want to mix in the same tree should wait for the follow-up RFC.
+- **(A) Compile-only stubs for v0.x types**. Declare every v0.x
+  class/builder in the shim's umbrella with the same signatures, with
+  method bodies that return `error_code_t::GRAPH_NOT_SUPPORTED` at runtime.
+  Lets `Conv_v8.cpp` *compile* against the shim; the convolution path is
+  disabled at runtime.
+- **(B) Require the consumer to gate v0.x usage**. Ship a v9-only umbrella
+  and require consumers to keep v0.x TUs out of the build via their
+  existing platform-gating mechanism (e.g., excluding `Conv_v8.cpp` from
+  the ROCm build of PyTorch).
 - **(C) Split the umbrella**. Ship `<cudnn_frontend.h>` (v9-only) and a
-  separate `<cudnn_frontend_v8.h>` (stubs). Functionally the same as
-  (A) but with explicit consumer opt-in for the v0.x stub surface.
-  **Deferred** with (A) — the difference matters only when (A) ships.
+  separate `<cudnn_frontend_v8.h>` (stubs). Functionally the same as (A)
+  but with explicit consumer opt-in.
+
+[RFC 0022](./0022_CuDNN_V8_Shim.md) takes a functional variant of (A): the
+v0.x builders run on hipDNN and are exposed through the existing umbrella.

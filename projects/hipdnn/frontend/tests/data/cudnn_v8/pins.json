@@ -1,0 +1,17 @@
+{
+  "cudnn_frontend": {
+    "inputs_sha256": "9ad8243bc41b53e6d72018eeca2ce562154b435d29720de635295ef8ed0f9749"
+  },
+  "pytorch": {
+    "repo": "https://github.com/pytorch/pytorch",
+    "tag": "v2.14.1",
+    "commit": "5c4886908584029761b579af026dcfb627c84070",
+    "files": {
+      "aten/src/ATen/native/cudnn/Conv_v8.cpp": "ec8213dda6218ec95244e0b4313d9af216851d5379d7ee1490b4b7b694abc4e8",
+      "aten/src/ATen/native/quantized/cudnn/utils.h": "f8473a744e1da12cd079e36a1dbbcfbabb07d5ce06523fca223d0f3dd2b7d5a0",
+      "aten/src/ATen/native/quantized/cudnn/Conv.cpp": "ee3cb8558ab3b2369926ad263a067448576818e44e1a6624c2641e7d8d698729",
+      "aten/src/ATen/native/quantized/cudnn/Linear.cpp": "1e32f1db8f8fadf9066e7cbe3c3f4f9fd44057166d99489294e825e016d200d8",
+      "aten/src/ATen/native/quantized/cudnn/BinaryOps.cpp": "27f055ad50a41b94e498527d21efec351f4045006a3cb071b042cd10e1710f7e"
+    }
+  }
+}
