@@ -244,6 +244,16 @@ class KernelIdentity:
     xh_dpp: bool = False
     # fwd only (ImplicitGemmConvSpec.rpf_setprio). Left out of the hash at 0.
     rpf_setprio: int = 0
+    # fwd only (ImplicitGemmConvSpec.rpf_pingpong). Left out of the hash at 0.
+    rpf_pingpong: int = 0
+    # fwd only (ImplicitGemmConvSpec.pp_pre_mfma). Left out of the hash at 0.
+    pp_pre_mfma: int = 0
+    # fwd only (ImplicitGemmConvSpec.pp_b_double). Left out of the hash while False.
+    pp_b_double: bool = False
+    # fwd only (ImplicitGemmConvSpec.lds_xor_rowkey). Left out of the hash while False.
+    lds_xor_rowkey: bool = False
+    # fwd only (ImplicitGemmConvSpec.xh_wait_smem). Left out of the hash while False.
+    xh_wait_smem: bool = False
     # dgrad only (DgradConvSpec.dy_halo / dy_halo_setprio /
     # dy_halo_kouter_pad): the dY halo mode of the tap-outer K loop and its
     # knobs. A halo binary also bakes its filter (filter_h/w) and the widest
@@ -383,7 +393,7 @@ class KernelIdentity:
             "lds_ahead", "defer_mfma", "vmem_interleave", "split_tail", "uk_nopad",
             "defer_mfma_per_write",
             "lds_kpack_read", "uk_chunk_group", "rpf_lds_barrier", "rpf_fetch_late",
-            "uk_xhalo", "xh_dpp", "rpf_setprio",
+            "uk_xhalo", "xh_dpp", "rpf_setprio", "rpf_pingpong", "pp_pre_mfma", "xh_wait_smem", "pp_b_double", "lds_xor_rowkey",
         ):
             if not fields[name]:
                 del fields[name]

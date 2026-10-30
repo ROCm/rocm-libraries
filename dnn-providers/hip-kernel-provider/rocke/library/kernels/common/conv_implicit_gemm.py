@@ -510,6 +510,47 @@ class ImplicitGemmConvSpec:
     # tile_k 32 and the other half only Z*Y*X tiles later. Power of two,
     # 0 = off (plain tapf). Tags ``cg<n>``.
     uk_chunk_group: int = 0
+    # 8-wave block ping-pong (Triton's BlockPingpong form) of the
+    # uniform_k_decode + reg_prefetch=1 loop; 0 = off. The waves of the high
+    # half (warp_id >= n_waves / 2) run one extra s_barrier before the loop
+    # and the low half one after it, so the two waves sharing a SIMD run half
+    # an iteration apart. Every K tile is four phases separated by barriers:
+    # [mem A] all LDS fragment reads of the tile + the next tile's global
+    # reads, [compute A] the first half of the MFMAs, [mem B] the next tile's
+    # LDS store, [compute B] the second half -- one wave's memory phase hides
+    # under its SIMD partner's MFMAs. The compute phases run at s_setprio
+    # ``rpf_setprio``. 1: the barrier closing [mem A] waits for the wave's
+    # fragment reads (lgkmcnt(0)); 2: it does not (the reads complete under
+    # the partner's MFMAs; Triton's form); 3: as 2 without the compiler
+    # fence on that barrier, so each MFMA waits for its own fragments;
+    # 4: as 3 with the global reads of tile t+2 issued in [mem B] after the
+    # LDS store of t+1 (loop-carried registers; [mem A] ends with
+    # lgkmcnt(0) as in 1, modes 2/3 rely on in-order LDS across waves and
+    # are experiments only), so [mem A] holds the
+    # fragment reads only; 5: as 4 with those reads (and their address math)
+    # inside [compute B], one buffer_load per ``vmem_interleave`` MFMAs.
+    # Tags ``pp<n>``.
+    rpf_pingpong: int = 0
+    # rpf_pingpong: MFMAs of each compute phase issued ahead of the barrier
+    # that opens it (operands in registers; hides the barrier). Tags ``ppm<n>``.
+    pp_pre_mfma: int = 0
+    # rpf_pingpong: B in two LDS buffers (alternating per tile), so the B
+    # fragments of the second half of a tile's kk steps are read in [mem B]
+    # instead of [mem A] (which is LDS-read bound). Tags ``ppbd``.
+    pp_b_double: bool = False
+    # lds_xor + lds_kpack_read at tile_k 32: XOR key = row % 4 instead of
+    # (row / 2) % 4 (see lds_swz). Tags ``lxrk``.
+    lds_xor_rowkey: bool = False
+    # cshuffle epilogue: stage the C tile through LDS in this many row slabs
+    # (CShuffleEpilogue.m_chunks), so a tile whose C does not fit the LDS
+    # (e.g. 512x128 / 256x256 bf16 = 128 KB) can still take the cshuffle
+    # store and the split-K atomic store. bf16 output, MFMA. Tags ``mch<n>``.
+    cshuffle_m_chunks: int = 1
+    # uk_xhalo loop: s_waitcnt lgkmcnt(0) before the loop, so no scalar load
+    # is pending at its header and the first MFMA of every iteration waits
+    # for its own fragments only (partial lgkmcnt) instead of all of them.
+    # Tags ``xws``.
+    xh_wait_smem: bool = False
 
     @property
     def block_size(self) -> int:
@@ -623,6 +664,12 @@ class ImplicitGemmConvSpec:
                 f"uxh{self.uk_xhalo}": self.uk_xhalo > 0,
                 "xdpp": self.xh_dpp,
                 f"prio{self.rpf_setprio}": self.rpf_setprio > 0,
+                f"pp{self.rpf_pingpong}": self.rpf_pingpong > 0,
+                f"ppm{self.pp_pre_mfma}": self.pp_pre_mfma > 0,
+                "ppbd": self.pp_b_double,
+                "lxrk": self.lds_xor_rowkey,
+                f"mch{self.cshuffle_m_chunks}": self.cshuffle_m_chunks > 1,
+                "xws": self.xh_wait_smem,
                 "nopad": self.uk_nopad,
                 f"dpw{self.defer_mfma_per_write}": self.defer_mfma_per_write > 0,
                 # The occupancy target changes the register allocation.
@@ -787,7 +834,9 @@ def _fwd_kloop_sched_conflict(spec: "ImplicitGemmConvSpec") -> str:
                 "vmem_interleave is implemented in the reg_prefetch and "
                 "single-buffer prefetch_regs loops only"
             )
-        if not SchedulePolicy.for_pipeline(spec.pipeline).emit_hints:
+        if not (SchedulePolicy.for_pipeline(spec.pipeline).emit_hints or spec.uk_xhalo
+                or spec.rpf_pingpong):
+            # (The x-halo loop places its loads itself on every pipeline.)
             return "vmem_interleave needs a hint-emitting pipeline (compv3/compv4)"
     return ""
 
@@ -835,8 +884,8 @@ def _fwd_kloop_conflict(spec: "ImplicitGemmConvSpec") -> str:
         if not (spec.uniform_k_decode and spec.reg_prefetch == 1 and spec.lds_xor
                 and spec.problem.is_3d):
             return "uk_xhalo is implemented in the 3-D uniform_k_decode + reg_prefetch=1 lds_xor loop only"
-        if spec.a_direct or spec.vmem_interleave or spec.rpf_fetch_late:
-            return "uk_xhalo does not combine with a_direct, vmem_interleave or rpf_fetch_late"
+        if spec.a_direct or spec.rpf_fetch_late:
+            return "uk_xhalo does not combine with a_direct or rpf_fetch_late"
     if spec.rpf_setprio and (
         not (spec.reg_prefetch in (1, 2) or _fwd_pfr_single_buffer(spec))
         or spec.rpf_setprio > 3
@@ -846,6 +895,56 @@ def _fwd_kloop_conflict(spec: "ImplicitGemmConvSpec") -> str:
             "rpf_setprio (1..3) is implemented in the reg_prefetch and "
             "single-buffer prefetch_regs loops"
         )
+    if spec.rpf_pingpong:
+        _nw = spec.warp_m * spec.warp_n
+        if spec.rpf_pingpong not in (1, 2, 3, 4, 5):
+            return "rpf_pingpong must be 0..5"
+        if (spec.rpf_pingpong == 5) != bool(spec.vmem_interleave):
+            return "rpf_pingpong=5 places its loads one per vmem_interleave MFMAs (and only it)"
+        _half_mf = (spec.tile_k // spec.warp_tile_k
+                    * (spec.tile_m // spec.warp_m // spec.warp_tile_m)
+                    * (spec.tile_n // spec.warp_n // spec.warp_tile_n)) // 2
+        if spec.pp_pre_mfma > _half_mf:
+            return "pp_pre_mfma must not exceed a compute phase's MFMAs"
+        if spec.rpf_pingpong >= 4 and not spec.lds_xor:
+            return "rpf_pingpong>=4 carries the staged tile in the lds_xor store form"
+        if not (spec.uniform_k_decode and spec.reg_prefetch == 1):
+            return "rpf_pingpong is implemented in the uniform_k_decode + reg_prefetch=1 loop only"
+        if _nw != 8:
+            return "rpf_pingpong pairs the two waves of each SIMD: it needs 8 waves"
+        if (spec.lds_ahead or spec.defer_mfma or spec.rpf_fetch_late
+                or spec.rpf_lds_barrier or spec.a_direct
+                or (spec.uk_xhalo and spec.rpf_pingpong < 4)):
+            return "rpf_pingpong has its own schedule (no lah/dfr/vmi/flate/lbar/adir/uxh)"
+    if spec.cshuffle_m_chunks != 1:
+        _mpw = spec.tile_m // spec.warp_m // spec.warp_tile_m
+        if (spec.cshuffle_m_chunks < 1 or spec.epilogue != "cshuffle"
+                or spec.data.dtype_d != "bf16" or spec.wave_size != 64
+                or spec.pipeline == "wavelet" or _mpw % spec.cshuffle_m_chunks):
+            return ("cshuffle_m_chunks needs the bf16 wave64 MFMA cshuffle epilogue and "
+                    "must divide the MFMAs per warp along M")
+        if spec.split_k > 1 and spec.warp_n > 2:
+            # Measured: the chunked atomic store of t256x256 w2x4 fails the
+            # fp32 reference at every split degree (w4x2 passes); not root-
+            # caused, so the combination is not built.
+            return "cshuffle_m_chunks with split_k is verified for warp_n <= 2 only"
+    if spec.lds_xor_rowkey and not (spec.lds_xor and spec.lds_kpack_read and spec.tile_k == 32):
+        return "lds_xor_rowkey re-keys the k-packed lds_xor swizzle of tile_k 32 only"
+    if spec.xh_wait_smem and not spec.uk_xhalo:
+        return "xh_wait_smem shapes the uk_xhalo loop"
+    if spec.pp_b_double and not (
+        spec.rpf_pingpong and spec.lds_kpack_read
+        and (spec.tile_k // spec.warp_tile_k // 2) % 2 == 0
+        if not spec.uk_xhalo else
+        spec.rpf_pingpong in (4, 5) and spec.lds_kpack_read and not spec.xh_dpp
+        and (spec.tile_n // spec.warp_n // spec.warp_tile_n) % 2 == 0
+    ):
+        return ("pp_b_double: the plain rpf_pingpong loop with k-packed reads and an even "
+                "number of kk pairs per half")
+    if spec.pp_pre_mfma and not spec.rpf_pingpong:
+        return "pp_pre_mfma shapes the rpf_pingpong loop"
+    if spec.pp_pre_mfma < 0:
+        return "pp_pre_mfma must be >= 0"
     if spec.xh_dpp and not spec.uk_xhalo:
         return "xh_dpp shifts the x-halo A fragments; it needs uk_xhalo"
     if spec.rpf_fetch_late and (
@@ -1117,10 +1216,13 @@ def implicit_gemm_lds_bytes(spec: ImplicitGemmConvSpec) -> Tuple[int, int, int, 
     # LDS the kernel never allocates.
     _double = spec.async_dma or spec.unroll_k or spec.reg_prefetch == 2
     _ab_lds = _ab_bytes * (2 if _double else 1)
+    if spec.pp_b_double:
+        _ab_lds += _b_shape[0] * _b_shape[1] * _ab_dtype_bytes
     # cshuffle stages tile_m×tile_n elements at dtype_d (fp16/bf16 = 2B, fp32 = 4B).
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
     _c_lds = (
-        spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
+        spec.tile_m // max(1, spec.cshuffle_m_chunks) * spec.tile_n * _c_dtype_bytes
+        if spec.epilogue == "cshuffle" else 0
     )
     # cshuffle_no_alias decides whether the cshuffle C tile shares the A/B pool
     # bytes, so the LDS budget must be computed per case:
@@ -1873,7 +1975,13 @@ def _build_implicit_gemm_conv_impl(
     # buffer-alternating K-loop, so allocating a second tile for it produced a
     # dead allocation that the LDS pool then stripped anyway.
     double_buffer = spec.async_dma or spec.unroll_k or spec.reg_prefetch == 2
-    if double_buffer:
+    if spec.pp_b_double:
+        # rpf_pingpong: B alone in two buffers (A stays single).
+        A_smem2 = A_smem
+        B_smem2 = b.smem_alloc(
+            ir_dtype_b, lds_layout.storage_shape(_xhalo_b_rows(spec)), name_hint="B_smem2"
+        )
+    elif double_buffer:
         A_smem2 = b.smem_alloc(
             ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem2"
         )
@@ -2487,7 +2595,10 @@ def _build_implicit_gemm_conv_impl(
         # 16-row MFMA fragment read hit the same banks.
         if spec.lds_kpack_read:
             # 16-byte reads: key on the 128-byte (32-bank) span.
-            sh = {32: 1}.get(block_k, 0)
+            # lds_xor_rowkey: key on the row itself at tile_k 32 too (64-byte
+            # rows): measured conflict-free for the x-halo loop's shifted
+            # A rows, where the 128-byte key leaves ~21% conflict cycles.
+            sh = 0 if spec.lds_xor_rowkey else {32: 1}.get(block_k, 0)
         else:
             sh = {32: 2, 64: 1}.get(block_k, 0)
         if sh:
@@ -2514,6 +2625,8 @@ def _build_implicit_gemm_conv_impl(
     # ``defer_mfma``: while ``on``, emit_mfma_phase reads the fragments of its
     # last ``n`` kk steps but leaves their MFMAs to the caller (``fns``).
     _mfma_defer = {"on": False, "n": 0, "fns": []}
+    # rpf_pingpong + pp_b_double: which fragments a pp_read reads.
+    _pp_part = {"b_only": False, "b_from": None, "kk_from": 0, "b_ni": None}
     # ``vmem_interleave``: buffer_loads issued just before the next
     # emit_mfma_phase that it spreads over its MFMAs.
     _vmi_pending = [0]
@@ -2550,7 +2663,7 @@ def _build_implicit_gemm_conv_impl(
     def emit_mfma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value], a_regs=None,
         after_first_reads=None, a_lds_rows=None, b_row_off: int = 0,
-        a_shift_prev=None, a_rec=None,
+        a_shift_prev=None, a_rec=None, pp_read=None, pp_use=None,
     ) -> List[Value]:
         """One K-tile worth of MFMAs across all per-warp atom positions.
 
@@ -2591,7 +2704,9 @@ def _build_implicit_gemm_conv_impl(
                     b.const_i32(kk * spec.warp_tile_k),
                 )
                 pairs = ([], [])
-                for mi in range(mfmas_m):
+                _skip_a = _pp_part["b_only"]
+                _skip_b = _pp_part["b_from"] is not None and kk >= _pp_part["b_from"]
+                for mi in range(0 if _skip_a else mfmas_m):
                     if a_shift_prev is not None and mi < mfmas_m - 1:
                         prev = a_shift_prev[("p", kk)]
                         pairs[0].append(_xh_shift(prev[mi], prev[mi + 1]))
@@ -2608,7 +2723,8 @@ def _build_implicit_gemm_conv_impl(
                 if a_rec is not None:
                     a_rec[("p", kk)] = list(pairs[0])
                 b_pairs = []
-                for ni in range(mfmas_n):
+                _b_lo, _b_hi = _pp_part["b_ni"] or (0, mfmas_n)
+                for ni in range(_b_lo, _b_lo if _skip_b else _b_hi):
                     b_row = b.add(
                         warp_n_off,
                         b.add(b.const_i32(ni * spec.warp_tile_n + b_row_off), n_in_atom),
@@ -2699,6 +2815,27 @@ def _build_implicit_gemm_conv_impl(
                 )
             return a_rows, b_cols
 
+        if pp_read is not None:
+            # rpf_pingpong [mem A]: every fragment of the tile, no MFMA
+            # (with pp_b_double: A all + B of the first half of the kk steps;
+            # the other B columns in [mem B], _pp_part["b_only"]).
+            for kk in range(_pp_part["kk_from"], k_atoms):
+                pp_read.append(load_frags(kk))
+            return new_accs
+        if pp_use is not None:
+            # rpf_pingpong [compute A/B]: MFMAs [i0, i1) of the tile, counted
+            # kk-major (then mi, ni).
+            frags_pp, i0, i1 = pp_use
+            per_kk = mfmas_m * mfmas_n
+            for i in range(i0, i1):
+                kk, flat = divmod(i, per_kk)
+                mi, ni = divmod(flat, mfmas_n)
+                a_rows, b_cols = frags_pp[kk]
+                new_accs[flat] = _emit_mfma(
+                    b, atom, a_rows[mi], b_cols[ni], new_accs[flat]
+                )
+            return new_accs
+
         # ``lds_ahead`` (identity field, AOT axis ROCKE_AOT_FWD_SCHED; it
         # replaces the former ROCKE_FWD_LDS_AHEAD env gate): the LDS fragment
         # reads run one kk step ahead -- step kk+1's ds_reads issue before
@@ -2767,7 +2904,7 @@ def _build_implicit_gemm_conv_impl(
             # - none:                            tested below.
             # - 1 DS group + 1 MFMA group:       186 TFLOPS (best).
             n_ld = _vmi_pending[0]
-            if n_ld and schedule.emit_hints:
+            if n_ld and (schedule.emit_hints or spec.uk_xhalo):
                 # vmem_interleave: the next tile's buffer_loads, issued just
                 # before this phase, go one per ``vmem_interleave`` MFMAs.
                 b.sched_group_barrier(
@@ -2879,6 +3016,8 @@ def _build_implicit_gemm_conv_impl(
             # the A/B LDS that the cshuffle store then reuses, so a single
             # barrier before the store leaves the re-read racing them.
             epi = dc_replace(epi, war_barriers=(2 if spec.pipeline == "wavelet" else 1))
+            if spec.cshuffle_m_chunks > 1:
+                epi = dc_replace(epi, m_chunks=spec.cshuffle_m_chunks)
             if _split:
                 # Each K slice adds its partial tile into the zeroed D. D's
                 # row (output position) stride is the total K; the group's
@@ -3154,6 +3293,192 @@ def _build_implicit_gemm_conv_impl(
                 for row, col, v in st:
                     b.smem_store_vN(dst, [row, lds_swz(b, row, col)], v, vec)
 
+        def run_pingpong(lo, hi, it1, n_acc, fetch_tile, advance, tag):
+            """The rpf_pingpong loop (see ImplicitGemmConvSpec.rpf_pingpong).
+            Entered with tile ``lo`` in the LDS buffer, published.
+
+            Every phase boundary is pinned with ``sched_barrier`` on both
+            sides of its ``s_barrier``; only ``pp_pre_mfma`` MFMAs of each
+            compute phase are placed ahead of the barrier that opens it (they
+            read registers only, so the barrier does not order them)."""
+            nw = spec.warp_m * spec.warp_n
+            wid = b.readfirstlane(warp_id)
+            hi_half = b.lshr(wid, b.const_i32((nw // 2).bit_length() - 1))
+            lo_half = b.sub(c1, hi_half)
+            h_mf = k_atoms * mfmas_m * mfmas_n // 2
+            pre = spec.pp_pre_mfma
+            late = spec.rpf_pingpong in (4, 5)
+            # pp5: tile t+2's address math and global reads move from [mem B]
+            # into [compute B], one buffer_load per vmem_interleave MFMAs.
+            in_comp = spec.rpf_pingpong == 5
+
+            def pin():
+                b.sched_barrier(0)
+
+            def prio(on: bool) -> None:
+                if spec.rpf_setprio:
+                    b.s_setprio(spec.rpf_setprio if on else 0)
+
+            def mfmas(frags, accs_, i0, i1):
+                return emit_mfma_phase(A_smem, B_smem, accs_, pp_use=(frags, i0, i1))
+
+            def open_compute(frags, accs_, i0, barrier):
+                # The first ``pre`` MFMAs of the phase, then its barrier.
+                prio(True)
+                accs_ = mfmas(frags, accs_, i0, i0 + pre) if pre else accs_
+                pin()
+                barrier()
+                pin()
+                return accs_
+
+            def close_compute(frags, accs_, i0, i1):
+                accs_ = mfmas(frags, accs_, i0, i1)
+                pin()
+                prio(False)
+                b.s_barrier_bare(fence="compiler")
+                pin()
+                return accs_
+
+            def bar_mem_a():
+                if spec.rpf_pingpong in (1, 4, 5):
+                    # The wave's fragment reads complete before the partner
+                    # half may start overwriting the buffer: a read still
+                    # queued at the LDS when the barrier releases is not
+                    # ordered before another SIMD's later write (pp3 measured
+                    # nondeterministic results on t128x128 w2x4).
+                    b.sync_lds_only(fence="compiler")
+                elif spec.rpf_pingpong == 2:
+                    b.s_barrier_bare(fence="compiler")
+                else:
+                    # No compiler fence: the compute phase waits for each
+                    # fragment with its own (descending) lgkmcnt.
+                    b.s_barrier_bare(fence="none")
+
+            def bar_mem_b():
+                b.sync_lds_only(fence="compiler")
+
+            # The high half runs one barrier ahead: its barrier j pairs with
+            # the low half's barrier j + 1 from here to the loop's end.
+            b.sync_half_block(hi_half)
+            # Retire every scalar load before the loop: a scalar load still
+            # pending at the loop header makes every LDS wait in the body a
+            # full lgkmcnt(0) (SMEM returns out of order).
+            b.s_waitcnt(lgkmcnt=0)
+            it = list(it1)
+            n_st = len(it1) - n_acc
+            if late:
+                # pp4: the global reads of tile t+2 issue in [mem B] of tile
+                # t, after its LDS store of tile t+1, so [mem A] holds only the
+                # fragment reads. The staged registers are loop-carried; their
+                # LDS coordinates are the prologue's (thread-only values).
+                st1 = advance([v for _, v in it1[n_acc:]])
+                staged0 = fetch_tile(b.add(lo, c_block_k), st1)
+                n_a = len(staged0[0])
+                regs0 = [v for _, _, v in staged0[0]] + [v for _, _, v in staged0[1]]
+                it = (list(it1[:n_acc]) + [(f"{tag}_ps{i}", v) for i, v in enumerate(st1)]
+                      + [(f"{tag}_pr{i}", v) for i, v in enumerate(regs0)])
+            c_2bk = b.const_i32(2 * block_k)
+            # (an x-halo kernel's plain fallback loop keeps one B buffer)
+            bdb = spec.pp_b_double and not spec.uk_xhalo
+            half_kk = k_atoms // 2
+
+            def body(kv, iv, B_cur, B_nxt):
+                """One K tile; returns the values the loop carries on."""
+                accs_t = list(iv[:n_acc])
+                st = list(iv[n_acc:n_acc + n_st])
+                # [mem A] every fragment of tile t (+ tile t+1's global reads);
+                # pp_b_double: the B columns of the second half later.
+                frags = []
+                k_off_capture[0] = kv
+                if bdb:
+                    _pp_part.update(b_from=half_kk)
+                emit_mfma_phase(A_smem, B_cur, accs_t, pp_read=frags)
+                _pp_part.update(b_from=None)
+                pin()
+                if late:
+                    st_n = st
+                else:
+                    st_n = advance(st)
+                    staged = fetch_tile(b.add(kv, c_block_k), st_n)
+                    pin()
+                acc_n = open_compute(frags, accs_t, 0, bar_mem_a)
+                # [compute A]
+                acc_n = close_compute(frags, acc_n, pre, h_mf)
+                # [mem B] tile t+1 into the buffer (every wave's reads of tile
+                # t are retired: the partner half closed its [mem A] before
+                # the barrier that opened this phase).
+                if late:
+                    regs = list(iv[n_acc + n_st:])
+                    staged = (
+                        [(r, c, v) for (r, c, _), v in zip(staged0[0], regs[:n_a])],
+                        [(r, c, v) for (r, c, _), v in zip(staged0[1], regs[n_a:])],
+                    )
+                store(staged, A_smem, B_nxt)
+                pin()
+                if bdb:
+                    # The second half's B columns of tile t, from the buffer
+                    # nobody writes before tile t+2's [mem B].
+                    bf = []
+                    _pp_part.update(b_only=True, kk_from=half_kk)
+                    emit_mfma_phase(A_smem, B_cur, acc_n, pp_read=bf)
+                    _pp_part.update(b_only=False, kk_from=0)
+                    for i, (_, bc) in enumerate(bf):
+                        frags[half_kk + i] = (frags[half_kk + i][0], bc)
+                    pin()
+                if late and not in_comp:
+                    st_n = advance(st)
+                    nxt = fetch_tile(b.add(kv, c_2bk), st_n)
+                    pin()
+                acc_n = open_compute(frags, acc_n, h_mf, bar_mem_b)
+                # [compute B]
+                if in_comp:
+                    acc_n = mfmas(frags, acc_n, h_mf + pre, 2 * h_mf)
+                    st_n = advance(st)
+                    nxt = fetch_tile(b.add(kv, c_2bk), st_n)
+                    n_ld = len(nxt[0]) + len(nxt[1])
+                    n_m = h_mf - pre
+                    vi = spec.vmem_interleave
+                    for _ in range(n_ld):
+                        take = min(vi, n_m)
+                        if take:
+                            b.sched_group_barrier(MFMA, take, 0)
+                            n_m -= take
+                        b.sched_group_barrier(VMEM_READ, 1, 0)
+                    if n_m:
+                        b.sched_group_barrier(MFMA, n_m, 0)
+                    pin()
+                    prio(False)
+                    b.s_barrier_bare(fence="compiler")
+                    pin()
+                else:
+                    acc_n = close_compute(frags, acc_n, h_mf + pre, 2 * h_mf)
+                if late:
+                    return [*acc_n, *st_n, *[v for _, _, v in nxt[0]],
+                            *[v for _, _, v in nxt[1]]]
+                return [*acc_n, *st_n]
+
+            if not bdb:
+                for_op = b.scf_for_iter(lo, hi, c_block_k, it, iv_name=f"{tag}_k")
+                with for_op as (kv, iv):
+                    b.scf_yield(*body(kv, list(iv), B_smem, B_smem))
+                b.sync_half_block(lo_half)
+                return list(for_op.results)[:n_acc]
+            # pp_b_double: B alternates between two buffers, so the loop runs
+            # whole pairs of tiles and an odd last tile in a 0/1-trip tail.
+            n_tiles = b.div(b.add(b.sub(hi, lo), b.const_i32(block_k - 1)), c_block_k)
+            pair_hi = b.add(lo, b.mul(b.div(n_tiles, b.const_i32(2)), c_2bk))
+            tail_hi = b.add(lo, b.mul(n_tiles, c_block_k))
+            for_op = b.scf_for_iter(lo, pair_hi, c_2bk, it, iv_name=f"{tag}_k")
+            with for_op as (kv, iv):
+                iv1 = body(kv, list(iv), B_smem, B_smem2)
+                b.scf_yield(*body(b.add(kv, c_block_k), iv1, B_smem2, B_smem))
+            it_t = [(f"{n}_t", v) for (n, _), v in zip(it, for_op.results)]
+            for_t = b.scf_for_iter(pair_hi, tail_hi, c_block_k, it_t, iv_name=f"{tag}_kt")
+            with for_t as (kt, tv):
+                b.scf_yield(*body(kt, list(tv), B_smem, B_smem2))
+            b.sync_half_block(lo_half)
+            return list(for_t.results)[:n_acc]
+
         def run_loop(lo, hi, accs_in, state_in, fetch_tile, advance, tag, adir=False):
             """One K loop over [lo, hi). ``fetch_tile(k, state)`` issues the
             global reads of the tile at ``k`` and returns them staged;
@@ -3242,6 +3567,8 @@ def _build_implicit_gemm_conv_impl(
             it1 = [(f"{tag}_{n}", v) for (n, _), v in zip(accs, accs_in)] + [
                 (nm, v) for nm, (_, v) in zip(names, state_in)
             ]
+            if spec.reg_prefetch == 1 and spec.rpf_pingpong and tag == "uk":
+                return run_pingpong(lo, hi, it1, n_acc, fetch_tile, advance, tag)
             if spec.reg_prefetch == 1:
                 # One buffer: read tile t+1 into registers, MFMA tile t, retire
                 # every wave's ds_reads, then overwrite the buffer and publish.
@@ -3381,6 +3708,179 @@ def _build_implicit_gemm_conv_impl(
             return run_loop(k_lo, k_hi, [v for _, v in accs], state0,
                             plain_fetch, plain_adv, "k")
 
+        def _emit_xhalo_pingpong(accs_in, st0, xh_ok, xh_hi, xh_fetch, xh_store, xh_adv,
+                                 base_rows, XT):
+            """The x-halo loop in the rpf_pingpong form (modes 4 and 5): per
+            staged tile, [mem A] reads every fragment of the X taps, the X
+            taps' MFMAs are split in two halves around [mem B] (the LDS store
+            of the next tile), and the global reads of the tile after it
+            issue in [mem B] (pp4) or inside [compute B] (pp5). The two halves
+            of the waves run half an iteration apart as in run_pingpong."""
+            nw = spec.warp_m * spec.warp_n
+            wid = b.readfirstlane(warp_id)
+            hi_half = b.lshr(wid, b.const_i32((nw // 2).bit_length() - 1))
+            lo_half = b.sub(c1, hi_half)
+            per_tap = k_atoms * mfmas_m * mfmas_n
+            n_all = XT * per_tap
+            h_mf = n_all // 2
+            pre = spec.pp_pre_mfma
+            in_comp = spec.rpf_pingpong == 5
+            n_acc = len(accs_in)
+
+            def pin():
+                b.sched_barrier(0)
+
+            def prio(on: bool) -> None:
+                if spec.rpf_setprio:
+                    b.s_setprio(spec.rpf_setprio if on else 0)
+
+            def mfmas(frags, accs_, i0, i1):
+                i = i0
+                while i < i1:
+                    x, j = divmod(i, per_tap)
+                    j1 = min(per_tap, j + (i1 - i))
+                    accs_ = emit_mfma_phase(A_smem, B_smem, accs_, pp_use=(frags[x], j, j1))
+                    i += j1 - j
+                return accs_
+
+            with b.scf_if(xh_ok):
+                xh_store(xh_fetch(st0))
+                b.sync()
+            # Tile 1 into registers (a workgroup that does not run the loop
+            # loads it and never stores it).
+            st1 = xh_adv(st0)
+            staged0 = xh_fetch(st1)
+            n_a = len(staged0[0])
+            regs0 = [v for _, _, v in staged0[0]] + [v for _, _, v in staged0[1]]
+            b.sync_half_block(hi_half)
+            b.s_waitcnt(lgkmcnt=0)
+            it = ([(f"xp_{n}", v) for (n, _), v in zip(accs, accs_in)]
+                  + [("xp_c", st1[0]), ("xp_y", st1[1]), ("xp_z", st1[2])]
+                  + [(f"xp_r{i}", v) for i, v in enumerate(regs0)])
+            bdb = spec.pp_b_double
+            nh = mfmas_n // 2
+
+            def mf_part(frags, accs_, part):
+                # pp_b_double: compute A = the B columns [0, n/2) of every
+                # tap, compute B = [n/2, n) (their B fragments are read in
+                # [mem B]).
+                out = list(accs_)
+                for x in range(XT):
+                    for kk in range(k_atoms):
+                        a_rows, b_cols = frags[x][kk]
+                        for mi in range(mfmas_m):
+                            for ni in range(part * nh, (part + 1) * nh):
+                                f = mi * mfmas_n + ni
+                                out[f] = _emit_mfma(b, atom, a_rows[mi], b_cols[ni], out[f])
+                return out
+
+            def body(kv, iv, B_cur, B_nxt):
+                accs_t = list(iv[:n_acc])
+                st_t1 = list(iv[n_acc:n_acc + 3])
+                regs = list(iv[n_acc + 3:])
+                # [mem A] the fragments of every x tap of the staged tile.
+                frags = []
+                prev = None
+                if bdb:
+                    _pp_part.update(b_ni=(0, nh))
+                for x in range(XT):
+                    rows = base_rows if x == 0 else [b.add(r, b.const_i32(x)) for r in base_rows]
+                    f = []
+                    rec = {} if spec.xh_dpp else None
+                    emit_mfma_phase(A_smem, B_cur, accs_t, pp_read=f, a_lds_rows=rows,
+                                    b_row_off=x * block_n,
+                                    a_shift_prev=prev if spec.xh_dpp else None, a_rec=rec)
+                    prev = rec
+                    frags.append(f)
+                _pp_part.update(b_ni=None)
+                prio(True)
+                if bdb:
+                    acc_n = accs_t
+                else:
+                    acc_n = mfmas(frags, accs_t, 0, pre) if pre else accs_t
+                pin()
+                b.sync_lds_only(fence="compiler")  # see run_pingpong's bar_mem_a
+                pin()
+                # [compute A]
+                acc_n = mf_part(frags, acc_n, 0) if bdb else mfmas(frags, acc_n, pre, h_mf)
+                pin()
+                prio(False)
+                b.s_barrier_bare(fence="compiler")
+                pin()
+                # [mem B] the next staged tile (registers) into the buffers.
+                xh_store((
+                    [(r, c_, v) for (r, c_, _), v in zip(staged0[0], regs[:n_a])],
+                    [(r, c_, v) for (r, c_, _), v in zip(staged0[1], regs[n_a:])],
+                ), B_nxt)
+                pin()
+                if bdb:
+                    # The other B columns of every tap of tile t (B_cur is not
+                    # written before tile t+2's [mem B]).
+                    _pp_part.update(b_only=True, b_ni=(nh, mfmas_n))
+                    for x in range(XT):
+                        bf = []
+                        emit_mfma_phase(A_smem, B_cur, accs_t, pp_read=bf,
+                                        a_lds_rows=base_rows, b_row_off=x * block_n)
+                        for kk in range(k_atoms):
+                            lo_b = frags[x][kk][1]
+                            frags[x][kk] = (frags[x][kk][0], list(lo_b) + list(bf[kk][1]))
+                    _pp_part.update(b_only=False, b_ni=None)
+                    pin()
+                if not in_comp:
+                    st_t2 = xh_adv(st_t1)
+                    nxt = xh_fetch(st_t2)
+                    pin()
+                prio(True)
+                if pre and not bdb:
+                    acc_n = mfmas(frags, acc_n, h_mf, h_mf + pre)
+                pin()
+                b.sync_lds_only(fence="compiler")
+                pin()
+                # [compute B]
+                if bdb:
+                    acc_n = mf_part(frags, acc_n, 1)
+                else:
+                    acc_n = mfmas(frags, acc_n, h_mf + pre, n_all)
+                if in_comp:
+                    st_t2 = xh_adv(st_t1)
+                    nxt = xh_fetch(st_t2)
+                    n_ld = len(nxt[0]) + len(nxt[1])
+                    n_m = n_all - h_mf - (0 if bdb else pre)
+                    for _ in range(n_ld):
+                        take = min(spec.vmem_interleave, n_m)
+                        if take:
+                            b.sched_group_barrier(MFMA, take, 0)
+                            n_m -= take
+                        b.sched_group_barrier(VMEM_READ, 1, 0)
+                    if n_m:
+                        b.sched_group_barrier(MFMA, n_m, 0)
+                pin()
+                prio(False)
+                b.s_barrier_bare(fence="compiler")
+                pin()
+                return [*acc_n, *st_t2, *[v for _, _, v in nxt[0]], *[v for _, _, v in nxt[1]]]
+
+            if not bdb:
+                for_op = b.scf_for_iter(c0, xh_hi, c_block_k, it, iv_name="xp_k")
+                with for_op as (kv, iv):
+                    b.scf_yield(*body(kv, list(iv), B_smem, B_smem))
+                b.sync_half_block(lo_half)
+                return list(for_op.results)[:n_acc]
+            c_2bk = b.const_i32(2 * block_k)
+            n_tiles = b.div(b.add(xh_hi, b.const_i32(block_k - 1)), c_block_k)
+            pair_hi = b.mul(b.div(n_tiles, b.const_i32(2)), c_2bk)
+            tail_hi = b.mul(n_tiles, c_block_k)
+            for_op = b.scf_for_iter(c0, pair_hi, c_2bk, it, iv_name="xp_k")
+            with for_op as (kv, iv):
+                iv1 = body(kv, list(iv), B_smem, B_smem2)
+                b.scf_yield(*body(b.add(kv, c_block_k), iv1, B_smem2, B_smem))
+            it_t = [(f"{n}_t", v) for (n, _), v in zip(it, for_op.results)]
+            for_t = b.scf_for_iter(pair_hi, tail_hi, c_block_k, it_t, iv_name="xp_kt")
+            with for_t as (kt, tv):
+                b.scf_yield(*body(kt, list(tv), B_smem, B_smem2))
+            b.sync_half_block(lo_half)
+            return list(for_t.results)[:n_acc]
+
         def _emit_xhalo_loop(uk_ok_, accs_in):
             """The uk_xhalo K loop (see ImplicitGemmConvSpec.uk_xhalo).
 
@@ -3486,8 +3986,9 @@ def _build_implicit_gemm_conv_impl(
                     b_st.append((row, col, b.buffer_load_vN(b_rsrc, safe, c0, ir_dtype_b, load_vec_b)))
                 return a_st, b_st
 
-            def xh_store(staged):
-                for dst, st, vec in ((A_smem, staged[0], load_vec_a), (B_smem, staged[1], load_vec_b)):
+            def xh_store(staged, B_dst=None):
+                B_dst = B_smem if B_dst is None else B_dst
+                for dst, st, vec in ((A_smem, staged[0], load_vec_a), (B_dst, staged[1], load_vec_b)):
                     for row, col, v in st:
                         b.smem_store_vN(dst, [row, lds_swz(b, row, col)], v, vec)
 
@@ -3551,12 +4052,21 @@ def _build_implicit_gemm_conv_impl(
             _bar = b.sync_lds_only if spec.rpf_lds_barrier else b.sync
             n_acc = len(accs_in)
             st0 = [c0, c0, c0]
+            if spec.rpf_pingpong:
+                return xh_ok, _emit_xhalo_pingpong(
+                    accs_in, st0, xh_ok, xh_hi, xh_fetch, xh_store, xh_adv, base_rows, XT
+                )
             with b.scf_if(xh_ok):
                 xh_store(xh_fetch(st0))
                 b.sync()
             it = [(f"xh_{n}", v) for (n, _), v in zip(accs, accs_in)] + [
                 ("xh_c", c0), ("xh_y", c0), ("xh_z", c0)
             ]
+            if spec.xh_wait_smem:
+                # A scalar load still pending at the loop header makes the
+                # first LDS wait of every iteration a full lgkmcnt(0) (SMEM
+                # returns out of order); retire it once before the loop.
+                b.s_waitcnt(lgkmcnt=0)
             for_op = b.scf_for_iter(c0, xh_hi, c_block_k, it, iv_name="xh_k")
             with for_op as (kv, iv):
                 st = list(iv[n_acc:])
@@ -3564,7 +4074,13 @@ def _build_implicit_gemm_conv_impl(
                 if spec.rpf_setprio:
                     b.s_setprio(spec.rpf_setprio)
                 staged = xh_fetch(st1)
-                b.sched_barrier(0)
+                if spec.vmem_interleave:
+                    # The first tap's MFMA phase spreads the loads, one per
+                    # vmem_interleave MFMAs (they back up in the TA queue
+                    # when issued back to back; ATT: 46-54 stall cycles each).
+                    _vmi_pending[0] = len(staged[0]) + len(staged[1])
+                else:
+                    b.sched_barrier(0)
                 acc_n = xh_mfma(list(iv[:n_acc]), defer_last=bool(spec.defer_mfma))
                 b.sched_barrier(0)
                 if spec.rpf_setprio:

@@ -379,7 +379,8 @@ class TestTapOuterKIdentity(unittest.TestCase):
         del fields["streamk"], fields["streamk_reduction"]
         for name in ("defer_mfma", "defer_mfma_per_write", "lds_ahead", "lds_kpack_read", "rpf_fetch_late",
                      "rpf_lds_barrier", "rpf_setprio", "split_tail", "uk_chunk_group", "uk_nopad", "uk_xhalo",
-                     "vmem_interleave", "xh_dpp"):  # fwd K-loop / x-halo knobs, off
+                     "vmem_interleave", "xh_dpp", "rpf_pingpong", "pp_pre_mfma",
+                     "xh_wait_smem", "pp_b_double", "lds_xor_rowkey"):  # fwd K-loop / x-halo knobs, off
             del fields[name]
         legacy = hashlib.sha1(
             json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()

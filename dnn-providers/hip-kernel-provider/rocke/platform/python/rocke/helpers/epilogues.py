@@ -705,9 +705,13 @@ class CShuffleEpilogue:
                     b.buffer_store_vN_f16(d_rsrc, safe, b.const_i32(0), v, dwords)
 
     def _store_m_chunked(
-        self, b, *, accs, addr_fn, d_rsrc, bounds, lds_dtype, bf16_out, fp32_out, warp_n_off
+        self, b, *, accs, addr_fn, d_rsrc, bounds, lds_dtype, bf16_out, fp32_out, warp_n_off,
+        atomic=None,
     ) -> None:
-        """PROTOTYPE: :meth:`store` through a tile_m/m_chunks-row LDS slab."""
+        """PROTOTYPE: :meth:`store` through a tile_m/m_chunks-row LDS slab.
+
+        ``atomic=(dw_ptr, wg_N, col_offset)``: :meth:`atomic_store`'s packed
+        bf16 atomic-adds in place of the buffer stores."""
         atom = self.atom
         grid = self.grid
         if atom is None or fp32_out or not bf16_out:
@@ -776,6 +780,36 @@ class CShuffleEpilogue:
                 g_row = b.add(b.add(b.mul(w, c_wrows), b.const_i32(c * cm * am)), r_in)
                 m_val = b.add(grid.block_m_off, g_row)
                 n_val = b.add(grid.block_n_off, col)
+                if atomic is not None:
+                    dw_ptr, wg_N, col_offset = atomic
+                    M_bound, N_bound = bounds if bounds is not None else (None, None)
+                    for pr in range(sv // 2):
+                        n_even = b.add(n_val, b.const_i32(2 * pr))
+                        m_ok = b.cmp_lt(m_val, M_bound) if M_bound is not None else None
+                        n_ok = (b.cmp_lt(b.add(n_even, b.const_i32(1)), N_bound)
+                                if N_bound is not None else None)
+                        okp = (b.land(m_ok, n_ok) if (m_ok is not None and n_ok is not None)
+                               else (m_ok if m_ok is not None else n_ok))
+                        c_off = b.add(b.mul(m_val, wg_N), n_even)
+                        if col_offset is not None:
+                            c_off = b.add(c_off, col_offset)
+
+                        def _emit_pair(_row=row, _c=b.add(col, b.const_i32(2 * pr)),
+                                       _coff=c_off):
+                            v_e = b.vec_extract(
+                                b.smem_load_vN(c_smem, _row, _c, dtype=BF16, n=1), 0)
+                            v_o = b.vec_extract(
+                                b.smem_load_vN(c_smem, _row, b.add(_c, b.const_i32(1)),
+                                               dtype=BF16, n=1), 0)
+                            b.global_atomic_add_pk_bf16(
+                                dw_ptr, _coff, b.vec_pack([v_e, v_o], v_e.type))
+
+                        if okp is not None:
+                            with b.scf_if(okp):
+                                _emit_pair()
+                        else:
+                            _emit_pair()
+                    continue
                 ok = DirectEpilogue._bounds_check(b, m_val, n_val, bounds, vec_n=sv)
                 off_elems, valid = addr_fn(b, m_val, n_val)
                 ok = (
@@ -859,6 +893,12 @@ class CShuffleEpilogue:
         _fp32_out = self.out_dtype == "fp32"
         _bf16_out = self.out_dtype == "bf16"
         _lds_dtype = F32 if _fp32_out else (BF16 if _bf16_out else F16)
+        if self.m_chunks > 1:
+            return self._store_m_chunked(
+                b, accs=accs, addr_fn=None, d_rsrc=None, bounds=bounds,
+                lds_dtype=_lds_dtype, bf16_out=_bf16_out, fp32_out=_fp32_out,
+                warp_n_off=warp_n_off, atomic=(dw_ptr, wg_N, col_offset),
+            )
 
         # ---- step 1: scatter accs to LDS (identical to store()). ----
         lds_layout = LdsLayout.cshuffle(tile_m=grid.tile_m, tile_n=grid.tile_n)

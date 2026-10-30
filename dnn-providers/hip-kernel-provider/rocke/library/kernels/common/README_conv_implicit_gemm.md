@@ -256,6 +256,24 @@ ukd split-K @7 (s10). `defer_mfma_per_write` (`dpw<n>`, `ROCKE_AOT_FWD_DPW`) mea
 
 ---
 
+### 8-wave block ping-pong K loop (`rpf_pingpong`, uniform_k_decode + reg_prefetch=1)
+
+Triton's BlockPingpong form for 8-wave tiles (two waves per SIMD). The high half of the waves runs one extra
+`s_barrier` before the loop and the low half one after it, so the two waves of a SIMD run half an iteration apart.
+Every K tile is four barrier-separated phases: [mem A] all LDS fragment reads of the tile, [compute A] half of the
+MFMAs, [mem B] the LDS store of the next tile, [compute B] the other half -- one wave's memory phase runs under its
+SIMD partner's MFMAs. Modes: `pp1` (fragment reads retired before the barrier, loads of the next tile in [mem A]),
+`pp4` (global reads of tile t+2 issued in [mem B] after the store of t+1, loop-carried registers), `pp5` (those reads
+spread over the [compute B] MFMAs, one per `vmem_interleave` MFMAs); `pp2`/`pp3` are experiments that rely on in-order
+LDS across waves. `pp_pre_mfma` (`ppm<n>`) hoists MFMAs above the opening barriers, `pp_b_double` (`ppbd`) keeps B in
+two buffers. With the 16x16x16 atom on t256x128x64 w4x2 this beats the a32 lah/dfr winners on gfx942 FWD 3-D convs
+with 128-1024 channels; [mem A] (16 KB of fragments per wave per 1024 MFMA cycles) is LDS-read bound.
+AOT axis: `ROCKE_AOT_FWD_PP=p<mode>[m<pre>][s<prio>][v<vmi>][w<wpe>],...` on `ROCKE_AOT_FWD_PP_SCOPE` geometries.
+The same loop shape exists for the x-halo loop (`uk_xhalo` + `rpf_pingpong` 4/5, measured at parity). Related:
+`cshuffle_m_chunks` (`mch<n>`, C tile staged in row slabs, also for the split-K atomic store) and, on the x-halo
+loop, `xh_wait_smem` (`xws`: retire pending scalar loads before the loop so its LDS waits are partial) and
+`vmem_interleave` (AOT `ROCKE_AOT_FWD_XWS=1|only`, `ROCKE_AOT_FWD_XH_VMI=2,4`).
+
 ## Next steps
 
 ### K0-M-K1 LDS layout

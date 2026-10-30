@@ -92,7 +92,12 @@ class TestFwd3dXHalo(unittest.TestCase):
                 dict(uk_xhalo=20, rpf_setprio=1, rpf_lds_barrier=True),
                 dict(uk_xhalo=20, defer_mfma=2, rpf_setprio=1, lds_kpack_read=True,
                      uk_tap_fast=True, uk_chunk_group=2),
+                # r3: partial waits (xws), interleaved loads, row-keyed swizzle.
+                dict(uk_xhalo=20, defer_mfma=2, lds_kpack_read=True, xh_wait_smem=True,
+                     vmem_interleave=2, lds_xor_rowkey=True),
             ):
+                if knobs.get("lds_xor_rowkey") and tile[2] != 32:
+                    continue
                 for i, prob in enumerate(probs):
                     with self.subTest(tile=tile, prob=i, **knobs):
                         self._check(prob, tile=tile, **base, **knobs)
@@ -155,14 +160,17 @@ class TestFwdLdsKnobSpec(unittest.TestCase):
         self.assertEqual(_fwd_kloop_conflict(self._spec(uk_xhalo=8, xh_dpp=True)), "")
         self.assertEqual(_fwd_kloop_conflict(self._spec(uk_xhalo=8, defer_mfma=1)), "")
         self.assertEqual(_fwd_kloop_conflict(self._spec(uk_xhalo=8, rpf_setprio=1)), "")
+        # r3: the x-halo loop places its loads with vmem_interleave too.
+        self.assertEqual(_fwd_kloop_conflict(self._spec(uk_xhalo=8, vmem_interleave=2)), "")
+        self.assertEqual(_fwd_kloop_conflict(self._spec(uk_xhalo=8, xh_wait_smem=True)), "")
         # opt-fwds: setprio also wraps the rpf1 loop's deferred MFMA phase.
         self.assertEqual(_fwd_kloop_conflict(self._spec(rpf_setprio=1, defer_mfma=1)), "")
         for kw in (
             dict(xh_dpp=True),  # needs uk_xhalo
             dict(uk_xhalo=6),
             dict(uk_xhalo=8, lds_xor=False),
-            dict(uk_xhalo=8, vmem_interleave=2),
             dict(uk_xhalo=8, rpf_fetch_late=True),
+            dict(xh_wait_smem=True),  # needs uk_xhalo
             dict(rpf_setprio=4),
         ):
             with self.subTest(**kw):
