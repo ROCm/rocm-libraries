@@ -40,7 +40,10 @@ from support_matrix_markdown import (
 from support_matrix_units import (
     NO_LAYOUT,
     ClaimUnit,
+    SweepPatchError,
+    apply_case_patches,
     collect_units,
+    expand_template_graph,
     dtypes_of,
     layout_from_name,
     layout_from_strides,
@@ -819,6 +822,93 @@ class TestCollection:
         assert len(errors) == 1
         assert f"case 'bad': {message}" in errors[0]
 
+    def test_add_tensors_and_node_patches_are_part_of_the_graph_a_case_runs(
+        self, bundle_root: Path
+    ) -> None:
+        """A case that adds a tensor and wires it into its node reads as that graph."""
+        node = {
+            "type": "ConvAttributes",
+            "name": "Conv_0",
+            "attributes": {"flag": None},
+            "outputs": {"extra_tensor_uid": None},
+        }
+        extra = {**_tensor(7, [1], [1]), "name": "Extra"}
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            cases=[
+                {"id": "plain"},
+                {
+                    "id": "wired",
+                    "add_tensors": [extra],
+                    "node_patches": [
+                        {
+                            "node": "Conv_0",
+                            "section": "outputs",
+                            "set": {"extra_tensor_uid": 7},
+                        },
+                        {"node": 0, "section": "attributes", "set": {"flag": True}},
+                    ],
+                    "tensor_patches": [{"uid": 7, "set": {"alignment": 4}}],
+                },
+            ],
+            template=_graph(nodes=[node]),
+        )
+        plain, wired = collect_units(bundle_root)
+        assert [t["uid"] for t in plain.graph["tensors"]] == [1]
+        assert [t["uid"] for t in wired.graph["tensors"]] == [1, 7]
+        assert wired.graph["tensors"][1] == {**extra, "alignment": 4}
+        assert wired.graph["nodes"][0]["outputs"] == {"extra_tensor_uid": 7}
+        assert wired.graph["nodes"][0]["attributes"] == {"flag": True}
+        assert plain.graph["nodes"][0]["attributes"] == {"flag": None}
+        assert wired.digest != plain.digest
+
+    @pytest.mark.parametrize(
+        ("case", "cause"),
+        [
+            (
+                {
+                    "node_patches": [
+                        {"node": "Nope", "section": "attributes", "set": {}}
+                    ]
+                },
+                "node_patches[0]: node 'Nope' not found in expanded graph",
+            ),
+            (
+                {"add_tensors": [_tensor(1, [1])]},
+                "add_tensors[0]: uid 1 already exists in the graph",
+            ),
+            (
+                {
+                    "node_patches": [
+                        {"node": 0, "section": "attributes", "set": {"flg": True}}
+                    ]
+                },
+                "node_patches[0]: set key 'flg' is not in the 'attributes' section of "
+                "node index 0 (set only overwrites existing keys)",
+            ),
+        ],
+    )
+    def test_a_bad_patch_field_is_one_error_that_names_the_case_once(
+        self, bundle_root: Path, case: dict, cause: str
+    ) -> None:
+        node = {
+            "type": "ConvAttributes",
+            "name": "Conv_0",
+            "attributes": {"flag": None},
+        }
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            cases=[{"id": "good"}, {"id": "bad", **case}],
+            template=_graph(nodes=[node]),
+        )
+        errors: list[str] = []
+        assert [u.case_id for u in collect_units(bundle_root, errors)] == ["good"]
+        assert len(errors) == 1
+        assert f"sweep case 'bad': {cause}" in errors[0]
+        assert "case 'bad': sweep case 'bad'" not in errors[0]
+
     @pytest.mark.parametrize(
         ("values", "message"),
         [
@@ -1085,6 +1175,187 @@ def _move_sweep_case(root: Path, source: str, target: str, case_id: str) -> None
 
     (dst / "golden").mkdir(parents=True, exist_ok=True)
     (src / "golden" / case_id).rename(dst / "golden" / case_id)
+
+
+def _sdpa_fixture() -> dict:
+    """The fixture the Python and C++ loaders share (tests/data/sweep_patch_parity.json)."""
+    path = Path(__file__).resolve().parent.parent / "tests/data/sweep_patch_parity.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+_SDPA = _sdpa_fixture()
+_SDPA_VALUES = next(e for e in _SDPA["expands"] if e["case"]["id"] == "plain")["case"][
+    "values"
+]
+
+
+def _patched(case: dict, template: dict | None = None) -> dict:
+    """The graph of ``case`` over the fixture template (default values unless it has its own)."""
+    case = {"values": _SDPA_VALUES, **case}
+    graph = expand_template_graph(template or _SDPA["template"], case)
+    apply_case_patches(graph, case)
+    return graph
+
+
+class TestSweepCasePatches:
+    """``apply_case_patches`` against the rules of the C++ loader (``applyAddTensors``,
+    ``applyNodePatches``, ``applyTensorPatches``).
+
+    The two loaders must build one graph from one case and refuse the same cases with the
+    same message. ``tests/data/sweep_patch_parity.json`` is the oracle for both: it holds
+    the template, each case, the graph that must come out and the exact message of each
+    refusal. These tests check Python against it; the C++ test can read the same file.
+    """
+
+    @pytest.mark.parametrize(
+        "entry", _SDPA["expands"], ids=[e["case"]["id"] for e in _SDPA["expands"]]
+    )
+    def test_python_builds_the_graph_the_shared_fixture_names(
+        self, entry: dict
+    ) -> None:
+        assert _patched(entry["case"]) == entry["graph"]
+
+    @pytest.mark.parametrize(
+        "entry",
+        _SDPA["rejects"],
+        ids=[e["case"].get("id", "no_id") for e in _SDPA["rejects"]],
+    )
+    def test_python_refuses_with_the_message_the_shared_fixture_names(
+        self, entry: dict
+    ) -> None:
+        with pytest.raises(SweepPatchError) as error:
+            _patched(entry["case"])
+        assert str(error.value) == entry["error"]
+
+    def test_the_fixture_covers_what_the_plan_requires(self) -> None:
+        causes = " | ".join(e["error"] for e in _SDPA["rejects"])
+        for part in (
+            "node 'Sdpa' not found",  # unknown node
+            "unknown section",
+            "set key 'generate_stat' is not in",  # unknown key
+            "already exists in the graph",  # duplicate uid
+            "tensor_patch uid 4 not found",  # patch on a missing uid
+        ):
+            assert part in causes
+
+    def test_the_fixture_template_has_the_keys_of_the_shipped_sdpa_forward_template(
+        self,
+    ) -> None:
+        """The fixture must stay shaped like the shipped template, or it proves nothing
+        about it: one node, flags under attributes, uids under inputs and outputs."""
+        shipped = json.loads(
+            (
+                Path(__file__).resolve().parent.parent
+                / "integration-test-bundles/quick/SdpaFwd/Default/graph.template.json"
+            ).read_text(encoding="utf-8")
+        )
+        for section in ("attributes", "inputs", "outputs"):
+            assert (
+                _SDPA["template"]["nodes"][0][section].keys()
+                == shipped["nodes"][0][section].keys()
+            )
+
+    def test_patches_run_in_the_harness_order_so_a_later_stage_sees_an_earlier_one(
+        self,
+    ) -> None:
+        # bug caught: tensor_patches applied before add_tensors cannot find the added uid
+        case = {
+            "id": "ordered",
+            "add_tensors": [{"uid": 9, "name": "New"}],
+            "node_patches": [
+                {"node": 0, "section": "outputs", "set": {"stats_tensor_uid": 9}}
+            ],
+            "tensor_patches": [{"uid": 9, "set": {"alignment": 2}}],
+        }
+        graph = _patched(case)
+        assert graph["tensors"][-1] == {"uid": 9, "name": "New", "alignment": 2}
+        assert graph["nodes"][0]["outputs"]["stats_tensor_uid"] == 9
+
+    def test_a_tensor_patch_on_a_uid_nothing_adds_names_the_case(self) -> None:
+        case = {"id": "late", "tensor_patches": [{"uid": 9, "set": {"alignment": 2}}]}
+        with pytest.raises(
+            SweepPatchError, match="sweep case 'late': tensor_patch uid 9"
+        ):
+            _patched(case)
+
+    def test_set_of_an_unknown_key_fails_and_so_does_remove_of_one(self) -> None:
+        # bug caught: a misspelled flag builds the unchanged graph and the case passes
+        # without the feature it asked for
+        for entry, word in (
+            ({"set": {"generate_stat": True}}, "set key 'generate_stat'"),
+            ({"remove": ["generate_stat"]}, 'remove key "generate_stat"'),
+        ):
+            case = {
+                "id": "typo",
+                "node_patches": [
+                    {"node": "SdpaFwd_0", "section": "attributes", **entry}
+                ],
+            }
+            with pytest.raises(SweepPatchError, match=f"sweep case 'typo': .*{word}"):
+                _patched(case)
+
+    def test_patches_edit_the_cases_own_copy_never_the_shared_template(self) -> None:
+        template = json.loads(json.dumps(_SDPA["template"]))
+        case = {
+            "id": "g",
+            "values": _SDPA_VALUES,
+            "node_patches": [
+                {"node": 0, "section": "attributes", "set": {"left_bound": 9}}
+            ],
+        }
+        before = json.dumps(template, sort_keys=True)
+        _patched(case, template)
+        assert json.dumps(template, sort_keys=True) == before
+
+    def test_an_added_tensor_is_copied_not_shared_with_the_case(self) -> None:
+        added = {"uid": 9, "name": "New"}
+        case = {
+            "id": "c",
+            "add_tensors": [added],
+            "tensor_patches": [{"uid": 9, "set": {"alignment": 2}}],
+        }
+        _patched(case)
+        assert added == {"uid": 9, "name": "New"}
+
+    def test_two_nodes_with_one_name_need_an_index(self) -> None:
+        graph = {
+            "tensors": [],
+            "nodes": [
+                {"name": "n", "attributes": {"k": 0}},
+                {"name": "n", "attributes": {"k": 0}},
+            ],
+        }
+        by_name = {
+            "id": "amb",
+            "node_patches": [{"node": "n", "section": "attributes", "set": {"k": 1}}],
+        }
+        with pytest.raises(SweepPatchError, match="node name 'n' is ambiguous"):
+            apply_case_patches(graph, by_name)
+        by_index = {
+            "id": "idx",
+            "node_patches": [{"node": 1, "section": "attributes", "set": {"k": 1}}],
+        }
+        apply_case_patches(graph, by_index)
+        assert [n["attributes"]["k"] for n in graph["nodes"]] == [0, 1]
+
+    def test_a_bool_is_not_an_integer_uid_or_index(self) -> None:
+        # bug caught: Python's True == 1 reaching a tensor or a node the harness refuses
+        graph = {"tensors": [{"uid": 1}], "nodes": [{"attributes": {"k": 0}}]}
+        with pytest.raises(SweepPatchError, match="integer uid"):
+            apply_case_patches(graph, {"id": "b", "add_tensors": [{"uid": True}]})
+        bad_node = {
+            "id": "b",
+            "node_patches": [{"node": True, "section": "attributes", "set": {"k": 1}}],
+        }
+        with pytest.raises(
+            SweepPatchError, match="node must be a node name or an index"
+        ):
+            apply_case_patches(graph, bad_node)
+
+    def test_a_case_with_none_of_the_fields_is_left_alone(self) -> None:
+        graph = {"tensors": [{"uid": 1}], "nodes": []}
+        apply_case_patches(graph, {"id": "x"})
+        assert graph == {"tensors": [{"uid": 1}], "nodes": []}
 
 
 class TestTierMoves:

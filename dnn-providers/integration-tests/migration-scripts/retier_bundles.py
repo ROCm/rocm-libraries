@@ -5,9 +5,10 @@
 Move existing bundle cases between tiers (quick/standard/comprehensive/full).
 
 Re-tiering changes only *where* a case lives. No case is added, removed or
-modified: the expanded graph, metadata, tensor_patches, golden pointer and
-per-engine support claims of every case are identical before and after, and
-the tool proves it by re-reading the tree from disk after writing.
+modified: the expanded graph (patches applied), metadata, add_tensors, node_patches,
+tensor_patches, golden pointer and per-engine support claims of every case are
+identical before and after, and the tool proves it by re-reading the tree from disk
+after writing.
 
 An assignment file maps every existing case to the tier it should live in::
 
@@ -61,6 +62,7 @@ from bundle_utils import canon, expand
 
 # The sidecar renderer lives with the tools that verify and rewrite sidecars.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+from support_matrix_units import apply_case_patches  # noqa: E402
 from support_sidecar import Claim, render  # noqa: E402
 
 TIERS = ["quick", "standard", "comprehensive", "full"]
@@ -139,9 +141,13 @@ def snapshot(root: Path) -> dict:
     for (tier, op, topology), sw in sweeps.items():
         for case in sw.sweep["cases"]:
             key = f"{op}/{topology}/{case['id']}"
+            graph = expand(sw.template, case["values"])
+            apply_case_patches(graph, case)
             snap[(tier, key)] = {
-                "graph": canon(expand(sw.template, case["values"])),
+                "graph": canon(graph),
                 "metadata": canon(case.get("metadata")),
+                "add_tensors": canon(case.get("add_tensors")),
+                "node_patches": canon(case.get("node_patches")),
                 "tensor_patches": canon(case.get("tensor_patches")),
                 "golden": canon(case.get("golden")),
                 "claims": canon(sw.claims_of(case["id"])),

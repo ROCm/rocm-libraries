@@ -228,6 +228,19 @@ frozen case replays the same input values, grading and pointer placement
 placement keeps `placement: "under"`, so the frozen case still expects `BAD_PARAM` and
 fails until the backend rejects that pointer.
 
+A finding from a space that switches a feature on per sample (an extra output tensor wired
+into the node, a node flag) keeps that too. `import_graph.py` diffs the finding's graph
+against the template's expansion and writes what differs onto the new case:
+[`add_tensors`](file-formats.md#add_tensors-and-node_patches) for the tensors only the
+graph has, `node_patches` for node values that changed (`set`) or keys the graph dropped
+(`remove`), and `tensor_patches` for alignment, as above. When no sweep has the finding's
+skeleton, a graph that has every tensor and node of one sweep's template and only adds
+tensors is appended to that sweep, with the uids the case values address (matched by tensor
+name). Otherwise it creates a template of its own. A difference the fields cannot say, such
+as a node key the template lacks (`set` never inserts a key), fails the import round trip
+and writes nothing. Either way the new case builds the graph that failed, and importing it
+again is reported as a duplicate.
+
 ### Add a domain, alignment or placement axis to a space
 
 A space (`gauntlet/spaces/<Op>[.<Name>].space.json`) renders one sweep case per sample
@@ -245,6 +258,8 @@ model; the axes are documented in
 | Render the fills | `case.metadata.inputs`: `"<uid>": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}`. Render every field for every kind: fields a kind does not read are ignored, so one expression picks the kind. Keep the non-finite out of an operand that spreads it over many outputs (put `nan`/`inf` on a tensor each output element meets elementwise, as the spaces do) and say why in `description`. Set `"validator": "${dom_validator}"` beside it. |
 | Declare the alignment | `case.tensor_patches`: `{"uid": N, "set": {"alignment": "${alignment}"}}` for each device tensor. The patch may set only `alignment`; `uid` and `alignment` may be `${expr}` strings; a rendered uid must be an integer and the alignment an integer of at least 1. Leave host scalars (an epsilon, a by-value tensor) at the template's value. |
 | Place the pointers | `case.metadata`: `"placement": "${eff_placement}"` and `"placement_uid": N`, with `"eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"` in `derive` (an `under` placement needs an alignment of at least 2 to be below). `N` is the data operand whose pointer is misaligned; it must be a device buffer of the run, or the case is `UNEXERCISED`. |
+
+| Switch a feature on per sample | `case.add_tensors`: literal tensor objects (an integer `uid`), and `case.node_patches`: `{"node", "section", "set", "remove"}` entries, as in [file-formats](file-formats.md#add_tensors-and-node_patches). Any value may be a `${expr}` string, and an entry may carry `"when": "${expr}"`: it is kept when the expression is true and dropped when false, and the `when` key never reaches the sweep row. A node patch `set` only overwrites keys the node's section already has; read the template for the section (`attributes` for SDPA forward, `parameters` for SDPA backward). A rendered row that is malformed, or that holds a `${` anywhere in these two keys, is an error naming the space. `case.tensor_patches` stays limited to `alignment`. |
 
 `case.metadata` must not set the driver-owned keys `format_version`, `generator`, `seed`
 or `notes` (a load error). Every error in a space names the space.

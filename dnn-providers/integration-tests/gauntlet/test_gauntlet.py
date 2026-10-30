@@ -466,7 +466,13 @@ def test_row_has_sweep_json_format(space_id):
     s = sampler.sample(space_by_id(space_id), 913377)
     row = s.row
     assert list(row)[:3] == ["id", "values", "metadata"]
-    assert set(row) - {"id", "values", "metadata"} <= {"tensor_patches"}
+    assert set(row) - {"id", "values", "metadata"} <= {
+        "add_tensors",
+        "node_patches",
+        "tensor_patches",
+    }
+    # the shipped spaces switch no feature yet; the keys are there only when a space declares them
+    assert not {"add_tensors", "node_patches"} & set(row)
     assert ("tensor_patches" in row) == (space_id in PATCHED_OPERANDS)
     assert row["id"] == "s913377"
     meta = row["metadata"]
@@ -538,7 +544,7 @@ def expanded_graph(template, row):
     """The graph the harness runs for a sweep row: the template expanded with the row's
     values, then its ``tensor_patches`` applied."""
     graph = bu.expand(template, row["values"])
-    fuzz.load_support_matrix_units().apply_tensor_patches(graph, row)
+    fuzz.load_support_matrix_units().apply_case_patches(graph, row)
     return graph
 
 
@@ -1186,6 +1192,334 @@ def test_a_rendered_uid_that_is_not_an_integer_is_an_error(tmp_path):
         sampler.sample(sp, 5)
 
 
+def _toy_entries_space(tmp_path, **fields):
+    return space_lib.load_space(
+        write_space(
+            tmp_path,
+            case={
+                "values": {"a": "${a}", "n": "${n}"},
+                "metadata": {"purpose": "probe"},
+                **fields,
+            },
+        )
+    )
+
+
+TOY_STATS = {"uid": 4, "name": "Stats", "dims": [1, "${n}"], "alignment": "${a * 2}"}
+TOY_WIRE = {"node": "N", "section": "outputs", "set": {"stats_tensor_uid": 4}}
+
+
+def test_a_toy_space_renders_add_tensors_and_node_patches_into_the_row(tmp_path):
+    # bug caught: the new case keys dropped between render and the row, or added to rows of a
+    # space that does not declare them, or a ${...} left in a sweep value the harness reads
+    sp = _toy_entries_space(
+        tmp_path,
+        add_tensors=[TOY_STATS],
+        node_patches=[
+            TOY_WIRE,
+            {
+                "node": 0,
+                "section": "attributes",
+                "set": {"scale": "${1 / (a * 2)}", "on": "${a >= 2}"},
+                "remove": ["old"],
+            },
+        ],
+    )
+    s = sampler.sample(sp, 5)
+    a, n = s.axis_values["a"], s.axis_values["n"]
+    assert s.row["add_tensors"] == [
+        {"uid": 4, "name": "Stats", "dims": [1, n], "alignment": a * 2}
+    ]
+    assert s.row["node_patches"] == [
+        TOY_WIRE,
+        {
+            "node": 0,
+            "section": "attributes",
+            "set": {"scale": 1 / (a * 2), "on": a >= 2},
+            "remove": ["old"],
+        },
+    ]
+    assert list(s.row) == ["id", "values", "metadata", "add_tensors", "node_patches"]
+    assert "${" not in json.dumps(s.row)
+    plain = space_lib.load_space(write_space(tmp_path))
+    row = sampler.sample(plain, 5).row
+    assert "add_tensors" not in row and "node_patches" not in row
+    # a space's own tensor_patches follow them
+    both = _toy_entries_space(
+        tmp_path,
+        add_tensors=[TOY_STATS],
+        tensor_patches=[{"uid": 4, "set": {"alignment": 4}}],
+    )
+    assert list(sampler.sample(both, 5).row)[3:] == ["add_tensors", "tensor_patches"]
+
+
+def test_when_keeps_or_drops_an_entry_and_never_reaches_the_row(tmp_path):
+    # bug caught: no way to switch a feature off per sample, or a "when" key in the sweep row
+    sp = _toy_entries_space(
+        tmp_path,
+        add_tensors=[{**TOY_STATS, "when": "${a >= 2}"}],
+        node_patches=[{**TOY_WIRE, "when": "${a >= 2}"}, {**TOY_WIRE, "node": "M"}],
+    )
+    kept = dropped = 0
+    for seed in range(40):
+        s = sampler.sample(sp, seed)
+        on = s.axis_values["a"] >= 2
+        assert [t["uid"] for t in s.row["add_tensors"]] == ([4] if on else [])
+        assert [p["node"] for p in s.row["node_patches"]] == (
+            ["N", "M"] if on else ["M"]
+        )
+        assert "when" not in json.dumps(s.row)
+        kept, dropped = kept + on, dropped + (not on)
+    assert kept and dropped
+
+
+@pytest.mark.parametrize(
+    "key, entries, message",
+    [
+        ("add_tensors", {"uid": 4}, "'case.add_tensors' must be a list"),
+        ("add_tensors", [7], r"add_tensors\[0\]' must be an object"),
+        ("add_tensors", [{"name": "x"}], r"add_tensors\[0\].uid' must be an integer"),
+        ("add_tensors", [{"uid": "4"}], r"add_tensors\[0\].uid' must be an integer"),
+        ("add_tensors", [{"uid": True}], r"add_tensors\[0\].uid' must be an integer"),
+        (
+            "add_tensors",
+            [{"uid": 4, "when": True}],
+            r"when' must be a \$\{expression\}",
+        ),
+        ("add_tensors", [{"uid": "${a}", "name": "${nope}"}], "unknown name 'nope'"),
+        ("node_patches", "x", "'case.node_patches' must be a list"),
+        ("node_patches", [[1]], r"node_patches\[0\]' must be an object"),
+        (
+            "node_patches",
+            [{**TOY_WIRE, "extra": 1}],
+            r"node_patches\[0\]' has unknown keys \['extra'\]",
+        ),
+        (
+            "node_patches",
+            [{"section": "outputs", "set": {}}],
+            r"node_patches\[0\]' needs 'node'",
+        ),
+        (
+            "node_patches",
+            [{"node": "N", "set": {}}],
+            r"node_patches\[0\]' needs 'section'",
+        ),
+        (
+            "node_patches",
+            [{**TOY_WIRE, "node": ""}],
+            r"node_patches\[0\].node' must be",
+        ),
+        (
+            "node_patches",
+            [{**TOY_WIRE, "node": 1.5}],
+            r"node_patches\[0\].node' must be",
+        ),
+        (
+            "node_patches",
+            [{**TOY_WIRE, "node": True}],
+            r"node_patches\[0\].node' must be",
+        ),
+        (
+            "node_patches",
+            [{**TOY_WIRE, "section": "attribute"}],
+            r"node_patches\[0\].section' must be one of attributes, parameters, inputs, outputs",
+        ),
+        (
+            "node_patches",
+            [{**TOY_WIRE, "section": "${a}"}],
+            r"node_patches\[0\].section' must be one of",
+        ),
+        (
+            "node_patches",
+            [{"node": "N", "section": "outputs"}],
+            r"node_patches\[0\]' needs 'set' or 'remove'",
+        ),
+        (
+            "node_patches",
+            [{**TOY_WIRE, "set": [1]}],
+            r"node_patches\[0\].set' must be an object",
+        ),
+        (
+            "node_patches",
+            [{"node": "N", "section": "outputs", "remove": "k"}],
+            r"node_patches\[0\].remove' must be a list of key names",
+        ),
+        (
+            "node_patches",
+            [{"node": "N", "section": "outputs", "remove": [1]}],
+            r"node_patches\[0\].remove' must be a list of key names",
+        ),
+    ],
+)
+def test_add_tensors_and_node_patches_declarations_are_validated(
+    tmp_path, key, entries, message
+):
+    # bug caught: a malformed entry loads, and every sample then fails at run time as a bare
+    # load failure with no detail, or reaches the harness as the typo it is
+    with pytest.raises(space_lib.SpaceError, match=f"Toy/Default.*{message}"):
+        _toy_entries_space(tmp_path, **{key: entries})
+
+
+@pytest.mark.parametrize(
+    "key, entry, message",
+    [
+        ("add_tensors", {"uid": "${'u'}"}, "the uid must be an integer"),
+        ("add_tensors", {"uid": "${a / 2}"}, "the uid must be an integer"),
+        ("add_tensors", {"uid": 4, "name": "x${a}"}, "still holds a '\\$\\{'"),
+        (
+            "add_tensors",
+            {"uid": 4, "dims": ["${a}", "$${a}"]},
+            "dims\\[1\\] still holds",
+        ),
+        ("node_patches", {**TOY_WIRE, "node": "${None}"}, "must be a node name"),
+        ("node_patches", {**TOY_WIRE, "node": "${a / 2}"}, "must be a node name"),
+        (
+            "node_patches",
+            {**TOY_WIRE, "set": {"k": "v${a}"}},
+            "set.k still holds a '\\$\\{'",
+        ),
+    ],
+)
+def test_a_rendered_entry_that_is_not_literal_sweep_json_is_an_error(
+    tmp_path, key, entry, message
+):
+    # bug caught: a half-rendered ${...}, a float uid or a missing node name reaches sweep.json
+    sp = _toy_entries_space(tmp_path, **{key: [entry]})
+    with pytest.raises(space_lib.SpaceError, match=f"Toy/Default.*rendered.*{message}"):
+        sampler.sample(sp, 5)
+
+
+def test_a_space_with_a_stats_axis_builds_the_graph_with_stats_only_when_on(tmp_path):
+    # bug caught: the sample's stats value and the graph the harness builds disagree: an
+    # added tensor nothing names, or a node that names a tensor that is not there
+    shared = json.loads(
+        (TESTS_ROOT / "tests/data/sweep_patch_parity.json").read_text(encoding="utf-8")
+    )
+    (tmp_path / "toy.template.json").write_text(json.dumps(shared["template"]))
+    plain = next(e for e in shared["expands"] if e["case"]["id"] == "plain")["case"]
+    stats_tensor = next(e for e in shared["expands"] if e["case"]["id"] == "stats_on")[
+        "case"
+    ]["add_tensors"][0]
+    sp = space_lib.load_space(
+        write_space(
+            tmp_path,
+            file_name="SdpaToy.space.json",
+            operation="SdpaToy",
+            axes={"stats": {"values": ["off", "on"]}},
+            derive={},
+            constraints=[],
+            case={
+                "values": plain["values"],
+                "metadata": {"purpose": "probe"},
+                "add_tensors": [{**stats_tensor, "when": "${stats == 'on'}"}],
+                "node_patches": [
+                    {
+                        "node": "SdpaFwd_0",
+                        "section": "attributes",
+                        "set": {"generate_stats": "${stats == 'on'}"},
+                    },
+                    {
+                        "when": "${stats == 'on'}",
+                        "node": "SdpaFwd_0",
+                        "section": "outputs",
+                        "set": {"stats_tensor_uid": 4},
+                    },
+                ],
+            },
+        )
+    )
+    support = fuzz.load_support_matrix_units()
+    seen = {}
+    for seed in range(20):
+        s = sampler.sample(sp, seed)
+        graph = bu.expand(shared["template"], s.row["values"])
+        support.apply_case_patches(graph, s.row)
+        node = graph["nodes"][0]
+        on = s.axis_values["stats"] == "on"
+        assert node["attributes"]["generate_stats"] is on
+        assert node["outputs"]["stats_tensor_uid"] == (4 if on else None)
+        assert [t["uid"] for t in graph["tensors"]] == (
+            [0, 1, 2, 3, 4] if on else [0, 1, 2, 3]
+        )
+        seen[on] = True
+    assert seen == {True: True, False: True}
+
+
+def test_the_driver_writes_the_new_case_keys_into_sweep_json(run, tmp_path):
+    spaces = tmp_path / "spaces"
+    spaces.mkdir()
+    write_space(
+        spaces,
+        case={
+            "values": {"a": "${a}", "n": "${n}"},
+            "metadata": {"purpose": "probe"},
+            "add_tensors": [{**TOY_STATS, "when": "${a >= 2}"}],
+            "node_patches": [TOY_WIRE],
+        },
+    )
+    assert run.run("--samples", "6", "--spaces-dir", str(spaces), space=None) == 0
+    sweep = json.loads(
+        (run.work / "bundles/gauntlet/Toy/Default/sweep.json").read_text()
+    )
+    assert len(sweep["cases"]) == 6
+    for row in sweep["cases"]:
+        assert row["node_patches"] == [TOY_WIRE]
+        assert "when" not in json.dumps(row) and "${" not in json.dumps(row)
+    assert {len(row["add_tensors"]) for row in sweep["cases"]} == {0, 1}
+    assert run.summary["outcomes"]["PASS"] == 6
+
+
+def test_a_failure_folder_holds_the_graph_with_added_tensors_and_node_patches(
+    run, tmp_path
+):
+    # bug caught: the fault folder's graph is the template expansion without the case's
+    # patches, so freezing it records a different test than the one that failed
+    shared = json.loads(
+        (TESTS_ROOT / "tests/data/sweep_patch_parity.json").read_text(encoding="utf-8")
+    )
+    spaces = tmp_path / "spaces"
+    spaces.mkdir()
+    stats_on = next(e for e in shared["expands"] if e["case"]["id"] == "stats_on")[
+        "case"
+    ]
+    write_space(
+        spaces,
+        file_name="SdpaToy.space.json",
+        axes={"a": {"values": [1]}},
+        derive={},
+        constraints=[],
+        case={
+            "values": stats_on["values"],
+            "metadata": {"purpose": "probe"},
+            "add_tensors": stats_on["add_tensors"],
+            "node_patches": stats_on["node_patches"],
+        },
+    )
+    (spaces / "toy.template.json").write_text(json.dumps(shared["template"]))
+    run.control(default="wrong")
+    assert run.run("--samples", "1", "--spaces-dir", str(spaces), space=None) == 1
+    folder = run.failure_dir("s1000", space="SdpaToy_Default")
+    graph = json.loads((folder / "SdpaToy_Default_s1000.json").read_text())
+    expected = next(e for e in shared["expands"] if e["case"]["id"] == "stats_on")[
+        "graph"
+    ]
+    # the folder holds the canonical-uid form of the graph the harness runs
+    assert [t["name"] for t in graph["tensors"]] == sorted(
+        t["name"] for t in expected["tensors"]
+    )
+    node = graph["nodes"][0]
+    names = {t["uid"]: t["name"] for t in graph["tensors"]}
+    assert names[node["outputs"]["stats_tensor_uid"]] == "SdpaFwd_0::Stats"
+    assert node["attributes"]["generate_stats"] is True
+    assert json.loads((folder / "repro.json").read_text())["sweep_row"] == json.loads(
+        json.dumps(
+            sampler.sample(
+                space_lib.load_space(spaces / "SdpaToy.space.json"), 1000
+            ).row
+        )
+    )
+
+
 def test_remap_meta_inputs_remaps_placement_uid_with_the_inputs():
     # bug caught: after UIDs are canonicalized the misaligned pointer would belong to
     # another tensor than the one the case named
@@ -1295,7 +1629,7 @@ def test_import_graph_keeps_a_declared_alignment_as_tensor_patches(tmp_path, ali
     # the case expands, patched, to the graph that was imported
     imported_template = json.loads((topology / "graph.template.json").read_text())
     back = bu.expand(imported_template, new["values"])
-    fuzz.load_support_matrix_units().apply_tensor_patches(back, new)
+    fuzz.load_support_matrix_units().apply_case_patches(back, new)
     assert bu.canon(back) == bu.canon(graph)
     # importing it again is a duplicate, even though the expansion needs the patches
     assert "DUPLICATE" in import_it().stderr
@@ -2485,7 +2819,7 @@ def test_fault_folder_imports_for_real_and_expands_back_identically(
     assert len(cases) == len(before) + 1
     new = cases[-1]
     expanded = bu.expand(template, new["values"])
-    fuzz.load_support_matrix_units().apply_tensor_patches(expanded, new)
+    fuzz.load_support_matrix_units().apply_case_patches(expanded, new)
     assert bu.canon(expanded) == bu.canon(failing_graph)  # the same graph back
     # UIDs unchanged: the import did not renumber a tensor (that would change its input seed)
     sampled = bu.expand(template, repro["sweep_row"]["values"])

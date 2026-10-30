@@ -2198,6 +2198,280 @@ def test_retier_bundles():
         print("  PASS: retier_bundles")
 
 
+def _parity_fixture():
+    """The SDPA-shaped template and cases the Python and C++ loaders share."""
+    path = SCRIPT_DIR.parent / "tests" / "data" / "sweep_patch_parity.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _expansion(entry_id):
+    """(case, graph a loader must build) of the shared fixture's case ``entry_id``."""
+    entry = next(e for e in _parity_fixture()["expands"] if e["case"]["id"] == entry_id)
+    return entry["case"], entry["graph"]
+
+
+def test_case_id_hash_includes_add_tensors_and_node_patches_only_when_present():
+    """A case with the new fields is a different test from one without; one without them
+    keeps the identity (and so the id) it always had."""
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from bundle_utils import _case_hash, _case_identity, assign_case_ids
+
+    plain = {"values": {"a": 1}, "metadata": {"inputs": {}, "seed": 3}}
+    assert _case_identity(plain) == {"values": {"a": 1}, "inputs": {}, "seed": 3}
+    # empty fields say nothing, so they do not move an id either
+    empty = dict(plain, add_tensors=[], node_patches=[])
+    assert _case_identity(empty) == _case_identity(plain)
+    assert _case_hash(empty) == _case_hash(plain)
+
+    added = dict(plain, add_tensors=[{"uid": 4, "name": "Stats"}])
+    noded = dict(
+        plain,
+        node_patches=[{"node": 0, "section": "attributes", "set": {"left_bound": 3}}],
+    )
+    both = dict(added, node_patches=noded["node_patches"])
+    other = dict(
+        plain,
+        node_patches=[{"node": 0, "section": "attributes", "set": {"left_bound": 4}}],
+    )
+    assert _case_identity(added)["add_tensors"] == added["add_tensors"]
+    assert _case_identity(noded)["node_patches"] == noded["node_patches"]
+    hashes = {_case_hash(e) for e in (plain, added, noded, both, other)}
+    assert len(hashes) == 5, "each distinct patch field set needs its own hash"
+
+    # key order inside a patch is not identity: the hash is over the canonical form
+    reordered = dict(
+        plain,
+        node_patches=[{"set": {"left_bound": 3}, "section": "attributes", "node": 0}],
+    )
+    assert _case_hash(reordered) == _case_hash(noded)
+
+    # the ids a sweep gets: same graph values, so only the patches tell them apart
+    cases = [copy.deepcopy(e) for e in (plain, added, noded)]
+    for c in cases:
+        c["values"] = {"io_data_type": "half", "tensors": []}
+    assign_case_ids(cases)
+    assert len({c["id"] for c in cases}) == 3, [c["id"] for c in cases]
+    print(
+        "  PASS: case_id_hash_includes_add_tensors_and_node_patches_only_when_present"
+    )
+
+
+def _sdpa_bundle(tmp):
+    """A bundle dir holding quick/SdpaFwd/Default: the fixture template and its plain case."""
+    fixture = _parity_fixture()
+    plain, _ = _expansion("plain")
+    bundle_dir = tmp / "bundles"
+    sweep_dir = bundle_dir / "quick" / "SdpaFwd" / "Default"
+    sweep_dir.mkdir(parents=True)
+    (sweep_dir / "graph.template.json").write_text(
+        json.dumps(fixture["template"], indent=2) + "\n"
+    )
+    case = {
+        "id": "plain",
+        "values": plain["values"],
+        "metadata": {"format_version": 1, "seed": 42},
+    }
+    (sweep_dir / "sweep.json").write_text(
+        json.dumps({"version": 1, "cases": [case]}, indent=2) + "\n"
+    )
+    return bundle_dir, sweep_dir
+
+
+def _frozen_cases(sweep_dir):
+    return json.loads((sweep_dir / "sweep.json").read_text())["cases"][1:]
+
+
+def _run_graph(sweep_dir, case):
+    """The graph a case of the sweep at ``sweep_dir`` runs, built as the harness does."""
+    sys.path.insert(0, str(SCRIPT_DIR.parent / "scripts"))
+    from support_matrix_units import apply_case_patches, expand_template_graph
+
+    template = json.loads((sweep_dir / "graph.template.json").read_text())
+    graph = expand_template_graph(template, case)
+    apply_case_patches(graph, case)
+    return graph
+
+
+def _canon_sorted(graph):
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from import_graph import _graph_canon
+
+    return _graph_canon(graph)
+
+
+def test_import_freezes_a_graph_that_adds_a_tensor_as_add_tensors_and_node_patches():
+    """A finding with an extra tensor wired into its node freezes as a case of the sweep.
+
+    The graph is what a gauntlet sample with stats on expands to: the template plus a stats
+    tensor, named by the node's outputs, with the flag set. Its uids are canonicalized by
+    name on import, which moves V and puts the stats tensor before it; the case must still
+    address the template's uids. The case that comes out has to build the graph that went in,
+    and importing the same graph again is a duplicate.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir, sweep_dir = _sdpa_bundle(tmp)
+        _, stats_on = _expansion("stats_on")
+
+        r = _import(tmp, "stats_on", stats_on, bundle_dir)
+        assert r.returncode == 0, r.stderr
+        assert "appended case" in r.stderr, r.stderr
+        (case,) = _frozen_cases(sweep_dir)
+        assert [t["uid"] for t in case["add_tensors"]] == [4], case
+        assert case["add_tensors"][0]["name"] == "SdpaFwd_0::Stats"
+        assert {(p["section"], tuple(p["set"])) for p in case["node_patches"]} == {
+            ("attributes", ("generate_stats",)),
+            ("outputs", ("stats_tensor_uid",)),
+        }, case["node_patches"]
+        assert "tensor_patches" not in case
+        # the case is its own test: a new id, not the plain case's
+        assert case["id"] != "plain"
+        assert _canon_sorted(_run_graph(sweep_dir, case)) == _canon_sorted(stats_on)
+
+        before = _inventory(bundle_dir)
+        r = _import(tmp, "stats_on_again", stats_on, bundle_dir)
+        assert r.returncode == 0 and "DUPLICATE" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == before, "a duplicate must write nothing"
+        print("  PASS: import_freezes_a_graph_that_adds_a_tensor")
+
+
+def test_import_freezes_changed_node_values_as_node_patches():
+    """Same skeleton, different node flags: the case carries the difference as node_patches.
+
+    Before node_patches a graph that differed from its template in a node attribute failed the
+    import round trip. Keys the graph dropped are removed, values that changed are set, and
+    a key the template does not have still fails, because ``set`` could not express it.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir, sweep_dir = _sdpa_bundle(tmp)
+        _, window = _expansion("window")  # left_bound, scale, alignment, no alibi_mask
+
+        r = _import(tmp, "window", window, bundle_dir)
+        assert r.returncode == 0, r.stderr
+        (case,) = _frozen_cases(sweep_dir)
+        assert "add_tensors" not in case
+        (patch,) = case["node_patches"]
+        assert patch["section"] == "attributes" and patch["node"] == "SdpaFwd_0"
+        assert patch["set"] == {
+            "attn_scale_value": 0.0625,
+            "diagonal_alignment": "TOP_LEFT",
+            "left_bound": 3,
+        }
+        assert patch["remove"] == ["alibi_mask"]
+        assert _canon_sorted(_run_graph(sweep_dir, case)) == _canon_sorted(window)
+
+        # a node key the template lacks is not expressible: refused, nothing written
+        unknown = copy.deepcopy(window)
+        unknown["nodes"][0]["attributes"]["brand_new"] = 1
+        before = _inventory(bundle_dir)
+        r = _import(tmp, "unknown", unknown, bundle_dir, check=False)
+        _assert_refused(r, bundle_dir, before, "after extraction")
+        assert "brand_new" in r.stderr, r.stderr
+        print("  PASS: import_freezes_changed_node_values_as_node_patches")
+
+
+def test_import_freezes_the_alignment_of_an_added_tensor_in_the_tensor_itself():
+    """Alignment of a template tensor is a tensor_patch (as before); an added tensor is a
+    literal, so its alignment is in it and no tensor_patch is written for it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir, sweep_dir = _sdpa_bundle(tmp)
+        _, stats_on = _expansion("stats_on")
+        graph = copy.deepcopy(stats_on)
+        for tensor in graph["tensors"]:
+            if tensor["uid"] in (1, 4):
+                tensor["alignment"] = 2
+        r = _import(tmp, "aligned", graph, bundle_dir)
+        assert r.returncode == 0, r.stderr
+        (case,) = _frozen_cases(sweep_dir)
+        assert case["add_tensors"][0]["alignment"] == 2
+        assert case["tensor_patches"] == [{"uid": 1, "set": {"alignment": 2}}]
+        assert _canon_sorted(_run_graph(sweep_dir, case)) == _canon_sorted(graph)
+        print("  PASS: import_freezes_the_alignment_of_an_added_tensor")
+
+
+def test_import_leaves_a_graph_with_nothing_to_add_on_the_old_path():
+    """A graph with a topology no sweep has still makes its own template, as before."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir, sweep_dir = _sdpa_bundle(tmp)
+        _, stats_on = _expansion("stats_on")
+        other = copy.deepcopy(stats_on)
+        other["nodes"][0]["name"] = "Renamed_0"  # not the template's node
+        before = len(list(bundle_dir.rglob("sweep.json")))
+        r = _import(tmp, "other", other, bundle_dir)
+        assert r.returncode == 0, r.stderr
+        assert "created new bundle" in r.stderr, r.stderr
+        assert len(list(bundle_dir.rglob("sweep.json"))) == before + 1
+        assert _frozen_cases(sweep_dir) == []
+        print("  PASS: import_leaves_a_graph_with_nothing_to_add_on_the_old_path")
+
+
+def test_place_keeps_a_manual_case_that_patches_an_added_tensor():
+    """A manual case may patch a uid its own add_tensors adds, not one nothing adds."""
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from place_bundles import manual_cases_to_keep
+
+    fixture = _parity_fixture()
+    plain, _ = _expansion("plain")
+    stats = _expansion("stats_on")[0]["add_tensors"]
+    template = fixture["template"]
+    with tempfile.TemporaryDirectory() as tmp:
+        sweep_path = Path(tmp) / "sweep.json"
+
+        def manual(**fields):
+            case = {
+                "id": "m",
+                "values": plain["values"],
+                "metadata": {"format_version": 1, "generator": "manual"},
+                **fields,
+            }
+            sweep_path.write_text(json.dumps({"version": 1, "cases": [case]}))
+            return manual_cases_to_keep(sweep_path, template, set())
+
+        patch = [{"uid": 4, "set": {"alignment": 4}}]
+        kept, error = manual(add_tensors=stats, tensor_patches=patch)
+        assert error is None and [c["id"] for c in kept] == ["m"], error
+        kept, error = manual(tensor_patches=patch)
+        assert kept == [] and "'m' does not fit" in error, error
+    print("  PASS: place_keeps_a_manual_case_that_patches_an_added_tensor")
+
+
+def test_retier_snapshot_sees_add_tensors_and_node_patches():
+    """The before/after proof of a re-tier covers the new fields, and a graph with them
+    applied: moving a case must not drop a field, or change what it builds."""
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from retier_bundles import snapshot
+
+    fixture = _parity_fixture()
+    stats_on, graph = _expansion("stats_on")
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        sweep_dir = root / "quick" / "SdpaFwd" / "Default"
+        sweep_dir.mkdir(parents=True)
+
+        def write(case):
+            (sweep_dir / "graph.template.json").write_text(
+                json.dumps(fixture["template"])
+            )
+            (sweep_dir / "sweep.json").write_text(
+                json.dumps({"version": 1, "cases": [case]})
+            )
+            ((_, entry),) = snapshot(root).items()
+            return entry
+
+        full = write(stats_on)
+        stripped = write({k: v for k, v in stats_on.items() if k != "node_patches"})
+        assert full["node_patches"] != stripped["node_patches"]
+        assert full["graph"] != stripped["graph"]
+        assert full["add_tensors"] == stripped["add_tensors"] != "null"
+        assert json.loads(full["graph"]) == json.loads(
+            json.dumps(graph, sort_keys=True)
+        )
+    print("  PASS: retier_snapshot_sees_add_tensors_and_node_patches")
+
+
 def main() -> int:
     verbose = "-v" in sys.argv
     failures = 0
@@ -2233,6 +2507,13 @@ def main() -> int:
         test_import_seed_only_difference_distinct_cases,
         test_diff_coverage_suite_qualified_join,
         test_retier_bundles,
+        test_case_id_hash_includes_add_tensors_and_node_patches_only_when_present,
+        test_import_freezes_a_graph_that_adds_a_tensor_as_add_tensors_and_node_patches,
+        test_import_freezes_changed_node_values_as_node_patches,
+        test_import_freezes_the_alignment_of_an_added_tensor_in_the_tensor_itself,
+        test_import_leaves_a_graph_with_nothing_to_add_on_the_old_path,
+        test_place_keeps_a_manual_case_that_patches_an_added_tensor,
+        test_retier_snapshot_sees_add_tensors_and_node_patches,
     ]
 
     for t in tests:

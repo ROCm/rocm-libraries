@@ -39,6 +39,16 @@ The optional ``case.tensor_patches`` is the sweep case's own key of that name: a
 space may set) whose ``uid`` and ``alignment`` may be ``${expr}`` strings. A rendered patch
 with a non-integer uid or an alignment below 1 is an error naming the space.
 
+The optional ``case.add_tensors`` and ``case.node_patches`` are the sweep case's own keys of
+those names (see ``docs/file-formats.md``, "add_tensors and node_patches"): lists of literal
+tensor objects (each with an integer ``uid``) and of ``{"node", "section", "set", "remove"}``
+entries. Any value in them may be a ``${expr}`` string. An entry may also carry
+``"when": "${expr}"``: it is kept when the expression is true and dropped when it is false,
+and the key itself never reaches the sweep row. That is how a sample switches a feature on or
+off. ``section`` is one of ``attributes``, ``parameters``, ``inputs``, ``outputs``. A rendered
+entry that is malformed, or that still holds a ``${``, is an error naming the space.
+``tensor_patches`` stays limited to alignment, as above.
+
 In ``case``, a string that starts with ``${`` and ends with ``}`` is replaced by the value
 of the expression between them, keeping its JSON type; every other string is copied.
 """
@@ -308,6 +318,112 @@ def _check_declared_patches(space_name, patches):
             )
 
 
+NODE_PATCH_SECTIONS = ("attributes", "parameters", "inputs", "outputs")
+_NODE_PATCH_KEYS = {"node", "section", "set", "remove"}
+
+
+def _check_declared_entries(space_name, key, entries):
+    """``case.add_tensors`` or ``case.node_patches`` as declared: a list of objects whose
+    structural fields are the right type (or a ``${expr}`` string where a value is computed).
+    """
+    where = f"case.{key}"
+    if not isinstance(entries, list):
+        raise SpaceError(f"space '{space_name}': '{where}' must be a list")
+    for i, entry in enumerate(entries):
+        at = f"{where}[{i}]"
+        if not isinstance(entry, dict):
+            raise SpaceError(f"space '{space_name}': '{at}' must be an object")
+        if "when" in entry and not _is_subst(entry["when"]):
+            raise SpaceError(
+                f"space '{space_name}': '{at}.when' must be a ${{expression}} string"
+            )
+        if key == "add_tensors":
+            if not (_is_int(entry.get("uid")) or _is_subst(entry.get("uid"))):
+                raise SpaceError(
+                    f"space '{space_name}': '{at}.uid' must be an integer or a ${{expression}}"
+                )
+            continue
+        unknown = sorted(set(entry) - _NODE_PATCH_KEYS - {"when"})
+        if unknown:
+            raise SpaceError(f"space '{space_name}': '{at}' has unknown keys {unknown}")
+        for field in ("node", "section"):
+            if field not in entry:
+                raise SpaceError(f"space '{space_name}': '{at}' needs '{field}'")
+        if not (
+            _is_int(entry["node"])
+            or (isinstance(entry["node"], str) and entry["node"] != "")
+        ):
+            raise SpaceError(
+                f"space '{space_name}': '{at}.node' must be a node name, an index or a"
+                " ${expression}"
+            )
+        if entry["section"] not in NODE_PATCH_SECTIONS:
+            raise SpaceError(
+                f"space '{space_name}': '{at}.section' must be one of"
+                f" {', '.join(NODE_PATCH_SECTIONS)}"
+            )
+        if "set" not in entry and "remove" not in entry:
+            raise SpaceError(f"space '{space_name}': '{at}' needs 'set' or 'remove'")
+        if "set" in entry and not isinstance(entry["set"], dict):
+            raise SpaceError(f"space '{space_name}': '{at}.set' must be an object")
+        remove = entry.get("remove", [])
+        if not isinstance(remove, list) or not all(isinstance(k, str) for k in remove):
+            raise SpaceError(
+                f"space '{space_name}': '{at}.remove' must be a list of key names"
+            )
+
+
+def _leftover_substitution(node, path):
+    """The path of the first string under ``node`` that still starts a ``${``, or None."""
+    if isinstance(node, str):
+        return path if "${" in node else None
+    if isinstance(node, list):
+        children = ((f"{path}[{i}]", v) for i, v in enumerate(node))
+    elif isinstance(node, dict):
+        children = ((f"{path}.{k}", v) for k, v in node.items())
+    else:
+        return None
+    for child_path, child in children:
+        found = _leftover_substitution(child, child_path)
+        if found is not None:
+            return found
+    return None
+
+
+def _render_entries(space, key, compiled, env):
+    """Render ``case.add_tensors`` or ``case.node_patches`` for one sample: drop the entries
+    whose ``when`` is false, strip the key, and check the rest is literal sweep-case JSON.
+    """
+    entries = []
+    for entry in compiled:
+        if "when" in entry:
+            if not _render_case(entry["when"], env):
+                continue
+            entry = {k: v for k, v in entry.items() if k != "when"}
+        entries.append(_render_case(entry, env))
+    for i, entry in enumerate(entries):
+        at = f"rendered case.{key}[{i}]"
+        if key == "add_tensors":
+            if not _is_int(entry.get("uid")):
+                raise SpaceError(
+                    f"space '{space.space_id}': {at} is {entry}: the uid must be an integer"
+                )
+        else:
+            node = entry["node"]
+            if not (_is_int(node) or (isinstance(node, str) and node != "")):
+                raise SpaceError(
+                    f"space '{space.space_id}': {at}.node is {node!r}: it must be a node"
+                    " name or an integer index"
+                )
+        left = _leftover_substitution(entry, at)
+        if left is not None:
+            raise SpaceError(
+                f"space '{space.space_id}': {left} still holds a '${{' after rendering;"
+                " sweep case values must be literal JSON"
+            )
+    return entries
+
+
 def _check_rendered_patches(space, patches):
     for i, patch in enumerate(patches):
         alignment = patch["set"]["alignment"]
@@ -374,6 +490,8 @@ class Space:
         self.constraints = []
         self.case_values = None
         self.case_metadata = {}
+        self.case_add_tensors = None
+        self.case_node_patches = None
         self.case_tensor_patches = None
         self.space_sha256 = None
         self.template_sha256 = None
@@ -404,11 +522,20 @@ class Space:
 
     def render(self, env):
         """The sweep case ``{"values": ..., "metadata": ...}`` for a legal sample, plus
-        ``"tensor_patches"`` when the space declares them."""
+        ``"add_tensors"``, ``"node_patches"`` and ``"tensor_patches"`` when the space declares
+        them."""
         row = {
             "values": _render_case(self.case_values, env),
             "metadata": _render_case(self.case_metadata, env),
         }
+        if self.case_add_tensors is not None:
+            row["add_tensors"] = _render_entries(
+                self, "add_tensors", self.case_add_tensors, env
+            )
+        if self.case_node_patches is not None:
+            row["node_patches"] = _render_entries(
+                self, "node_patches", self.case_node_patches, env
+            )
         if self.case_tensor_patches is not None:
             patches = _render_case(self.case_tensor_patches, env)
             _check_rendered_patches(self, patches)
@@ -606,7 +733,13 @@ def load_space(path):
         raise SpaceError(
             f"space '{space_name}': 'case' must be an object with a 'values' object"
         )
-    if set(case) - {"values", "metadata", "tensor_patches"}:
+    if set(case) - {
+        "values",
+        "metadata",
+        "add_tensors",
+        "node_patches",
+        "tensor_patches",
+    }:
         raise SpaceError(f"space '{space_name}': 'case' has unknown keys")
     metadata = case.get("metadata", {})
     if not isinstance(metadata, dict):
@@ -618,6 +751,14 @@ def load_space(path):
         )
     space.case_values = _compile_case(case["values"], space_name, "case.values", known)
     space.case_metadata = _compile_case(metadata, space_name, "case.metadata", known)
+    for key in ("add_tensors", "node_patches"):
+        if key in case:
+            _check_declared_entries(space_name, key, case[key])
+            setattr(
+                space,
+                f"case_{key}",
+                _compile_case(case[key], space_name, f"case.{key}", known),
+            )
     if "tensor_patches" in case:
         _check_declared_patches(space_name, case["tensor_patches"])
         space.case_tensor_patches = _compile_case(

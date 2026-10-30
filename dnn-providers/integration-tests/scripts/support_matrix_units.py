@@ -383,14 +383,167 @@ def check_sweep_golden(case: dict) -> None:
         raise SweepCaseError("golden.path is required when golden is present")
 
 
-def apply_tensor_patches(graph: dict, case: dict) -> None:
-    """Apply a sweep case's ``tensor_patches``, as applyTensorPatches() does.
+class SweepPatchError(SweepCaseError):
+    """A bad ``add_tensors``, ``node_patches`` or ``tensor_patches`` field.
 
-    Each patch upserts its ``set`` keys into the tensor with its uid and
-    erases its ``remove`` keys. This is how a case makes a scalar runtime
-    pass-by-value, so without it the graph read here is not the graph the
-    harness runs. Raises ``SweepCaseError`` where the harness throws: a patch
-    without an integer uid, or one whose uid no tensor holds.
+    Its message starts with ``sweep case '<id>': ``, as sweepPatchError() in
+    the harness does, so it names the case without a caller adding it.
+    """
+
+
+def _patch_error(case: dict, cause: str) -> SweepPatchError:
+    """Mirror sweepPatchError(): the case's id, then the cause."""
+    case_id = case.get("id") if isinstance(case, dict) else None
+    if not isinstance(case_id, str):
+        case_id = "<no id>"
+    return SweepPatchError(f"sweep case '{case_id}': {cause}")
+
+
+def _dump(value) -> str:
+    """nlohmann::json::dump(): compact JSON, non-ASCII left as it is."""
+    return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+
+
+def _graph_has_tensor_uid(tensors: list, uid: int) -> bool:
+    return any(
+        isinstance(tensor, dict) and _is_uid(tensor.get("uid")) and tensor["uid"] == uid
+        for tensor in tensors
+    )
+
+
+def apply_add_tensors(graph: dict, case: dict) -> None:
+    """Mirror applyAddTensors(): append ``add_tensors`` to the graph's tensors."""
+    if "add_tensors" not in case:
+        return
+    added = case["add_tensors"]
+    if not isinstance(added, list):
+        raise _patch_error(case, "add_tensors must be an array")
+    if not added:
+        return
+    tensors = graph.get("tensors")
+    if not isinstance(tensors, list):
+        raise _patch_error(
+            case, "add_tensors needs a tensors array in the expanded graph"
+        )
+    for index, tensor in enumerate(added):
+        where = f"add_tensors[{index}]"
+        if not isinstance(tensor, dict) or not _is_uid(tensor.get("uid")):
+            raise _patch_error(case, f"{where} must be an object with an integer uid")
+        uid = tensor["uid"]
+        if _graph_has_tensor_uid(tensors, uid):
+            raise _patch_error(case, f"{where}: uid {uid} already exists in the graph")
+        tensors.append(copy.deepcopy(tensor))
+
+
+NODE_PATCH_SECTIONS = ("attributes", "parameters", "inputs", "outputs")
+_NODE_PATCH_KEYS = ("node", "section", "set", "remove")
+
+
+def _find_patched_node(
+    graph: dict, case: dict, selector, where: str
+) -> tuple[dict, str]:
+    """Mirror findPatchedNode(): the node a patch addresses, and its label."""
+    nodes = graph.get("nodes")
+    if not isinstance(nodes, list):
+        raise _patch_error(case, f"{where}: the expanded graph has no nodes array")
+    if _is_uid(selector):
+        if selector < 0 or selector >= len(nodes):
+            raise _patch_error(
+                case,
+                f"{where}: node index {selector} is out of range "
+                f"(nodes[] has {len(nodes)} entries)",
+            )
+        return nodes[selector], f"node index {selector}"
+    if not isinstance(selector, str):
+        raise _patch_error(case, f"{where}: node must be a node name or an index")
+    matches = [
+        node
+        for node in nodes
+        if isinstance(node, dict)
+        and isinstance(node.get("name"), str)
+        and node["name"] == selector
+    ]
+    if not matches:
+        raise _patch_error(
+            case, f"{where}: node '{selector}' not found in expanded graph"
+        )
+    if len(matches) > 1:
+        raise _patch_error(
+            case,
+            f"{where}: node name '{selector}' is ambiguous ({len(matches)} nodes "
+            "have it); address it by index",
+        )
+    return matches[0], f"node '{selector}'"
+
+
+def apply_node_patches(graph: dict, case: dict) -> None:
+    """Mirror applyNodePatches(): edit one section of a node per entry.
+
+    ``set`` only overwrites keys the section has and ``remove`` only erases
+    keys it has: the JSON-to-flatbuffer converters ignore unknown keys, so a
+    misspelled key would otherwise build the unchanged graph. Keys are visited
+    in sorted order, as nlohmann::json's std::map does, so the first error
+    reported is the harness's.
+    """
+    if "node_patches" not in case:
+        return
+    patches = case["node_patches"]
+    if not isinstance(patches, list):
+        raise _patch_error(case, "node_patches must be an array")
+    for index, patch in enumerate(patches):
+        where = f"node_patches[{index}]"
+        if not isinstance(patch, dict) or "node" not in patch or "section" not in patch:
+            raise _patch_error(case, f"{where} must be an object with node and section")
+        for key in sorted(patch):
+            if key not in _NODE_PATCH_KEYS:
+                raise _patch_error(case, f"{where}: unknown key '{key}'")
+        section = patch["section"]
+        if not isinstance(section, str) or section not in NODE_PATCH_SECTIONS:
+            raise _patch_error(
+                case,
+                f"{where}: unknown section {_dump(section)} "
+                "(expected attributes, parameters, inputs or outputs)",
+            )
+        has_set = "set" in patch
+        has_remove = "remove" in patch
+        if not has_set and not has_remove:
+            raise _patch_error(case, f"{where} has neither set nor remove")
+        if has_set and not isinstance(patch["set"], dict):
+            raise _patch_error(case, f"{where}: set must be an object")
+        if has_remove and not isinstance(patch["remove"], list):
+            raise _patch_error(case, f"{where}: remove must be an array of key names")
+
+        node, label = _find_patched_node(graph, case, patch["node"], where)
+        if not isinstance(node.get(section), dict):
+            raise _patch_error(case, f"{where}: {label} has no '{section}' section")
+        keys = node[section]
+        if has_set:
+            for key, value in sorted(patch["set"].items()):
+                if key not in keys:
+                    raise _patch_error(
+                        case,
+                        f"{where}: set key '{key}' is not in the '{section}' "
+                        f"section of {label} (set only overwrites existing keys)",
+                    )
+                keys[key] = copy.deepcopy(value)
+        if has_remove:
+            for key in patch["remove"]:
+                if not isinstance(key, str) or key not in keys:
+                    raise _patch_error(
+                        case,
+                        f"{where}: remove key {_dump(key)} is not in the "
+                        f"'{section}' section of {label}",
+                    )
+                del keys[key]
+
+
+def _apply_tensor_patches(graph: dict, case: dict) -> None:
+    """Mirror applyTensorPatches(): ``tensor_patches`` upsert and erase tensor keys.
+
+    This is how a case makes a scalar runtime pass-by-value, so without it the
+    graph read here is not the graph the harness runs. Raises where the
+    harness throws: a patch without an integer uid, or one whose uid no tensor
+    holds.
     """
     patches = case.get("tensor_patches")
     tensors = graph.get("tensors")
@@ -398,7 +551,7 @@ def apply_tensor_patches(graph: dict, case: dict) -> None:
         return
     for patch in patches:
         if not isinstance(patch, dict) or not _is_uid(patch.get("uid")):
-            raise SweepCaseError("tensor_patch entry is missing an integer uid")
+            raise _patch_error(case, "tensor_patch entry is missing an integer uid")
         target = next(
             (
                 tensor
@@ -408,15 +561,28 @@ def apply_tensor_patches(graph: dict, case: dict) -> None:
             None,
         )
         if target is None:
-            raise SweepCaseError(
-                f"tensor_patch uid {patch['uid']} not found in expanded graph"
+            raise _patch_error(
+                case, f"tensor_patch uid {patch['uid']} not found in expanded graph"
             )
         if isinstance(patch.get("set"), dict):
-            target.update(patch["set"])
+            target.update(copy.deepcopy(patch["set"]))
         if isinstance(patch.get("remove"), list):
             for key in patch["remove"]:
                 if isinstance(key, str):
                     target.pop(key, None)
+
+
+def apply_case_patches(graph: dict, case: dict) -> None:
+    """Apply a sweep case's patch fields to its expanded graph, in place.
+
+    The order of loadIntegrationTestBundle(): ``add_tensors``, ``node_patches``,
+    then ``tensor_patches``, so a node or tensor patch can use an added uid.
+    Raises ``SweepPatchError`` where the harness throws; its message names the
+    case.
+    """
+    apply_add_tensors(graph, case)
+    apply_node_patches(graph, case)
+    _apply_tensor_patches(graph, case)
 
 
 # --------------------------------------------------------------------------
@@ -825,11 +991,17 @@ def collect_sweep_units(
         try:
             graph = expand_template_graph(template, case)
             check_sweep_golden(case)
-            apply_tensor_patches(graph, case)
+            apply_case_patches(graph, case)
         except SweepCaseError as error:
+            # A patch error already starts with "sweep case '<id>': ".
+            named = (
+                error
+                if isinstance(error, SweepPatchError)
+                else f"case '{case_id}': {error}"
+            )
             report_error(
                 errors,
-                f"{sweep_dir / SWEEP_MANIFEST_NAME}: case '{case_id}': {error}; "
+                f"{sweep_dir / SWEEP_MANIFEST_NAME}: {named}; "
                 "the harness skips it, so it never runs",
             )
             continue

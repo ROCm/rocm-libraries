@@ -619,6 +619,12 @@ def _case_identity(entry: dict) -> dict:
     ]
     if aligned:
         identity["alignment"] = aligned
+    # add_tensors and node_patches are new fields no shipped case has. A case that
+    # carries them is a different graph from the case without, so they ride the hash, again
+    # only when present.
+    for key in ("add_tensors", "node_patches"):
+        if entry.get(key):
+            identity[key] = entry[key]
     for key in ("placement", "placement_uid"):
         if key in meta:
             identity[key] = meta[key]

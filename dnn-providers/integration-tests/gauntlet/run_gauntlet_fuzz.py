@@ -111,7 +111,8 @@ def load_bundle_utils():
 
 def load_support_matrix_units():
     """``scripts/support_matrix_units.py``, imported by path (no copy): the module whose
-    ``apply_tensor_patches`` expands a sweep case's ``tensor_patches`` as the harness does.
+    ``apply_case_patches`` applies a sweep case's ``add_tensors``, ``node_patches`` and
+    ``tensor_patches`` as the harness does.
     """
     module = sys.modules.get("support_matrix_units")
     if module is not None:
@@ -992,7 +993,7 @@ class Fuzz:
 
         template = json.loads(sp.template_path.read_bytes())
         expanded = bu.expand(template, sample.row["values"])
-        load_support_matrix_units().apply_tensor_patches(expanded, sample.row)
+        load_support_matrix_units().apply_case_patches(expanded, sample.row)
         uid_map = bu.canonical_uid_map_by_name(expanded)
         graph = bu.remap_graph(expanded, uid_map)
         json_dump(folder / f"{case}.json", graph)
