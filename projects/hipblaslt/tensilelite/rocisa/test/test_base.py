@@ -124,3 +124,29 @@ test_rocisa()
 test_item()
 test_copy()
 test_functions()
+
+
+def test_rocisa_concurrent_access():
+    # Readers and writers on the singleton must not race (map::operator[] inserts).
+    import threading
+    global_isa = getInstance()
+    errors = []
+
+    def worker():
+        try:
+            for i in range(200):
+                global_isa.setKernel(isa, 64)
+                global_isa.setVgprIdx("v%d" % (i % 8), i)
+                global_isa.setVgprMsb(i)
+                global_isa.getKernel()
+                global_isa.getVgprIdx()
+                global_isa.getVgprMsb()
+        except Exception as e:  # pragma: no cover
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors

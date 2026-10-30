@@ -753,3 +753,18 @@ TEST_F(AnalysisManagerTest, InterleavedGetResults) {
     EXPECT_EQ(CountingAnalysis::runCount, 1);  // still cached
     EXPECT_EQ(SecondAnalysis::runCount, 1);
 }
+
+TEST(BasicBlockEraseTest, EraseDetachesCFGEdges) {
+    Function f{"erase_edges"};
+    BasicBlock* a = f.createBasicBlock("a");
+    BasicBlock* b = f.createBasicBlock("b");
+    BasicBlock* c = f.createBasicBlock("c");
+    f.addEdge(a, b);
+    f.addEdge(b, c);
+    f.addEdge(b, b);  // self loop
+
+    b->erase();
+
+    EXPECT_TRUE(a->getSuccessors().empty());
+    EXPECT_TRUE(c->getPredecessors().empty());
+}

@@ -115,10 +115,8 @@ class STINKYTOFU_EXPORT PassBuilder {
     /// location and pass it straight to loadPlugin(); they do not call this.
     static std::string examplePluginPath();
 
-    /// Explicitly close all loaded plugin handles.
-    /// C++ callers should invoke this before shutdown.
-    /// Python callers should NOT call this — plugin handles are
-    /// cleaned up by the OS when the process exits.
+    /// Forget all registered pass factories. Plugin libraries stay mapped until
+    /// process exit, so passes and callbacks created earlier remain valid.
     static void unloadPlugins();
 
    private:

@@ -24,12 +24,14 @@
 
 #include <algorithm>
 #include <cctype>
+#include <mutex>
 #include <unordered_map>
 
 #include "stinkytofu/hardware/ArchHelper.hpp"
 
 namespace stinkytofu {
 struct BackendRegistry::Registry {
+    std::mutex mu;  // guards pipelines
     std::unordered_map<std::string, ArchPipeline> pipelines;
 };
 
@@ -40,12 +42,14 @@ BackendRegistry::Registry& BackendRegistry::getRegistry() {
 
 void BackendRegistry::setArchPipeline(const std::array<int, 3>& arch, ArchPipeline pipeline) {
     auto& reg = getRegistry();
+    std::lock_guard<std::mutex> lock(reg.mu);
     reg.pipelines[makeArchKey(arch)] = std::move(pipeline);
 }
 
 const BackendRegistry::ArchPipeline* BackendRegistry::getArchPipeline(
     const std::array<int, 3>& arch) {
     auto& reg = getRegistry();
+    std::lock_guard<std::mutex> lock(reg.mu);
     auto it = reg.pipelines.find(makeArchKey(arch));
     if (it != reg.pipelines.end()) {
         return &it->second;
@@ -55,16 +59,19 @@ const BackendRegistry::ArchPipeline* BackendRegistry::getArchPipeline(
 
 void BackendRegistry::clear() {
     auto& reg = getRegistry();
+    std::lock_guard<std::mutex> lock(reg.mu);
     reg.pipelines.clear();
 }
 
 void BackendRegistry::clearArch(const std::array<int, 3>& arch) {
     auto& reg = getRegistry();
+    std::lock_guard<std::mutex> lock(reg.mu);
     reg.pipelines.erase(makeArchKey(arch));
 }
 
 std::vector<std::string> BackendRegistry::getRegisteredArchKeys() {
     auto& reg = getRegistry();
+    std::lock_guard<std::mutex> lock(reg.mu);
     std::vector<std::string> keys;
     keys.reserve(reg.pipelines.size());
     for (const auto& kv : reg.pipelines) keys.push_back(kv.first);

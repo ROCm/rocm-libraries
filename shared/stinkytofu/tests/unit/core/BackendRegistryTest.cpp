@@ -22,6 +22,9 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <thread>
+#include <vector>
+
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 
 using namespace stinkytofu;
@@ -109,4 +112,22 @@ TEST(BackendRegistryTest, RegisteredKeysAreSorted) {
     for (size_t i = 1; i < keys.size(); ++i) {
         EXPECT_LE(keys[i - 1], keys[i]) << "Keys should be sorted";
     }
+}
+
+// --- thread safety ---
+
+TEST(BackendRegistryTest, ConcurrentSetGetClear) {
+    std::vector<std::thread> threads;
+    for (int t = 0; t < 8; ++t) {
+        threads.emplace_back([t] {
+            for (int i = 0; i < 200; ++i) {
+                std::array<int, 3> arch{9, 0, t};
+                BackendRegistry::setArchPipeline(arch, {});
+                BackendRegistry::getRegisteredArchKeys();
+                if (i % 7 == 0) BackendRegistry::clearArch(arch);
+            }
+        });
+    }
+    for (auto& th : threads) th.join();
+    for (int t = 0; t < 8; ++t) BackendRegistry::clearArch({9, 0, t});
 }
