@@ -113,17 +113,34 @@ def is_fence(line):
     return line.lstrip().startswith("```")
 
 
-# A markdown heading or a thematic break outside fenced code ends a field's continuation.
-FIELD_END = re.compile(r"^(?:#{1,6}\s|\s*(?:-{3,}|\*{3,}|_{3,})\s*$)")
-# An `ID:` line in any markup a lane may wrap it in (bullet, quote, bold, inline code).
-ID_LINE = re.compile(r"^\s*(?:[-*>]\s+)?(?:\*\*|__|`)?ID(?:\*\*|__|`)?:")
+# A `##` or deeper heading or a thematic break outside fenced code ends a field's
+# continuation; a single `#` line (a shell comment) does not.
+FIELD_END = re.compile(r"^(?:#{2,6}\s|\s*(?:-{3,}|\*{3,}|_{3,})\s*$)")
+
+
+def loose_label(label, value=""):
+    """A `<label>:` line in any markup a lane may wrap it in: bullets, numbering, quotes,
+    table pipes, headings, bold, italics, inline code or a space before the colon,
+    followed by `value` (a regex; empty matches anything). Flat prefix class: linear time.
+    """
+    return re.compile(
+        r"^[\s\-*+>|#]*(?:\d+[.)][\s\-*+>|#]*)*(?:\*\*|__|[*_`])?"
+        + re.escape(label)
+        + r"(?:\*\*|__|[*_`])?\s*:"
+        + value
+    )
+
+
+ID_LINE = loose_label("ID")
+# A `Tier:` line whose whole value is one tier; prose and quotes that mention a tier differ.
+TIER_LINE = loose_label("Tier", r"[\s*_`]*(?:" + "|".join(TIERS) + r")[\s*_`|]*$")
 
 
 def parse_fields(text, labels, first="ID"):
     """Labelled-line blocks: a `<first>:` line starts a block; a later labelled line
     starts the next field; any other line (blank lines and fenced code included)
-    continues the current field, until a markdown heading or a `---` line outside fenced
-    code ends it (a later labelled line still joins the block). A fence directly before a
+    continues the current field, until a `##` or deeper heading or a `---` line outside
+    fenced code ends it (a later labelled line still joins the block). A fence directly before a
     `<first>:` line wraps the blocks up to the next bare fence outside nested code;
     neither fence is read. Returns a list of {label: value} dicts."""
     label_re = re.compile(
@@ -162,13 +179,22 @@ def parse_fields(text, labels, first="ID"):
     return blocks
 
 
-def unparsed_ids(text):
-    """Number of `ID:` lines of a lane report's Findings section that parse_findings does
-    not read as a finding: marked up (bullet, quote, bold, inline code) or inside a code
-    fence that does not wrap whole blocks."""
-    findings = split_sections(text).get("Findings", "")
-    seen = sum(1 for line in findings.splitlines() if ID_LINE.match(line))
-    return seen - len(parse_findings(text))
+def unparsed_blocks(text):
+    """Number of finding blocks of a lane report's Findings section that parse_findings
+    does not read: the larger excess over the parsed findings of `ID:` lines (any markup,
+    fenced included) or of unfenced `Tier: <tier>` lines (any markup). Catches marked-up
+    or spaced labels, a block inside a code fence that does not wrap whole blocks, and a
+    block with no `ID:` line (its `Tier:` line is dropped or overwrites the previous
+    block's)."""
+    lines = split_sections(text).get("Findings", "").splitlines()
+    ids = tiers = 0
+    fenced = False
+    for line in lines:
+        ids += bool(ID_LINE.match(line))
+        tiers += not fenced and bool(TIER_LINE.match(line))
+        if is_fence(line):
+            fenced = not fenced
+    return max(ids, tiers) - len(parse_findings(text))
 
 
 def split_sections(text):

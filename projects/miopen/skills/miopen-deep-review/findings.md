@@ -17,13 +17,15 @@ Fix:       smallest change that resolves it, or the decision a human must make
 ```
 
 Write the block as plain lines, never inside a code fence; each label starts its line (no
-bullet, bold or quote). A markdown heading or a `---` line ends a field: write notes under
+bullet, bold or quote). A `##` or deeper heading or a `---` line ends a field, so fence any
+command, diff or code inside a field. Write notes under
 **Checked, no finding** or **Handoffs**, never below a block. `Actual` and `Fix` are written for the PR author, who posts them
 nearly verbatim: no first person, no lane IDs and no `$VAR`s (`path:line` anchors, quoted code and final IDs are fine).
 
-`<LANE>` is the lane's name (`VER` for a verifier). `<n>` counts from 1 within the report; a
+`<LANE>` is the lane's name (`VER<batch>` for a verifier). `<n>` counts from 1 within the report; a
 follow-up report continues after the lane's last `p<n>` with the lane's own prefix (`AUTH-p3`,
-never `AUTH-f1-p1`). Read each anchor from `$HEAD`
+never `AUTH-f1-p1`). A provisional ID anywhere in **Findings** must be a finding some report of
+this round writes as a block; cite an earlier round's finding by its final ID. Read each anchor from `$HEAD`
 (`$REPO`, or `git -C "$CLONE" show` outside the sparse set), not from a diff hunk or an
 earlier head. Mark anything not observed directly `[INFERENCE]`. Never write absolute local
 paths: cite `$EVIDENCE/...`, `$SCRATCH/...` or repository-relative paths.

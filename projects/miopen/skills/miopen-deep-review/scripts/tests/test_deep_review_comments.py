@@ -10,7 +10,9 @@ from pathlib import Path
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parent.parent
+SCRIPTS = (
+    Path(__file__).resolve().parent.parent
+)
 
 
 def _load(name):

@@ -511,7 +511,9 @@ def test_orient_gate_accepts_added_files_and_flags_paths_absent_at_base(
     rd = make_round(tmp_path / "r1", [(1, 0, "src/new.hpp")])
     (rd / "PIN.md").write_text(f"CLONE: {clone}\nBASE: {base}\n")
     (rd / "orient").mkdir()
-    (rd / "orient" / "a.md").write_text("Adds `src/new.hpp:3`; reads `src/old.cpp`.\n")
+    (rd / "orient" / "a.md").write_text(
+        "Adds `src/new.hpp:3`; reads `./src/old.cpp`.\n"
+    )
     (rd / "CONTEXT.md").write_text("Area `src/old.cpp:1` and dir `src/x`.\n")
     with pytest.raises(SystemExit) as exc:
         run(part, "orient-gate", rd)

@@ -26,9 +26,7 @@ HEAD_ANCHOR = re.compile(r"^(\s*`?)\$HEAD:")
 BASE_ANCHOR = re.compile(r"^\s*`?\$BASE:([^\s:`,$]+):(\d+)")
 # Review-process references that mean nothing to the PR author: provisional IDs, lane
 # reports, evidence paths and the $HEAD:/$BASE: prefixes of inline references.
-_LANES = "|".join(
-    ["CORR", "SCOUT", "SYNTH", "VER", "ORCH", *sorted(partition.CONCERN_LANES)]
-)
+_LANES = "|".join(partition.REPORT_LANES)
 _REF = (
     r"\$EVIDENCE/\S*|\br\d+/lanes/[\w.-]+\.md"
     rf"|\b(?:{_LANES})\d*(?:-f\d+)?-p\d+\b|\$(?:HEAD|BASE):"
