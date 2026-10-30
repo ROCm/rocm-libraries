@@ -52,3 +52,42 @@ target_sources(hip_kernel_provider_census_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionDecodePacks.cpp
 )
+
+# FlyDSL's suites ride FlyDSL's gate, not the ingestor's: they read a shard only FlyDSL
+# stages, and the cases that do it call loadedSet(), which throws rather than skipping when
+# no shard is there. The sources above are the generic ingestor suites and stay ungated.
+#
+# Split across the two binaries on the same rule as the packs above: the census over the
+# staged shard goes to the census binary, and the seam suites -- matchers, scoring,
+# dispatch, the real launches -- stay in the ordinary one.
+if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+    target_sources(hip_kernel_provider_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormEngine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormBwdEngine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormObjects.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaRdnaEngine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaCdnaEngine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaObjects.cpp
+    )
+    # The architectures each op has objects for, so a device case that finds none
+    # staged on one of them fails instead of skipping (FlydslNormDeviceTestSupport.hpp).
+    # The content list, not what this build packs: this binary is a host artifact that a
+    # multi-arch build (TheRock RFC 0008) compiles in one architecture's shard and runs on
+    # every other, so the test asks at run time whether the device's shard is staged.
+    foreach(_flydsl_op rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode
+                       sdpa_rdna sdpa_rdna_decode sdpa_aiw)
+        string(REPLACE ";" "," _flydsl_archs
+                       "${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_flydsl_op}}")
+        string(TOUPPER "${_flydsl_op}" _flydsl_op_upper)
+        target_compile_definitions(hip_kernel_provider_tests PRIVATE
+            HIPKERNELPROVIDER_FLYDSL_ARCHS_${_flydsl_op_upper}="${_flydsl_archs}")
+    endforeach()
+    target_sources(hip_kernel_provider_census_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormPacks.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormBwdPacks.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaRdnaPacks.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaRdnaDecodePacks.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaAiwPacks.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaCdnaPacks.cpp
+    )
+endif()
