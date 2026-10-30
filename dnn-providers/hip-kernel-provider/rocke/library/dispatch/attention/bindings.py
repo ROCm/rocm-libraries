@@ -1100,8 +1100,9 @@ def _rdna_validate_and_collect(
             _check_last_dim_contiguous(cu_seqlens_q, "cu_seqlens_q")
             values["cu_seqlens_q"] = cu_seqlens_q
         if view.seqused_q:
-            # Live query rows per sequence; the kernel writes rows past them
-            # as padding (O = 0, LSE = -inf).
+            # Live query rows per sequence; with dense_q the kernel writes rows
+            # past them as padding (O = 0, LSE = -inf), with cu_seqlens_q it
+            # neither reads nor writes them.
             seqused_q = tensors.get("seqused_q")
             if seqused_q is None:
                 raise ValueError("seqused_q objects require tensors['seqused_q']")
