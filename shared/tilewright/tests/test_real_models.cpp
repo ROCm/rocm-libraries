@@ -5,6 +5,7 @@
 // logic, whose <arch>/<subtree>/Tilewright directories hold them); pointer files
 // are skipped.
 
+#include "features.hpp"
 #include "test_util.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -178,6 +179,11 @@ tw::detail::PoolKeys one_group_per_config(const tw::Model& model,
   for (std::size_t i = 0; i < n; ++i) k.view_keys[next[k.view_of[i]]++] = i;
   return k;
 }
+
+// The shipped model the drift-fallback cases leave without the fallback (the
+// TF32 TT one).
+constexpr const char kNotFlagged[] =
+    "gfx950_Cijk_Alik_Bjlk_S_MX_B_Bias_HAS_SAV_UserArgs.tilewright.bin";
 
 }  // namespace
 
@@ -498,4 +504,114 @@ TEST_CASE("every tilewright_index entry resolves to its model", "[real]") {
     }
   }
   CHECK(entries > 0);
+}
+
+TEST_CASE("shipped models served with the drift fallback rank as its rule says", "[real][drift]") {
+  std::size_t pointers               = 0;
+  const std::vector<fs::path> models = shipped_models(&pointers);
+  if (models.empty()) SKIP("no materialized shipped models under " TILEWRIGHT_TEST_WEIGHTS_DIR);
+  const std::vector<tw::Config> real_pool  = sample_pool();
+  const std::vector<tw::Config> synth_pool = synthetic_pool();
+  const tw::Hardware hw{128, 65536, 4u << 20};
+  const tw::ExecutionContext ctx;
+  std::size_t flagged = 0, degraded_rankings = 0, merged = 0, kept = 0;
+  for (const fs::path& path : models) {
+    INFO(path.string());
+    if (path.filename() == kNotFlagged) continue;
+    std::ifstream in(path, std::ios::binary);
+    const std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(in)),
+                                           std::istreambuf_iterator<char>());
+    const tw::ModelPtr plain = tw::load_model_from_memory(bytes.data(), bytes.size());
+    REQUIRE(plain);
+    const tw::ModelInfo info = tw::describe(*plain);
+    if (info.format_version < 3 || !info.whitelist_tier || info.launch_keys) continue;
+    if (std::any_of(plain->cells.begin(), plain->cells.end(), [](const tw::detail::Cell& c) {
+          return !c.signatures.empty();
+        }))
+      continue;
+    ++flagged;
+    // The view-key hash of a config under the model's spec.
+    const auto hash_of = [&](const tw::Config& c) {
+      std::int64_t attrs[tw::detail::kMaxAttributeReads];
+      std::uint64_t key[tw::detail::kMaxViewKeySize];
+      tw::detail::read_attributes(*plain, c, attrs);
+      plain->catalog->view_key(*plain, c, attrs, key);
+      return tw::detail::view_key_hash(key, plain->view_key_size);
+    };
+    const tw::PoolOptions options = shipped_options(*plain);
+    // At the largest share a pool lacking one trained whitelisted key degrades a cell; at the
+    // smallest only a pool lacking all of them does, so other cells keep their whitelist.
+    for (const std::uint32_t keep : {std::uint32_t{1000000}, std::uint32_t{1}}) {
+      INFO("keep_ppm " << keep);
+      const std::vector<unsigned char> image = with_drift_fallback(bytes, keep);
+      std::string err;
+      const tw::ModelPtr drift = tw::load_model_from_memory(image.data(), image.size(), &err);
+      INFO(err);
+      REQUIRE(drift);
+      CHECK(tw::describe(*drift).drift_keep_ppm == keep);
+      for (const std::vector<tw::Config>* pool : {&real_pool, &synth_pool}) {
+        const tw::CandidateSet set(drift, *pool, options), ready(drift, *pool, options),
+            base(plain, *pool, options);
+        ready.prepare();
+        const std::vector<std::size_t> degraded = set.degraded_cells();
+        CHECK(ready.degraded_cells() == degraded);
+        CHECK(base.degraded_cells().empty());
+        for (std::size_t m : {1, 64, 777, 4096})
+          for (std::size_t n : {16, 640, 9000})
+            for (std::size_t k : {16, 1000, 16384})
+              for (std::size_t b : {1, 4}) {
+                const tw::Problem p = make_problem(m, n, k, b, tw::DataType::BFloat16);
+                const int cell      = tw::route(*drift, p);
+                if (cell < 0) continue;
+                const bool is_degraded = std::binary_search(
+                    degraded.begin(), degraded.end(), static_cast<std::size_t>(cell));
+                // The cell's whitelisted view keys the model lists as trained.
+                std::vector<std::uint64_t> listed;
+                for (const std::uint64_t h :
+                     plain->cells[static_cast<std::size_t>(cell)].view_key_hashes)
+                  if (!plain->trained_key_gate ||
+                      std::binary_search(plain->trained_keys.begin(), plain->trained_keys.end(), h))
+                    listed.push_back(h);
+                std::sort(listed.begin(), listed.end());
+                for (const std::size_t min_scored :
+                     {std::size_t{0}, std::size_t{1}, std::size_t{1000}}) {
+                  const std::vector<tw::Result> r = set.rank(p, hw, ctx, min_scored);
+                  REQUIRE(same_results(
+                      r, tw::rank_configs(*drift, p, hw, ctx, *pool, options, min_scored)));
+                  REQUIRE(same_results(ready.rank(p, hw, ctx, min_scored), r));
+                  if (!is_degraded) {
+                    REQUIRE(same_results(base.rank(p, hw, ctx, min_scored), r));
+                    ++kept;
+                    continue;
+                  }
+                  ++degraded_rankings;
+                  // Tier 2 is built behind a whitelist tier 1 and both rank as one tier.
+                  const std::vector<std::size_t> tier1 = scored_indices(base.rank(p, hw, ctx, 1));
+                  const bool whitelist =
+                      !tier1.empty() && std::all_of(tier1.begin(), tier1.end(), [&](std::size_t c) {
+                        return std::binary_search(
+                            listed.begin(), listed.end(), hash_of((*pool)[c]));
+                      });
+                  std::vector<tw::Result> want = base.rank(
+                      p, hw, ctx, whitelist ? std::max(min_scored, tier1.size() + 1) : min_scored);
+                  if (whitelist) {
+                    ++merged;
+                    const auto tail = std::stable_partition(
+                        want.begin(), want.end(), [](const tw::Result& x) { return x.scored; });
+                    std::stable_sort(
+                        want.begin(), tail, [](const tw::Result& a, const tw::Result& b) {
+                          return a.score > b.score ||
+                                 (a.score == b.score && a.config_index < b.config_index);
+                        });
+                  }
+                  REQUIRE(same_results(r, want));
+                }
+              }
+      }
+    }
+  }
+  if (flagged == 0) SKIP("no shipped model takes the drift fallback");
+  CHECK(degraded_rankings > 0);
+  CHECK(merged > 0);
+  CHECK(kept > 0);
 }

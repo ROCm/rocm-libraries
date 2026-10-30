@@ -23,6 +23,10 @@ struct FeatureCatalog;
 // Number of base grid labels: 4 M tiers x 4 N tiers x 3 K tiers x 2 batch tiers.
 constexpr std::size_t kBaseCells = 96;
 
+// The largest drift-fallback share (Model::drift_keep_ppm), in millionths: at
+// it a pool must hold every trained whitelisted view key of a cell.
+constexpr std::uint32_t kMaxDriftKeepPpm = 1000000;
+
 // (mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, cache_hints_a, cache_hints_b)
 using Signature = std::array<int, 8>;
 
@@ -200,6 +204,11 @@ class Model {
   double max_cu_fraction        = 1.0;
   std::uint8_t schedules        = 1;
   std::size_t min_effective_cus = 0;
+  // MLREC_v3 drift fallback: the share of a cell's whitelisted view keys the
+  // model lists as trained, in millionths, that a pool must hold for the cell
+  // to be served from its whitelist alone (rank.cpp, drift_degraded); 0 for a
+  // model without it.
+  std::uint32_t drift_keep_ppm = 0;
   Provenance provenance;
 
   std::vector<detail::Cell> cells;

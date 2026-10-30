@@ -477,3 +477,47 @@ TEST_CASE("prefetching and the memo leave whitelist-tier rankings bit-identical"
   }
   CHECK(answered > 0);
 }
+
+TEST_CASE("the memo never answers a ranking of a degraded cell", "[levers][memo][drift]") {
+  const tw::Hardware hw              = test_hardware();
+  const std::vector<tw::Config> pool = variant_pool();
+  const std::vector<tw::Config> listed(pool.begin(), pool.begin() + 4);
+  ModelSpec spec       = as_v3(grid_model());
+  spec.schedules       = 0x7;
+  spec.min_cu_fraction = 1.0 / 64.0;
+  for (CellSpec& cell : spec.cells)
+    for (const tw::Config& c : listed) cell.view_key_hashes.push_back(key_hash(c));
+  const tw::ModelPtr plain = load_spec(spec);
+  spec.v3_serving_flags |= 0x400;
+  spec.drift_keep_ppm      = 1000000;
+  const tw::ModelPtr drift = load_spec(spec);
+  // Without the first listed kernel and its variant every cell is degraded; the full pool
+  // degrades none, and there the memo answers as before.
+  std::vector<tw::Config> lacking;
+  for (const tw::Config& c : pool)
+    if (key_hash(c) != key_hash(pool[0])) lacking.push_back(c);
+  for (std::size_t i = 0; i < lacking.size(); ++i) lacking[i].index = i;
+  auto launch = std::make_shared<ShiftLaunch>();
+  const tw::PoolOptions options{tw::TieBreak::PoolOrder, launch};
+  const tw::CandidateSet degraded(drift, lacking, options), whole(drift, pool, options);
+  REQUIRE(degraded.degraded_cells().size() == spec.cells.size());
+  REQUIRE(whole.degraded_cells().empty());
+  std::vector<tw::Result> top;
+  for (const tw::Problem& p : {make_problem(1000, 2000, 512), make_problem(640, 3000, 1024, 3)}) {
+    const std::vector<tw::Result> fresh =
+        tw::rank_configs(*drift, p, hw, tw::ExecutionContext{}, lacking, options, 1);
+    std::uint64_t before = replays();
+    degraded.rank_top(p, hw, tw::ExecutionContext{}, 1, top);
+    CHECK(same_results(top, scored_prefix(fresh, 1)));
+    CHECK(same_results(degraded.rank(p, hw, tw::ExecutionContext{}, 1), fresh));
+    CHECK(same_results(degraded.rank(p, hw, tw::ExecutionContext{}, 1), fresh));
+    CHECK(replays() == before);
+    // The same pool ranked by the model without the fallback: its tier is the whitelist alone.
+    const std::vector<tw::Result> plain_fresh =
+        tw::rank_configs(*plain, p, hw, tw::ExecutionContext{}, pool, options, 1);
+    before = replays();
+    whole.rank_top(p, hw, tw::ExecutionContext{}, 1, top);
+    CHECK(same_results(whole.rank(p, hw, tw::ExecutionContext{}, 1), plain_fresh));
+    CHECK(replays() == before + 1);
+  }
+}

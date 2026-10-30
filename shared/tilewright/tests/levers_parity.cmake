@@ -10,22 +10,27 @@
 # first build of BUILDS prints, and in each build of MEMO_BUILDS the re-rank
 # memo must answer TensileLite's re-rank (rerank_check) and scenario S06 of
 # memo_check, the same pair of rankings, for some shape of some model, so that
-# the comparison reaches the memo. With VETO_MODELS (tests/veto_models.cpp),
-# copies of the models the alignment veto can serve, each without the veto
-# and with the veto of the gfx950 recipes (K above 512, 128-byte lines)
-# whether or not it ships with one, rank bf16 problems of the two layouts the
-# veto applies to (A and B transposed, and neither) with the sample kernels
-# and their siblings whose cache hint on A or on B is the non-temporal one,
-# and the same holds of the copies with the veto: equal hashes in every
-# build, memo answers in each memo build, and, so that the comparison
-# reaches the veto, hashes of some copy that differ from those of the copy
-# without it in the first build.
+# the comparison reaches the memo. With DRIFT_FLAG (tests/drift_flag.cpp), a
+# copy of every model the drift fallback can serve, served with it at the
+# largest share, is ranked as well, except the models DRIFT_SKIP names (file
+# names without .tilewright.bin); the sample pool degrades most of their
+# cells. With VETO_MODELS (tests/veto_models.cpp), copies of the models the
+# alignment veto can serve, the drift fallback's copies among them, each
+# without the veto and with the veto of the gfx950 recipes (K above 512,
+# 128-byte lines) whether or not it ships with one, rank bf16 problems of the
+# two layouts the veto applies to (A and B transposed, and neither) with the
+# sample kernels and their siblings whose cache hint on A or on B is the
+# non-temporal one, and the same holds of the copies with the veto: equal
+# hashes in every build, memo answers in each memo build, and, so that the
+# comparison reaches the veto, hashes of some copy that differ from those of
+# the copy without it in the first build.
 # Without a materialized shipped model the entry is skipped. Each run's output
 # is kept in OUT.
 #
 #   cmake -DWEIGHTS=DIR -DKERNELS=FILE -DSHAPES=FILE -DOUT=DIR -DBUILDS=a,b,...
 #         -DMEMO_BUILDS=b,... -Drerank_check_<build>=EXE -Dmemo_check_<build>=EXE ...
-#         [-DVETO_MODELS=EXE] -P levers_parity.cmake
+#         [-DDRIFT_FLAG=EXE [-DDRIFT_SKIP=name,...]] [-DVETO_MODELS=EXE]
+#         -P levers_parity.cmake
 
 cmake_minimum_required(VERSION 3.25.2)
 
@@ -68,6 +73,33 @@ endif()
 if(NOT _models)
     message(STATUS "no materialized shipped models under ${WEIGHTS}")
     return()
+endif()
+
+set(_n_flagged 0)
+if(DEFINED DRIFT_FLAG)
+    string(REPLACE "," ";" _drift_skip "${DRIFT_SKIP}")
+    file(MAKE_DIRECTORY "${OUT}/drift")
+    set(_flagged)
+    foreach(_model IN LISTS _models)
+        get_filename_component(_name "${_model}" NAME)
+        string(REPLACE ".tilewright.bin" "" _stem "${_name}")
+        if(_stem IN_LIST _drift_skip)
+            continue()
+        endif()
+        set(_copy "${OUT}/drift/${_stem}.drift.tilewright.bin")
+        execute_process(
+            COMMAND "${DRIFT_FLAG}" "${_model}" "${_copy}" 1000000
+            ERROR_VARIABLE _err
+            RESULT_VARIABLE _rc
+        )
+        if(_rc EQUAL 0)
+            list(APPEND _flagged "${_copy}")
+        elseif(NOT _rc EQUAL 3)
+            message(FATAL_ERROR "drift_flag on ${_name}: exit ${_rc}\n${_err}")
+        endif()
+    endforeach()
+    list(LENGTH _flagged _n_flagged)
+    list(APPEND _models ${_flagged})
 endif()
 
 # The inputs (bench_inputs.hpp): DataType::BFloat16 (7) for every type,
@@ -329,6 +361,7 @@ if(_failures GREATER 0)
 endif()
 message(
     STATUS
-        "levers parity: ${_n_models} models, ${_n_shapes} shapes, ${_n_kernels} kernels: "
-        "rerank_check and memo_check hash alike in ${_n_builds} builds (${BUILDS})${_veto_summary}"
+        "levers parity: ${_n_models} models (${_n_flagged} served with the drift fallback), "
+        "${_n_shapes} shapes, ${_n_kernels} kernels: rerank_check and memo_check hash alike in "
+        "${_n_builds} builds (${BUILDS})${_veto_summary}"
 )

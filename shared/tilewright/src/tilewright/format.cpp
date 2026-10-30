@@ -36,8 +36,10 @@ constexpr std::uint8_t kServingFlagsKnown = kNoNonTemporalRule;
 // family it would reject whole (needs the rule itself), whether the model
 // was trained on the bank as well as the table, whether only the keys the
 // header lists as trained are scored while one of them is feasible, whether
-// the header declares the fewest usable CUs the model supports, and whether
-// it declares the alignment veto (never with the non-temporal rule).
+// the header declares the fewest usable CUs the model supports, whether it
+// declares the alignment veto (never with the non-temporal rule), and whether
+// a cell whose pool lacks too many of its whitelisted keys is served from its
+// other keys as well (the drift fallback, whose share the header declares).
 constexpr std::uint32_t kV3SmallBatchedRule  = 0x01;
 constexpr std::uint32_t kV3Dot2Rule          = 0x02;
 constexpr std::uint32_t kV3NonTemporalRule   = 0x04;
@@ -48,9 +50,11 @@ constexpr std::uint32_t kV3Bank              = 0x40;
 constexpr std::uint32_t kV3TrainedKeyGate    = 0x80;
 constexpr std::uint32_t kV3CuFloor           = 0x100;
 constexpr std::uint32_t kV3AlignmentVeto     = 0x200;
+constexpr std::uint32_t kV3DriftFallback     = 0x400;
 constexpr std::uint32_t kV3ServingFlagsKnown =
     kV3SmallBatchedRule | kV3Dot2Rule | kV3NonTemporalRule | kV3NoWhitelistTier | kV3LaunchKeys |
-    kV3NonTemporalFamily | kV3Bank | kV3TrainedKeyGate | kV3CuFloor | kV3AlignmentVeto;
+    kV3NonTemporalFamily | kV3Bank | kV3TrainedKeyGate | kV3CuFloor | kV3AlignmentVeto |
+    kV3DriftFallback;
 constexpr std::uint8_t kScheduleBits     = 0x07;
 constexpr std::uint16_t kMaxAttributes   = 64;
 constexpr std::uint16_t kMaxOneHotValues = 64;
@@ -461,6 +465,14 @@ class Parser {
     if ((flags & kV3AlignmentVeto) != 0 && (flags & kV3NonTemporalRule) != 0)
       return fail("serving flags " + std::to_string(flags) +
                   " ask for the alignment veto with the non-temporal rule");
+    // The drift fallback counts a cell's whitelisted view keys: it needs the
+    // whitelist tier, and launch keys would split what it counts.
+    if ((flags & kV3DriftFallback) != 0 && (flags & kV3NoWhitelistTier) != 0)
+      return fail("serving flags " + std::to_string(flags) +
+                  " ask for the drift fallback without the whitelist tier");
+    if ((flags & kV3DriftFallback) != 0 && (flags & kV3LaunchKeys) != 0)
+      return fail("serving flags " + std::to_string(flags) +
+                  " ask for the drift fallback with launch keys");
     if (!(model_->min_cu_fraction > 0.0 && model_->min_cu_fraction <= model_->max_cu_fraction &&
           model_->max_cu_fraction <= 1.0))
       return fail("CU fraction range must satisfy 0 < min <= max <= 1");
@@ -518,6 +530,7 @@ class Parser {
     if (model_->trained_key_gate && !parse_trained_keys(r)) return false;
     if ((flags & kV3CuFloor) != 0 && !parse_cu_floor(r)) return false;
     if ((flags & kV3AlignmentVeto) != 0 && !parse_alignment_veto(r)) return false;
+    if ((flags & kV3DriftFallback) != 0 && !parse_drift(r)) return false;
     if (r.remaining() != 0 && !parse_provenance(r)) return false;
     if (r.remaining() != 0) return fail("header_size does not match the header contents");
     if (feature_spec_hash(spec) != spec_hash)
@@ -578,6 +591,21 @@ class Parser {
                            " bits is not a power of two of at least 8 bits",
                        at);
     model_->alignment_veto = AlignmentVeto{true, k_min, align_bits};
+    return true;
+  }
+
+  // `u32` share of a cell's trained whitelisted view keys, in millionths,
+  // that a pool must hold for the cell to be served from its whitelist alone:
+  // 1 to 1,000,000.
+  bool parse_drift(Reader& r) {
+    const std::size_t at = r.pos();
+    std::uint32_t keep   = 0;
+    if (!r.u32(&keep, "drift keep_ppm")) return false;
+    if (keep == 0 || keep > kMaxDriftKeepPpm)
+      return r.fail_at("the drift fallback's keep_ppm " + std::to_string(keep) +
+                           " is outside 1 to " + std::to_string(kMaxDriftKeepPpm),
+                       at);
+    model_->drift_keep_ppm = keep;
     return true;
   }
 
@@ -706,6 +734,10 @@ class Parser {
       if (n_sk > r.remaining() / 32)
         return r.fail_at("signature count " + std::to_string(n_sk) + " exceeds the payload", at);
       const unsigned char* sigs = r.take(32 * static_cast<std::size_t>(n_sk), "signatures");
+      if (n_sk != 0 && model_->drift_keep_ppm != 0)
+        return r.fail_at("cell '" + cell.label +
+                             "' lists signatures, and the drift fallback counts view keys only",
+                         at);
       cell.signatures.resize(n_sk);
       for (std::uint32_t s = 0; s < n_sk; ++s)
         for (std::size_t t = 0; t < 8; ++t) {

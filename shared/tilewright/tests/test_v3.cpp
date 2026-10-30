@@ -372,7 +372,7 @@ TEST_CASE("v3 header defects are rejected", "[v3][loader]") {
   CHECK(mentions(with([](ModelSpec& s) { s.i_dim += 1; }), "feature dims"));
   CHECK(mentions(with([](ModelSpec& s) { s.q_dim = 55; }), "feature dims"));
   CHECK(mentions(with([](ModelSpec& s) { s.x_dim = 37; }), "feature dims"));
-  CHECK(mentions(with([](ModelSpec& s) { s.v3_serving_flags = 0x400; }), "unknown serving flags"));
+  CHECK(mentions(with([](ModelSpec& s) { s.v3_serving_flags = 0x800; }), "unknown serving flags"));
   ModelSpec veto        = good;
   veto.v3_serving_flags = 0x200;
   veto.veto_k_min       = 512;
@@ -2629,4 +2629,490 @@ TEST_CASE("the family-wise rule ranks alike through the cascade, launch keys and
       }
     }
   }
+}
+
+namespace {
+
+// MLREC_v3 serving flag of the drift fallback.
+constexpr std::uint32_t kDrift = 0x400;
+// keep_ppm values the drift tests try: 32-key whitelists degrade at 1, 1, 1, 2, 4, 9, 17,
+// 31 and 32 missing keys.
+constexpr std::uint32_t kKeepGrid[] =
+    {1000000, 999999, 968751, 950000, 900000, 750000, 500000, 31251, 1};
+
+// Distinct kernels (every tile of a grid, hint-free, and for every third its non-temporal
+// sibling), the first `duplicated` of them with a second config of their view key (another
+// occupancy), shuffled.
+std::vector<tw::Config> drift_pool(Random& rnd, std::size_t duplicated) {
+  std::vector<tw::Config> kinds;
+  for (const std::size_t m : {16, 32, 64, 128, 256})
+    for (const std::size_t n : {16, 32, 64, 128, 256})
+      for (const std::size_t k : {32, 64, 128}) {
+        kinds.push_back(make_config(m, n, k));
+        if (kinds.size() % 3 == 0) kinds.push_back(make_config(m, n, k, 16, 16, 32, 4, 0));
+      }
+  std::vector<tw::Config> pool = kinds;
+  for (std::size_t i = 0; i < duplicated && i < kinds.size(); ++i) {
+    tw::Config c = kinds[i];
+    c.occupancy  = 2;
+    pool.push_back(c);
+  }
+  for (std::size_t i = pool.size(); i > 1; --i) std::swap(pool[i - 1], pool[rnd.below(i)]);
+  for (std::size_t i = 0; i < pool.size(); ++i) pool[i].index = i;
+  return pool;
+}
+
+std::vector<std::uint64_t> view_hashes(const std::vector<tw::Config>& pool) {
+  std::vector<std::uint64_t> out;
+  for (const tw::Config& c : pool) out.push_back(key_hash(c, {}));
+  std::sort(out.begin(), out.end());
+  out.erase(std::unique(out.begin(), out.end()), out.end());
+  return out;
+}
+
+// A v3 grid model with the trained-key gate over `trained` whose cells each list `listed` of
+// the trained keys and, in every fifth cell, an untrained key `untrained` as well.
+ModelSpec drift_spec(Random& rnd,
+                     const std::vector<std::uint64_t>& trained,
+                     std::uint64_t untrained,
+                     std::size_t listed,
+                     std::uint32_t flags,
+                     std::uint32_t cascade) {
+  ModelSpec spec        = v3_grid({});
+  spec.v3_serving_flags = kGate | flags;
+  spec.trained_keys     = trained;
+  spec.v3_cascade_keys  = cascade;
+  for (std::size_t c = 0; c < spec.cells.size(); ++c) {
+    std::vector<std::uint64_t> keys = trained;
+    for (std::size_t i = keys.size(); i > 1; --i) std::swap(keys[i - 1], keys[rnd.below(i)]);
+    keys.resize(std::min(listed, keys.size()));
+    if (c % 5 == 0) keys.push_back(untrained);
+    std::sort(keys.begin(), keys.end());
+    spec.cells[c].view_key_hashes = keys;
+  }
+  return spec;
+}
+
+ModelSpec with_drift(ModelSpec spec, std::uint32_t keep) {
+  spec.v3_serving_flags |= kDrift;
+  spec.drift_keep_ppm = keep;
+  return spec;
+}
+
+// The cell's whitelisted keys the model lists as trained, ascending.
+std::vector<std::uint64_t> trained_listed(const ModelSpec& spec, std::size_t cell) {
+  std::vector<std::uint64_t> out;
+  for (const std::uint64_t h : spec.cells[cell].view_key_hashes)
+    if ((spec.v3_serving_flags & kGate) == 0 ||
+        std::binary_search(spec.trained_keys.begin(), spec.trained_keys.end(), h))
+      out.push_back(h);
+  std::sort(out.begin(), out.end());
+  out.erase(std::unique(out.begin(), out.end()), out.end());
+  return out;
+}
+
+// The cells a drift fallback at `keep` serves degraded on `pool`, by the rule's arithmetic.
+std::vector<std::size_t> degraded_oracle(const ModelSpec& spec,
+                                         const std::vector<tw::Config>& pool,
+                                         std::uint32_t keep) {
+  const std::vector<std::uint64_t> held = view_hashes(pool);
+  std::vector<std::size_t> out;
+  for (std::size_t c = 0; c < spec.cells.size(); ++c) {
+    const std::vector<std::uint64_t> listed = trained_listed(spec, c);
+    std::uint64_t present                   = 0;
+    for (const std::uint64_t h : listed)
+      present += std::binary_search(held.begin(), held.end(), h) ? 1 : 0;
+    if (!listed.empty() && present * 1000000 < std::uint64_t{keep} * listed.size())
+      out.push_back(c);
+  }
+  return out;
+}
+
+// `pool` without every config of the view keys `gone`.
+std::vector<tw::Config> without_keys(const std::vector<tw::Config>& pool,
+                                     const std::vector<std::uint64_t>& gone) {
+  std::vector<tw::Config> out;
+  for (const tw::Config& c : pool)
+    if (std::find(gone.begin(), gone.end(), key_hash(c, {})) == gone.end()) out.push_back(c);
+  for (std::size_t i = 0; i < out.size(); ++i) out[i].index = i;
+  return out;
+}
+
+// rank_configs with one group per config, the configs of one view key forming one view (which
+// a cascade keeps or drops whole), as tests/test_real_models.cpp groups them.
+std::vector<tw::Result> rank_by_config(const tw::Model& model,
+                                       const tw::Problem& p,
+                                       const std::vector<tw::Config>& pool,
+                                       std::size_t min_scored) {
+  const tw::detail::PoolKeys grouped = tw::detail::pool_keys(model, pool);
+  const std::size_t n                = pool.size();
+  tw::detail::PoolKeys k             = singleton_keys(pool);
+  k.attribute_count                  = model.attribute_reads.size();
+  k.attribute_values.resize(n * k.attribute_count);
+  for (std::size_t i = 0; i < n; ++i) {
+    tw::detail::read_attributes(model, pool[i], k.attribute_values.data() + i * k.attribute_count);
+    if (grouped.trained.empty()) continue;
+    k.trained.push_back(grouped.trained[grouped.key_of[i]]);
+    k.untrained += grouped.trained[grouped.key_of[i]] != 0 ? 0 : 1;
+  }
+  const std::size_t views = grouped.first.size();
+  if (views != n) {
+    k.view_of = grouped.key_of;
+    k.view_begin.assign(views + 1, 0);
+    for (std::size_t i = 0; i < n; ++i) ++k.view_begin[k.view_of[i] + 1];
+    for (std::size_t v = 0; v < views; ++v) k.view_begin[v + 1] += k.view_begin[v];
+    k.view_keys.resize(n);
+    std::vector<std::size_t> next(k.view_begin.begin(), k.view_begin.end() - 1);
+    for (std::size_t i = 0; i < n; ++i) k.view_keys[next[k.view_of[i]]++] = i;
+  }
+  return tw::detail::rank_keys(model,
+                               p,
+                               test_hardware(),
+                               tw::ExecutionContext{},
+                               pool,
+                               k,
+                               min_scored,
+                               tw::TieBreak::PoolOrder,
+                               nullptr);
+}
+
+// What a degraded cell serves, from the model without the fallback: its ranking with tier 2
+// built behind a whitelist tier 1 (min_scored above tier 1), both tiers ordered best-first by
+// score, equal scores in input order; its ranking itself when tier 1 is not the whitelist.
+std::vector<tw::Result> drift_reference(const tw::CandidateSet& plain,
+                                        const std::vector<std::uint64_t>& listed,
+                                        const std::vector<tw::Config>& pool,
+                                        const tw::Problem& p,
+                                        std::size_t min_scored,
+                                        bool* merged = nullptr) {
+  const tw::Hardware hw = test_hardware();
+  const tw::ExecutionContext ctx;
+  const std::vector<std::size_t> tier1 = scored_indices(plain.rank(p, hw, ctx, 1));
+  const bool whitelist =
+      !tier1.empty() && std::all_of(tier1.begin(), tier1.end(), [&](std::size_t c) {
+        return std::binary_search(listed.begin(), listed.end(), key_hash(pool[c], {}));
+      });
+  if (merged != nullptr) *merged = whitelist;
+  std::vector<tw::Result> r =
+      plain.rank(p, hw, ctx, whitelist ? std::max(min_scored, tier1.size() + 1) : min_scored);
+  if (!whitelist) return r;
+  const auto unscored =
+      std::stable_partition(r.begin(), r.end(), [](const tw::Result& x) { return x.scored; });
+  std::stable_sort(r.begin(), unscored, [](const tw::Result& a, const tw::Result& b) {
+    return a.score > b.score || (a.score == b.score && a.config_index < b.config_index);
+  });
+  return r;
+}
+
+}  // namespace
+
+TEST_CASE("the drift fallback degrades a cell by the share of its trained whitelisted keys",
+          "[v3][drift]") {
+  Random rnd(71);
+  const std::vector<tw::Config> pool    = drift_pool(rnd, 12);
+  const std::vector<std::uint64_t> keys = view_hashes(pool);
+  REQUIRE(keys.size() > 64);
+  // Four keys without training data; the cells list 32 trained keys each.
+  const std::vector<std::uint64_t> trained(keys.begin() + 4, keys.end());
+  const ModelSpec spec = drift_spec(rnd, trained, keys[0], 32, 0, 4);
+  CHECK(tw::describe(*load_spec(spec)).drift_keep_ppm == 0);
+  CHECK(tw::CandidateSet(load_spec(spec), without_keys(pool, trained)).degraded_cells().empty());
+
+  // Cell 0 loses m of its 32 listed keys (it also lists an untrained one, which counts in
+  // neither number); every cell matches the arithmetic at every keep_ppm.
+  const std::vector<std::uint64_t> listed = trained_listed(spec, 0);
+  REQUIRE(listed.size() == 32);
+  REQUIRE(spec.cells[0].view_key_hashes.size() == 33);
+  for (std::size_t m = 0; m <= 32; ++m) {
+    const std::vector<tw::Config> variant =
+        without_keys(pool, std::vector<std::uint64_t>(listed.begin(), listed.begin() + m));
+    for (const std::uint32_t keep : kKeepGrid) {
+      INFO("missing " << m << " keep_ppm " << keep);
+      const ModelSpec flagged  = with_drift(spec, keep);
+      const tw::ModelPtr model = load_spec(flagged);
+      CHECK(tw::describe(*model).drift_keep_ppm == keep);
+      const std::vector<std::size_t> degraded = tw::CandidateSet(model, variant).degraded_cells();
+      CHECK(degraded == degraded_oracle(flagged, variant, keep));
+      const bool cell0 = !degraded.empty() && degraded.front() == 0;
+      CHECK(cell0 == ((32 - m) * std::uint64_t{1000000} < std::uint64_t{keep} * 32));
+    }
+  }
+
+  const tw::ModelPtr strict = load_spec(with_drift(spec, 1000000));
+  // A pool that holds every listed key, in any order, with members removed or added, is never
+  // degraded: a key with one member left is present.
+  CHECK(tw::CandidateSet(strict, pool).degraded_cells().empty());
+  std::vector<tw::Config> reversed(pool.rbegin(), pool.rend());
+  for (std::size_t i = 0; i < reversed.size(); ++i) reversed[i].index = i;
+  CHECK(tw::CandidateSet(strict, reversed).degraded_cells().empty());
+  std::vector<tw::Config> thinned;
+  std::vector<std::uint64_t> seen;
+  for (const tw::Config& c : pool) {
+    const std::uint64_t h = key_hash(c, {});
+    if (std::find(seen.begin(), seen.end(), h) != seen.end()) continue;
+    seen.push_back(h);
+    thinned.push_back(c);
+  }
+  REQUIRE(thinned.size() < pool.size());
+  CHECK(tw::CandidateSet(strict, thinned).degraded_cells().empty());
+  // Untrained keys neither count as present nor make a cell degraded.
+  const std::vector<tw::Config> no_untrained = without_keys(pool, {keys[0], keys[1], keys[2]});
+  CHECK(tw::CandidateSet(strict, no_untrained).degraded_cells().empty());
+  std::vector<tw::Config> grown = without_keys(pool, {listed[0]});
+  tw::Config added              = make_config(512, 16, 32, 16, 16, 32);
+  added.index                   = grown.size();
+  grown.push_back(added);
+  CHECK(tw::CandidateSet(strict, grown).degraded_cells() ==
+        degraded_oracle(with_drift(spec, 1000000), grown, 1000000));
+
+  // Without the gate every listed key counts.
+  ModelSpec open = spec;
+  open.v3_serving_flags &= ~kGate;
+  open.trained_keys.clear();
+  const std::vector<tw::Config> no_first = without_keys(pool, {keys[0]});
+  const std::vector<std::size_t> open_degraded =
+      tw::CandidateSet(load_spec(with_drift(open, 1000000)), no_first).degraded_cells();
+  CHECK(open_degraded == degraded_oracle(with_drift(open, 1000000), no_first, 1000000));
+  CHECK(std::find(open_degraded.begin(), open_degraded.end(), 0) != open_degraded.end());
+  CHECK(tw::CandidateSet(strict, no_first).degraded_cells().empty());
+}
+
+TEST_CASE("a degraded cell ranks its whitelist and the cascade over its other keys as one tier",
+          "[v3][drift]") {
+  Random rnd(73);
+  const tw::Hardware hw = test_hardware();
+  const tw::ExecutionContext ctx;
+  std::size_t merged = 0, not_whitelist = 0, kept = 0, gated = 0;
+  for (int round = 0; round < 6; ++round) {
+    const std::vector<tw::Config> pool    = drift_pool(rnd, 10);
+    const std::vector<std::uint64_t> keys = view_hashes(pool);
+    const std::vector<std::uint64_t> trained(keys.begin() + 3, keys.end());
+    const std::uint32_t cascade = round % 3 == 0 ? 0 : round % 3 == 1 ? 4 : 64;
+    const ModelSpec spec =
+        drift_spec(rnd, trained, keys[1], 32, round % 2 != 0 ? kNonTemporal : 0, cascade);
+    const ModelSpec flagged = with_drift(spec, round < 3 ? 1000000 : 900000);
+    // The variant pool: a tenth of the trained keys gone, one member of a duplicated key gone,
+    // and kernels of untrained keys added.
+    std::vector<std::uint64_t> gone;
+    for (const std::uint64_t h : trained)
+      if (rnd.below(10) == 0) gone.push_back(h);
+    std::vector<tw::Config> variant = without_keys(pool, gone);
+    for (std::size_t i = 0; i < variant.size(); ++i)
+      if (variant[i].occupancy == 2) {
+        variant.erase(variant.begin() + static_cast<std::ptrdiff_t>(i));
+        break;
+      }
+    for (const std::size_t mt : {512, 1024}) {
+      tw::Config c = make_config(mt, 32, 32);
+      variant.push_back(c);
+    }
+    for (std::size_t i = 0; i < variant.size(); ++i) variant[i].index = i;
+    const tw::ModelPtr fm = load_spec(flagged), pm = load_spec(spec);
+    const tw::CandidateSet fs(fm, variant), ps(pm, variant);
+    const std::vector<std::size_t> degraded = fs.degraded_cells();
+    CHECK(degraded == degraded_oracle(flagged, variant, flagged.drift_keep_ppm));
+    CHECK(ps.degraded_cells().empty());
+    for (int i = 0; i < 60; ++i) {
+      const tw::Problem p = rnd.problem();
+      const int cell      = tw::route(*fm, p);
+      REQUIRE(cell >= 0);
+      const bool is_degraded =
+          std::binary_search(degraded.begin(), degraded.end(), static_cast<std::size_t>(cell));
+      const std::vector<std::uint64_t> listed =
+          trained_listed(flagged, static_cast<std::size_t>(cell));
+      for (const std::size_t min_scored : {std::size_t{0}, std::size_t{1}, std::size_t{8}, kAll}) {
+        INFO("round " << round << " problem " << i << " min_scored " << min_scored);
+        const std::vector<tw::Result> r = fs.rank(p, hw, ctx, min_scored);
+        if (is_degraded) {
+          bool whitelist = false;
+          CHECK(same_results(r, drift_reference(ps, listed, variant, p, min_scored, &whitelist)));
+          (whitelist ? merged : not_whitelist) += 1;
+        } else {
+          CHECK(same_results(r, ps.rank(p, hw, ctx, min_scored)));
+          ++kept;
+        }
+        CHECK(same_results(fs.rank_top(p, hw, ctx, min_scored), scored_prefix(r, min_scored)));
+        // Kernels of untrained keys are scored only when no trained key is.
+        const std::vector<std::size_t> scored = scored_indices(r);
+        const auto is_trained                 = [&](std::size_t c) {
+          return std::binary_search(trained.begin(), trained.end(), key_hash(variant[c], {}));
+        };
+        if (std::any_of(scored.begin(), scored.end(), is_trained)) {
+          CHECK(std::all_of(scored.begin(), scored.end(), is_trained));
+          ++gated;
+        }
+      }
+    }
+  }
+  CHECK(merged > 0);
+  CHECK(kept > 0);
+  CHECK(gated > 0);
+
+  // Cells that whitelist only tiles whose 2- and 4-byte operands never fit in the LDS: with one
+  // of those keys gone they are degraded, and with no whitelisted kernel feasible they rank
+  // every feasible kernel through the cascade, as without the fallback.
+  const std::vector<tw::Config> pool    = drift_pool(rnd, 6);
+  const std::vector<std::uint64_t> keys = view_hashes(pool);
+  ModelSpec spec                        = v3_grid({});
+  spec.v3_cascade_keys                  = 4;
+  std::vector<std::uint64_t> large;
+  for (const tw::Config& c : pool)
+    if (c.mt.m == 256 && c.mt.k == 128) large.push_back(key_hash(c, {}));
+  std::sort(large.begin(), large.end());
+  large.erase(std::unique(large.begin(), large.end()), large.end());
+  REQUIRE(large.size() > 2);
+  for (CellSpec& cell : spec.cells) cell.view_key_hashes = large;
+  const ModelSpec flagged               = with_drift(spec, 1000000);
+  const std::vector<tw::Config> variant = without_keys(pool, {large[0]});
+  const tw::CandidateSet fs(load_spec(flagged), variant), ps(load_spec(spec), variant);
+  CHECK(fs.degraded_cells().size() == spec.cells.size());
+  for (int i = 0; i < 40; ++i) {
+    tw::Problem p = rnd.problem();
+    if (p.a_dtype == tw::DataType::Float8)
+      p.a_dtype = p.b_dtype = p.c_dtype = p.d_dtype = p.mi_dtype = tw::DataType::BFloat16;
+    for (const std::size_t min_scored : {std::size_t{0}, std::size_t{1}, std::size_t{8}, kAll}) {
+      bool whitelist = true;
+      const std::vector<tw::Result> want =
+          drift_reference(ps, large, variant, p, min_scored, &whitelist);
+      CHECK_FALSE(whitelist);
+      CHECK(same_results(fs.rank(p, hw, ctx, min_scored), want));
+      CHECK(same_results(want, ps.rank(p, hw, ctx, min_scored)));
+      not_whitelist += scored_indices(want).empty() ? 0 : 1;
+    }
+  }
+  CHECK(not_whitelist > 0);
+}
+
+TEST_CASE("drift rankings agree through every entry point and cache state", "[v3][drift]") {
+  Random rnd(79);
+  const tw::Hardware hw = test_hardware();
+  const tw::ExecutionContext ctx;
+  const std::vector<tw::Config> pool    = drift_pool(rnd, 16);
+  const std::vector<std::uint64_t> keys = view_hashes(pool);
+  const ModelSpec spec = with_drift(drift_spec(rnd, keys, keys[0], 32, kNonTemporal, 4), 1000000);
+  std::vector<std::uint64_t> gone;
+  for (const std::uint64_t h : keys)
+    if (rnd.below(20) == 0) gone.push_back(h);
+  const std::vector<tw::Config> variant = without_keys(pool, gone);
+  const tw::ModelPtr m                  = load_spec(spec);
+  const tw::CandidateSet lazy(m, variant), ready(m, variant);
+  ready.prepare();
+  REQUIRE_FALSE(lazy.degraded_cells().empty());
+  CHECK(ready.degraded_cells() == lazy.degraded_cells());
+  std::vector<std::vector<tw::Result>> first;
+  std::vector<tw::Problem> problems;
+  for (int i = 0; i < 40; ++i) problems.push_back(rnd.problem());
+  for (const tw::Problem& p : problems)
+    for (const std::size_t min_scored : {std::size_t{0}, std::size_t{1}, std::size_t{8}, kAll}) {
+      const std::vector<tw::Result> r = lazy.rank(p, hw, ctx, min_scored);
+      CHECK(same_results(ready.rank(p, hw, ctx, min_scored), r));
+      CHECK(same_results(tw::rank_configs(*m, p, hw, ctx, variant, min_scored), r));
+      CHECK(same_results(rank_by_config(*m, p, variant, min_scored), r));
+      CHECK(same_results(ready.rank_top(p, hw, ctx, min_scored), scored_prefix(r, min_scored)));
+      first.push_back(r);
+    }
+  const std::size_t saved = tw::cache_limit();
+  tw::set_cache_limit(0);
+  const tw::CandidateSet bounded(m, variant);
+  std::size_t at = 0;
+  for (const tw::Problem& p : problems)
+    for (const std::size_t min_scored : {std::size_t{0}, std::size_t{1}, std::size_t{8}, kAll}) {
+      CHECK(same_results(bounded.rank(p, hw, ctx, min_scored), first[at]));
+      CHECK(same_results(lazy.rank(p, hw, ctx, min_scored), first[at]));
+      ++at;
+    }
+  tw::set_cache_limit(saved);
+}
+
+namespace {
+
+// Rankings by v3 models without the drift fallback, whose cells whitelist view keys, with and
+// without the trained-key gate and the cascade, of a pool, of the pool without some
+// whitelisted keys and of the pool reversed, through rank, rank_top and rank_configs: the
+// FNV-1a 64 hash of every result's config index, scored flag and score bits.
+std::uint64_t rankings_without_drift() {
+  std::uint64_t h = 0xcbf29ce484222325ull;
+  const auto word = [&h](std::uint64_t v) {
+    for (int i = 0; i < 8; ++i) {
+      h ^= (v >> (8 * i)) & 0xFF;
+      h *= 0x100000001b3ull;
+    }
+  };
+  const auto every = [&word](const std::vector<tw::Result>& results) {
+    for (const tw::Result& r : results) {
+      std::uint64_t bits;
+      std::memcpy(&bits, &r.score, sizeof bits);
+      word(r.config_index);
+      word(r.scored ? 1 : 0);
+      word(bits);
+    }
+    word(~std::uint64_t{0});
+  };
+  std::vector<tw::Config> pool;
+  for (const std::size_t m : {16, 64, 256})
+    for (const std::size_t n : {32, 128})
+      for (const std::size_t k : {32, 64})
+        for (const int hint : {0, 4}) {
+          tw::Config c = make_config(m, n, k, 16, 16, 32, hint, 0);
+          c.index      = pool.size();
+          pool.push_back(c);
+        }
+  for (std::size_t i = 0; i < 24; i += 5) {
+    tw::Config c = pool[i];
+    c.occupancy  = 2;
+    c.index      = pool.size();
+    pool.push_back(c);
+  }
+  std::vector<std::uint64_t> hashes;
+  for (const tw::Config& c : pool) hashes.push_back(key_hash(c, {}));
+  std::sort(hashes.begin(), hashes.end());
+  hashes.erase(std::unique(hashes.begin(), hashes.end()), hashes.end());
+  const std::vector<std::uint64_t> trained(hashes.begin() + 2, hashes.end());
+  std::vector<ModelSpec> specs(3, v3_grid({}));
+  for (ModelSpec& spec : specs)
+    for (std::size_t c = 0; c < spec.cells.size(); ++c)
+      for (std::size_t i = 0; i < hashes.size(); ++i)
+        if ((i + c) % 3 == 0) spec.cells[c].view_key_hashes.push_back(hashes[i]);
+  specs[1].v3_serving_flags = 0x80;
+  specs[1].trained_keys     = trained;
+  specs[2].v3_serving_flags = 0x80 | 0x04;
+  specs[2].trained_keys     = trained;
+  specs[2].v3_cascade_keys  = 3;
+  std::vector<std::vector<tw::Config>> pools(3);
+  pools[0] = pool;
+  for (const tw::Config& c : pool)
+    if (std::find(hashes.begin(), hashes.end(), key_hash(c, {})) - hashes.begin() >= 6)
+      pools[1].push_back(c);
+  pools[2].assign(pool.rbegin(), pool.rend());
+  for (std::vector<tw::Config>& v : pools)
+    for (std::size_t i = 0; i < v.size(); ++i) v[i].index = i;
+  const tw::Hardware hw = test_hardware();
+  const tw::ExecutionContext ctx;
+  for (const ModelSpec& spec : specs) {
+    const tw::ModelPtr m = load_spec(spec);
+    for (const std::vector<tw::Config>& v : pools) {
+      const tw::CandidateSet set(m, v), ready(m, v);
+      ready.prepare();
+      for (const tw::DataType dt : {tw::DataType::BFloat16, tw::DataType::Float})
+        for (const std::size_t mn : {8, 100, 3000})
+          for (const std::size_t k : {64, 1024})
+            for (const std::size_t batch : {1, 4}) {
+              const tw::Problem p = make_problem(mn, 2 * mn + 7, k, batch, dt);
+              for (const std::size_t min_scored : {std::size_t{0}, std::size_t{1}, kAll}) {
+                every(set.rank(p, hw, ctx, min_scored));
+                every(tw::rank_configs(*m, p, hw, v, min_scored));
+              }
+              every(ready.rank_top(p, hw, ctx, 3));
+            }
+    }
+  }
+  return h;
+}
+
+}  // namespace
+
+TEST_CASE("a model without the drift fallback ranks as before the fallback existed",
+          "[v3][drift]") {
+  // The hash the engine before the drift fallback gives for the same rankings.
+  CHECK(rankings_without_drift() == 0xf9200ac571099be5ull);
 }

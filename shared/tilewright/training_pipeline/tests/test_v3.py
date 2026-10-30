@@ -1526,7 +1526,7 @@ def test_cu_floor_defects_are_rejected_by_reader_and_engine():
     with pytest.raises(mlrec.FormatError):
         mlrec.read_model(bytes(unflagged))
     unknown = bytearray(data)
-    struct.pack_into("<I", unknown, at, 0x500)
+    struct.pack_into("<I", unknown, at, 0x900)
     with pytest.raises(mlrec.FormatError, match="unknown serving flags"):
         mlrec.read_model(bytes(unknown))
     tw = pytest.importorskip("tilewright")

@@ -87,6 +87,11 @@ struct ModelInfo {
   // What the non-temporal rule reads of the pool still counts every kernel.
   bool trained_key_gate    = false;
   std::size_t trained_keys = 0;
+  // MLREC_v3 drift fallback: a candidate set that holds fewer than
+  // drift_keep_ppm millionths of a cell's whitelisted view keys the model
+  // lists as trained serves that cell degraded (CandidateSet::degraded_cells);
+  // 0 for a model without it.
+  std::uint32_t drift_keep_ppm = 0;
   // Base grid labels with no node in the split tree. An MLREC_v3 model scores
   // their problems through the nearest base label that has a trained cell.
   std::size_t uncovered_base_labels = 0;
@@ -263,12 +268,21 @@ class CandidateSet {
   std::size_t untrained_keys() const noexcept;
   std::size_t untrained_configs() const noexcept;
 
+  // The cells (indices as route() returns them, ascending) that the model's
+  // drift fallback (ModelInfo::drift_keep_ppm) serves degraded: this pool
+  // holds no config of too many of their trained whitelisted view keys. Fixed
+  // when the set is built; empty for a model without the fallback.
+  std::vector<std::size_t> degraded_cells() const;
+
   // Ranks for exclusive use of the device (a default ExecutionContext).
   // Returns one Result per config. Scored configs come first: survivors of the
   // cell's whitelist (every feasible config when the whitelist keeps none)
   // best-first, followed (only when min_scored exceeds their count) by the
-  // remaining feasible configs best-first; ties keep input order. Unscored
-  // configs, including those whose score is not finite, follow in input order.
+  // remaining feasible configs best-first; ties keep input order. In a cell
+  // the drift fallback serves degraded (degraded_cells()), the remaining
+  // feasible configs are scored whatever min_scored and both are ordered
+  // together, best-first. Unscored configs, including those whose score is
+  // not finite, follow in input order.
   // Invalid hardware (a zero field) or a problem with no trained cell returns
   // every config unscored.
   std::vector<Result> rank(const Problem& problem,

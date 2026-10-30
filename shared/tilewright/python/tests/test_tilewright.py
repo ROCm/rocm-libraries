@@ -1117,3 +1117,94 @@ def test_alignment_veto_reads_the_width_of_the_operand_it_applies_to():
         assert {r.config_index for r in got if r.scored} == {
             r.config_index for r in base if r.scored
         } - vetoed
+
+
+# The shipped model the drift-fallback tests leave without the fallback (the
+# TF32 TT one).
+NOT_FLAGGED = "gfx950_Cijk_Alik_Bjlk_S_MX_B_Bias_HAS_SAV_UserArgs.tilewright.bin"
+
+
+def _with_drift_fallback(data, keep_ppm):
+    """An MLREC_v3 image served with the drift fallback (serving flag bit 10 and
+    its u32 keep_ppm after the trained keys, the CU floor and the alignment
+    veto's fields)."""
+    at = 52
+    (n,) = struct.unpack_from("<H", data, at)
+    at += 2 + n + 8
+    (n,) = struct.unpack_from("<H", data, at)
+    at += 2 + n + 16
+    (n_mi,) = struct.unpack_from("<I", data, at)
+    at += 4 + 24 * n_mi
+    flags_at = at
+    (flags,) = struct.unpack_from("<I", data, at)
+    # The field follows the fields of every flag before it, and this walk
+    # knows those of the trained keys, the CU floor and the alignment veto only.
+    assert not flags & ~0x3FF, f"serving flags {flags:#x} beyond what it walks"
+    at += 4 + 4 + 16 + 2
+    (n_attr,) = struct.unpack_from("<H", data, at)
+    at += 2
+    for _ in range(n_attr):
+        (n,) = struct.unpack_from("<H", data, at)
+        at += 2 + n + 8
+        transform = data[at]
+        at += 1
+        if transform == 3:
+            (n,) = struct.unpack_from("<H", data, at)
+            at += 2 + 8 * n
+    if flags & 0x80:
+        (n,) = struct.unpack_from("<I", data, at)
+        at += 4 + 8 * n
+    if flags & 0x100:
+        at += 4
+    if flags & 0x200:
+        at += 8
+    out = bytearray(data[:at] + struct.pack("<I", keep_ppm) + data[at:])
+    struct.pack_into("<I", out, flags_at, flags | 0x400)
+    struct.pack_into("<I", out, 12, struct.unpack_from("<I", data, 12)[0] + 4)
+    return bytes(out)
+
+
+def test_drift_fallback(model):
+    assert tw.describe(model).drift_keep_ppm == 0
+    pool = [_config(m, n) for m in (64, 128, 256) for n in (64, 128, 256)]
+    assert tw.CandidateSet(model, pool).degraded_cells() == []
+    models, _ = _shipped_models()
+    pool = [
+        _config(m, n, k, index=i)
+        for i, (m, n, k) in enumerate(
+            (m, n, k)
+            for m in (32, 64, 128, 256)
+            for n in (32, 64, 128, 256)
+            for k in (32, 64)
+        )
+    ]
+    flagged = 0
+    for path in models:
+        if path.name == NOT_FLAGGED:
+            continue
+        data = path.read_bytes()
+        plain = tw.load_model_from_memory(data)
+        info = tw.describe(plain)
+        if info.format_version < 3 or not info.whitelist_tier or info.launch_keys:
+            continue
+        image = _with_drift_fallback(data, 1000000)
+        try:
+            m = tw.load_model_from_memory(image)
+        except ValueError:
+            continue  # a cell lists signatures, which the fallback does not count
+        flagged += 1
+        assert tw.describe(m).drift_keep_ppm == 1000000
+        name = info.provenance.launch_model
+        launch = _ShippedLaunch(name) if name else None
+        # A pool that grows never degrades more cells, and order never matters.
+        empty = tw.CandidateSet(m, [], launch=launch).degraded_cells()
+        some = tw.CandidateSet(m, pool[:8], launch=launch).degraded_cells()
+        every = tw.CandidateSet(m, pool, launch=launch).degraded_cells()
+        backwards = list(reversed(pool))
+        assert tw.CandidateSet(m, backwards, launch=launch).degraded_cells() == every
+        assert empty == sorted(set(empty)) and empty
+        assert set(every) <= set(some) <= set(empty)
+        assert all(0 <= c < info.n_cells for c in empty)
+        assert tw.CandidateSet(plain, pool, launch=launch).degraded_cells() == []
+    if models and not flagged:
+        pytest.skip("no shipped model takes the drift fallback")

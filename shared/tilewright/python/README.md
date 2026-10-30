@@ -79,6 +79,15 @@ tw.set_cache_limit(256 << 20)
 tw.describe(model).provenance.config_id  # what an MLREC_v3 file records, else ""
 ```
 
+An MLREC_v3 model may declare a drift fallback (see the engine README): a cell
+whose pool lacks too many of its trained whitelisted view keys is served
+degraded, which the candidate set decides once, when it is built:
+
+```python
+tw.describe(model).drift_keep_ppm  # its share in millionths, 0 without the fallback
+pool.degraded_cells()  # the degraded cells' indices, ascending
+```
+
 An MLREC_v3 model trained with a launch model records its id
 (`provenance.launch_model`); `CandidateSet` then raises `ValueError` unless
 `launch` has that `id` attribute:

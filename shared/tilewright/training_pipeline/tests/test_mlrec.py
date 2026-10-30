@@ -318,7 +318,7 @@ def test_alignment_veto_defects_and_unknown_bits_are_rejected():
         (data[: end - 8] + struct.pack("<II", 512, 1000) + data[end:], "power of two"),
         (data[: end - 8] + struct.pack("<II", 512, 4) + data[end:], "power of two"),
         (with_flags(flags | 0x04), "with the non-temporal rule"),
-        (with_flags(flags | 0x400), "unknown serving flags"),
+        (with_flags(flags | 0x800), "unknown serving flags"),
         (with_flags(flags | 0x80000000), "unknown serving flags"),
     ]
     for corrupt, why in bad:

@@ -169,6 +169,27 @@ feasible kernel, all feasible kernels form tier 1. When the caller asks for
 more results than tier 1 holds (`min_scored`), the other feasible kernels are
 scored as tier 2.
 
+An MLREC_v3 model may declare a drift fallback for pools that differ from the
+one it was trained on. Its file holds a share, `keep_ppm` in millionths: a
+cell is degraded on a pool when the pool holds a kernel of fewer than that
+share of the cell's whitelisted view keys the model lists as trained (with the
+trained-key gate; every whitelisted view key without it), counting each key
+once. Whether a cell is degraded is a property of the pool alone: a
+`CandidateSet` decides it for every cell when it is built
+(`CandidateSet::degraded_cells()`), `rank_configs` for the routed cell from
+its own list, and neither reads the problem, the context or the order of the
+pool, so a pool that only gains kernels or is reordered degrades no cell that
+the trained pool does not. Tier 1 of a degraded cell is its whitelist as
+before; tier 2 is then built whatever `min_scored`, and both tiers are ranked
+as one tier, best-first by score, equal scores in input order. When the
+whitelist leaves no feasible kernel, a degraded cell ranks as any other cell.
+A degraded cell's rankings therefore cost more than rankings from its
+whitelist alone: they compute the embedding term of its other feasible view
+keys and fully score the keys the cascade keeps (every one for a model
+without a cascade), and the re-rank memo never answers them. A model without
+the fallback, and a cell that is not degraded, rank exactly as they would
+without it.
+
 An MLREC_v3 model with the trained-key gate lists the view keys (see below)
 that had training data. A `CandidateSet` marks the pool's other kernels when
 it is built, and the tiers hold only listed kernels unless no listed kernel
@@ -346,7 +367,7 @@ width) must be 0. The header tail is:
 | arch | `u16` length + ASCII | |
 | parallel_mi_cu, mi_default_cycles | `f64` each | > 0 |
 | n_mi, MI table | as in v2 | |
-| serving_flags | `u32` | bit 0 small-batched rule, bit 1 Dot2 rule, bit 2 non-temporal rule (each applied when set), bit 3 no whitelist tier, bit 4 launch keys (the pool is grouped by launch key), bit 5 family-wise non-temporal rule (only with bit 2), bit 6 trained on the integration's bank as well as its table (ranking ignores it; an integration with a bank serves both), bit 7 trained-key gate, bit 8 CU floor, bit 9 alignment veto (never with bit 2); other bits 0 |
+| serving_flags | `u32` | bit 0 small-batched rule, bit 1 Dot2 rule, bit 2 non-temporal rule (each applied when set), bit 3 no whitelist tier, bit 4 launch keys (the pool is grouped by launch key), bit 5 family-wise non-temporal rule (only with bit 2), bit 6 trained on the integration's bank as well as its table (ranking ignores it; an integration with a bank serves both), bit 7 trained-key gate, bit 8 CU floor, bit 9 alignment veto (never with bit 2), bit 10 drift fallback (not with bit 3 or bit 4, and no cell may list signatures); other bits 0 |
 | cascade_keys | `u32` | the cascade width, 0 for none |
 | min_cu_fraction, max_cu_fraction | `f64` each | `0 < min <= max <= 1`: the `N_eff / N_CU` the model supports |
 | schedules | `u8` | bit 0 Default, bit 1 Dynamic, bit 2 Auto; not 0 |
@@ -355,6 +376,7 @@ width) must be 0. The header tail is:
 | trained keys | with bit 7 only | `u32` count (at least 1), then that many `u64` view-key hashes, strictly ascending: the view keys with training data |
 | CU floor | with bit 8 only | `u32`, at least 1: the fewest usable CUs (`N_eff`) the model supports on any device; a file without it has no floor |
 | alignment veto | with bit 9 only | `u32` K the veto applies above (at least 1), then `u32` the line in bits (a power of two, at least 8); see *Filtering* |
+| drift keep_ppm | with bit 10 only | `u32`, 1 to 1,000,000: the share, in millionths, of a cell's trained whitelisted view keys a pool must hold for the cell not to be degraded (see How a problem is ranked) |
 | provenance | optional | present when header bytes remain: `u16` entry count (1-5), then per entry a `u16`+key and a `u16`+value (printable ASCII without spaces), the keys `config_id`, `training_data_hash`, `source_revision`, `date` and `launch_model`, each at most once |
 
 A loader refuses a file with a serving flag it does not know (`unknown serving
@@ -367,7 +389,8 @@ an engine and ranks as a model without a floor. The same holds for the
 alignment veto: an engine that predates it refuses a file that declares it,
 and `with_alignment_veto(data, k_min, align_bits)` and
 `without_alignment_veto(data)` add it to a file or remove it without
-retraining.
+retraining. An engine that predates the drift fallback refuses a file with
+bit 10 the same way.
 
 `i_dim` is 8 plus the attribute features: one per identity, log2p1 and
 nonzero attribute (`x`, `log2(1 + max(x, 0))`, `x != 0`) and one per value of a
@@ -552,11 +575,13 @@ if (!tilewright::scoring_context(*model, context, hw)) { /* use another ranking 
   the spec hash, supported contexts (the CU floor as `min_effective_cus`, 0
   for none), serving flags (with the alignment veto as `alignment_veto`, whose
   `on` is false for a model without one, and with `bank`, which an
-  integration reads to decide whether it serves its bank, and the number of
-  view keys the trained-key gate lists), the number of base
+  integration reads to decide whether it serves its bank, the number of
+  view keys the trained-key gate lists, and the drift fallback's
+  `drift_keep_ppm`, 0 for none), the number of base
   labels without a trained cell and the provenance the file records;
   `CandidateSet::untrained_keys()` and `untrained_configs()` count the pool's
-  kernels the gate leaves out;
+  kernels the gate leaves out, and `CandidateSet::degraded_cells()` lists the
+  cells the drift fallback serves degraded on the pool, ascending;
   `compute_features(model, problem, config, hardware[, context[, plan]])`
   returns the raw (unwhitened, unclamped) feature vectors for the config
   launched as `plan` (default `LaunchPlan{}`).
@@ -614,6 +639,8 @@ arguments of the C++ API (`context=None` is exclusive use),
 `supports(model, context, hardware)` reports whether a model declares a
 context, `scoring_context(model, context, hardware)` the context it ranks one at
 (`None`: not ranked),
+`ModelInfo.drift_keep_ppm` and `CandidateSet.degraded_cells()` (a list of cell
+indices) report the drift fallback,
 `attribute_names(model)` lists the attributes it reads, and
 `set_cache_limit(bytes)`, `cache_limit()` and `cache_usage()` manage the cache
 limit.
@@ -631,7 +658,7 @@ of `0` or an empty value counts as unset.
 
 | Variable | Effect |
 |----------|--------|
-| `TILEWRIGHT_DIAG` | One stderr line per loaded model: `[TILEWRIGHT_DIAG FILE] path=... arch=... qhash=... qdim=55 idim=12 xdim=37 n_cells=N n_splits=N weights=int4` (the model's dims), and `[TILEWRIGHT_DIAG FAIL] <reason>` for a load that fails, a malformed `tilewright_index` row of the stem included |
+| `TILEWRIGHT_DIAG` | One stderr line per loaded model: `[TILEWRIGHT_DIAG FILE] path=... arch=... qhash=... qdim=55 idim=12 xdim=37 n_cells=N n_splits=N weights=int4` (the model's dims), `[TILEWRIGHT_DIAG FAIL] <reason>` for a load that fails, a malformed `tilewright_index` row of the stem included, and one line per `CandidateSet` whose model's drift fallback degrades a cell: `[TILEWRIGHT_DIAG DRIFT] cells=<degraded>/<cells with a whitelist> keep_ppm=<value> missing=<trained whitelisted keys the pool lacks, summed over the degraded cells>` |
 | `TILEWRIGHT_PICK_LOG` | One stderr line per ranking that scores a kernel: `[TILEWRIGHT_PICK] m=.. n=.. k=.. b=.. tA=.. tB=.. leaf=<label> top1_sig=(mt_m=..,mt_n=..,mt_k=..,mi_m=..,mi_n=..,mi_k=..,cha=..,chb=..) top1_score=.. top1_index=.. n_configs=..`; `top1_index` is the pool position of the top-ranked kernel |
 | `TILEWRIGHT_FORCE_CELL` | Score every problem with this cell index, for debugging; ignored when it is not a valid index of the model |
 | `TILEWRIGHT_CACHE_MB` | Initial cache limit in MiB (a whole number; anything else leaves the default of 1 GiB); `set_cache_limit` changes it later |
@@ -786,14 +813,16 @@ rankings the memo answered. The entry `tilewright-levers-parity`
 (`tests/levers_parity.cmake`) builds both against the engine with neither
 option, with each alone, and with both, with and without the check, and runs
 them on every shipped model with the sample kernel pool and the benches'
-default shapes: every build must print the hashes of the build with neither,
-and the memo must answer some re-rank in every build that has it. It does
-the same with copies of the shipped models the alignment veto can serve,
-given the veto whether or not they ship with one (`tests/veto_models.cpp`),
-on problems of the two layouts it applies to, with each sample kernel's
-non-temporal siblings in the pool, and requires the veto to change some of
-their hashes against the copies without it. Without a materialized shipped
-model it is skipped.
+default shapes, and on a copy of each model that takes the drift fallback
+served with it (`tests/drift_flag.cpp`), whose cells that pool mostly
+degrades: every build must print the hashes of the build with neither, and
+the memo must answer some re-rank in every build that has it. It does
+the same with copies of the models it ranks that the alignment veto can
+serve (the drift fallback's copies among them), given the veto whether or
+not they ship with one (`tests/veto_models.cpp`), on problems of the two
+layouts it applies to, with each sample kernel's non-temporal siblings in
+the pool, and requires the veto to change some of their hashes against the
+copies without it. Without a materialized shipped model it is skipped.
 
 As a subproject, `add_subdirectory(shared/tilewright)` provides the static
 library `roc::tilewright`. An installed tilewright is found with

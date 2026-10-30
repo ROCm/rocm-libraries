@@ -243,3 +243,79 @@ TEST_CASE("rankings racing CandidateSet::prepare() agree with a serial run",
     CHECK(failures.load() == 0);
   }
 }
+
+TEST_CASE("degraded and other cells ranked from many threads agree with a serial run",
+          "[concurrency][drift]") {
+  // A v3 grid whose cells list keys of the pool by view-key hash, served with the drift
+  // fallback at keep_ppm 1000000: the pool lacks some listed keys, so some cells are degraded.
+  std::vector<tw::Config> pool;
+  for (std::size_t mt : {16, 32, 64, 128, 256})
+    for (std::size_t nt : {16, 32, 64, 128, 256})
+      for (std::size_t kt : {32, 64}) pool.push_back(make_config(mt, nt, kt));
+  for (std::size_t i = 0; i < pool.size(); ++i) pool[i].index = i;
+  // FNV-1a 64 over each signature field as 8 little-endian bytes: the view-key hash.
+  std::vector<std::uint64_t> hashes;
+  for (const tw::Config& c : pool) {
+    std::uint64_t h         = 0xCBF29CE484222325ull;
+    const std::int64_t v[8] = {static_cast<std::int64_t>(c.mt.m),
+                               static_cast<std::int64_t>(c.mt.n),
+                               static_cast<std::int64_t>(c.mt.k),
+                               static_cast<std::int64_t>(c.mi.m),
+                               static_cast<std::int64_t>(c.mi.n),
+                               static_cast<std::int64_t>(c.mi.k),
+                               c.cache_hints_a,
+                               c.cache_hints_b};
+    for (std::int64_t x : v)
+      for (int b = 0; b < 8; ++b)
+        h = (h ^ static_cast<unsigned char>(static_cast<std::uint64_t>(x) >> (8 * b))) *
+            0x100000001B3ull;
+    hashes.push_back(h);
+  }
+  ModelSpec spec        = as_v3(grid_model());
+  spec.v3_serving_flags = 0x400;
+  spec.drift_keep_ppm   = 1000000;
+  spec.v3_cascade_keys  = 4;
+  // Odd cells list kernels the variant pool below lacks; even cells do not.
+  for (std::size_t c = 0; c < spec.cells.size(); ++c) {
+    std::vector<std::uint64_t> listed;
+    for (std::size_t i = 0; i < hashes.size(); ++i)
+      if ((i + c) % 3 == 0 && (c % 2 != 0 || i % 7 != 0)) listed.push_back(hashes[i]);
+    std::sort(listed.begin(), listed.end());
+    spec.cells[c].view_key_hashes = listed;
+  }
+  const tw::ModelPtr model = load_spec(spec);
+  std::vector<tw::Config> variant;
+  for (std::size_t i = 0; i < pool.size(); ++i)
+    if (i % 7 != 0) variant.push_back(pool[i]);
+  for (std::size_t i = 0; i < variant.size(); ++i) variant[i].index = i;
+
+  std::mt19937_64 rng(13);
+  std::vector<tw::Problem> problems;
+  std::vector<std::size_t> depth;
+  for (int i = 0; i < 64; ++i) {
+    problems.push_back(
+        make_problem(1 + rng() % 5000, 1 + rng() % 5000, 1 + rng() % 5000, rng() % 3 == 0 ? 4 : 1));
+    depth.push_back(rng() % 3 == 0 ? 0 : rng() % 2 ? 1 : 40);
+  }
+  std::vector<std::vector<tw::Result>> expect;
+  for (std::size_t i = 0; i < problems.size(); ++i)
+    expect.push_back(tw::rank_configs(*model, problems[i], test_hardware(), variant, depth[i]));
+
+  const tw::CandidateSet set(model, variant);
+  REQUIRE_FALSE(set.degraded_cells().empty());
+  REQUIRE(set.degraded_cells().size() < spec.cells.size());
+  std::atomic<int> mismatches{0};
+  std::vector<std::thread> threads;
+  for (int t = 0; t < 8; ++t)
+    threads.emplace_back([&, t] {
+      for (int round = 0; round < 6; ++round)
+        for (std::size_t i = 0; i < problems.size(); ++i) {
+          const std::size_t j = (i + static_cast<std::size_t>(t) * 7) % problems.size();
+          if (!same_results(set.rank(problems[j], test_hardware(), depth[j]), expect[j]))
+            ++mismatches;
+          if (t % 2 == 0 && round == 2 && i == 5) set.prepare();
+        }
+    });
+  for (std::thread& th : threads) th.join();
+  CHECK(mismatches.load() == 0);
+}

@@ -413,6 +413,49 @@ bool has_whitelist(const Model& model, const Cell& cell) {
   return model.whitelist_tier && (!cell.signatures.empty() || !cell.view_key_hashes.empty());
 }
 
+// The view-key hashes of the keys of `keys`, ascending.
+std::vector<std::uint64_t> pool_view_hashes(const Model& model,
+                                            const std::vector<Config>& configs,
+                                            const PoolKeys& keys) {
+  std::vector<std::uint64_t> hashes;
+  hashes.reserve(keys.first.size());
+  std::uint64_t value[kMaxViewKeySize];
+  for (std::size_t key = 0; key < keys.first.size(); ++key) {
+    model.catalog->view_key(model, configs[keys.first[key]], keys.attributes(key), value);
+    hashes.push_back(view_key_hash(value, model.view_key_size));
+  }
+  std::sort(hashes.begin(), hashes.end());
+  return hashes;
+}
+
+// The drift fallback's trigger: whether a pool whose keys have the view-key
+// hashes `pool` (ascending) serves `cell` degraded. Of the cell's whitelisted
+// view keys that the model lists as trained (every one without the gate), the
+// pool must hold a config of at least drift_keep_ppm millionths. Adds the
+// trained whitelisted keys the pool lacks to *missing when non-null. Reads
+// nothing of a problem, a context or the order of the pool.
+bool drift_degraded(const Model& model,
+                    const Cell& cell,
+                    const std::vector<std::uint64_t>& pool,
+                    std::uint64_t* missing = nullptr) {
+  if (model.drift_keep_ppm == 0) return false;
+  std::uint64_t total = 0, present = 0;
+  const std::vector<std::uint64_t>& listed = cell.view_key_hashes;  // ascending
+  for (std::size_t i = 0; i < listed.size(); ++i) {
+    const std::uint64_t h = listed[i];
+    if (i > 0 && h == listed[i - 1]) continue;
+    if (model.trained_key_gate &&
+        !std::binary_search(model.trained_keys.begin(), model.trained_keys.end(), h))
+      continue;
+    ++total;
+    if (std::binary_search(pool.begin(), pool.end(), h)) ++present;
+  }
+  const bool degraded = total > 0 && present * std::uint64_t{kMaxDriftKeepPpm} <
+                                         std::uint64_t{model.drift_keep_ppm} * total;
+  if (degraded && missing != nullptr) *missing += total - present;
+  return degraded;
+}
+
 }  // namespace
 
 // What a ranking writes to `results`: its first `limit` scored configs and,
@@ -656,6 +699,10 @@ class CellCacheSource {
   virtual const float* inter_kernel(const Problem& p, const HwView& hw) const = 0;
   // The source's HotArena, once published (release) by CandidateSet::prepare().
   mutable std::atomic<const HotArena*> hot_arena{nullptr};
+  // Per model cell, whether the model's drift fallback serves it degraded on
+  // the source's pool (drift_degraded); empty for a model without it. Set
+  // once, before the source ranks.
+  std::vector<unsigned char> drift;
 #if TW_LEVER_MEMO
   // Distinct for every source of the process, so that a ranking remembered
   // for one never answers for another built at the same address.
@@ -988,6 +1035,7 @@ void rank_in_cell(const Model& model,
                   const std::vector<double>* prior,
                   const CellCacheSource* source,
                   const LaunchModel* launch,
+                  bool degraded,
                   const Output& out) {
   // The pool's arrays and, below, the cell's whitelist and tensors as copied
   // into the source's HotArena once its prepare() has made one, else in place.
@@ -1243,7 +1291,10 @@ void rank_in_cell(const Model& model,
 
   ScratchVector<std::size_t>& tier2 = s.tier2;
   tier2.clear();
-  if (tier1_is_whitelist && min_scored > tier1_configs)
+  // A cell the drift fallback serves degraded always builds tier 2 behind a
+  // whitelist tier 1, and ranks both as one tier (`merged`).
+  const bool merged = degraded && tier1_is_whitelist;
+  if (tier1_is_whitelist && (merged || min_scored > tier1_configs))
     each_feasible([&](std::size_t key) {
       if (s.in_tier1[key] != epoch) tier2.push_back(key);
     });
@@ -1517,10 +1568,11 @@ void rank_in_cell(const Model& model,
   x_batch.resize(cat.inter_dim * kBatch);
   h_batch.resize(cell.inter_hidden * kBatch);
   if (!cat.reads_launch) launch = nullptr;
-  // At most one tier went through the cascade. A non-finite embedding term
-  // makes the total non-finite either way, so the cascade's -inf stands for
-  // it.
-  const auto rank_tier = [&](const ScratchVector<std::size_t>& tier, bool reuse) {
+  // At most one tier went through the cascade; the keys of `tier` from
+  // position `reuse_from` on are that tier's, whose embedding terms the
+  // cascade computed. A non-finite embedding term makes the total non-finite
+  // either way, so the cascade's -inf stands for it.
+  const auto rank_tier = [&](const ScratchVector<std::size_t>& tier, std::size_t reuse_from) {
     ranked.clear();
     // The keys' scattered data is requested at once rather than as each key
     // is scored, and their plans asked for before any is scored.
@@ -1543,7 +1595,7 @@ void rank_in_cell(const Model& model,
         const std::size_t key = tier[b0 + c];
         const Config& cfg     = configs[pool.first[key]];
         const std::int64_t* a = pool.attributes(key);
-        if (reuse) {
+        if (b0 + c >= reuse_from) {
           emb_score[c] = emb[keys.view(key)];
         } else {
           const float* ie = nullptr;
@@ -1659,9 +1711,14 @@ void rank_in_cell(const Model& model,
     }
     TILEWRIGHT_STAGE_LAP(Results);
   };
-  rank_tier(tier1, scored && !tier1_is_whitelist);
+  const std::size_t whitelist_keys = tier1.size();
+  if (merged) tier1.insert(tier1.end(), tier2.begin(), tier2.end());
+  rank_tier(tier1,
+            scored && !tier1_is_whitelist ? 0
+            : scored && merged            ? whitelist_keys
+                                          : tier1.size());
 #if TW_LEVER_MEMO
-  if (source != nullptr && prior == nullptr && tier1_is_whitelist && tier2.empty()) {
+  if (source != nullptr && prior == nullptr && tier1_is_whitelist && tier2.empty() && !degraded) {
     Scratch::Memo& m = s.memo;
     m.valid          = true;
     m.source         = source;
@@ -1678,7 +1735,8 @@ void rank_in_cell(const Model& model,
     m.context        = context;
   }
 #endif
-  if (!tier2.empty() && order.size() < out.limit) rank_tier(tier2, scored && tier1_is_whitelist);
+  if (!merged && !tier2.empty() && order.size() < out.limit)
+    rank_tier(tier2, scored && tier1_is_whitelist ? 0 : tier2.size());
   if (order.size() > out.limit) order.resize(out.limit);
 
   if (env_knobs().pick_log && !order.empty())
@@ -1732,6 +1790,13 @@ void rank_pool(const Model& model,
   if (cell < 0) return write_unscored(n, out);
   const std::vector<double>* order_prior = tie_break == TieBreak::Prior ? prior : nullptr;
   const std::size_t ci                   = static_cast<std::size_t>(cell);
+  // A candidate set fixed its cells' bits when it was built; any other pool
+  // gets the routed cell's from the same trigger.
+  const auto degraded = [&](const PoolKeys& k) {
+    if (model.drift_keep_ppm == 0) return false;
+    if (source != nullptr) return !source->drift.empty() && source->drift[ci] != 0;
+    return drift_degraded(model, model.cells[ci], pool_view_hashes(model, configs, k));
+  };
   if (keys != nullptr)
     return rank_in_cell(model,
                         ci,
@@ -1744,6 +1809,7 @@ void rank_pool(const Model& model,
                         order_prior,
                         source,
                         launch,
+                        degraded(*keys),
                         out);
   const PoolKeys built = pool_keys(model, configs, launch);
   rank_in_cell(model,
@@ -1757,6 +1823,7 @@ void rank_pool(const Model& model,
                order_prior,
                source,
                launch,
+               degraded(built),
                out);
 }
 
@@ -2517,6 +2584,31 @@ CandidateSet::CandidateSet(ModelPtr model, std::vector<Config> configs, PoolOpti
   }
   std::sort(impl_->signature_keys.begin(), impl_->signature_keys.end());
   std::sort(impl_->view_key_keys.begin(), impl_->view_key_keys.end());
+  if (model->drift_keep_ppm != 0) {
+    std::vector<std::uint64_t> hashes;
+    hashes.reserve(impl_->view_key_keys.size());
+    for (const auto& vk : impl_->view_key_keys) hashes.push_back(vk.first);
+    std::size_t listed = 0, degraded = 0;
+    std::uint64_t missing = 0;
+    impl_->drift.assign(model->cells.size(), 0);
+    for (std::size_t c = 0; c < model->cells.size(); ++c) {
+      const detail::Cell& cell = model->cells[c];
+      if (!detail::has_whitelist(*model, cell)) continue;
+      ++listed;
+      if (!detail::drift_degraded(*model, cell, hashes, &missing)) continue;
+      impl_->drift[c] = 1;
+      ++degraded;
+    }
+    if (degraded > 0 && detail::env_knobs().diag) {
+      std::fprintf(stderr,
+                   "[TILEWRIGHT_DIAG DRIFT] cells=%zu/%zu keep_ppm=%u missing=%llu\n",
+                   degraded,
+                   listed,
+                   static_cast<unsigned>(model->drift_keep_ppm),
+                   static_cast<unsigned long long>(missing));
+      std::fflush(stderr);
+    }
+  }
   impl_->slots  = std::make_unique<Impl::Slot[]>(model->cells.size());
   impl_->bounds = detail::cell_bounds(*model);
   impl_->model  = std::move(model);
@@ -2536,6 +2628,13 @@ std::size_t CandidateSet::untrained_configs() const noexcept {
   for (std::size_t key = 0; key < keys.trained.size(); ++key)
     if (keys.trained[key] == 0) n += keys.member_begin[key + 1] - keys.member_begin[key];
   return n;
+}
+
+std::vector<std::size_t> CandidateSet::degraded_cells() const {
+  std::vector<std::size_t> cells;
+  for (std::size_t c = 0; c < impl_->drift.size(); ++c)
+    if (impl_->drift[c] != 0) cells.push_back(c);
+  return cells;
 }
 
 std::vector<Result> CandidateSet::rank(const Problem& problem,
@@ -2716,6 +2815,7 @@ ModelInfo describe(const Model& model) {
   info.bank                     = model.bank;
   info.trained_key_gate         = model.trained_key_gate;
   info.trained_keys             = model.trained_keys.size();
+  info.drift_keep_ppm           = model.drift_keep_ppm;
   for (std::size_t b = 0; b < detail::kBaseCells; ++b)
     if (model.base_nodes[b] < 0) ++info.uncovered_base_labels;
   info.provenance   = model.provenance;

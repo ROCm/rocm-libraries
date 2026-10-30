@@ -101,6 +101,9 @@ struct ModelSpec {
   // serving flags ask for it (0x200).
   std::uint32_t veto_k_min      = 0;
   std::uint32_t veto_align_bits = 0;
+  // The drift fallback's keep_ppm, written as given when the serving flags ask
+  // for the fallback (0x400).
+  std::uint32_t drift_keep_ppm = 0;
   // Written instead of the spec's hash when nonzero.
   std::uint64_t spec_hash_override = 0;
   // MLREC_v3 provenance entries (key, value), written when not empty, then
@@ -145,6 +148,15 @@ Image write_model(const ModelSpec& spec);
 
 // Recomputes the payload CRC after the payload bytes were patched.
 void refresh_crc(Image& image);
+
+// An MLREC_v3 model file `bytes` served with the drift fallback at
+// `keep_ppm` (serving flag 0x400 and its field, after the trained keys, the CU
+// floor and the alignment veto's fields): the header grows by the field, the
+// payload is unchanged. Throws std::invalid_argument for a file that has the
+// flag, or a serving flag above 0x200, whose header fields it cannot place the
+// field after.
+std::vector<unsigned char> with_drift_fallback(const std::vector<unsigned char>& bytes,
+                                               std::uint32_t keep_ppm);
 
 void put_u16(Image& image, std::size_t offset, std::uint16_t v);
 void put_u32(Image& image, std::size_t offset, std::uint32_t v);

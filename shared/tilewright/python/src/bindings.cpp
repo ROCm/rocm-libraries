@@ -584,6 +584,11 @@ NB_MODULE(_tilewright, m) {
       .def_ro("trained_keys",
               &tw::ModelInfo::trained_keys,
               "The number of view keys the trained-key gate lists.")
+      .def_ro("drift_keep_ppm",
+              &tw::ModelInfo::drift_keep_ppm,
+              "The drift fallback's share of a cell's trained whitelisted view keys, in "
+              "millionths, that a pool must hold for the cell to be served from its whitelist "
+              "alone (0: no drift fallback).")
       .def_ro("uncovered_base_labels", &tw::ModelInfo::uncovered_base_labels)
       .def_ro("packed_bytes", &tw::ModelInfo::packed_bytes, "Bytes of the packed weights.")
       .def_ro("expanded_bytes",
@@ -667,7 +672,8 @@ NB_MODULE(_tilewright, m) {
           "prior"_a      = nb::none(),
           "One Result per config: whitelist survivors best-first, then (when min_scored "
           "exceeds their count) the remaining feasible configs best-first, then unscored "
-          "configs in input order. context None means exclusive use of the device; a context "
+          "configs in input order; in a cell degraded_cells() lists, both are ranked "
+          "together, best-first. context None means exclusive use of the device; a context "
           "is ranked at scoring_context(), and every config is unscored for a schedule the "
           "model does not list. With "
           "TieBreak.Prior, prior (one float per config) orders equal scores; ValueError "
@@ -718,6 +724,10 @@ NB_MODULE(_tilewright, m) {
                    "one is feasible (0 without a gate).")
       .def_prop_ro(
           "untrained_configs", &tw::CandidateSet::untrained_configs, "The configs of those groups.")
+      .def("degraded_cells",
+           &tw::CandidateSet::degraded_cells,
+           "The cells (indices as route returns them, ascending) the model's drift fallback "
+           "serves degraded on this pool; empty without the fallback.")
       .def("__len__", [](const tw::CandidateSet& s) { return s.configs().size(); });
 
   m.def(
