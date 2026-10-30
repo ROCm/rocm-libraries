@@ -403,8 +403,8 @@ launch_surface:
       isSupportedGfx942AttentionDenseTile() admits, the candidate is ragged,
       Sq % block_m or Skv % block_n is non-zero, or the window leaves the last
       query block no key tile (gfx942AttentionDenseWindowReachesKeys()). Head
-      counts, batch and sequence lengths are runtime kernel arguments and are never
-      compared (matchesHeadCounts is false for gfx942). graph_match maps a causal
+      counts, batch and sequence lengths are runtime kernel arguments and are
+      never compared. graph_match maps a causal
       band of left_bound L to sliding_window L, declines every non-causal band, and
       declines a window that leaves query rows no key (seqlen_q - seqlen_kv >= W),
       with or without stats. It binds the stats output when stats_tensor_uid is
