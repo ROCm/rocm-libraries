@@ -141,6 +141,19 @@ namespace
         return OnlineTuner::getInstance();
     }
 
+    // What the tuner has told this file's livePairCapReached callback, in
+    // order: the device, and the cap it was at.
+    std::vector<std::pair<int, int>>& capReports()
+    {
+        static std::vector<std::pair<int, int>> reports;
+        return reports;
+    }
+
+    void recordCapReached(int device, int cap)
+    {
+        capReports().emplace_back(device, cap);
+    }
+
     /**
      * Stands in for std::hash<ContractionProblemGemm>, the problem identity the
      * library hands the tuner alongside the resolution key.
@@ -1796,6 +1809,59 @@ namespace
         tuner().reloadForTest();
     }
 
+    // A launch that goes untimed because its device is at the cap with every
+    // pair in flight is reported, once per device: otherwise the only trace of
+    // it is declined= on a winner line, which reads like a shape that was
+    // measured. Reaching the cap and reclaiming is not reported, and a device
+    // that has reported once stays quiet when it happens again.
+    TEST(OnlineTuner, ALaunchUntimedAtTheCapIsReportedOncePerDevice)
+    {
+        if(deviceCount() < 1)
+            GTEST_SKIP() << "no HIP device";
+        if(!HeldStream::supported(0))
+            GTEST_SKIP() << "the device cannot hold a stream on a host value";
+
+        const Device device(0);
+        const int    id = device.id();
+
+        tuner().reloadForTest();
+        capReports().clear();
+
+        const int              cap = tuner().livePairCap();
+        const std::vector<int> ranked{241, 242, 243};
+
+        // At the cap with finished launches: reclaimed, nothing to report.
+        size_t key = 0x77000;
+        for(int shape = 0; shape <= cap; ++shape, ++key)
+            ASSERT_TRUE(dispatchOnce(key, identityOf(key), ranked, device)) << shape;
+        EXPECT_TRUE(capReports().empty()) << "reaching the cap and reclaiming was reported";
+
+        // Every pair in flight, twice over: one report, for this device.
+        for(int hold = 0; hold < 2; ++hold)
+        {
+            HeldStream held(id);
+
+            int untimed = 0;
+            for(int shape = 0; shape < cap + 3; ++shape, ++key)
+            {
+                ASSERT_EQ(tuner().selectCandidate(key, identityOf(key), ranked), 0);
+
+                hipEvent_t start = nullptr;
+                hipEvent_t stop  = nullptr;
+                if(tuner().beginMeasurement(key, ranked[0], start, stop))
+                    held.bracket(start, stop);
+                else
+                    ++untimed;
+            }
+            EXPECT_GE(untimed, 3) << "the device never ran out of pairs";
+
+            ASSERT_EQ(capReports().size(), 1u) << "hold " << hold;
+            EXPECT_EQ(capReports()[0], std::make_pair(id, cap));
+        }
+
+        tuner().reloadForTest();
+    }
+
     // The event pool is on a process-wide singleton and the device is per
     // caller. Keyed on nothing, one vector hands device 1 the pairs device 0
     // recycled -- and hipEventRecord rejects a pair belonging to another
@@ -1861,5 +1927,7 @@ rocblaslt::OnlineTunerConfig rocblaslt::onlineTunerConfig()
     config.topK        = kTopK;
     config.repeats     = kRepeats;
     config.livePairCap = kLivePairCap;
+
+    config.livePairCapReached = recordCapReached;
     return config;
 }

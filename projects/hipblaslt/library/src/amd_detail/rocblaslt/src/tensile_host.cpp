@@ -5604,6 +5604,8 @@ namespace rocblaslt
         // variable of its own.
         config.verbose = (get_logger_layer_mode() & rocblaslt_layer_mode_log_info) != 0;
 
+        config.livePairCapReached = TensileLite::noteOnlineEventPairCap;
+
         return config;
     }
 } // namespace rocblaslt

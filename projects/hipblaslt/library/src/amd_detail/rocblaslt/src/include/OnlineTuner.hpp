@@ -10,6 +10,7 @@
 #include <memory>
 #include <shared_mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 // The tuning file's problem key, so a pinned winner can carry the key a cache
@@ -84,6 +85,17 @@ namespace rocblaslt
         int livePairCap = c_defaultLivePairCap;
 
         bool verbose = false;
+
+        /**
+         * Told the first time, per device, that a launch there went untimed
+         * because the device was at livePairCap() with every pair it holds
+         * still in flight. Optional.
+         *
+         * A callback rather than a log call because the tuner links no logger;
+         * inside hipBLASLt it is TensileLite::noteOnlineEventPairCap(), which
+         * logs one info-level line. Called with no lock held.
+         */
+        void (*livePairCapReached)(int device, int cap) = nullptr;
     };
 
     /**
@@ -793,7 +805,17 @@ namespace rocblaslt
         void  resolve(size_t problemKey, ProblemState& state);
         void  releaseExploration(ProblemState& state);
         void  publishResolution(size_t problemKey, const ProblemState& state);
-        bool  acquireEvents(hipEvent_t& start, hipEvent_t& stop, int& device, size_t requester);
+        // What acquireEvents() came back with. AtCap is the device holding
+        // livePairCap() pairs with every one still in flight; Failed is HIP
+        // refusing to create an event or report the device.
+        enum class Acquired
+        {
+            Pair,
+            AtCap,
+            Failed,
+        };
+
+        Acquired acquireEvents(hipEvent_t& start, hipEvent_t& stop, int& device, size_t requester);
         void  recycleEvents(hipEvent_t start, hipEvent_t stop, int device);
         void  retireEvents(hipEvent_t start, hipEvent_t stop, int device);
 
@@ -828,6 +850,12 @@ namespace rocblaslt
         // Pairs created on each device and not yet retired, whether pooled or
         // outstanding; what livePairCap() bounds. Same lock as m_pairs.
         std::unordered_map<int, int> m_livePairs;
+
+        // Devices that have already reported a launch going untimed at the
+        // cap, so each reports it once; see OnlineTunerConfig::livePairCapReached.
+        // Same lock as m_pairs.
+        std::unordered_set<int> m_capReported;
+        void (*m_livePairCapReached)(int device, int cap) = nullptr;
 
         // The resolved table, sized by c_resolutionSlots above.
 

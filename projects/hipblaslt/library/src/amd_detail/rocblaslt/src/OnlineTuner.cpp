@@ -96,6 +96,8 @@ namespace rocblaslt
         m_livePairCap = std::max(config.livePairCap, 1);
         m_verbose     = config.verbose;
 
+        m_livePairCapReached = config.livePairCapReached;
+
         // One candidate is nothing to choose between, so a depth below two is
         // the feature switched off however the mode is set.
         m_enabled = config.enabled && m_topK >= 2;
@@ -122,6 +124,7 @@ namespace rocblaslt
                 retireEvents(pending.m_start, pending.m_stop, pending.m_device);
 
         m_problems.clear();
+        m_capReported.clear();
         m_resolutionPool.clear();
         m_winnerPool.clear();
         m_misses.store(0, std::memory_order_relaxed);
@@ -597,10 +600,24 @@ namespace rocblaslt
         // when HIP will not create an event. Either way the launch goes ahead
         // untimed, and the offer is left for the next launch this thread's
         // visit makes.
-        int device = 0;
-        if(!acquireEvents(start, stop, device, problemKey))
+        int            device   = 0;
+        const Acquired acquired = acquireEvents(start, stop, device, problemKey);
+        if(acquired != Acquired::Pair)
         {
             ++state.m_declined;
+
+            // Said once per device, after the lock is let go. Otherwise the
+            // only sign of a launch going untimed at the cap is declined= on
+            // the winner trace line, which reads exactly like a shape that was
+            // measured.
+            const bool firstAtCap
+                = acquired == Acquired::AtCap && m_capReported.insert(device).second;
+            const int cap = livePairCap();
+            lock.unlock();
+
+            if(firstAtCap && m_livePairCapReached)
+                m_livePairCapReached(device, cap);
+
             return false;
         }
 
@@ -935,13 +952,13 @@ namespace rocblaslt
     // livePairCap() live ones. Past that, a measurement can still start on a
     // pair some harvest handed back, or one reclaimFinishedPairs() reads back
     // from another problem's finished launch, and otherwise it does not start.
-    bool OnlineTuner::acquireEvents(hipEvent_t& start,
-                                    hipEvent_t& stop,
-                                    int&        device,
-                                    size_t      requester)
+    OnlineTuner::Acquired OnlineTuner::acquireEvents(hipEvent_t& start,
+                                                     hipEvent_t& stop,
+                                                     int&        device,
+                                                     size_t      requester)
     {
         if(hipGetDevice(&device) != hipSuccess)
-            return false;
+            return Acquired::Failed;
 
         std::vector<EventPair>& pool = m_pairs[device];
         int&                    live = m_livePairs[device];
@@ -957,15 +974,15 @@ namespace rocblaslt
             start = pair.m_start;
             stop  = pair.m_stop;
 
-            return true;
+            return Acquired::Pair;
         }
 
         if(live >= livePairCap())
-            return false;
+            return Acquired::AtCap;
 
         EventPair pair;
         if(hipEventCreateWithFlags(&pair.m_start, hipEventDefault) != hipSuccess)
-            return false;
+            return Acquired::Failed;
 
         if(hipEventCreateWithFlags(&pair.m_stop, hipEventDefault) != hipSuccess)
         {
@@ -973,7 +990,7 @@ namespace rocblaslt
             // unrelated measurement, whose timestamps say nothing about either.
             // Never counted as live, so destroyed rather than retired.
             static_cast<void>(hipEventDestroy(pair.m_start));
-            return false;
+            return Acquired::Failed;
         }
 
         ++live;
@@ -981,7 +998,7 @@ namespace rocblaslt
         start = pair.m_start;
         stop  = pair.m_stop;
 
-        return true;
+        return Acquired::Pair;
     }
 
     int OnlineTuner::livePairs(int device)

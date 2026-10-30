@@ -458,6 +458,20 @@ namespace TensileLite
         log_info(__func__, msg.str());
     }
 
+    void noteOnlineEventPairCap(int device, int cap)
+    {
+        if(!DiagnosticsState::instance().infoOn())
+            return;
+
+        std::ostringstream msg;
+        msg << "tuning-cache: online-event-pair-cap device=" << device << " cap=" << cap
+            << "; every event pair online tuning keeps on this device is timing a launch not "
+               "read back yet, so a launch ran untimed. Exploration resumes as those launches "
+               "finish; raise HIPBLASLT_TUNING_MAX_EVENT_PAIRS if the host runs this far ahead "
+               "of the device. Logged once per device";
+        log_info(__func__, msg.str());
+    }
+
     void resetTuningDiagnosticsForTest()
     {
         DiagnosticsState& state = DiagnosticsState::instance();

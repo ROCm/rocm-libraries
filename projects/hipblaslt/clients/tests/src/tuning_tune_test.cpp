@@ -22,6 +22,7 @@
 #include <hipblaslt/hipblaslt.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -3048,9 +3049,12 @@ namespace
 
         /**
          * One matmul, reporting the solution the library launched. algo is the
-         * caller's own, or null to leave the choice to the library.
+         * caller's own, or null to leave the choice to the library. Waits for
+         * the device unless asked not to, for a case that holds the stream.
          */
-        bool dispatch(int* launched, const hipblasLtMatmulAlgo_t* algo = nullptr)
+        bool dispatch(int*                         launched,
+                      const hipblasLtMatmulAlgo_t* algo        = nullptr,
+                      bool                         synchronize = true)
         {
             const float alpha = 1.0f;
             const float beta  = 0.0f;
@@ -3070,16 +3074,22 @@ namespace
                                algo,
                                m_ws,
                                kOnlineWorkspace,
-                               nullptr)
+                               m_stream)
                != HIPBLAS_STATUS_SUCCESS)
                 return false;
 
-            if(hipDeviceSynchronize() != hipSuccess)
+            if(synchronize && hipDeviceSynchronize() != hipSuccess)
                 return false;
 
             if(launched)
                 *launched = hipblaslt_tuning_last_launch_for_test();
             return true;
+        }
+
+        /** The stream dispatch() launches on; the null stream until set. */
+        void setStream(hipStream_t stream)
+        {
+            m_stream = stream;
         }
 
         /** The heuristic's first answer, as an application holding it would. */
@@ -3194,6 +3204,7 @@ namespace
 
         bool                        m_pointerArray = false;
         int64_t                     m_m            = kOnlineM;
+        hipStream_t                 m_stream       = nullptr;
         hipblasLtHandle_t           m_handle       = nullptr;
         hipblasLtMatmulDesc_t       m_desc         = nullptr;
         hipblasLtMatmulPreference_t m_pref         = nullptr;
@@ -3959,5 +3970,109 @@ namespace
             },
             ::testing::ExitedWithCode(100 + kShapes),
             "");
+    }
+
+    // A launch that goes untimed because every event pair on its device is
+    // still in flight is reported once per device, and only at info level.
+    // Under a cap of one, on a stream the GPU is held on, the first shape takes
+    // the only pair and the next two find it still timing that launch.
+    //
+    // Info logging is read once, at startup, so the info-level half runs in a
+    // fresh process, as ACallOnlineDoesNotTuneIsReportedOnceAtInfoLevel does.
+    TEST_F(TuningOnline_pre_checkin, ALaunchUntimedAtTheEventPairCapIsReportedOnceAtInfoLevel)
+    {
+        auto exercise = [this](std::string* output) {
+            OnlineProblem first(/*pointerArray=*/false, kOnlineM + 320);
+            OnlineProblem second(/*pointerArray=*/false, kOnlineM + 384);
+            OnlineProblem third(/*pointerArray=*/false, kOnlineM + 448);
+            for(OnlineProblem* problem : {&first, &second, &third})
+                if(!problem->create() || problem->distinctCandidates(kOnlineTopK) < 2)
+                    return false;
+
+            // Held on a host-visible value, and non-blocking so nothing the
+            // library does on the null stream waits behind it. A watchdog lets
+            // it go regardless, so a dispatch that does wait cannot hang the
+            // suite; it fails the count instead.
+            int canWait = 0;
+            if(hipDeviceGetAttribute(&canWait, hipDeviceAttributeCanUseStreamWaitValue, 0)
+                   != hipSuccess
+               || !canWait)
+                return false;
+
+            hipStream_t held = nullptr;
+            uint32_t*   go   = nullptr;
+            if(hipStreamCreateWithFlags(&held, hipStreamNonBlocking) != hipSuccess
+               || hipHostMalloc(reinterpret_cast<void**>(&go), sizeof(*go), 0) != hipSuccess)
+                return false;
+            *go = 0;
+            if(hipStreamWaitValue32(held, go, 1, hipStreamWaitValueEq) != hipSuccess)
+                return false;
+
+            std::atomic<bool> done{false};
+            std::thread       watchdog([&] {
+                for(int waited = 0; waited < 300 && !done.load(); waited++)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                __atomic_store_n(go, 1u, __ATOMIC_SEQ_CST);
+            });
+
+            setenv("HIPBLASLT_TUNING_MAX_EVENT_PAIRS", "1", 1);
+            enterOnline(m_path);
+
+            bool ok = true;
+            {
+                CerrCapture capture;
+                for(OnlineProblem* problem : {&first, &second, &third})
+                {
+                    int launched = -1;
+                    problem->setStream(held);
+                    ok = ok && problem->dispatch(&launched, nullptr, /*synchronize=*/false);
+                }
+                *output = capture.str();
+            }
+
+            done = true;
+            watchdog.join();
+            ok = ok && hipStreamSynchronize(held) == hipSuccess;
+            static_cast<void>(hipStreamDestroy(held));
+            static_cast<void>(hipHostFree(go));
+            return ok;
+        };
+
+        if(loggingEnvIsClean())
+        {
+            std::string output;
+            ASSERT_TRUE(exercise(&output));
+            EXPECT_EQ(countOccurrences(output, "online-event-pair-cap"), 0u)
+                << "the cap note is info-level, and info logging is off:\n"
+                << output;
+        }
+
+        std::vector<std::pair<std::string, std::optional<std::string>>> savedEnv;
+        for(const char* name : {"HIPBLASLT_LOG_LEVEL", "HIPBLASLT_LOG_MASK", "HIPBLASLT_LOG_FILE"})
+        {
+            const char* value = getenv(name);
+            savedEnv.emplace_back(name, value ? std::optional<std::string>(value) : std::nullopt);
+            unsetenv(name);
+        }
+        setenv("HIPBLASLT_LOG_LEVEL", "4", 1);
+
+        GTEST_FLAG_SET(death_test_style, "threadsafe");
+        EXPECT_EXIT(
+            {
+                std::string output;
+                if(!exercise(&output))
+                    std::exit(2);
+                std::exit(countOccurrences(output, "online-event-pair-cap device=") == 1 ? 0 : 3);
+            },
+            ::testing::ExitedWithCode(0),
+            "");
+
+        for(const auto& [name, value] : savedEnv)
+        {
+            if(value)
+                setenv(name.c_str(), value->c_str(), 1);
+            else
+                unsetenv(name.c_str());
+        }
     }
 } // namespace

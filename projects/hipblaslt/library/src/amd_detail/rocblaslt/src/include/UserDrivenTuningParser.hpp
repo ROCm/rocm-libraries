@@ -387,6 +387,20 @@ namespace TensileLite
      */
     void noteOnlineScopeEvent(OnlineScopeEvent kind);
 
+    /**
+     * Log that online mode ran a launch on device untimed because the device
+     * held cap event pairs and every one was still timing a launch not yet
+     * read back. The tuner calls it once per device per process, through
+     * rocblaslt::OnlineTunerConfig::livePairCapReached, with no lock held.
+     *
+     * Info-level, like the scope events above, and for the same reason those
+     * are: nothing about the call changes. It runs the kernel online off would
+     * have run, and the shape goes on being explored as the launches in flight
+     * finish and their pairs are reused. A line without any logging variable
+     * is reserved for what pauses a call or changes what it launches.
+     */
+    void noteOnlineEventPairCap(int device, int cap);
+
     /** Drop the announcement latch and every per-key set. Tests only. */
     void resetTuningDiagnosticsForTest();
 
