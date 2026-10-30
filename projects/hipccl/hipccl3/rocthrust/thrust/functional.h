@@ -363,7 +363,6 @@ template <class _Fn>
  */
 namespace placeholders
 {
-
 /*! \p thrust::placeholders::_1 is the placeholder for the first function parameter.
  */
 THRUST_GLOBAL_CONSTANT thrust::detail::functional::placeholder<0>::type _1;
@@ -403,7 +402,6 @@ THRUST_GLOBAL_CONSTANT thrust::detail::functional::placeholder<8>::type _9;
 /*! \p thrust::placeholders::_10 is the placeholder for the tenth function parameter.
  */
 THRUST_GLOBAL_CONSTANT thrust::detail::functional::placeholder<9>::type _10;
-
 } // namespace placeholders
 
 /*! \} // placeholder_objects

@@ -35,7 +35,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace system::omp::detail
 {
-
 struct __no_init_tag
 {};
 
@@ -188,6 +187,5 @@ OutputIterator exclusive_scan(
 {
   return scan_impl<false>(exec, first, last, result, init, binary_op);
 }
-
 } // namespace system::omp::detail
 THRUST_NAMESPACE_END

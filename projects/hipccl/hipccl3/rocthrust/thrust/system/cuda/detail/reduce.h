@@ -82,10 +82,8 @@ void _CCCL_HOST_DEVICE reduce_into(
 
 namespace cuda_cub
 {
-
 namespace __reduce
 {
-
 template <bool>
 struct is_true : _THRUST_STD::false_type
 {};
@@ -604,7 +602,6 @@ struct DrainAgent
 
 namespace detail
 {
-
 template <typename Derived, typename InputIt, typename Size, typename T, typename BinaryOp>
 THRUST_RUNTIME_FUNCTION T
 reduce_n_impl(execution_policy<Derived>& policy, InputIt first, Size num_items, T init, BinaryOp binary_op)
@@ -661,7 +658,6 @@ reduce_n_impl(execution_policy<Derived>& policy, InputIt first, Size num_items, 
   // make this guarantee.
   return thrust::cuda_cub::get_value(policy, thrust::detail::aligned_reinterpret_cast<T*>(tmp.data().get()));
 }
-
 } // namespace detail
 
 //-------------------------
@@ -701,7 +697,6 @@ reduce(execution_policy<Derived>& policy, InputIt first, InputIt last)
   using value_type = thrust::detail::it_value_t<InputIt>;
   return cuda_cub::reduce(policy, first, last, value_type(0));
 }
-
 } // namespace cuda_cub
 
 THRUST_NAMESPACE_END

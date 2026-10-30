@@ -30,10 +30,8 @@
 THRUST_NAMESPACE_BEGIN
 namespace system::tbb::detail
 {
-
 namespace scan_detail
 {
-
 template <typename InputIterator, typename OutputIterator, typename BinaryFunction, typename ValueType, bool HasInit>
 struct inclusive_body
 {
@@ -217,7 +215,6 @@ struct exclusive_body
     sum = b.sum;
   }
 };
-
 } // namespace scan_detail
 
 template <typename InputIterator, typename OutputIterator, typename BinaryFunction>
@@ -292,6 +289,5 @@ OutputIterator exclusive_scan(
 
   return result;
 }
-
 } // end namespace system::tbb::detail
 THRUST_NAMESPACE_END

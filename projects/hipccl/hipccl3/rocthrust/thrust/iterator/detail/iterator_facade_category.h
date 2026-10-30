@@ -177,6 +177,5 @@ using iterator_facade_category_t =
   typename ::internal::If<is_iterator_category<CategoryOrTraversal>,
                           _THRUST_STD::type_identity<CategoryOrTraversal>,
                           iterator_facade_category_impl<CategoryOrSystem, CategoryOrTraversal>>::type;
-
 } // namespace detail
 THRUST_NAMESPACE_END

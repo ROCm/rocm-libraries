@@ -61,7 +61,6 @@ namespace detail
 {
 namespace complex
 {
-
 using thrust::complex;
 
 THRUST_HOST_DEVICE inline complex<double> csqrt(const complex<double>& z)
@@ -158,9 +157,7 @@ THRUST_HOST_DEVICE inline complex<double> csqrt(const complex<double>& z)
     return (result);
   }
 }
-
 } // namespace complex
-
 } // namespace detail
 
 template <typename ValueType>

@@ -56,7 +56,6 @@ namespace detail
 {
 namespace complex
 {
-
 using thrust::complex;
 
 /* round down to 8 = 24/3 bits */
@@ -197,9 +196,7 @@ THRUST_HOST_DEVICE inline complex<float> clogf(const complex<float>& z)
   }
   return (complex<float>(0.5f * log1pf(hm1), atan2(y, x)));
 }
-
 } // namespace complex
-
 } // namespace detail
 
 template <>

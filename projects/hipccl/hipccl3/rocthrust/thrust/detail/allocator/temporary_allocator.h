@@ -47,7 +47,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
-
 // XXX the pointer parameter given to tagged_allocator should be related to
 //     the type of the expression get_temporary_buffer(system, n).first
 //     without decltype, compromise on pointer<T,System>
@@ -119,6 +118,5 @@ public:
 private:
   using pointer_and_size = thrust::pair<pointer, size_type>;
 }; // end temporary_allocator
-
 } // namespace detail
 THRUST_NAMESPACE_END
