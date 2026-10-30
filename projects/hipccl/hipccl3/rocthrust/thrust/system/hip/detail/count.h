@@ -42,6 +42,7 @@
 
 #  include <thrust/distance.h>
 #  include <thrust/iterator/transform_iterator.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/detail/reduce.h>
 #  include <thrust/system/hip/detail/util.h>
 

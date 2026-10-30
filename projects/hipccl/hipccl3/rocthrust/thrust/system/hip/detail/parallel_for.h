@@ -43,6 +43,7 @@
 
 #  include <rocprim/config.hpp>
 
+#  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/detail/util.h>
 
 THRUST_NAMESPACE_BEGIN

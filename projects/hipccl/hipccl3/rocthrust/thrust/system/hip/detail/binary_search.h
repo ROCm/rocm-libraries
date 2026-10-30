@@ -33,7 +33,7 @@
 #  include <thrust/binary_search.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
-#  include <thrust/system/hip/detail/par_to_seq.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/execution_policy.h>
 
 #  include _THRUST_STD_INCLUDE(cstdint)

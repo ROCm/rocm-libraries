@@ -35,6 +35,7 @@
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/seq.h>
 #include <thrust/system/detail/bad_alloc.h>
+#include <thrust/system/hip/detail/execution_policy.h>
 #include <thrust/system/hip/detail/util.h>
 
 THRUST_NAMESPACE_BEGIN

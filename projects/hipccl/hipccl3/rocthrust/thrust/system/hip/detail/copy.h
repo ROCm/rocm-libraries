@@ -78,7 +78,6 @@ THRUST_NAMESPACE_END
 
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/detail/temporary_array.h>
-#include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/uninitialized_copy.h>
 #include <thrust/system/hip/detail/util.h>
 #include <thrust/type_traits/is_trivially_relocatable.h>

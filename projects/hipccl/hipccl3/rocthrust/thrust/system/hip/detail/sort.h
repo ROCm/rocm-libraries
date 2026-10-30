@@ -49,7 +49,6 @@
 #  include <thrust/sequence.h>
 #  include <thrust/sort.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
-#  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
 #  include <thrust/type_traits/is_contiguous_iterator.h>
 

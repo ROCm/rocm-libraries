@@ -44,6 +44,7 @@
 #  include <thrust/iterator/iterator_traits.h>
 #  include <thrust/pair.h>
 #  include <thrust/system/hip/detail/dispatch.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/detail/util.h>
 
 #  include _THRUST_STD_INCLUDE(cstdint)

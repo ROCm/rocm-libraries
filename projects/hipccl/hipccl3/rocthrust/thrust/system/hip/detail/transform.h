@@ -42,6 +42,7 @@
 
 #  include <thrust/iterator/zip_iterator.h>
 #  include <thrust/system/hip/detail/dispatch.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/detail/parallel_for.h>
 #  include <thrust/system/hip/detail/util.h>
 #  include <thrust/zip_function.h>

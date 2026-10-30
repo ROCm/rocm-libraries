@@ -37,8 +37,10 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/system/hip/config.h>
+
+#include <thrust/detail/type_traits.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/system/hip/detail/execution_policy.h>
 
 #if !THRUST_COMPILER(NVRTC)
 #  include <thrust/system/hip/error.h>
@@ -67,6 +69,9 @@
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
+// forward declare to avoid cyclic includes
+template <class>
+struct execution_policy;
 
 inline THRUST_HOST_DEVICE hipStream_t default_stream()
 {
