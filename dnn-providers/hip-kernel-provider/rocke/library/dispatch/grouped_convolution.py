@@ -23,6 +23,10 @@ points list every safe Winograd plan of an eligible request. Its kernels are
 built per problem (no AOT binary), its eligibility and plan come from
 :mod:`kernels.common.conv_winograd_select`, and its :class:`ConvLaunchPlan`
 runs the transform, GEMM and output kernels in order over named workspaces.
+Its AOT twin, ``conv_winograd_fwd_aot`` (``algorithm="winograd_aot"``, also
+opt-in), runs the same 3x3 plans on the shape-generic transform binaries of
+:mod:`kernels.common.conv_winograd_fwd_rt` (plan kind ``unfused2d_rt``):
+every kernel of its plans is compiled once and named by its kernel name.
 
 Every
 record there spells the :class:`KernelIdentity` of one AOT kernel (format:
@@ -1195,7 +1199,9 @@ def _winograd_model(arch: str) -> WinogradCostModel:
     return WinogradCostModel(num_cus=_ARCH_NUM_CUS.get(arch, _DEFAULT_NUM_CUS))
 
 
-def _winograd_spec(req: ConvGroupedRequest, plan) -> ConvWinogradSpec:
+def _winograd_spec(
+    req: ConvGroupedRequest, plan, name: str = _WINOGRAD_NAME
+) -> ConvWinogradSpec:
     """The spec of ``plan`` on ``req``; raises ``ValueError`` when a kernel of
     the plan cannot run the problem or does not lower at the request's LLVM
     flavor (the K3 GEMM lowers at llvm23 only)."""
@@ -1204,9 +1210,9 @@ def _winograd_spec(req: ConvGroupedRequest, plan) -> ConvWinogradSpec:
     steps, _ = winograd_steps(problem, dtype, plan)
     why = winograd_flavor_reason(problem, dtype, plan, req.llvm_flavor)
     if why is not None:
-        raise ValueError(f"{_WINOGRAD_NAME}:{plan.label}: {why}")
+        raise ValueError(f"{name}:{plan.label}: {why}")
     return ConvWinogradSpec(
-        name=f"{_WINOGRAD_NAME}:{plan.label}",
+        name=f"{name}:{plan.label}",
         plan=plan,
         problem=problem,
         dtype=dtype,
@@ -1266,12 +1272,81 @@ def _winograd_selection(
         return None, str(e)
 
 
+# The same 3x3 plans on the shape-generic transform binaries
+# (:mod:`kernels.common.conv_winograd_fwd_rt`): every kernel of the pipeline is
+# compiled once, ahead of time, and named by its kernel name.
+_WINOGRAD_AOT_NAME = "conv_winograd_fwd_aot"
+
+
+def _as_aot(plan):
+    """The ``unfused2d_rt`` twin of a 3x3 ``unfused2d`` plan, else ``None``
+    (the 1-D and generalized plans have no shape-generic kernels)."""
+    if plan.kind != "unfused2d":
+        return None
+    return dataclasses.replace(plan, kind="unfused2d_rt", merge="")
+
+
+@functools.lru_cache(maxsize=256)
+def _winograd_aot_sweep(req: ConvGroupedRequest) -> tuple[ConvWinogradSpec, ...]:
+    """Every safe 3x3 Winograd plan of ``req`` on the AOT binaries, in model
+    cost order."""
+    if _winograd_problem_reason(req) is not None:
+        return ()
+    dtype = req.dtype.lower()
+    out = []
+    for plan in winograd_plans(
+        _conv_problem(req), dtype, model=_winograd_model(req.arch)
+    ):
+        aot = _as_aot(plan)
+        if aot is None:
+            continue
+        try:
+            out.append(_winograd_spec(req, aot, _WINOGRAD_AOT_NAME))
+        except ValueError:
+            continue
+    return tuple(out)
+
+
+@functools.lru_cache(maxsize=256)
+def _winograd_aot_selection(
+    req: ConvGroupedRequest,
+) -> tuple[ConvWinogradSpec | None, str]:
+    """The selector's plan for ``req`` on the AOT binaries (the cheapest safe
+    3x3 plan when the selector picks a 1-D / generalized one, or when a
+    binary of its plan cannot run the problem), or ``(None, why)``."""
+    why = _winograd_problem_reason(req)
+    if why is not None:
+        return None, why
+    sel = select_winograd(
+        _conv_problem(req), req.dtype.lower(), model=_winograd_model(req.arch)
+    )
+    if sel.kind == "none":
+        return None, sel.reason
+    aot = _as_aot(sel)
+    if aot is not None:
+        try:
+            return _winograd_spec(req, aot, _WINOGRAD_AOT_NAME), "ok"
+        except ValueError as e:
+            why = str(e)
+    else:
+        why = f"the selected {sel.label} plan has no AOT kernels"
+    rest = _winograd_aot_sweep(req)
+    if rest:
+        return rest[0], "ok"
+    return None, why
+
+
 def _winograd_last_step(spec: ConvWinogradSpec):
     steps, _ = winograd_steps(spec.problem, spec.dtype, spec.plan)
     return steps[-1]
 
 
-def _make_winograd_candidate() -> KernelCandidate:
+def _make_winograd_candidate(
+    name: str = _WINOGRAD_NAME,
+    algorithm: str = "winograd",
+    selection=_winograd_selection,
+    sweep=_winograd_sweep,
+) -> KernelCandidate:
     def support(req: OperatorRequest) -> tuple[bool, str]:
         errors = _request_errors(req)
         if errors:
@@ -1280,27 +1355,27 @@ def _make_winograd_candidate() -> KernelCandidate:
         ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
-        spec, why = _winograd_selection(req)
+        spec, why = selection(req)
         return spec is not None, why
 
     def select(req: OperatorRequest) -> ConvWinogradSpec:
         ok, why = candidate.admits(req)
         if not ok:
-            raise ValueError(f"{_WINOGRAD_NAME} does not support request: {why}")
+            raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, ConvGroupedRequest)
-        spec, why = _winograd_selection(req)
+        spec, why = selection(req)
         if spec is None:
-            raise ValueError(f"{_WINOGRAD_NAME} does not support request: {why}")
+            raise ValueError(f"{name} does not support request: {why}")
         return spec
 
     def build(spec: ConvWinogradSpec, arch: str):
         return _winograd_last_step(spec).kernel.build(arch)
 
     candidate = KernelCandidate(
-        name=_WINOGRAD_NAME,
+        name=name,
         family=_FAMILIES["fwd"],
-        algorithm="winograd",
-        spec_id=_WINOGRAD_NAME,
+        algorithm=algorithm,
+        spec_id=name,
         abi_version=CONV_WINOGRAD_ABI_VERSION,
         # After every listed instance; opt-in, so never picked under "auto".
         priority=1_000_000,
@@ -1314,9 +1389,7 @@ def _make_winograd_candidate() -> KernelCandidate:
         signature=lambda spec: _winograd_last_step(spec).signature,
         grid=lambda spec, req: _winograd_last_step(spec).grid,
         block=lambda spec: _winograd_last_step(spec).block,
-        sweep_space=lambda req: (
-            _winograd_sweep(req) if candidate.admits(req)[0] else ()
-        ),
+        sweep_space=lambda req: (sweep(req) if candidate.admits(req)[0] else ()),
         build=build,
         opt_in=True,
     )
@@ -1326,6 +1399,14 @@ def _make_winograd_candidate() -> KernelCandidate:
 _WINOGRAD_CANDIDATE = _make_winograd_candidate()
 _REGISTRIES["fwd"].register(_WINOGRAD_CANDIDATE)
 _EXECUTION_REGISTRIES["fwd"].register(_WINOGRAD_CANDIDATE)
+_WINOGRAD_AOT_CANDIDATE = _make_winograd_candidate(
+    _WINOGRAD_AOT_NAME,
+    "winograd_aot",
+    _winograd_aot_selection,
+    _winograd_aot_sweep,
+)
+_REGISTRIES["fwd"].register(_WINOGRAD_AOT_CANDIDATE)
+_EXECUTION_REGISTRIES["fwd"].register(_WINOGRAD_AOT_CANDIDATE)
 
 
 # ---------------------------------------------------------------------------

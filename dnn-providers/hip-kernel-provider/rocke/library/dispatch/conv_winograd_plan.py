@@ -13,13 +13,17 @@ transform kernels bake the extents in): the plan kinds of
   input transform, K3 batched GEMM (:mod:`kernels.common.conv_winograd_gemm_wmma`)
   and K4 output transform; a batch split runs K2 / K3 / K4 once per chunk of
   ``N / chunks`` images on byte offsets of x and y, sharing U;
+* ``unfused2d_rt`` (3x3, :mod:`kernels.common.conv_winograd_fwd_rt`): the same
+  pipeline (without the merged launch) on shape-generic transform binaries,
+  every problem extent a kernarg, so each binary is compiled once ahead of
+  time and named by its kernel name;
 * ``unfused_gen`` (1-D, 7x1, 5x5, segmented long filters,
   :mod:`kernels.common.conv_winograd_gen`): K1, K2, K3 with ``taps`` segments,
   K4;
 * ``fused1d`` (:mod:`kernels.common.conv_winograd_fused_1d_wmma`): the
   generalized K1 writes U, then one fused kernel goes from x to y.
 
-The steps are :class:`ConvLaunchStep` records with no AOT identity: each
+The steps are :class:`ConvLaunchStep` records with no conv-kernel identity: each
 carries the kernel to build (``kernel.build(arch)``) and its kernargs by name,
 resolved by :meth:`ConvLaunchPlan.values` against the buffers ``x`` / ``w`` /
 ``y`` and the plan's workspaces (``U``, ``V``, ``M``, ``e``). Transform knobs,
@@ -309,6 +313,76 @@ def _unfused2d(problem: ConvProblem, dtype: str, plan: WinogradPlan):
     return tuple(steps), workspaces
 
 
+def _rt_kernargs(signature, vals: dict, sizes: dict, offsets: dict) -> tuple:
+    """Kernargs of a shape-generic transform step: its scalar values from
+    ``stage_launch``, ``*_bytes`` the chunk's buffer sizes, pointers at the
+    chunk's byte offsets."""
+    out = []
+    for a in signature:
+        nm = a["name"]
+        if nm in vals:
+            out.append(("i32", int(vals[nm])))
+        elif nm.endswith("_bytes"):
+            out.append(("i32", int(sizes[_BUF_OF[nm[: -len("_bytes")]]])))
+        else:
+            buf = _BUF_OF[nm]
+            out.append(("buf", buf, int(offsets.get(buf, 0))))
+    return tuple(out)
+
+
+def _unfused2d_rt(problem: ConvProblem, dtype: str, plan: WinogradPlan):
+    """The 3x3 pipeline on the shape-generic (AOT) transform binaries of
+    :mod:`kernels.common.conv_winograd_fwd_rt`: each step is named by its
+    binary's kernel name (its AOT identity) and its problem extents are
+    kernargs. The binaries are :func:`default_stage_specs`; K3 is the plan's
+    WMMA GEMM, as in :func:`_unfused2d`."""
+    from kernels.common import conv_winograd_fwd_rt as R
+    from kernels.common.conv_winograd_gemm_wmma import (
+        WinogradGemmProblem,
+        WinogradGemmWmmaSpec,
+    )
+
+    mh, mw = plan.tile
+    chunks = max(1, int(plan.chunks))
+    if problem.N % chunks:
+        raise ValueError(f"batch split {chunks} does not divide N={problem.N}")
+    sub = dataclasses.replace(problem, N=problem.N // chunks)
+    geo = R.RtGeometry(sub, mh, mw)
+    operand, prescale = R.pipeline_dtypes((mh, mw), dtype)
+    why = geo.check(prescale)
+    if why:
+        raise ValueError(why)
+    specs = R.default_stage_specs(sub, (mh, mw), dtype)
+    sizes = dict(geo.buffer_bytes(prescale))
+    x_chunk, y_chunk = sizes["x"], sizes["y"]
+
+    def stage_step(stage, chunk):
+        spec = specs[stage]
+        grid, block, vals = R.stage_launch(spec, geo)
+        sig = R.stage_signature(spec)
+        offs = {"x": chunk * x_chunk, "y": chunk * y_chunk}
+        return _step(
+            spec.kernel_name(),
+            functools.partial(_build_with_arch, R.build_stage, spec),
+            grid,
+            block,
+            sig,
+            _rt_kernargs(sig, vals, sizes, offs),
+        )
+
+    steps = [stage_step("K1", 0)]
+    k3 = WinogradGemmWmmaSpec(dtype=operand, **_k3_knobs(plan.k3))
+    prob = WinogradGemmProblem.from_conv(sub, (mh, mw))
+    for i in range(chunks):
+        for k in ("K2a", "K2"):
+            if k in specs:
+                steps.append(stage_step(k, i))
+        steps.append(_k3_step(k3, prob))
+        steps.append(stage_step("K4", i))
+    workspaces = {k: int(max(sizes[k], 4)) for k in ("U", "V", "M", "e")}
+    return tuple(steps), workspaces
+
+
 def _unfused_gen(problem: ConvProblem, dtype: str, plan: WinogradPlan):
     from kernels.common import conv_winograd_gen as WG
     from kernels.common.conv_winograd_gemm_wmma import WinogradGemmWmmaSpec
@@ -407,7 +481,12 @@ def _fused1d(problem: ConvProblem, dtype: str, plan: WinogradPlan):
     return tuple(steps), {"U": int(max(gsizes["U"], 4))}
 
 
-_KINDS = {"unfused2d": _unfused2d, "unfused_gen": _unfused_gen, "fused1d": _fused1d}
+_KINDS = {
+    "unfused2d": _unfused2d,
+    "unfused2d_rt": _unfused2d_rt,
+    "unfused_gen": _unfused_gen,
+    "fused1d": _fused1d,
+}
 
 
 @functools.lru_cache(maxsize=256)

@@ -5264,6 +5264,45 @@ def cases():
             build_winograd_fwd_case(_stage, **_over),
         )
 
+    # --- conv_winograd_fwd_rt: shape-generic (AOT) Winograd transforms ---
+    # Every extent a kernel argument: K1, K2a, K2 (register path with the fused
+    # and the split prescale, LDS path) and K4. The full matrix (and the C++
+    # twin) lives in library/tests/parity/conv_winograd_fwd_rt_emit.*.
+    def build_winograd_rt_case(cls, **spec_kw):
+        def _build():
+            from kernels.common import conv_winograd_fwd_rt as wr
+
+            return wr.build_stage(getattr(wr, cls)(**spec_kw), arch="gfx1250")
+
+        return _build
+
+    for _case_id, _cls, _over in (
+        ("f4_k1", "RtFilterSpec", dict(filter_rows=2)),
+        ("bf16_k2a", "RtPrescaleSpec", dict(io_dtype="bf16")),
+        ("f4_k2", "RtInputSpec", dict(vec=4)),
+        (
+            "f4_bf16_fused_prescale_k2",
+            "RtInputSpec",
+            dict(io_dtype="bf16", prescale=True, fused=True, vec=4),
+        ),
+        (
+            "f2_lds_k2",
+            "RtInputSpec",
+            dict(mh=2, mw=2, lds=(4, 8), tiles_per_thread=4),
+        ),
+        (
+            "f6x4_bf16_prescale_k4",
+            "RtOutputSpec",
+            dict(mh=6, mw=4, io_dtype="bf16", prescale=True, vec=4),
+        ),
+    ):
+        add(
+            "conv_winograd_fwd_rt",
+            f"conv_winograd_fwd_rt/gfx1250/{_case_id}",
+            "gfx1250",
+            build_winograd_rt_case(_cls, **_over),
+        )
+
     # --- conv_winograd_gemm_wmma: the Winograd batched GEMM (K3, gfx1250) ---
     # TDM operand ring + WMMA, TDM or per-lane epilogue, split-K slabs and
     # their reduce. The full matrix (and the C++ twin) lives in
