@@ -31,6 +31,7 @@
 #include <cctype>
 #include <cstring>
 #include <type_traits>
+#include <utility>
 
 #include <gtest/gtest-spi.h>
 
@@ -56,6 +57,251 @@ namespace
         {
             EXPECT_STREQ(error.what(), expected);
         }
+    }
+
+    // Runs the hipblaslt-bench -v checks of D (norm and allclose) through check() on host
+    // buffers of T (f32 or f16), M x N per batch, and counts the checks that failed.
+    template <typename T = float>
+    struct BenchVerifyD
+    {
+        static constexpr hipDataType type = std::is_same_v<T, float> ? HIP_R_32F : HIP_R_16F;
+
+        int64_t                    m, n, batches;
+        hipblasLtBatchMode_t       mode;
+        std::vector<HipHostBuffer> gold, result;
+        double                     norm_error = 0, atol = 1, rtol = 1;
+
+        BenchVerifyD(int64_t m, int64_t n, int64_t batches, hipblasLtBatchMode_t mode)
+            : m(m)
+            , n(n)
+            , batches(batches)
+            , mode(mode)
+        {
+            const bool   strided = mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+            const size_t count   = strided ? 1 : batches;
+            for(size_t i = 0; i < count; i++)
+            {
+                gold.emplace_back(type, m * n * (strided ? batches : 1));
+                result.emplace_back(type, m * n * (strided ? batches : 1));
+            }
+            for(int64_t b = 0; b < batches; b++)
+                for(int64_t i = 0; i < m * n; i++)
+                    at(gold, b, i) = at(result, b, i) = T(1 + (i + b) % 3);
+        }
+
+        T& at(std::vector<HipHostBuffer>& buffers, int64_t batch, int64_t i)
+        {
+            if(mode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+                return static_cast<T*>(buffers[batch].buf())[i];
+            return static_cast<T*>(buffers[0].buf())[batch * m * n + i];
+        }
+
+        // output_type overrides the type check() is told D has, for a type it cannot compare.
+        int64_t
+            run(hipDataType input_type = type, hipDataType output_type = type, bool allclose = true)
+        {
+            Arguments arg{};
+            arg.init();
+            arg.unit_check        = 0;
+            arg.norm_check        = 1;
+            arg.allclose_check    = allclose;
+            arg.norm_check_assert = false;
+            arg.compute_type      = HIPBLAS_COMPUTE_32F;
+            arg.a_type = arg.b_type = input_type;
+
+            const uint32_t               gemm_count = 1;
+            std::vector<HipDeviceBuffer> no_device;
+            std::vector<HipHostBuffer>   no_host_gold, no_host;
+            std::vector<double>          tol{0};
+            double                       max_ulp = 0, avg_ulp = 0;
+            const int64_t                before = hipblaslt_bench_options::verification_failures();
+            check(nullptr,
+                  arg,
+                  gemm_count,
+                  {m},
+                  {n},
+                  {m},
+                  {m},
+                  {m * n},
+                  {m * n},
+                  {int(batches)},
+                  {0},
+                  gold,
+                  result,
+                  no_device,
+                  no_host_gold,
+                  no_host,
+                  no_device,
+                  no_host_gold,
+                  no_host,
+                  no_device,
+                  no_host_gold,
+                  no_host,
+                  no_device,
+                  tol,
+                  norm_error,
+                  atol,
+                  rtol,
+                  max_ulp,
+                  avg_ulp,
+                  output_type,
+                  HIP_R_32F,
+                  HIP_R_32F,
+                  HIP_R_32F,
+                  mode);
+            return hipblaslt_bench_options::verification_failures() - before;
+        }
+    };
+
+    // ROCM-32137: one wrong element in the last batch fails both checks.
+    TEST(BenchVerify, smoke_WrongLaterBatchCountsBothChecks)
+    {
+        BenchVerifyD d(8, 4, 3, HIPBLASLT_BATCH_MODE_STRIDED);
+        d.at(d.result, 2, 5) = 7;
+        EXPECT_EQ(d.run(), 2);
+        EXPECT_EQ(d.atol, 1);
+        EXPECT_GT(d.norm_error, 0.1);
+    }
+
+    TEST(BenchVerify, smoke_MatchingResultCountsNothing)
+    {
+        BenchVerifyD d(8, 4, 3, HIPBLASLT_BATCH_MODE_POINTER_ARRAY);
+        EXPECT_EQ(d.run(), 0);
+        EXPECT_EQ(d.norm_error, 0);
+        EXPECT_EQ(d.atol, 1e-6);
+    }
+
+    // Every batch is off by about 4e-6 relative, under the f32 limit of 1e-5. The reported
+    // norm_error sums the 8 batches past the limit, but each batch passes on its own.
+    TEST(BenchVerify, smoke_AccurateBatchesDoNotAddUpToFailure)
+    {
+        BenchVerifyD d(8, 4, 8, HIPBLASLT_BATCH_MODE_STRIDED);
+        for(int64_t b = 0; b < 8; b++)
+            for(int64_t i = 0; i < 32; i++)
+                d.at(d.result, b, i) *= 1.000004f;
+        EXPECT_EQ(d.run(), 0);
+        EXPECT_GT(d.norm_error, 1e-5);
+    }
+
+    // Pointer-array mode used to add the last batch's norm_error twice.
+    TEST(BenchVerify, smoke_PointerArrayNormCountsEachBatchOnce)
+    {
+        BenchVerifyD d(8, 4, 3, HIPBLASLT_BATCH_MODE_POINTER_ARRAY);
+        d.at(d.result, 2, 5) += 0.5f;
+        const double last
+            = norm_check_general('F', 8, 4, 8, 0, d.gold[2].buf(), d.result[2].buf(), 1, HIP_R_32F);
+        d.run();
+        EXPECT_GT(last, 0);
+        EXPECT_DOUBLE_EQ(d.norm_error, last);
+    }
+
+    TEST(BenchVerify, smoke_MixedPrecisionNormUsesGemmTolerance)
+    {
+        BenchVerifyD d(8, 4, 1, HIPBLASLT_BATCH_MODE_STRIDED);
+        for(int64_t i = 0; i < 32; i++)
+            d.at(d.result, 0, i) *= 1.001f;
+        EXPECT_EQ(d.run(HIP_R_16F), 0);
+        EXPECT_GT(d.norm_error, norm_tolerance(HIP_R_32F));
+        EXPECT_DOUBLE_EQ(norm_tolerance(HIP_R_32F, HIPBLAS_COMPUTE_32F, HIP_R_16F, HIP_R_16F),
+                         0.01);
+        EXPECT_DOUBLE_EQ(norm_tolerance(HIP_R_16F, HIPBLAS_COMPUTE_32F, HIP_R_16BF, HIP_R_16BF),
+                         0.1);
+        EXPECT_DOUBLE_EQ(
+            norm_tolerance(HIP_R_32F, HIPBLAS_COMPUTE_32F_FAST_16BF, HIP_R_32F, HIP_R_32F),
+            0.5);
+    }
+
+    // f16 output uses the f16 limit of 0.01: a 0.4% error passes, which the f32 limit would
+    // fail, and a 2% error fails, which the bf16 limit would pass. Allclose passes both.
+    TEST(BenchVerify, smoke_HalfOutputNormUsesHalfTolerance)
+    {
+        BenchVerifyD<hipblasLtHalf> within_limit(8, 4, 2, HIPBLASLT_BATCH_MODE_STRIDED);
+        BenchVerifyD<hipblasLtHalf> beyond_limit(8, 4, 2, HIPBLASLT_BATCH_MODE_STRIDED);
+        for(int64_t b = 0; b < 2; b++)
+            for(int64_t i = 0; i < 32; i++)
+            {
+                within_limit.at(within_limit.result, b, i) *= hipblasLtHalf(1.004f);
+                beyond_limit.at(beyond_limit.result, b, i) *= hipblasLtHalf(1.02f);
+            }
+        EXPECT_EQ(within_limit.run(), 0);
+        EXPECT_GT(within_limit.norm_error, norm_tolerance(HIP_R_32F));
+        EXPECT_EQ(beyond_limit.run(), 1);
+    }
+
+    // A D type that norm_check_general cannot compare is counted as a failure, so exit 0
+    // under --verify_strict always means D was checked.
+    TEST(BenchVerify, smoke_UncomparableOutputTypeCountsAsFailure)
+    {
+        BenchVerifyD d(8, 4, 3, HIPBLASLT_BATCH_MODE_STRIDED);
+        EXPECT_GT(norm_tolerance(HIP_R_4F_E2M1), 0);
+        EXPECT_FALSE(norm_check_general_supports(HIP_R_4F_E2M1));
+        struct RestoreErrorStream
+        {
+            hipblaslt_internal_ostream saved = std::move(hipblaslt_cerr);
+            ~RestoreErrorStream()
+            {
+                hipblaslt_cerr = std::move(saved);
+            }
+        } restore_error_stream;
+        hipblaslt_cerr        = hipblaslt_internal_ostream{};
+        const auto failures   = d.run(HIP_R_4F_E2M1, HIP_R_4F_E2M1, false);
+        const auto diagnostic = hipblaslt_cerr.str();
+        EXPECT_EQ(failures, 1);
+        EXPECT_EQ(diagnostic.find("Error type in norm_check_general"), std::string::npos);
+        EXPECT_NE(diagnostic.find("so D was not verified"), std::string::npos);
+    }
+
+    TEST(BenchVerify, smoke_UnknownOutputTypeCountsAsFailure)
+    {
+        BenchVerifyD d(8, 4, 3, HIPBLASLT_BATCH_MODE_STRIDED);
+        EXPECT_EQ(d.run(HIP_R_32F, static_cast<hipDataType>(-1), false), 1);
+    }
+
+    // Runs a 64 x 64 x 64 f32 GEMM through the hipblaslt-bench timing path with
+    // --post_bench_verify_iters 3 and C stored in D, and counts the checks that failed.
+    int64_t bench_relaunch_failures(double beta)
+    {
+        Arguments arg{};
+        arg.init();
+        snprintf(arg.function, sizeof(arg.function), "%s", "matmul");
+        arg.a_type = arg.b_type = arg.c_type = arg.d_type = arg.aux_type = HIP_R_32F;
+        arg.compute_type                                                 = HIPBLAS_COMPUTE_32F;
+        arg.transA = arg.transB = 'N';
+        arg.M[0] = arg.N[0] = arg.K[0] = 64;
+        arg.lda[0] = arg.ldb[0] = arg.ldc[0] = arg.ldd[0] = arg.lde[0] = 64;
+        arg.stride_a[0] = arg.stride_b[0] = arg.stride_c[0] = arg.stride_d[0] = arg.stride_e[0]
+            = 64 * 64;
+        arg.alpha             = 1;
+        arg.beta              = beta;
+        arg.c_equal_d         = true;
+        arg.timing            = 1;
+        arg.iters             = 3;
+        arg.cold_iters        = 1;
+        arg.unit_check        = 0;
+        arg.norm_check        = 1;
+        arg.allclose_check    = 1;
+        arg.norm_check_assert = false;
+        arg.fast_check        = 0;
+
+        const int32_t saved = hipblaslt_bench_options::post_bench_verify_iters();
+        hipblaslt_bench_options::post_bench_verify_iters() = 3;
+        const int64_t before = hipblaslt_bench_options::verification_failures();
+        testing_matmul(arg);
+        hipblaslt_bench_options::post_bench_verify_iters() = saved;
+        return hipblaslt_bench_options::verification_failures() - before;
+    }
+
+    // With beta 1, every launch adds A * B to the D the previous launch left, so each relaunch
+    // gives a different D from the first launch. The bench refuses this setup from the command
+    // line; here it stands in for a solution that writes a wrong result on some launches.
+    TEST(BenchVerify, smoke_RelaunchThatChangesDIsCaught)
+    {
+        EXPECT_EQ(bench_relaunch_failures(1), 1);
+    }
+
+    TEST(BenchVerify, smoke_RepeatableRelaunchesPass)
+    {
+        EXPECT_EQ(bench_relaunch_failures(0), 0);
     }
 
     TEST(PreswizzledScaleLayout, smoke_rejects_nontransposed_A)
@@ -267,8 +513,9 @@ namespace
                     name << "_PLACE_" << arg.placement;
                 if(arg.integer_exact_pattern[0])
                     name << "_IE_" << arg.integer_exact_pattern;
-                // grouped gemm only supports ext
-                if(arg.use_ext || arg.grouped_gemm > 0)
+                if(arg.api_method == kApiMethodGroupedC)
+                    name << "_APIGroupedC";
+                else if(arg.use_ext || arg.grouped_gemm > 0)
                     name << "_APIExt";
                 if(arg.use_ext_setproblem)
                     name << "_APIExtSet";

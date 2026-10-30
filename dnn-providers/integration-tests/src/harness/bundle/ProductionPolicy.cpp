@@ -26,6 +26,7 @@ HarnessPolicy productionPolicy(TensorPlacement placement)
     policy.arch = TestConfig::get().getCurrentArch();
     policy.platform = currentPlatform();
     policy.deviceVramMb = TestConfig::get().getCurrentDeviceVramMb();
+    policy.benchmark = TestConfig::get().benchmarkSettings();
     return policy;
 }
 

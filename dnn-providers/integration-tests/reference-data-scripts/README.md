@@ -130,3 +130,18 @@ and for template-sweep bundles:
 - `golden.path` validation and per-case tensor file/NaN/size checks (input and output tensors)
 - per-case metadata field validation
 - a directory with only one of `graph.template.json`/`sweep.json`
+
+## Sliding-window bounds in the generators
+
+A left window bound has two common conventions, and each generator flag is named after the
+one it uses:
+
+| Convention | Name | `L = 3` keeps, for the query on the diagonal |
+|---|---|---|
+| hipDNN graph, cuDNN | `left_bound` (`--left-bound`) | the 3 keys ending at the diagonal, diagonal included |
+| FlashAttention, AITER | `window_size_left` (`--window-left`) | the 3 keys before the diagonal, plus the diagonal (4 keys) |
+
+`generate_sdpa_fwd_golden.py --left-bound L` writes `left_bound = L` to the graph.
+`--window-left W` writes `left_bound = W + 1`; it exists for `--validate`, which passes the
+window to AITER. The two flags are mutually exclusive. `left_bound` must be positive or -1
+(unbounded).

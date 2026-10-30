@@ -7,7 +7,9 @@ This page covers:
 - `library/kernels/common/conv_direct_nongrouped.py`
 - `library/kernels/common/conv_direct_wgrad_tiled.py`,
   `library/kernels/common/conv_direct_dw_wgrad.py`,
-  `library/kernels/common/conv_direct_wgrad_gather.py` (direct wgrad)
+  `library/kernels/common/conv_direct_wgrad_gather.py`,
+  `library/kernels/common/conv_direct_dw_wgrad_mfma.py`,
+  `library/kernels/common/conv_direct_grouped_wgrad_mfma.py` (direct wgrad)
 - `library/kernels/common/img2col.py`
 - `instances/common/pooling.py`
 
@@ -282,6 +284,25 @@ for each thread's coalesced output chunk:
   (d_off, valid) = D_desc.offset(...)
   buffer_store_vN_f16(d_rsrc, d_off*2, 0, v, dwords=4)
 ```
+
+### Split-K Forward (gfx1250)
+
+`ImplicitGemmConvSpec.split_k > 1` builds the split-K forward binary (WMMA only; `mem` or `wavelet` pipeline, 2-D, not pointwise, no `async_dma` / `unroll_k` / `chiplet_swizzle` / `group_merge`, identity `acc_epilogue` since the reduction only adds the raw partials; checked by `fwd_split_k_reason`). It is one binary for every degree: the ABI (`conv_arg_names("fwd", two_stage=True)`) appends `ws_ptr`, `ws_bytes`, `ks` and `ks_count`, and the kernel name gains a `splitk` tag.
+
+- The group and the K slice share `blockIdx.z = group * ks_count + slice`. Slice `s` reduces `[s*ks, (s+1)*ks)` of the `[Z*]Y*X*cpg` reduction; the host rounds `ks` to whole K tiles (`ConvArgs`), and the tail past `K_gemm` reads zero through the descriptor bounds.
+- The epilogue stores the fp32 partial tile into slab `slice` of a `[ks_count][M][K]` fp32 workspace, addressed by the D descriptor plus the slab base. Every slab element is written by exactly one workgroup, so the workspace needs no clearing. A cshuffle C tile is staged in fp32.
+- Stage 2, `conv_fwd_split_k_reduce` (`FwdSplitKReduceSpec(dtype_d, vec, block_size, degree)`), sums the slabs element-wise in a fixed order and casts into D, so the result is deterministic. `degree > 0` unrolls the fold for exactly that many slabs; `0` loops over `ks_count`.
+- `split_k_cluster = S` (2..15, `mem` pipeline, `tile_n % 4 == 0`, K and kpg multiples of 4, a target with workgroup-cluster launch, llvm23) is the single-launch form: the S slices of one output tile form a `(1, 1, S)` workgroup cluster (`cluster_dims` attribute; the launch passes the same shape), store their slabs, meet at a cluster barrier, and each slice folds `ceil(tile_m / S)` rows of the tile across the S slabs into D in 4-channel quads. The degree is baked (`skc<S>` tag, `ks_count == S` at launch) and there is no Stage 2.
+
+`split_k = -1` (auto) is resolved before validation by the conv split-K resolver (`resolve_conv_split_k("fwd", ...)`), as for wgrad and dgrad. Its degree comes from `rocke.helpers.split_k.select_split_k_fwd`:
+- It splits only when the unsplit grid is under half of 8 workgroups per CU and the reduction is at least 512 deep.
+- The degree is a power of two toward that target grid, at most 32, and keeps at least 2 K tiles per slice.
+- It is then held to the gridDim.z budget and the i32 workspace.
+- It resolves to 1 (the plain kernel) elsewhere, including on targets other than gfx1250 and on pointwise or 3-D problems.
+
+The partials meet in fp32 slabs, so the degree has no accuracy limit. The C++ engine takes explicit degrees only; `rocke.core.backend.lower_conv_implicit_gemm` resolves `-1` first.
+
+Both forms are in the gfx1250 AOT kernel cache (`kernels/conv/aot_jobs.py`; the cluster form only at llvm23) and in `benchmark_implicit_gemm_conv --run-from-cache`, where `--split-k -1` (the default) launches a cached split-K binary at the resolved degree and `0` adds `--split-k-degrees`. The grouped-convolution dispatcher does not select them. `split_k = 1` emits exactly the plain kernel.
 
 ### Step-By-Step Trace (one workgroup)
 
@@ -727,7 +748,17 @@ class DirectDepthwiseSpec:
     block_w: int = 8       # output W positions per workgroup
     block_waves: int = 1
     wave_size: int = 64
+    cpl: int = 1           # channels per lane: 1, 2 or 4
 ```
+
+`cpl > 1` (channel packing) gives every lane `cpl` adjacent channels: input
+rows load and output rows store as one `cpl`-wide vector per lane, and every
+tap is `cpl / 2` packed `<2 x f32>` FMAs over channel pairs. `groups` must be a
+multiple of `cpl`, `block_ch` grows by `cpl`, and the validator bounds the
+packed weights (`cpl * KH * KW <= 200`) and accumulator slots
+(`cpl * block_w * KH <= 192`). The kernel name gains `cpl{N}`. Both engines
+build it (`conv_direct_grouped_build_depthwise_packed.cpp`); the AOT grid
+emits the cpl knobs for wave32 targets only.
 
 Constraints (Python `is_valid_depthwise_spec` / C++ `rocke_direct_depthwise_is_valid_spec`):
 
@@ -812,6 +843,8 @@ class DirectDepthwiseTiledSpec:
     block_waves: int = 1    # waves per block (64 channels each)
     unroll_rows: bool = False
     wave_size: int = 64
+    dgrad: bool = False     # stride-1 depthwise dgrad, rotated filter (below)
+    cpl: int = 1            # channels per lane: 1, 2 or 4 (see DirectDepthwiseSpec)
 ```
 
 The row-streaming `DirectDepthwiseSpec` holds all `KH x KW` weights and `KH`
@@ -832,15 +865,41 @@ and compiles slowly. This kernel is linear in the filter width:
 Outputs are indexed directly, so it is not tied to "same" padding. Constraints
 (`is_valid_depthwise_tiled_spec` / `rocke_direct_depthwise_tiled_is_valid_spec`):
 `cpg == kpg == 1`, `KH, KW <= 32`, `stride <= KH`, no dilation, `Ho, Wo >= 1`,
-and `live_regs = block_h*block_w + block_h*n_cols + 2*KW <= 256`
-(`n_cols = (block_w-1)*stride + KW`). The register budget and the unroll cap
+and `live_regs = cpl * (block_h*block_w + block_h*n_cols + 2*KW) <= 256`
+(`n_cols = (block_w-1)*stride + KW`); with `cpl > 1`, `groups` must be a
+multiple of `cpl`. The register budget and the unroll cap
 keep both rolled and unrolled configurations within a bounded register and
 code-size footprint.
 
 The sweeps skip a row-streaming config that would spill
 (`depthwise_stream_register_reason`) and leave its shape to this kernel.
 
-Parity gate: configs 57-62 in `library/tests/parity/conv_direct_grouped_emit.{c,py}`.
+Parity gate: configs 57-62 in `library/tests/parity/conv_direct_grouped_emit.{c,py}`;
+the wave32 configs 166-178 cover both depthwise forward kernels at wave size
+32, including their channel-packed (`cpl` 2 and 4) forms.
+
+**Rotated-filter dgrad mode (`dgrad=True`).** A stride-1 depthwise dgrad is the
+forward correlation of dY with the filter rotated by 180 degrees, at padding
+`KH-1-PAD` rows and `KW-1-PAD_W` columns. In this mode the kernel takes the
+dgrad kernarg block, reads dY (`Ho x Wo`) and writes dX (`H x W`): the extents
+and the A-side strides swap roles, the weight-row loads read row `KH-1-r`
+reversed, and the epilogue addresses dX through its kernarg strides. The grid
+tiles `H x W` (`out_hw`), and the kernel name gains the `dg` flag (and a
+`p{PAD}x{PAD_W}` part when the two paddings differ). Only one
+filter row is register-resident, so the mode takes filters up to
+`_DW_TILED_DGRAD_MAX_K = 64` on a side, including non-square ones such as
+51x5 / 5x51, and it is the one direct kernel that accepts a per-axis padding
+(`DirectConvProblem.pad_w`, -1 meaning `PAD`; `PAD_W` is the effective column
+padding and `Wo` uses it; a `pad_w` below -1 is refused). It requires stride 1,
+one channel per lane (`cpl = 1`), `PAD <= KH-1` and `PAD_W <= KW-1`; the forward mode refuses a problem whose `PAD_W != PAD`, and
+`direct_spec_for_problem` refuses such a problem for every other variant. AOT
+variant `direct_depthwise_tiled_dgrad` (`DIRECT_WAVE_PARAMETRIC`): 13x13 to
+31x31 and 51x5 / 5x51 at "same" padding, `DW_TILED_DGRAD_BLOCK_W` x
+`DW_TILED_DGRAD_BLOCK_H`. Like `conv_direct_dgrad_wmma` it is served by the
+direct-conv AOT cache; there is no dispatcher route. Both engines build it
+(C++ `rocke_build_direct_depthwise_tiled` with `dgrad = true`); parity configs
+186-190 and 197, and 191-193 and 198 are specs both engines reject (per-axis
+padding on the forward mode, stride 2, a 65-row filter, `pad_w = -2`).
 
 ### Windowed Depthwise Dgrad Kernel (`DirectDepthwiseDgradWindowedSpec`)
 
@@ -958,6 +1017,53 @@ Parity gate: configs 0-19 of
 `block_h = 0` configs both engines reject). Case study:
 [`depthwise_windowed_dgrad_case_study.md`](../../python/rocke/examples/gfx950/conv_dgrad/depthwise_windowed_dgrad_case_study.md).
 
+### Row-Streaming Depthwise Dgrad Kernel (`DirectDepthwiseDgradStreamSpec`)
+
+`DirectDepthwiseDgradStreamSpec` / `build_direct_depthwise_dgrad_streaming`
+(C++ `rocke_build_direct_depthwise_dgrad_streaming`, header
+`rocke/instance_conv_direct_grouped_dw_dgrad.h`). Backward-data for depthwise
+convolution (`cpg == kpg == 1`) at any stride; AOT cache variant
+`direct_depthwise_dgrad`.
+
+```python
+@dataclass(frozen=True)
+class DirectDepthwiseDgradStreamSpec:
+    problem: DirectConvProblem
+    name: str = "direct_depthwise_dgrad_stream"
+    block_w: int = 8        # dX columns per block
+    block_waves: int = 1
+    wave_size: int = 64
+    cpl: int = 1            # channels per lane: 1, 2, 4 or 8
+```
+
+dY rows stream through a runtime loop, `KH` rows per iteration with a few rows
+prefetched, into `stride * KH` circular accumulator slots per dX column; a dX
+row is stored once its last tap has landed, and a second loop flushes the rows
+past the last dY row. The `KH x KW` weights are preloaded.
+
+`cpl > 1` (channel packing) gives every lane `cpl` adjacent channels: dY rows
+load and dX rows store as one `cpl`-wide vector per lane and every tap is
+`cpl / 2` packed `<2 x f32>` FMAs over channel pairs; `cpl == 1` emits the
+scalar kernel unchanged. `groups` must be a multiple of `cpl`, `block_ch`
+grows by `cpl`, and the validator bounds the packed weights
+(`cpl * KH * KW <= 200`) and accumulator slots
+(`cpl * block_w * KH <= _DW_DGRAD_CPL_MAX_ACC = 192`). Those are ceilings,
+not a spill model: the AOT grid adds the `DW_DGRAD_CPL_GRID` knobs and drops
+the entries whose per-lane estimate `cpl * KH * (2 * KW + block_w / stride)`
+exceeds `DW_DGRAD_PACKED_LIVE_BUDGET` (288; 448 for four-wave blocks on
+gfx1250, which spills in no smaller block), calibrated by compiling the grid.
+The kernel name gains `cpl{N}`.
+
+Grid: `(ceil(W / block_w), ceil(groups / block_ch), N)` with
+`block_ch = block_waves * wave_size * cpl`.
+
+Parity gate: configs 179-185 in
+`library/tests/parity/conv_direct_grouped_emit.{c,py}` (scalar and `cpl` 2 / 4
+/ 8, fp16 and bf16, stride 1 and 2, wave32 and wave64), and 194-196 and
+199-200 are specs both engines reject (`groups % cpl != 0`, `cpl = 3`, the
+accumulator bound, a per-axis padding, `pad_w = -3`). The kernel offsets
+columns by `PAD`, so it refuses a problem whose `PAD_W != PAD`.
+
 ## Direct Non-grouped Convolution
 
 Source: `library/kernels/common/conv_direct_nongrouped.py`. Full write-up (every
@@ -1031,10 +1137,255 @@ C++ engine twin: `rocke_build_direct_conv_nongrouped` in
 `conv_direct_nongrouped/*` in `tests/instances/rocke_ir_parity_harness.py`, binding
 `rocke_engine.conv_direct_nongrouped_*` / `rocke.core.backend.lower_conv_direct_nongrouped`.
 
+## Stem Dgrad on WMMA (gfx1250)
+
+Two wave32 WMMA dgrad kernels for stem convolutions (ungrouped, `C <= 4` dX
+channels), where the dX-channel GEMM of the direct WMMA dgrad below would
+leave almost every MMA tile empty. Both fold the filter taps into the GEMM
+column dimension instead, and stage their operands like the direct WMMA dgrad
+with a 1x1 filter: per dY channel chunk of `ck`, one 3-D TDM transfer of the dY
+pixels and one of the weights into an LDS ring of `stages` slots, the KRSC
+weights read transposed (`ds_read_tr16_b128`) as the `[K][R*S*C]` A operand.
+
+`library/kernels/common/conv_dgrad_patch_wmma.py`, spec `DgradPatchWmmaSpec`,
+builder `build_dgrad_patch_wmma` (C++ twin `instance_conv_dgrad_patch_wmma.h`).
+A patch embedding (stride == square filter `P`, no padding) has no tap
+reduction, so its dgrad is one GEMM:
+
+    dX[n, i*P + r, j*P + s, c] = sum_k dY[n, i, j, k] * W[k, r, s, c]
+
+A workgroup owns `tile_h x tile_w` dY pixels (`waves_p * tiles_p * 16`) and
+`r_blk` patch rows (`r_blk*P*C` GEMM columns, padded to `waves_c * tiles_c * 16`
+with at most an eighth of padding). The epilogue pixel-shuffles the tile in
+LDS as `[i][r][j][s, c]` and stores it with one rank-3 TDM transfer, clipped to
+the image. When `P` does not divide the image, `N` extra workgroups at the end
+of the grid zero the dX border no patch covers.
+
+`library/kernels/common/conv_dgrad_smallc_wmma.py`, spec `DgradSmallcWmmaSpec`,
+builder `build_dgrad_smallc_wmma` (C++ twin `instance_conv_dgrad_smallc_wmma.h`).
+An overlapping stem computes `Z[q, (r, s, c)] = sum_k dY[q, k] * W[k, r, s, c]`
+for every dY pixel `q` that reaches the block's `out_h x out_w` dX tile (both
+multiples of the stride), stages `Z` in LDS as fp32 and overlap-adds it phase
+by phase (output row / column mod S, a compile-time tap list per phase) into a
+dX tile that one TDM transfer stores.
+
+Runtime (kernargs): batch, extents and the dY channel count. Build-time: the
+filter, stride, padding, the dX channel count, dtype and the tile geometry.
+Constraints: `kpg` a multiple of 8, every tensor below 2 GiB (i32 byte
+offsets), the ring and the staged tiles within the 320 KB LDS. The AOT grids
+are `DGRAD_PATCH_KNOBS` over `DGRAD_PATCH_SIZES` and `DGRAD_SMALLC_KNOBS` over
+`DGRAD_SMALLC_STEMS` (`kernels/conv/direct_aot_jobs.py`, variants
+`direct_dgrad_patch_wmma` / `direct_dgrad_smallc_wmma`).
+
+C++ engine twins: `cpp/instances/common/conv_dgrad_{patch,smallc}_wmma.cpp`
+(shared staging in `instance_conv_dgrad_stem_wmma_internal.hpp`); byte-identity
+gated by `library/tests/parity/conv_dgrad_{patch,smallc}_wmma_emit.{c,py}`
+(llvm23 lane), Python IR golden `conv_dgrad_{patch,smallc}_wmma/*` in
+`tests/instances/rocke_ir_parity_harness.py`, bindings
+`rocke_engine.conv_dgrad_{patch,smallc}_wmma_*` /
+`rocke.core.backend.lower_conv_dgrad_{patch,smallc}_wmma`.
+
+## Direct Dgrad on WMMA (gfx1250)
+
+`library/kernels/common/conv_direct_dgrad_wmma.py`, spec `DirectDgradWmmaSpec`,
+builder `build_direct_dgrad_wmma` (C++ twin `instance_conv_direct_dgrad_wmma.h`).
+A direct dgrad for gfx1250 (wave32, WMMA 16x16x32, TDM), dense and grouped:
+
+    dX[n, h, w, c] = sum_{r, s, k} dY[n, h + PAD - r, w + PAD - s, k] * W[k, r, s, c]
+
+A workgroup owns `block_c = waves_c * tiles_c * 16` dX channels of one group
+and `tile_n` images of `tile_h x tile_w` dX pixels (`waves_p * tiles_p * 16` in
+all). Its loop walks the group's dY channels in chunks of `ck` through an LDS
+ring of `stages` slots:
+
+- one 3-D TDM transfer per image stages the dY halo
+  `[tile_h + KH - 1][tile_w + KW - 1][ck]`, zero-filled past the image;
+- one 3-D TDM transfer stages the chunk's weights for every tap as `[tap][k][c]`;
+- each tap reads the weights transposed (`ds_read_tr16_b128`, the WMMA A
+  operand) and a window of the halo shifted by `(KH-1-r, KW-1-s)` (B), so there
+  is no weight pre-pass and no im2col.
+
+A wave holds `tiles_c x tiles_p` 16x16 accumulators. The epilogue stages the
+dX tile in LDS and stores it with one TDM transfer per image, clipped to the
+image and the group's channels. `prefetch` reads the next tap's fragments
+before the current tap's WMMAs; `sched` sets the machine-scheduler strategy.
+`tile_w` need not be a power of two (a tile can hold whole rows of a 24-, 28-,
+40- or 56-wide map); it must divide the block's pixel count.
+
+- **Stride 2** runs as a phase decomposition: output row `2 * i + a` collects
+  filter row `r` from dY row `i + delta(r)` for the one phase `a` with
+  `(a + PAD - r * dil) % 2 == 0`. A block tiles the phase grid, keeps one dY
+  halo for all four phases and one accumulator set per phase (four times the
+  accumulators of a stride-1 tile); taps that share a halo shift share their B
+  fragments, so the 2x2 / stride-2 patch merge reads one B fragment for all
+  four phases. The epilogue interleaves the phases in LDS and stores the dense
+  `2 * tile_h x 2 * tile_w` dX tile.
+- **Dilation** (per axis, stride 1) only moves each tap's halo shift; the halo
+  grows to `tile + (K - 1) * dil`.
+- **`pack_groups = G`** treats `G` consecutive groups as one super-group of
+  `G * cpg` dX and `G * kpg` dY channels (contiguous in NHWC). Its weights are
+  staged once, before the loop, as a block-diagonal matrix with zeros off the
+  diagonal; `cpg` and `kpg` are then baked into the binary.
+- **`split_barrier`** splits the per-chunk barrier into `s_barrier_signal` /
+  `s_barrier_wait`: a wave signals once it has read the chunk's last fragments
+  (and its next transfer has landed) and waits at the top of the next chunk.
+- **`wave_epilogue`** stages each wave's tiles in a private LDS region and
+  stores them with the wave's own TDM transfer, with no block barrier between
+  the staging and the store (each wave must own whole rows of one image).
+
+Runtime (kernargs): batch, extents, the group count and both channel counts.
+Build-time: filter, padding, stride, dilation, dtype and the tile geometry
+(plus `cpg` / `kpg` with `pack_groups > 1`). Constraints: stride 1 or 2, no
+dilation with stride 2, `PAD` in 0..(K-1)*dil, every tensor below 2 GiB (i32
+byte offsets), `pack_groups * cpg` and `pack_groups * kpg` multiples of 8
+(`pack_groups > 1` needs `cpg`, `kpg` in 2/4/8/16, `pack_groups * kpg <= ck`
+and `pack_groups * cpg <= block_c`), `split_barrier` / `wave_epilogue` on
+stride-1 unpacked tiles only, and the ring and the staged dX tile within the
+320 KB LDS. The AOT grid is `DGRAD_WMMA_KNOBS` plus `DGRAD_WMMA_SB_KNOBS`
+(split barrier), `DGRAD_WMMA_PACKED_KNOBS`, `DGRAD_WMMA_STRIDED_KNOBS`,
+`DGRAD_WMMA_PATCH2_KNOBS` and `DGRAD_WMMA_DILATED_KNOBS`
+(`kernels/conv/direct_aot_jobs.py`, variant `direct_dgrad_wmma`). The C++ twin
+covers every knob; the byte-identity gate is
+`library/tests/parity/conv_direct_dgrad_wmma_emit.{c,py}` (llvm23 lane).
+
+## Direct Forward on WMMA (gfx1250)
+
+`library/kernels/common/conv_direct_fwd_wmma.py`, spec `DirectFwdWmmaSpec`,
+builder `build_direct_fwd_wmma` (C++ twin `instance_conv_direct_fwd_wmma.h`).
+The forward counterpart of the WMMA dgrad, dense and grouped:
+
+    Y[n, p, q, k] = sum_{r, s, c} X[n, S*p + r*dh - PAD, S*q + s*dw - PAD, c] * W[k, r, s, c]
+
+A workgroup owns `block_k = waves_k * tiles_k * 16` output channels of one
+group and `tile_n` images of `tile_h x tile_w` output pixels
+(`waves_p * tiles_p * 16` in all). Its loop walks the group's input channels
+in chunks of `ck` through an LDS ring of `stages` slots: one 3-D TDM transfer
+per image stages the X halo (`S * (tile - 1) + (K - 1) * dil + 1` rows and
+columns, zero-filled past the image) and one stages the chunk's weights. Every
+tap reads a shifted window of the halo (no im2col); the Y tile is staged in
+LDS and stored with TDM.
+
+Knobs beyond the tile geometry (`prefetch`, `sched` as in the dgrad):
+
+- `pack_groups` packs `G` small groups (`cpg`, `kpg` in 2..16) into one
+  block-diagonal super-group; it bakes `cpg` and `kpg`.
+- `split_barrier` splits the per-chunk barrier into signal / wait;
+  `wave_epilogue` stores each wave's tiles with its own TDM transfer.
+- `phase_split` (stride 2) keeps the even and odd input columns in two
+  sub-halos so B fragments read consecutive LDS rows.
+- `row_ring` / `tap_ring` stage the weights one filter row / one tap per
+  ring slot, for wider tiles and deeper chunks.
+- `pingpong` (with `pp_group` steps per phase) runs the waves as two ranks
+  one barrier apart, so one reads LDS while the other multiplies.
+- `tap_reuse` reuses B fragments across filter rows (whole output rows per
+  wave); `tap_shift` builds the next filter column's fragments with an
+  in-wave lane rotation (`v_permlane16`).
+
+Runtime (kernargs): batch, extents, the group count and both channel counts
+(unless packed). Build-time: filter (square), stride 1 or 2, per-axis
+dilation, `PAD` in 0..(K-1)*dil, dtype and the tile geometry. Constraints:
+`cpg` and `kpg` (after packing) multiples of 8, `ck` a multiple of 32, every
+tensor below 2 GiB (i32 byte offsets), and the ring and the staged Y tile
+within the LDS. The AOT grid is `FWD_WMMA_*_KNOBS` (variant
+`direct_fwd_wmma`), filtered per problem by tile efficiency.
+
+### Tiny channel counts (`FwdSmallcWmmaSpec`, `FwdSmallkWmmaSpec`)
+
+`library/kernels/common/conv_fwd_small_wmma.py` (C++ twin
+`instance_conv_fwd_small_wmma.h`) serves the ungrouped, undilated forward
+layers where implicit GEMM leaves most of every WMMA tile empty:
+
+- `build_fwd_smallc_wmma` -- `C <= 4` input channels (stems). The reduction
+  `(r, s, c)` is flattened over the whole filter, so a 3x3x3 stem is one
+  16x16x32 WMMA step. A block stages its output tile's input window with one
+  2-D TDM transfer and each lane gathers its im2col fragment from it; the
+  weights stay in registers for the `tiles_per_block` tiles a block walks
+  (double-buffered window). `tdm_store` stores the output tile through LDS
+  with one TDM transfer. `K` must be a multiple of 8.
+- `build_fwd_smallk_wmma` -- `K` in (1, 2, 4, 8) output channels. A 1x1 GEMM
+  over the window's input pixels with the taps and output channels as its M
+  dimension (`Z[q, (r, s, k)]`), then the overlap-add into `Y` in fp32 LDS;
+  input channel chunks of `ck` stream through a TDM ring of `stages` slots.
+  `C` must be a multiple of 8.
+
+Both: square filters, `PAD` in 0..K-1, every tensor below 2 GiB. Batch,
+extents and the other channel count are kernargs; the filter, stride,
+padding, the small channel count and the tile geometry are baked. The AOT
+grid is `FWD_SMALLC_KNOBS` over `FWD_SMALLC_STEMS` (3x3, 7x7 / stride 2 and
+the 4x4, 14x14 and 16x16 patch-embedding stems) and `FWD_SMALLK_KNOBS` over
+`FWD_SMALLK_LAYERS` (variants `direct_fwd_smallc_wmma` /
+`direct_fwd_smallk_wmma`).
+
+## Winograd Forward (gfx1250)
+
+`library/kernels/common/conv_winograd_*.py` (C++ twins
+`instance_conv_winograd_{fwd,gemm_wmma,gen,fused_1d_wmma}.h`). A stride-1, 2-D
+forward convolution computed as Winograd `F(m, r)` per axis, with fp16 / bf16
+I/O and fp16 GEMM operands (bf16 operands only for `F(2x2, 3x3)` with bf16
+I/O). Three implementations:
+
+- **Unfused 3x3** (`conv_winograd_fwd` + `conv_winograd_gemm_wmma`), output
+  tile `mh x mw` with `mh, mw` in {2, 4, 6}:
+  - K1 filter transform `w KYXC -> U [bin][K][C/g]`;
+  - K2 input transform `x NHWC -> V [tile][bin][C]` (register path, or an
+    LDS region of `bh x bw` tiles per workgroup); dilation runs as
+    `dH * dW` independent sub-grids. On the register path a run of
+    `tiles_per_thread` tiles keeps its whole input patch in VGPRs, so
+    explicit specs with long runs of large tiles spill to scratch on gfx1250
+    (F4: from 2 tiles at `vec` 8, from 4 at `vec` 4; F(6x4), F(4x6), F6:
+    from 2 or 3). They stay legal (slower, not wrong); the dispatcher's
+    knobs (`tuned_transform_options`) use one tile per thread on the
+    register path and longer runs only on the LDS path, which does not spill;
+  - K3 batched GEMM over the `bins * groups` independent GEMMs
+    (`WinogradGemmWmmaSpec`: TDM operand ring in LDS, WMMA 16x16x32, TDM or
+    direct epilogue, optional split-K with `build_winograd_gemm_reduce`);
+  - K4 output transform `M -> y`.
+  bf16 I/O with tiles of 4 or more runs a per-tile power-of-two prescale
+  (`e[tile]`, fused into K2 or as a separate max pass K2a; K4 undoes it).
+  K1 and the first input-transform stage can run as one merged launch
+  (`WinogradMergedSpec`). Problems past the 32-bit buffer offsets run as
+  batch chunks sharing U.
+- **Generalized** (`conv_winograd_gen` + K3 with `taps`): any `F(m, r)` per
+  axis (1-D `1 x r` / `r x 1`, 5x5), and segmented long filters: `S`
+  segments of `F(m, m)` share one input transform and K3 sums
+  `V[t + s] U[s]` over the segments.
+- **Fused 1-D** (`conv_winograd_fused_1d_wmma`, `1 x r`, `H = 1`, fp16):
+  the generalized K1 writes U, then one persistent kernel keeps a block of
+  transformed weights in registers and runs input transform, per-bin WMMA
+  GEMMs and output transform per tile block through LDS (optional async
+  prefetch of the next raw block and merged phases).
+
+The transforms use exact Toom-Cook matrices (`toom_cook_gen`, default
+interpolation points per `F(m, r)`), applied in fp32. Every transform load
+and store goes through a buffer resource; padding, dilation holes and tails
+read zero / drop the store, so the kernels have no bounds branches. The
+transform kernels bake the problem extents in; K3 takes them as kernargs.
+
+**Plan selection.** `conv_winograd_select.select_winograd(problem, dtype,
+model=WinogradCostModel(num_cus=...))` returns the safe plan of lowest model
+cost: the kind, tile or variant, a K3 configuration and the batch split.
+Eligibility: stride 1, 2-D, not 1x1, `C/g` and `K/g` >= 32, dilation up to
+35. Plans over the fp16 error budget (F(6x6, 3x3), several single-segment
+long-filter transforms) are never offered. The cost model is analytic
+(roofline terms in byte equivalents with nominal ratios); it ranks plans and
+predicts no time.
+
+**Dispatch.** The grouped-convolution dispatcher registers one opt-in forward
+candidate, `conv_winograd_fwd` (`algorithm="winograd"`, gfx1250): pinning the
+algorithm selects the selector's plan, and the sweep entry points list every
+safe plan. `algorithm="auto"` never picks it. Plans are admitted only at an
+LLVM flavor all their kernels lower at (`ConvGroupedRequest.llvm_flavor`): the
+K3 GEMM lowers at `llvm23` only, so at `llvm20` / `llvm22` the unfused plans
+are refused and only the fused 1-D plans remain. `launch_plan_for` returns the
+plan's `ConvLaunchPlan`: one step per kernel (each built for the problem,
+kernargs named per step) over the buffers `x`, `w`, `y` and the workspaces
+`U`, `V`, `M` (and `e`).
+
 ## Direct Wgrad Kernels
 
 Sources: `library/kernels/common/conv_direct_wgrad_tiled.py`,
-`conv_direct_dw_wgrad.py`, `conv_direct_wgrad_gather.py`. Weight-gradient
+`conv_direct_dw_wgrad.py`, `conv_direct_wgrad_gather.py`,
+`conv_direct_dw_wgrad_mfma.py`, `conv_direct_grouped_wgrad_mfma.py`. Weight-gradient
 kernels of the direct-conv AOT sweep (`--directions wgrad`), gfx950; all take
 the `conv_direct_arg_names("wgrad")` kernargs (dY on A, X on B) and accumulate
 in fp32.
@@ -1045,6 +1396,8 @@ in fp32.
 | `DwWgradLdsSpec` | depthwise, `C % 8 == 0`, 3x3, stride 1/2 | partial slots `ws[part][tap][c]` |
 | `DwWgradColsSpec` | depthwise, `C <= 8` (stem layers), any filter | partial slots `ws[part][tap][c]` |
 | `WgradGatherSpec` | dense, small `C` (`KW * C <= 96`), any stride | partial slots `ws[part][(r, s, c)][k]` |
+| `DwWgradMfmaSpec` | depthwise, `C % 8 == 0`, any filter, stride 1 | partial slots `ws[part][tap][c]` |
+| `GroupedWgradMfmaSpec` | grouped, `cpg = kpg` in (4, 8), stride 1 | partial slots `ws[part][(r, s, c)][k]` |
 | `DwWgradFoldSpec` | the fold after a partial-slot pass | `dW` written whole (no zeroing) |
 
 - **Tiled.** A wave owns `wave_k16*16 x wave_c16*16` channels for all taps;
@@ -1059,9 +1412,26 @@ in fp32.
   `DwWgradFoldSpec` sums the partitions. In the sweep they are two-step plans:
   the pass writes the scratch `ws`, the fold reads it (kernargs `A, D, A_bytes,
   D_bytes, parts, channels`).
-- All four row-streaming kernels set the kernel attr `lds_alias_scopes`: every
-  smem allocation gets its own alias scope, so the waitcnt pass does not drain
-  the in-flight LDS DMA before each `ds_read`.
+- **Batched 4x4x4 MFMA.** `mfma_f32_4x4x4_{f16,bf16}` runs 16 independent
+  4x4x4 products per wave. `DwWgradMfmaSpec` gives each batch one channel: per
+  input row and 4-column group, `A[s][k] = X[y][q0 + k + s - PAD]` (a Hankel
+  window: the four lanes of a channel read a quarter each of its channel-major
+  LDS row, share it with `quad_perm`, and build every A fragment with two
+  `v_perm_b32`, the lane's tap shift being its byte selector) times
+  `B[k][r] = dY[y + PAD - r][q0 + k]` from a register ring rotated one row per
+  step. Rows arrive by LDS DMA in NHWC order and are transposed channel-major
+  with `ds_read_b64_tr_b16`. `unfold_n` packs small images side by side in one
+  column tile (pitch `max(Wo, Wo + KW - 1 - PAD, PAD + W)`, shared zero
+  padding); when a unit is a whole image the prologue stages only PAD dY rows.
+  `GroupedWgradMfmaSpec` gives each batch one 4-channel group and reads both
+  operands straight from the staged NHWC rows (the tap shift is a row offset of
+  the transpose-read addresses); `cpg = 8` adds a dY read with the group's
+  halves swapped for the off-diagonal blocks.
+- All the row-streaming kernels set the kernel attr `lds_alias_scopes`: every
+  smem allocation gets its own alias scope, and the LDS DMA, the transpose
+  reads and the vector LDS loads/stores (`smem_load_vN` / `smem_store_vN`) are
+  tagged with it, so the waitcnt pass does not drain the in-flight LDS DMA
+  before each LDS access.
 - The validators gate on `lds_bytes()`, which counts what the builder
   allocates: ring slots rounded up to whole DMA instructions of every wave
   (plus the gather's 16-element transpose tail) and the reduction buffers.
@@ -1071,8 +1441,10 @@ in fp32.
 C++ engine twins: `rocke_build_direct_wgrad_tiled` (`cpp/instances/common/conv_direct_wgrad_tiled.cpp`,
 also `rocke_direct_wgrad_pick_swizzle`), `rocke_build_dw_wgrad_{fold,cols,lds}`
 (`conv_direct_dw_wgrad.cpp`), `rocke_build_direct_wgrad_gather`
-(`conv_direct_wgrad_gather.cpp`); byte-identity gated by
-`library/tests/parity/conv_direct_grouped_emit.{c,py}` (configs 95+), Python IR
+(`conv_direct_wgrad_gather.cpp`), `rocke_build_dw_wgrad_mfma`
+(`conv_direct_dw_wgrad_mfma.cpp`), `rocke_build_grouped_wgrad_mfma`
+(`conv_direct_grouped_wgrad_mfma.cpp`); byte-identity gated by
+`library/tests/parity/conv_direct_grouped_emit.{c,py}` (configs 114+), Python IR
 golden `conv_direct_wgrad/*` in `tests/instances/rocke_ir_parity_harness.py`.
 On-GPU numeric coverage: `TestDirectWgradAotKernelsCorrectness` in
 `library/tests/test_direct_conv_correctness.py` (built on the cache probe,
