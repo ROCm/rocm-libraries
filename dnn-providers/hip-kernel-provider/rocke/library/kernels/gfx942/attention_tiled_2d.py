@@ -1096,10 +1096,10 @@ def supports_tiled_2d(
         )
     if dtype not in ("fp16", "bf16"):
         return False, f"tiled 2D kernel currently supports fp16/bf16 (got {dtype!r})"
-    if head_size not in (64, 128, 256):
+    if head_size not in (64, 128, 192, 256):
         return (
             False,
-            f"tiled 2D kernel only supports head_size in {{64,128,256}} (got {head_size})",
+            f"tiled 2D kernel only supports head_size in {{64,128,192,256}} (got {head_size})",
         )
     if head_size % 32 != 0:
         return (
@@ -5749,16 +5749,13 @@ def build_unified_attention_2d_tiled(
 # standalone (experiments/d256_4warp_gqa/build_e2e_T3_ragged_bf16o.py): parity+
 # with AITER at Sq4096/8192. Wired for the ``_d256_gfx942_fast`` cohort only.
 _4WGQA_LOG2E = 1.4426950408889634
-# Head size the lean natural-QK body is written and GPU-validated for. Most
-# head-dim extents derive from ``spec.head_size`` (``NK``, ``NDdim``, ``V_lds``),
-# but the V-staging loop's per-thread stride is hardwired to the 256-wide row
-# (``BN*HD/256 == 64`` elems/thread), so a different head size would compute wrong
-# offsets -- a real limit of the lean body, not merely a validation gate. Other
-# head sizes are served by the general 4-warp body (``build_gfx942_4warp_gqa``,
-# whose V-fill derives the stride from ``BN*HD``, e.g. D128) and the default tiled
-# builder. Widening the lean body needs the staging generalized AND end-to-end GPU
-# validation, then a golden re-bless.
-_4WGQA_LEAN_HEAD_SIZE = 256
+# Head sizes the lean natural-QK body serves. Every head-dim extent derives from
+# ``spec.head_size`` (``NK``, ``NDdim``, ``V_lds`` and the V-staging per-thread
+# stride ``BN*HD/256``). D192 runs here too: the general 4-warp body
+# (``build_gfx942_4warp_gqa``) spills past the 256-VGPR budget at D192, while the
+# lean body keeps Q streamed from global and fits. Other head sizes (e.g. D128)
+# are served by the general 4-warp body and the default tiled builder.
+_4WGQA_LEAN_HEAD_SIZES = (192, 256)
 
 
 def _online_softmax_rescale(
@@ -5808,10 +5805,10 @@ def _build_gfx942_4warp_gqa_lean(
         raise NotImplementedError("4-warp GQA kernel is bf16-only")
     dtype = spec.dtype_ir
     HD = spec.head_size
-    if HD != _4WGQA_LEAN_HEAD_SIZE:
+    if HD not in _4WGQA_LEAN_HEAD_SIZES:
         raise NotImplementedError(
-            f"4-warp GQA lean body is validated for head_size="
-            f"{_4WGQA_LEAN_HEAD_SIZE} only"
+            f"4-warp GQA lean body is validated for head_size in "
+            f"{_4WGQA_LEAN_HEAD_SIZES} only"
         )
     if spec.sliding_window:
         raise NotImplementedError(
@@ -5822,13 +5819,14 @@ def _build_gfx942_4warp_gqa_lean(
     GQAG = spec.num_queries_per_kv
     BS = spec.block_size
     BN = 64  # 4-warp: 64-key tiles
-    BPT = BN // BS
     at = MfmaAtom.bf16_32x32x8()
     APL, BPL, CPL, K = at.a_per_lane, at.b_per_lane, at.c_per_lane, at.k
     NKEYT = BN // 32
     NK = HD // K
     NDdim = HD // 32
     NKpv = BN // K
+    # V-fill: elements per thread (256 = 4 wave64 threads), 8-wide loads.
+    v_fill_epw = (BN * HD) // 256
     ITERS = spec.binary_search_iters
 
     b = IRBuilder(spec.kernel_name() + "_4wgqa")
@@ -5898,13 +5896,21 @@ def _build_gfx942_4warp_gqa_lean(
         "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
     )
 
+    # Every K/V key is bounded by the last valid key and every Q row by the last
+    # token of its sequence: the 64-key tiles and 128-row Q block otherwise read
+    # block-table entries, K/V rows and Q rows past the sequence when its length
+    # is not a tile multiple (an unbounded block-table read returns an arbitrary
+    # page id, so the K/V load faults). Clamped keys are masked to -inf (P = 0)
+    # and clamped rows are never stored, so only the addresses change.
+    k_last = b.sub(klen, b.const_i32(1))
+    q_last = b.sub(cu_q_stop, b.const_i32(1))
+
     def phys_key(kv, keytile):
-        lblk = b.add(
-            b.mul(sid, bt_stride_p),
-            b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS))),
-        )
+        key = b.add(b.mul(kv, b.const_i32(BN)), keytile)
+        key = b.select(b.cmp_lt(key, k_last), key, k_last)
+        lblk = b.add(b.mul(sid, bt_stride_p), b.div(key, b.const_i32(BS)))
         pb = b.global_load_i32(BT, lblk)
-        return b.add(b.mul(pb, b.const_i32(BS)), b.mod(keytile, b.const_i32(BS)))
+        return b.add(b.mul(pb, b.const_i32(BS)), b.mod(key, b.const_i32(BS)))
 
     sc = b.fmul(scale_p, b.const_f32(_4WGQA_LOG2E))
     ninf = b.const_f32(-1e30)
@@ -5929,8 +5935,8 @@ def _build_gfx942_4warp_gqa_lean(
         l_old = carry[1]
         accs = list(carry[2:])
         b.sync()  # WAR: prev iter's PV reads of V_lds must finish before this tile overwrites it
-        for c in range(8):
-            lin = b.add(b.mul(tid, b.const_i32(64)), b.const_i32(c * 8))
+        for c in range(v_fill_epw // 8):
+            lin = b.add(b.mul(tid, b.const_i32(v_fill_epw)), b.const_i32(c * 8))
             key = b.div(lin, b.const_i32(HD))
             hd = b.mod(lin, b.const_i32(HD))
             pk = phys_key(kv, key)
@@ -5951,6 +5957,7 @@ def _build_gfx942_4warp_gqa_lean(
                 b.mul(b.const_i32(h), b.const_i32(K)), b.mul(ld.k_blk, b.const_i32(APL))
             )
             q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
+            q_tok = b.select(b.cmp_lt(q_tok, q_last), q_tok, q_last)
             q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
             q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
             for kt in range(NKEYT):
@@ -6068,9 +6075,11 @@ def build_gfx942_4warp_gqa(
         raise NotImplementedError("4-warp GQA kernel supports dtype in {bf16, fp16}")
     dtype = spec.dtype_ir
     HD = spec.head_size
-    if HD not in (128, 256):
-        raise NotImplementedError("4-warp GQA kernel supports head_size in {128, 256}")
-    if HD == _4WGQA_LEAN_HEAD_SIZE:
+    if HD not in (128, 192, 256):
+        raise NotImplementedError(
+            "4-warp GQA kernel supports head_size in {128, 192, 256}"
+        )
+    if HD in _4WGQA_LEAN_HEAD_SIZES:
         return _build_gfx942_4warp_gqa_lean(spec, arch=arch)
     H = spec.num_query_heads
     HKV = spec.num_kv_heads
