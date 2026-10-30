@@ -12,6 +12,7 @@
 
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
@@ -810,6 +811,11 @@ void SdpaFwdPlanBuilder::buildPlan(
             "SdpaFwdPlanBuilder::buildPlan: failed to load kernel tocKey='" + tocKey + "' arch='"
                 + deviceString + "'");
     }
+
+    // One line per built plan: the kernel it launches. The integration harness reads it (the
+    // format is fixed: "kernel: <engine> <kernel>").
+    HIPDNN_PLUGIN_LOG_INFO("kernel: " << hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME << ' '
+                                      << config.knl_name);
 
     executionContext.setPlan(std::make_unique<SdpaFwdPlan>(std::move(kernel), params));
 }

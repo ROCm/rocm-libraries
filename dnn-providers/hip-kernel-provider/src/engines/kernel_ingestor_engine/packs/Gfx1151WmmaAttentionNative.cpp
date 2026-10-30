@@ -27,6 +27,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
@@ -1481,6 +1482,11 @@ void requireRowAligned(const void* pointer, const char* name)
     }
 }
 
+/// The engine names of the two ued.json descriptors this pack serves; the kernel lines the
+/// pack logs carry them.
+constexpr std::string_view PREFILL_ENGINE_NAME = "hipkernel:Gfx1151WmmaAttention";
+constexpr std::string_view DECODE_ENGINE_NAME = "hipkernel:Gfx1151WmmaAttentionDecode";
+
 class Gfx1151WmmaAttentionDispatchHandler : public IKernelDispatchHandler<Handle>
 {
 public:
@@ -1543,6 +1549,7 @@ public:
             requireLaunchRange(grid, I32_MAX, "prefill grid");
             code.setBlockSize(static_cast<uint32_t>(traits.blockSize), 1, 1);
             code.setGridSize(static_cast<uint32_t>(grid), 1, 1);
+            logSelectedKernel(kernel);
             return std::make_unique<PreparedGfx1151WmmaAttention>(
                 std::move(code), std::nullopt, false, DecodePlan{}, binding, arguments);
         }
@@ -1565,6 +1572,7 @@ public:
         auto merge = buildIngestorKernelCode(_kpackLoader, context, mergeKernel, mergeSignature());
         merge.setBlockSize(MERGE_THREADS, 1, 1);
         merge.setGridSize(static_cast<uint32_t>(plan.mergeGrid), 1, 1);
+        logSelectedKernel(kernel);
         return std::make_unique<PreparedGfx1151WmmaAttention>(
             std::move(code), std::move(merge), true, plan, binding, arguments);
     }
@@ -1751,6 +1759,15 @@ public:
     }
 
 private:
+    /// One line per prepared dispatch: the kernel it launches. The integration harness reads
+    /// it (the format is fixed: "kernel: <engine> <kernel>").
+    void logSelectedKernel(const KernelDefinition& kernel) const
+    {
+        HIPDNN_PLUGIN_LOG_INFO("kernel: " << (_decode ? DECODE_ENGINE_NAME : PREFILL_ENGINE_NAME)
+                                          << ' ' << kernel.name << '/'
+                                          << toString(kernel.kernelId));
+    }
+
     /// The traits of @p kernel, which must be of this handler's engine: the state
     /// manager's launch-name check keeps the other engine's kernels out, and this is the
     /// same guard on the metadata.

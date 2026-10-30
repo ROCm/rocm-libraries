@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <fstream>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <stdexcept>
 
@@ -409,6 +410,12 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
             throw std::runtime_error(msg);
         }
     }
+
+    // One line per built plan, after every check above: the kernel this plan launches. The
+    // integration harness reads it (the format is fixed: "kernel: <engine> <kernel>").
+    HIPDNN_PLUGIN_LOG_INFO("kernel: "
+                           << hipdnn_data_sdk::utilities::HIP_FLASH2_ENGINE_NAME << ' ' << funcName
+                           << '/' << (params.variantTag.empty() ? "legacy" : params.variantTag));
 
     executionContext.setPlan(
         std::make_unique<HipFlash2FwdPlan>(std::move(*kernelOpt), std::move(params)));

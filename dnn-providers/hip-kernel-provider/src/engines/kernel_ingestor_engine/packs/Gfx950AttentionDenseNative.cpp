@@ -1172,10 +1172,17 @@ public:
         const auto* k = findTensor(context, binding.k);
         const auto problem = problemFor(*q, *k);
 
-        return makePreparedGfx950AttentionDense(
+        const std::string kernelName = toString(kernel.kernelId);
+        auto prepared = makePreparedGfx950AttentionDense(
             std::move(code),
             Gfx950AttentionDenseLaunchInputs{binding, problem, tile->blockM},
-            toString(kernel.kernelId));
+            kernelName);
+
+        // One line per prepared dispatch: the kernel it launches. The integration harness
+        // reads it (the format is fixed: "kernel: <engine> <kernel>").
+        HIPDNN_PLUGIN_LOG_INFO("kernel: " << GFX950_ATTENTION_DENSE_ENGINE_NAME << ' '
+                                          << kernel.name << '/' << kernelName);
+        return prepared;
     }
 
     std::unique_ptr<PreparedDispatch> restoreLaunch(const SavedLaunchInputs& inputs,

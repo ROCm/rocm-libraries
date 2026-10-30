@@ -16,6 +16,7 @@
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
@@ -1162,6 +1163,11 @@ void SdpaBwdPlanBuilder::buildPlan(
             "SdpaBwdPlanBuilder::buildPlan: failed to load dqdkdv kernel tocKey='"
                 + dqdkdvResolved.tocKey + "' arch='" + deviceString + "'");
     }
+
+    // One line per built plan: the main kernel (dq/dk/dv), not the helper stages. The
+    // integration harness reads it (the format is fixed: "kernel: <engine> <kernel>").
+    HIPDNN_PLUGIN_LOG_INFO("kernel: " << hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME << ' '
+                                      << dqdkdvResolved.knlName);
 
     std::optional<CachedModule> postKernel;
     if(dqConvertResolved)
