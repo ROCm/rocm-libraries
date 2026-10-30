@@ -21,6 +21,7 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -3092,6 +3093,40 @@ namespace
             m_stream = stream;
         }
 
+        /**
+         * A, B and C filled with one fp16 value and D cleared, so a launch
+         * writes a D whose every element is known (see outputIs()).
+         */
+        bool fillInputs(uint16_t half)
+        {
+            const size_t elementsA = static_cast<size_t>(m_m * kOnlineK) * kOnlineBatch;
+            const size_t elementsB = static_cast<size_t>(kOnlineK * kOnlineN) * kOnlineBatch;
+            const size_t elementsC = static_cast<size_t>(m_m * kOnlineN) * kOnlineBatch;
+
+            return hipMemsetD16(static_cast<hipDeviceptr_t>(m_a), half, elementsA) == hipSuccess
+                   && hipMemsetD16(static_cast<hipDeviceptr_t>(m_b), half, elementsB) == hipSuccess
+                   && hipMemsetD16(static_cast<hipDeviceptr_t>(m_c), half, elementsC) == hipSuccess
+                   && clearOutput();
+        }
+
+        bool clearOutput()
+        {
+            const size_t bytes
+                = static_cast<size_t>(m_m * kOnlineN) * kOnlineBatch * sizeof(uint16_t);
+            return hipMemset(m_d, 0, bytes) == hipSuccess && hipDeviceSynchronize() == hipSuccess;
+        }
+
+        /** Whether every element of D holds the fp16 value half. */
+        bool outputIs(uint16_t half)
+        {
+            std::vector<uint16_t> host(static_cast<size_t>(m_m * kOnlineN) * kOnlineBatch);
+            if(hipMemcpy(host.data(), m_d, host.size() * sizeof(uint16_t), hipMemcpyDeviceToHost)
+               != hipSuccess)
+                return false;
+
+            return std::all_of(host.begin(), host.end(), [half](uint16_t v) { return v == half; });
+        }
+
         /** The heuristic's first answer, as an application holding it would. */
         bool firstHeuristicAlgo(hipblasLtMatmulAlgo_t* algo)
         {
@@ -4074,5 +4109,144 @@ namespace
             else
                 unsetenv(name.c_str());
         }
+    }
+
+    // fp16 one, and the fp16 value every element of D holds when A and B are
+    // all ones: the length of the reduction, kOnlineK.
+    constexpr uint16_t kHalfOne       = 0x3C00;
+    constexpr uint16_t kHalfReduction = 0x6400;
+    static_assert(kOnlineK == 1024, "kHalfReduction is fp16 1024");
+
+    // A few eager calls of a shape and then a capture of the same call into a
+    // HIP graph, in the global capture mode HIP and most frameworks default to.
+    // Online is still exploring the shape when the capture starts, with
+    // launches outstanding, and reading those back must not invalidate the
+    // capture: the captured call succeeds, the capture ends with a graph, and
+    // the graph computes the GEMM. Run part way through exploration and at the
+    // visit that completes it.
+    TEST_F(TuningOnline_pre_checkin, CapturingAShapeStillBeingExploredLeavesTheGraphValid)
+    {
+        OnlineProblem problem(/*pointerArray=*/false);
+        ASSERT_TRUE(problem.create());
+
+        if(problem.distinctCandidates(kOnlineTopK) < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        hipStream_t stream = nullptr;
+        ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+        problem.setStream(stream);
+        ASSERT_TRUE(problem.fillInputs(kHalfOne));
+
+        for(const int eager : {3, kOnlineTopK * kOnlineRepeats})
+        {
+            SCOPED_TRACE("eager calls before the capture: " + std::to_string(eager));
+
+            std::remove(m_path.c_str());
+            enterOnline(m_path);
+
+            for(int visit = 0; visit < eager; visit++)
+                ASSERT_TRUE(problem.dispatch(nullptr)) << "eager call " << visit;
+            ASSERT_TRUE(problem.clearOutput());
+
+            ASSERT_EQ(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal), hipSuccess);
+            const bool       captured = problem.dispatch(nullptr, nullptr, /*synchronize=*/false);
+            hipGraph_t       graph    = nullptr;
+            const hipError_t ended    = hipStreamEndCapture(stream, &graph);
+            const hipError_t left     = hipGetLastError();
+
+            EXPECT_TRUE(captured) << "the captured hipblasLtMatmul failed";
+            EXPECT_EQ(ended, hipSuccess) << hipGetErrorName(ended);
+            EXPECT_EQ(left, hipSuccess) << hipGetErrorName(left);
+            ASSERT_NE(graph, nullptr) << "the capture produced no graph";
+
+            hipGraphExec_t exec = nullptr;
+            EXPECT_EQ(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0), hipSuccess);
+            if(exec)
+            {
+                EXPECT_EQ(hipGraphLaunch(exec, stream), hipSuccess);
+                EXPECT_EQ(hipStreamSynchronize(stream), hipSuccess);
+                EXPECT_TRUE(problem.outputIs(kHalfReduction))
+                    << "the graph did not compute the GEMM it captured";
+                static_cast<void>(hipGraphExecDestroy(exec));
+            }
+            static_cast<void>(hipGraphDestroy(graph));
+        }
+
+        static_cast<void>(hipStreamDestroy(stream));
+    }
+
+    // The same reading back, done by an ordinary uncaptured call on one thread
+    // while another thread holds a global-mode capture open on a stream of its
+    // own. Global mode is process-wide, so this is reachable by any
+    // multithreaded application that captures graphs.
+    TEST_F(TuningOnline_pre_checkin, AnExploringCallDoesNotInvalidateAnotherThreadsCapture)
+    {
+        OnlineProblem problem(/*pointerArray=*/false);
+        ASSERT_TRUE(problem.create());
+
+        if(problem.distinctCandidates(kOnlineTopK) < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        hipStream_t mine   = nullptr;
+        hipStream_t theirs = nullptr;
+        void*       target = nullptr;
+        ASSERT_EQ(hipStreamCreate(&mine), hipSuccess);
+        ASSERT_EQ(hipStreamCreate(&theirs), hipSuccess);
+        ASSERT_EQ(hipMalloc(&target, 4096), hipSuccess);
+        problem.setStream(mine);
+
+        enterOnline(m_path);
+
+        // Leaves a launch outstanding, so the next call reads one back.
+        for(int visit = 0; visit < 3; visit++)
+            ASSERT_TRUE(problem.dispatch(nullptr)) << "eager call " << visit;
+
+        // Both waits are bounded, so a dispatch that hangs fails the case
+        // instead of the suite.
+        constexpr int    kWaits = 3000;
+        std::atomic<int> phase{0};
+        hipError_t       began = hipErrorUnknown;
+        hipError_t       ended = hipErrorUnknown;
+        hipGraph_t       graph = nullptr;
+
+        std::thread capturer([&] {
+            began = hipStreamBeginCapture(theirs, hipStreamCaptureModeGlobal);
+            if(began == hipSuccess)
+                static_cast<void>(hipMemsetAsync(target, 0, 4096, theirs));
+            phase = 1;
+            for(int wait = 0; wait < kWaits && phase.load() != 2; wait++)
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            ended = hipStreamEndCapture(theirs, &graph);
+        });
+
+        for(int wait = 0; wait < kWaits && phase.load() != 1; wait++)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+        const bool dispatched = problem.dispatch(nullptr, nullptr, /*synchronize=*/false);
+        phase                 = 2;
+        capturer.join();
+
+        EXPECT_TRUE(dispatched) << "the uncaptured hipblasLtMatmul failed";
+        EXPECT_EQ(hipStreamSynchronize(mine), hipSuccess);
+        EXPECT_EQ(began, hipSuccess) << hipGetErrorName(began);
+        EXPECT_EQ(ended, hipSuccess) << "the other thread's capture: " << hipGetErrorName(ended);
+        EXPECT_NE(graph, nullptr);
+
+        if(graph)
+        {
+            hipGraphExec_t exec = nullptr;
+            EXPECT_EQ(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0), hipSuccess);
+            if(exec)
+            {
+                EXPECT_EQ(hipGraphLaunch(exec, theirs), hipSuccess);
+                EXPECT_EQ(hipStreamSynchronize(theirs), hipSuccess);
+                static_cast<void>(hipGraphExecDestroy(exec));
+            }
+            static_cast<void>(hipGraphDestroy(graph));
+        }
+
+        static_cast<void>(hipFree(target));
+        static_cast<void>(hipStreamDestroy(theirs));
+        static_cast<void>(hipStreamDestroy(mine));
     }
 } // namespace

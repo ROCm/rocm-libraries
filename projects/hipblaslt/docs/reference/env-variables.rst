@@ -119,6 +119,11 @@ is tuned online:
 * The ``hipblaslt_ext`` GEMM and grouped GEMM interfaces, and pointer-array batched problems, are
   not tuned online.
 
+A ``hipblasLtMatmul`` call captured into a HIP graph is never explored or timed. The graph gets the
+winner ``online`` has already measured for the problem, if there is one, and otherwise the usual
+ranked first choice. Calls that are still exploring, on the capturing thread or any other, leave a
+capture in progress valid in every capture mode.
+
 With ``HIPBLASLT_LOG_LEVEL=4`` or higher, or ``HIPBLASLT_LOG_MASK`` including ``8``, the first
 ``hipblasLtMatmulAlgoGetHeuristic`` call and the first ``hipblasLtMatmul`` call with a supplied
 algorithm in a process each log one ``online-not-tuned`` line saying that the call is not tuned.

@@ -459,13 +459,33 @@ namespace rocblaslt
     // has not reached, does not stick. Anything else it might still return is
     // this library's to clear -- but only when the thread had no error before
     // the call, since one that was already there is the caller's.
+    //
+    // hipEventQuery is the one call here that HIP refuses while a stream
+    // capture in global mode is in progress anywhere in the process, and the
+    // refusal invalidates that capture: the caller's own, when this call is
+    // being captured, or another thread's. Nothing this queries was recorded
+    // into a capture -- beginMeasurement() is never reached for a capturing
+    // stream -- so the query is safe, and it runs with this thread's capture
+    // mode exchanged to relaxed, which tells HIP exactly that. The caller's
+    // mode is put back before anything else runs.
     OnlineTuner::PairReading OnlineTuner::readPair(const PendingMeasurement& pending,
                                                    float&                    milliseconds) const
     {
-        if(hipEventQuery(pending.m_stop) != hipSuccess)
-            return PairReading::Outstanding;
-
         const hipError_t before = hipPeekAtLastError();
+
+        hipStreamCaptureMode mode = hipStreamCaptureModeRelaxed;
+        if(hipThreadExchangeStreamCaptureMode(&mode) != hipSuccess)
+        {
+            if(before == hipSuccess)
+                static_cast<void>(hipGetLastError());
+            return PairReading::Outstanding;
+        }
+
+        const hipError_t query = hipEventQuery(pending.m_stop);
+        static_cast<void>(hipThreadExchangeStreamCaptureMode(&mode));
+
+        if(query != hipSuccess)
+            return PairReading::Outstanding;
 
         milliseconds = 0.0f;
         const hipError_t elapsed
