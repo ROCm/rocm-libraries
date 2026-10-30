@@ -26,8 +26,8 @@ import rocisa
 
 from typing import List, Dict
 
-from .Architectures import (ARCH_CAP_OVERRIDES, baseArchName, gfxToIsa, tuningArchOf,
-                           withoutPredicate)
+from .Architectures import (ARCH_CAP_OVERRIDES, baseArchName, capOverrideKeyOf, gfxToIsa,
+                           tuningArchOf, withoutPredicate)
 from .Types import IsaVersion, IsaInfo
 
 
@@ -36,16 +36,21 @@ def _overrideLayers(name: str):
 
     1. Base-name overrides (e.g. gfx1250v0's stepping deltas), keyed on the bare
        name so gfx1250v0 still picks up the right entry.
-    2. Full-name overrides (e.g. gfx1250:xnack- clearing EnableXnackReplay),
-       keyed on the qualified spec so the xnack suffix is visible. The predicate
-       is dropped first, so gfx1250:xnack-[cu=64] finds the same entry as
-       gfx1250:xnack- -- a hardware-selection predicate says nothing about caps.
+    2. Qualified overrides (e.g. gfx1250:xnack- clearing EnableXnackReplay),
+       keyed by ``capOverrideKeyOf`` -- the architecture plus its xnack mode,
+       which is what the table is written in terms of. Building the key that way
+       rather than matching the spec as written is what makes
+       gfx1250:xnack-[cu=64], gfx1250:xnack-:sramecc+ and
+       gfx1250:sramecc+:xnack- all reach the gfx1250:xnack- entry. None of a
+       predicate, an unrelated qualifier, or the order two were written in says
+       anything about the xnack mode, so none of them may decide whether the
+       override is found.
 
     Layer 2 wins on any key present in both: the xnack mode is a stronger
     constraint than the stepping default.
     """
     base = ARCH_CAP_OVERRIDES.get(tuningArchOf(baseArchName(name)), {})
-    full = ARCH_CAP_OVERRIDES.get(withoutPredicate(name), {})
+    full = ARCH_CAP_OVERRIDES.get(capOverrideKeyOf(name), {})
     return base, full
 
 
