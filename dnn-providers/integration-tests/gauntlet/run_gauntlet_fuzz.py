@@ -89,8 +89,6 @@ DEFAULT_CASE_TIMEOUT = "10m"
 LOG_TAIL_LINES = 200
 LOG_TAIL_BYTES = 32 * 1024
 HOST_FILL_ENV = "HIPDNN_TEST_HOST_INPUT_FILL"
-# The axes whose values the summary breaks the outcomes down by (``summary["axis_outcomes"]``).
-AXIS_OUTCOME_AXES = ("alignment", "placement", "domain")
 ZERO_TESTS_MARKER = "Error: zero tests ran"
 NO_DEVICE_MARKER = "No HIP devices available"
 GTEST_FILTER_LINE = re.compile(r"\s*gtest_filter:")
@@ -403,7 +401,7 @@ class Fuzz:
         self._bu = None
         self._outcomes_file = None
         self._samples_file = None
-        # (space id, case id) -> the values of the AXIS_OUTCOME_AXES the sample drew
+        # (space id, case id) -> the values of the ``values`` axes the sample drew
         self._outcome_axes = {}
 
     # -- control ---------------------------------------------------------
@@ -932,8 +930,8 @@ class Fuzz:
         }
         self._outcome_axes[(sp.space_id, sample.case_id)] = {
             name: sample.axis_values[name]
-            for name in AXIS_OUTCOME_AXES
-            if name in sample.axis_values
+            for name, axis in sp.axes.items()
+            if not axis.is_range and name in sample.axis_values
         }
         if record is not None:
             for key in ("purpose", "depth", "origin", "verifier", "platform"):

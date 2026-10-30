@@ -2382,18 +2382,22 @@ def test_import_graph_gives_two_alignments_of_one_graph_two_case_ids(tmp_path):
     assert [c["tensor_patches"][0]["set"]["alignment"] for c in cases[-2:]] == [2, 4]
 
 
-def test_summary_breaks_the_outcomes_down_by_alignment_placement_and_domain(run):
-    # bug caught: a run that cannot say which alignment, placement or domain fails
+def test_summary_breaks_the_outcomes_down_by_every_values_axis(run):
+    # bug caught: a run that cannot say which feature (alignment, placement, domain, dtype,
+    # layout, ...) fails or never passes, so per-feature PASS counts need the log
     run.control(seed_mod={"m": 3, "map": {"0": "wrong", "1": "declined"}})
     assert (
         run.run("--samples", "30", "--batch-size", "30", space="RMSNorm/Default") == 1
     )
     sp = space_by_id("RMSNorm/Default")
+    values_axes = [name for name, axis in sp.axes.items() if not axis.is_range]
+    assert {"alignment", "placement", "domain", "dtype", "layout"} <= set(values_axes)
+    assert len(values_axes) < len(sp.axes)
     expected = {}
     for seed in range(1000, 1030):
         axes = sampler.sample(sp, seed).axis_values
         outcome = {0: "WRONG", 1: "DECLINED"}.get(seed % 3, "PASS")
-        for name in ("alignment", "placement", "domain"):
+        for name in values_axes:
             by_value = expected.setdefault(name, {})
             by_value.setdefault(str(axes[name]), dict.fromkeys(fuzz.OUTCOMES, 0))[
                 outcome
@@ -2403,8 +2407,9 @@ def test_summary_breaks_the_outcomes_down_by_alignment_placement_and_domain(run)
         assert sum(sum(c.values()) for c in by_value.values()) == 30, name
 
 
-def test_summary_has_only_the_axes_a_space_declares(run, tmp_path):
-    # bug caught: an axis the space does not have shows up as an empty or invented breakdown
+def test_summary_counts_a_values_axis_per_value_and_skips_range_axes(run, tmp_path):
+    # bug caught: an axis the space does not have, or a range axis (one entry per drawn
+    # integer), shows up in the breakdown
     assert run.run("--samples", "4", space="Matmul/Align") == 0
     assert sorted(run.summary["axis_outcomes"]["Matmul/Align"]) == [
         "alignment",
@@ -2414,7 +2419,10 @@ def test_summary_has_only_the_axes_a_space_declares(run, tmp_path):
     spaces.mkdir()
     write_space(spaces)
     assert run.run("--samples", "2", "--spaces-dir", str(spaces), space=None) == 0
-    assert run.summary["axis_outcomes"] == {}
+    toy = run.summary["axis_outcomes"]
+    assert [sorted(by_axis) for by_axis in toy.values()] == [["a"]]
+    counts = next(iter(toy.values()))["a"]
+    assert sum(sum(c.values()) for c in counts.values()) == 2
 
 
 def test_a_failure_folder_carries_the_alignment_placement_and_patches(run):

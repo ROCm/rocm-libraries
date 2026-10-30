@@ -562,12 +562,15 @@ replays from). Device-filled inputs differ from the host fill's, so a replay use
 the fill path of the original run. To turn a finding into a checked-in case, see
 [Freeze a fuzz finding](adding-tests.md#freeze-a-fuzz-finding).
 
-**`summary.json` `axis_outcomes`.** For the `alignment`, `placement` and `domain` axes a
-sample drew, the summary counts outcomes per axis value:
+**`summary.json` `axis_outcomes`.** For every axis of a space that lists `values` (the
+`alignment`, `placement` and `domain` axes, and also the feature axes such as `dtype`, `layout`,
+`mask`, `stats`, `window`, `d`) the summary counts outcomes per drawn value:
 `axis_outcomes[<space id>][<axis>][<value as a string>]` is an object with a count for each of
 `PASS`, `DECLINED`, `WRONG`, `CRASH`, `UNCLAIMED_PASS` and `UNEXERCISED`. The value is the
 one drawn, so an `under` that was rendered as `exact` at alignment 1 counts under `under`.
-A space without the axis has no entry for it.
+`range` axes (sizes such as `sq`, `skv`, `n`) have no entry: they draw many distinct integers.
+Read the `PASS` count of each feature value to see that a feature is exercised and passes, not
+only that the run is green. A space has an entry for the axes it declares and no others.
 
 ### Reading an alignment or placement probe
 
