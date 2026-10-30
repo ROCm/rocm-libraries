@@ -11,7 +11,8 @@ Every case ends as `pass`, `fail`, `crash`, `not-run`, `declined` (hipDNN has no
 | `aotriton/vendor/` | AOTriton's tests, byte-identical at a pinned commit |
 | `aotriton/shim/` | `aotriton_flash.py` and `pyaotriton` replacements |
 | `aotriton/hipdnn_aotriton_plugin.py` | outcome table, mode record, CSV, `--shard`, `--fake` |
-| `aotriton/run_aotriton.py`, `reconcile.py` | GPU runner; offline `not-run` reconciliation |
+| `aotriton/run_aotriton.py`, `reconcile.py` | GPU runner and its passes; offline `not-run` reconciliation and engine tables |
+| `aotriton/conformance_contract.py` | names and formats shared by the runner, plugin, shim and `hipdnn_sdpa` |
 
 ## CPU tests
 
@@ -49,20 +50,49 @@ Other options: `--packed-gpu` (adds `tests/`' `gpu` cases), `--workers N` (defau
 when Stats are requested can be exercised; AOTriton's M buffer is filled with zeros (its wrapper rejects NaN in M) and
 `test_forward.py` compares only O. The runner refuses it for any collection that includes
 backward or varlen cases, whose backward consumes the forward's Stats.
-`--all-engines` tests every applicable engine, not only the heuristic winner: after the normal
-run it pins each other engine that is applicable to a case (`fwd_engines` / `bwd_engines` in
-`results.csv`) and re-runs exactly those cases, `test_forward.py` with `HIPDNN_FWD_ENGINE`, every
-other case with `HIPDNN_BWD_ENGINE`. It composes with `--suite`, `--shard`, `--release`,
-`--workers` and (forward sweep) `--fwd-no-stats`; it refuses `--fake` and pre-set engine pins.
+`--all-engines` tests every applicable engine, not only the heuristic winner. After the normal run
+(pass 1) the runner adds, under `<out>/all-engines/`, one pytest run per pass, each with its own
+`results.csv`, `nodeids.txt` (the cases it must run) and `pass.json` (kind, direction, pins):
+
+| Pass directory | Pins | Cases |
+|---|---|---|
+| `fwd/<engine>/`, `bwd/<engine>/` | one engine | each applicable engine that did not serve the case (`test_forward.py` pins `HIPDNN_FWD_ENGINE`, every other case `HIPDNN_BWD_ENGINE`) |
+| `pair/<fwd>__<bwd>/` | both | backward cases: every stats-capable forward that did not serve the case against every backward engine |
+| `refwd/discovery/`, `refwd/<bwd>/` | `HIPDNN_FWD_ENGINE=reference` | backward cases whose forward failed or crashed in any pass: the backward unpinned, then each backward engine; the pair passes then cover them too |
+
+It composes with `--suite`, `--shard`, `--release`, `--workers` and (forward sweep)
+`--fwd-no-stats`; it refuses `--fake` and pre-set engine pins.
+`--nodeids-file PATH` limits pass 1 to the listed node ids; the pinned passes keep their own listings.
+`--resume` accepts a non-empty `--out` and runs, per pass directory, only the node ids that have no row,
+from a node-id file and without `--shard`; a `crash` row counts as a row, so a crash is never run again.
+`--hang-timeout S` (default 1800, 0 disables) starts `pytest_gpu_lease.watchdog` beside every pytest run
+on a node-local lock file (`--lock-dir`, `$HIPDNN_SDPA_LOCK_DIR`, else a temporary directory) with its
+stderr in `<pass dir>/watchdog.log`; a worker it kills is a `crash` row with reason `hang`, and the
+relayed stack goes to the case's repro directory.
+
+Every pass exports `HIPDNN_SDPA_PASS_SLUG` (`main`, `fwd-<engine>`, `pair-<fwd>__<bwd>`,
+`refwd-discovery`, ...) and uses its own subdirectory of `HIPDNN_SDPA_INFLIGHT_DIR` (node-local; default
+a temporary directory), where `hipdnn_sdpa` leaves a marker per worker. A worker that dies leaves its
+marker; the controller turns it into a `crash` row naming the engine (`fwd`/`bwd` hold
+`hipdnn:<engine>`), the direction (`fail_side`), the stage (`build` or `execute`), the engine lists and
+the kernel, then deletes the marker. After each pass the runner re-runs every new `crash` case once with
+`HIPDNN_SDPA_REPRO_CAPTURE=<out>/repro` into `<pass dir>/capture/` (excluded from `engines.csv` and the
+accounting) so a crash leaves a replayable repro directory too. A `fail` row saves its repro directly.
+Repro directories are `<out>/repro/<sha1(nodeid)[:12]>-<pass slug>/`, capped at 3 per (engine, test
+function) and 2 GiB per shard.
+
 AOTriton's calibration and backend knobs (`USE_ADIFFS_TXT`, `RECORD_ADIFFS_TO`, `SKIP_BWD`,
 `FWD_IMPL`, `BWD_IMPL`, ...) are refused; `FOR_RELEASE`, `SMALL_VRAM` and
 `AOTRITON_REF_DEVICE_OPTION` pass through.
 
 Outputs, in `<out>/` (default `./sdpa_conformance_results/<arch>/<run>/shard-<I>of<N>/`):
-`collected.txt` (every collected node id) and `results.csv` (`nodeid,outcome,mode,fwd,bwd,reason`,
-flushed per row; `fwd_engines` / `bwd_engines` list the applicable engines in heuristic rank
-order, `;`-joined, for a direction hipDNN planned unpinned). With `--all-engines`, each sweep
-writes the same files under `all-engines/<fwd|bwd>/<engine-slug>/`. After a run, or a killed one:
+`collected.txt` (every collected node id) and `results.csv` (`nodeid,outcome,mode,fwd,bwd,reason,
+fwd_engines,bwd_engines,fwd_kernel,bwd_kernel,fail_side,stage,repro`, flushed per row; the engine
+lists hold the applicable engines in heuristic rank order, `;`-joined, for a direction hipDNN planned
+unpinned; `*_kernel` is the ingestor kernel id; `fail_side` is `fwd` or `bwd` for a `fail` (the vendored
+forward comparison, a forward case or a backward that never ran count as `fwd`) and the direction in
+flight for a `crash`; `stage` is `build` or `execute`; `repro` is the repro directory under `<out>`).
+With `--all-engines`, each pass writes the same files under `all-engines/`. After a run, or a killed one:
 
 ```
 python aotriton/reconcile.py <arch>/<run> --out <arch>/<run>/reconciled.csv
@@ -72,7 +102,13 @@ python aotriton/reconcile.py <arch>/<run> --out <arch>/<run>/reconciled.csv
 backward). A `ref-fwd` pass proves the backward only.
 
 For an `--all-engines` run, `reconcile.py <arch>/<run> --engines <out>` writes `<out>/engines.csv`
-(`nodeid,direction,engine,source,outcome,reason`; `source` is `heuristic` for the engine that
-served the case in the normal run, `pinned` for a sweep) and prints pass/fail/declined counts per
-direction and engine. A pinned case served by another engine is recorded as `declined`, never as
-that engine's pass.
+(`nodeid,direction,engine,source,outcome,reason,pin_fwd,pin_bwd,kernel,stage`; `source` is `heuristic`
+for the engine that served (or, for a crash, was in flight in) the case in the normal run, then `pinned`,
+`pair`, `refwd` or `discovery` per pass). A case a pass listed but never recorded is a `not-run` row of
+that pass. It prints counts per direction and engine, per pass the cases expected against recorded, and
+every engine of `<out>/engine-inventory.txt` (written by the job, one name per line) with its counts,
+zeros included, and for an engine no case reached the first decline reasons the workers logged under
+`<out>/declines/` (an engine matches a logged name when the names are equal or one is a `:`-suffix of
+the other, or when the logged name is a `...PlanBuilder` class and the inventory name is a built-in
+SDPA engine such as `ASM_SDPA_ENGINE`). A pinned case served by another engine is recorded as
+`declined`, never as that engine's pass.
