@@ -62,7 +62,8 @@ from .Toolchain.Source import SourceToolchain
 from .Common import HR, print1, print2, IsaInfo, IsaVersion, \
         printExit, printWarning, ensurePath, tqdm, state, \
         BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR, ParallelMap2
-from .Common.Architectures import archNamesByIsa, isaToGfx, gfxToVariants, withoutPredicate
+from .Common.Architectures import (ARCH_CAP_OVERRIDES, archNamesByIsa, capOverrideKeyOf,
+                                   isaToGfx, gfxToVariants, xnackQualifierOf)
 from .Common.GlobalParameters import globalParameters, startTime
 from .Common.TimingInstrumentation import timing_context
 
@@ -164,20 +165,28 @@ def _computeCacheKey(benchmarkStep, cmdLineArchs, archNames=None):
     unqualified run reusing an xnack- run's objects gets kernels missing drains
     it needs.
 
-    The field is added only when something was actually qualified, so an
-    unqualified build hashes exactly as it did before this field existed and
-    keeps its caches. Adding it unconditionally would move every key once --
-    including those of builds that never mention xnack -- for no gain, since an
-    empty value distinguishes nothing. Predicates are dropped from what does go
-    in; they select hardware and say nothing about what is in a code object, so
-    keeping them would only split entries that should be shared.
+    The field holds only what selects an override, and is left out entirely when
+    nothing does. Both halves of that are about not splitting entries that
+    should be shared: a build whose qualifier the table does not speak to --
+    gfx942:xnack+ has no entry -- produces the same objects either way, so
+    keying on it would retire that configuration's caches for nothing, and a
+    build that never mentions xnack hashes exactly as it did before this field
+    existed. Predicates go for the same reason, as does the order two qualifiers
+    were written in, since ``capOverrideKeyOf`` reduces all of those to the one
+    thing that does change the objects.
     """
     cacheFields = {f: getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items()}
     cacheFields["KernelNamingVersion"] = _KERNEL_NAMING_VERSION
     cacheFields["_Architectures"] = ",".join(sorted(cmdLineArchs))
-    qualified = sorted(withoutPredicate(a) for a in (archNames or []) if ":" in a)
-    if qualified:
-        cacheFields["_RequestedArchitectures"] = ",".join(qualified)
+    # An xnack qualifier specifically: a bare stepping name is in the table too
+    # (gfx1250-strict carries deltas of its own), but it is an architecture, and
+    # _Architectures already tells those apart. Only the qualifier is invisible
+    # there, so only the qualifier belongs here.
+    overriding = sorted({k for a in (archNames or [])
+                         if xnackQualifierOf(a)
+                         and (k := capOverrideKeyOf(a)) in ARCH_CAP_OVERRIDES})
+    if overriding:
+        cacheFields["_RequestedArchitectures"] = ",".join(overriding)
     canonical = json.dumps(cacheFields, sort_keys=True, default=str)
     return hashlib.sha256(canonical.encode()).hexdigest()[:_CACHE_KEY_LEN]
 

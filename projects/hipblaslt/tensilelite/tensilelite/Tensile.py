@@ -43,7 +43,7 @@ from .Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
                            DebugConfig, IsaVersion, coVersionMap
 from .Common.Architectures import ARCH_BUILD_ALIASES, architectureMap, archNameForIsa, \
-                                         baseArchName, detectGlobalCurrentArch, \
+                                         baseArchName, capOverrideKeyOf, detectGlobalCurrentArch, \
                                          gfxToIsa, steppingArchOf, verifyTargetIdQualifiers
 from .Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from .Common.GlobalParameters import globalParameters, assignGlobalParameters, \
@@ -530,6 +530,8 @@ def archNamesFromConfig(configArchitecture, isaList, archNames):
             does not cover.
     """
     nameCameFromDetection = bool(archNames)
+    # The config entry that has qualified the detected architecture, if one has.
+    claimed = None
     for arch in str(configArchitecture).split(";"):
         arch = arch.strip()
         if not arch:
@@ -554,6 +556,21 @@ def archNamesFromConfig(configArchitecture, isaList, archNames):
             # different architecture or stepping is still passed over rather
             # than tuning one on the other's hardware.
             if baseArchName(arch) == baseArchName(archNames[0]):
+                # Refused rather than overwritten when two entries name the
+                # detected architecture and settle its capabilities differently.
+                # Letting the later one win made the mode a function of the
+                # order they were written in: `gfx1250:xnack-;gfx1250` tuned
+                # with replay on and the same two reversed tuned with it off,
+                # both silently. Compared against the entry that claimed the
+                # slot, not against what is in it -- the detected name starts
+                # there, and the config is allowed to qualify that.
+                if claimed is not None and capOverrideKeyOf(arch) != capOverrideKeyOf(claimed):
+                    raise ValueError(
+                        f"Architecture entries {claimed!r} and {arch!r} both name the "
+                        "detected architecture but settle its capabilities differently; "
+                        "a run has one set of capabilities, so name it once."
+                    )
+                claimed = arch
                 archNames[0] = arch
             continue
         if isa in isaList:
@@ -787,6 +804,15 @@ def Tensile(userArgs):
         detected = detectGlobalCurrentArch(device_id, enumerator)
         isaList = [gfxToIsa(detected)]
         archNames = [detected]
+
+    # Every name that reaches the capability overrides passes the qualifier
+    # check, whichever way it arrived. archNamesFromConfig applies it to the
+    # config's entries, but --gpu-targets skips that call entirely, so a
+    # qualifier typed there used to go unchecked and lose its suffix on the way
+    # to the compiler -- generating replay-enabled kernels for a run that asked
+    # for the opposite, with nothing reported.
+    for arch in archNames:
+        verifyTargetIdQualifiers(arch)
 
     if not args.gpuTargets:
         archNames = archNamesFromConfig(

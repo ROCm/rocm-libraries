@@ -4342,3 +4342,77 @@ def test_xnack_is_stripped_by_exact_match_not_by_prefix(monkeypatch):
         # degrading to a name that happens to be valid.
         assert Arch.compilerTargetOf(GFX1250 + typo, "cc") == GFX1250 + typo
     assert Arch.compilerTargetOf(GFX1250 + ":xnack-", "cc") == GFX1250
+
+
+# ---------------------------------------------------------------------------
+# A qualifier is worth forwarding only where it selects an override. One that
+# selects nothing still reaches the compiler, and there it costs the
+# xnack-agnostic code object without buying any capability.
+# ---------------------------------------------------------------------------
+
+
+def test_rebuild_target_drops_a_qualifier_that_selects_no_override():
+    from tensilelite.ClientWriter import rebuildTargetGfx
+
+    # gfx942 has no entry in ARCH_CAP_OVERRIDES, so :xnack+ changes nothing in
+    # the re-spawned build -- while --offload-arch would pin the source kernels
+    # to xnack+, which the bare name leaves loadable under either mode.
+    assert rebuildTargetGfx("gfx942", ["gfx942:xnack+"]) == "gfx942"
+    assert rebuildTargetGfx("gfx942", ["gfx942:xnack-"]) == "gfx942"
+    # gfx1250:xnack- does select one, so it still goes.
+    assert rebuildTargetGfx(GFX1250, [GFX1250 + ":xnack-"]) == GFX1250 + ":xnack-"
+    assert rebuildTargetGfx(GFX1250, [GFX1250 + ":xnack-[cu=64]"]) == GFX1250 + ":xnack-"
+
+
+def test_benchmark_cache_key_ignores_a_qualifier_that_selects_no_override():
+    from tensilelite.BenchmarkProblems import _computeCacheKey, _CACHE_FIELDS
+
+    step = type("Step", (), {attr: () for attr in _CACHE_FIELDS.values()})()
+    bare = _computeCacheKey(step, ["gfx942"], ["gfx942"])
+    # Same objects either way, so the entry stays shared rather than being
+    # retired for a configuration whose caches are still good.
+    assert _computeCacheKey(step, ["gfx942"], ["gfx942:xnack+"]) == bare
+    assert _computeCacheKey(step, ["gfx942"], ["gfx942:xnack-"]) == bare
+    # A bare stepping is in the override table too, but it is an architecture --
+    # _Architectures already tells those apart, so it must not move the key.
+    strictBare = _computeCacheKey(step, [GFX1250_STRICT], [GFX1250_STRICT])
+    assert strictBare == _computeCacheKey(step, [GFX1250_STRICT])
+
+
+def test_cap_override_key_ignores_everything_but_the_xnack_mode():
+    from tensilelite.Common.Architectures import ARCH_CAP_OVERRIDES, capOverrideKeyOf
+
+    key = GFX1250 + ":xnack-"
+    assert key in ARCH_CAP_OVERRIDES
+    # Order, an unrelated qualifier and a predicate each say nothing about the
+    # xnack mode, so none of them may decide whether the override is found.
+    for spelling in (key, key + ":sramecc+", GFX1250 + ":sramecc+:xnack-", key + "[cu=64]"):
+        assert capOverrideKeyOf(spelling) == key
+    assert capOverrideKeyOf(GFX1250) == GFX1250
+    assert capOverrideKeyOf(GFX1250_STRICT) == GFX1250_STRICT
+
+
+def test_cap_overrides_reach_a_spec_with_a_second_qualifier():
+    from tensilelite.Common.Capabilities import applyArchCapOverrides
+    from tensilelite.Common.Types import IsaInfo
+
+    for spec in (GFX1250 + ":xnack-", GFX1250 + ":xnack-:sramecc+",
+                 GFX1250 + ":sramecc+:xnack-"):
+        iim = {ISA_GFX1250: IsaInfo({}, {"EnableXnackReplay": True}, {}, {})}
+        applyArchCapOverrides(iim, [spec])
+        assert iim[ISA_GFX1250].archCaps["EnableXnackReplay"] is False, spec
+
+
+def test_config_rejects_two_entries_settling_the_detected_arch_differently():
+    from tensilelite.Tensile import archNamesFromConfig
+
+    isaList = [ISA_GFX1250]
+    # Order decided the mode before: one spelling tuned with replay on, the
+    # reverse with it off, and neither said so.
+    for cfg in (f"{GFX1250}:xnack-;{GFX1250}", f"{GFX1250};{GFX1250}:xnack-"):
+        with pytest.raises(ValueError, match="settle its capabilities differently"):
+            archNamesFromConfig(cfg, isaList, [GFX1250])
+    # Two spellings of one mode are not a conflict; a predicate is not a mode.
+    assert archNamesFromConfig(
+        f"{GFX1250}:xnack-;{GFX1250}:xnack-[cu=64]", isaList, [GFX1250]
+    ) == [GFX1250 + ":xnack-[cu=64]"]

@@ -7,7 +7,13 @@ set(BASE_ARCHITECTURES "")
 # All supported architectures including xnack variants - used for validation of GPU_TARGETS
 set(SUPPORTED_ARCHITECTURES "")
 
-if(HIPSPARSELT_ENABLE_ASAN OR BUILD_ADDRESS_SANITIZER)
+# THEROCK_SANITIZER is checked for the exact value, not with MATCHES: it also
+# takes HOST_ASAN, which instruments the host only and has no say over device
+# targets. Without this arm the staged-package path -- where THEROCK_SANITIZER
+# is the only flag set -- took the else branch, whose list carries the xnack-
+# targets, so a full-ASAN configuration could be built with replay protection
+# off. hipBLASLt's validation does not cover this module's list.
+if(HIPSPARSELT_ENABLE_ASAN OR BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
     # For address sanitizer builds, base and supported are the same
     list(APPEND BASE_ARCHITECTURES "gfx942:xnack+" "gfx950:xnack+" "gfx1250" "gfx1250-strict")
     set(SUPPORTED_ARCHITECTURES ${BASE_ARCHITECTURES})
