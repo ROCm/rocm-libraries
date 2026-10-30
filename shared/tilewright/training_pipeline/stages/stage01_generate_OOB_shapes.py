@@ -57,6 +57,23 @@ filter, history dedup and exclusions as every other shape, so never an
 audit shape; a leaf this round samples nothing in gets none. They are new
 held-out shapes like the others, whatever the cell's mean.
 
+Seeded targets (active mode, `--targeted-seed`): registered anchor GEMMs,
+the rows of a CSV file (`read_seeded_targets`: m, n, k, batch, and the
+contexts their near shapes are benched in, `bench_contexts`; with
+`--targeted-seed-library`, the rows of that `library` only), join the
+targeted draws after the tail GEMMs: each anchor whose leaf this round
+samples gets `--targeted-seed-per-target` new shapes near it by the same
+`synthesize_near` (each axis within an octave, in its leaf, alignment class
+and batch class), under the same filter, history dedup and exclusions, from
+an RNG stream of its own (round seed, leaf, the anchor and its contexts), and
+not counted against `--targeted-max-per-leaf`. No anchor is ever drawn: every
+anchor joins the shapes the draws avoid before any is drawn (they are held
+out, `--exclude-shapes-yaml`, as well). targeted_shapes.json lists each
+anchor (`anchor`, with its contexts) and its shapes beside the tails, so the
+contexts it names bench them (lib/contexts.py `targeted_for`); the file and
+categorization.json record the list (path, sha256, library, per target) and
+the counts. Without the option the round draws exactly as before.
+
 Weak-cell budget (active mode without `--only-cells`; `need_budget`): the
 previous round's stage04b decisions (`--decisions-from`, by default the
 last --prior-round-dir's stage04b/decisions.json) set each leaf's target.
@@ -89,7 +106,8 @@ Outputs in `--out-dir`:
   per_cell_plan.json   active mode only: per-cell plan, prior sel_eff and
                        the round's budget (`budget`; per leaf `need`)
   targeted_shapes.json active mode with targeted shapes: per leaf, each
-                       tail GEMM and the shapes drawn near it
+                       tail GEMM or seeded anchor and the shapes drawn
+                       near it
 """
 from __future__ import annotations
 
@@ -124,10 +142,12 @@ from lib.grid import cell_key  # noqa: E402
 from lib.shapes import (  # noqa: E402
     MEMORY_SAFE_FRACTION,
     REUSED_SHAPES_FILE,
+    SEEDED_PER_TARGET,
     Shape,
     ShapeFilter,
     ShapeTuple,
     device_memory_budget,
+    read_seeded_targets,
     synthesize_cell_shapes,
     synthesize_near,
     write_reused_shapes,
@@ -645,6 +665,60 @@ def targeted_shapes(
     return out
 
 
+def seeded_shapes(
+    anchors: List[Dict[str, Any]],
+    leaves: Set[str],
+    split_tree: Dict[str, "sc.SplitRule"],
+    round_seed: int,
+    shape_filter: ShapeFilter,
+    *,
+    per_target: int,
+    taken: Set[ShapeTuple],
+) -> Tuple[Dict[str, List[Dict[str, Any]]], List[Dict[str, Any]]]:
+    """({leaf: [{anchor, the shapes drawn near it}]}, [the anchors that got
+    none, with why]): up to `per_target` shapes near each anchor of
+    `anchors` (`synthesize_near`) in the leaf of `split_tree` that holds it,
+    for the leaves of `leaves` only, in file order, none of them an anchor or
+    in `taken` (the history, the exclusions and the round's other shapes),
+    which the drawn shapes join. Each anchor draws from its own RNG stream,
+    seeded with the round seed, its leaf, its shape and its contexts."""
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    skipped: List[Dict[str, Any]] = []
+    taken.update(
+        (int(a["m"]), int(a["n"]), int(a["k"]), int(a["batch"])) for a in anchors
+    )
+    for a in anchors:
+        m, n, k, b = int(a["m"]), int(a["n"]), int(a["k"]), int(a["batch"])
+        leaf = sc.assign_subcell(cell_key(m, n, k, b), m, n, k, b, split_tree)
+        if leaf not in leaves:
+            skipped.append(
+                dict(a, leaf=leaf, why="the round samples no shape in its leaf")
+            )
+            continue
+        rng = random.Random(
+            derive_seed(
+                round_seed, "seeded", leaf, m, n, k, b, ",".join(a["bench_contexts"])
+            )
+        )
+        drawn = synthesize_near(
+            (m, n, k, b), per_target * 3, rng, shape_filter, leaf_box(leaf)
+        )
+        new = []
+        for s in drawn:
+            if len(new) >= per_target:
+                break
+            if s not in taken:
+                taken.add(s)
+                new.append(s)
+        if not new:
+            skipped.append(dict(a, leaf=leaf, why="no new shape near it"))
+            continue
+        out.setdefault(leaf, []).append(
+            {"anchor": dict(a), "shapes": [list(x) for x in new]}
+        )
+    return out, skipped
+
+
 # ── main ─────────────────────────────────────────────────────────────────────
 
 
@@ -783,6 +857,26 @@ def main() -> int:
         "targeted shapes (default: the last --prior-round-dir's)",
     )
     ap.add_argument(
+        "--targeted-seed",
+        type=Path,
+        default=None,
+        help="(active mode) a CSV of registered anchor GEMMs (m, n, k, batch, "
+        "bench_contexts): each gets --targeted-seed-per-target new shapes near "
+        "it, beside the tail GEMMs' targeted shapes",
+    )
+    ap.add_argument(
+        "--targeted-seed-per-target",
+        type=int,
+        default=SEEDED_PER_TARGET,
+        help="(with --targeted-seed) new shapes near each anchor (>= 1)",
+    )
+    ap.add_argument(
+        "--targeted-seed-library",
+        default=None,
+        help="(with --targeted-seed) the value of the file's library column "
+        "whose rows are this run's anchors",
+    )
+    ap.add_argument(
         "--weak-cell-factor",
         type=float,
         default=1.0,
@@ -826,6 +920,20 @@ def main() -> int:
     if args.targeted_per_gemm < 0 or args.targeted_max_per_leaf < 0:
         ui.err("err", "--targeted-per-gemm and --targeted-max-per-leaf are >= 0")
         return 1
+    anchors: List[Dict[str, Any]] = []
+    seeded_sha256: Optional[str] = None
+    if args.targeted_seed is not None:
+        if args.targeted_seed_per_target < 1:
+            ui.err("err", "--targeted-seed-per-target must be at least 1")
+            return 1
+        try:
+            anchors = read_seeded_targets(
+                args.targeted_seed, args.targeted_seed_library
+            )
+            seeded_sha256 = hashlib.sha256(args.targeted_seed.read_bytes()).hexdigest()
+        except (OSError, ValueError) as e:
+            ui.err("seeded", str(e))
+            return 1
     bad = False
     for flag, value, ok, rule in (
         ("--weak-cell-factor", args.weak_cell_factor, lambda v: v >= 1, ">= 1"),
@@ -1162,6 +1270,29 @@ def main() -> int:
                 max_per_leaf=args.targeted_max_per_leaf,
                 taken=set(history) | excluded | set(result.shapes) | set(stratum),
             )
+    n_tail_shapes = sum(len(e["shapes"]) for es in targeted.values() for e in es)
+    seeded: Dict[str, List[Dict[str, Any]]] = {}
+    seeded_skipped: List[Dict[str, Any]] = []
+    if args.mode == "active" and anchors:
+        seeded, seeded_skipped = seeded_shapes(
+            anchors,
+            {c for c, v in per_cell.items() if v > 0},
+            split_tree,
+            round_seed,
+            shape_filter,
+            per_target=args.targeted_seed_per_target,
+            taken=set(history)
+            | excluded
+            | set(result.shapes)
+            | set(stratum)
+            | {tuple(s) for es in targeted.values() for e in es for s in e["shapes"]},
+        )
+        for leaf, entries in seeded.items():
+            targeted.setdefault(leaf, []).extend(entries)
+    seeded_per_cell = {
+        leaf: sum(len(e["shapes"]) for e in entries) for leaf, entries in seeded.items()
+    }
+    n_seeded_shapes = sum(seeded_per_cell.values())
     targeted_per_cell = {
         leaf: sum(len(e["shapes"]) for e in entries)
         for leaf, entries in targeted.items()
@@ -1176,13 +1307,41 @@ def main() -> int:
         )
         return 1
     if not args.quiet and args.mode == "active" and args.targeted_per_gemm > 0:
+        n_tails = sum(1 for es in targeted.values() for e in es if "tail" in e)
         ui.ok(
             "targeted",
-            f"{len(extra):,} shapes near {sum(len(v) for v in targeted.values())} "
-            f"of {len(tails)} tail GEMMs in {len(targeted)} leaves "
+            f"{n_tail_shapes:,} shapes near {n_tails} "
+            f"of {len(tails)} tail GEMMs "
             f"({tails_from if tails else 'no tail GEMMs'})",
         )
+    if not args.quiet and args.mode == "active" and anchors:
+        ui.ok(
+            "seeded",
+            f"{n_seeded_shapes:,} shapes near "
+            f"{sum(len(v) for v in seeded.values())} of {len(anchors)} anchors "
+            f"in {len(seeded)} leaves ({args.targeted_seed}"
+            + (f", {len(seeded_skipped)} without shapes" if seeded_skipped else "")
+            + ")",
+        )
 
+    seeded_record = (
+        {
+            "list": str(args.targeted_seed),
+            "sha256": seeded_sha256,
+            "library": args.targeted_seed_library,
+            "per_target": args.targeted_seed_per_target,
+            "n_anchors": len(anchors),
+            "n_anchors_drawn": sum(len(v) for v in seeded.values()),
+            "n_shapes": n_seeded_shapes,
+            "per_cell": seeded_per_cell,
+            "skipped": [
+                {k: a.get(k) for k in ("row", "m", "n", "k", "batch", "leaf", "why")}
+                for a in seeded_skipped
+            ],
+        }
+        if args.targeted_seed is not None
+        else None
+    )
     if not args.quiet:
         ui.banner("Stage 3/3  Write outputs", ui.C.BLUE)
     shape_objs = [
@@ -1236,6 +1395,7 @@ def main() -> int:
                 "n_tail_gemms": len(tails),
                 "n_shapes": len(extra),
                 "per_cell": targeted_per_cell,
+                **({"seeded": seeded_record} if seeded_record is not None else {}),
             },
             "large_k": {
                 "factor": k_factor,
@@ -1254,6 +1414,7 @@ def main() -> int:
                 "per_gemm": args.targeted_per_gemm,
                 "max_per_leaf": args.targeted_max_per_leaf,
                 "n_shapes": len(extra),
+                **({"seeded": seeded_record} if seeded_record is not None else {}),
                 "leaves": targeted,
             },
         )
@@ -1286,6 +1447,7 @@ def main() -> int:
                         "n_actual": result.actual_per_cell.get(cell, 0),
                         "n_reused": result.reused_per_cell.get(cell, 0),
                         "n_targeted": targeted_per_cell.get(cell, 0),
+                        "n_seeded": seeded_per_cell.get(cell, 0),
                         "n_large_k": len(large_k.get(cell, ())),
                     }
                     for cell, info in plan.items()

@@ -528,9 +528,11 @@ def select_shapes(
 
 def targeted_for(path: Optional[Path], ctx: BenchContext) -> Set[ShapeKey]:
     """The shapes stage01 drew near tail GEMMs that ran in the context
-    `ctx` (its targeted_shapes.json at `path`), which `select_shapes`
-    benches in that context beside its own draw: none for the exclusive
-    context, which benches every shape, or without the file."""
+    `ctx`, and near seeded anchors that name its label among their
+    `bench_contexts` (its targeted_shapes.json at `path`), which
+    `select_shapes` benches in that context beside its own draw: none for
+    the exclusive context, which benches every shape, or without the
+    file."""
     if path is None or ctx.is_exclusive() or not Path(path).is_file():
         return set()
     try:
@@ -540,11 +542,15 @@ def targeted_for(path: Optional[Path], ctx: BenchContext) -> Set[ShapeKey]:
     out: Set[ShapeKey] = set()
     for entries in (doc.get("leaves") or {}).values():
         for e in entries or []:
-            t = e.get("tail") or {}
-            if int(t.get("cu_budget") or 0) != ctx.cu_budget:
-                continue
-            if str(t.get("schedule") or "default") != ctx.schedule:
-                continue
+            if "anchor" in e:
+                if ctx.label not in (e["anchor"].get("bench_contexts") or []):
+                    continue
+            else:
+                t = e.get("tail") or {}
+                if int(t.get("cu_budget") or 0) != ctx.cu_budget:
+                    continue
+                if str(t.get("schedule") or "default") != ctx.schedule:
+                    continue
             out.update(
                 (int(s[0]), int(s[1]), int(s[2]), int(s[3]))
                 for s in e.get("shapes") or []

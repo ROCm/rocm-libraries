@@ -2996,6 +2996,30 @@ context re-plan of stage02 (`--targeted-shapes`) take them among the
 shapes the context draws for their cells (`lib.contexts.select_shapes`,
 `targeted_for`), ahead of the cell's random draw.
 
+Seeded targets (`seed.targeted_seed`): registered anchor GEMMs, the rows
+of a CSV file (`list`; columns `m`, `n`, `k`, `batch` and `bench_contexts`,
+the labels of the contexts, comma-separated, their near shapes are benched
+in, `exclusive` or empty for none; with a `library` column the rows of
+the value `library` names), join every active round's targeted draws
+(`--targeted-seed`, `--targeted-seed-per-target`,
+`--targeted-seed-library`). After the tail GEMMs' shapes, each anchor
+whose leaf the round samples gets `per_target` (4) new shapes near it by
+the same `synthesize_near`, under the same filter, history dedup and
+exclusions, from an RNG stream of its own (the round seed, its leaf, the
+anchor and its contexts), not counted against `targeted_max_per_leaf`.
+No anchor is drawn: every anchor joins the shapes the draws avoid, and
+config validation refuses a list with an anchor no `audit.held_out` list
+holds, a list with no anchor for the run, and, once the contexts are
+resolved for the bench device, an anchor naming a context the run does not
+train. `targeted_shapes.json` lists each anchor (`anchor`) and its shapes
+beside the tails, which the contexts its `bench_contexts` name bench as
+they bench a tail's (`targeted_for`); it and categorization.json record the
+list (path, sha256, library, `per_target`), the counts and the anchors
+that got no shape (`seeded`), and per_cell_plan.json counts them per leaf
+(`n_seeded`). The pin records the three keys and the list's sha256
+(`seed.targeted_seed.list_sha256`) when a list is set; without one the
+round draws exactly as before.
+
 ### Weak cells and very large K (stage01)
 
 An active round's stage01 sets each leaf's number of new shapes from the
@@ -5366,7 +5390,10 @@ within a cell, 1), `exclude` (shape regions left out, a list of rules with
 is left out when it meets every bound of a rule), `targeted_per_tail_gemm`
 (4: new shapes near each tail GEMM of the previous round's stage04b, 0 off;
 see *Targeted shapes (stage01)*), `targeted_max_per_leaf` (32: at most that
-many per leaf), `weak_cell_factor` (1: the new shapes of a leaf the
+many per leaf), `targeted_seed` (`list`: null, a CSV of registered anchor
+GEMMs whose neighbourhoods every active round draws; `per_target` 4;
+`library` null, the rows of the list's `library` column to take; see
+*Targeted shapes (stage01)*), `weak_cell_factor` (1: the new shapes of a leaf the
 previous round's stage04b retrained, as a multiple of `shapes_per_cell`;
 >= 1), `strong_cell_factor` (1: the same for a leaf that passed at least
 `strong_cell_margin` above the threshold, in (0, 1]; the strong leaves

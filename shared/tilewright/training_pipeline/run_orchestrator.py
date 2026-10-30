@@ -428,6 +428,13 @@ SCHEMA = _section(
                 "n_strata": _int(default=1, minimum=1),
                 "targeted_per_tail_gemm": _int(default=4, minimum=0),
                 "targeted_max_per_leaf": _int(default=32, minimum=0),
+                "targeted_seed": _section(
+                    {
+                        "list": _str(nullable=True),
+                        "per_target": _int(default=4, minimum=1),
+                        "library": _str(nullable=True),
+                    }
+                ),
                 "weak_cell_factor": _num(default=1.0, minimum=1.0),
                 "strong_cell_factor": _num(
                     default=1.0, minimum=0.0, exclusive_minimum=True, maximum=1.0
@@ -2433,9 +2440,10 @@ PINNED_WHEN_SET = ("library", "planner.top_k_round0")
 # hand-written kernels' sources (none: the build's) and their guards (off:
 # an unguarded one is blocked whole), the held-out
 # lists (none) and the CU budget granule (32, lib/contexts.py's
-# PREDATING_GRANULE, not its default, which may change), and the weak-cell
+# PREDATING_GRANULE, not its default, which may change), the weak-cell
 # budget's keys at their defaults (factors of 1: every leaf draws
-# seed.shapes_per_cell).
+# seed.shapes_per_cell), and the seeded targets' (no list; with a list its
+# every key and the digest of the file are pinned).
 PINNED_UNLESS_NEUTRAL: Dict[str, Any] = {
     **{f"bench.rebench.{k}": v for k, v in rebenchlib.NEUTRAL_REREADS.items()},
     "bench.canary.tolerance_us": 0.0,
@@ -2451,6 +2459,9 @@ PINNED_UNLESS_NEUTRAL: Dict[str, Any] = {
     "seed.large_k_factor": 1.0,
     "deploy.alignment_veto.k_min": None,
     "deploy.alignment_veto.align_bytes": None,
+    "seed.targeted_seed.list": None,
+    "seed.targeted_seed.per_target": 4,
+    "seed.targeted_seed.library": None,
 }
 
 
@@ -2500,6 +2511,14 @@ def pinned_config(cfg: Mapping[str, Any], audit: bool = False) -> Dict[str, Any]
         out["correctness.lists_sha256"] = cxlib.list_digests(out["correctness.lists"])
     if out.get("audit.held_out"):
         out["audit.held_out_sha256"] = hol.digests(out["audit.held_out"])
+    if out.get("seed.targeted_seed.list"):
+        out["seed.targeted_seed.per_target"] = cfg_get(
+            cfg, "seed.targeted_seed.per_target"
+        )
+        out["seed.targeted_seed.library"] = cfg_get(cfg, "seed.targeted_seed.library")
+        out["seed.targeted_seed.list_sha256"] = cxlib._sha256(
+            Path(str(out["seed.targeted_seed.list"]))
+        )
     return out
 
 
@@ -2796,6 +2815,7 @@ def _audit_config_checks(cfg: Mapping[str, Any], errors: List[str]) -> None:
     if len(set(devices)) != len(devices):
         errors.append("audit.devices: duplicate device indices")
     errors += held_out_errors(cfg)
+    errors += seeded_target_errors(cfg)
     if cfg_get(cfg, "audit.official") == "sustained" and not cfg_get(
         cfg, "audit.sustained"
     ):
@@ -2818,6 +2838,83 @@ def _audit_config_checks(cfg: Mapping[str, Any], errors: List[str]) -> None:
             f"parallel benches the audit set beside the rounds on devices of "
             f"its own"
         )
+
+
+def seeded_anchors(cfg: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """The anchors seed.targeted_seed names for the run (stage01
+    `read_seeded_targets`); none without a list. ValueError when the list
+    cannot be read."""
+    listed = cfg_get(cfg, "seed.targeted_seed.list")
+    if not listed:
+        return []
+    from lib.shapes import read_seeded_targets
+
+    try:
+        return read_seeded_targets(
+            Path(str(listed)), cfg_get(cfg, "seed.targeted_seed.library")
+        )
+    except OSError as e:
+        raise ValueError(f"cannot read {listed}: {e}") from None
+
+
+def seeded_target_errors(cfg: Mapping[str, Any]) -> List[str]:
+    """seed.targeted_seed: a list stage01 reads, with at least one anchor
+    for the run, and every anchor held out (audit.held_out): a registered
+    anchor is never drawn, so no round trains on it."""
+    if not cfg_get(cfg, "seed.targeted_seed.list"):
+        if cfg_get(cfg, "seed.targeted_seed.library"):
+            return [
+                "seed.targeted_seed.library names no list (seed.targeted_seed.list)"
+            ]
+        return []
+    try:
+        anchors = seeded_anchors(cfg)
+    except ValueError as e:
+        return [f"seed.targeted_seed.list: {e}"]
+    if not anchors:
+        return ["seed.targeted_seed.list holds no anchor for this run"]
+    try:
+        lists, _ = hol.read_all(auditlib.held_out_entries(cfg))
+    except ValueError as e:
+        return [f"seed.targeted_seed: the held-out lists cannot be read ({e})"]
+    held = set().union(*(set(lst.gemms) for lst in lists)) if lists else set()
+    loose = [
+        a
+        for a in anchors
+        if (int(a["m"]), int(a["n"]), int(a["k"]), int(a["batch"])) not in held
+    ]
+    if loose:
+        a = loose[0]
+        return [
+            f"seed.targeted_seed.list: {len(loose)} anchor(s) no audit.held_out "
+            f"list holds (e.g. row {a['row']}: {a['m']}x{a['n']}x{a['k']}x"
+            f"{a['batch']}): a round could draw them"
+        ]
+    return []
+
+
+def seeded_context_errors(cfg: Mapping[str, Any]) -> List[str]:
+    """seed.targeted_seed: every context an anchor's near shapes are
+    benched in (`bench_contexts`) is a trained context of the resolved
+    config `cfg`."""
+    try:
+        anchors = seeded_anchors(cfg)
+    except ValueError as e:
+        return [f"seed.targeted_seed.list: {e}"]
+    trained = {
+        ctxlib.BenchContext.from_mapping(m).label
+        for m in ctxlib.trained_entries(cfg)
+        if not ctxlib.unresolved(m)
+    }
+    out = []
+    for a in anchors:
+        unknown = [c for c in a["bench_contexts"] if c not in trained]
+        if unknown:
+            out.append(
+                f"seed.targeted_seed.list row {a['row']}: no trained context is "
+                f"{', '.join(unknown)} (the run trains {sorted(trained) or 'none'})"
+            )
+    return out
 
 
 def held_out_errors(cfg: Mapping[str, Any]) -> List[str]:
@@ -3116,7 +3213,11 @@ def resolve_contexts(
     of, `shares_of`). ConfigError when the CU count cannot be read or the
     resolved contexts break a rule."""
     if not ctxlib.has_unresolved(cfg):
-        return ctxlib.resolve_fractions(cfg, None)
+        out, lines = ctxlib.resolve_fractions(cfg, None)
+        errors = seeded_context_errors(out)
+        if errors:
+            raise ConfigError(errors)
+        return out, lines
     from lib import hardware as hwlib
 
     try:
@@ -3130,6 +3231,7 @@ def resolve_contexts(
         )
     out, lines = ctxlib.resolve_fractions(cfg, n_cu)
     errors = ctxlib.context_errors(out, n_cu) + _min_cu_fraction_errors(out, n_cu)
+    errors += seeded_context_errors(out)
     if errors:
         raise ConfigError(errors)
     return out, [shares_of(cfg, device, n_cu)] + lines
@@ -6460,6 +6562,7 @@ class Pipeline:
                 args += ["--only-cells", ",".join(step.targets)]
             else:
                 args += self.need_budget_args()
+            args += self.seeded_args()
         audit = auditlib.config_dir(self.cfg)
         if audit is not None:
             shapes = auditlib.shapes_yaml(audit)
@@ -6473,6 +6576,22 @@ class Pipeline:
                 )
         for entry in auditlib.held_out_entries(self.cfg):
             args += ["--exclude-shapes-yaml", entry]
+        return args
+
+    def seeded_args(self) -> List[str]:
+        """stage01 options of seed.targeted_seed (none without a list)."""
+        listed = self.get("seed.targeted_seed.list")
+        if not listed:
+            return []
+        args = [
+            "--targeted-seed",
+            str(listed),
+            "--targeted-seed-per-target",
+            str(self.get("seed.targeted_seed.per_target")),
+        ]
+        library = self.get("seed.targeted_seed.library")
+        if library:
+            args += ["--targeted-seed-library", str(library)]
         return args
 
     def need_budget_args(self) -> List[str]:

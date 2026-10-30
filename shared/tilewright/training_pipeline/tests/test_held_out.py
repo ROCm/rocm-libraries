@@ -435,6 +435,126 @@ def test_a_run_never_draws_a_registered_list(tmp_path, stubs, env, monkeypatch, 
     )
 
 
+# ── seeded targets (seed.targeted_seed) ──────────────────────────────────────
+
+
+def _targets(tmp_path, gemms, library="lib", contexts="exclusive"):
+    path = tmp_path / "targets.csv"
+    path.write_text(
+        "library,m,n,k,batch,cu_budget,bench_contexts,cell,source\n"
+        + "".join(
+            f'{library},{m},{n},{k},{b},0,"{contexts}",{cell_key(m, n, k, b)},x\n'
+            for m, n, k, b in gemms
+        )
+        + "other,9,9,9,1,0,exclusive,x,y\n"
+    )
+    return path
+
+
+def test_seeded_targets_must_be_held_out_and_reach_every_active_round(tmp_path):
+    lists = _lists(tmp_path, GEMMS)
+    targets = _targets(tmp_path, GEMMS)
+    keys = {
+        "seed.targeted_seed.list": str(targets),
+        "seed.targeted_seed.library": "lib",
+    }
+    cfg_path = _config(tmp_path, lists[:1], **keys)
+    cfg = yaml.safe_load(cfg_path.read_text())
+    assert ro.validate_config(cfg) == ([], [])
+    assert len(ro.seeded_anchors(cfg)) == len(GEMMS)
+
+    def errors(**seed):
+        bad = dict(cfg, seed=dict(cfg["seed"], targeted_seed=seed))
+        return ro.validate_config(bad)[0]
+
+    (e,) = errors(list=str(targets))
+    assert "several libraries" in e
+    (e,) = errors(list=str(targets), library="none")
+    assert e == "seed.targeted_seed.list holds no anchor for this run"
+    (e,) = errors(list=str(tmp_path / "gone.csv"), library="lib")
+    assert e.startswith("seed.targeted_seed.list: cannot read")
+    (e,) = errors(library="lib")
+    assert e.startswith("seed.targeted_seed.library names no list")
+    (tmp_path / "loose").mkdir()
+    loose = _targets(tmp_path / "loose", GEMMS + [(100, 100, 100, 1)])
+    (e,) = errors(list=str(loose), library="lib")
+    assert "1 anchor(s) no audit.held_out list holds (e.g. row 5: 100x100x100x1)" in e
+    (e,) = errors(list=str(targets), library="lib", per_target=0)
+    assert "per_target" in e
+    # Every active round's stage01 gets the list; round 0 does not.
+    p = _pipeline(cfg_path, tmp_path)
+    rd = tmp_path / "run" / "round_1"
+    prior = [tmp_path / "run" / "round_0"]
+    for step, want in (
+        (ro.RoundStep(0, "initial", [], None, False), False),
+        (ro.RoundStep(1, "active", prior, None, True), True),
+        (ro.RoundStep(1, "active", prior, None, True, targets=[TINY]), True),
+    ):
+        args = p.args_stage01(rd, step)
+        assert values(args, "--targeted-seed") == ([str(targets)] if want else [])
+        if want:
+            assert values(args, "--targeted-seed-per-target") == ["4"]
+            assert values(args, "--targeted-seed-library") == ["lib"]
+    plain = _pipeline(_config(tmp_path, lists[:1]), tmp_path)
+    args = plain.args_stage01(rd, ro.RoundStep(1, "active", prior, None, True))
+    assert "--targeted-seed" not in args
+
+
+def test_seeded_targets_are_pinned_with_the_digest_of_their_list(tmp_path):
+    lists = _lists(tmp_path, GEMMS)
+    targets = _targets(tmp_path, GEMMS)
+    plain = yaml.safe_load(_config(tmp_path, lists[:1]).read_text())
+    keys = {
+        "seed.targeted_seed.list": str(targets),
+        "seed.targeted_seed.library": "lib",
+    }
+    seeded = yaml.safe_load(_config(tmp_path, lists[:1], **keys).read_text())
+    for key in ("list", "per_target", "library"):
+        dotted = f"seed.targeted_seed.{key}"
+        assert ro.PINNED_UNLESS_NEUTRAL[dotted] == ro.cfg_get({}, dotted)
+    before = ro.pinned_config(plain)
+    assert not [k for k in before if k.startswith("seed.targeted_seed")]
+    pinned = ro.pinned_config(seeded)
+    assert {k: v for k, v in pinned.items() if k not in before} == {
+        "seed.targeted_seed.list": str(targets),
+        "seed.targeted_seed.per_target": 4,
+        "seed.targeted_seed.library": "lib",
+        "seed.targeted_seed.list_sha256": __import__("hashlib")
+        .sha256(targets.read_bytes())
+        .hexdigest(),
+    }
+    targets.write_text(targets.read_text() + "lib,1,2,3,1,0,exclusive,x,y\n")
+    assert pinning.differences(
+        {"config": pinning.config_record(pinned)},
+        {"config": pinning.config_record(ro.pinned_config(seeded))},
+        ("config",),
+    )
+
+
+def test_seeded_contexts_must_be_trained_contexts_of_the_run(tmp_path):
+    lists = _lists(tmp_path, GEMMS)
+    targets = _targets(tmp_path, GEMMS, contexts="cu32_cot,cu64_cot")
+    keys = {
+        "seed.targeted_seed.list": str(targets),
+        "seed.targeted_seed.library": "lib",
+    }
+    cfg = yaml.safe_load(_config(tmp_path, lists[:1], **keys).read_text())
+    cfg["train"] = dict(cfg.get("train") or {}, catalog="v3")
+    trained = [
+        {"cu_budget": 32, "cotenant": True, "fraction": 0.1},
+        {"cu_budget": 64, "cotenant": True, "fraction": 0.1},
+    ]
+    cfg["contexts"] = {"list": trained}
+    out, _ = ro.resolve_contexts(cfg, 0)
+    assert ro.seeded_context_errors(out) == []
+    cfg["contexts"] = {"list": trained[1:]}
+    with pytest.raises(ro.ConfigError) as e:
+        ro.resolve_contexts(cfg, 0)
+    assert "no trained context is cu32_cot (the run trains ['cu64_cot'])" in str(
+        e.value.args[0]
+    )
+
+
 def test_the_guard_key_needs_the_static_check_and_is_pinned_only_when_on(tmp_path):
     cfg = yaml.safe_load(_config(tmp_path).read_text())
     cfg["correctness"] = {"enabled": True, "lists": []}

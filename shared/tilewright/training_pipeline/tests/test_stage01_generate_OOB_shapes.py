@@ -988,3 +988,229 @@ def test_the_stratum_skips_history_held_out_and_this_rounds_shapes(
     assert len(set(written) - set(regular)) == n_big
     cat = json.loads((out / "categorization.json").read_text())
     assert cat["large_k"]["n_shapes"] == n_big
+
+
+# ── seeded targets ───────────────────────────────────────────────────────────
+
+SEEDED_HEAD = "library,m,n,k,batch,cu_budget,bench_contexts,cell,source\n"
+
+
+def _seeded_csv(path, rows):
+    path.write_text(SEEDED_HEAD + "".join(rows))
+    return path
+
+
+def test_seeded_targets_are_read_for_one_library(tmp_path):
+    p = _seeded_csv(
+        tmp_path / "t.csv",
+        [
+            'a,300,300,288,1,0,exclusive,Mid|Mid|MidK|Bnone,"x, y"\n',
+            'a,260,200,96,4,48,"cu32_cot,cu64_cot",Mid|Mid|MidK|Bany,z\n',
+            "b,64,64,64,1,32,cu32_cot,Small|Small|MidK|Bnone,w\n",
+        ],
+    )
+    got = shapes.read_seeded_targets(p, "a")
+    assert [(a["m"], a["n"], a["k"], a["batch"], a["row"]) for a in got] == [
+        (300, 300, 288, 1, 2),
+        (260, 200, 96, 4, 3),
+    ]
+    assert got[0]["bench_contexts"] == [] and got[0]["source"] == "x, y"
+    assert got[1]["bench_contexts"] == ["cu32_cot", "cu64_cot"]
+    assert shapes.read_seeded_targets(p, "c") == []
+    with pytest.raises(ValueError, match="several libraries"):
+        shapes.read_seeded_targets(p)
+    plain = tmp_path / "plain.csv"
+    plain.write_text("m,n,k,batch\n300,300,288,1\n")
+    assert len(shapes.read_seeded_targets(plain)) == 1
+    with pytest.raises(ValueError, match="no library column"):
+        shapes.read_seeded_targets(plain, "a")
+    for bad, why in (
+        ("m,n,k\n1,1,1\n", "no column batch"),
+        ("m,n,k,batch\n1,1,x,1\n", "whole numbers"),
+        ("m,n,k,batch\n1,0,1,1\n", "at least 1"),
+    ):
+        plain.write_text(bad)
+        with pytest.raises(ValueError, match=why):
+            shapes.read_seeded_targets(plain)
+
+
+def _anchor(m, n, k, b, contexts=()):
+    return {"m": m, "n": n, "k": k, "batch": b, "bench_contexts": list(contexts),
+            "row": 2}  # fmt: skip
+
+
+def test_seeded_shapes_are_drawn_near_their_anchors_deterministically():
+    leaf = "Mid|Mid|MidK|Bnone"
+    anchors = [_anchor(300, 300, 288, 1), _anchor(300, 300, 288, 1, ["cu32_cot"])]
+    other = _anchor(4000, 4000, 4000, 1)
+
+    def draw(seed, taken=()):
+        return s01.seeded_shapes(
+            anchors + [other], {leaf}, {}, seed, _filter(), per_target=4,
+            taken=set(taken),
+        )  # fmt: skip
+
+    out, skipped = draw(11)
+    (entries,) = out.values()
+    assert [e["anchor"]["bench_contexts"] for e in entries] == [[], ["cu32_cot"]]
+    near = [tuple(s) for e in entries for s in e["shapes"]]
+    assert len(near) == 8 and len(set(near)) == 8
+    assert (300, 300, 288, 1) not in near
+    for m, n, k, b in near:
+        assert grid.cell_key(m, n, k, b) == leaf and b == 1
+        assert 150 <= m <= 600 and 150 <= n <= 600 and 144 <= k <= 512
+        assert shapes.alignment(m) == shapes.alignment(300)
+    assert skipped == [dict(other, leaf=grid.cell_key(4000, 4000, 4000, 1),
+                            why="the round samples no shape in its leaf")]  # fmt: skip
+    # The same round seed draws the same shapes, another round others; the
+    # anchors with other contexts draw from streams of their own.
+    assert draw(11)[0] == out
+    assert draw(12)[0] != out
+    assert entries[0]["shapes"] != entries[1]["shapes"]
+    # Alone, an anchor draws what it draws beside the others, and the anchor
+    # with other contexts still draws other shapes.
+    alone = [
+        s01.seeded_shapes([a], {leaf}, {}, 11, _filter(), per_target=4,
+                          taken=set())[0][leaf][0]["shapes"]
+        for a in anchors
+    ]  # fmt: skip
+    assert alone[0] == entries[0]["shapes"] and alone[1] != alone[0]
+    # Shapes already taken are not drawn again, and no anchor ever is.
+    taken = {tuple(s) for s in entries[0]["shapes"]}
+    again, _ = draw(11, taken)
+    assert not taken & {tuple(s) for e in again[leaf] for s in e["shapes"]}
+    close = [_anchor(300, 300, 288, 1), _anchor(304, 300, 288, 1)]
+    out, _ = s01.seeded_shapes(close, {leaf}, {}, 5, _filter(), per_target=40,
+                               taken=set())  # fmt: skip
+    drawn = {tuple(s) for e in out[leaf] for s in e["shapes"]}
+    assert not drawn & {(300, 300, 288, 1), (304, 300, 288, 1)}
+
+
+def test_a_round_draws_its_seeded_targets_after_its_tails(
+    tmp_path, monkeypatch, config_path
+):
+    prior = tmp_path / "round_0"
+    args = ["--mode", "initial", "--out-dir", prior / "stage01"]
+    args += ["--config-yaml", config_path, "--target-per-cell", 4, "--quiet"]
+    assert _run(monkeypatch, *args) == 0
+    (prior / "stage05").mkdir()
+    planned = ["Mid|Mid|MidK|Bnone", "Large|Small|LargeK|Bnone"]
+    (prior / "stage05" / "cells.json").write_text(
+        json.dumps({"cells": [{"label": c, "best_sel_eff": 0.97} for c in planned]})
+    )
+    tails = [_tail(300, 300, 288, 1, 0.42, cu=128)]
+    (prior / "stage04b").mkdir()
+    (prior / "stage04b" / "decisions.json").write_text(
+        json.dumps({"per_cell": [{"cell": planned[0], "tail_gemms": tails}]})
+    )
+    csv_path = _seeded_csv(
+        tmp_path / "targets.csv",
+        [
+            'lib,260,200,96,1,48,"cu32_cot,cu64_cot",Mid|Mid|MidK|Bnone,a\n',
+            "lib,4000,4000,4000,1,0,exclusive,Large|Large|LargeK|Bnone,b\n",
+            "other,300,300,96,1,0,exclusive,Mid|Mid|MidK|Bnone,c\n",
+        ],
+    )
+    base = ["--mode", "active", "--config-yaml", config_path, "--prior-round-dir"]
+    base += [prior, "--shapes-per-cell", 6, "--targeted-per-gemm", 3, "--quiet"]
+    plain = tmp_path / "plain"
+    assert _run(monkeypatch, *base, "--out-dir", plain) == 0
+    out = tmp_path / "seeded"
+    seeded = ["--targeted-seed", csv_path, "--targeted-seed-library", "lib"]
+    assert _run(monkeypatch, *base, "--out-dir", out, *seeded) == 0
+    doc = json.loads((out / s01.TARGETED_FILE).read_text())
+    (entries,) = doc["leaves"].values()
+    assert ["tail" in e for e in entries] == [True, False]
+    tail_doc = json.loads((plain / s01.TARGETED_FILE).read_text())
+    (tail_entries,) = tail_doc["leaves"].values()
+    assert entries[0] == tail_entries[0], "the tails draw as without the key"
+    anchor = entries[1]["anchor"]
+    assert (anchor["m"], anchor["bench_contexts"]) == (260, ["cu32_cot", "cu64_cot"])
+    assert len(entries[1]["shapes"]) == 4
+    sha = __import__("hashlib").sha256(csv_path.read_bytes()).hexdigest()
+    rec = doc["seeded"]
+    assert (rec["list"], rec["sha256"], rec["library"]) == (str(csv_path), sha, "lib")
+    assert (rec["per_target"], rec["n_anchors"], rec["n_anchors_drawn"]) == (4, 2, 1)
+    assert rec["n_shapes"] == 4 and rec["per_cell"] == {planned[0]: 4}
+    assert [s["row"] for s in rec["skipped"]] == [3]
+    cat = json.loads((out / "categorization.json").read_text())
+    assert cat["targeted"]["seeded"] == rec
+    assert cat["targeted"]["n_shapes"] == 3 + 4
+    assert (
+        cat["n_final"]
+        == json.loads((plain / "categorization.json").read_text())["n_final"] + 4
+    )
+    plan = json.loads((out / "per_cell_plan.json").read_text())
+    assert plan["cells"][planned[0]]["n_seeded"] == 4
+    written = set(parse_shapes_yaml(out / "shapes.yaml"))
+    assert {tuple(s) for s in entries[1]["shapes"]} <= written
+    assert written - {tuple(s) for s in entries[1]["shapes"]} == set(
+        parse_shapes_yaml(plain / "shapes.yaml")
+    )
+    # Deterministic: the same round draws the same anchors' shapes.
+    again = tmp_path / "again"
+    assert _run(monkeypatch, *base, "--out-dir", again, *seeded) == 0
+    assert (
+        json.loads((again / s01.TARGETED_FILE).read_text())["leaves"] == doc["leaves"]
+    )
+    # The key without tail GEMMs still writes its draws; a bad list stops.
+    (prior / "stage04b" / "decisions.json").unlink()
+    alone = tmp_path / "alone"
+    assert _run(monkeypatch, *base, "--out-dir", alone, *seeded) == 0
+    (entries,) = json.loads((alone / s01.TARGETED_FILE).read_text())["leaves"].values()
+    assert [list(e) for e in entries] == [["anchor", "shapes"]]
+    bad = ["--targeted-seed", csv_path]
+    assert _run(monkeypatch, *base, "--out-dir", tmp_path / "bad", *bad) == 1
+    zero = [*seeded, "--targeted-seed-per-target", 0]
+    assert _run(monkeypatch, *base, "--out-dir", tmp_path / "zero", *zero) == 1
+
+
+def test_no_anchor_is_drawn_near_another(monkeypatch):
+    """Every anchor joins the shapes the draws avoid before any is drawn, so
+    an anchor next to another is never one of its draws."""
+    leaf = "Mid|Mid|MidK|Bnone"
+    a, b = (300, 300, 288, 1), (320, 300, 288, 1)
+    offered = [b, (336, 300, 288, 1), a]
+
+    def near(shape, n, rng, f, box, **kw):
+        return [s for s in offered if s != tuple(shape)]
+
+    monkeypatch.setattr(s01, "synthesize_near", near)
+    out, skipped = s01.seeded_shapes(
+        [_anchor(*a), _anchor(*b)], {leaf}, {}, 3, _filter(), per_target=4, taken=set()
+    )
+    assert [e["shapes"] for e in out[leaf]] == [[[336, 300, 288, 1]]]
+    assert [s["why"] for s in skipped] == ["no new shape near it"]
+
+
+def test_a_held_out_gemm_near_an_anchor_is_drawn_around(
+    tmp_path, monkeypatch, config_path
+):
+    """The draws near an anchor avoid the held-out lists' GEMMs as the
+    round's other draws do: with the first shape the anchor's stream draws
+    held out, the round draws the next one in its place and is written."""
+    leaf = "Mid|Mid|MidK|Bnone"
+    run = _active_round(tmp_path, monkeypatch, config_path, None, [leaf])
+    targets = _seeded_csv(
+        tmp_path / "targets.csv",
+        ['lib,260,200,96,1,48,"cu32_cot,cu64_cot",Mid|Mid|MidK|Bnone,a\n'],
+    )
+    seeded = ["--targeted-seed", targets, "--targeted-seed-library", "lib"]
+
+    def near(out):
+        doc = json.loads((out / s01.TARGETED_FILE).read_text())
+        (entry,) = [e for es in doc["leaves"].values() for e in es if "anchor" in e]
+        return [tuple(s) for s in entry["shapes"]]
+
+    first = run("first", *seeded)
+    drawn = near(first)
+    assert len(drawn) == 4
+    held = _bench_yaml(tmp_path / "held.yaml", [drawn[0]])
+    out = run("held", *seeded, "--exclude-shapes-yaml", held)
+    again = near(out)
+    assert drawn[0] not in again and again[:3] == drawn[1:] and len(again) == 4
+    written = set(parse_shapes_yaml(out / "shapes.yaml"))
+    assert drawn[0] not in written and set(again) <= written
+    assert written - set(again) == set(parse_shapes_yaml(first / "shapes.yaml")) - {
+        *drawn
+    }

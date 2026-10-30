@@ -23,6 +23,7 @@ Config keys read here:
 """
 from __future__ import annotations
 
+import csv
 import math
 import random
 from dataclasses import dataclass
@@ -673,6 +674,63 @@ def synthesize_near(
             continue
         seen.add(s)
         out.append(s)
+    return out
+
+
+# ── seeded targets ───────────────────────────────────────────────────────────
+
+# The columns of a seeded-targets file: those a row must give, and the one
+# that names the library a row belongs to.
+SEEDED_COLUMNS: Tuple[str, ...] = ("m", "n", "k", "batch")
+SEEDED_LIBRARY_COLUMN = "library"
+# A bench_contexts value that names no context beyond the round's own bench.
+EXCLUSIVE_CONTEXT = "exclusive"
+SEEDED_PER_TARGET = 4
+
+
+def read_seeded_targets(
+    path: Path, library: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """The anchors of a seeded-targets CSV file, in file order: per row
+    m, n, k and batch (whole numbers, at least 1), `bench_contexts` (the
+    labels, comma-separated, of the contexts its near shapes are benched in;
+    `exclusive` or empty: the round's own bench only) and its other columns
+    as text. With a `library` column the file holds several libraries'
+    anchors and `library` must name the one wanted (its rows only).
+    ValueError naming the file and row otherwise."""
+    text = Path(path).read_text()
+    rows = list(csv.DictReader(text.splitlines()))
+    header = list(csv.DictReader(text.splitlines()).fieldnames or [])
+    missing = [c for c in SEEDED_COLUMNS if c not in header]
+    if missing:
+        raise ValueError(f"{path}: no column {', '.join(missing)}")
+    if SEEDED_LIBRARY_COLUMN in header and not library:
+        raise ValueError(
+            f"{path} holds the anchors of several libraries (its "
+            f"{SEEDED_LIBRARY_COLUMN} column): name the one this run trains"
+        )
+    if library and SEEDED_LIBRARY_COLUMN not in header:
+        raise ValueError(f"{path} has no {SEEDED_LIBRARY_COLUMN} column")
+    out: List[Dict[str, Any]] = []
+    for i, row in enumerate(rows, 2):
+        if library and row.get(SEEDED_LIBRARY_COLUMN) != library:
+            continue
+        try:
+            dims = {c: int(str(row[c]).strip()) for c in SEEDED_COLUMNS}
+        except (TypeError, ValueError):
+            raise ValueError(f"{path}:{i}: m, n, k and batch must be whole numbers")
+        if min(dims.values()) < 1:
+            raise ValueError(f"{path}:{i}: m, n, k and batch must be at least 1")
+        contexts = [
+            c.strip()
+            for c in str(row.get("bench_contexts") or "").split(",")
+            if c.strip() and c.strip() != EXCLUSIVE_CONTEXT
+        ]
+        anchor: Dict[str, Any] = {
+            k: v for k, v in row.items() if k not in SEEDED_COLUMNS and v is not None
+        }
+        anchor.update(dims, bench_contexts=contexts, row=i)
+        out.append(anchor)
     return out
 
 

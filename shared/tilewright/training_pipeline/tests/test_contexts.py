@@ -726,6 +726,22 @@ def test_a_context_benches_the_shapes_targeted_at_its_tails(tmp_path):
     assert cx.targeted_for(path, cx.BenchContext()) == set()
     assert cx.targeted_for(None, ctx) == set()
     assert cx.targeted_for(tmp_path / "missing.json", ctx) == set()
+    # A seeded anchor's shapes go to the contexts its bench_contexts name,
+    # whatever its own budget: both trained neighbours of an untrained one.
+    doc["leaves"]["L"] += [
+        {"anchor": {"cu_budget": "48", "bench_contexts": ["cu32_cot", "cu64_cot"]},
+         "shapes": [list(cell[9])]},
+        {"anchor": {"cu_budget": "0", "bench_contexts": []},
+         "shapes": [list(cell[3])]},
+    ]  # fmt: skip
+    path.write_text(json.dumps(doc))
+    cu64 = cx.BenchContext(cu_budget=64, cotenant=True, fraction=0.1)
+    cu32 = cx.BenchContext(cu_budget=32, cotenant=True, fraction=0.1)
+    assert (cu64.label, cu32.label) == ("cu64_cot", "cu32_cot")
+    assert cx.targeted_for(path, cu64) == {cell[8], cell[9]}
+    assert cx.targeted_for(path, cu32) == {cell[9]}
+    assert cx.targeted_for(path, ctx) == {cell[5], cell[6]}
+    assert cx.targeted_for(path, cx.BenchContext()) == set()
 
 
 # ── bench wrapper ────────────────────────────────────────────────────────────

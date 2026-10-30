@@ -2955,6 +2955,9 @@ def test_the_offset_rereads_are_pinned_only_when_they_change_something(tmp_path)
         "audit.held_out",
         "contexts.granule",
         "deploy.drift_fallback.keep",
+        "seed.targeted_seed.list",
+        "seed.targeted_seed.per_target",
+        "seed.targeted_seed.library",
     } | {f"bench.rebench.{k}" for k in NEUTRAL_REREADS} | set(NEED_BUDGET) | set(
         ALIGNMENT_VETO_KEYS
     )
