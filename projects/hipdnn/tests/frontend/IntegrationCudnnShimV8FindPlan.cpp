@@ -128,7 +128,7 @@ protected:
 
 TEST_F(IntegrationCudnnShimV8FindPlan, GetPlanSkipsContextFailure)
 {
-    // Engine -32 is offered and then skipped when its plan fails at context creation.
+    // Engine -34 is offered and then skipped when its plan fails at context creation.
     ASSERT_EQ(_generator.generate_engine_config(*_graph).size(), 4U);
     const fe::executionPlans_t plans = getPlans();
 

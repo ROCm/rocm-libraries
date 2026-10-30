@@ -48,8 +48,8 @@ protected:
     }
 };
 
-// The shim's index orders engines by signed id: the context-failing engine (-32)
-// is index 0 and the knob engine (-31) index 1.
+// The shim's index orders engines by signed id: the context-failing engine (-34)
+// is index 0 and the knob engine (-33) index 1.
 constexpr std::int64_t K_CONTEXT_FAILS_INDEX = 0;
 constexpr std::int64_t K_KNOB_ENGINE_INDEX = 1;
 

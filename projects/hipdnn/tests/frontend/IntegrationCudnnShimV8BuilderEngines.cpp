@@ -91,7 +91,7 @@ TEST_F(IntegrationCudnnShimV8BuilderEnginesNoEngines, ZeroIsNotAnError)
     EXPECT_EQ(engineCount(), 0);
 }
 
-// Engines sorted by signed id: -32, -31, -2, then the execute-fails engine's positive id.
+// Engines sorted by signed id: -34, -33, -2, then the execute-fails engine's positive id.
 constexpr std::int64_t K_ENGINE_COUNT = 4;
 constexpr std::int64_t K_CONTEXT_FAILS_INDEX = 0;
 constexpr std::int64_t K_EXECUTE_FAILS_INDEX = 3;
