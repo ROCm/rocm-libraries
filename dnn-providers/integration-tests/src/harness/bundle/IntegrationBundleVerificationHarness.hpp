@@ -32,6 +32,7 @@
 #include "harness/bundle/GraphSession.hpp"
 #include "harness/bundle/HarnessDependencies.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/bundle/KernelLogTap.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
 #include "harness/bundle/OutputComparison.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
@@ -99,6 +100,7 @@ public:
     explicit IntegrationBundleVerificationHarness(HarnessDependencies dependencies,
                                                   std::optional<LoadedEngine> engineUnderTest = {})
         : _deps(std::move(dependencies))
+        , _kernelTap(_deps.kernelLog)
         , _engineUnderTest(std::move(engineUnderTest))
     {
     }
@@ -134,6 +136,7 @@ public:
         // gap between them.
         _caseFinished = false;
         _deps.reporter->recordCaseStarted(caseIdentity());
+        _kernelTap.begin();
 
         // Before the first skip exit, so a bundle this SetUp() goes on to skip is still
         // counted as selected. That is the whole point of the counter: the gap between it
@@ -346,13 +349,16 @@ private:
 
     // At most one `finished` per SetUp(): the first exit to get here wins, so the
     // catch-all in TestBody() cannot double-report a test that already said how it ended.
-    void publishFinished(const CaseOutcomeRecord& record)
+    void publishFinished(CaseOutcomeRecord record)
     {
         if(_caseFinished)
         {
             return;
         }
         _caseFinished = true;
+        // Every `finished` ends the tap, so the lines of this case stop here and the log
+        // level goes back before the next case starts.
+        record.kernels = _kernelTap.finish();
         _deps.reporter->recordCaseOutcome(record);
     }
 
@@ -672,6 +678,9 @@ private:
     }
 
     HarnessDependencies _deps;
+    // Collects the kernels the engine names between this SetUp()'s `started` record and its
+    // `finished` one. Declared after _deps, which it is built from.
+    KernelLogTap _kernelTap;
     std::optional<LoadedEngine> _engineUnderTest;
     std::filesystem::path _bundlePath;
     SupportClaimLocator _claimLocator;

@@ -10,6 +10,7 @@
 #include "harness/bundle/IGraphEngineRunner.hpp"
 #include "harness/bundle/ISupportClaimObserver.hpp"
 #include "harness/bundle/IVerificationReporter.hpp"
+#include "harness/bundle/KernelLogTap.hpp"
 #include "harness/bundle/ProductionPolicy.hpp"
 #include "harness/input-init/FillInputs.hpp"
 
@@ -19,8 +20,8 @@ namespace hipdnn_integration_tests::bundle
 /// Everything IntegrationBundleVerificationHarness talks to that it does not own
 /// the decision for.
 ///
-/// Four collaborators and a policy value — not a container, and not a registry.
-/// They are the four things that need a GPU, a handle, a loaded engine plugin, or
+/// Five collaborators and a policy value — not a container, and not a registry.
+/// They are the five things that need a GPU, a handle, a loaded engine plugin, or
 /// process-wide state; everything else the harness does is a decision over values
 /// and stays inside it.
 struct HarnessDependencies
@@ -34,6 +35,10 @@ struct HarnessDependencies
     /// run and its lifetime belongs to whoever created it, not to a test. Null means
     /// every input is filled on the host.
     std::shared_ptr<DeviceInputFiller> deviceFiller;
+    /// The log callback and log level the kernel tap drives to learn which kernels a case
+    /// ran. Null turns the tap off: no callback is registered, no level changes, and the
+    /// outcome records carry no kernels.
+    std::shared_ptr<IKernelLogControl> kernelLog;
     HarnessPolicy policy;
 };
 

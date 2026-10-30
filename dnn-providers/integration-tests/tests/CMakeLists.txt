@@ -14,6 +14,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     ../src/harness/bundle/CaseOutcome.cpp
     ../src/harness/bundle/GraphSession.cpp
     ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
+    ../src/harness/bundle/KernelLogTap.cpp
     ../src/harness/bundle/OutcomeReportLog.cpp
     ../src/harness/bundle/OutputComparison.cpp
     ../src/harness/bundle/ProductionPolicy.cpp
@@ -93,6 +94,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGraphSession.cpp
     TestCaseOutcome.cpp
     TestOutcomeReport.cpp
+    TestKernelLogTap.cpp
     TestOutputComparison.cpp
 )
 

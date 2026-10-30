@@ -350,6 +350,27 @@ TEST(TestCaseOutcome, FinishedRecordOmitsWhatTheIdentityDoesNotKnow)
     EXPECT_FALSE(json.contains("inputs"));
 }
 
+// Bug caught: the kernels a case ran lost on the way to the report (the summary counts them
+// per engine), or written in a shape the driver cannot read back.
+TEST(TestCaseOutcome, FinishedRecordCarriesTheKernelsInOrder)
+{
+    auto record = makeUnexercisedRecord(makeIdentity(), OutcomeStage::SETUP, "r");
+    record.kernels = {"fmha_fwd_a", "fmha_fwd_b"};
+
+    const auto json = nlohmann::json::parse(finishedRecordJson(record));
+    ASSERT_TRUE(json.contains("kernels"));
+    EXPECT_EQ(json.at("kernels"), (nlohmann::json::array({"fmha_fwd_a", "fmha_fwd_b"})));
+}
+
+// Bug caught: an empty `kernels` list on every record, which the driver cannot tell from "the
+// engine reported nothing" and which bloats a report of thousands of cases.
+TEST(TestCaseOutcome, FinishedRecordOmitsKernelsWhenNoneWereReported)
+{
+    const auto record = makeUnexercisedRecord(makeIdentity(), OutcomeStage::SETUP, "r");
+    const auto json = nlohmann::json::parse(finishedRecordJson(record));
+    EXPECT_FALSE(json.contains("kernels"));
+}
+
 // Bug caught: the started record growing the fields only the finished record owns.
 TEST(TestCaseOutcome, StartedRecordNeverCarriesWhatTheCaseAskedFor)
 {

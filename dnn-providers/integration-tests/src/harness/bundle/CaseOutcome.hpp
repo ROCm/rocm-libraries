@@ -83,6 +83,10 @@ struct CaseOutcomeRecord
     std::string reason;
     /// The non-success status the case expected and got ("BAD_PARAM"); empty otherwise.
     std::string expectedStatus;
+    /// The kernels the engine reported for this case (its `kernel: <engine> <kernel>` log
+    /// lines), distinct and sorted. Empty when the case never built a plan, or the engine
+    /// does not report a kernel (HIP_MLOPS); the `finished` record then has no `kernels`.
+    std::vector<std::string> kernels;
 };
 
 /// Builds the record for a test body that reached an outcome. `reason` is the

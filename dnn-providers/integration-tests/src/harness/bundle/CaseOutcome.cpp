@@ -208,6 +208,10 @@ std::string finishedRecordJson(const CaseOutcomeRecord& record)
     {
         json["expected_status"] = record.expectedStatus;
     }
+    if(!record.kernels.empty())
+    {
+        json["kernels"] = record.kernels;
+    }
     return dumpLine(json);
 }
 
