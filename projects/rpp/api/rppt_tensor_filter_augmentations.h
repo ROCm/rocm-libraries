@@ -219,6 +219,54 @@ RppStatus rppt_emboss(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                       RpptImageBorderType borderType, RpptROIPtr roiTensorPtrSrc,
                       RpptRoiType roiType, rppHandle_t rppHandle, RppBackend executionBackend);
 
+/*! \brief Bilateral Filter augmentation on HIP/HOST backend for a NCHW/NHWC layout tensor
+ * \details The bilateral filter augmentation runs for a batch of RGB(3 channel) / greyscale(1
+ * channel) images with an NHWC/NCHW tensor layout. It is an edge-preserving smoothing: each output
+ * pixel is the normalized weighted mean of its kernelSize x kernelSize neighbourhood, where a
+ * neighbour's weight is the product of a spatial Gaussian on its offset (stdDevSpaceTensor) and a
+ * range Gaussian on the difference between its value and the centre pixel's (stdDevRangeTensor).
+ * Each channel is filtered independently: the range term uses that channel's own difference.<br>
+ * weight(dy, dx) = exp(-(dy^2 + dx^2) / (2 * stdDevSpace^2)) *
+ *                  exp(-(v - v0)^2 / (2 * stdDevRange^2))<br>
+ * - srcPtr depth ranges - Rpp8u (0 to 255), Rpp16f (0 to 1), Rpp32f (0 to 1), Rpp8s (-128 to 127).
+ * - dstPtr depth ranges - Will be same depth as srcPtr.
+ * \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory (for HOST
+ * backend)
+ * \param [in] srcDescPtr source tensor descriptor (Restrictions - numDims = 4, offsetInBytes >= 0,
+ * dataType = U8/F16/F32/I8, layout = NCHW/NHWC, c = 1/3)
+ * \param [out] dstPtr destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST
+ * backend)
+ * \param [in] dstDescPtr destination tensor descriptor (Restrictions - numDims = 4,
+ * offsetInBytes >= 0, dataType = U8/F16/F32/I8, layout = NCHW/NHWC, c = same as that of srcDescPtr)
+ * \param [in] stdDevSpaceTensor spatial standard deviation in pixels (1D tensor in pinned / HIP
+ * memory (for HIP backend) or HOST memory (for HOST backend), of size batchSize, for each image in
+ * batch, with stdDevSpaceTensor[i] > 0)
+ * \param [in] stdDevRangeTensor range (intensity) standard deviation in the same units as the
+ * pixel values - 0 to 255 scale for Rpp8u/Rpp8s, 0 to 1 scale for Rpp16f/Rpp32f (1D tensor in
+ * pinned / HIP memory (for HIP backend) or HOST memory (for HOST backend), of size batchSize, for
+ * each image in batch, with stdDevRangeTensor[i] > 0)
+ * \param [in] kernelSize kernel size for bilateral filter (a single Rpp32u odd number with
+ * kernelSize = 3/5/7/9 that applies to all images in the batch)
+ * \param [in] borderType border type for padding during filtering (Restrictions -
+ * RpptImageBorderType::REPLICATE only mode supported)
+ * \param [in] roiTensorPtrSrc ROI data in HIP memory (for HIP backend) or HOST memory (for HOST
+ * backend), for each image in source tensor (2D tensor of size batchSize * 4, in either format -
+ * XYWH(xy.x, xy.y, roiWidth, roiHeight) or LTRB(lt.x, lt.y, rb.x, rb.y))
+ * \param [in] roiType ROI type used (RpptRoiType::XYWH or RpptRoiType::LTRB)
+ * \param [in] rppHandle RPP HIP/HOST handle created with <tt>\ref rppCreate()</tt>
+ * \param [in] executionBackend backend for execution (RppBackend::RPP_HOST_BACKEND or
+ * RppBackend::RPP_HIP_BACKEND)
+ * \return A <tt> \ref RppStatus</tt> enumeration.
+ * \retval RPP_SUCCESS Successful completion.
+ * \retval RPP_ERROR* Unsuccessful completion.
+ */
+RppStatus rppt_bilateral_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
+                                RpptDescPtr dstDescPtr, Rpp32f* stdDevSpaceTensor,
+                                Rpp32f* stdDevRangeTensor, Rpp32u kernelSize,
+                                RpptImageBorderType borderType, RpptROIPtr roiTensorPtrSrc,
+                                RpptRoiType roiType, rppHandle_t rppHandle,
+                                RppBackend executionBackend);
+
 /*! \brief Prewitt Filter augmentation on HOST only backend for a NCHW/NHWC layout tensor
  * \details The prewitt filter augmentation runs for a batch of RGB(3 channel) / greyscale(1
  * channel) images with an NHWC/NCHW tensor layout. It is a first-order edge detector: two 3x3
