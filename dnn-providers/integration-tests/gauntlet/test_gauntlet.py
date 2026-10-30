@@ -467,6 +467,8 @@ def test_data_seed_can_be_fixed_and_is_validated():
 FEATURE_KEYS = {
     "SdpaBackward/Default": {"node_patches"},
     "SdpaFwd/Default": {"add_tensors", "node_patches"},
+    "SdpaFwd/Gfx1151": {"add_tensors", "node_patches"},
+    "SdpaFwd/Gfx1151Decode": {"add_tensors", "node_patches"},
 }
 
 
@@ -518,6 +520,8 @@ def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
         "SdpaFwd/Default",
         "SdpaFwd/Flash2",
         "SdpaFwd/Flash2Region",
+        "SdpaFwd/Gfx1151",
+        "SdpaFwd/Gfx1151Decode",
         "SdpaFwd/Gfx950Dense",
     ]
     for sp in SPACES:
@@ -539,6 +543,8 @@ def test_shipped_spaces_declare_cost_ceilings():
     assert any("2**31" in r for r in rules["SdpaFwd/Default"])
     assert any("2**31" in r for r in rules["SdpaFwd/Gfx950Dense"])
     assert any("2**31" in r for r in rules["SdpaFwd/Flash2Region"])
+    assert any("2**31" in r for r in rules["SdpaFwd/Gfx1151"])
+    assert any("2**31" in r for r in rules["SdpaFwd/Gfx1151Decode"])
     assert any("2**26" in r for r in rules["SdpaBackward/Default"])
     assert any("2**30" in r for r in rules["RMSNorm/Default"])
     assert any("2**30" in r for r in rules["ResampleFwd/Default"])
@@ -868,6 +874,264 @@ def test_flash2_region_crossover_constraint_follows_use_flash2_for_shape():
     assert legal[True] > 100 and legal[False] > 100
 
 
+GFX1151_SPACES = ["SdpaFwd/Gfx1151", "SdpaFwd/Gfx1151Decode"]
+GFX1151_CATALOGS = (
+    TESTS_ROOT.parent
+    / "hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE"
+)
+
+
+def _gfx1151_catalog(space_id):
+    """The metadata of every kernel descriptor the shipped catalog of the space's engine holds."""
+    name = "gfx1151_wmma_attention" + ("_decode" if space_id.endswith("Decode") else "")
+    path = GFX1151_CATALOGS / name / f"{name}.kdp.json"
+    if not path.is_file():
+        pytest.skip("the hip-kernel-provider descriptors are not in this checkout")
+    return [d["metadata"] for d in json.loads(path.read_text())["kernelDescriptors"]]
+
+
+def _contiguous(dims):
+    strides, running = [], 1
+    for d in reversed(dims):
+        strides.append(running)
+        running *= d
+    return strides[::-1]
+
+
+@pytest.mark.parametrize("space_id", GFX1151_SPACES)
+def test_gfx1151_space_draws_the_shipped_buckets_and_renders_every_feature(space_id):
+    # bug caught: a head-size pair, dtype, bias kind or mask the shipped descriptors do not hold
+    # (it would decline and say nothing), a catalog row the space never draws, a bias or LSE
+    # tensor with other dims, strides, dtype or alignment than the sample's, a wiring key that
+    # misses (attn_mask_tensor_uid, stats_tensor_uid, generate_stats, left_bound: the case would
+    # pass without the feature), uids a freeze renumbers, and a row with no key under its mask
+    sp = space_by_id(space_id)
+    template = json.loads(sp.template_path.read_text())
+    catalog = _gfx1151_catalog(space_id)
+    shipped_heads = {(m["head_size"], m["head_size_v"]) for m in catalog}
+    probe = {(100, 100)}  # not a multiple of 8: both engines decline it
+    assert {tuple(v) for v in sp.axes["hd"].values} == shipped_heads | probe
+    assert {m["dtype"] for m in catalog} == {"FP16", "BF16"}
+    assert {m["bias"] for m in catalog} == set(sp.axes["bias"].values)
+    # a 'causal' prefill object and a 'runtime' decode object both serve every mask drawn
+    assert {m["mask_mode"] for m in catalog} == {
+        "runtime" if space_id.endswith("Decode") else "causal"
+    }
+    dtypes = {"half": "FP16", "bfloat16": "BF16"}
+
+    seen = {name: set() for name in ("dtype", "layout", "mask", "bias", "stats", "hd")}
+    bias_shapes, claimable = set(), 0
+    for seed in range(700):
+        s = sampler.sample(sp, seed)
+        axes = s.axis_values
+        env = sp.derive_env(axes)
+        graph = expanded_graph(template, s.row)
+        node = graph["nodes"][0]
+        attrs, ins, outs = node["attributes"], node["inputs"], node["outputs"]
+        by_name = {t["name"]: t for t in graph["tensors"]}
+        b, hkv, hq, sq, skv = axes["b"], axes["hkv"], env["hq"], axes["sq"], axes["skv"]
+        dq, dv = axes["hd"]
+        dtype, bias, stats = axes["dtype"], axes["bias"], axes["stats"]
+        assert dtype in dtypes and hq % hkv == 0
+        assert len(graph["tensors"]) == 4 + (bias != "none") + (stats == "on"), seed
+        assert bu.canonical_uid_map_by_name(graph) == {
+            t["uid"]: t["uid"] for t in graph["tensors"]
+        }, seed  # a freeze (import_graph.py) renumbers by sorted name and must keep these
+
+        assert by_name["Q"]["dims"] == [b, hq, sq, dq]
+        assert by_name["K"]["dims"] == [b, hkv, skv, dq]
+        assert by_name["V"]["dims"] == [b, hkv, skv, dv]
+        assert by_name["SdpaFwd_0::O"]["dims"] == [b, hq, sq, dv]
+        base = [by_name[n] for n in ("Q", "K", "V", "SdpaFwd_0::O")]
+        assert {t["data_type"] for t in base} == {dtype}
+        for t in base:
+            assert t["strides"][3] == 1 and _packed(t["dims"], t["strides"])
+            if dq % 8 == 0 and dv % 8 == 0:  # hasAlignedRows
+                assert all(
+                    t["strides"][i] % 8 == 0 for i in range(3) if t["dims"][i] > 1
+                ), (seed, t["name"])
+        assert by_name["Q"]["strides"] == (
+            [sq * hq * dq, dq, hq * dq, 1]
+            if axes["layout"] == "bshd"
+            else [hq * sq * dq, sq * dq, dq, 1]
+        )
+
+        # the mask, by the cuDNN semantics of left_bound
+        mask = axes["mask"]
+        want = {
+            "none": ("TOP_LEFT", None, None),
+            "causal_top_left": ("TOP_LEFT", None, 0),
+            "causal_bottom_right": ("BOTTOM_RIGHT", None, 0),
+            "window": (axes["walign"].upper(), axes["wl"], axes["wr"]),
+        }[mask]
+        assert (attrs["diagonal_alignment"], attrs["left_bound"], attrs["right_bound"]) == want, seed  # fmt: skip
+        assert not (attrs["causal_mask"] or attrs["causal_mask_bottom_right"])
+        assert _row_has_a_key(
+            attrs["left_bound"],
+            attrs["right_bound"],
+            attrs["diagonal_alignment"] == "TOP_LEFT",
+            sq,
+            skv,
+        ), seed
+
+        # the additive mask: [B|1, Hq|1, Sq|1, Sk], packed, FP32 or the Q dtype, wired by uid
+        if bias == "none":
+            assert "bias" not in by_name and ins["attn_mask_tensor_uid"] is None
+        else:
+            dims = [
+                1 if axes["bcast_b"] else b,
+                1 if axes["bcast_h"] else hq,
+                1 if axes["bcast_q"] else sq,
+                skv,
+            ]
+            t = by_name["bias"]
+            assert (t["uid"], t["dims"], t["strides"]) == (4, dims, _contiguous(dims))
+            assert t["data_type"] == ("float" if bias == "f32" else dtype), seed
+            assert t["alignment"] == axes["alignment"]
+            assert not t["virtual"] and not t["is_runtime_pass_by_value"]
+            assert ins["attn_mask_tensor_uid"] == 4
+            bias_shapes.add((axes["bcast_b"], axes["bcast_h"], axes["bcast_q"]))
+        # the log-sum-exp output
+        if stats == "off":
+            assert "stats" not in by_name
+            assert attrs["generate_stats"] is None and outs["stats_tensor_uid"] is None
+        else:
+            t = by_name["stats"]
+            uid = 4 if bias == "none" else 5
+            assert (t["uid"], t["dims"], t["strides"]) == (
+                uid, [b, hq, sq, 1], [hq * sq, sq, 1, 1],
+            ), seed  # fmt: skip
+            assert t["data_type"] == "float" and t["alignment"] == axes["alignment"]
+            assert attrs["generate_stats"] is True and outs["stats_tensor_uid"] == uid
+        assert {by_name[n]["alignment"] for n in ("Q", "K", "V", "SdpaFwd_0::O")} == {
+            axes["alignment"]
+        }
+
+        for name in seen:
+            seen[name].add(json.dumps(axes[name]))
+        claimable += (dq, dv) != (100, 100) and axes["alignment"] >= 16
+    for name in seen:
+        assert seen[name] == {json.dumps(v) for v in sp.axes[name].values}, name
+    assert bias_shapes == {
+        (b, h, q) for b in (False, True) for h in (False, True) for q in (False, True)
+    }
+    # the part the engine can answer (heads it ships, 16-byte alignment) stays the bulk
+    assert claimable > 200
+
+
+def _decode_kv_range(sq, skv, bottom_right, window_left, window_right):
+    """``decodeKvRange`` (Gfx1151WmmaAttentionNative.cpp), written out again: the keys any query
+    row sees, [lo, hi); the window bounds are the kernel's (window_left = left_bound - 1).
+    """
+    ctx = skv - sq if bottom_right else 0
+    lo = max(ctx - window_left, 0) if window_left >= 0 else 0
+    hi = max(min(ctx + window_right + sq, skv), 0) if window_right >= 0 else skv
+    return lo, hi
+
+
+def _rdna_use_decode_gfx11(sq, visible, hq, hkv, batch, num_cus):
+    """``rdnaAttentionUseDecode`` for a gfx11 device, written out again."""
+    groups = max(1, hq // max(hkv, 1))
+    if sq > 64:
+        return 4 * batch * hq * ((sq + 127) // 128) < num_cus
+    return (
+        groups * sq < 512 or visible < 64 * num_cus or batch * visible < 512 * num_cus
+    )
+
+
+def _routed_to_decode(attrs, b, hq, hkv, sq, skv, num_cus):
+    left, right = attrs["left_bound"], attrs["right_bound"]
+    lo, hi = _decode_kv_range(
+        sq,
+        skv,
+        attrs["diagonal_alignment"] == "BOTTOM_RIGHT",
+        -1 if left is None else left - 1,
+        -1 if right is None else right,
+    )
+    return _rdna_use_decode_gfx11(sq, hi - lo, hq, hkv, b, num_cus)
+
+
+@pytest.mark.parametrize("space_id", GFX1151_SPACES)
+def test_gfx1151_spaces_split_prefill_and_decode_by_the_dispatch_rule(space_id):
+    # bug caught: a prefill sample the decode engine would take (the prefill engine declines
+    # it), a decode sample the dispatcher sends to prefill, and a split that holds at one
+    # compute-unit count only (the rule reads the device: the spaces keep to shapes whose route
+    # is the same at 32 and 40 compute units). The mask moves the route through the visible keys.
+    sp = space_by_id(space_id)
+    template = json.loads(sp.template_path.read_text())
+    decode_space = space_id.endswith("Decode")
+    short, long, routed_by_window = 0, 0, 0
+    for seed in range(700):
+        s = sampler.sample(sp, seed)
+        axes = s.axis_values
+        env = sp.derive_env(axes)
+        attrs = expanded_graph(template, s.row)["nodes"][0]["attributes"]
+        args = (axes["b"], env["hq"], axes["hkv"], axes["sq"], axes["skv"])
+        d32, d40 = (_routed_to_decode(attrs, *args, n) for n in (32, 40))
+        assert not d32 or d40  # more compute units never move a shape to prefill
+        short += axes["sq"] <= 64
+        long += axes["sq"] > 64
+        if axes["hd"] == [100, 100]:
+            continue  # the head-size probe has no route: the matcher declines it first
+        if decode_space:
+            assert d32 and d40, (seed, axes["sq"], axes["skv"], axes["mask"])
+        else:
+            assert not d32 and not d40, (seed, axes["sq"], axes["skv"], axes["mask"])
+        routed_by_window += decode_space and axes["mask"] != "none" and axes["sq"] <= 64
+    if decode_space:
+        assert short > 100 and long > 20 and routed_by_window > 20
+    else:
+        assert (
+            short == 0 and long == 700
+        )  # gfx11: seqlen_q <= 64 keeps decode below 2560 keys
+
+
+@pytest.mark.parametrize("space_id", GFX1151_SPACES)
+def test_gfx1151_space_constraints_follow_the_dispatch_rule_and_the_reference_mask(
+    space_id,
+):
+    # bug caught: a constraint off by one from rdnaAttentionUseDecode or the mask (a window that
+    # leaves a row with no key, or the wrong side of the 32/40 compute-unit bounds), checked on
+    # axes drawn independently of the sampler so that rejected draws are exercised too
+    sp = space_by_id(space_id)
+    decode_space = space_id.endswith("Decode")
+    rng = random.Random(9)
+    legal = {True: 0, False: 0}
+    for _ in range(3000):
+        axes = {
+            name: (
+                axis.values[rng.randrange(len(axis.values))]
+                if not axis.is_range
+                else rng.randint(axis.lo, rng.choice([axis.hi, min(axis.hi, 300)]))
+            )
+            for name, axis in sp.axes.items()
+        }
+        env = sp.derive_env(axes)
+        attrs = {
+            "left_bound": env["left"],
+            "right_bound": env["right"],
+            "diagonal_alignment": env["align"],
+        }
+        dq, dv = axes["hd"]
+        sq, skv, hq = axes["sq"], axes["skv"], env["hq"]
+        sees_keys = _row_has_a_key(
+            env["left"], env["right"], env["align"] == "TOP_LEFT", sq, skv
+        )
+        cost = axes["b"] * hq * sq * skv * dq <= 2**31
+        args = (axes["b"], hq, axes["hkv"], sq, skv)
+        n = 32 if decode_space else 40
+        routed = _routed_to_decode(attrs, *args, n)
+        route_ok = (routed if decode_space else not routed) or dq % 8 != 0
+        got = sp.first_violation(env) is None
+        assert got == (sees_keys and cost and route_ok), (
+            axes,
+            env["left"],
+            env["right"],
+        )
+        legal[got] += 1
+    assert legal[True] > 100 and legal[False] > 100
+
+
 def test_sdpa_backward_space_draws_every_feature_and_renders_it():
     # bug caught: a mask axis that never reaches the node's left_bound, right_bound or
     # diagonal_alignment, a scale patch that leaves the template's literal 1/sqrt(128), an
@@ -1015,6 +1279,8 @@ LARGE_SCALE = {
     "SdpaBackward/Default": 8,
     "SdpaFwd/Gfx950Dense": 8,
     "SdpaFwd/Flash2Region": 8,
+    "SdpaFwd/Gfx1151": 8,
+    "SdpaFwd/Gfx1151Decode": 8,
 }
 # The poisoned share of V: a non-finite element of V reaches only its own head-dim column of the
 # output, so the share keeps part of the columns finite for the non-finite mask to grade
@@ -1024,6 +1290,8 @@ POISON_FRACTION = {
     "SdpaFwd/Default": 2**-12,
     "SdpaFwd/Gfx950Dense": 2**-12,
     "SdpaFwd/Flash2Region": 2**-12,
+    "SdpaFwd/Gfx1151": 2**-12,
+    "SdpaFwd/Gfx1151Decode": 2**-12,
     # dscale and dbias sum over every normalization group, so one poisoned group (or stat) makes
     # every dscale element non-finite; one poisoned dy element (the fill plants at least one,
     # which this fraction rounds down to) leaves the other columns and rows finite
@@ -1040,6 +1308,8 @@ OPERAND_DOMAIN = {
     ("SdpaFwd/Default", "V"): {"wide": (-2, 2, 1), "large": (-1, 1, 2)},
     ("SdpaFwd/Gfx950Dense", "V"): {"wide": (-2, 2, 1), "large": (-1, 1, 2)},
     ("SdpaFwd/Flash2Region", "V"): {"wide": (-2, 2, 1), "large": (-1, 1, 2)},
+    ("SdpaFwd/Gfx1151", "V"): {"wide": (-2, 2, 1), "large": (-1, 1, 2)},
+    ("SdpaFwd/Gfx1151Decode", "V"): {"wide": (-2, 2, 1), "large": (-1, 1, 2)},
     # V and dO of the backward keep magnitude 1 where wide and large widen Q and K (the
     # outputs grow with |dO| * |V| and the engine tolerances are calibrated at magnitude 1)
     **{
@@ -1057,6 +1327,7 @@ OPERAND_DOMAIN = {
 POISONABLE_SEED = {
     "SdpaFwd/Default": 14,
     "SdpaFwd/Flash2Region": 13,
+    "SdpaFwd/Gfx1151Decode": 13,
     "SdpaFwd/Gfx950Dense": 12,
 }
 # the tensors (by template name) whose fill the domain axis drives, per space
@@ -1072,6 +1343,8 @@ PRIMARY_OPERANDS = {
     "SdpaFwd/Default": ["Q", "K", "V"],
     "SdpaFwd/Gfx950Dense": ["Q", "K", "V"],
     "SdpaFwd/Flash2Region": ["Q", "K", "V"],
+    "SdpaFwd/Gfx1151": ["Q", "K", "V"],
+    "SdpaFwd/Gfx1151Decode": ["Q", "K", "V"],
     "SdpaBackward/Default": ["Q", "K", "V", "dO"],
 }
 # The operands that carry the `special` fill in the nan and inf domains, per space. The other
@@ -1090,6 +1363,8 @@ POISONED_OPERANDS = {
     "SdpaBackward/Default": [],  # nan and inf are not drawn: see that space's description
     "SdpaFwd/Gfx950Dense": ["V"],
     "SdpaFwd/Flash2Region": ["V"],
+    "SdpaFwd/Gfx1151": ["V"],
+    "SdpaFwd/Gfx1151Decode": ["V"],
 }
 # sha256 over seeds 0..299 of the pre-existing axes' draws, taken before the domain axis existed
 OLD_SHAPE_DIGESTS = {
@@ -1120,6 +1395,8 @@ PLACEMENT_OPERAND = {
     "SdpaFwd/Default": "Q",
     "SdpaFwd/Flash2": "Q",
     "SdpaFwd/Flash2Region": "Q",
+    "SdpaFwd/Gfx1151": "Q",
+    "SdpaFwd/Gfx1151Decode": "Q",
     "SdpaFwd/Gfx950Dense": "Q",
 }
 PATCHED_OPERANDS = (
@@ -1348,7 +1625,7 @@ def test_resample_nan_domain_plants_infinity_under_maxpool_only():
 
 
 @pytest.mark.parametrize(
-    "space_id", ["SdpaFwd/Default", "SdpaFwd/Flash2Region", "SdpaFwd/Gfx950Dense"]
+    "space_id", [s for s in DOMAIN_SPACE_IDS if s.startswith("SdpaFwd/")]
 )
 def test_sdpa_poisons_v_only_where_the_reference_and_the_kernels_agree(space_id):
     # bug caught: a non-finite V under a causal or window mask (probed on gfx950 with a causal
@@ -1366,7 +1643,11 @@ def test_sdpa_poisons_v_only_where_the_reference_and_the_kernels_agree(space_id)
             env = sp.derive_env(dict(axes, domain=domain))
             meta = sp.render(env)["metadata"]
             underflows = axes["dtype"] == "half" or axes["scale"] > 1
-            masked = axes["causal"] or axes.get("window", "none") != "none"
+            masked = (
+                axes.get("causal", False)
+                or axes.get("window", "none") != "none"
+                or axes.get("mask", "none") != "none"
+            )
             poisoned = not masked and not (domain == "inf" and underflows)
             leaf = meta["inputs"][v_uid]
             assert (leaf["kind"], meta["validator"]) == (
@@ -2347,6 +2628,8 @@ def test_default_run_covers_every_space_and_filter_narrows(run):
         "SdpaFwd/Default",
         "SdpaFwd/Flash2",
         "SdpaFwd/Flash2Region",
+        "SdpaFwd/Gfx1151",
+        "SdpaFwd/Gfx1151Decode",
         "SdpaFwd/Gfx950Dense",
     ]
 

@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "operation": "SdpaFwd",
+  "description": "SDPA forward over the decode kernel of hipkernel:Gfx1151WmmaAttentionDecode (Gfx1151WmmaAttentionNative.cpp; the shipped catalog descriptors/rocKE/gfx1151_wmma_attention_decode/gfx1151_wmma_attention_decode.kdp.json), NOT RUN ON ANY DEVICE: no gfx1151 machine is part of this work, so the space is proven only by the pytest load, sample and render tests, and every claim below is what the code and the shipped descriptors say, not something observed. Half or bfloat16 (supportedDataTypeName; the catalog ships both for every row), BSHD or BHSD (isWellFormedOperand asks a head-dim stride of 1 and hasAlignedRows a multiple of 8 elements for every other stride of an extent above 1, which both layouts give for a head size that is a multiple of 8), grouped-query heads (Hq a multiple of Hkv; the decode kernel packs the Hq/Hkv query heads of a K/V head with their positions into 16-row tiles), and the three (head_size, head_size_v) buckets the catalog ships for decode: 64/64, 128/128 and 256/256 (the 256 objects split the O columns over 2 workgroups on gfx11). Every row ships the three bias kinds none, f32 and q and the mask class 'runtime', so the four masks the space draws (none, top-left causal, bottom-right causal, a sliding window by left_bound/right_bound with either alignment) are all served; left_bound has cuDNN semantics (L keeps the L keys ending at the diagonal, diagonal included) and maskFor passes window_left = L - 1 to the kernel. A head size of 100, 1 draw in 10, is the decline probe: isServedHeadDim needs a multiple of 8, so both Gfx1151 engines decline it. Query rows that would see no key (bottom-right causal or a window with seqlen_q above seqlen_kv or a window clear of the diagonal) are excluded as in SdpaBackward: the reference gives them a zero row and an LSE of -inf, which is not an input the kernel is described to define. stats (off, on) adds the FP32 log-sum-exp tensor [b, hq, sq, 1] (add_tensors, stride [hq*sq, sq, 1, 1], declaring the sampled alignment, which the matcher needs to be a multiple of 4 bytes: LSE_ALIGN_BYTES) and sets generate_stats and stats_tensor_uid (node_patches); where decodePlanFor splits the keys over more than one workgroup the merge kernel writes the LSE, which a long kv sequence and few workgroups reach. bias (none, f32, q) adds the additive attention mask the references grade (attn_mask_tensor_uid through node_patches): dims [B or 1, Hq or 1, Sq or 1, Sk] chosen by the bcast_b, bcast_h and bcast_q axes, packed strides with a unit key stride, FP32 or the Q dtype (biasFor declines every other dtype, a rank below 4, a broadcast key axis and a declared alignment below the element size, 4 or 2); GpuSdpaFwdPlan.hpp and the CPU SdpaFwdPlan.hpp register a mask of float, half or bfloat16 for each of these Q types and add it to the scaled scores (the window or causal mask applies after), as the kernel's bias does. The tensors are named bias and stats because import_graph.py numbers tensors by sorted name and a freeze must keep their uids: bias is uid 4, stats is uid 5 with a bias and uid 4 without. The alignment axis declares one alignment on Q, K, V and O (tensor_patches on uids 1, 0, 3, 2) and the matcher needs 16 bytes from each (QKVO_ALIGN_BYTES), so alignments 1 to 8 decline whatever the shape; placement puts the pointers at exactly that alignment (exact) or misaligns Q (placement_uid 1) below it, which passes only if the backend rejects it (under, drawn as exact at alignment 1). DECODE VERSUS PREFILL: this engine takes exactly what the rocKE dispatcher routes to decode (rdnaAttentionUseDecode, with the key range any row sees from decodeKvRange, on gfx11) and what decodePlanFor can launch; the prefill engine declines those graphs (catalogDecodePlan) and SdpaFwd/Gfx1151 draws the others. The rule depends on the device's compute-unit count (twice HIP's multiProcessorCount); the space draws only shapes that go to decode at 32 compute units, which are decode at 40 too, and [INFERENCE] those are the two Strix Halo sizes (8050S, 8060S); shapes the two counts route differently are in neither space. With seqlen_q at most 64 the gfx11 rule picks decode when seqlen_q * Hq/Hkv < 512, or the visible keys are under 64 * 32 compute units, or batch * visible keys under 512 * 32; above 64 it picks decode only when 4 * batch * Hq * ceil(seqlen_q / 128) is under 32, so most draws are short queries and the key length (up to 8192) is what drives the key split. The domain axis fills Q, K and V as in the SdpaFwd spaces (large uses scale 8, V keeps free(-2,2) under wide and scale 2 under large, nan and inf go on V alone at 2^-12 of its elements, only where no mask applies and for an infinity only for bfloat16 with a scale at most 1): inherited from the gfx950 probes of the ASM and rocKE dense kernels, not measured on these kernels. The cost ceiling b*hq*sq*skv*dqk <= 2**31 is the one of the other SdpaFwd spaces (GPU reference cost ceiling, RFC 0023 section 14). The engine TOML (config/hipkernel_Gfx1151WmmaAttentionDecode.toml) carries no tolerance override: the default forward tolerances apply until a device run says otherwise.",
+  "engine": "hipkernel:Gfx1151WmmaAttentionDecode",
+  "template": "../../integration-test-bundles/quick/SdpaFwd/Default/graph.template.json",
+  "axes": {
+    "dtype":  {"values": ["half", "bfloat16"]},
+    "layout": {"values": ["bshd", "bhsd"]},
+    "b":      {"values": [1, 2, 3, 4]},
+    "hkv":    {"values": [1, 2, 4, 8]},
+    "group":  {"values": [1, 2, 4, 8]},
+    "hd":     {"values": [[64, 64], [64, 64], [64, 64], [128, 128], [128, 128], [128, 128], [256, 256], [256, 256], [256, 256], [100, 100]]},
+    "sq":     {"range": [1, 256], "boundaries": [1, 2, 15, 16, 17, 32, 33, 63, 64, 65, 128, 129, 256]},
+    "skv":    {"range": [1, 8192], "boundaries": [1, 63, 64, 65, 127, 128, 1024, 2048, 2560, 4096, 8192]},
+    "mask":   {"values": ["none", "none", "causal_top_left", "causal_bottom_right", "window"]},
+    "wl":     {"range": [1, 4096], "boundaries": [1, 2, 16, 17, 64, 65, 128, 256, 1024]},
+    "wr":     {"values": [null, 0, 1, 16, 64]},
+    "walign": {"values": ["top_left", "bottom_right"]},
+    "bias":   {"values": ["none", "none", "f32", "q"]},
+    "bcast_b": {"values": [false, true]},
+    "bcast_h": {"values": [false, true]},
+    "bcast_q": {"values": [false, true]},
+    "stats":  {"values": ["off", "on"]},
+    "scale":  {"values": [0.0883883461356163, 0.07216878235340118, 0.125, 0.25, 0.5, 1.0]},
+    "domain": {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"]},
+    "alignment": {"values": [1, 2, 4, 8, 16, 32, 64, 128, 256]},
+    "placement": {"values": ["default", "exact", "under"]}
+  },
+  "derive": {
+    "hq":       "hkv * group",
+    "dq":       "hd[0]",
+    "dv":       "hd[1]",
+    "dims_q":   "[b, hq, sq, dq]",
+    "dims_k":   "[b, hkv, skv, dq]",
+    "dims_v":   "[b, hkv, skv, dv]",
+    "dims_o":   "[b, hq, sq, dv]",
+    "stride_q": "[sq*hq*dq, dq, hq*dq, 1] if layout == 'bshd' else [hq*sq*dq, sq*dq, dq, 1]",
+    "stride_k": "[skv*hkv*dq, dq, hkv*dq, 1] if layout == 'bshd' else [hkv*skv*dq, skv*dq, dq, 1]",
+    "stride_v": "[skv*hkv*dv, dv, hkv*dv, 1] if layout == 'bshd' else [hkv*skv*dv, skv*dv, dv, 1]",
+    "stride_o": "[sq*hq*dv, dv, hq*dv, 1] if layout == 'bshd' else [hq*sq*dv, sq*dv, dv, 1]",
+    "bottom":   "mask == 'causal_bottom_right' or (mask == 'window' and walign == 'bottom_right')",
+    "align":    "'BOTTOM_RIGHT' if bottom else 'TOP_LEFT'",
+    "left":     "wl if mask == 'window' else None",
+    "right":    "0 if mask in ['causal_top_left', 'causal_bottom_right'] else (wr if mask == 'window' else None)",
+    "diag":     "skv - sq if bottom else 0",
+    "rows_see_a_key": "(right == None or diag + right >= 0) and (left == None or sq + diag - left <= skv - 1)",
+    "window_mask": "mask == 'window'",
+    "stats_on": "stats == 'on'",
+    "bias_on":  "bias != 'none'",
+    "bias_type": "'float' if bias == 'f32' else dtype",
+    "bias_b":   "1 if bcast_b else b",
+    "bias_h":   "1 if bcast_h else hq",
+    "bias_q":   "1 if bcast_q else sq",
+    "dims_bias": "[bias_b, bias_h, bias_q, skv]",
+    "stride_bias": "[bias_h*bias_q*skv, bias_q*skv, skv, 1]",
+    "stats_uid": "5 if bias_on else 4",
+    "dims_stats": "[b, hq, sq, 1]",
+    "stride_stats": "[hq*sq, sq, 1, 1]",
+    "served_width": "dq % 8 == 0 and dv % 8 == 0",
+    "ctx":      "skv - sq if bottom else 0",
+    "wleft":    "left - 1 if left != None else -1",
+    "kv_lo":    "max(ctx - wleft, 0) if wleft >= 0 else 0",
+    "kv_hi":    "max(min(ctx + right + sq, skv), 0) if (right != None and right >= 0) else skv",
+    "visible":  "kv_hi - kv_lo",
+    "tiles":    "b * hq * ((sq + 127) // 128)",
+    "decode_at_32": "(4 * tiles < 32) if sq > 64 else (group * sq < 512 or visible < 64 * 32 or b * visible < 512 * 32)",
+    "masked":    "mask != 'none'",
+    "nf_ok":     "not masked and not (domain == 'inf' and (dtype == 'half' or scale > 1))",
+    "dom_poison": "domain in ['nan', 'inf'] and nf_ok",
+    "dom_kind":  "'fixed' if domain == 'constant' else ('special' if dom_poison else ('free' if domain in ['default', 'narrow', 'wide', 'positive', 'nan', 'inf'] else domain))",
+    "dom_lo":    "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
+    "dom_hi":    "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
+    "dom_value": "0.5 if domain == 'constant' else 0",
+    "dom_scale": "8 if domain == 'large' else 1",
+    "dom_special": "'inf' if domain == 'inf' else 'nan'",
+    "dom_fraction": "0.000244140625",
+    "dom_validator": "'match_nonfinite' if dom_poison else 'default'",
+    "dom_clean_kind": "'free' if domain in ['nan', 'inf'] else dom_kind",
+    "dom_v_lo": "-2 if domain == 'wide' else dom_lo",
+    "dom_v_hi": "2 if domain == 'wide' else dom_hi",
+    "dom_v_scale": "2 if domain == 'large' else dom_scale",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
+  },
+  "constraints": [
+    {"rule": "rows_see_a_key", "reason": "a query row with no key under the mask has a zero output row and an LSE of -inf in the references (CpuFpReferenceSdpa.hpp, 'fully masked rows'), which the kernel is not described to define; bottom-right causal needs sq <= skv, and a window must reach a key from every row"},
+    {"rule": "decode_at_32 or not served_width", "reason": "this engine takes only what rdnaAttentionUseDecode (Gfx1151WmmaAttentionNative.cpp) routes to decode; the others go to the prefill engine (SdpaFwd/Gfx1151). The shapes the rule sends to decode at 32 compute units are decode at 40 too. A head size that is not a multiple of 8 is the decline probe and has no decode route"},
+    {"rule": "b*hq*sq*skv*dq <= 2**31", "reason": "GPU reference cost ceiling (RFC 0023 section 14), as the other SdpaFwd spaces"}
+  ],
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {"uid": 0, "dims": "${dims_k}", "strides": "${stride_k}", "data_type": "${dtype}"},
+        {"uid": 1, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dtype}"},
+        {"uid": 2, "dims": "${dims_o}", "strides": "${stride_o}", "data_type": "${dtype}"},
+        {"uid": 3, "dims": "${dims_v}", "strides": "${stride_v}", "data_type": "${dtype}"}
+      ],
+      "attributes": {
+        "attributes__attn_scale_value": "${scale}",
+        "attributes__diagonal_alignment": "${align}",
+        "attributes__right_bound": "${right}"
+      }
+    },
+    "metadata": {
+      "purpose": "probe",
+      "validator": "${dom_validator}",
+      "inputs": {
+        "0": {"kind": "${dom_clean_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "1": {"kind": "${dom_clean_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "3": {"kind": "${dom_kind}", "lo": "${dom_v_lo}", "hi": "${dom_v_hi}", "value": "${dom_value}", "scale": "${dom_v_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}
+      },
+      "placement": "${eff_placement}",
+      "placement_uid": 1
+    },
+    "add_tensors": [
+      {"when": "${bias_on}", "uid": 4, "name": "bias", "data_type": "${bias_type}", "dims": "${dims_bias}", "strides": "${stride_bias}", "alignment": "${alignment}", "is_runtime_pass_by_value": false, "ragged_offset_multiplier": 1, "virtual": false},
+      {"when": "${stats_on}", "uid": "${stats_uid}", "name": "stats", "data_type": "float", "dims": "${dims_stats}", "strides": "${stride_stats}", "alignment": "${alignment}", "is_runtime_pass_by_value": false, "ragged_offset_multiplier": 1, "virtual": false}
+    ],
+    "node_patches": [
+      {"when": "${bias_on}", "node": "SdpaFwd_0", "section": "inputs", "set": {"attn_mask_tensor_uid": 4}},
+      {"when": "${stats_on}", "node": "SdpaFwd_0", "section": "outputs", "set": {"stats_tensor_uid": "${stats_uid}"}},
+      {"when": "${stats_on}", "node": "SdpaFwd_0", "section": "attributes", "set": {"generate_stats": true}},
+      {"when": "${window_mask}", "node": "SdpaFwd_0", "section": "attributes", "set": {"left_bound": "${left}"}}
+    ],
+    "tensor_patches": [
+      {"uid": 0, "set": {"alignment": "${alignment}"}},
+      {"uid": 1, "set": {"alignment": "${alignment}"}},
+      {"uid": 2, "set": {"alignment": "${alignment}"}},
+      {"uid": 3, "set": {"alignment": "${alignment}"}}
+    ]
+  }
+}
