@@ -217,7 +217,9 @@ public:
                            std::array<OperandStrides, 5> strides,
                            BiasStrides biasStrides,
                            PhiloxSources philox,
-                           std::optional<DropoutMaskLaunch> dropoutMask)
+                           std::optional<DropoutMaskLaunch> dropoutMask,
+                           bool rawScores,
+                           bool zeroBias)
         : _code(std::move(code))
         , _binding(binding)
         , _problem(problem)
@@ -226,6 +228,8 @@ public:
         , _biasStrides(biasStrides)
         , _philox(philox)
         , _dropoutMask(std::move(dropoutMask))
+        , _rawScores(rawScores)
+        , _zeroBias(zeroBias)
     {
     }
 
@@ -273,6 +277,19 @@ public:
         return _dropoutMask;
     }
 
+    /// Whether the object keeps its running max over unscaled scores (no bias): it takes a
+    /// runtime scale only when rawScoresServe accepts it.
+    bool rawScores() const
+    {
+        return _rawScores;
+    }
+
+    /// Whether the object reads the zero bias from the workspace (readsZeroBias).
+    bool zeroBias() const
+    {
+        return _zeroBias;
+    }
+
 private:
     IngestorKernelCode _code;
     FlydslSdpaRdnaBinding _binding;
@@ -282,6 +299,8 @@ private:
     BiasStrides _biasStrides;
     PhiloxSources _philox;
     std::optional<DropoutMaskLaunch> _dropoutMask;
+    bool _rawScores;
+    bool _zeroBias;
 };
 
 /**
@@ -304,14 +323,22 @@ public:
     }
 
     /// The kernel's only scratch is LDS and registers; a dropout seed given by value needs 8
-    /// bytes to be read from.
+    /// bytes to be read from, and a bias object run for a graph without a bias reads the zero
+    /// bias after them (readsZeroBias).
     size_t workspaceBytes(const MatchContext& context,
                           const BoundTokens& bound,
-                          const KernelDefinition& /*kernel*/) const override
+                          const KernelDefinition& kernel) const override
     {
-        return philoxSources(context, flydslSdpaRdnaBinding(bound)).seedValue.has_value()
-                   ? SEED_WORKSPACE_BYTES
-                   : 0;
+        const auto binding = flydslSdpaRdnaBinding(bound);
+        const size_t seedBytes
+            = philoxSources(context, binding).seedValue.has_value() ? SEED_WORKSPACE_BYTES : 0;
+        if(!readsZeroBias(binding, kernel))
+        {
+            return seedBytes;
+        }
+        const auto problem
+            = problemFor(requireTensor(context, binding.q), requireTensor(context, binding.k));
+        return zeroBiasOffset(seedBytes) + zeroBiasBytes(problem.seqLenKv);
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
@@ -394,6 +421,13 @@ public:
             }
             biasStrides = *strides;
         }
+        // An object without a bias keeps raw scores (rawScoresServe), a bias object scaled ones.
+        const bool rawScores = integerMetadata(kernel, HAS_BIAS_FIELD) != 1;
+        const bool zeroBias = readsZeroBias(binding, kernel);
+        if(zeroBias)
+        {
+            biasStrides = ZERO_BIAS_STRIDES;
+        }
 
         // Packed (THD) sequences (kernel modification 29): a batch's base is its first
         // token's row times the batch stride, so each operand's batch stride is its sequence
@@ -430,7 +464,9 @@ public:
                                                         strides,
                                                         biasStrides,
                                                         philoxSources(context, binding),
-                                                        std::move(dropoutMask));
+                                                        std::move(dropoutMask),
+                                                        rawScores,
+                                                        zeroBias);
     }
 
     void launch(const Handle& handle,
@@ -442,8 +478,11 @@ public:
         const auto& preparedSdpa = dynamic_cast<const PreparedFlydslSdpaRdna&>(prepared);
         const auto& binding = preparedSdpa.binding();
         const auto& problem = preparedSdpa.problem();
-        const float scale
-            = launchScale(binding, preparedSdpa.scaleOperand(), deviceBuffers, numDeviceBuffers);
+        const float scale = launchScale(binding,
+                                        preparedSdpa.scaleOperand(),
+                                        deviceBuffers,
+                                        numDeviceBuffers,
+                                        preparedSdpa.rawScores());
 
         const auto q
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.q, deviceBuffers, numDeviceBuffers);
@@ -458,6 +497,17 @@ public:
         // has_bias and has_sink objects, which kernel_match pairs with a bound one.
         void* stats = optionalBuffer(binding.stats, deviceBuffers, numDeviceBuffers);
         void* bias = optionalBuffer(binding.bias, deviceBuffers, numDeviceBuffers);
+        if(preparedSdpa.zeroBias())
+        {
+            // After the seed a by-value dropout seed takes (workspaceBytes).
+            bias = stageZeroBias(workspace,
+                                 zeroBiasOffset(preparedSdpa.philox().seedValue.has_value()
+                                                    ? SEED_WORKSPACE_BYTES
+                                                    : 0),
+                                 problem.seqLenKv,
+                                 handle.getStream(),
+                                 "flydsl_sdpa_rdna");
+        }
         void* sink = optionalBuffer(binding.sink, deviceBuffers, numDeviceBuffers);
         // The head stride, with the sink's dtype in its bit 32 (kernel modification 31).
         const int64_t sinkStride = rdnaSinkStrideArgument(binding.sinkStride, binding.sinkFloat);

@@ -143,6 +143,11 @@ inline constexpr std::string_view BIAS_TOKEN = "flydsl_sdpa_cdna.bias.uid";
 /// 1 when the vectorized bias objects read the graph's bias, 0 when only the strided ones
 /// do (`bias_kstrided`, vendored-kernel modification 31) or there is none.
 inline constexpr std::string_view BIAS_VECTORIZED_TOKEN = "flydsl_sdpa_cdna.bias.vectorized";
+/// 1 when a graph without a bias needs scaled scores (runsOnAZeroBias: a zero, negative or
+/// subnormal scale), which the objects without a bias do not keep: it runs on the bias
+/// objects with a zero bias. BIAS_VECTORIZED_TOKEN then says whether the vectorized ones read
+/// it (servableVectorZeroBias). Else 0.
+inline constexpr std::string_view ZERO_BIAS_TOKEN = "flydsl_sdpa_cdna.bias.zero";
 /// The attention sink's uid, or NO_SINK, its element stride across query heads
 /// (vendored-kernel modification 19), and 1 when it is FLOAT rather than in the query's dtype
 /// (modification 36).
@@ -602,6 +607,25 @@ inline std::optional<BiasStrides> servableBias(const data_objects::TensorAttribu
         strided->vectorized = true;
     }
     return strided;
+}
+
+/**
+ * @brief Whether the vectorized bias objects read the zero bias (runsOnAZeroBias), as they
+ *        would a [1, 1, 1, Skv] bias in the query's dtype (servableVectorBias): its keys in runs
+ *        of 4, so a key length that is a multiple of 4, its one row within 32-bit offsets.
+ *
+ * Every bias object reads it at stride 0 on the batch, head and query axes; the strided ones
+ * at key stride 0 too (zeroBiasStrides), the vectorized ones along its row of Skv zeros.
+ */
+inline bool servableVectorZeroBias(const SdpaProblem& problem)
+{
+    return problem.seqLenKv % 4 == 0 && problem.seqLenKv * BYTES_PER_ELEMENT <= INT32_LIMIT;
+}
+
+/// The zero bias's strides as the kernels take them: 0 on every axis, in the query's dtype.
+constexpr BiasStrides zeroBiasStrides(bool vectorized)
+{
+    return BiasStrides{0, 0, 0, 0, false, vectorized};
 }
 
 /// The (batch, head, query) strides of @p stats, an LSE output the kernels write: f32
@@ -1066,6 +1090,18 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
         std::memcpy(&scaleBits, &scale, sizeof(scale));
         scaleToken = static_cast<int64_t>(scaleBits);
     }
+    // A scale that needs scaled scores, on a graph without a bias, runs on the bias objects
+    // with a zero bias (runsOnAZeroBias). It declines where a graph's own bias does: packed
+    // sequences, and the f32 objects, which have no bias twins.
+    const bool zeroBias = runsOnAZeroBias(context, attributes);
+    if(zeroBias)
+    {
+        if(varlen->packed() || f32)
+        {
+            return std::nullopt;
+        }
+        biasVectorized = servableVectorZeroBias(problem);
+    }
 
     // An attention sink: one logit per query head, FLOAT or in the query's dtype, as a
     // rank-1 [Hq] or rank-4 [1, Hq, 1, 1] device tensor (vendored-kernel modifications 19
@@ -1099,6 +1135,7 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
     bound[std::string(V_OWN_STRIDES_TOKEN)] = vOwnStrides ? 1 : 0;
     bound[std::string(BIAS_TOKEN)] = biasUid;
     bound[std::string(BIAS_VECTORIZED_TOKEN)] = biasVectorized ? 1 : 0;
+    bound[std::string(ZERO_BIAS_TOKEN)] = zeroBias ? 1 : 0;
     bound[std::string(SINK_TOKEN)] = sinkUid;
     bound[std::string(SINK_STRIDE_TOKEN)] = sinkStride;
     bound[std::string(SINK_FLOAT_TOKEN)] = sinkFloat;
@@ -1132,6 +1169,8 @@ struct FlydslSdpaCdnaBinding
     int64_t windowLo = NO_WINDOW;
     int64_t stats = NO_STATS;
     int64_t bias = NO_BIAS;
+    /// Whether the graph runs on the zero bias (ZERO_BIAS_TOKEN).
+    bool zeroBias = false;
     int64_t sink = NO_SINK;
     int64_t sinkStride = 0;
     /// Whether the sink is FLOAT rather than in the query's dtype.
@@ -1190,6 +1229,7 @@ inline FlydslSdpaCdnaBinding flydslSdpaCdnaBinding(const BoundTokens& bound)
     binding.windowLo = read(WINDOW_TOKEN);
     binding.stats = read(STATS_TOKEN);
     binding.bias = read(BIAS_TOKEN);
+    binding.zeroBias = read(ZERO_BIAS_TOKEN) != 0;
     binding.sink = read(SINK_TOKEN);
     binding.sinkStride = read(SINK_STRIDE_TOKEN);
     binding.sinkFloat = read(SINK_FLOAT_TOKEN) != 0;
@@ -1504,10 +1544,17 @@ inline bool familyKernelMatches(const MatchContext& context,
         return false;
     }
 
+    // A bias object for a graph with a bias, or one that runs on the zero bias (a scale that
+    // needs scaled scores, ZERO_BIAS_TOKEN); a plain one for any other.
     const auto hasBias = integerMetadata(kernel, HAS_BIAS_FIELD);
     const auto boundBias = tryGetBoundInt(bound, BIAS_TOKEN);
-    if(!hasBias.has_value() || !boundBias.has_value()
-       || *hasBias != (*boundBias != NO_BIAS ? 1 : 0))
+    const auto zeroBias = tryGetBoundInt(bound, ZERO_BIAS_TOKEN);
+    if(!hasBias.has_value() || !boundBias.has_value() || !zeroBias.has_value())
+    {
+        return false;
+    }
+    const bool biased = *boundBias != NO_BIAS || *zeroBias != 0;
+    if(*hasBias != (biased ? 1 : 0))
     {
         return false;
     }
@@ -1517,7 +1564,7 @@ inline bool familyKernelMatches(const MatchContext& context,
     const auto kstrided = familyKnob(kernel, BIAS_KSTRIDED_FIELD, family);
     const auto biasVectorized = tryGetBoundInt(bound, BIAS_VECTORIZED_TOKEN);
     if(!kstrided.has_value() || !biasVectorized.has_value()
-       || (*boundBias != NO_BIAS && *kstrided == 0 && *biasVectorized == 0))
+       || (biased && *kstrided == 0 && *biasVectorized == 0))
     {
         return false;
     }
@@ -1964,7 +2011,9 @@ public:
                            int64_t splits = 1,
                            std::optional<IngestorKernelCode> mergeCode = std::nullopt,
                            CdnaPhiloxSources philoxSources = {},
-                           std::optional<DropoutMaskLaunch> dropoutMask = std::nullopt)
+                           std::optional<DropoutMaskLaunch> dropoutMask = std::nullopt,
+                           bool rawScores = true,
+                           std::optional<size_t> zeroBiasAt = std::nullopt)
         : _code(std::move(code))
         , _binding(binding)
         , _problem(problem)
@@ -1976,7 +2025,23 @@ public:
         , _mergeCode(std::move(mergeCode))
         , _philoxSources(philoxSources)
         , _dropoutMask(std::move(dropoutMask))
+        , _rawScores(rawScores)
+        , _zeroBiasAt(zeroBiasAt)
     {
+    }
+
+    /// Whether the object keeps its running max over unscaled scores (no bias): it takes a
+    /// runtime scale only when rawScoresServe accepts it.
+    bool rawScores() const
+    {
+        return _rawScores;
+    }
+
+    /// Where in the workspace the zero bias the object reads starts (runsOnAZeroBias); empty
+    /// when it reads the graph's bias or none.
+    const std::optional<size_t>& zeroBiasAt() const
+    {
+        return _zeroBiasAt;
     }
 
     /// Where a dropout launch's seed and offset come from (vendored-kernel modification 33).
@@ -2050,6 +2115,8 @@ private:
     std::optional<IngestorKernelCode> _mergeCode;
     CdnaPhiloxSources _philoxSources;
     std::optional<DropoutMaskLaunch> _dropoutMask;
+    bool _rawScores = true;
+    std::optional<size_t> _zeroBiasAt;
 };
 
 /**
@@ -2070,7 +2137,8 @@ public:
 
     /// A split object launched with more than one split needs scratch for its partials; a
     /// dropout launch whose seed or offset is given by value needs 16 bytes to read them from
-    /// (a dropout object is never a split one).
+    /// (a dropout object is never a split one); and a bias object run for a graph without a
+    /// bias reads the zero bias after either (runsOnAZeroBias).
     size_t workspaceBytes(const MatchContext& context,
                           const BoundTokens& bound,
                           const KernelDefinition& kernel) const override
@@ -2081,23 +2149,15 @@ public:
             return 0;
         }
         const auto binding = flydslSdpaCdnaBinding(bound);
-        if(!tile->splitKv)
-        {
-            return cdnaPhiloxSources(context, binding).needWorkspace() ? DROPOUT_WORKSPACE_BYTES
-                                                                       : 0;
-        }
         const auto problem = problemFor(requireTensor(context, binding.q),
                                         requireTensor(context, binding.k),
                                         &requireTensor(context, binding.v));
-        const auto bytes = splitWorkspaceBytes(
-            problem, candidateSplits(problem, *tile, context.deviceProperties.multiProcessorCount));
-        if(!bytes.has_value())
+        const auto used = workspaceBeforeZeroBias(context, binding, problem, *tile);
+        if(!readsZeroBias(binding, kernel))
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "flydsl_sdpa_cdna: the split workspace exceeds 32-bit addressing");
+            return used;
         }
-        return *bytes;
+        return zeroBiasOffset(used) + zeroBiasBytes(problem.seqLenKv);
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
@@ -2210,6 +2270,21 @@ public:
             }
             biasStrides = *servable;
         }
+        // An object without a bias keeps raw scores (rawScoresServe), a bias object scaled ones.
+        const bool rawScores = integerMetadata(kernel, HAS_BIAS_FIELD) != 1;
+        std::optional<size_t> zeroBiasAt;
+        if(readsZeroBias(binding, kernel))
+        {
+            const auto vectorized = tryGetBoundInt(bound, BIAS_VECTORIZED_TOKEN).value_or(0) != 0;
+            if(!vectorized && familyKnob(kernel, BIAS_KSTRIDED_FIELD, _family).value_or(0) == 0)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "flydsl_sdpa_cdna: the zero bias is not one this kernel can add");
+            }
+            biasStrides = zeroBiasStrides(vectorized);
+            zeroBiasAt = zeroBiasOffset(workspaceBeforeZeroBias(context, binding, problem, *tile));
+        }
         // The RNG dump's writer (FlydslSdpaRngDump.hpp), when the graph names a dump.
         auto dropoutMask = prepareDropoutMask(_kpackLoader,
                                               context,
@@ -2229,7 +2304,9 @@ public:
                                                         splits,
                                                         std::move(mergeCode),
                                                         cdnaPhiloxSources(context, binding),
-                                                        std::move(dropoutMask));
+                                                        std::move(dropoutMask),
+                                                        rawScores,
+                                                        zeroBiasAt);
     }
 
     void launch(const Handle& handle,
@@ -2249,13 +2326,21 @@ public:
                 hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
                     *preparedSdpa.scaleOperand(), deviceBuffers, numDeviceBuffers)));
             // A pass-by-value scalar, read from host memory. A constant scale was checked at
-            // match time; this one arrives now.
+            // match time; this one arrives now, after the object was chosen.
             if(!isServableScale(static_cast<double>(scale)))
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                    "flydsl_sdpa_cdna: the runtime softmax scale must be positive and at most "
-                    "2^20");
+                    "flydsl_sdpa_cdna: the runtime softmax scale must be finite and at most 2^20 "
+                    "in magnitude");
+            }
+            if(preparedSdpa.rawScores() && !rawScoresServe(static_cast<double>(scale)))
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "flydsl_sdpa_cdna: an object without a bias takes a runtime softmax scale "
+                    "only when it is positive and normal; give a zero, negative or subnormal "
+                    "scale as a value, which runs on the bias objects");
             }
         }
         else
@@ -2286,6 +2371,14 @@ public:
                                                    binding.bias, deviceBuffers, numDeviceBuffers)
                                                    .ptr
                                              : o;
+        if(preparedSdpa.zeroBiasAt().has_value())
+        {
+            bias = stageZeroBias(workspace,
+                                 *preparedSdpa.zeroBiasAt(),
+                                 problem.seqLenKv,
+                                 handle.getStream(),
+                                 "flydsl_sdpa_cdna");
+        }
         const auto& biasStrides = preparedSdpa.biasStrides();
         // Read by the strided bias objects only (vendored-kernel modification 31).
         const int32_t biasF32 = biasStrides.f32 ? 1 : 0;
@@ -2540,6 +2633,36 @@ public:
     }
 
 private:
+    /// Whether @p kernel, launched for @p binding, reads the zero bias: a bias object for a
+    /// graph without a bias of its own.
+    static bool readsZeroBias(const FlydslSdpaCdnaBinding& binding, const KernelDefinition& kernel)
+    {
+        return binding.bias == NO_BIAS && integerMetadata(kernel, HAS_BIAS_FIELD) == 1;
+    }
+
+    /// The workspace bytes a launch takes before the zero bias: a split launch's partials, or
+    /// a dropout seed and offset given by value.
+    static size_t workspaceBeforeZeroBias(const MatchContext& context,
+                                          const FlydslSdpaCdnaBinding& binding,
+                                          const SdpaProblem& problem,
+                                          const CdnaTile& tile)
+    {
+        if(!tile.splitKv)
+        {
+            return cdnaPhiloxSources(context, binding).needWorkspace() ? DROPOUT_WORKSPACE_BYTES
+                                                                       : 0;
+        }
+        const auto bytes = splitWorkspaceBytes(
+            problem, candidateSplits(problem, tile, context.deviceProperties.multiProcessorCount));
+        if(!bytes.has_value())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "flydsl_sdpa_cdna: the split workspace exceeds 32-bit addressing");
+        }
+        return *bytes;
+    }
+
     const compilation::IKernelCompiler& _kernelCompiler;
     const compilation::KpackKernelLoader& _kpackLoader;
     CdnaFamily _family;

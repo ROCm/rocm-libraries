@@ -110,6 +110,10 @@ inline constexpr std::string_view ALIGN_BOTTOM_RIGHT_TOKEN = "flydsl_sdpa_rdna.a
 inline constexpr std::string_view STATS_TOKEN = "flydsl_sdpa_rdna.stats.uid";
 /// The uid of the additive bias (`attn_mask`), or NO_BIAS when the graph has none.
 inline constexpr std::string_view BIAS_TOKEN = "flydsl_sdpa_rdna.bias.uid";
+/// 1 when a graph without a bias needs scaled scores (runsOnAZeroBias: a zero, negative or
+/// subnormal scale), so the RDNA prefill and decode engines run it on their bias objects with
+/// a zero bias; else 0. The aiw objects scale every score first, and ignore it.
+inline constexpr std::string_view ZERO_BIAS_TOKEN = "flydsl_sdpa_rdna.bias.zero";
 /// The uid of the attention sink, or NO_SINK, its element stride across query heads, and 1
 /// when it is FLOAT rather than in the query's dtype.
 inline constexpr std::string_view SINK_TOKEN = "flydsl_sdpa_rdna.sink.uid";
@@ -158,6 +162,10 @@ inline float tokenFloat(int64_t token)
 
 /// The bias's (batch, head, query, key) element strides as the kernel takes them.
 using BiasStrides = std::array<int64_t, 4>;
+
+/// The zero bias's strides (runsOnAZeroBias): 0 on every axis, so every score reads its first
+/// element, whatever the batch, row or key -- packed sequences included.
+inline constexpr BiasStrides ZERO_BIAS_STRIDES{0, 0, 0, 0};
 
 /// The bias is read through a 32-bit buffer descriptor per (batch, head) slice, with 32-bit
 /// element offsets inside it.
@@ -725,6 +733,7 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
     bound[std::string(ALIGN_BOTTOM_RIGHT_TOKEN)] = mask->alignBottomRight ? 1 : 0;
     bound[std::string(STATS_TOKEN)] = statsUid;
     bound[std::string(BIAS_TOKEN)] = biasUid;
+    bound[std::string(ZERO_BIAS_TOKEN)] = runsOnAZeroBias(context, attributes) ? 1 : 0;
     bound[std::string(SINK_TOKEN)] = sinkUid;
     bound[std::string(SINK_STRIDE_TOKEN)] = sinkStride;
     bound[std::string(SINK_FLOAT_TOKEN)] = sinkFloat;
@@ -753,6 +762,8 @@ struct FlydslSdpaRdnaBinding
     int64_t alignBottomRight = 0;
     int64_t stats = NO_STATS;
     int64_t bias = NO_BIAS;
+    /// Whether the graph runs on the zero bias (ZERO_BIAS_TOKEN).
+    bool zeroBias = false;
     int64_t sink = NO_SINK;
     int64_t sinkStride = 0;
     /// Whether the sink is FLOAT rather than in the query's dtype.
@@ -811,6 +822,7 @@ inline FlydslSdpaRdnaBinding flydslSdpaRdnaBinding(const BoundTokens& bound)
     binding.alignBottomRight = read(ALIGN_BOTTOM_RIGHT_TOKEN);
     binding.stats = read(STATS_TOKEN);
     binding.bias = read(BIAS_TOKEN);
+    binding.zeroBias = read(ZERO_BIAS_TOKEN) != 0;
     binding.sink = read(SINK_TOKEN);
     binding.sinkStride = read(SINK_STRIDE_TOKEN);
     binding.sinkFloat = read(SINK_FLOAT_TOKEN) != 0;
@@ -891,9 +903,19 @@ inline bool familyMatches(const MatchContext& context,
         return false;
     }
 
-    // A bias object for a graph with a bias, a plain one for a graph without.
+    // A bias object for a graph with a bias, a plain one for a graph without -- unless its
+    // scale needs scaled scores, which the plain objects do not keep (runsOnAZeroBias): then a
+    // bias object in the query's dtype, reading a zero bias, as for a [1, 1, 1, Skv] one.
     const auto bias = tryGetBoundInt(bound, BIAS_TOKEN);
-    if(!bias.has_value() || integerMetadata(kernel, HAS_BIAS_FIELD) != (*bias == NO_BIAS ? 0 : 1))
+    const auto zeroBias = tryGetBoundInt(bound, ZERO_BIAS_TOKEN);
+    if(!bias.has_value() || !zeroBias.has_value()
+       || integerMetadata(kernel, HAS_BIAS_FIELD) != (*bias == NO_BIAS && *zeroBias == 0 ? 0 : 1))
+    {
+        return false;
+    }
+    // The zero bias is in the query's dtype. Read at stride 0 on every axis (ZERO_BIAS_STRIDES),
+    // it has no layout for packed sequences to break, as a graph's own bias does.
+    if(*bias == NO_BIAS && *zeroBias != 0 && integerMetadata(kernel, BIAS_Q_FIELD) != 1)
     {
         return false;
     }
@@ -966,12 +988,23 @@ inline const data_objects::TensorAttributes& requireTensor(const MatchContext& c
     return requireSdpaTensor(context, uid, "flydsl_sdpa_rdna");
 }
 
+/// Whether @p kernel, launched for @p binding, reads the zero bias (runsOnAZeroBias): a bias
+/// object of the RDNA prefill or decode engine for a graph without a bias of its own.
+inline bool readsZeroBias(const FlydslSdpaRdnaBinding& binding, const KernelDefinition& kernel)
+{
+    return binding.bias == NO_BIAS && integerMetadata(kernel, HAS_BIAS_FIELD) == 1;
+}
+
 /// The softmax scale for a launch: the pass-by-value scalar when the graph gives one, read
-/// now, else the f32 the match baked into the scale token.
+/// now, else the f32 the match baked into the scale token. @p rawScores says whether the
+/// launched object keeps its running max over unscaled scores (an RDNA prefill or decode
+/// object without a bias), which takes only a scale rawScoresServe accepts; the others take
+/// any isServableScale accepts.
 inline float launchScale(const FlydslSdpaRdnaBinding& binding,
                          const std::optional<hipdnn_plugin_sdk::ScalarOperand>& scaleOperand,
                          const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                         uint32_t numDeviceBuffers)
+                         uint32_t numDeviceBuffers,
+                         bool rawScores)
 {
     float scale = 0.0F;
     if(scaleOperand.has_value())
@@ -980,12 +1013,21 @@ inline float launchScale(const FlydslSdpaRdnaBinding& binding,
             hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
                 *scaleOperand, deviceBuffers, numDeviceBuffers)));
         // A pass-by-value scalar, read from host memory. A constant scale was checked at
-        // match time; this one arrives now.
+        // match time; this one arrives now, after the object was chosen.
         if(!isServableScale(static_cast<double>(scale)))
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "flydsl_sdpa_rdna: the runtime softmax scale must be positive and at most 2^20");
+                "flydsl_sdpa_rdna: the runtime softmax scale must be finite and at most 2^20 in "
+                "magnitude");
+        }
+        if(rawScores && !rawScoresServe(static_cast<double>(scale)))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "flydsl_sdpa_rdna: an object without a bias takes a runtime softmax scale only "
+                "when it is positive and normal; give a zero, negative or subnormal scale as a "
+                "value, which runs on the bias objects");
         }
     }
     else

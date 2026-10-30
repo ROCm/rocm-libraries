@@ -714,8 +714,13 @@ public:
         const auto& preparedSdpa = dynamic_cast<const PreparedFlydslSdpaAiw&>(prepared);
         const auto& binding = preparedSdpa.binding();
         const auto& problem = preparedSdpa.problem();
-        const float scale
-            = launchScale(binding, preparedSdpa.scaleOperand(), deviceBuffers, numDeviceBuffers);
+        // Every aiw object scales its scores before the softmax's max (the kernel's
+        // correction (b)), so it takes any scale isServableScale accepts.
+        const float scale = launchScale(binding,
+                                        preparedSdpa.scaleOperand(),
+                                        deviceBuffers,
+                                        numDeviceBuffers,
+                                        /*rawScores=*/false);
 
         const auto q
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.q, deviceBuffers, numDeviceBuffers);

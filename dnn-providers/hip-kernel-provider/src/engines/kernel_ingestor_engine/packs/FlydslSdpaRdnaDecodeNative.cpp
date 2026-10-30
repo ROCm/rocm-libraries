@@ -402,7 +402,9 @@ public:
                                  std::optional<hipdnn_plugin_sdk::ScalarOperand> scaleOperand,
                                  std::array<OperandStrides, 5> strides,
                                  BiasStrides biasStrides,
-                                 int64_t splits)
+                                 int64_t splits,
+                                 bool rawScores,
+                                 bool zeroBias)
         : _code(std::move(code))
         , _mergeCode(std::move(mergeCode))
         , _binding(binding)
@@ -411,6 +413,8 @@ public:
         , _strides(strides)
         , _biasStrides(biasStrides)
         , _splits(splits)
+        , _rawScores(rawScores)
+        , _zeroBias(zeroBias)
     {
     }
 
@@ -457,6 +461,19 @@ public:
         return _biasStrides;
     }
 
+    /// Whether the object keeps its running max over unscaled scores (no bias): it takes a
+    /// runtime scale only when rawScoresServe accepts it.
+    bool rawScores() const
+    {
+        return _rawScores;
+    }
+
+    /// Whether the object reads the zero bias from the workspace (readsZeroBias).
+    bool zeroBias() const
+    {
+        return _zeroBias;
+    }
+
 private:
     IngestorKernelCode _code;
     IngestorKernelCode _mergeCode;
@@ -466,6 +483,8 @@ private:
     std::array<OperandStrides, 5> _strides;
     BiasStrides _biasStrides;
     int64_t _splits = 1;
+    bool _rawScores;
+    bool _zeroBias;
 };
 
 /**
@@ -487,7 +506,8 @@ public:
     {
     }
 
-    /// A launch with more than one KV split needs a partial O and LSE per split.
+    /// A launch with more than one KV split needs a partial O and LSE per split; a bias object
+    /// run for a graph without a bias reads the zero bias after them (readsZeroBias).
     size_t workspaceBytes(const MatchContext& context,
                           const BoundTokens& bound,
                           const KernelDefinition& kernel) const override
@@ -506,7 +526,11 @@ public:
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM, "flydsl_sdpa_rdna_decode: workspace overflows");
         }
-        return *bytes;
+        if(!readsZeroBias(binding, kernel))
+        {
+            return *bytes;
+        }
+        return zeroBiasOffset(*bytes) + zeroBiasBytes(problem.seqLenKv);
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
@@ -605,6 +629,11 @@ public:
             }
             biasStrides = *strides;
         }
+        const bool zeroBias = readsZeroBias(binding, kernel);
+        if(zeroBias)
+        {
+            biasStrides = ZERO_BIAS_STRIDES;
+        }
 
         return std::make_unique<PreparedFlydslSdpaRdnaDecode>(
             std::move(code),
@@ -620,7 +649,9 @@ public:
                                               ? OperandStrides{}
                                               : stridesOf(requireTensor(context, binding.stats))},
             biasStrides,
-            splits);
+            splits,
+            integerMetadata(kernel, HAS_BIAS_FIELD) != 1,
+            zeroBias);
     }
 
     void launch(const Handle& handle,
@@ -632,8 +663,11 @@ public:
         const auto& preparedSdpa = dynamic_cast<const PreparedFlydslSdpaRdnaDecode&>(prepared);
         const auto& binding = preparedSdpa.binding();
         const auto& problem = preparedSdpa.problem();
-        const float scale
-            = launchScale(binding, preparedSdpa.scaleOperand(), deviceBuffers, numDeviceBuffers);
+        const float scale = launchScale(binding,
+                                        preparedSdpa.scaleOperand(),
+                                        deviceBuffers,
+                                        numDeviceBuffers,
+                                        preparedSdpa.rawScores());
 
         const auto q
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.q, deviceBuffers, numDeviceBuffers);
@@ -647,6 +681,16 @@ public:
         // one: the LSE when flags bit 0 is set, the bias by has_bias, the sink by has_sink.
         void* stats = optionalBuffer(binding.stats, deviceBuffers, numDeviceBuffers);
         void* bias = optionalBuffer(binding.bias, deviceBuffers, numDeviceBuffers);
+        if(preparedSdpa.zeroBias())
+        {
+            // After the split partials (workspaceBytes).
+            bias = stageZeroBias(
+                workspace,
+                zeroBiasOffset(decodeWorkspaceBytes(problem, preparedSdpa.splits()).value_or(0)),
+                problem.seqLenKv,
+                handle.getStream(),
+                "flydsl_sdpa_rdna_decode");
+        }
         void* sink = optionalBuffer(binding.sink, deviceBuffers, numDeviceBuffers);
         // The head stride, with the sink's dtype in its bit 32 (kernel modification 31).
         const int64_t sinkStride = rdnaSinkStrideArgument(binding.sinkStride, binding.sinkFloat);
