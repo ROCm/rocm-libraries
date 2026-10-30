@@ -9,6 +9,7 @@
 #include <TensileLite/Client/hostnumerics/HostNumericsBridge.hpp>
 #include <TensileLite/Client/hostnumerics/Reference.hpp>
 #include <roc/hostnumerics/validation.hpp>
+#include <roc/hostnumerics/sampling.hpp>
 
 #include <array>
 #include <cmath>

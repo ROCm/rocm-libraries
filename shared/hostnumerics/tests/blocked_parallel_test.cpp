@@ -1,6 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <roc/hostnumerics/sampling.hpp>
+
 #include "_blocked_backend_test_support.hpp"
 
 namespace blocked_backend_test {
