@@ -690,6 +690,37 @@ struct FmhaBwdPrepareWorkspaceKernel
     }
 };
 
+// Second stage of the two-stage d_sink: adds the sum of one head's per-block partials to
+// d_sink[head]. Single writer and fixed summation order, so the result is bit-identical from
+// run to run. Must be called by the whole block.
+template <index_t kBlockSize>
+CK_TILE_DEVICE void FmhaBwdFoldSinkPartials(const float* partials, float* d_sink, index_t num_slots)
+{
+    float sum = 0.f;
+    for(index_t i = get_thread_id(); i < num_slots; i += kBlockSize)
+        sum += partials[i];
+
+    const index_t warp_sz = get_warp_size();
+    for(index_t offset = warp_sz >> 1; offset > 0; offset >>= 1)
+        sum += warp_shuffle_down(sum, offset);
+
+    constexpr index_t kWarps = kBlockSize / get_warp_size();
+    __shared__ float warp_sums[kWarps];
+    if(get_lane_id() == 0)
+        warp_sums[get_warp_id()] = sum;
+    block_sync_lds();
+
+    if(get_thread_id() == 0)
+    {
+        float head_sum = 0.f;
+        static_for<0, kWarps, 1>{}([&](auto i_w) { head_sum += warp_sums[i_w.value]; });
+        *d_sink += head_sum; // accumulate, as the atomic path does; the caller zeroes d_sink
+    }
+}
+
+// Spacing, in ints, of the per-head arrival counters: one 128 B line each.
+inline constexpr index_t kFmhaBwdSinkCounterStride = 32;
+
 template <typename FmhaPipeline_,
           typename KGradEpiloguePipeline_,
           typename VGradEpiloguePipeline_,
@@ -2407,6 +2438,13 @@ struct FmhaBwdOGradDotOKernel
         ck_tile::index_t nhead_stride_o;
         // LSE and D always share the same layout; this stride covers both.
         ck_tile::index_t nhead_stride_lsed;
+
+        // Two-stage d_sink: one partial per block, laid out [nhead][batch][gridDim.x].
+        // nullptr keeps the atomicAdd onto d_sink_ptr.
+        float* sink_partial_ptr;
+        // Per-head arrival counters, zero at launch. Set only when no ConvertQGrad follows to
+        // fold the partials; the last block of each head folds them instead.
+        int* sink_counter_ptr;
     };
 
     struct FmhaBwdOGradDotOBatchModeKargs : FmhaBwdOGradDotOCommonKargs
@@ -2446,7 +2484,9 @@ struct FmhaBwdOGradDotOKernel
               ck_tile::index_t nhead_stride_lsed,
               ck_tile::index_t batch_stride_do,
               ck_tile::index_t batch_stride_o,
-              ck_tile::index_t batch_stride_lsed)
+              ck_tile::index_t batch_stride_lsed,
+              void* sink_partial_ptr = nullptr,
+              void* sink_counter_ptr = nullptr)
     {
         Kargs kargs{{o_ptr,
                      do_ptr,
@@ -2462,7 +2502,9 @@ struct FmhaBwdOGradDotOKernel
                      stride_o,
                      nhead_stride_do,
                      nhead_stride_o,
-                     nhead_stride_lsed},
+                     nhead_stride_lsed,
+                     reinterpret_cast<float*>(sink_partial_ptr),
+                     reinterpret_cast<int*>(sink_counter_ptr)},
                     batch_stride_do,
                     batch_stride_o,
                     batch_stride_lsed};
@@ -2488,7 +2530,9 @@ struct FmhaBwdOGradDotOKernel
               ck_tile::index_t stride_o,
               ck_tile::index_t nhead_stride_do,
               ck_tile::index_t nhead_stride_o,
-              ck_tile::index_t nhead_stride_lsed)
+              ck_tile::index_t nhead_stride_lsed,
+              void* sink_partial_ptr = nullptr,
+              void* sink_counter_ptr = nullptr)
     {
         Kargs kargs{{o_ptr,
                      do_ptr,
@@ -2504,7 +2548,9 @@ struct FmhaBwdOGradDotOKernel
                      stride_o,
                      nhead_stride_do,
                      nhead_stride_o,
-                     nhead_stride_lsed},
+                     nhead_stride_lsed,
+                     reinterpret_cast<float*>(sink_partial_ptr),
+                     reinterpret_cast<int*>(sink_counter_ptr)},
                     reinterpret_cast<const int32_t*>(seqstart_q_ptr),
                     reinterpret_cast<const int32_t*>(seqlen_q_ptr),
                     reinterpret_cast<const int32_t*>(cu_seqlen_q_ptr)};
@@ -2531,12 +2577,59 @@ struct FmhaBwdOGradDotOKernel
 
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize() { return 0; }
 
+    // Last-block fold, used when no ConvertQGrad follows (deterministic decode tiles). Every
+    // block counts itself in after storing its slot; the last one folds the head in slot order
+    // and rearms the counter. The integer count only elects that block, so d_sink does not
+    // depend on arrival order. Called block-uniformly, after thread 0 stored the slot.
+    // noinline keeps the atomic and fences out of the code of runs that never fold.
+    __attribute__((noinline)) CK_TILE_DEVICE static void
+    FoldSinkIfLast(const float* head_partials, float* d_sink, int* counter, index_t num_blocks)
+    {
+        __shared__ int is_last;
+        if(get_thread_id() == 0)
+        {
+            // Release: publishes the slot stored by this thread along with the count.
+            is_last = __scoped_atomic_fetch_add(
+                          counter, 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE) == num_blocks - 1;
+        }
+        block_sync_lds();
+
+        if(is_last)
+        {
+            // Acquire: makes every other block's slot visible.
+            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            FmhaBwdFoldSinkPartials<kBlockSize>(head_partials, d_sink, num_blocks);
+            if(get_thread_id() == 0)
+                *counter = 0; // rearm for the next run on this workspace
+        }
+    }
+
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
         // divide problem
         const auto [i_tile_m, i_nhead, i_batch] = GetTileIndex();
 
         const index_t i_m0 = amd_wave_read_first_lane(i_tile_m * kM0);
+
+        // This block's slot in the two-stage d_sink buffer.
+        const index_t sink_blocks = gridDim.x * gridDim.z; // blocks, and slots, per head
+        float* sink_partial_slot =
+            (kargs.sink_partial_ptr == nullptr || kargs.d_sink_ptr == nullptr)
+                ? nullptr
+                : kargs.sink_partial_ptr +
+                      (static_cast<long_index_t>(i_nhead) * gridDim.z + i_batch) * gridDim.x +
+                      i_tile_m;
+        int* sink_counter = (sink_partial_slot == nullptr || kargs.sink_counter_ptr == nullptr)
+                                ? nullptr
+                                : kargs.sink_counter_ptr + i_nhead * kFmhaBwdSinkCounterStride;
+
+        auto fold_sink_if_last = [&, i_nhead_ = i_nhead]() {
+            FoldSinkIfLast(kargs.sink_partial_ptr +
+                               static_cast<long_index_t>(i_nhead_) * sink_blocks,
+                           reinterpret_cast<float*>(kargs.d_sink_ptr + i_nhead_),
+                           sink_counter,
+                           sink_blocks);
+        };
 
         long_index_t batch_offset_o    = 0;
         long_index_t batch_offset_do   = 0;
@@ -2572,6 +2665,11 @@ struct FmhaBwdOGradDotOKernel
             // earlier
             if(kargs.seqlen_q <= i_m0)
             {
+                // A skipped block still owns a slot and still counts toward the arrivals.
+                if(sink_partial_slot != nullptr && get_thread_id() == 0)
+                    *sink_partial_slot = 0.f;
+                if(sink_counter != nullptr)
+                    fold_sink_if_last();
                 return;
             }
         }
@@ -2648,12 +2746,14 @@ struct FmhaBwdOGradDotOKernel
             make_tile_window(do_dram, make_tuple(number<kM0>{}, number<kVHeaddim>{}), {i_m0, 0});
         auto d_dram_window = make_tile_window(d_dram, make_tuple(number<kM0>{}), {i_m0});
 
-        // nullptr when sink grad is disabled; the pipeline checks this to skip the sink path
+        // nullptr when sink grad is off or the two-stage path is used
         LSEDataType* atomic_sink_grad_ptr =
-            kargs.d_sink_ptr == nullptr ? nullptr : kargs.d_sink_ptr + i_nhead;
+            (kargs.d_sink_ptr == nullptr || sink_partial_slot != nullptr)
+                ? nullptr
+                : kargs.d_sink_ptr + i_nhead;
 
         // lse_ptr is always valid (also needed by the main bwd kernel).
-        // The actual load happens inside the pipeline only when atomic_sink_grad_ptr != nullptr.
+        // The actual load happens inside the pipeline only on the sink path.
         auto lse_dram = [&]() {
             const auto lse_dram_naive = make_naive_tensor_view_packed<address_space_enum::global>(
                 lse_ptr, make_tuple(kargs.seqlen_q), number<1>{});
@@ -2668,7 +2768,11 @@ struct FmhaBwdOGradDotOKernel
                            d_dram_window,
                            sink_value,
                            kargs.p_undrop,
-                           atomic_sink_grad_ptr);
+                           atomic_sink_grad_ptr,
+                           sink_partial_slot);
+
+        if(sink_counter != nullptr)
+            fold_sink_if_last();
     }
 };
 
@@ -2744,6 +2848,12 @@ struct FmhaBwdConvertQGradKernel
 
         ck_tile::index_t stride_dq;
         ck_tile::index_t nhead_stride_dq;
+
+        // Two-stage d_sink partials stored by OGradDotO, [nhead][sink_slots_per_head], folded
+        // here. nullptr when OGradDotO took the atomic path.
+        const float* sink_partial_ptr;
+        float* d_sink_ptr;
+        ck_tile::index_t sink_slots_per_head;
     };
 
     struct FmhaBwdConvertQGradDeterministicKargs
@@ -2793,7 +2903,10 @@ struct FmhaBwdConvertQGradKernel
               ck_tile::index_t stride_dq,
               ck_tile::index_t nhead_stride_dq,
               ck_tile::index_t batch_stride_dq,
-              ck_tile::index_t mask_k_end_off = -1)
+              ck_tile::index_t mask_k_end_off      = -1,
+              const void* sink_partial_ptr         = nullptr,
+              void* d_sink_ptr                     = nullptr,
+              ck_tile::index_t sink_slots_per_head = 0)
     {
         const uint8_t* ws = reinterpret_cast<const uint8_t*>(workspace);
         Kargs kargs{
@@ -2804,7 +2917,10 @@ struct FmhaBwdConvertQGradKernel
              seqlen_k,
              hdim_q,
              stride_dq,
-             nhead_stride_dq},
+             nhead_stride_dq,
+             reinterpret_cast<const float*>(sink_partial_ptr),
+             reinterpret_cast<float*>(d_sink_ptr),
+             sink_slots_per_head},
             {},
             batch_stride_dq,
         };
@@ -2832,7 +2948,10 @@ struct FmhaBwdConvertQGradKernel
               const void* cu_seqlen_k_ptr,
               ck_tile::index_t hdim_q,
               ck_tile::index_t stride_dq,
-              ck_tile::index_t nhead_stride_dq)
+              ck_tile::index_t nhead_stride_dq,
+              const void* sink_partial_ptr         = nullptr,
+              void* d_sink_ptr                     = nullptr,
+              ck_tile::index_t sink_slots_per_head = 0)
     {
         const uint8_t* ws = reinterpret_cast<const uint8_t*>(workspace);
         Kargs kargs{{ws + WorkspaceManager::template GetDqAccDataOffset<false>(batch_size),
@@ -2842,7 +2961,10 @@ struct FmhaBwdConvertQGradKernel
                      -1, //
                      hdim_q,
                      stride_dq,
-                     nhead_stride_dq},
+                     nhead_stride_dq,
+                     reinterpret_cast<const float*>(sink_partial_ptr),
+                     reinterpret_cast<float*>(d_sink_ptr),
+                     sink_slots_per_head},
                     {},
                     reinterpret_cast<const int32_t*>(seqstart_q_ptr),
                     reinterpret_cast<const int32_t*>(seqstart_k_ptr),
@@ -2886,6 +3008,18 @@ struct FmhaBwdConvertQGradKernel
     {
         // divide problem
         const auto [i_tile_m, i_nhead, i_batch] = GetTileIndex();
+
+        // One block per head also folds the d_sink partials, after its own dQ tile (folding
+        // first slowed short no-sink runs). The group-mode early exit folds too, so no head is
+        // skipped when batch 0 is empty.
+        const bool fold_sink = kargs.sink_partial_ptr != nullptr && i_tile_m == 0 && i_batch == 0;
+        auto fold_sink_partials = [&, i_nhead_ = i_nhead]() {
+            FmhaBwdFoldSinkPartials<kBlockSize>(kargs.sink_partial_ptr +
+                                                    static_cast<long_index_t>(i_nhead_) *
+                                                        kargs.sink_slots_per_head,
+                                                kargs.d_sink_ptr + i_nhead_,
+                                                kargs.sink_slots_per_head);
+        };
 
         const index_t i_m0 = amd_wave_read_first_lane(i_tile_m * kM0);
 
@@ -2936,6 +3070,8 @@ struct FmhaBwdConvertQGradKernel
             // earlier
             if(kargs.seqlen_q <= i_m0)
             {
+                if(fold_sink)
+                    fold_sink_partials();
                 return;
             }
         }
@@ -3057,6 +3193,9 @@ struct FmhaBwdConvertQGradKernel
         {
             FmhaBwdConvertQGrad{}(dq_acc_dram_window, dq_dram_window);
         }
+
+        if(fold_sink)
+            fold_sink_partials();
     }
 };
 
