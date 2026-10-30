@@ -45,3 +45,24 @@ def test_two_element_form_sets_free_extent():
 def test_rejects_wrong_length():
     with pytest.raises(ConfigTypeError, match="MXBlockA"):
         _problemType(MXBlockA=[1, 128, 128])
+
+
+def test_rejects_list_conflicting_with_explicit_free_key():
+    with pytest.raises(ConfigTypeError, match="conflicts with MXBlockFreeA"):
+        _problemType(MXBlockA=[32], MXBlockFreeA=128)
+    with pytest.raises(ConfigTypeError, match="conflicts with MXBlockFreeB"):
+        _problemType(MXBlockB=[128, 128], MXBlockFreeB=64)
+
+
+def test_explicit_free_key_matching_the_list_is_accepted():
+    pt = _problemType(MXBlockA=[128, 128], MXBlockFreeA=128)
+    assert (pt["MXBlockA"], pt["MXBlockFreeA"]) == (128, 128)
+
+
+@pytest.mark.parametrize("overrides", [
+    {"MXBlockA": [128, 0]},
+    {"MXBlockA": 0, "MXBlockFreeA": 128},
+])
+def test_rejects_free_extent_without_mx(overrides):
+    with pytest.raises(ConfigTypeError, match="needs MXBlockA > 0"):
+        _problemType(**overrides)
