@@ -1966,6 +1966,7 @@ private:
                 std::vector<float> timings;
                 bool benchmarkFailed = false;
                 bool restartUnstalled = false;
+                int discardedNegativeSamples = 0;
                 auto candidateQuality = ::hipdnn_frontend::TimingQuality::INVALID;
 
                 // One lambda for both strategies: it just runs the reusable profiling
@@ -1993,6 +1994,7 @@ private:
                     timings = std::move(outcome.timings);
                     benchmarkFailed = outcome.benchmarkFailed;
                     restartUnstalled = outcome.restartUnstalled;
+                    discardedNegativeSamples = outcome.discardedNegativeSamples;
                     candidateQuality = outcome.finalQuality;
                     if(benchmarkFailed)
                     {
@@ -2020,6 +2022,7 @@ private:
                     timings = std::move(outcome.timings);
                     benchmarkFailed = outcome.benchmarkFailed;
                     restartUnstalled = outcome.restartUnstalled;
+                    discardedNegativeSamples = outcome.discardedNegativeSamples;
                     candidateQuality = outcome.finalQuality;
                     if(benchmarkFailed)
                     {
@@ -2034,8 +2037,9 @@ private:
                     HIPDNN_FE_LOG_WARN(
                         "autotune: engine "
                         << result.engineName
-                        << ": stall watchdog fired or stalling was declined mid-sweep; "
-                           "discarding this pass and re-measuring every candidate unstalled.");
+                        << ": stall watchdog fired, stalling was declined, or stalled "
+                           "timing kept reading negative mid-sweep; discarding this pass and "
+                           "re-measuring every candidate unstalled.");
                     restartUnstalledRequested = true;
                     break;
                 }
@@ -2047,6 +2051,16 @@ private:
                                                            << result.errorMessage);
                     allResults.push_back(std::move(result));
                     continue;
+                }
+
+                if(discardedNegativeSamples > 0)
+                {
+                    HIPDNN_FE_LOG_WARN("autotune: engine "
+                                       << result.engineName << ": discarded "
+                                       << discardedNegativeSamples
+                                       << " negative elapsed reading(s) from the HIP event "
+                                          "timer and re-measured them "
+                                          "(ROCm/rocm-systems#12925).");
                 }
 
                 // --- Compute statistics ---
@@ -2834,6 +2848,9 @@ public:
      * Unpacks the serialized graph, reconstructs frontend nodes and attributes,
      * and finalizes the backend descriptor with the given handle.
      *
+     * An embedded execution plan is restored bound to the device of @p handle's
+     * stream, and executes only on handles whose stream is on that device.
+     *
      * @param handle The hipDNN handle for finalization.
      * @param data The binary data to deserialize.
      * @return Error indicating success or failure.
@@ -2958,6 +2975,10 @@ public:
      * allowed on this lightweight plan-only object; graph-aware override
      * validation is skipped, so callers must supply overrides that are
      * consistent with the deserialized plan.
+     *
+     * The plan is bound to the device of @p handle's stream and executes only on
+     * handles whose stream is on that device. To run it on another device,
+     * deserialize the same bytes with a handle on that device.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error deserialize_compiled_plan(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
@@ -3215,12 +3236,29 @@ public:
      * Called internally by build() after create_execution_plans().
      *
      * @param policy Controls which plans are compiled:
-     *   - HEURISTICS_CHOICE: compile only the active (top-ranked) plan
+     *   - HEURISTICS_CHOICE: compile the active plan. The active plan is the
+     *     preferred engine's plan when set_preferred_engine_id_ext() names an engine
+     *     among the ranked candidates, otherwise the top-ranked plan. If it fails
+     *     to finalize for any reason (engine config rejected, backend finalize or
+     *     execution-context creation failure, workspace query failure), a warning is
+     *     logged and the other plans are tried in ranked order starting at the top of
+     *     the list; the first one that finalizes becomes active. A candidate that
+     *     also fails is logged and skipped. Candidates barred by deselect_engines(),
+     *     whose descriptors are invalid, or whose workspace exceeds the
+     *     deselect_workspace_greater_than() limit are skipped with an info log. If no
+     *     plan finalizes, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED is returned
+     *     with a message listing every attempted engine and its failure, and the
+     *     active plan is unchanged. This applies to a single-plan graph too. An
+     *     active plan that finalizes but whose workspace exceeds the
+     *     deselect_workspace_greater_than() limit is an error
+     *     (ErrorCode::INVALID_VALUE); no other plan is tried.
      *   - ALL: compile every plan in _compiledPlans, setting _activePlanIndex
      *     to the first plan that compiles successfully
      *
-     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
-     *         on failure. Call get_message() for the specific failure reason.
+     * @return ErrorCode::OK on success; ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED
+     *         when no plan finalizes under HEURISTICS_CHOICE; ErrorCode::INVALID_VALUE /
+     *         ErrorCode::HIPDNN_BACKEND_ERROR on other failures. Call get_message() for
+     *         the specific failure reason.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error build_plans(BuildPlanPolicy policy = BuildPlanPolicy::HEURISTICS_CHOICE)
@@ -3306,7 +3344,9 @@ public:
             return {ErrorCode::OK, ""};
         }
 
-        // HEURISTICS_CHOICE path: compile only the active plan (original behavior)
+        // HEURISTICS_CHOICE path: compile the active plan. If it fails to finalize for any
+        // reason, the other plans are tried in ranked order from the top of the list and the
+        // first one that finalizes becomes active.
         auto& activePlan = _compiledPlans[_activePlanIndex];
         if(activePlan.barred)
         {
@@ -3330,12 +3370,89 @@ public:
             return {ErrorCode::INVALID_VALUE, "No active execution plan / engine config"};
         }
 
-        // Set the engine config, finalize the plan, and cache its workspace size.
-        // On failure return a backend error (the original heuristics behavior).
+        // Set the engine config, finalize the plan, and cache its workspace size. A repeated
+        // call after a plan was already finalized fails here because the backend refuses to
+        // finalize it again; that is returned as is, not treated as an engine failure to
+        // fall back from (which would silently activate a second plan).
+        const bool alreadyFinalized = _executionPlanFinalized;
         auto finalizeErr = finalizePlanDescriptor(activePlan);
-        if(finalizeErr.is_bad())
+        if(finalizeErr.is_bad() && alreadyFinalized)
         {
             return finalizeErr;
+        }
+        if(finalizeErr.is_bad())
+        {
+            HIPDNN_FE_LOG_WARN("Failed to finalize active plan (engine "
+                               << activePlan.engineId << "): " << finalizeErr.get_message()
+                               << "; trying the other ranked plans");
+            // Failures in attempt order, the active plan first.
+            std::string failures = "engine " + std::to_string(activePlan.engineId) + ": "
+                                   + finalizeErr.get_message();
+
+            for(size_t i = 0; i < _compiledPlans.size(); ++i)
+            {
+                if(i == _activePlanIndex)
+                {
+                    continue;
+                }
+
+                auto& candidate = _compiledPlans[i];
+                if(candidate.barred)
+                {
+                    HIPDNN_FE_LOG_INFO("Skipping plan index " << i << " (engine "
+                                                              << candidate.engineId
+                                                              << "): already barred");
+                    continue;
+                }
+
+                if(!candidate.engineConfigDesc || !candidate.engineConfigDesc->valid()
+                   || !candidate.executionPlanDesc || !candidate.executionPlanDesc->valid())
+                {
+                    HIPDNN_FE_LOG_INFO("Skipping plan index "
+                                       << i << " (engine " << candidate.engineId
+                                       << "): missing or invalid descriptor");
+                    continue;
+                }
+
+                if(_barredEngineIds.count(candidate.engineId) > 0)
+                {
+                    candidate.barred = true;
+                    HIPDNN_FE_LOG_INFO("Skipping plan index " << i << " (engine "
+                                                              << candidate.engineId
+                                                              << "): barred by deselect_engines()");
+                    continue;
+                }
+
+                auto candidateErr = finalizePlanDescriptor(candidate);
+                if(candidateErr.is_bad())
+                {
+                    HIPDNN_FE_LOG_WARN("Failed to finalize plan index "
+                                       << i << " (engine " << candidate.engineId
+                                       << "): " << candidateErr.get_message() << "; skipping");
+                    failures += "; engine " + std::to_string(candidate.engineId) + ": "
+                                + candidateErr.get_message();
+                    continue;
+                }
+
+                if(_maxWorkspaceAllowed >= 0 && candidate.workspaceSize > _maxWorkspaceAllowed)
+                {
+                    candidate.barred = true;
+                    HIPDNN_FE_LOG_INFO("Skipping plan index "
+                                       << i << " (engine " << candidate.engineId << "): workspace "
+                                       << candidate.workspaceSize << " exceeds limit "
+                                       << _maxWorkspaceAllowed);
+                    continue;
+                }
+
+                HIPDNN_FE_LOG_INFO("Falling back to plan index " << i << " (engine "
+                                                                 << candidate.engineId << ")");
+                setActivePlanState(i, detail::ActivePlanFinalization::FINALIZED);
+                return {ErrorCode::OK, ""};
+            }
+
+            return {ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED,
+                    "Failed to finalize any execution plan (policy=HEURISTICS_CHOICE): "
+                        + failures};
         }
 
         if(_maxWorkspaceAllowed >= 0 && activePlan.workspaceSize > _maxWorkspaceAllowed)
@@ -3374,14 +3491,19 @@ public:
      *
      * @param handle The hipDNN handle
      * @param modes Heuristic modes for engine selection
-     * @param policy Build plan policy: HEURISTICS_CHOICE compiles only the
-     *        top-ranked plan; ALL compiles every engine config
+     * @param policy Build plan policy: HEURISTICS_CHOICE compiles the active plan
+     *        (the preferred engine's plan when it is among the ranked candidates,
+     *        otherwise the top-ranked plan) and, if that plan fails to finalize for
+     *        any reason, tries the other ranked plans in order. See build_plans()
+     *        for the details. ALL compiles every engine config
      * @param do_multithreaded_builds Reserved for future use
      * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
      *         ErrorCode::ATTRIBUTE_NOT_SET / ErrorCode::HIPDNN_BACKEND_ERROR /
      *         ErrorCode::GRAPH_NOT_SUPPORTED (when no engine has an applicable
-     *         solution on the current device) on failure. Call get_message() for
-     *         the specific failure reason.
+     *         solution on the current device) /
+     *         ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED (when no plan
+     *         finalizes under HEURISTICS_CHOICE) on failure. Call get_message()
+     *         for the specific failure reason.
      */
     // NOLINTBEGIN(readability-identifier-naming)
     Error build(hipdnnHandle_t handle,
@@ -4713,6 +4835,11 @@ public:
 
     /**
      * @brief Execute the graph with tensor pointers mapped by UID
+     *
+     * The handle's stream must be on the device the plan was built or
+     * deserialized for; a handle on another device fails with
+     * HIPDNN_BACKEND_ERROR. To run on another device, serialize the plan and
+     * deserialize it with a handle on that device.
      *
      * @param handle The hipDNN handle
      * @param variantPack Map from tensor UID to device memory pointers
@@ -6596,6 +6723,13 @@ public:
 
     /**
      * @brief Set the preferred engine ID for execution plan selection
+     *
+     * The preference is soft. When the ID is among the ranked candidates its plan
+     * becomes the active plan that build_plans() compiles. If that plan fails to
+     * finalize for any reason, the other ranked plans are tried from the top of
+     * the list and the engine that ends up serving the graph may differ; read it
+     * with @c get_execution_plan_engine_id() or @c get_plan_name().
+     *
      * @param engineId Engine ID to prefer, or std::nullopt to clear
      * @return Reference to this Graph for method chaining
      */
@@ -6620,6 +6754,11 @@ public:
      * hash of its spelling. Only the ID survives a round trip through a backend
      * graph descriptor, so this is what keeps such a preference from being
      * silently dropped on deserialize.
+     *
+     * The preference is soft. If the preferred engine's plan fails to finalize
+     * for any reason, build_plans() falls back to another ranked engine, scanning
+     * from the top of the list; read the engine that serves the graph with
+     * @c get_execution_plan_engine_id() or @c get_plan_name().
      *
      * @param engineName Engine name to look up; empty string clears the preference
      * @return Reference to this Graph for method chaining
