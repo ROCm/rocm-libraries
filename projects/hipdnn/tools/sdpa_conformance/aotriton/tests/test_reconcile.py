@@ -410,3 +410,146 @@ def test_inventory_matches_asm_builders_by_class_name_and_never_a_longer_engine_
     )
     assert "alpha_v2" not in alpha and "no decline reason logged" in alpha
     assert "head_dim 96" in asm and "never on gfx950" in asm and "unrelated" not in asm
+
+
+# ------------------------------------------------------------------ candidate passes
+
+ENGINE_E = "hipkernel:flydsl_sdpa_cdna"
+ENGINE_SLUG = "hipkernel_flydsl_sdpa_cdna"
+
+
+def candidate_meta(direction, engine, k):
+    return {
+        "kind": "candidate",
+        "direction": direction,
+        f"pin_{direction}": engine,
+        f"{direction}_candidate": str(k),
+    }
+
+
+def test_the_candidate_columns_round_trip_and_a_csv_without_them_reads_them_empty(
+    tmp_path,
+):
+    assert reconcile.FIELDS[-2:] == ("fwd_candidate", "bwd_candidate")
+    full = row("a::t1", fwd_candidate="2", bwd_candidate='{"E": 3}')
+    (tmp_path / "results.csv").write_text(",".join(FIELDS) + "\n" + format_row(full))
+    (got,) = read_rows(tmp_path / "results.csv")
+    assert (got["fwd_candidate"], got["bwd_candidate"]) == ("2", '{"E": 3}')
+    before = FIELDS[:-2]  # a results.csv written before the candidate columns
+    old = ",".join(before) + "\n" + ",".join(["a::t2", "pass"] + [""] * 11) + "\n"
+    (tmp_path / "old.csv").write_text(old)
+    (got,) = read_rows(tmp_path / "old.csv")
+    assert (got["nodeid"], got["fwd_candidate"], got["bwd_candidate"]) == (
+        "a::t2",
+        "",
+        "",
+    )
+
+
+def test_each_candidate_pass_gets_its_own_engine_rows_naming_the_candidate(tmp_path):
+    ids = [FWD_T, "v/test_forward.py::f2"]
+    write_pass(tmp_path, "", {}, [row(i, fwd=f"hipdnn:{ENGINE_E}") for i in ids], ids)
+    for k in range(3):
+        write_pass(
+            tmp_path,
+            f"cand/fwd/{ENGINE_SLUG}/{k}",
+            candidate_meta("fwd", ENGINE_E, k),
+            [row(i, fwd=f"hipdnn:{ENGINE_E}", fwd_kernel=f"kernel-{k}") for i in ids],
+            ids,
+        )
+    rows = [r for r in table(tmp_path) if r["source"] == "candidate"]
+    assert len(rows) == 6
+    assert sorted({(r["engine"], r["fwd_candidate"], r["kernel"]) for r in rows}) == [
+        (ENGINE_E, str(k), f"kernel-{k}") for k in range(3)
+    ]
+    assert {r["pin_fwd"] for r in rows} == {ENGINE_E}
+    counts = reconcile.engine_counts(rows)
+    assert counts.splitlines() == [
+        f"candidate fwd {ENGINE_E} #{k}: pass=2 fail=0 declined=0" for k in range(3)
+    ]
+
+
+def test_a_candidate_pass_that_served_another_engine_is_declined_and_counted_not_honored(
+    tmp_path,
+):
+    ids = [FWD_T, "v/test_forward.py::f2"]
+    write_pass(tmp_path, "", {}, [row(i) for i in ids], ids)
+    write_pass(
+        tmp_path,
+        f"cand/fwd/{ENGINE_SLUG}/1",
+        candidate_meta("fwd", ENGINE_E, 1),
+        [
+            row(ids[0], fwd="hipdnn:other"),
+            row(
+                ids[1],
+                "declined",
+                reason="fwd candidate_not_honored: requested kernel a, built b",
+            ),
+        ],
+        ids,
+    )
+    rows = {r["nodeid"]: r for r in table(tmp_path) if r["source"] == "candidate"}
+    assert rows[ids[0]]["outcome"] == "declined"
+    assert "not the pinned" in rows[ids[0]]["reason"]
+    assert rows[ids[1]]["outcome"] == "declined"
+    assert "not_honored=1" in reconcile.engine_counts(list(rows.values()))
+
+
+def test_not_enumerable_rows_carry_the_message_and_an_unreached_case_is_not_run(
+    tmp_path,
+):
+    ids = [FWD_T, "v/test_forward.py::f2"]
+    write_pass(tmp_path, "", {}, [row(i) for i in ids], ids)
+    message = "Engine does not support matched-catalog enumeration"
+    write_pass(
+        tmp_path,
+        f"cand/fwd/{ENGINE_SLUG}/not-enumerable",
+        {"kind": "candidate", "direction": "fwd", "pin_fwd": ENGINE_E, "fwd_candidate": ""},
+        [row(ids[0], "not-enumerable", reason=message)],
+        ids,
+    )  # fmt: skip
+    rows = {r["nodeid"]: r for r in table(tmp_path) if r["source"] == "candidate"}
+    assert (rows[ids[0]]["outcome"], rows[ids[0]]["reason"]) == (
+        "not-enumerable",
+        message,
+    )
+    assert (rows[ids[0]]["engine"], rows[ids[0]]["fwd_candidate"]) == (ENGINE_E, "")
+    assert rows[ids[1]]["outcome"] == "not-run"
+    assert "not-enumerable" in reconcile.OUTCOMES
+    assert "not-enumerable" in reconcile.summarize([row(ids[0], "not-enumerable")])
+
+
+def test_a_candidate_pair_pass_pins_both_directions_and_both_candidates(tmp_path):
+    write_pass(tmp_path, "", {}, [row(BWD_T)], [BWD_T])
+    meta = {
+        "kind": "candidate-pair", "direction": "bwd", "pin_fwd": "A", "pin_bwd": "X",
+        "fwd_candidate": "1", "bwd_candidate": "2",
+    }  # fmt: skip
+    write_pass(
+        tmp_path,
+        "cand/pair/A__X/1x2",
+        meta,
+        [row(BWD_T, fwd="hipdnn:A", bwd="hipdnn:X", bwd_kernel="kx")],
+        [BWD_T],
+    )
+    (got,) = [r for r in table(tmp_path) if r["source"] == "candidate-pair"]
+    assert (got["engine"], got["pin_fwd"], got["pin_bwd"]) == ("X", "A", "X")
+    assert (got["fwd_candidate"], got["bwd_candidate"], got["kernel"]) == (
+        "1",
+        "2",
+        "kx",
+    )
+
+
+def test_candidate_passes_have_their_own_slug_and_accounting_lines(tmp_path):
+    ids = [FWD_T, "v/test_forward.py::f2"]
+    write_pass(tmp_path, "", {}, [row(i) for i in ids], ids)
+    rel = f"cand/fwd/{ENGINE_SLUG}/0"
+    d = write_pass(
+        tmp_path, rel, candidate_meta("fwd", ENGINE_E, 0), [row(ids[0])], ids
+    )
+    assert reconcile.pass_slug(tmp_path, d) == f"cand-fwd-{ENGINE_SLUG}-0"
+    assert reconcile.pass_accounting(tmp_path).splitlines() == [
+        "main: expected 2, recorded 2",
+        f"{rel}: expected 2, recorded 1 (1 not-run)",
+    ]

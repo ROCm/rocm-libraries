@@ -920,3 +920,69 @@ def test_dies_with_its_own_marker():
     )
     assert rows["test_dies_with_its_own_marker"]["fwd"] == "hipdnn:MINE"
     assert (stale / "gw0.json").exists()  # not the controller's to delete
+
+
+# ------------------------------------------------------------------ candidate columns
+
+
+def test_pass_one_writes_each_directions_candidate_counts_as_json(run, fake_sdpa):
+    fake_sdpa.engine_lists = {"fwd": ("E1", "E2"), "bwd": ("E3",)}
+    fake_sdpa.candidates = {
+        "fwd": {"E1": 3, "E2": "does not support enumeration"},
+        "bwd": {"E3": 1},
+    }
+    result, rows = run(
+        BOTH_CALLED
+        + """
+def test_both():
+    call_both()
+
+def test_declined_forward():
+    plug.record('fwd', 'declined', 'no engine')
+"""
+    )
+    got = rows["test_both"]
+    assert json.loads(got["fwd_candidate"]) == {
+        "E1": 3,
+        "E2": "does not support enumeration",
+    }
+    assert json.loads(got["bwd_candidate"]) == {"E3": 1}
+    assert (got["fwd"], got["bwd"], got["outcome"]) == (
+        "hipdnn:fake_fwd",
+        "hipdnn:fake_bwd",
+        "pass",
+    )
+    assert (rows["test_declined_forward"]["fwd_candidate"]) == ""
+
+
+def test_a_candidate_pass_writes_its_pinned_index_whatever_the_outcome(
+    run, fake_sdpa, monkeypatch
+):
+    monkeypatch.setenv("HIPDNN_FWD_CANDIDATE", "2")
+    fake_sdpa.decline = {"bwd": "candidate_not_honored: requested kernel a, built b"}
+    result, rows = run(
+        BOTH_CALLED
+        + """
+def test_served():
+    call_fwd()
+
+def test_declined():
+    call_fwd()
+    call_bwd()
+"""
+    )
+    assert (rows["test_served"]["outcome"], rows["test_served"]["fwd_candidate"]) == (
+        "pass",
+        "2",
+    )
+    declined = rows["test_declined"]
+    assert declined["outcome"] == "declined"
+    assert "candidate_not_honored" in declined["reason"]
+    assert (declined["fwd_candidate"], declined["bwd_candidate"]) == ("2", "")
+
+
+def test_a_dead_worker_row_names_the_pinned_candidates(monkeypatch):
+    monkeypatch.setenv("HIPDNN_BWD_CANDIDATE", "1")
+    report = type("Report", (), {"nodeid": "t.py::t", "longrepr": "worker died"})()
+    got = plugin._crash_row(report)
+    assert (got["outcome"], got["bwd_candidate"]) == ("crash", "1")

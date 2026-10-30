@@ -22,6 +22,10 @@ Load it with ``-p hipdnn_aotriton_plugin`` (``aotriton/`` on PYTHONPATH). It
   ``kernel`` entries, ignored by the fold), ``fail_side`` and ``stage`` of a ``fail`` row, and
   ``repro`` once ``hipdnn_sdpa.save_repro`` wrote the case's repro directory (``--repro-dir``,
   capped per engine and test function and per shard);
+* fills ``fwd_candidate`` / ``bwd_candidate``: the candidate index a pass pins
+  (``HIPDNN_FWD_CANDIDATE`` / ``HIPDNN_BWD_CANDIDATE``, also on a ``crash`` row), else, in an
+  ``--exhaustive`` pass 1, the JSON ``{engine: candidate count | why it cannot enumerate}`` the call
+  record carries (kind ``candidates``, ignored by the fold);
 * turns a worker death into a ``crash`` row naming the engine, direction and stage left in the
   worker's in-flight marker (``conformance_contract``): ``fwd``/``bwd`` hold ``hipdnn:<engine>``
   for the direction in flight and ``fail_side`` names it; the marker is deleted once read, and
@@ -59,6 +63,7 @@ _FORWARDED_KNOBS = (
     "AOTRITON_REF_DEVICE_OPTION",
     "HIPDNN_FWD_ENGINE",
     "HIPDNN_BWD_ENGINE",
+    *contract.CANDIDATE_ENV.values(),
     "HIPDNN_SDPA_CONFORMANCE_FWD_NO_STATS",
 )
 _REASON_LIMIT = 400
@@ -76,7 +81,8 @@ def record(direction, kind, detail=""):
     ``direction`` is ``'fwd'`` or ``'bwd'``; ``kind`` is ``'hipdnn'`` (``detail`` the engine),
     ``'ref'`` (the reference forward ran; ``detail`` the decline reason), ``'declined'`` or
     ``'engines'`` (``detail`` the ``;``-joined ranked engine names of the preceding ``'hipdnn'``
-    call) or ``'kernel'`` (the kernel id of that call; ignored by the fold). A ``'ref'`` entry replaces the ``'declined'`` entry of the call it falls back from.
+    call), ``'kernel'`` (the kernel id of that call) or ``'candidates'`` (the exhaustive pass-1
+    ``{engine: count | message}`` JSON of that call); the fold ignores the last three. A ``'ref'`` entry replaces the ``'declined'`` entry of the call it falls back from.
     """
     with _LOCK:
         entries = _RECORDS.setdefault(_CURRENT, [])
@@ -99,7 +105,7 @@ def _fold(entries):
         calls = [
             (kind, detail)
             for d, kind, detail in entries
-            if d == direction and kind not in ("engines", "kernel")
+            if d == direction and kind not in ("engines", "kernel", "candidates")
         ]
         if not calls:
             folded[direction] = None
@@ -134,6 +140,18 @@ def _kernel_text(entries, direction):
 def _names(value):
     """A marker's engine list (a list, or already ``;``-joined) as ``;``-joined text."""
     return value if isinstance(value, str) else ";".join(value or ())
+
+
+def _candidate_text(entries, direction):
+    """What the row's ``<direction>_candidate`` holds: the candidate index the pass pins for
+    ``direction`` (``HIPDNN_<DIR>_CANDIDATE``), else pass 1's candidate counts of the call.
+    """
+    pinned = os.environ.get(contract.CANDIDATE_ENV[direction], "")
+    if pinned:
+        return pinned
+    return next(
+        (c for d, k, c in entries if (d, k) == (direction, "candidates") and c), ""
+    )
 
 
 _FORWARD_COMPARISON = re.compile(r"\bForward pass\b")
@@ -234,6 +252,8 @@ def _make_row(item, call, report):
         "bwd_engines": _engine_list(entries, folded, "bwd"),
         "fwd_kernel": _kernel_text(entries, "fwd"),
         "bwd_kernel": _kernel_text(entries, "bwd"),
+        "fwd_candidate": _candidate_text(entries, "fwd"),
+        "bwd_candidate": _candidate_text(entries, "bwd"),
     }
 
     declined = []
@@ -489,6 +509,9 @@ def _install_wrappers(fake):
             record(direction, "engines", ";".join(call.ranked) if call else "")
             if call and call.kernel:
                 record(direction, "kernel", call.kernel)
+            candidates = getattr(call, "candidates", None)
+            if candidates:
+                record(direction, "candidates", json.dumps(candidates))
             _remember_call(direction, call, args, kwargs)
             return engine
 
@@ -656,6 +679,8 @@ def _crash_row(report):
         "nodeid": report.nodeid,
         "outcome": "crash",
         "reason": _one_line(str(report.longrepr)),
+        "fwd_candidate": os.environ.get(contract.CANDIDATE_ENV["fwd"], ""),
+        "bwd_candidate": os.environ.get(contract.CANDIDATE_ENV["bwd"], ""),
     }
     gateway = getattr(getattr(report, "node", None), "gateway", None)
     path = _inflight_marker_path(getattr(gateway, "id", None))

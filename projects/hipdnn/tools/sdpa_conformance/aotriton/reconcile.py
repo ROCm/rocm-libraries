@@ -14,9 +14,15 @@ a row (killed job, exhausted walltime). A truncated trailing row (no newline, or
 of fields) is dropped, so its case becomes ``not-run`` too. CSVs written before the
 ``fwd_engines`` / ``bwd_engines`` columns existed read with those fields empty.
 
+``--engines <out>`` also reads the candidate passes of ``run_aotriton.py --exhaustive`` under
+``<out>/cand/`` (``candidate`` and ``candidate-pair`` passes; ``engines.csv`` gains
+``fwd_candidate``, ``bwd_candidate``; a case an engine cannot enumerate is a ``not-enumerable``
+row with the message). ``results.csv`` gains the same two columns after ``repro``; older CSVs read
+them empty.
+
 ``--engines <out>`` takes one shard's output directory of a ``run_aotriton.py --all-engines`` run
 and writes ``<out>/engines.csv`` (``nodeid,direction,engine,source,outcome,reason,pin_fwd,pin_bwd,
-kernel,stage``): per case the engine that served it under the heuristic (``source=heuristic``,
+kernel,stage,fwd_candidate,bwd_candidate``): per case the engine that served it under the heuristic (``source=heuristic``,
 ``<out>/results.csv``; for a ``crash`` row the engine in flight), one row per case and pass of every
 pass directory under ``<out>/all-engines/`` (``pinned``, ``pair``, ``refwd``, ``discovery``), and a
 ``not-run`` row for every node id a pass listed (``nodeids.txt``, ``collected.txt`` for pass 1) but
@@ -38,27 +44,46 @@ import sys
 from pathlib import Path
 
 import conformance_contract as contract
-from conformance_contract import ENGINES_EXTRA_FIELDS, RESULTS_EXTRA_FIELDS
+from conformance_contract import (
+    CANDIDATE_FIELDS,
+    ENGINES_EXTRA_FIELDS,
+    RESULTS_EXTRA_FIELDS,
+)
 
 LEGACY_FIELDS = ("nodeid", "outcome", "mode", "fwd", "bwd", "reason")
 ENGINE_LIST_FIELDS = LEGACY_FIELDS + ("fwd_engines", "bwd_engines")
-FIELDS = ENGINE_LIST_FIELDS + RESULTS_EXTRA_FIELDS
-OUTCOMES = ("pass", "fail", "crash", "not-run", "declined", "native-skip", "no-hipdnn")
+PRE_CANDIDATE_FIELDS = ENGINE_LIST_FIELDS + RESULTS_EXTRA_FIELDS
+FIELDS = PRE_CANDIDATE_FIELDS + CANDIDATE_FIELDS
+OUTCOMES = (
+    "pass",
+    "fail",
+    "crash",
+    "not-run",
+    "declined",
+    "native-skip",
+    "no-hipdnn",
+    contract.NOT_ENUMERABLE,
+)
 CSV_NAME = "results.csv"
 COLLECTED_NAME = "collected.txt"
 ENGINES_CSV_NAME = "engines.csv"
 ENGINES_DIR = "all-engines"
+CANDIDATES_DIR = contract.CANDIDATES_DIR
 ENGINE_NAME_FILE = (
     "engine.txt"  # the pinned engine's name, beside a sweep's results.csv
 )
 ENGINES_FIELDS = (
-    "nodeid",
-    "direction",
-    "engine",
-    "source",
-    "outcome",
-    "reason",
-) + ENGINES_EXTRA_FIELDS
+    (
+        "nodeid",
+        "direction",
+        "engine",
+        "source",
+        "outcome",
+        "reason",
+    )
+    + ENGINES_EXTRA_FIELDS
+    + CANDIDATE_FIELDS
+)
 PASS_META_NAME = "pass.json"
 NODEIDS_NAME = "nodeids.txt"
 DECLINES_DIR = "declines"  # the job stages the workers' decline files here
@@ -84,10 +109,16 @@ def format_row(row):
 def read_rows(path):
     """Rows of one shard's CSV; a malformed trailing line is dropped, any other raises.
 
-    A CSV from before the engine-list columns (six fields) or before the kernel/side/repro
-    columns (eight fields) reads with the missing fields empty.
+    A CSV from before the engine-list columns (six fields), before the kernel/side/repro
+    columns (eight fields) or before the candidate columns (thirteen fields) reads with the
+    missing fields empty.
     """
-    known = {len(LEGACY_FIELDS), len(ENGINE_LIST_FIELDS), len(FIELDS)}
+    known = {
+        len(LEGACY_FIELDS),
+        len(ENGINE_LIST_FIELDS),
+        len(PRE_CANDIDATE_FIELDS),
+        len(FIELDS),
+    }
     path = Path(path)
     if not path.exists():
         return []
@@ -99,6 +130,7 @@ def read_rows(path):
         well_formed = line.endswith("\n") and len(fields) in known
         if number == 1 and fields in (
             list(FIELDS),
+            list(PRE_CANDIDATE_FIELDS),
             list(ENGINE_LIST_FIELDS),
             list(LEGACY_FIELDS),
         ):
@@ -170,7 +202,8 @@ def served_engines(state):
 
 def pass_slug(out, pass_dir):
     """Name of a pass for the in-flight directory and repro case names: ``main`` for pass 1,
-    else its path under ``all-engines/`` joined with ``-`` (``pair-A__X``, ``refwd-discovery``).
+    else its path under ``all-engines/`` joined with ``-`` (``pair-A__X``, ``refwd-discovery``);
+    a candidate pass keeps its ``cand`` prefix (``cand-fwd-<engine>-0``).
     """
     parts = Path(pass_dir).relative_to(out).parts
     if parts[:1] == (ENGINES_DIR,):
@@ -179,10 +212,11 @@ def pass_slug(out, pass_dir):
 
 
 def pass_dirs(out):
-    """``[(directory, meta)]`` of every pass under ``<out>/all-engines``; ``capture/`` directories never.
+    """``[(directory, meta)]`` of every pass under ``<out>/all-engines`` and ``<out>/cand``;
+    ``capture/`` directories never.
 
-    A pass directory holds ``pass.json`` (``kind`` sweep|pair|refwd|discovery, ``direction``,
-    ``pin_fwd``, ``pin_bwd``). A directory with only ``engine.txt`` (a sweep of a run before
+    A pass directory holds ``pass.json`` (``kind`` sweep|pair|refwd|discovery|candidate|
+    candidate-pair, ``direction``, ``pin_fwd``, ``pin_bwd``, ``fwd_candidate``, ``bwd_candidate``). A directory with only ``engine.txt`` (a sweep of a run before
     ``pass.json``) reads as a sweep pinning that engine in the direction named by its parent.
     """
     root = Path(out) / ENGINES_DIR
@@ -195,8 +229,9 @@ def pass_dirs(out):
             "direction": direction,
             f"pin_{direction}": engine_file.read_text().strip(),
         }
-    for meta_file in root.glob(f"**/{PASS_META_NAME}"):
-        found[meta_file.parent] = json.loads(meta_file.read_text())
+    for top in (root, Path(out) / CANDIDATES_DIR):
+        for meta_file in top.glob(f"**/{PASS_META_NAME}"):
+            found[meta_file.parent] = json.loads(meta_file.read_text())
     return sorted(found.items())
 
 
@@ -215,7 +250,9 @@ def _passes(out):
         yield d, meta, _listing(d / NODEIDS_NAME)
 
 
-_SOURCE = {"sweep": "pinned"}
+_SOURCE = {"sweep": "pinned"}  # every other kind is its own source
+_PINNED_KINDS = ("sweep", "candidate")  # one direction pinned; the other unpinned
+_PAIR_KINDS = ("pair", "candidate-pair")  # backward cases, both directions pinned
 
 
 def _pass_engine_rows(d, meta, expected):
@@ -238,6 +275,8 @@ def _pass_engine_rows(d, meta, expected):
                 "pin_bwd": pin["bwd"],
                 "kernel": row[f"{direction}_kernel"],
                 "stage": row["stage"],
+                "fwd_candidate": meta.get("fwd_candidate", ""),
+                "bwd_candidate": meta.get("bwd_candidate", ""),
             }
         )
 
@@ -262,7 +301,7 @@ def _pass_engine_rows(d, meta, expected):
         elif kind == "discovery":
             for engine in sorted(served_engines(row["bwd"])):
                 add(nodeid, "bwd", engine, outcome, reason, row)
-        elif kind == "sweep":
+        elif kind in _PINNED_KINDS:
             direction = meta["direction"]
             if crashed and crashed != direction:
                 for engine in sorted(served_engines(row[crashed])):
@@ -275,7 +314,7 @@ def _pass_engine_rows(d, meta, expected):
             add(nodeid, direction, pin[direction], outcome, reason, row)
         else:  # pair, refwd: the backward is pinned; a pair also pins the forward
             wanted = {"bwd": pin["bwd"]}
-            if kind == "pair":
+            if kind in _PAIR_KINDS:
                 wanted["fwd"] = pin["fwd"]
             if outcome in ("pass", "fail"):
                 wrong = mismatch(row, wanted)
@@ -285,12 +324,16 @@ def _pass_engine_rows(d, meta, expected):
             add(nodeid, side, wanted.get(side, "reference"), outcome, reason, row)
     direction = (
         meta.get("direction")
-        if kind == "sweep"
+        if kind in _PINNED_KINDS
         else "bwd" if kind != HEURISTIC else None
     )
     for nodeid in expected:
         if nodeid not in recorded:
-            engine = pin[direction] if kind in ("sweep", "pair", "refwd") else ""
+            engine = (
+                pin[direction]
+                if kind in _PINNED_KINDS + _PAIR_KINDS + ("refwd",)
+                else ""
+            )
             add(
                 nodeid,
                 direction or direction_of(nodeid),
@@ -314,14 +357,24 @@ def _count_label(r):
     if r["source"] in ("heuristic", "pinned"):
         return f"{r['direction']} {r['engine']}"
     label = f"{r['source']} {r['direction']} {r['engine']}"
+    if r["source"] == "candidate":
+        return f"{label} #{r[r['direction'] + '_candidate'] or '-'}"
+    if r["source"] == "candidate-pair":
+        return (
+            f"{label} (fwd {r['pin_fwd']} #{r['fwd_candidate'] or '-'}, "
+            f"bwd {r['pin_bwd']} #{r['bwd_candidate'] or '-'})"
+        )
     return label + (f" (fwd {r['pin_fwd']})" if r["source"] == "pair" else "")
 
 
 def engine_counts(rows):
-    """Text: per (direction, engine) the pass / fail / declined counts (other outcomes appended)."""
+    """Text: per (direction, engine) the pass / fail / declined counts (other outcomes appended;
+    ``not_honored`` counts the declines whose candidate the backend did not build)."""
     counts = collections.defaultdict(collections.Counter)
     for r in rows:
         counts[_count_label(r)][r["outcome"]] += 1
+        if contract.CANDIDATE_NOT_HONORED in r["reason"]:
+            counts[_count_label(r)]["not_honored"] += 1
     lines = []
     for label, c in sorted(counts.items()):
         extra = [
@@ -359,7 +412,11 @@ def pass_accounting(out):
         name = (
             MAIN_PASS
             if d == Path(out)
-            else d.relative_to(Path(out) / ENGINES_DIR).as_posix()
+            else (
+                d.relative_to(Path(out))
+                if d.is_relative_to(Path(out) / CANDIDATES_DIR)
+                else d.relative_to(Path(out) / ENGINES_DIR)
+            ).as_posix()
         )
         lines.append(
             f"{name}: expected {len(expected)}, recorded {len(recorded & set(expected))}"
@@ -411,6 +468,11 @@ def inventory_summary(out, rows, reasons=3):
             + " ".join(
                 f"{o}={counts[o]}"
                 for o in ("pass", "fail", "crash", "declined", "not-run")
+                + (
+                    (contract.NOT_ENUMERABLE,)
+                    if contract.NOT_ENUMERABLE in counts
+                    else ()
+                )
             )
         )
         if not counts:
