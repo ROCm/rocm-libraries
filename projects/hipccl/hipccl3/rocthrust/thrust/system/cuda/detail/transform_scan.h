@@ -38,11 +38,11 @@
 
 #if _CCCL_CUDA_COMPILATION()
 #  include <thrust/detail/type_traits.h>
-#  include <thrust/distance.h>
 #  include <thrust/iterator/transform_iterator.h>
 #  include <thrust/system/cuda/detail/scan.h>
 
-#  include <cuda/std/type_traits>
+#  include <cuda/std/__iterator/distance.h>
+#  include <cuda/std/__type_traits/remove_cvref.h>
 
 #  include <iterator>
 
@@ -50,7 +50,6 @@ THRUST_NAMESPACE_BEGIN
 
 namespace cuda_cub
 {
-
 template <class Derived, class InputIt, class OutputIt, class TransformOp, class ScanOp>
 OutputIt _CCCL_HOST_DEVICE transform_inclusive_scan(
   execution_policy<Derived>& policy,
@@ -114,7 +113,6 @@ OutputIt _CCCL_HOST_DEVICE transform_exclusive_scan(
   return cuda_cub::exclusive_scan_n(
     policy, transformed_iterator_t(first, transform_op), num_items, result, init, scan_op);
 }
-
 } // namespace cuda_cub
 
 THRUST_NAMESPACE_END

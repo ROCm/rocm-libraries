@@ -36,15 +36,10 @@
 #endif
 
 THRUST_NAMESPACE_BEGIN
-namespace system
+namespace system::detail::generic
 {
 namespace detail
 {
-namespace generic
-{
-namespace detail
-{
-
 // XXX define this here rather than in internal_functional.h
 // to avoid circular dependence between swap.h & internal_functional.h
 struct swap_pair_elements
@@ -61,7 +56,6 @@ struct swap_pair_elements
     swap(thrust::get<0>(t), thrust::get<1>(t));
   }
 }; // end swap_pair_elements
-
 } // namespace detail
 
 template <typename DerivedPolicy, typename ForwardIterator1, typename ForwardIterator2>
@@ -81,8 +75,5 @@ THRUST_HOST_DEVICE ForwardIterator2 swap_ranges(
     detail::swap_pair_elements());
   return thrust::get<1>(result.get_iterator_tuple());
 } // end swap_ranges()
-
-} // namespace generic
-} // namespace detail
-} // namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END

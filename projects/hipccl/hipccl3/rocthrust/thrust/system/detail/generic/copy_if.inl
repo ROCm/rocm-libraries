@@ -44,15 +44,10 @@
 #endif
 
 THRUST_NAMESPACE_BEGIN
-namespace system
+namespace system::detail::generic
 {
 namespace detail
 {
-namespace generic
-{
-namespace detail
-{
-
 template <typename IndexType,
           typename DerivedPolicy,
           typename InputIterator1,
@@ -92,7 +87,6 @@ THRUST_HOST_DEVICE OutputIterator copy_if(
 
   return result + output_size;
 }
-
 } // end namespace detail
 
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename Predicate>
@@ -149,8 +143,5 @@ THRUST_HOST_DEVICE OutputIterator copy_if(
 
   return result;
 } // end copy_if()
-
-} // end namespace generic
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END

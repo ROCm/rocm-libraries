@@ -34,11 +34,10 @@
 THRUST_NAMESPACE_BEGIN
 namespace mr
 {
-
 template <typename MR>
 struct validator
 {
-  static_assert(_THRUST_STD::is_base_of<memory_resource<typename MR::pointer>, MR>::value,
+  static_assert(_THRUST_STD::is_base_of_v<memory_resource<typename MR::pointer>, MR>,
                 "a type used as a memory resource must derive from memory_resource");
 };
 
@@ -51,6 +50,5 @@ struct validator2
 template <typename T>
 struct validator2<T, T> : private validator<T>
 {};
-
 } // namespace mr
 THRUST_NAMESPACE_END

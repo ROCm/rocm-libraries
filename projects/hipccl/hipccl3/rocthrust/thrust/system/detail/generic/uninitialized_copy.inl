@@ -32,20 +32,17 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/generic/uninitialized_copy.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(__new/device_new.h)
+#else
 #  include <type_traits>
 #endif
 
 THRUST_NAMESPACE_BEGIN
-namespace system
+namespace system::detail::generic
 {
 namespace detail
 {
-namespace generic
-{
-namespace detail
-{
-
 template <typename InputType, typename OutputType>
 struct uninitialized_copy_functor
 {
@@ -54,7 +51,6 @@ struct uninitialized_copy_functor
   {
     const InputType& in = thrust::get<0>(t);
     OutputType& out     = thrust::get<1>(t);
-
     ::new (static_cast<void*>(&out)) OutputType(in);
   } // end operator()()
 }; // end uninitialized_copy_functor
@@ -143,7 +139,6 @@ THRUST_HOST_DEVICE ForwardIterator uninitialized_copy_n(
 {
   return thrust::copy_n(exec, first, n, result);
 } // end uninitialized_copy_n()
-
 } // namespace detail
 
 template <typename ExecutionPolicy, typename InputIterator, typename ForwardIterator>
@@ -169,8 +164,5 @@ THRUST_HOST_DEVICE ForwardIterator uninitialized_copy_n(
   return thrust::system::detail::generic::detail::uninitialized_copy_n(
     exec, first, n, result, ResultTypeHasTrivialCopyConstructor());
 } // end uninitialized_copy_n()
-
-} // end namespace generic
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END

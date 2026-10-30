@@ -37,8 +37,10 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/normal_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/iterator/reverse_iterator.h>
 
+#include _THRUST_STD_INCLUDE(__iterator/iterator_traits.h)
+#include _THRUST_STD_INCLUDE(initializer_list)
+#include _THRUST_STD_INCLUDE(iterator)
 #include _THRUST_STD_INCLUDE(utility)
 
 #include <vector>
@@ -63,7 +65,6 @@ inline constexpr no_init_t no_init;
 
 namespace detail
 {
-
 template <typename T, typename Alloc>
 class vector_base
 {
@@ -84,8 +85,8 @@ public:
   using iterator       = typename storage_type::iterator;
   using const_iterator = typename storage_type::const_iterator;
 
-  using reverse_iterator       = thrust::reverse_iterator<iterator>;
-  using const_reverse_iterator = thrust::reverse_iterator<const_iterator>;
+  using reverse_iterator       = _THRUST_STD::reverse_iterator<iterator>;
+  using const_reverse_iterator = _THRUST_STD::reverse_iterator<const_iterator>;
 
   /*! This constructor creates an empty vector_base.
    */
@@ -610,7 +611,6 @@ bool operator!=(const vector_base<T1, Alloc1>& lhs, const std::vector<T2, Alloc2
 
 template <typename T1, typename Alloc1, typename T2, typename Alloc2>
 bool operator!=(const std::vector<T1, Alloc1>& lhs, const vector_base<T2, Alloc2>& rhs);
-
 } // namespace detail
 
 THRUST_NAMESPACE_END

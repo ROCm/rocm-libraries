@@ -28,11 +28,12 @@
 
 #include <thrust/random/uniform_real_distribution.h>
 
+#include _THRUST_STD_INCLUDE(cmath)
+
 THRUST_NAMESPACE_BEGIN
 
 namespace random
 {
-
 template <typename RealType>
 THRUST_HOST_DEVICE uniform_real_distribution<RealType>::uniform_real_distribution(RealType a, RealType b)
     : m_param(a, b)
@@ -71,7 +72,7 @@ uniform_real_distribution<RealType>::operator()(UniformRandomNumberGenerator& ur
   result /=
     (result_type(1) + static_cast<result_type>(UniformRandomNumberGenerator::max - UniformRandomNumberGenerator::min));
 
-  return (result * (parm.second - parm.first)) + parm.first;
+  return _THRUST_STD::lerp(parm.first, parm.second, result);
 } // end uniform_real::operator()()
 
 template <typename RealType>
@@ -192,7 +193,6 @@ operator>>(std::basic_istream<CharT, Traits>& is, uniform_real_distribution<Real
 {
   return thrust::random::detail::random_core_access::stream_in(is, d);
 }
-
 } // namespace random
 
 THRUST_NAMESPACE_END

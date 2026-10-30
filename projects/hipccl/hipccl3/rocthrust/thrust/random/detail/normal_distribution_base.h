@@ -44,11 +44,8 @@
 #endif
 
 THRUST_NAMESPACE_BEGIN
-namespace random
+namespace random::detail
 {
-namespace detail
-{
-
 // this version samples the normal distribution directly
 // and uses the non-standard math function erfcinv
 template <typename RealType>
@@ -159,7 +156,5 @@ struct normal_distribution_base
   using type = normal_distribution_portable<RealType>;
 #endif
 };
-
-} // namespace detail
-} // namespace random
+} // namespace random::detail
 THRUST_NAMESPACE_END

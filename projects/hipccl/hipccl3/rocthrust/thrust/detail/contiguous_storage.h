@@ -40,7 +40,6 @@ THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
-
 struct copy_allocator_t
 {};
 
@@ -226,7 +225,6 @@ private:
     lhs.swap(rhs);
   }
 }; // end contiguous_storage
-
 } // namespace detail
 
 THRUST_NAMESPACE_END

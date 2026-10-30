@@ -42,32 +42,28 @@
 THRUST_NAMESPACE_BEGIN
 namespace cuda_cub
 {
-
 template <class Derived, class ItemsIt, class ResultIt>
 ResultIt _CCCL_HOST_DEVICE reverse_copy(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, ResultIt result);
 
 template <class Derived, class ItemsIt>
 void _CCCL_HOST_DEVICE reverse(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last);
-
 } // namespace cuda_cub
 THRUST_NAMESPACE_END
 
-#  include <thrust/advance.h>
-#  include <thrust/distance.h>
-#  include <thrust/iterator/reverse_iterator.h>
 #  include <thrust/system/cuda/detail/copy.h>
 #  include <thrust/system/cuda/detail/swap_ranges.h>
 
-#  include <cuda/std/iterator>
+#  include <cuda/std/__iterator/advance.h>
+#  include <cuda/std/__iterator/distance.h>
+#  include <cuda/std/__iterator/reverse_iterator.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace cuda_cub
 {
-
 template <class Derived, class ItemsIt, class ResultIt>
 ResultIt _CCCL_HOST_DEVICE reverse_copy(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, ResultIt result)
 {
-  return cuda_cub::copy(policy, thrust::make_reverse_iterator(last), thrust::make_reverse_iterator(first), result);
+  return cuda_cub::copy(policy, ::cuda::std::reverse_iterator{last}, ::cuda::std::reverse_iterator{first}, result);
 }
 
 template <class Derived, class ItemsIt>
@@ -80,9 +76,8 @@ void _CCCL_HOST_DEVICE reverse(execution_policy<Derived>& policy, ItemsIt first,
   ItemsIt mid(first);
   _THRUST_STD::advance(mid, N / 2);
 
-  cuda_cub::swap_ranges(policy, first, mid, thrust::make_reverse_iterator(last));
+  cuda_cub::swap_ranges(policy, first, mid, ::cuda::std::make_reverse_iterator(last));
 }
-
 } // namespace cuda_cub
 THRUST_NAMESPACE_END
 #endif

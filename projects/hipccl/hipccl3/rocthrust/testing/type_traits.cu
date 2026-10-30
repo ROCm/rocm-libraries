@@ -18,8 +18,13 @@
 #include <thrust/detail/libcxx_wrapper/__cccl_config.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/device_ptr.h>
+#include <thrust/device_vector.h>
+#include <thrust/functional.h>
+#include <thrust/host_vector.h>
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/detail/iterator_category_to_system.h>
+#include <thrust/iterator/detail/iterator_category_to_traversal.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/iterator/zip_iterator.h>
@@ -35,6 +40,12 @@
 #endif // THRUST_COMPILER(GCC, >=, 7)
 #include _THRUST_STD_INCLUDE(tuple)
 #include _THRUST_STD_INCLUDE(utility)
+
+#include <vector>
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(iterator)
+#endif
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
@@ -235,3 +246,214 @@ void TestTriviallyRelocatable()
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<NonTriviallyCopyable>>::value, "");
 };
 DECLARE_UNITTEST(TestTriviallyRelocatable);
+
+template <typename Cat, typename Tag>
+inline constexpr bool system_is = _THRUST_STD::is_same_v<thrust::detail::iterator_category_to_system_t<Cat>, Tag>;
+
+template <typename Cat, typename Traversal>
+inline constexpr bool traversal_is =
+  _THRUST_STD::is_same_v<thrust::detail::iterator_category_to_traversal_t<Cat>, Traversal>;
+
+void TestIteratorCategoryToSystem()
+{
+  static_assert(system_is<thrust::input_device_iterator_tag, thrust::device_system_tag>);
+  static_assert(system_is<thrust::output_device_iterator_tag, thrust::device_system_tag>);
+  static_assert(system_is<thrust::forward_device_iterator_tag, thrust::device_system_tag>);
+  static_assert(system_is<thrust::bidirectional_device_iterator_tag, thrust::device_system_tag>);
+  static_assert(system_is<thrust::random_access_device_iterator_tag, thrust::device_system_tag>);
+
+  static_assert(system_is<thrust::input_host_iterator_tag, thrust::host_system_tag>);
+  static_assert(system_is<thrust::output_host_iterator_tag, thrust::host_system_tag>);
+  static_assert(system_is<thrust::forward_host_iterator_tag, thrust::host_system_tag>);
+  static_assert(system_is<thrust::bidirectional_host_iterator_tag, thrust::host_system_tag>);
+  static_assert(system_is<thrust::random_access_host_iterator_tag, thrust::host_system_tag>);
+};
+DECLARE_UNITTEST(TestIteratorCategoryToSystem);
+
+void TestIteratorCategoryToTraversal()
+{
+  static_assert(traversal_is<thrust::input_device_iterator_tag, thrust::single_pass_traversal_tag>);
+  static_assert(traversal_is<thrust::output_device_iterator_tag, thrust::incrementable_traversal_tag>);
+  static_assert(traversal_is<thrust::forward_device_iterator_tag, thrust::forward_traversal_tag>);
+  static_assert(traversal_is<thrust::bidirectional_device_iterator_tag, thrust::bidirectional_traversal_tag>);
+  static_assert(traversal_is<thrust::random_access_device_iterator_tag, thrust::random_access_traversal_tag>);
+
+  static_assert(traversal_is<thrust::input_host_iterator_tag, thrust::single_pass_traversal_tag>);
+  static_assert(traversal_is<thrust::output_host_iterator_tag, thrust::incrementable_traversal_tag>);
+  static_assert(traversal_is<thrust::forward_host_iterator_tag, thrust::forward_traversal_tag>);
+  static_assert(traversal_is<thrust::bidirectional_host_iterator_tag, thrust::bidirectional_traversal_tag>);
+  static_assert(traversal_is<thrust::random_access_host_iterator_tag, thrust::random_access_traversal_tag>);
+};
+DECLARE_UNITTEST(TestIteratorCategoryToTraversal);
+
+struct thrust_make_counting_iterator
+{
+  template <typename... Args>
+  auto operator()(Args&&... args) const
+  {
+    return thrust::make_counting_iterator(_THRUST_STD::forward<Args>(args)...);
+  }
+};
+
+struct thrust_make_transform_iterator
+{
+  template <typename... Args>
+  auto operator()(Args&&... args) const
+  {
+    return thrust::make_transform_iterator(_THRUST_STD::forward<Args>(args)...);
+  }
+};
+
+struct thrust_make_zip_iterator
+{
+  template <typename... Args>
+  auto operator()(Args&&... args) const
+  {
+    return thrust::make_zip_iterator(_THRUST_STD::forward<Args>(args)...);
+  }
+};
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+struct libcxx_make_counting_iterator
+{
+  template <typename... Args>
+  auto operator()(Args&&... args) const
+  {
+    return _THRUST_LIBCXX::make_counting_iterator(_THRUST_STD::forward<Args>(args)...);
+  }
+};
+
+struct libcxx_make_transform_iterator
+{
+  template <typename... Args>
+  auto operator()(Args&&... args) const
+  {
+    return _THRUST_LIBCXX::make_transform_iterator(_THRUST_STD::forward<Args>(args)...);
+  }
+};
+
+struct libcxx_make_zip_iterator
+{
+  template <typename... Args>
+  auto operator()(Args&&... args) const
+  {
+    return _THRUST_LIBCXX::make_zip_iterator(_THRUST_STD::forward<Args>(args)...);
+  }
+};
+#endif // _THRUST_HAS_DEVICE_SYSTEM_STD
+
+template <typename Iterator>
+inline constexpr bool has_random_access_traversal =
+  _THRUST_STD::is_same_v<thrust::iterator_traversal_t<Iterator>, thrust::random_access_traversal_tag>;
+
+auto expected_tag(thrust::device_vector<int>) -> thrust::device_system_tag;
+auto expected_tag(thrust::host_vector<int>) -> thrust::host_system_tag;
+auto expected_tag(std::vector<int>) -> thrust::host_system_tag;
+
+template <typename MakeCounting, typename MakeTransform, typename MakeZip>
+void check_any_system_propagation()
+{
+  auto counting_it = MakeCounting{}(0);
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(counting_it)>, thrust::any_system_tag>);
+  static_assert(has_random_access_traversal<decltype(counting_it)>);
+
+  auto transform_it = MakeTransform{}(counting_it, thrust::square<>{});
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(transform_it)>, thrust::any_system_tag>);
+  static_assert(has_random_access_traversal<decltype(transform_it)>);
+
+  [[maybe_unused]] auto zip_it = MakeZip{}(counting_it, transform_it);
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(zip_it)>, thrust::any_system_tag>);
+  static_assert(has_random_access_traversal<decltype(zip_it)>);
+}
+
+template <typename Vector, typename MakeTransform, typename MakeZip>
+void check_vector_propagation()
+{
+  Vector vec{};
+  using tag = decltype(expected_tag(vec));
+
+  auto vec_it = vec.begin();
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(vec_it)>, tag>);
+  static_assert(has_random_access_traversal<decltype(vec_it)>);
+
+  using thrust::placeholders::_1;
+  auto transform_it = MakeTransform{}(vec_it, _1 + 1);
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(transform_it)>, tag>);
+  static_assert(has_random_access_traversal<decltype(transform_it)>);
+
+  [[maybe_unused]] auto zip_it = MakeZip{}(vec_it, transform_it);
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(zip_it)>, tag>);
+  static_assert(has_random_access_traversal<decltype(zip_it)>);
+}
+
+template <typename Vector, typename MakeCounting, typename MakeZip>
+void check_vector_and_any_system_propagation()
+{
+  Vector vec{};
+  using vec_tag = decltype(expected_tag(vec));
+
+  auto vec_it = vec.begin();
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(vec_it)>, vec_tag>);
+  static_assert(has_random_access_traversal<decltype(vec_it)>);
+
+  auto counting_it = MakeCounting{}(0);
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(counting_it)>, thrust::any_system_tag>);
+  static_assert(has_random_access_traversal<decltype(counting_it)>);
+
+  [[maybe_unused]] auto zip_it = MakeZip{}(vec_it, counting_it);
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(zip_it)>, vec_tag>);
+  static_assert(has_random_access_traversal<decltype(zip_it)>);
+}
+
+void TestIteratorSystemAndTraversalPropagationAnySystem()
+{
+  check_any_system_propagation<thrust_make_counting_iterator, thrust_make_transform_iterator, thrust_make_zip_iterator>();
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+  check_any_system_propagation<thrust_make_counting_iterator, thrust_make_transform_iterator, libcxx_make_zip_iterator>();
+  check_any_system_propagation<thrust_make_counting_iterator, libcxx_make_transform_iterator, thrust_make_zip_iterator>();
+  check_any_system_propagation<thrust_make_counting_iterator, libcxx_make_transform_iterator, libcxx_make_zip_iterator>();
+  check_any_system_propagation<libcxx_make_counting_iterator, thrust_make_transform_iterator, thrust_make_zip_iterator>();
+  check_any_system_propagation<libcxx_make_counting_iterator, thrust_make_transform_iterator, libcxx_make_zip_iterator>();
+  check_any_system_propagation<libcxx_make_counting_iterator, libcxx_make_transform_iterator, thrust_make_zip_iterator>();
+  check_any_system_propagation<libcxx_make_counting_iterator, libcxx_make_transform_iterator, libcxx_make_zip_iterator>();
+#endif // _THRUST_HAS_DEVICE_SYSTEM_STD
+};
+DECLARE_UNITTEST(TestIteratorSystemAndTraversalPropagationAnySystem);
+
+void TestIteratorSystemAndTraversalPropagationVectors()
+{
+  check_vector_propagation<thrust::device_vector<int>, thrust_make_transform_iterator, thrust_make_zip_iterator>();
+  check_vector_propagation<thrust::host_vector<int>, thrust_make_transform_iterator, thrust_make_zip_iterator>();
+  check_vector_propagation<std::vector<int>, thrust_make_transform_iterator, thrust_make_zip_iterator>();
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+  check_vector_propagation<thrust::device_vector<int>, thrust_make_transform_iterator, libcxx_make_zip_iterator>();
+  check_vector_propagation<thrust::device_vector<int>, libcxx_make_transform_iterator, thrust_make_zip_iterator>();
+  check_vector_propagation<thrust::device_vector<int>, libcxx_make_transform_iterator, libcxx_make_zip_iterator>();
+  check_vector_propagation<thrust::host_vector<int>, thrust_make_transform_iterator, libcxx_make_zip_iterator>();
+  check_vector_propagation<thrust::host_vector<int>, libcxx_make_transform_iterator, thrust_make_zip_iterator>();
+  check_vector_propagation<thrust::host_vector<int>, libcxx_make_transform_iterator, libcxx_make_zip_iterator>();
+  check_vector_propagation<std::vector<int>, thrust_make_transform_iterator, libcxx_make_zip_iterator>();
+  check_vector_propagation<std::vector<int>, libcxx_make_transform_iterator, thrust_make_zip_iterator>();
+  check_vector_propagation<std::vector<int>, libcxx_make_transform_iterator, libcxx_make_zip_iterator>();
+#endif // _THRUST_HAS_DEVICE_SYSTEM_STD
+};
+DECLARE_UNITTEST(TestIteratorSystemAndTraversalPropagationVectors);
+
+void TestIteratorSystemAndTraversalPropagationVectorsAndAnySystem()
+{
+  check_vector_and_any_system_propagation<thrust::device_vector<int>, thrust_make_counting_iterator, thrust_make_zip_iterator>();
+  check_vector_and_any_system_propagation<thrust::host_vector<int>, thrust_make_counting_iterator, thrust_make_zip_iterator>();
+  check_vector_and_any_system_propagation<std::vector<int>, thrust_make_counting_iterator, thrust_make_zip_iterator>();
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+  check_vector_and_any_system_propagation<thrust::device_vector<int>, thrust_make_counting_iterator, libcxx_make_zip_iterator>();
+  check_vector_and_any_system_propagation<thrust::device_vector<int>, libcxx_make_counting_iterator, thrust_make_zip_iterator>();
+  check_vector_and_any_system_propagation<thrust::device_vector<int>, libcxx_make_counting_iterator, libcxx_make_zip_iterator>();
+  check_vector_and_any_system_propagation<thrust::host_vector<int>, thrust_make_counting_iterator, libcxx_make_zip_iterator>();
+  check_vector_and_any_system_propagation<thrust::host_vector<int>, libcxx_make_counting_iterator, thrust_make_zip_iterator>();
+  check_vector_and_any_system_propagation<thrust::host_vector<int>, libcxx_make_counting_iterator, libcxx_make_zip_iterator>();
+  check_vector_and_any_system_propagation<std::vector<int>, thrust_make_counting_iterator, libcxx_make_zip_iterator>();
+  check_vector_and_any_system_propagation<std::vector<int>, libcxx_make_counting_iterator, thrust_make_zip_iterator>();
+  check_vector_and_any_system_propagation<std::vector<int>, libcxx_make_counting_iterator, libcxx_make_zip_iterator>();
+#endif // _THRUST_HAS_DEVICE_SYSTEM_STD
+};
+DECLARE_UNITTEST(TestIteratorSystemAndTraversalPropagationVectorsAndAnySystem);

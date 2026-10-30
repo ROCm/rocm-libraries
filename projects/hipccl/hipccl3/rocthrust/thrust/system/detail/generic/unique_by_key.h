@@ -29,13 +29,8 @@
 #include <thrust/system/detail/generic/tag.h>
 
 THRUST_NAMESPACE_BEGIN
-namespace system
+namespace system::detail::generic
 {
-namespace detail
-{
-namespace generic
-{
-
 template <typename ExecutionPolicy, typename ForwardIterator1, typename ForwardIterator2>
 THRUST_HOST_DEVICE thrust::pair<ForwardIterator1, ForwardIterator2> unique_by_key(
   thrust::execution_policy<ExecutionPolicy>& exec,
@@ -78,10 +73,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> unique_by_key_
   OutputIterator1 keys_output,
   OutputIterator2 values_output,
   BinaryPredicate binary_pred);
-
-} // end namespace generic
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END
 
 #include <thrust/system/detail/generic/unique_by_key.inl>

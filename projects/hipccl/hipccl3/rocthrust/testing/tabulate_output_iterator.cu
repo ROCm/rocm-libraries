@@ -15,6 +15,8 @@
  *  limitations under the License.
  */
 
+#define CCCL_IGNORE_DEPRECATED_API
+
 #include <thrust/copy.h>
 #include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/device_vector.h>
@@ -98,7 +100,7 @@ struct index_to_gather_index_op
   }
 };
 
-// ensure that we properly support thrust::reverse_iterator from _THRUST_STD
+// ensure that we properly support thrust::tabulate_output_iterator from _THRUST_STD
 void TestTabulateOutputIteratorTraits()
 {
   using base_it = thrust::host_vector<int>::iterator;
