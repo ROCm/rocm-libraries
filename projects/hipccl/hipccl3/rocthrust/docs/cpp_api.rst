@@ -106,10 +106,22 @@ Fancy Iterators
 .. doxygengroup:: fancyiterator
     :inner:
 
+Iterator Traits
+---------------
+
+.. doxygengroup:: iterator_traits
+    :inner:
+
 Iterator Tags
 -------------
 
 .. doxygengroup:: iterator_tags
+    :inner:
+
+Iterator Tag Utilities
+----------------------
+
+.. doxygengroup:: iterator_tag_utilities
     :inner:
 
 Memory Management
