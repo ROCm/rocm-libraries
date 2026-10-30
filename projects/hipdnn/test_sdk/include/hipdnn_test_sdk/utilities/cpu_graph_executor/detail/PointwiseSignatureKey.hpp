@@ -297,6 +297,58 @@ private:
                             InputDataTypeEnum,
                             ComputeDataTypeEnum,
                             OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::EXP,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::LOG,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SQRT,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RSQRT,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RECIPROCAL,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIN,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TAN,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ERF,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CEIL,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::FLOOR,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_FWD,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
     }
 
     template <hipdnn_flatbuffers_sdk::data_objects::DataType Input0DataTypeEnum,
