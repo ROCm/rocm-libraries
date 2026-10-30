@@ -75,6 +75,43 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                (Geometry::kN == 64 || !Problem::FmhaMask::IsMasking);
     }
 
+    template <typename Problem, typename KTileView, typename VTileWindow>
+    CK_TILE_DEVICE static void
+    PrepareIterationLdsReads(PreparedLdsReadContext& prepared_context,
+                             const KTileView& k_lds_read_view,
+                             typename Geometry::KDataType* k_lds_write_ptr,
+                             const VTileWindow& v_lds_read_window,
+                             typename Geometry::KDataType* k_lds_read_ptr)
+    {
+        auto next_su_window = make_tile_window(
+            k_lds_read_view,
+            make_tuple(number<Geometry::kQkSuColumns>{}, number<Geometry::kHeadDimQK>{}),
+            {Geometry::kQkSuColumns, 0},
+            MakeKSuRegTileDistribution<Problem>());
+        next_su_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
+        prepared_context.qk_stage0 = FmhaTdmPreparedKRead::Prepare<0>(next_su_window);
+        if constexpr(UseEarlyLdsBases<Problem>())
+        {
+            // Keep the tile's read bases in VGPRs before the WMMA stream. Otherwise a late
+            // VALU address write can make its LDS-read dependency wait drain intervening WMMA.
+            prepared_context.v0 = FmhaTdmPreparedKRead::Prepare<0>(v_lds_read_window);
+            asm volatile("" : "+v"(prepared_context.qk_stage0.byte_address));
+            asm volatile("" : "+v"(prepared_context.v0.byte_address));
+            // N64's final PV K reads use the ordinary instruction path.
+            if constexpr(Geometry::kN == 128)
+            {
+                auto pv_k_window = make_tile_window(
+                    k_lds_read_view,
+                    make_tuple(number<Geometry::kQkSuColumns>{}, number<Geometry::kHeadDimQK>{}),
+                    {0, 0},
+                    MakeKSuRegTileDistribution<Problem>());
+                pv_k_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
+                prepared_context.pv_k0 = FmhaTdmPreparedKRead::Prepare<0>(pv_k_window);
+                asm volatile("" : "+v"(prepared_context.pv_k0.byte_address));
+            }
+        }
+    }
+
     template <index_t Stage>
     CK_TILE_HOST_DEVICE static constexpr index_t GetQkTailDsCount()
     {
