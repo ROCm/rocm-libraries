@@ -666,6 +666,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     if(HIPKERNELPROVIDER_ENABLE_TESTS)
         install(DIRECTORY "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/"
                 DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}"
-                PATTERN "${HKP_PACK_STAMP_NAME}" EXCLUDE)
+                PATTERN "${HKP_PACK_STAMP_NAME}" EXCLUDE
+                # A census shard also runs in place; the Testing/ directory CTest leaves
+                # beside it is a build-machine log, not content.
+                REGEX "/census/[^/]+/Testing$" EXCLUDE)
     endif()
 endif()
