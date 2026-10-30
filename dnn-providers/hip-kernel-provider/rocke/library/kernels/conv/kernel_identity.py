@@ -222,6 +222,11 @@ class KernelIdentity:
     tapk_pp_sched: int = 0
     # dgrad only (DgradConvSpec.tapk_pp_epi). Left out of the hash at 0.
     tapk_pp_epi: int = 0
+    # dgrad only (DgradConvSpec.xh_a_k4 / xh_order / xh_defer). Left out of
+    # the hash at False / 0 / 0.
+    xh_a_k4: bool = False
+    xh_order: int = 0
+    xh_defer: int = 0
     # fwd only (ImplicitGemmConvSpec.split_addr_k_decode): the per-tile
     # reduction decode of the 3-D split-addressing path. Serves only problems
     # whose cpg is a multiple of tile_k (see identity_supports_problem). Left
@@ -409,6 +414,9 @@ class KernelIdentity:
             del fields["tapk_pp_sched"]
         if not fields["tapk_pp_epi"]:
             del fields["tapk_pp_epi"]
+        for name in ("xh_a_k4", "xh_order", "xh_defer"):
+            if not fields[name]:
+                del fields[name]
         if not fields["split_addr_k_decode"]:
             del fields["split_addr_k_decode"]
         for name in (

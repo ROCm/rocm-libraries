@@ -281,12 +281,13 @@ CACHE_DGRAD_B_KPACK: Tuple[int, ...] = tuple(
 # (tapk_lds_ahead), lsb (tapk_lds_barrier), sp (tapk_setprio) -- those four
 # on tpf 1/3 only --, xhx (xhalo_exact), xcd (xcd_remap), kpad (lds_k_pad),
 # lxor (lds_xor, with lds_k_pad 0), mch (cshuffle_m_chunks; cshuffle only),
-# wpe (waves_per_eu) and sk (split_k; cshuffle tpf 1/3 only, serves
-# groups == 1), e.g. "ilv=4,xhx=1,xcd=6;ilv=8,xhx=1,xcd=6". An item
+# wpe (waves_per_eu), sk (split_k; cshuffle tpf 1/3 only, serves
+# groups == 1), bw (xh_b_wide), bpad (xh_b_kpad), ak4 (xh_a_k4, with lxor),
+# xo (xh_order bits) and xdf (xh_defer; xo and xdf on tpf 1/3 only), e.g. "ilv=4,xhx=1,xcd=6;ilv=8,xhx=1,xcd=6". An item
 # "@<regex>" gives its set its own scope (see ROCKE_AOT_DGRAD_XHK_SCOPE). An
 # empty set is the plain binary; unset = that alone.
 def _parse_dgrad_xh_knobs(text: str) -> Tuple[Tuple[Tuple[str, int], ...], ...]:
-    keys = {"ilv", "xhx", "xcd", "kpad", "mch", "sk", "lda", "wpe", "lsb", "sp", "lxor", "bw", "bpad"}
+    keys = {"ilv", "xhx", "xcd", "kpad", "mch", "sk", "lda", "wpe", "lsb", "sp", "lxor", "bw", "bpad", "ak4", "xo", "xdf"}
     out = []
     for part in text.split(";"):
         kv = []
@@ -336,6 +337,16 @@ def _dgrad_xh_knob_cfg(knobs, *, tpf: int, grouped: bool, epilogue: str):
         cfg["tapk_lds_barrier"] = True
     if d.get("bpad"):
         cfg["xh_b_kpad"] = d["bpad"]
+    if d.get("ak4"):
+        cfg["xh_a_k4"] = True
+    if d.get("xo"):
+        if tpf not in (1, 3):
+            return None
+        cfg["xh_order"] = d["xo"]
+    if d.get("xdf"):
+        if tpf not in (1, 3):
+            return None
+        cfg["xh_defer"] = d["xdf"]
     if d.get("bw"):
         if tpf not in (1, 3):
             return None
