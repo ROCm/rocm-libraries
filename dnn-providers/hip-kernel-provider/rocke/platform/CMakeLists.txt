@@ -274,7 +274,8 @@ endif()
 
 include(CTest)
 
-# C++ test targets are registered in the by-layer tests/ tree (tests/CMakeLists.txt).
+# C++ test targets are orchestrated from tests/CMakeLists.txt and registered in
+# concern-owned tests/cmake/*.cmake fragments.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
   add_subdirectory(tests)
 endif()
@@ -515,7 +516,7 @@ if(ROCKE_INSTALL_TESTS)
            "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
 
     # Reproduce the committed host-flavor column from the relocated artifact.
-    # This mirrors the build-tree CTest in tests/CMakeLists.txt, but deliberately
+    # This mirrors the build-tree CTest in tests/cmake/CoreTests.cmake, but deliberately
     # uses the installed package data that downstream/provider CI consumes.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_arch_domain_reproducibility python -u \"${ROCKE_TEST_CTEST_REL}tests/arch_domain/gen_arch_domain.py\" --check --unvalidated-exit-code 77)\n")
