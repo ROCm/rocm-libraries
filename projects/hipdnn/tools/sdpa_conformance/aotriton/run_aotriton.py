@@ -5,7 +5,8 @@
 """Run AOTriton's SDPA suite against hipDNN and record one CSV row per case.
 
     run_aotriton.py [--suite default|forward] [--release N] [--shard I/N] [--fake always-decline]
-                    [--layout-mode MODE] [--fwd-no-stats] [--all-engines] [--packed-gpu] [--out DIR | --arch ARCH --run NAME]
+                    [--layout-mode MODE] [--fwd-no-stats] [--all-engines] [--exhaustive] [--packed-gpu]
+                    [--out DIR | --arch ARCH --run NAME]
                     [--workers N] [--resume] [--nodeids-file PATH] [--hang-timeout S] [--lock-dir DIR]
                     [--hipdnn-prefix DIR] [-- PYTEST...]
 
@@ -48,6 +49,24 @@ cases it must run) and ``pass.json`` (kind, direction, pins):
   any pass, the backward unpinned and then pinned on the reference forward
   (``HIPDNN_FWD_ENGINE=reference``); the pair passes then cover those cases with the backward
   engines the discovery pass recorded.
+
+``--exhaustive`` pins kernels inside an engine (``--all-engines`` pins engines; the flags compose, and
+both together are the EXTREME run). Pass 1 records, per case and engine, the candidate count
+``hipdnn_bench enumerate`` lists (``fwd_candidate`` / ``bwd_candidate``: a JSON object ``{engine:
+count | reason the engine cannot enumerate}``). Under ``<out>/cand/``:
+
+* ``<fwd|bwd>/<engine>/<k>/``: one pass per candidate index up to the largest count any case
+  reported for the engine, pinning the engine and ``HIPDNN_FWD_CANDIDATE`` / ``HIPDNN_BWD_CANDIDATE``
+  ``=k`` over the cases whose count exceeds ``k``;
+* ``<fwd|bwd>/<engine>/not-enumerable/``: no pytest run; a ``not-enumerable`` row carrying the
+  message for each case where the engine could not enumerate;
+* with ``--all-engines`` also ``pair/<fwd>__<bwd>/<i>x<j>/`` (and ``.../not-enumerable/``) for backward
+  cases: every forward engine against every backward engine of the case, the winners included,
+  over every pair of candidate indices.
+
+A case whose worker died in pass 1 has no counts and gets no candidate pass. The runner exports
+``HIPDNN_SDPA_PREFIX`` (the ``--hipdnn-prefix``, where ``bin/hipdnn_bench`` lives) to every pass and
+``HIPDNN_SDPA_EXHAUSTIVE`` to pass 1 only; it refuses ``--fake`` and pre-set candidate variables.
 
 ``reconcile.py --engines <out>`` folds the passes into ``engines.csv``. The option composes with
 ``--suite``, ``--shard``, ``--release``, ``--workers`` and ``--fwd-no-stats`` (forward sweep
@@ -96,6 +115,7 @@ ENGINE_ENV = {"fwd": "HIPDNN_FWD_ENGINE", "bwd": "HIPDNN_BWD_ENGINE"}
 WATCHDOG_MODULE = "pytest_gpu_lease.watchdog"
 LOCK_NAME = "gpu.lock"
 CAPTURE_DIR = "capture"
+PIN_ENV = (*ENGINE_ENV.values(), *contract.CANDIDATE_ENV.values())
 
 
 def parse_args(argv):
@@ -123,6 +143,12 @@ def parse_args(argv):
         "--all-engines",
         action="store_true",
         help="after the normal run, re-run every case with each other applicable engine pinned",
+    )
+    parser.add_argument(
+        "--exhaustive",
+        action="store_true",
+        help="after the normal run, run one pass per candidate (kernel) of every enumerable engine; "
+        "with --all-engines, per pair of candidates too (EXTREME)",
     )
     parser.add_argument(
         "--resume",
@@ -244,6 +270,60 @@ def pair_work(rows, bwd_lists=None):
             if fwd not in served:
                 for bwd in backwards:
                     work.setdefault((fwd, bwd), []).append(row["nodeid"])
+    return work
+
+
+def _counts(text):
+    """The ``{engine: count | message}`` JSON of a pass-1 candidate column; ``{}`` when empty."""
+    try:
+        found = json.loads(text) if text else {}
+    except ValueError:
+        return {}
+    return found if isinstance(found, dict) else {}
+
+
+def candidate_work(rows):
+    """``{(direction, engine): ({nodeid: count}, {nodeid: message})}`` from pass-1 rows: a
+    ``test_forward.py`` case reads ``fwd_candidate``, any other case ``bwd_candidate``.
+    """
+    work = {}
+    for row in rows:
+        direction = reconcile.direction_of(row["nodeid"])
+        for engine, found in _counts(row[f"{direction}_candidate"]).items():
+            counts, messages = work.setdefault((direction, engine), ({}, {}))
+            if isinstance(found, int):
+                counts[row["nodeid"]] = found
+            else:
+                messages[row["nodeid"]] = str(found)
+    return work
+
+
+def candidate_pair_work(rows):
+    """``{(fwd engine, bwd engine): ({nodeid: (fwd count, bwd count)}, {nodeid: message})}`` for
+    backward cases: every forward and backward engine pass 1 counted, winners included.
+    """
+    work = {}
+    for row in rows:
+        if reconcile.direction_of(row["nodeid"]) != "bwd":
+            continue
+        forwards, backwards = _counts(row["fwd_candidate"]), _counts(
+            row["bwd_candidate"]
+        )
+        for fwd, fwd_found in forwards.items():
+            for bwd, bwd_found in backwards.items():
+                counts, messages = work.setdefault((fwd, bwd), ({}, {}))
+                if isinstance(fwd_found, int) and isinstance(bwd_found, int):
+                    counts[row["nodeid"]] = (fwd_found, bwd_found)
+                else:
+                    why = [
+                        f"{side} {engine}: {found}"
+                        for side, engine, found in (
+                            ("fwd", fwd, fwd_found),
+                            ("bwd", bwd, bwd_found),
+                        )
+                        if not isinstance(found, int)
+                    ]
+                    messages[row["nodeid"]] = "; ".join(why)
     return work
 
 
@@ -371,8 +451,10 @@ class Runner:
             args.shard = None  # the listed node ids are already this shard's cases
         env = dict(self.env)
         if pins is not None:
-            env = {k: v for k, v in env.items() if k not in ENGINE_ENV.values()}
+            env = {k: v for k, v in env.items() if k not in PIN_ENV}
             env.update(pins)
+        if slug != reconcile.MAIN_PASS:
+            env.pop(contract.EXHAUSTIVE_ENV, None)  # only pass 1 counts candidates
         env[contract.PASS_SLUG_ENV] = slug
         if capture:
             env[contract.REPRO_CAPTURE_ENV] = str(self.out / contract.REPRO_DIR)
@@ -434,13 +516,15 @@ class Runner:
                 selection, capture_dir, slug, pins, listing, len(chosen), capture=True
             )
 
-    def extra_pass(self, rel, kind, direction, pins, nodeids, note):
-        """A pass under ``all-engines/<rel>``: its metadata and full listing, then its missing cases."""
-        pass_dir = self.out / reconcile.ENGINES_DIR / rel
+    def extra_pass(self, rel, kind, direction, pins, nodeids, note, root=None):
+        """A pass under ``<root>/<rel>`` (``all-engines`` unless ``root``): its metadata and full
+        listing, then its missing cases."""
+        pass_dir = self.out / (root or reconcile.ENGINES_DIR) / rel
         pass_dir.mkdir(parents=True, exist_ok=True)
         meta = {"kind": kind, "direction": direction}
         for d, name in ENGINE_ENV.items():
             meta[f"pin_{d}"] = pins.get(name, "")
+            meta[f"{d}_candidate"] = pins.get(contract.CANDIDATE_ENV[d], "")
         (pass_dir / reconcile.PASS_META_NAME).write_text(json.dumps(meta) + "\n")
         listing_file(pass_dir / reconcile.NODEIDS_NAME, nodeids)
         slug = reconcile.pass_slug(self.out, pass_dir)
@@ -467,6 +551,73 @@ class Runner:
                 nodeids,
                 f"pair {fwd} x {bwd}",
             )
+
+    def not_enumerable(self, rel, direction, pins, messages, note):
+        """The ``not-enumerable`` pass of ``cand/<rel>``: its metadata and the message rows."""
+        pass_dir = self.out / contract.CANDIDATES_DIR / rel / contract.NOT_ENUMERABLE
+        pass_dir.mkdir(parents=True, exist_ok=True)
+        meta = {"kind": "candidate", "direction": direction}
+        for d, name in ENGINE_ENV.items():
+            meta[f"pin_{d}"] = pins.get(name, "")
+            meta[f"{d}_candidate"] = ""
+        (pass_dir / reconcile.PASS_META_NAME).write_text(json.dumps(meta) + "\n")
+        listing_file(pass_dir / reconcile.NODEIDS_NAME, list(messages))
+        _not_enumerable_rows(pass_dir, messages)
+        print(f"{note}: {len(messages)} not enumerable", flush=True)
+
+    def candidates(self, rows):
+        """One pass per (engine, candidate index) from the candidate counts of pass 1."""
+        for (direction, engine), (counts, messages) in sorted(
+            candidate_work(rows).items()
+        ):
+            rel = Path(direction) / engine_slug(engine)
+            pin = {ENGINE_ENV[direction]: engine}
+            note = f"candidates {direction} {engine}"
+            for k in range(max(counts.values(), default=0)):
+                self.extra_pass(
+                    rel / str(k),
+                    "candidate",
+                    direction,
+                    {**pin, contract.CANDIDATE_ENV[direction]: str(k)},
+                    [n for n, count in counts.items() if count > k],
+                    f"{note} #{k}",
+                    root=contract.CANDIDATES_DIR,
+                )
+            if messages:
+                self.not_enumerable(rel, direction, pin, messages, note)
+
+    def candidate_pairs(self, rows):
+        """EXTREME: one pass per (forward engine, backward engine, forward index, backward index)."""
+        for (fwd, bwd), (counts, messages) in sorted(candidate_pair_work(rows).items()):
+            rel = Path("pair") / f"{engine_slug(fwd)}__{engine_slug(bwd)}"
+            pin = {ENGINE_ENV["fwd"]: fwd, ENGINE_ENV["bwd"]: bwd}
+            note = f"candidates pair {fwd} x {bwd}"
+            for i in range(max((c[0] for c in counts.values()), default=0)):
+                for j in range(max((c[1] for c in counts.values()), default=0)):
+                    chosen = [n for n, c in counts.items() if c[0] > i and c[1] > j]
+                    if chosen:
+                        self.extra_pass(
+                            rel / f"{i}x{j}",
+                            "candidate-pair",
+                            "bwd",
+                            {
+                                **pin,
+                                contract.CANDIDATE_ENV["fwd"]: str(i),
+                                contract.CANDIDATE_ENV["bwd"]: str(j),
+                            },
+                            chosen,
+                            f"{note} #{i}x{j}",
+                            root=contract.CANDIDATES_DIR,
+                        )
+            if messages:
+                self.not_enumerable(rel, "bwd", pin, messages, note)
+
+    def exhaustive(self):
+        """Candidate passes from pass 1's counts; with ``--all-engines`` the pair passes too."""
+        rows = reconcile.read_rows(self.out / reconcile.CSV_NAME)
+        self.candidates(rows)
+        if self.args.all_engines:
+            self.candidate_pairs(rows)
 
     def all_engines(self):
         """Pinned sweeps, pair passes, then the reference-forward passes for failed forwards."""
@@ -499,13 +650,36 @@ class Runner:
         self.pairs(pair_work(rows, {r["nodeid"]: r["bwd_engines"] for r in discovery}))
 
 
+def _not_enumerable_rows(pass_dir, messages):
+    """Write ``pass_dir``'s ``results.csv``: a ``not-enumerable`` row per case of ``messages`` that
+    has none yet. No pytest run is involved."""
+    path = pass_dir / reconcile.CSV_NAME
+    done = recorded_ids(pass_dir)
+    new = not path.exists() or not path.stat().st_size
+    with open(path, "a") as f:
+        if new:
+            f.write(",".join(reconcile.FIELDS) + "\n")
+        for nodeid, message in messages.items():
+            if nodeid not in done:
+                f.write(
+                    reconcile.format_row(
+                        {
+                            "nodeid": nodeid,
+                            "outcome": contract.NOT_ENUMERABLE,
+                            "reason": message,
+                        }
+                    )
+                )
+
+
 def main(argv=None):
     args = parse_args(argv)
-    if args.all_engines:
-        pinned = [k for k in ENGINE_ENV.values() if os.environ.get(k)]
+    if args.all_engines or args.exhaustive:
+        pinned = [k for k in PIN_ENV if os.environ.get(k)]
         if args.fake or pinned:
             raise SystemExit(
-                "--all-engines needs the real heuristic run: refused with "
+                f"{'--exhaustive' if args.exhaustive else '--all-engines'} needs the real "
+                "heuristic run: refused with "
                 + ("--fake" if args.fake else ", ".join(pinned))
             )
     if not args.hipdnn_prefix:
@@ -538,6 +712,12 @@ def main(argv=None):
     if args.fwd_no_stats:
         env[FWD_NO_STATS_ENV] = "1"
         print("forward mode: no Stats", flush=True)
+    env[contract.PREFIX_ENV] = str(args.hipdnn_prefix)
+    env.pop(contract.EXHAUSTIVE_ENV, None)
+    if args.exhaustive:
+        env[contract.EXHAUSTIVE_ENV] = (
+            "1"  # pass 1 counts candidates; later passes drop it
+        )
     env.setdefault(contract.INFLIGHT_DIR_ENV, tempfile.mkdtemp(prefix="sdpa-inflight-"))
     env.setdefault(contract.DECLINES_DIR_ENV, str(out / reconcile.DECLINES_DIR))
     runner = Runner(args, env, out, workers)
@@ -598,6 +778,8 @@ def main(argv=None):
     runner.capture_crashes(out, reconcile.MAIN_PASS, None)
     if args.all_engines:
         runner.all_engines()
+    if args.exhaustive:
+        runner.exhaustive()
     return runner.status
 
 
