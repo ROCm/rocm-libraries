@@ -28,12 +28,14 @@
 #pragma once
 
 #include "rocblaslt.h"
+#include "rocblaslt_adaptive_sm_controller.hpp"
 #include <hipblaslt/hipblaslt-opt-in-features.h>
 //#include "rocblaslt_ostream.hpp"
 #include <atomic>
 #include <fstream>
 #include <hip/hip_runtime_api.h>
 #include <iostream>
+#include <memory>
 #include <vector>
 
 struct _rocblaslt_attribute
@@ -109,7 +111,7 @@ struct _rocblaslt_handle
     int32_t sm_count_target = 0;
 
     // Handle-level uniform-summation-order request. 0 off, 1 on; see hipblaslt.h.
-    int32_t uniform_summation_order = 0;
+    int32_t uniform_summation_order = 1;
 
     // -1: rocRoller (or the checked-in KFA kernels) for block-scaled GEMMs.
     //  1: force that path. 0: Tensile only. Parsed even when rocRoller is not linked.
@@ -212,6 +214,19 @@ struct _rocblaslt_handle
         if(problemIndex >= c_syncSkSlotsPerStream)
             return rocblaslt_status_internal_error;
 
+        const int i = streamSlot(stream);
+        if(i < 0)
+            return rocblaslt_status_internal_error;
+
+        *out = static_cast<char*>(StreamKFlags)
+               + (i * c_syncSkSlotsPerStream + problemIndex) * c_syncSkSlotBytes;
+        return rocblaslt_status_success;
+    }
+
+    // Index of the per-stream block owned by `stream`, claiming a free one on
+    // first use; -1 once all c_syncSkStreamSlots are taken.
+    int streamSlot(hipStream_t stream)
+    {
         // hipStreamPerThread is a sentinel that resolves to a different stream
         // for every host thread, so every thread would present the same key and
         // share one block. Key those by thread instead. The legacy null stream
@@ -244,18 +259,18 @@ struct _rocblaslt_handle
                             : expected;
             }
             if(owner == key)
-            {
-                *out = static_cast<char*>(StreamKFlags)
-                       + (i * c_syncSkSlotsPerStream + problemIndex) * c_syncSkSlotBytes;
-                return rocblaslt_status_success;
-            }
+                return static_cast<int>(i);
         }
 
-        return rocblaslt_status_internal_error;
+        return -1;
     }
 
     // Value-initialised so every block starts unowned.
     std::atomic<const void*> m_skSlotOwner[c_syncSkStreamSlots] = {};
+
+    // Adaptive sm_count_target state, per stream slot; null when the mode is
+    // off or its setup failed.
+    std::unique_ptr<rocblaslt::adaptive_sm::Controller> adaptive_sm;
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // Device communicator, registered once by hipblasLtSetDeviceComm. Every rank
@@ -391,9 +406,9 @@ struct _rocblaslt_matmul_desc
     // 1 = ON (force SK4 dynamic), 2 = AUTO (heuristic picks per launch).
     int32_t streamk_tile_scheduling_ext = 0;
 
-    // Uniform summation order. 0 inherits the handle request; 1 enables.
+    // Uniform summation order. -1 inherits the handle request; 0 disables;1 enables.
     // See hipblaslt.h for the guarantee.
-    int32_t uniform_summation_order = 0;
+    int32_t uniform_summation_order = -1;
 
     // HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT (hipblasLtInt4Encoding_t).
     int32_t int4_encoding_a_ext = 0;
@@ -508,19 +523,33 @@ inline int32_t effective_sm_count_target(const _rocblaslt_handle*            han
     return 0;
 }
 
+// True when the hint for a matmul comes from the adaptive estimator: adaptive
+// mode on, StreamK tile scheduling AUTO or ON, and no desc or handle hint.
+inline bool adaptive_sm_count_applies(const _rocblaslt_handle*      handle,
+                                      const _rocblaslt_matmul_desc* desc)
+{
+    return handle && desc
+           && rocblaslt::adaptive_sm::applies(
+               handle->adaptive_sm != nullptr,
+               desc->streamk_tile_scheduling_ext == HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO
+                   || desc->streamk_tile_scheduling_ext == HIPBLASLT_STREAMK_TILE_SCHEDULING_ON,
+               desc->sm_count_target,
+               handle->sm_count_target);
+}
+
 // Resolve the effective uniform-summation-order request for a matmul launch
 // using first-on-wins precedence (C++ preference true, then desc==1, then
 // handle==1). 0 on desc/pref means inherit. There is no per-GEMM opt-out
 // when the handle is on.
 inline int32_t effective_uniform_summation_order(const _rocblaslt_handle*      handle,
                                                  const _rocblaslt_matmul_desc* desc,
-                                                 bool                          pref_uso = false)
+                                                 int32_t                       pref_uso = -1)
 {
-    if(pref_uso)
-        return 1;
-    if(desc && desc->uniform_summation_order)
-        return 1;
-    if(handle && handle->uniform_summation_order)
-        return 1;
-    return 0;
+    if(pref_uso != -1)
+        return pref_uso;
+    if(desc && desc->uniform_summation_order != -1)
+        return desc->uniform_summation_order;
+    if(handle)
+        return handle->uniform_summation_order;
+    return 1;
 }

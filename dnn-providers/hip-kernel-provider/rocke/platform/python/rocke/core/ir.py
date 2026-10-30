@@ -573,6 +573,16 @@ def _check_cachepolicy(op: str, value: int) -> int:
     return v
 
 
+def _with_cachepolicy(attrs: Optional[dict], op: str, cachepolicy: int):
+    """``attrs`` plus a non-zero ``cachepolicy`` (0 leaves the op unchanged)."""
+    v = _check_cachepolicy(op, cachepolicy)
+    if not v:
+        return attrs
+    out = dict(attrs or {})
+    out["cachepolicy"] = v
+    return out
+
+
 def _check_axis(op: str, axis: object) -> str:
     """Validate a grid axis name (``x``, ``y``, or ``z``)."""
     if axis not in ("x", "y", "z"):
@@ -3266,7 +3276,7 @@ class IRBuilder:
                 "sideeffect": True,
                 "convergent": False,
                 "required_arch": "gfx1250",
-                "required_llvm_flavor": "llvm23",
+                "minimum_llvm_flavor": "llvm23",
             },
         )
 
@@ -4385,21 +4395,26 @@ class IRBuilder:
         raise ValueError(f"warp_shuffle_xor: unsupported type {v.type.name}")
 
     def vop2_f32_dpp_xor(self, v: Value, xor_mask: int, mnemonic: str) -> Value:
-        """One **fused** VALU reduce step: ``<mnemonic>_dpp d, v, v
-        row_xmask:mask`` — the cross-lane XOR shuffle *and* the f32 combine in
-        a single instruction (``v_max_f32_dpp`` / ``v_add_f32_dpp``).
+        """One softmax row-reduce stage, ``d = mnemonic(shuffle(v), v)``: the
+        in-row XOR shuffle of :meth:`warp_shuffle_xor_dpp` (``row_xmask:mask``
+        on targets that have it) followed by ``fmax`` (``v_max_f32``) or
+        ``fadd`` (``v_add_f32``).
 
-        This is the fused form of a softmax row-reduce stage. LLVM's
-        GCNDPPCombine pass refuses to fold a ``row_xmask`` ``v_mov_b32_dpp``
-        into the consuming ``v_max``/``v_add`` (verified on gfx1250: the mov
-        survives), so we emit the fused op directly via inline asm — halving
-        the VALU op count of the reduction vs the unfused
-        :meth:`warp_shuffle_xor_dpp` + ``fmax``/``fadd``.
+        LLVM's GCNDPPCombine pass folds the shuffle's ``v_mov_b32_dpp`` into the
+        consumer, giving the fused ``v_add_f32_dpp`` / ``v_max_num_f32_dpp``
+        (gfx1250), when both sit in the same block under the same EXEC. Some
+        compilers first quiet the shuffled value for ``llvm.maxnum`` with a
+        separate ``v_max_num_f32 v, v, v``, so the max stage stays a
+        ``v_mov_b32_dpp`` + ``v_max_num_f32`` pair; upstream LLVM fuses it.
 
-        The DPP modifier applies to the first source, so ``d = mnemonic(
-        shuffle(v), v)`` — correct for the commutative max/add reduction.
-        ``convergent`` (reads other lanes), ``bound_ctrl:1`` (partner always
-        in-row for mask 1..15). Operand + result are f32."""
+        This used to be inline asm (``<mnemonic>_dpp $0, $1, $1 row_xmask:..``).
+        LLVM's hazard recognizer does not look inside inline asm, so on gfx1250
+        the asm could overwrite a WMMA source operand before the required VALU
+        gap without LLVM adding the wait states; as real instructions the DPP
+        ops are covered by the WMMA co-execution hazard check.
+
+        The DPP modifier applies to the first source, so the shuffle is the
+        first operand; max and add are commutative. Operand + result are f32."""
         if v.type.name != "f32":
             raise ValueError("vop2_f32_dpp_xor requires f32 data")
         if not (1 <= xor_mask <= 15):
@@ -4409,19 +4424,10 @@ class IRBuilder:
                 f"vop2_f32_dpp_xor mnemonic must be v_max_f32/v_add_f32, "
                 f"got {mnemonic!r}"
             )
-        tmpl = (
-            f"{mnemonic}_dpp $0, $1, $1 "
-            f"row_xmask:{xor_mask} row_mask:0xf bank_mask:0xf bound_ctrl:1"
-        )
-        return self.inline_asm(
-            tmpl,
-            "=v,v",
-            [v],
-            result_type=F32,
-            sideeffect=False,
-            convergent=True,
-            result_name_hint="dppr",
-        )
+        shuffled = self.warp_shuffle_xor_dpp(v, xor_mask)
+        if mnemonic == "v_max_f32":
+            return self.fmax(shuffled, v)
+        return self.fadd(shuffled, v)
 
     def warp_shuffle_xor_dpp(self, v: Value, lane_xor: int) -> Value:
         """VALU XOR shuffle: lane ``l`` gets ``v`` from lane ``l ^ lane_xor``
@@ -5455,47 +5461,82 @@ class IRBuilder:
         ).result
 
     def buffer_store_vN_f16(
-        self, rsrc: Value, voffset: Value, soffset: Value, value: Value, dwords: int
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        value: Value,
+        dwords: int,
+        *,
+        cachepolicy: int = 0,
     ) -> None:
         """Vectorised `raw_ptr_buffer_store`. dwords in {1,2,4}; each
         dword is two halves. Out-of-range voffsets are *silently
         dropped* by the AMD buffer rsrc — the runbook §6.2 lever
         ("vectorise the epilogue") for tail-safe stores.
+
+        ``cachepolicy`` is the intrinsic's aux immediate (on gfx12: bits[0:2]
+        = th, bits[3:4] = scope; 1 = ``th:TH_STORE_NT``). 0 records nothing.
         """
         if dwords not in (1, 2, 4):
             raise ValueError(f"buffer_store dwords must be 1, 2, or 4 (got {dwords})")
         self._op(
             "tile.buffer_store_vN_f16",
             [rsrc, voffset, soffset, value],
-            attrs={"dwords": int(dwords)},
+            attrs=_with_cachepolicy(
+                {"dwords": int(dwords)}, "buffer_store_vN_f16", cachepolicy
+            ),
         )
 
     def buffer_store_f16(
-        self, rsrc: Value, voffset: Value, soffset: Value, value: Value
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        value: Value,
+        *,
+        cachepolicy: int = 0,
     ) -> None:
         """Single-half buffer store, OOB-clamped. The epilogue path
         for per-lane direct stores (4 halves per accumulator slot)
         uses this when the kernel layout doesn't align to a 32-bit
-        vector boundary."""
+        vector boundary. ``cachepolicy`` as for :meth:`buffer_store_vN_f16`."""
         self._op(
             "tile.buffer_store_f16",
             [rsrc, voffset, soffset, value],
+            attrs=_with_cachepolicy(None, "buffer_store_f16", cachepolicy),
         )
 
     def buffer_store_bf16(
-        self, rsrc: Value, voffset: Value, soffset: Value, value: Value
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        value: Value,
+        *,
+        cachepolicy: int = 0,
     ) -> None:
-        """Single bf16 buffer store via raw_ptr_buffer_store.i16, OOB-dropped."""
+        """Single bf16 buffer store via raw_ptr_buffer_store.i16, OOB-dropped.
+        ``cachepolicy`` as for :meth:`buffer_store_vN_f16`."""
         self._op(
             "tile.buffer_store_bf16",
             [rsrc, voffset, soffset, value],
+            attrs=_with_cachepolicy(None, "buffer_store_bf16", cachepolicy),
         )
 
     def buffer_store_vN_bf16(
-        self, rsrc: Value, voffset: Value, soffset: Value, value: Value, dwords: int
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        value: Value,
+        dwords: int,
+        *,
+        cachepolicy: int = 0,
     ) -> None:
         """Vectorised bf16 buffer store. dwords in {1, 2, 4}; each dword
-        holds two bf16 elements. OOB voffsets are silently dropped."""
+        holds two bf16 elements. OOB voffsets are silently dropped.
+        ``cachepolicy`` as for :meth:`buffer_store_vN_f16`."""
         if dwords not in (1, 2, 4):
             raise ValueError(
                 f"buffer_store_vN_bf16 dwords must be 1, 2, or 4 (got {dwords})"
@@ -5503,7 +5544,9 @@ class IRBuilder:
         self._op(
             "tile.buffer_store_vN_bf16",
             [rsrc, voffset, soffset, value],
-            attrs={"dwords": int(dwords)},
+            attrs=_with_cachepolicy(
+                {"dwords": int(dwords)}, "buffer_store_vN_bf16", cachepolicy
+            ),
         )
 
     def buffer_store_f32(

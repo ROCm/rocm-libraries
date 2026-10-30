@@ -3,6 +3,16 @@
 Documentation for rocWMMA is available at
 [https://rocm.docs.amd.com/projects/rocWMMA/en/latest](https://rocm.docs.amd.com/projects/rocWMMA/en/latest).
 
+## Unreleased
+
+### Changed
+
+* Applications using OpenMP must now discover and link it explicitly instead of relying on `roc::rocwmma` to supply OpenMP flags and libraries. Use `find_package(OpenMP REQUIRED COMPONENTS CXX)` and link the application to `OpenMP::OpenMP_CXX`. Without this change, OpenMP loops may execute serially and calls to `omp_*` functions may fail to link.
+
+### Resolved issues
+
+* Removed the OpenMP requirement from the public CMake target and installed CMake package. OpenMP remains a dependency of samples, tests, and community samples; DEB/RPM OpenMP dependencies are scoped to client packages.
+
 ## rocWMMA 2.2.2 for ROCm 10.2
 
 ### Added
