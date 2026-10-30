@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -18,9 +19,21 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
+struct KernelDefinition;
+
+/// A pack's own decoding of one kernel's metadata, computed once when the engine's
+/// shared state is built rather than on every graph. A pack registers one under the
+/// symbol of a kernel-scoped matcher it declares (NativeRegistry.hpp); its matcher,
+/// score and candidate filter then read `KernelDefinition::prepared` instead of parsing
+/// the metadata map again. Returns null when it has nothing to precompute. Must not
+/// throw.
+using KernelPrepareFn = std::shared_ptr<const void> (*)(const KernelDefinition&);
+
 /// One kernel an engine can dispatch. KernelIngestorStateManager owns every definition
 /// in an immutable set; catalogs and rankings reference them by pointer, valid for the
-/// manager's lifetime.
+/// manager's lifetime. The state manager hands out views of its own immutable
+/// definitions (CatalogView) and copies of them (Catalog), never a reference into a
+/// mutable cache.
 struct KernelDefinition
 {
     DescriptorId kernelId;
@@ -54,6 +67,13 @@ struct KernelDefinition
     /// the same reason as treeRoot. A native handler reaches one entry through the
     /// provider's launchKernelDefinition(), which returns a single-launch definition.
     std::map<std::string, KernelSource> sources;
+    /// What `preparedBy` computed from this definition when the shared state was built;
+    /// null when the kernel's pack registers no KernelPrepareFn, and for a definition
+    /// built anywhere else (a test, say). Shared and immutable, so copying a definition
+    /// copies a pointer. A reader checks `preparedBy` against its own function before
+    /// trusting the payload's type, and decodes the metadata itself otherwise.
+    std::shared_ptr<const void> prepared;
+    KernelPrepareFn preparedBy = nullptr;
 
     std::optional<MetadataValue> tryGetMetadata(const std::string& field) const
     {
@@ -120,11 +140,12 @@ struct KernelDefinition
     }
 };
 
-// KernelDefinition is built positionally, eleven initializers at a time, so its field count
-// is pinned here the way KernelSource's is in Descriptors.hpp. std::string converts
-// implicitly to std::filesystem::path, so a path field inserted ahead of originDirectory
-// would otherwise compile and silently rebind every initializer after it. Only the count
-// -- two same-typed members swapped past each other still brace-initialize.
+// KernelDefinition is built positionally, up to eleven initializers at a time (the two
+// trailing prepared fields are set afterwards), so its field count is pinned here the way
+// KernelSource's is in Descriptors.hpp. std::string converts implicitly to
+// std::filesystem::path, so a path field inserted ahead of originDirectory would
+// otherwise compile and silently rebind every initializer after it. Only the count --
+// two same-typed members swapped past each other still brace-initialize.
 static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                DescriptorId,
                                                DescriptorId,
@@ -136,7 +157,9 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                std::filesystem::path,
                                                std::string,
                                                std::filesystem::path,
-                                               std::map<std::string, KernelSource>>
+                                               std::map<std::string, KernelSource>,
+                                               std::shared_ptr<const void>,
+                                               KernelPrepareFn>
                   && !detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                        DescriptorId,
                                                        DescriptorId,
@@ -149,6 +172,8 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                        std::string,
                                                        std::filesystem::path,
                                                        std::map<std::string, KernelSource>,
+                                                       std::shared_ptr<const void>,
+                                                       KernelPrepareFn,
                                                        std::string>,
               "KernelDefinition gained or lost a field; append only, then extend this "
               "assertion and every positional construction of it.");

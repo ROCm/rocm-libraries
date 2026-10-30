@@ -2,13 +2,26 @@
 
 This root holds the descriptors the provider **ships**. Its sibling `test_descriptors/`
 stages into the build tree for the unit and integration binaries and is installed only
-under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds one bundle,
-`rocKE/gfx950_attention_dense/` (its KDP is stored in DVC, see
-[Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below), whose KDP declares gfx950 only, so production packaging
-runs for a build whose GPU targets include gfx950 and that has rocKE enabled
+under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the bundles below (the attention KDP is
+stored in DVC, see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc)
+below). Each gfx950 bundle's KDP declares gfx950 only, so production packaging runs for a
+build whose GPU targets include gfx950 and that has rocKE enabled
 (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the walk). For
 any other build the root has nothing to pack and production packaging is dormant, unless
-the cache variable below is pointed elsewhere.
+the cache variable below is pointed elsewhere:
+
+| Bundle | Engine | Native pack |
+|---|---|---|
+| `rocKE/gfx950_attention_dense/` | `hipkernel:Gfx950AttentionDense` | `packs/Gfx950AttentionDenseNative.cpp` |
+| `rocKE/gfx1151_wmma_attention/` | `hipkernel:Gfx1151WmmaAttention` | `packs/Gfx1151WmmaAttentionNative.cpp` |
+| `rocKE/gfx1151_wmma_attention_decode/` | `hipkernel:Gfx1151WmmaAttentionDecode` | `packs/Gfx1151WmmaAttentionNative.cpp` |
+| `rocKE/gfx950_conv_fwd/` | `hipkernel:Gfx950ConvFwd` | `packs/Gfx950ConvFwdNative.cpp` |
+| `rocKE/gfx950_conv_fwd_aot/` | `hipkernel:Gfx950ConvFwdAot` | `packs/Gfx950ConvFwdNative.cpp` |
+| `rocKE/gfx950_conv_dgrad_aot/` | `hipkernel:Gfx950ConvDgradAot` | `packs/Gfx950ConvDgradNative.cpp` |
+
+`rocKE/gfx950_conv_fwd/` is generated from
+`projects/hipdnn/tools/IngestorGenerator/configs/gfx950_conv_fwd.yaml`; see
+`docs/gfx950_conv_fwd/README.md` for its catalog scope and regeneration procedure.
 
 ## Authoring a bundle
 

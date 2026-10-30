@@ -592,14 +592,13 @@ TEST(TestKernelIngestorEngine, ReportsTheSerializationNoteOnlyOnSaveableEngines)
         EXPECT_EQ(std::count(pointwiseNotes.begin(), pointwiseNotes.end(), SERIALIZATION_NOTE), 0);
     };
 
-    // The first Container takes the state managers that discovery built; a later one builds
-    // its own. Both construction paths must report the note.
-    rediscoverStateManagersForTesting();
+    // Every Container reads the shared state discovery built, the first and a later one
+    // alike. Both must report the note.
+    rediscoverSharedStatesForTesting();
     {
         SCOPED_TRACE("first Container");
         Container container;
-        ASSERT_EQ(takeDiscoveredStateManager(loadedSet(CONV_FWD.engineName).engine.id).get(),
-                  nullptr);
+        ASSERT_NE(discoveredSharedState(loadedSet(CONV_FWD.engineName).engine.id), nullptr);
         expectTheNoteOnlyOnConvFwd(container);
     }
     {
@@ -624,9 +623,12 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
     using hipdnn_plugin_sdk::ingestor::SavedKernelCode;
     using hipdnn_plugin_sdk::ingestor::SavedLaunchInputs;
 
-    constexpr std::array<std::string_view, 5> PACK_DISPATCH_SYMBOLS{
+    constexpr std::array<std::string_view, 8> PACK_DISPATCH_SYMBOLS{
         "hipkernel.pointwise.dispatch",
         "hipkernel.conv_fwd.dispatch",
+        "hipkernel.gfx950_conv_fwd.dispatch",
+        "hipkernel.gfx950_conv_fwd_aot.dispatch",
+        "hipkernel.gfx950_conv_dgrad_aot.dispatch",
         "hipkernel.gfx950_attention_dense.dispatch",
         "hipkernel.gfx1151_wmma_attention.dispatch",
         "hipkernel.gfx1151_wmma_attention_decode.dispatch"};

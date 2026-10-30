@@ -232,6 +232,16 @@ private:
     std::unique_ptr<hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper> _graph;
 };
 
+/// A graph that supplies no serialized bytes and no id: nothing can key its catalog.
+class TestGraphWithoutBytes : public TestGraph
+{
+public:
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView bytes() const override
+    {
+        return {nullptr, 0};
+    }
+};
+
 inline DeviceProperties testDeviceProperties()
 {
     DeviceProperties properties;
