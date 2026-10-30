@@ -26,6 +26,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:Gfx1151WmmaAttentionDecode",
          &registerGfx1151WmmaAttentionDecodeSymbols,
          &resetGfx1151WmmaAttentionDecodeModuleCache},
+#ifdef ENABLE_MEGAKERNEL_ENGINE
+        {MEGAKERNEL_ENGINE_NAME, &registerMegakernelSymbols, &resetMegakernelModuleCache},
+#endif
     };
     return s_packs;
 }

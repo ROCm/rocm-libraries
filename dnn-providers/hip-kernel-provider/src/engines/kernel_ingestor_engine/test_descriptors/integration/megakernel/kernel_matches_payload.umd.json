@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "6d904cb2-83e5-5f2a-b130-e4cafa7d9014",
+  "name": "every binary-key field of the stand-in equals the custom op payload's",
+  "scope": "kernel",
+  "match_symbol": "megakernel.kernel_matches"
+}

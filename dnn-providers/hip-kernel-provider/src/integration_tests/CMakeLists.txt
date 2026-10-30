@@ -102,6 +102,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_integration_tests
         PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR=1
     )
+    # The megakernel family's stand-in (test_descriptors/integration/megakernel) is packed
+    # only with the family on, so its case compiles only then.
+    if(ENABLE_MEGAKERNEL_ENGINE)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuMegakernel.cpp
+        )
+        target_compile_definitions(hip_kernel_provider_integration_tests
+            PRIVATE ENABLE_MEGAKERNEL_ENGINE=1
+        )
+    endif()
     # The one descriptor set this binary's cases resolve, as the offset from the binary to
     # the staged tree. main() applies it when the environment names no set, so the binary
     # runs standalone, and the offset holds in the install tree too, so no machine-specific

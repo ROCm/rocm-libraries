@@ -200,3 +200,11 @@ endblock()
 # Sources above are entirely inside `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`; the
 # definition must reach this object library, not only the static library tests link.
 target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENABLE_KERNEL_INGESTOR=1)
+
+# The megakernel family's native pack; its descriptors are gated by the same option in
+# HKP_DESCRIPTOR_FAMILIES (HkpPackaging.cmake).
+if(ENABLE_MEGAKERNEL_ENGINE)
+    target_sources(hip_kernel_provider_impl PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/MegakernelNative.cpp)
+    target_compile_definitions(hip_kernel_provider_impl PUBLIC ENABLE_MEGAKERNEL_ENGINE=1)
+endif()
