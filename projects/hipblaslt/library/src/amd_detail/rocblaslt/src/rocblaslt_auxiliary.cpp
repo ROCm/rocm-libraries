@@ -3148,9 +3148,9 @@ rocblaslt_status
         }
 #endif
 
-        // A heuristic query is outside what online tuning explores; see the
-        // scope note on rocblaslt::OnlineTuner. Said here, at the entry point,
-        // so it is said whether or not the tuning file answers the query below.
+        // Not tuned online; see the scope note on rocblaslt::OnlineTuner.
+        // Reported here so it is reported whether or not the tuning file
+        // answers the query.
         if(rocblaslt::OnlineTuner::getInstance().enabled())
             TensileLite::noteOnlineScopeEvent(TensileLite::OnlineScopeEvent::HeuristicQuery);
 
@@ -3726,23 +3726,16 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_debug_reload()
 
 // Everything hipblaslt_tuning_reset_for_test does except the diagnostics, the
 // counters and the injected failure: the configuration is re-read and every
-// shape this process has learned about is dropped, both the in-memory rows and
-// the online tuner's own tables.
-//
-// Separable because the lifecycle notices are bounded per shape by diagnostics
-// that live for the process, and that bound can only be seen where a shape is
-// settled twice while the diagnostics still remember the first time. Nothing
-// in one process reaches that state by itself -- a settled shape is served
-// from the in-memory cache and is never measured again -- so a test has to
-// make it, and the diagnostics are the one thing it may not clear.
+// shape learned so far is forgotten, in the in-memory rows and in the online
+// tuner. Lets a test settle a shape twice while the per-shape notice gating
+// still remembers the first time.
 extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_forget_shapes_for_test()
 {
     TensileLite::TuningModeSingleton::getInstance().reloadForTest();
     TensileLite::OverrideMap::getMap().resetForTest();
     OverrideSingleton::getInstance().reloadForTest();
 
-    // After the mode singleton, which is where the tuner reads whether it is on
-    // and how deep it searches.
+    // After the mode singleton, which the tuner's configuration reads.
     rocblaslt::OnlineTuner::getInstance().reloadForTest();
 }
 

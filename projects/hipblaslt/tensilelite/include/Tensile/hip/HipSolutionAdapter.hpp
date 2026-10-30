@@ -95,27 +95,16 @@ namespace TensileLite
                                      hipEvent_t                           stopEvent,
                                      bool                                 isKernelLoaded = false);
 
-            // bestEffortEvents says the events are instrumentation the caller
-            // can do without: hipEventRecord is still attempted, but its
-            // failure costs the measurement rather than the launch. The
-            // overloads above keep the strict behaviour, so a benchmark that
-            // cannot time what it ran still hears about it.
+            // bestEffortEvents marks the events as instrumentation the caller
+            // can do without: a failed hipEventRecord costs the measurement,
+            // not the launch, and is not left in the thread's error state. Used
+            // by online tuning, which times production dispatches. A swallowed
+            // start record also skips the stop record, so the pair is left
+            // unrecorded rather than half recorded. The overloads above keep
+            // the strict behaviour.
             //
-            // The flag exists because the events are recorded around a
-            // PRODUCTION dispatch. Online tuning times the caller's own
-            // hipblasLtMatmul, so without it an unrecordable event becomes the
-            // status of that matmul -- a correct GEMM reported as a failure,
-            // or a GEMM not run at all when the start record is the one that
-            // fails. A tuner that cannot measure has to stop measuring, not
-            // break the call it was measuring. Nothing more is needed on the
-            // tuner's side: a pair no launch recorded reads back non-positive,
-            // which the harvest already drops and retires. That holds because
-            // a swallowed start record also skips the stop record, so a
-            // failure leaves the pair unrecorded rather than half recorded.
-            //
-            // Separate overloads rather than a defaulted parameter because
-            // this library is installed with its headers and an exported CMake
-            // target, so the existing mangled names are ABI.
+            // Separate overloads rather than a defaulted parameter, because the
+            // existing mangled names are part of the installed ABI.
             hipError_t launchKernel(KernelInvocation const& kernel,
                                     hipStream_t             stream,
                                     hipEvent_t              startEvent,
@@ -159,10 +148,9 @@ namespace TensileLite
             int numRotationModules();
 
         private:
-            // The bestEffortEvents launchKernel, with startSwallowed carried in
-            // and out so launchKernels can tell the last kernel's launch that
-            // the first one's start record was swallowed, and leave the stop
-            // unrecorded to match.
+            // launchKernel with startSwallowed carried in and out, so that for a
+            // multi-kernel solution the last launch skips the stop record when
+            // the first one's start record was swallowed.
             hipError_t launchKernelMeasured(KernelInvocation const& kernel,
                                             hipStream_t             stream,
                                             hipEvent_t              startEvent,

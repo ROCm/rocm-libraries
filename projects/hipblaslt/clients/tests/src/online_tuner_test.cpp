@@ -1,29 +1,17 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Tests for the online tuner's bookkeeping: what registering a problem does,
-// how exploration ends, and what the lock-free resolution table answers. The
-// tuner carries no Tensile types, so like the store tests these need neither
-// the solution library nor the hooks the rest of hipblaslt-test uses.
+// Tests for the online tuner's bookkeeping: registration, how exploration ends, the
+// lock-free resolution table and the event pool.
 //
-// They run inside hipblaslt-test, against a private copy of the tuner:
-// OnlineTuner.cpp is compiled into the test binary alongside this file, and
-// the onlineTunerConfig() at the bottom of this file is what that copy is
-// built from. The library's own tuner is a different object. libhipblaslt
-// builds with hidden visibility and exports neither the class nor
-// onlineTunerConfig(), so the two copies never meet, and nothing here changes
-// what the library's tuner does in the cases that drive it through the API.
-// A static libhipblaslt does carry both into hipblaslt-test, so a static build
-// runs these cases in hipblaslt-test-online-tuner instead. See
+// They run against a private copy of the tuner: OnlineTuner.cpp is compiled into the
+// test binary with the onlineTunerConfig() defined at the bottom of this file. A shared
+// libhipblaslt exports neither, so the library's tuner is a separate object; a static
+// build runs these cases in hipblaslt-test-online-tuner instead. See
 // clients/tests/src/CMakeLists.txt.
 //
-// Most need no device either, because they are decided before any HIP call.
-// The ones gathered at the end of the file do: advancing the rotation means
-// issuing a candidate, issuing one means acquiring an event pair, and the
-// event pool is itself under test. Those skip where there is no device rather
-// than passing for the wrong reason. The one case that needs two devices is
-// in the OnlineTuner_multi_gpu suite, so CI runs it in its multi_gpu tier
-// rather than skipping it on every single-GPU runner.
+// The cases at the end of the file need a device and skip without one. The one case
+// that needs two devices is in the OnlineTuner_multi_gpu suite.
 
 #include "OnlineTuner.hpp"
 
@@ -45,12 +33,8 @@
 using rocblaslt::OnlineTuner;
 
 /**
- * Declared by OnlineTuner.hpp and defined only here.
- *
- * What a resolved problem has stopped holding is not something it answers, and
- * every other case in this file goes through the public surface. This is the
- * exception, it only reads, and it exists because the alternative way to see a
- * few hundred bytes a problem gave back is to measure the heap.
+ * Declared by OnlineTuner.hpp and defined only here. Read-only access to state
+ * the public surface does not expose.
  */
 struct OnlineTunerTestAccess
 {
@@ -115,35 +99,27 @@ struct OnlineTunerTestAccess
 
 namespace
 {
-    // What this test's own onlineTunerConfig() hands the singleton. The library
-    // maps these off the tuning mode and TuningPolicy, neither of which is
-    // linked here, so supplying them is also what keeps this test host-only.
+    // What this test's onlineTunerConfig() hands the singleton.
     constexpr int kTopK    = 3;
     constexpr int kRepeats = 2;
 
-    // Far below the library's default, so a case reaches the cap with a
-    // handful of shapes rather than thousands.
+    // Small, so a case reaches the cap with a handful of shapes.
     constexpr int kLivePairCap = 16;
 
-    // The host-only cases below record no event, so no candidate collects a
-    // sample and exploration can only end by running out its visit budget.
-    // Bounded well above that budget, so a tuner that never gives up fails an
-    // assertion instead of hanging the suite.
+    // Host-only cases record no event, so exploration can only end at the visit
+    // budget. Bounded well above it, so a tuner that never gives up fails instead of
+    // hanging.
     constexpr int kCallCeiling = 4096;
 
-    // The tuner's two ceilings, in the terms it computes them in.
-    // visitBudget() bounds the visits the REGISTRANT may spend and
-    // abandonBudget() bounds how long a problem nobody is exploring stays
-    // unresolved.
+    // visitBudget() bounds the visits the registrant may spend; abandonBudget()
+    // bounds how long a problem nobody is exploring stays unresolved.
     constexpr int kVisitBudget   = kTopK * kRepeats * OnlineTuner::c_visitBudgetFactor;
     constexpr int kAbandonBudget = kVisitBudget * OnlineTuner::c_abandonBudgetFactor;
 
-    // A run of sibling dispatches long enough to be well past the registrant's
-    // budget and well short of the abandonment ceiling.
+    // Well past the registrant's budget and well short of the abandonment ceiling.
     constexpr int kEarlyEnough = 512;
 
-    // The resolution table is direct-mapped over the key, so two keys this far
-    // apart share a slot.
+    // The resolution table is direct-mapped, so keys this far apart share a slot.
     constexpr size_t kResolutionSlots = OnlineTuner::c_resolutionSlots;
 
     OnlineTuner& tuner()
@@ -151,8 +127,7 @@ namespace
         return OnlineTuner::getInstance();
     }
 
-    // What the tuner has told this file's livePairCapReached callback, in
-    // order: the device, and the cap it was at.
+    // What the livePairCapReached callback was told, in order: (device, cap).
     std::vector<std::pair<int, int>>& capReports()
     {
         static std::vector<std::pair<int, int>> reports;
@@ -165,15 +140,9 @@ namespace
     }
 
     /**
-     * Stands in for std::hash<ContractionProblemGemm>, the problem identity the
-     * library hands the tuner alongside the resolution key.
-     *
-     * The two are deliberately different granularities: a resolution key covers
-     * every problem the prediction model ranks the same way, so problems that
-     * differ only in a leading dimension, an epilogue, a stride or a scaling
-     * mode share one. Every call below that varies this while holding the key
-     * fixed is one of those merged siblings, and that is the case these tests
-     * exist for.
+     * Stands in for the problem identity the library passes alongside the
+     * resolution key. Varying it under a fixed key makes a merged sibling: a
+     * problem the key covers that ranks or runs differently.
      */
     size_t identityOf(size_t key, int variant = 0)
     {
@@ -181,13 +150,8 @@ namespace
     }
 
     /**
-     * A solution pointer the tuner can carry but nothing can dereference.
-     *
-     * ContractionSolution is forward-declared in the tuner's header and the
-     * solution library is not linked here, which is the whole point: the tuner
-     * only ever copies this pointer and hands it back. A non-owning alias over
-     * a byte of this translation unit is a solution as far as any of that is
-     * concerned, and owns nothing to destroy.
+     * A solution pointer the tuner can carry but nothing dereferences; the
+     * solution library is not linked here.
      */
     std::shared_ptr<TensileLite::ContractionSolution> placeholderSolution()
     {
@@ -196,8 +160,8 @@ namespace
             std::shared_ptr<void>(), reinterpret_cast<TensileLite::ContractionSolution*>(&storage));
     }
 
-    // Offers the same ranking on behalf of the same problem until it resolves,
-    // and reports how many offers that took, or -1 if it never did.
+    // Offers the same ranking for the same problem until it resolves. Returns the
+    // number of offers that took, or -1 if it never resolved.
     int exploreToResolution(size_t key, size_t problem, const std::vector<int>& ranked)
     {
         for(int calls = 1; calls <= kCallCeiling; ++calls)
@@ -217,8 +181,6 @@ namespace
         EXPECT_EQ(tuner().repeats(), kRepeats);
         EXPECT_EQ(tuner().livePairCap(), kLivePairCap);
 
-        // No cold visits, so every test below registers its problem on the
-        // first offer.
         EXPECT_EQ(tuner().coldCalls(), 0);
     }
 
@@ -227,8 +189,7 @@ namespace
         EXPECT_EQ(tuner().resolution(0x1001), nullptr);
     }
 
-    // An empty ranking is not a problem to register: there is nothing to
-    // reorder and nothing to learn.
+    // An empty ranking has nothing to reorder, so nothing is registered.
     TEST(OnlineTuner, AnEmptyRankingRegistersNothing)
     {
         constexpr size_t key = 0x1002;
@@ -237,8 +198,8 @@ namespace
         EXPECT_EQ(tuner().resolution(key), nullptr);
     }
 
-    // One candidate is nothing to choose between, so the problem is born
-    // resolved with no winner and every later call takes the read-only path.
+    // One candidate is nothing to choose between: the problem is born resolved
+    // with no winner.
     TEST(OnlineTuner, ASingleCandidateResolvesOnSightWithNoWinner)
     {
         constexpr size_t key = 0x1003;
@@ -249,20 +210,16 @@ namespace
         ASSERT_NE(resolved, nullptr);
         EXPECT_EQ(resolved->winner(), -1);
 
-        // Nothing was measured, so there is no time to report and no row worth
-        // writing.
         EXPECT_FLOAT_EQ(resolved->winnerTimeUs(), 0.0f);
     }
 
-    // Exploration promotes the first candidate that still owes samples and,
-    // with nothing ever measuring one, gives up at the visit budget rather than
-    // holding the write lock for the life of the process.
+    // With nothing ever measured, exploration gives up at the visit budget rather
+    // than holding the write lock for the life of the process.
     TEST(OnlineTuner, ExplorationEndsAtTheVisitBudget)
     {
         constexpr size_t       key = 0x1004;
         const std::vector<int> ranked{21, 22, 23, 24};
 
-        // Only the top K are candidates, and the first of them is promoted.
         EXPECT_EQ(tuner().selectCandidate(key, identityOf(key), ranked), 0);
         EXPECT_EQ(tuner().resolution(key), nullptr);
 
@@ -274,8 +231,6 @@ namespace
         ASSERT_NE(resolved, nullptr);
         EXPECT_EQ(resolved->winner(), -1);
 
-        // Resolved, so the caller's ordering is left alone and no launch is
-        // offered an event pair.
         EXPECT_EQ(tuner().selectCandidate(key, identityOf(key), ranked), -1);
 
         hipEvent_t start = nullptr;
@@ -284,14 +239,11 @@ namespace
         EXPECT_EQ(start, nullptr);
         EXPECT_EQ(stop, nullptr);
 
-        // Nothing is outstanding on a resolved problem, so harvesting is a
-        // lookup and no more.
         tuner().harvestPending(key);
         EXPECT_EQ(tuner().resolution(key), resolved);
     }
 
-    // The slot a key lands in is shared, so the table has to answer on the key
-    // itself and not on the slot.
+    // Slots are shared, so the table must answer on the key, not the slot.
     TEST(OnlineTuner, AKeyInAResolvedKeysSlotIsNotMistakenForIt)
     {
         constexpr size_t key       = 0x1005;
@@ -327,10 +279,8 @@ namespace
         EXPECT_EQ(resolved->position(), 2);
     }
 
-    // A record is installed once, and pinWinner says which caller installed it.
-    // Whoever writes the row has to be that caller and no other: the key on the
-    // record is the one problem the winner was measured for, while the callers
-    // that lose the race carry keys nothing measured.
+    // A record is installed once, and pinWinner says which caller installed it, so
+    // only that caller writes a row.
     TEST(OnlineTuner, OnlyOneCallerInstallsTheRecord)
     {
         constexpr size_t key = 0x1008;
@@ -362,9 +312,7 @@ namespace
             << "a later caller restated the key the row is written under";
     }
 
-    // The selection hook registers a problem and the measurement hook only
-    // measures one it registered, so a key the two disagree on is refused
-    // rather than measured blind.
+    // A key the selection hook never registered is refused, not measured blind.
     TEST(OnlineTuner, BeginMeasurementRefusesAProblemSelectionNeverRegistered)
     {
         hipEvent_t start = nullptr;
@@ -377,19 +325,14 @@ namespace
     // ----------------------------------------------------------------------
     // Merged siblings: two problems under one resolution key.
     //
-    // The resolution key covers the fields the prediction model ranks on, so
-    // problems differing only in a leading dimension or an epilogue share one.
-    // Both move a kernel's runtime, so their launches are not interchangeable
-    // measurements, and resolve() compares a candidate's samples against the
-    // other candidates' as though they were. The three tests below are the
-    // three places that has to be stopped: who is offered a candidate, whose
-    // launch is timed, and whose key a record is built from.
+    // The key merges problems that differ in, for example, leading dimension or
+    // epilogue, which both move a kernel's runtime. Their launches are not
+    // comparable samples, so only the registering problem is offered candidates,
+    // timed, and recorded.
     // ----------------------------------------------------------------------
 
-    // Exploration belongs to the problem that registered it. A sibling visiting
-    // the same key is left its own ordering -- and spends none of the visit
-    // budget, which it could otherwise run out, ending exploration early on
-    // however many samples had been taken by then.
+    // A sibling is left its own ordering and spends none of the visit budget,
+    // which it could otherwise exhaust.
     TEST(OnlineTuner, AMergedSiblingIsOfferedNoCandidate)
     {
         constexpr size_t key = 0x1009;
@@ -402,8 +345,7 @@ namespace
 
         EXPECT_EQ(tuner().selectCandidate(key, registering, ranked), 0);
 
-        // Comfortably past the visit budget, which is candidates * repeats * a
-        // slack factor and so cannot be more than a few dozen here.
+        // Well past the visit budget.
         for(int visit = 0; visit < 512; ++visit)
             ASSERT_EQ(tuner().selectCandidate(key, merged, ranked), -1)
                 << "a merged sibling was handed a probe candidate on visit " << visit;
@@ -411,21 +353,14 @@ namespace
         EXPECT_EQ(tuner().resolution(key), nullptr)
             << "a merged sibling's visits ran the exploration out of its budget";
 
-        // Still owed its first candidate, which is what nothing having been
-        // credited to it looks like from here.
+        // Still owed its first candidate: nothing was credited.
         EXPECT_EQ(tuner().selectCandidate(key, registering, ranked), 0);
     }
 
-    // Refusing the sibling a candidate is not enough on its own. It still
-    // dispatches its own ranking's pick, and when two merged problems rank
-    // alike that pick is a candidate of this exploration's that still owes
-    // samples -- so matching a launch on the solution index alone would take
-    // the sample anyway and credit one problem with the other's launch.
-    //
-    // The refusal itself is decided before any HIP call, so it holds with or
-    // without a device. What it separates it from does not: a launch is only
-    // accepted if an event pair can be created, so on a machine with no HIP
-    // device this passes for the wrong reason. Judge it where one exists.
+    // A sibling's own pick is often a candidate this exploration still owes, so
+    // matching a launch on the solution index alone would credit one problem with
+    // the other's launch. Needs a device: without one no launch is accepted and
+    // this would pass for the wrong reason.
     TEST(OnlineTuner, AMergedSiblingsOwnLaunchIsNotSampled)
     {
         constexpr size_t key = 0x100a;
@@ -445,16 +380,12 @@ namespace
         EXPECT_EQ(start, nullptr);
         EXPECT_EQ(stop, nullptr);
 
-        // Candidate 0 still owes every one of its samples, so the next visit of
-        // the registering problem is offered it again. Had the sibling's launch
-        // been credited to it, the rotation would have moved on.
+        // Had the sibling's launch been credited, the rotation would have moved on.
         EXPECT_EQ(tuner().selectCandidate(key, registering, ranked), 0)
             << "a merged sibling's launch advanced this problem's rotation";
     }
 
-    // A launch of a candidate this visit was not asked for is not a sample of
-    // it either, whoever issues it: the offer names one candidate and buys one
-    // sample of it.
+    // The offer names one candidate and buys one sample of it.
     TEST(OnlineTuner, OnlyTheCandidateThisVisitWasOfferedIsSampled)
     {
         constexpr size_t key = 0x100b;
@@ -466,22 +397,15 @@ namespace
         hipEvent_t start = nullptr;
         hipEvent_t stop  = nullptr;
 
-        // Still owes all its samples, and is still not what was asked for.
         EXPECT_FALSE(tuner().beginMeasurement(key, ranked[1], nullptr, start, stop))
             << "a candidate the rotation did not ask for was timed";
         EXPECT_EQ(start, nullptr);
         EXPECT_EQ(stop, nullptr);
     }
 
-    // The key a row is written under belongs to the problem that was measured.
-    //
-    // OnlyOneCallerInstallsTheRecord above proves something narrower -- that
-    // one caller installs and the rest are told they did not -- which the
-    // sequential case cannot tell apart from this one, because there the
-    // installer and the measured problem are the same caller. Here the merged
-    // sibling arrives FIRST and its ranking does hold the winner, so nothing
-    // about its own list refuses it and installer-only writes is satisfied
-    // either way. What separates the two is whose key ends up on the record.
+    // The record's key belongs to the problem that was measured. The sibling
+    // arrives first here, and its ranking holds the winner, so only whose key ends
+    // up on the record tells the two apart.
     TEST(OnlineTuner, OnlyTheMeasuredProblemInstallsTheRecord)
     {
         constexpr size_t key = 0x100c;
@@ -495,8 +419,7 @@ namespace
         ASSERT_NE(resolved, nullptr);
         ASSERT_EQ(resolved->pinned(), nullptr);
 
-        // One resolution key, two file keys, differing in exactly the field the
-        // key merges and the row separates.
+        // One resolution key, two file keys.
         TensileLite::ProblemOverride measuredKey;
         measuredKey.m          = 4096;
         measuredKey.colStrideA = 4096;
@@ -523,20 +446,12 @@ namespace
     // ----------------------------------------------------------------------
     // HIP graph capture.
     //
-    // A capture is not a dispatch. It writes a kernel choice down once and the
-    // caller replays it for the life of the graph, never coming back through
-    // selection -- so a probe promoted during capture is a knowingly
-    // non-optimal kernel with no path to correction. It also buys nothing: the
-    // measurement hook refuses a capturing stream, so the probe is never timed.
-    //
-    // Serving a RESOLVED problem is the opposite case and is kept: a measured
-    // winner is precisely what belongs in a graph. The two tests below are
-    // those two halves.
+    // A graph replays its kernel choice without coming back through selection, so a
+    // probe captured during exploration would never be corrected, and is never
+    // timed. A resolved problem's measured winner is what belongs in a graph.
     // ----------------------------------------------------------------------
 
-    // A capture is offered nothing while exploration is still running, and
-    // costs the exploration nothing by being refused -- the same shape of rule
-    // as the merged sibling above, and for the same two reasons.
+    // A capture is offered nothing during exploration and spends none of its budget.
     TEST(OnlineTuner, CapturesAreOfferedNoCandidateAndSpendNoVisitBudget)
     {
         constexpr size_t key = 0x100d;
@@ -546,8 +461,7 @@ namespace
 
         EXPECT_EQ(tuner().selectCandidate(key, problem, ranked), 0);
 
-        // Comfortably past the visit budget, which is candidates * repeats * a
-        // slack factor and so cannot be more than a few dozen here.
+        // Well past the visit budget.
         for(int visit = 0; visit < 512; ++visit)
             ASSERT_EQ(tuner().selectCandidate(key, problem, ranked, /*capturing=*/true), -1)
                 << "a probe candidate was promoted into a captured graph on visit " << visit;
@@ -555,8 +469,7 @@ namespace
         EXPECT_EQ(tuner().resolution(key), nullptr)
             << "captured visits ran the exploration out of its budget";
 
-        // Still owed its first candidate, which is what the captures having
-        // cost it nothing looks like from here.
+        // Still owed its first candidate.
         EXPECT_EQ(tuner().selectCandidate(key, problem, ranked), 0)
             << "a captured visit advanced the rotation";
     }
@@ -564,23 +477,14 @@ namespace
     // ----------------------------------------------------------------------
     // Heuristic queries.
     //
-    // hipblasLtMatmulAlgoGetHeuristic hands the caller an algo and the caller
-    // dispatches it itself, for as long as it likes. A probe promoted into
-    // that answer is kept for as long as the caller keeps the algo, which for
-    // the ordinary framework pattern -- query once, dispatch forever -- is the
-    // life of the process. And it is never measured: the library cannot pair
-    // the launch of a caller-supplied algo with the visit that handed it out,
-    // so that launch goes past both measurement hooks.
-    //
-    // So a query is treated as a capture is: served a measured winner once
-    // there is one, and otherwise its own ranking, with nothing registered,
+    // The caller keeps the returned algo and dispatches it itself, so a probe
+    // promoted into it would be kept, and its launch cannot be paired with the
+    // visit that produced it. A query is treated like a capture: served a measured
+    // winner if there is one, otherwise its own ranking, with nothing registered,
     // counted or offered.
     // ----------------------------------------------------------------------
 
-    // However often it comes back. A query that asked again used to be taken
-    // as an ordinary visit and offered the rotation's next probe -- a probe
-    // its own launch could never be measured for, and that a merged sibling's
-    // caller-supplied launch on the same thread could claim instead.
+    // However often the same query comes back.
     TEST(OnlineTuner, AHeuristicQueryIsNeverOfferedAProbeHoweverOftenItComesBack)
     {
         constexpr size_t key = 0x1013;
@@ -592,7 +496,6 @@ namespace
             ASSERT_EQ(tuner().selectCandidate(key, problem, ranked, false, /*retained=*/true), -1)
                 << "a probe was promoted into an answer the caller keeps, on query " << visit;
 
-        // Nothing to claim, so the launch of what it was handed is not timed.
         hipEvent_t start = nullptr;
         hipEvent_t stop  = nullptr;
         EXPECT_FALSE(tuner().beginMeasurement(key, ranked[0], nullptr, start, stop))
@@ -601,21 +504,15 @@ namespace
         EXPECT_EQ(tuner().resolution(key), nullptr)
             << "heuristic queries ran an exploration out of its budget";
 
-        // And the problem's own dispatches are not held back by any of it:
-        // the first one registers and is offered the first probe.
+        // The problem's own dispatches still register and are offered the first probe.
         EXPECT_EQ(tuner().selectCandidate(key, problem, ranked), 0)
             << "heuristic queries left the problem unable to explore";
     }
 
-    // A heuristic query and a dispatch of the same problem are not the same
-    // problem to the solution library. The query ranks under a dummy beta and
-    // the preference's workspace ceiling, the dispatch under its own beta and
-    // allocation, so the identity each brings differs while the resolution key
-    // is the same. Whoever registers owns the exploration, and a query that
-    // registered first used to make every such dispatch a merged sibling of it:
-    // offered nothing, sampled by nothing, and holding the exclusive lock on
-    // every visit until the abandonment ceiling gave up with no winner. A
-    // query registers nothing now, so the dispatch is the registrant.
+    // A query and a dispatch of one problem carry different identities under the
+    // same key (the query ranks with a dummy beta and the preference's workspace).
+    // A query registers nothing, so a later dispatch is the registrant rather than a
+    // sibling of the query.
     TEST(OnlineTuner, ADispatchIsNotASiblingOfAQueryThatOnlyAskedFirst)
     {
         constexpr size_t key = 0x1020;
@@ -640,11 +537,8 @@ namespace
     // ----------------------------------------------------------------------
     // Problems the library stops being asked about.
     //
-    // Exploration advances at the selection hook, and a caller holding an algo
-    // it fetched once never reaches it. Such a problem would otherwise sit one
-    // visit short of its budget for ever: never resolving, never publishing,
-    // and so costing every dispatch of that shape the two locked lookups a
-    // published resolution answers without a lock.
+    // A problem whose registrant stops dispatching would otherwise never resolve,
+    // and every dispatch under its key would keep paying for the locked lookups.
     // ----------------------------------------------------------------------
 
     TEST(OnlineTuner, AProblemSelectionStopsVisitingGivesUpAndPublishes)
@@ -654,13 +548,11 @@ namespace
         const size_t           problem = identityOf(key);
         const std::vector<int> ranked{181, 182, 183};
 
-        // One selection visit, offered a probe whose launch never comes: the
-        // application has moved on from the shape.
+        // A probe whose launch never comes: the application moved on.
         ASSERT_EQ(tuner().selectCandidate(key, problem, ranked), 0);
         ASSERT_EQ(tuner().resolution(key), nullptr);
 
-        // Dispatches under the key that reach the measurement hook without a
-        // selection visit of the registrant -- a merged sibling's, say.
+        // Dispatches under the key without a selection visit of the registrant.
         int dispatches = 0;
         for(; dispatches < kCallCeiling && !tuner().resolution(key); ++dispatches)
             tuner().harvestPending(key);
@@ -669,15 +561,12 @@ namespace
         ASSERT_NE(resolved, nullptr) << "a problem nothing can measure never gave up";
         EXPECT_EQ(resolved->winner(), -1) << "nothing was measured, so there is no winner";
 
-        // Bounded by abandonBudget(), not by the registrant's own visit budget:
-        // this counter is advanced by every dispatch under the key, including a
-        // merged sibling's, so a ceiling tight enough to bound an exploration's
-        // progress would end a healthy one early. See the merged-sibling case.
+        // Bounded by abandonBudget(): the counter also advances on siblings'
+        // dispatches, so a tighter ceiling would end healthy explorations early.
         EXPECT_GT(dispatches, kTopK * kRepeats);
         EXPECT_LE(dispatches, kAbandonBudget + 2) << "the budget did not bound it";
 
-        // And the point of publishing: both entry points answer from the table
-        // now, without taking anything.
+        // Published, so both entry points answer from the table.
         EXPECT_EQ(tuner().selectCandidate(key, problem, ranked), -1);
 
         hipEvent_t start = nullptr;
@@ -685,11 +574,8 @@ namespace
         EXPECT_FALSE(tuner().beginMeasurement(key, ranked[0], nullptr, start, stop));
     }
 
-    // The other side of the same counter. Every call of an ordinary
-    // exploration reaches the measurement hook too, so counting those against
-    // the budget would halve how long a problem has to finish -- which is the
-    // margin GPU-bound shapes already need all of. A selection visit is what
-    // resets the run.
+    // Every call of an ordinary exploration also reaches the measurement hook; a
+    // selection visit resets the run, so those calls do not count against it.
     TEST(OnlineTuner, DispatchesBetweenSelectionVisitsDoNotShortenAnExploration)
     {
         constexpr size_t selectionOnlyKey = 0x1017;
@@ -714,31 +600,11 @@ namespace
             << "the dispatches of an ordinary exploration shortened its own budget";
     }
 
-    // A merged sibling spends none of the exploration's budget at the
-    // selection hook, and its dispatches must spend none of it at the
-    // measurement hook either. A sibling dispatching often enough would
-    // otherwise end the exploration early on however many samples had been
-    // taken by then -- which is the whole reason the sibling is exempt in the
-    // first place.
-    //
-    // It must not do the opposite either, and the version of this case that
-    // asserted only the first half is what kept an earlier defect in place: a
-    // sibling's selection visit reset the give-up counter, so a registrant
-    // that had stopped visiting could never be noticed, the problem stayed
-    // unresolved, and every one of those sibling dispatches took the tuner's
-    // process-wide mutex EXCLUSIVELY for the life of the process. Asserting
-    // only "still exploring at 512" was satisfied by never ending at all.
-    //
-    // So the two halves are two ceilings, and both are asserted. The
-    // registrant's own visit budget is small and a sibling cannot touch it;
-    // the abandonment ceiling is much larger and is the one a sibling's
-    // dispatches do advance, because what it measures is how long a shape
-    // NOBODY is exploring may stay unresolved.
-    //
-    // Deterministic by construction rather than by timing: the interleaving
-    // under test is "a sibling's visit between the registrant's", and driving
-    // both from this thread in a fixed order is that interleaving with the
-    // scheduler taken out. The concurrent case follows.
+    // A merged sibling neither ends an exploration early nor keeps one alive.
+    // Its dispatches spend none of the registrant's visit budget, but they do
+    // advance the abandonment counter, so a registrant that stops visiting is still
+    // given up on. Driven from this thread in a fixed order so the interleaving is
+    // deterministic; the concurrent case follows.
     TEST(OnlineTuner, AMergedSiblingEndsAnExplorationLateAndNeverEarly)
     {
         constexpr size_t key = 0x1019;
@@ -750,9 +616,7 @@ namespace
 
         ASSERT_EQ(tuner().selectCandidate(key, registering, ranked), 0);
 
-        // Comfortably past the registrant's visit budget and comfortably short
-        // of the abandonment ceiling, which is the window the first half of
-        // the rule lives in.
+        // The window between the two ceilings.
         ASSERT_GT(kEarlyEnough, kVisitBudget);
         ASSERT_LT(kEarlyEnough, kAbandonBudget);
 
@@ -766,14 +630,10 @@ namespace
         EXPECT_EQ(tuner().resolution(key), nullptr)
             << "a merged sibling's dispatches ran the exploration out of its budget";
 
-        // Still owed its first candidate: the sibling spent none of the
-        // registrant's visits either.
+        // Still owed its first candidate.
         EXPECT_EQ(tuner().selectCandidate(key, registering, ranked), 0);
 
-        // The other half. The registrant now stops visiting -- a shape the
-        // application has moved on from -- while the sibling keeps
-        // dispatching. Nothing can finish this
-        // exploration, so it has to be given up on.
+        // The registrant stops visiting while the sibling keeps dispatching.
         int siblingVisits = 0;
         for(; siblingVisits < kCallCeiling && !tuner().resolution(key); ++siblingVisits)
         {
@@ -786,16 +646,12 @@ namespace
             << "a merged sibling held an abandoned exploration open for ever";
         EXPECT_EQ(resolved->winner(), -1) << "nothing was measured, so there is no winner";
 
-        // And it was the large ceiling that ended it, not the small one. If
-        // these two numbers could be met by one budget there would be nothing
-        // to get wrong here.
+        // And it was the abandonment ceiling that ended it, not the visit budget.
         EXPECT_GT(siblingVisits, kVisitBudget) << "the registrant's budget ended it";
     }
 
-    // The same rule with the scheduler putting the visits in order instead of
-    // this thread. The property is not about any one interleaving: a shape no
-    // caller is exploring must end under EVERY interleaving of sibling
-    // traffic, so this asserts termination with real threads and a bound.
+    // The same rule under real threads: a shape no caller is exploring must end
+    // under every interleaving of sibling traffic.
     TEST(OnlineTuner, ConcurrentMergedSiblingsCannotKeepADeadExplorationAlive)
     {
         constexpr size_t key = 0x101C;
@@ -804,8 +660,7 @@ namespace
 
         const std::vector<int> ranked{241, 242, 243};
 
-        // The registrant registers, is offered its first candidate, and never
-        // comes back -- the dispatch never arrives, so no sample ever will.
+        // Registered and offered a candidate, then never dispatched.
         ASSERT_EQ(tuner().selectCandidate(key, registering, ranked), 0);
 
         constexpr int kSiblings = 4;
@@ -847,9 +702,8 @@ namespace
         EXPECT_EQ(answer->winner(), -1) << "nothing was measured, so there is no winner";
     }
 
-    // The samples and the in-flight record are what exploring costs, and a
-    // problem map that never erases is what makes holding them afterwards add
-    // up.
+    // A resolved problem releases its samples and in-flight record; the problem
+    // map never erases, so holding them would add up.
     TEST(OnlineTuner, AResolvedProblemGivesBackItsExplorationStorage)
     {
         constexpr size_t key = 0x101A;
@@ -865,8 +719,7 @@ namespace
         EXPECT_EQ(OnlineTunerTestAccess::exploringBytes(tuner(), key), 0u)
             << "a resolved problem is still holding its exploration storage";
 
-        // The other way a problem resolves: born with nothing to compare, so
-        // the arrays are dead before it has answered once.
+        // Born resolved, with nothing to compare.
         constexpr size_t single = 0x101B;
 
         ASSERT_EQ(tuner().selectCandidate(single, identityOf(single), {221}), -1);
@@ -877,18 +730,12 @@ namespace
     }
 
     // Last of the host-only cases, because filling the table evicts every key
-    // above it.
-    //
-    // Publishing used to stop once as many problems had resolved as the table
-    // has slots. The table is direct-mapped, so a slot is shared and not spent:
-    // the effect was that the problem after that, and every one after it, kept
-    // a null resolution() for the life of the process and so took the full
-    // locked path on every dispatch -- however free the slot it would have
-    // landed in.
+    // above it. A problem resolved after as many problems as the table has slots
+    // must still publish: the table is direct-mapped, so slots are shared, not
+    // spent.
     TEST(OnlineTuner, AProblemResolvedAfterTheTableIsFullStillPublishes)
     {
-        // Clear of every other key in the file, and aligned so the loop below
-        // covers each slot exactly once.
+        // Aligned so the loop covers each slot exactly once.
         constexpr size_t base = 0x40000;
         static_assert(base % kResolutionSlots == 0, "the fill would not cover the table");
 
@@ -907,22 +754,14 @@ namespace
         EXPECT_NE(tuner().resolution(late), nullptr)
             << "a problem that resolved past the slot count was refused a published entry";
 
-        // And the boundary that does remain, which is the point of publishing
-        // past the count rather than a cost of it: the late key took the slot
-        // of the one it collides with, and that one is left to the locked path
-        // rather than answered with somebody else's winner.
+        // The remaining boundary: the late key took its colliding slot, and the
+        // evicted key falls back to the locked path rather than another's winner.
         EXPECT_EQ(tuner().resolution(base + 7), nullptr) << "a collision answered on the slot";
     }
 
     // ----------------------------------------------------------------------
-    // Cases that need a device.
-    //
-    // Everything above is decided before any HIP call. These are not: a
-    // candidate's issue count only moves when a launch is offered an event
-    // pair, so the one case the self-limiting capture above is not -- a
-    // capture arriving part way through an exploration, where the candidate
-    // owed is no longer the caller's own rank 0 -- cannot be built without
-    // one. Nor can anything about the pool itself.
+    // Cases that need a device: a candidate's issue count only moves when a launch
+    // is offered an event pair, and the pool is itself under test.
     // ----------------------------------------------------------------------
 
     int deviceCount()
@@ -931,9 +770,8 @@ namespace
         return hipGetDeviceCount(&count) == hipSuccess ? count : 0;
     }
 
-    // A stream and a scrap buffer to put between a measurement's two events.
-    // Two back-to-back records can read exactly 0.0 ms, and the harvest's sign
-    // test rejects that, so a sample needs something real bracketed.
+    // A stream and a scrap buffer to bracket between a measurement's two events:
+    // back-to-back records can read exactly 0.0 ms, which the sign test rejects.
     class Device
     {
     public:
@@ -964,8 +802,8 @@ namespace
             return m_stream;
         }
 
-        // What the kernel launch does for the library: record both ends around
-        // something, return, and leave the pair readable by the next harvest.
+        // What the launch does for the library: record both ends around some work,
+        // return, and leave the pair for the next harvest.
         void bracket(size_t key, hipEvent_t start, hipEvent_t stop) const
         {
             EXPECT_EQ(hipEventRecord(start, m_stream), hipSuccess);
@@ -983,8 +821,8 @@ namespace
         void*       m_scratch = nullptr;
     };
 
-    // One whole visit of a problem: take the offer, time the launch it asks
-    // for, read it back. Returns the position offered.
+    // One whole visit: take the offer, time the launch, read it back. Returns the
+    // position offered.
     int sampleOneVisit(size_t                  key,
                        size_t                  problem,
                        const std::vector<int>& ranked,
@@ -1008,11 +846,9 @@ namespace
         return position;
     }
 
-    // One dispatch the way the library makes it: harvest this key's finished
-    // launches first, then select, then time the launch selection asked for.
-    // Unlike sampleOneVisit() the pair is left outstanding until the key's
-    // next dispatch, which is what holds pairs between visits and what a shape
-    // dispatched once never gives back. Returns whether the launch was timed.
+    // One dispatch as the library makes it: harvest, select, time the launch. The
+    // pair stays outstanding until the key's next dispatch. Returns whether the
+    // launch was timed.
     bool dispatchOnce(size_t                  key,
                       size_t                  problem,
                       const std::vector<int>& ranked,
@@ -1033,9 +869,8 @@ namespace
         return true;
     }
 
-    // A stream the GPU stops on until the host says go, so what is recorded on
-    // it stays in flight for as long as a case needs: the stream waits on a
-    // host-visible value that release() writes.
+    // A stream held on a host-visible value until release(), so what is recorded
+    // on it stays in flight for as long as a case needs.
     class HeldStream
     {
     public:
@@ -1092,11 +927,8 @@ namespace
         bool        m_released = false;
     };
 
-    // The case the capture test above cannot reach, and the only damaging one:
-    // exploration has advanced past its first candidate, and a capture lands
-    // on one the caller's own ranking does not put first. Freezing that into a
-    // graph is a kernel the heuristic rejected and the tuner has not finished
-    // judging, kept for the graph's lifetime.
+    // A capture that arrives part way through exploration, when the owed probe is
+    // not the caller's own first choice, is refused it.
     TEST(OnlineTuner, ACaptureMidExplorationIsRefusedTheProbeAndLeavesItOwed)
     {
         if(deviceCount() < 1)
@@ -1109,10 +941,8 @@ namespace
         const size_t           problem = identityOf(key);
         const std::vector<int> ranked{111, 112, 113};
 
-        // Run the rotation off candidate 0, so what is owed next is a probe
-        // sitting at a position the caller did not rank first. nextCandidate()
-        // takes the least-issued candidate, so the offers go 0, 1, 2, 0, 1, 2
-        // and one visit short of a full pass leaves the last one owed.
+        // nextCandidate() takes the least-issued candidate, so one visit short of a
+        // full pass leaves the last candidate owed.
         for(int candidate = 0; candidate < kTopK - 1; ++candidate)
             ASSERT_EQ(sampleOneVisit(key, problem, ranked, device), candidate)
                 << "the rotation did not advance as expected";
@@ -1122,16 +952,12 @@ namespace
         EXPECT_EQ(tuner().selectCandidate(key, problem, ranked, /*capturing=*/true), -1)
             << "probe candidate " << (kTopK - 1) << " was promoted into a captured graph";
 
-        // Nothing was credited to the capture, so the probe it was refused is
-        // still the one the next real dispatch is asked for.
+        // The refused probe is still the one the next real dispatch is asked for.
         EXPECT_EQ(tuner().selectCandidate(key, problem, ranked), kTopK - 1)
             << "a captured visit consumed the candidate it was refused";
     }
 
-    // The other half of the rule. A resolved problem has a measured winner and
-    // a graph is where that answer belongs: it is the kernel cache mode would
-    // replay, picked the same way. Refusing a capture outright would hand it
-    // the heuristic's rank 1 instead and throw the measurement away.
+    // A resolved problem's measured winner is what a graph should get.
     TEST(OnlineTuner, ACaptureIsStillServedTheMeasuredWinner)
     {
         if(deviceCount() < 1)
@@ -1159,10 +985,7 @@ namespace
             << "a capture was denied the measured winner";
     }
 
-    // The same half of the rule for a heuristic query: once the problem's own
-    // dispatches have measured a winner, a caller that asks once and keeps the
-    // answer is handed it, which is the kernel cache mode would replay, and
-    // keeps that.
+    // Likewise for a heuristic query, once dispatches have measured a winner.
     TEST(OnlineTuner, AHeuristicQueryIsStillServedTheMeasuredWinner)
     {
         if(deviceCount() < 1)
@@ -1193,13 +1016,10 @@ namespace
     /**
      * A thread that runs one piece of work at a time, on demand.
      *
-     * The offer that pairs a selection visit with the launch it asked for is
-     * held on the thread selection answered, so WHICH thread acts is the
-     * variable the two cases below are about and WHEN it acts must not be.
-     * Ordering the run() calls from the test body makes the interleaving total
-     * and fixed: no sleeps, no retries, no spinning on a flag, and the same
-     * sequence on every machine. A plain std::thread per step would not do, as
-     * the offer has to survive from one of this thread's steps to the next.
+     * The offer is held on the thread that selection answered, so the cases
+     * below vary which thread acts while run() fixes the order of steps. A
+     * std::thread per step would not do: the offer must survive between
+     * steps on the same thread.
      */
     class Worker
     {
@@ -1222,8 +1042,7 @@ namespace
         Worker(const Worker&)            = delete;
         Worker& operator=(const Worker&) = delete;
 
-        // Runs work on this worker and does not return until it is done, so
-        // the caller's next statement is strictly after it.
+        // Returns once the work is done.
         void run(std::function<void()> work)
         {
             std::packaged_task<void()> task(std::move(work));
@@ -1267,20 +1086,9 @@ namespace
         std::thread                 m_thread;
     };
 
-    // The sample a sibling could steal.
-    //
-    // The offer used to be one slot on the problem, matched at the measurement
-    // hook on the solution index alone, so any launch of that index under the
-    // same resolution key claimed it -- and the key deliberately merges
-    // problems that differ in epilogue, bias, strides or scaling, whose own
-    // rank 0 is very often a candidate of this exploration's. The sample taken
-    // was then a measurement of a different problem's kernel filed under this
-    // problem's candidate: the pooled-samples defect, reached under
-    // concurrency.
-    //
-    // Both halves are asserted, because the old slot got both wrong at once:
-    // the thief must be refused, AND the launch the offer was made to must
-    // still be able to claim it afterwards.
+    // A merged sibling on another thread cannot claim the registrant's offer, even
+    // when its own pick is the offered solution, and the registrant can still claim
+    // it afterwards.
     TEST(OnlineTuner, AnotherThreadCannotClaimTheOfferThisOneWasMade)
     {
         if(deviceCount() < 1)
@@ -1304,9 +1112,7 @@ namespace
                 << "the registrant was not offered its first candidate";
         });
 
-        // The sibling is refused a candidate of its own, as it always was, and
-        // then dispatches its own rank 0 -- which is the solution index the
-        // registrant was just offered.
+        // The sibling's own first choice is the solution the registrant was offered.
         hipEvent_t stolenStart = nullptr;
         hipEvent_t stolenStop  = nullptr;
 
@@ -1320,8 +1126,7 @@ namespace
                    "registrant's offer was made for";
         });
 
-        // And the offer is still there to be claimed by the launch it was made
-        // to, which is the half a thief also destroys.
+        // The offer is still there for the launch it was made to.
         registrant.run([&] {
             hipEvent_t start = nullptr;
             hipEvent_t stop  = nullptr;
@@ -1333,23 +1138,13 @@ namespace
             tuner().harvestPending(key);
         });
 
-        // The sample landed, so the exploration moved on to the next candidate
-        // rather than still owing the first one.
+        // The sample landed, so the rotation moved on.
         EXPECT_EQ(tuner().selectCandidate(key, registering, ranked), 1)
             << "the registrant's sample was not credited";
     }
 
-    // The same defect's other two halves, read
-    // forwards instead of backwards: the slot was dropped at the top of every
-    // selection visit, above the merged-sibling guard, so a sibling CANCELLED
-    // an offer the registrant had not consumed yet. The registrant's launch
-    // then went unsampled while its visit had already been spent, and enough
-    // sibling traffic starved the exploration into resolving with no winner at
-    // all -- for a shape that measures perfectly well.
-    //
-    // So this drives the whole exploration with a sibling's visit between
-    // every one of the registrant's, from another thread, and asks for the one
-    // thing starvation takes away: a winner.
+    // A sibling's visit between every one of the registrant's, from another
+    // thread, must not cancel the registrant's offers and starve it of a winner.
     TEST(OnlineTuner, SiblingVisitsDoNotStarveTheRegistrantOfItsWinner)
     {
         if(deviceCount() < 1)
@@ -1371,7 +1166,6 @@ namespace
         int visits = 0;
         for(; visits < kCallCeiling && !tuner().resolution(key); ++visits)
         {
-            // Between the registrant's visit and its launch, every time.
             const int position = tuner().selectCandidate(key, registering, ranked);
 
             sibling.run([&] {
@@ -1400,10 +1194,8 @@ namespace
         EXPECT_GT(resolved->winnerTimeUs(), 0.0f) << "a winner with no measured time";
     }
 
-    // An offer names one registration of a problem, not just its key. A
-    // thread still holding an offer made before reloadForTest() must not be
-    // able to claim it against the candidate list the same key registers
-    // afterwards, even where the candidate it names is the same.
+    // A thread holding an offer from before reloadForTest() cannot claim it
+    // against the key's new registration, even for the same candidate.
     TEST(OnlineTuner, AnOfferFromAnEarlierRegistrationOfTheKeyIsNotClaimed)
     {
         if(deviceCount() < 1)
@@ -1423,8 +1215,7 @@ namespace
 
         tuner().reloadForTest();
 
-        // The same key and ranking registered again, from this thread, which
-        // is offered the same candidate the stale thread holds.
+        // Registered again from this thread, which is offered the same candidate.
         ASSERT_EQ(tuner().selectCandidate(key, problem, ranked), 0);
 
         stale.run([&] {
@@ -1451,18 +1242,13 @@ namespace
     // ----------------------------------------------------------------------
     // The harvest's sign test.
     //
-    // A pair queries as complete whether or not a launch recorded it, so the
-    // elapsed time is the only evidence that one did, and the harvest keeps a
-    // sample only when it is positive. Every way of missing a record has to
-    // read otherwise, and that holds because of how pairs are pooled: only a
-    // pair that produced a sample goes back, and it goes back inverted. The
-    // cases below are the ways of missing one, each of which must be dropped
-    // without crediting the candidate, and must retire the pair rather than
-    // pool it, since a rejected pair pooled again would be inverted twice.
+    // A pair queries as complete whether or not a launch recorded it, so a sample
+    // is kept only when the elapsed time is positive. Pairs are pooled inverted and
+    // only after a sample, so every way of missing a record reads non-positive. A
+    // rejected pair is retired, not pooled: pooling it would invert it twice.
     // ----------------------------------------------------------------------
 
-    // The pairing the rest depends on, on one device: a sample is taken, and
-    // its pair goes back to the pool start-for-stop.
+    // A sample is taken and its pair goes back to the pool start-for-stop.
     TEST(OnlineTuner, AnAcceptedPairIsPooledInverted)
     {
         if(deviceCount() < 1)
@@ -1490,8 +1276,8 @@ namespace
         EXPECT_EQ(OnlineTunerTestAccess::samples(tuner(), key), 1u) << "the sample was not kept";
     }
 
-    // Each way a launch can fail to record its pair, read back by the harvest.
-    // Every one is dropped, credits nothing, and retires the pair.
+    // Each way a launch can fail to record its pair is dropped, credits nothing,
+    // and retires the pair.
     TEST(OnlineTuner, EveryUnrecordedPairIsDroppedAndRetired)
     {
         if(deviceCount() < 1)
@@ -1500,15 +1286,13 @@ namespace
         const Device device(0);
         const int    id = device.id();
 
-        // Nothing outstanding from earlier cases, so the counts below move
-        // only for what this case does.
+        // Nothing outstanding from earlier cases.
         tuner().reloadForTest();
 
         const std::vector<int> ranked{301, 302, 303};
 
-        // One measurement of key on this thread, recorded as record() says,
-        // then harvested. Returns whether the pair it was handed came from
-        // the pool.
+        // One measurement of key, recorded as record() says, then harvested. Returns
+        // whether the pair handed out came from the pool.
         auto measure = [&](size_t key, const std::function<void(hipEvent_t, hipEvent_t)>& record) {
             const size_t pooledBefore = OnlineTunerTestAccess::pooledPairs(tuner(), id).size();
 
@@ -1526,9 +1310,8 @@ namespace
             const int liveBefore = OnlineTunerTestAccess::livePairs(tuner(), id);
             tuner().harvestPending(key);
 
-            // The harvest runs inside the caller's matmul, so reading back a
-            // pair no launch recorded must leave nothing in this thread's HIP
-            // last-error state for the caller to take for its own.
+            // The harvest runs inside the caller's matmul, so it must leave no error in
+            // the thread's HIP state.
             EXPECT_EQ(hipGetLastError(), hipSuccess)
                 << "key " << key << ": the harvest left an error in the caller's HIP state";
 
@@ -1558,8 +1341,7 @@ namespace
             tuner().harvestPending(warm);
         }
 
-        // Every pooled pair but one is taken by an outstanding measurement, so
-        // what is handed out next is known.
+        // Take all but one pooled pair, so the next pair handed out is known.
         size_t drain = 0x1100;
         while(OnlineTunerTestAccess::pooledPairs(tuner(), id).size() > 1)
         {
@@ -1572,12 +1354,11 @@ namespace
             ++drain;
         }
 
-        // A pooled pair reused with nothing recorded reads the negative of
-        // the duration it last measured.
+        // A reused pooled pair with nothing recorded reads negative.
         EXPECT_TRUE(measure(0x1024, recordNothing)) << "the pooled case did not get a pooled pair";
 
-        // A pooled pair whose start was recorded and whose launch then
-        // failed reads its older stop against the newer start.
+        // A pooled pair with only its start recorded reads an older stop against a
+        // newer start.
         {
             constexpr size_t warm = 0x1025;
             ASSERT_EQ(tuner().selectCandidate(warm, identityOf(warm), ranked), 0);
@@ -1591,9 +1372,8 @@ namespace
         EXPECT_TRUE(measure(0x1026, recordStartOnly))
             << "the pooled case did not get a pooled pair";
 
-        // The pool is empty now, so the next pairs are fresh: one never
-        // recorded by its launch at all, and one with only its start recorded.
-        // Each still holds the inverted records it was created with.
+        // Fresh pairs from here on, holding only the inverted records made at
+        // creation.
         ASSERT_TRUE(OnlineTunerTestAccess::pooledPairs(tuner(), id).empty());
         EXPECT_FALSE(measure(0x1027, recordNothing)) << "the fresh case got a pooled pair";
         EXPECT_FALSE(measure(0x1028, recordStartOnly)) << "the fresh case got a pooled pair";
@@ -1605,13 +1385,9 @@ namespace
         tuner().reloadForTest();
     }
 
-    // The bound the cap exists for: however many shapes are measured, a device
-    // holds no more than livePairCap() pairs. A pair can only come back once
-    // the launch it timed is finished, so the way to hold a device at the cap
-    // is launches the GPU has not reached. Past it no new measurement starts;
-    // the launch runs unmeasured and nothing about it changes. And nothing
-    // still in flight is read back early: each launch's own harvest finds its
-    // sample once the GPU gets there.
+    // A device never holds more than livePairCap() pairs. Launches held in flight
+    // keep the device at the cap; past it the launch runs unmeasured, and nothing
+    // in flight is read back early.
     TEST(OnlineTuner, LiveEventPairsOnADeviceAreCapped)
     {
         if(deviceCount() < 1)
@@ -1622,9 +1398,7 @@ namespace
         const Device device(0);
         const int    id = device.id();
 
-        // Hands back what earlier cases left outstanding, so what is live now
-        // is only what the pool holds, and every pooled pair is one a new
-        // measurement can take without creating another.
+        // Retire what earlier cases left outstanding, so only pooled pairs are live.
         tuner().reloadForTest();
 
         const int cap = tuner().livePairCap();
@@ -1681,12 +1455,9 @@ namespace
         tuner().reloadForTest();
     }
 
-    // Shapes dispatched once and never again hold the whole cap, with every
-    // launch they timed long finished. A shape that keeps coming back must
-    // still be explored to a winner: at the cap the finished launches are read
-    // back and their pairs reused, rather than the cap ending tuning on the
-    // device for the rest of the process. Each one-shot shape keeps the sample
-    // its one launch bought.
+    // One-shot shapes hold the whole cap with finished launches. A shape that keeps
+    // coming back is still explored to a winner, because at the cap finished pairs
+    // are read back and reused, and each one-shot shape keeps its sample.
     TEST(OnlineTuner, AtTheCapTheFinishedPairsOfOneShotShapesAreReclaimed)
     {
         if(deviceCount() < 1)
@@ -1736,9 +1507,8 @@ namespace
         tuner().reloadForTest();
     }
 
-    // A reclaim pass walks the problems that may hold a pair, not every problem
-    // the tuner has seen: the shapes already resolved are dropped from what it
-    // walks, and so are the ones whose pairs it took back.
+    // A reclaim pass walks only problems that may hold a pair: resolved shapes and
+    // shapes whose pairs it took back are dropped from the list.
     TEST(OnlineTuner, AReclaimPassWalksOnlyTheProblemsHoldingPairs)
     {
         if(deviceCount() < 1)
@@ -1785,13 +1555,9 @@ namespace
         tuner().reloadForTest();
     }
 
-    // More shapes in rotation than the cap has pairs for. Each holds its pair
-    // only between its own visits, and at the cap the pairs of the others'
-    // finished launches are reused, so every shape is explored at once and
-    // resolves with a winner. Without that the shapes went through in waves
-    // of the cap's size, each waiting shape spending its visit budget on
-    // declined launches, and every shape past the waves that budget allows
-    // resolved with no winner at all.
+    // More shapes in rotation than the cap has pairs for all explore at once and
+    // resolve with a winner, because at the cap the others' finished pairs are
+    // reused.
     TEST(OnlineTuner, MoreShapesInRotationThanTheCapAllResolveWithWinners)
     {
         if(deviceCount() < 1)
@@ -1804,7 +1570,7 @@ namespace
 
         const int cap = tuner().livePairCap();
 
-        // Past the last shape the waves could reach.
+        // More shapes than waves of the cap's size could reach within the budget.
         const int shapes = cap * OnlineTuner::c_visitBudgetFactor + cap;
 
         constexpr size_t       base = 0x73000;
@@ -1844,13 +1610,10 @@ namespace
         tuner().reloadForTest();
     }
 
-    // The window a reclaim must never reach into. beginMeasurement() hands a
-    // pair out under the lock and the launch records it after the lock is
-    // released, so on another thread a pair can be outstanding and not yet
-    // recorded at the moment a dispatch at the cap looks for pairs to take
-    // back. Such a pair must be left exactly where it is: taking it would hand
-    // one pair to two launches, and retiring it would destroy a handle a launch
-    // is about to record.
+    // beginMeasurement() hands a pair out under the lock and the launch records it
+    // after the lock is released. A reclaim must not touch such a pair: taking it
+    // would hand one pair to two launches, and retiring it would destroy a handle
+    // about to be recorded.
     TEST(OnlineTuner, APairHandedOutAndNotYetRecordedIsNeverReclaimed)
     {
         if(deviceCount() < 1)
@@ -1865,8 +1628,8 @@ namespace
 
         const std::vector<int> ranked{251, 252, 253};
 
-        // Bring the device to the cap and pool every pair, so what is handed
-        // out below is what a busy device hands out: a pooled pair, inverted.
+        // At the cap with every pair pooled, so what is handed out below is a pooled,
+        // inverted pair.
         std::vector<size_t> filled;
         for(size_t key = 0x74000; !OnlineTunerTestAccess::pooledPairs(tuner(), id).empty()
                                   || OnlineTunerTestAccess::livePairs(tuner(), id) < cap;
@@ -1879,7 +1642,7 @@ namespace
             tuner().harvestPending(key);
         ASSERT_EQ(OnlineTunerTestAccess::pooledPairs(tuner(), id).size(), static_cast<size_t>(cap));
 
-        // Every one of them handed out for a launch that has not recorded yet.
+        // All of them handed out for launches that have not recorded yet.
         struct Taken
         {
             size_t     key;
@@ -1898,8 +1661,7 @@ namespace
             taken.push_back(pair);
         }
 
-        // A new shape at the cap with nothing pooled, so the reclaim runs, and
-        // it must find nothing it may take.
+        // At the cap with nothing pooled, so the reclaim runs and must take nothing.
         constexpr size_t late = 0x76000;
         ASSERT_EQ(tuner().selectCandidate(late, identityOf(late), ranked), 0);
 
@@ -1910,8 +1672,7 @@ namespace
         EXPECT_EQ(OnlineTunerTestAccess::livePairs(tuner(), id), cap)
             << "a pair handed out for a launch not yet recorded was retired";
 
-        // Each launch now records its pair, and its own harvest finds the
-        // sample: nothing was taken, pooled or destroyed underneath it.
+        // Each launch records its pair and its own harvest finds the sample.
         for(const Taken& pair : taken)
         {
             device.bracket(pair.key, pair.start, pair.stop);
@@ -1923,13 +1684,10 @@ namespace
         tuner().reloadForTest();
     }
 
-    // Two dispatches of one shape on two threads. One has been handed a pair
-    // and has not recorded it yet when the other harvests the shape. Such a
-    // pair reads exactly like one whose launch failed to record it, and those
-    // are retired -- but this one is about to be recorded, and recording a
-    // destroyed event is a use after free inside the caller's matmul. It must
-    // be left alone until its launch returns, and then be read back as usual.
-    // Twice, so the pair handed out is a pooled one at least once.
+    // Two threads dispatching one shape: one holds a pair it has not recorded yet
+    // while the other harvests the shape. The pair reads like an unrecorded one,
+    // but must not be retired before its launch returns, since recording a
+    // destroyed event is a use after free. Twice, so at least one pair is pooled.
     TEST(OnlineTuner, AnotherDispatchOfTheShapeLeavesAPairItsLaunchHasNotRecorded)
     {
         if(deviceCount() < 1)
@@ -1958,8 +1716,8 @@ namespace
             ASSERT_TRUE(
                 tuner().beginMeasurement(key, ranked[position], device.stream(), start, stop));
 
-            // Whatever the pair already holds is complete, so a harvest that
-            // reads it gets an answer rather than "outstanding".
+            // Whatever the pair holds is complete, so a harvest that read it would get an
+            // answer rather than "outstanding".
             ASSERT_EQ(hipStreamSynchronize(device.stream()), hipSuccess);
 
             const int live = OnlineTunerTestAccess::livePairs(tuner(), id);
@@ -1968,8 +1726,7 @@ namespace
                 tuner().harvestPending(key);
             });
 
-            // Asserted before the record below, which on a destroyed pair
-            // would fault rather than fail.
+            // Asserted before the record, which on a destroyed pair would fault.
             ASSERT_EQ(OnlineTunerTestAccess::livePairs(tuner(), id), live)
                 << "another dispatch retired a pair whose launch had not recorded it";
 
@@ -1983,11 +1740,10 @@ namespace
         tuner().reloadForTest();
     }
 
-    // Several threads dispatching one shape at a time, as a server's workers
-    // do, through many shapes. Launches record nothing between their two
-    // events, so most samples are rejected and their pairs retired, which is
-    // what puts a retire next to a record. Returns 0, or 3 if a record failed,
-    // or 4 if the shapes were not all resolved within the step bound.
+    // Several threads dispatching one shape at a time through many shapes. Nothing
+    // is bracketed, so most samples are rejected and retired, putting retires next
+    // to records. Returns 0, 3 if a record failed, or 4 if the shapes did not all
+    // resolve within the step bound.
     int dispatchOneShapeFromManyThreads()
     {
         tuner().reloadForTest();
@@ -2050,9 +1806,8 @@ namespace
         return failures.load() != 0 ? 3 : current.load() < kLast ? 4 : 0;
     }
 
-    // The same race as above, left to the scheduler. In a child process,
-    // because losing it records a destroyed event, which faults rather than
-    // failing an assertion.
+    // The same race left to the scheduler, in a child process because losing it
+    // faults rather than failing an assertion.
     TEST(OnlineTuner, ThreadsDispatchingOneShapeNeverRecordARetiredPair)
     {
         if(deviceCount() < 1)
@@ -2062,11 +1817,9 @@ namespace
         EXPECT_EXIT(std::exit(dispatchOneShapeFromManyThreads()), ::testing::ExitedWithCode(0), "");
     }
 
-    // The reclaim reads other shapes' pairs on the caller's thread, inside the
-    // caller's matmul, so it must leave that thread's HIP state as it found it
-    // -- including when what it reads is a fresh pair whose launch returned
-    // without recording it, which holds only the records it was created with.
-    // Such a pair is never taken, and its own harvest later retires it.
+    // The reclaim runs inside the caller's matmul, so reading fresh pairs whose
+    // launches returned without recording them must leave no error in the
+    // thread's HIP state. Such pairs are not taken; their own harvests retire them.
     TEST(OnlineTuner, AReclaimLeavesNoErrorInTheCallersHipState)
     {
         if(deviceCount() < 1)
@@ -2080,9 +1833,8 @@ namespace
         const int              cap = tuner().livePairCap();
         const std::vector<int> ranked{231, 232, 233};
 
-        // Empty the pool by retiring what it holds: a pooled pair whose launch
-        // returns without recording it reads negative, and its own harvest
-        // retires it.
+        // Empty the pool: a pooled pair whose launch records nothing reads negative
+        // and is retired by its own harvest.
         size_t key = 0x78000;
         for(int taken = 0; !OnlineTunerTestAccess::pooledPairs(tuner(), id).empty(); ++taken)
         {
@@ -2098,8 +1850,7 @@ namespace
         ASSERT_EQ(OnlineTunerTestAccess::livePairs(tuner(), id), 0);
         ASSERT_EQ(hipStreamSynchronize(device.stream()), hipSuccess);
 
-        // The whole cap in fresh pairs, each handed to a launch that returned
-        // without recording it.
+        // The whole cap in fresh pairs whose launches returned without recording.
         std::vector<size_t> keys;
         for(int shape = 0; shape < cap; ++shape, ++key)
         {
@@ -2113,7 +1864,7 @@ namespace
         ASSERT_EQ(hipStreamSynchronize(device.stream()), hipSuccess);
         ASSERT_EQ(hipGetLastError(), hipSuccess);
 
-        // A new shape at the cap: the reclaim reads every one of them.
+        // A new shape at the cap: the reclaim reads all of them.
         ASSERT_EQ(tuner().selectCandidate(key, identityOf(key), ranked), 0);
         hipEvent_t start = nullptr;
         hipEvent_t stop  = nullptr;
@@ -2137,11 +1888,8 @@ namespace
         tuner().reloadForTest();
     }
 
-    // A launch that goes untimed because its device is at the cap with every
-    // pair in flight is reported, once per device: otherwise the only trace of
-    // it is declined= on a winner line, which reads like a shape that was
-    // measured. Reaching the cap and reclaiming is not reported, and a device
-    // that has reported once stays quiet when it happens again.
+    // A launch untimed because every pair on its device is in flight is reported
+    // once per device. Reaching the cap and reclaiming is not reported.
     TEST(OnlineTuner, ALaunchUntimedAtTheCapIsReportedOncePerDevice)
     {
         if(deviceCount() < 1)
@@ -2190,11 +1938,8 @@ namespace
         tuner().reloadForTest();
     }
 
-    // The event pool is on a process-wide singleton and the device is per
-    // caller. Keyed on nothing, one vector hands device 1 the pairs device 0
-    // recycled -- and hipEventRecord rejects a pair belonging to another
-    // device with hipErrorInvalidResourceHandle, measured on gfx950, which the
-    // production launch then has to carry.
+    // The pool is keyed by device: hipEventRecord rejects another device's event
+    // with hipErrorInvalidResourceHandle, which the launch would then carry.
     TEST(OnlineTuner_multi_gpu, APooledEventPairIsNotHandedToAnotherDevice)
     {
         if(deviceCount() < 2)
@@ -2208,9 +1953,7 @@ namespace
 
         const std::vector<int> ranked{131, 132, 133};
 
-        // Device 0 takes one sample, and the harvest puts its pair in the
-        // pool. recycleEvents() stores it inverted, so an unkeyed pool would
-        // hand this pair's stop back as the next caller's start.
+        // Device 0 pools one pair, inverted.
         ASSERT_EQ(hipSetDevice(zero.id()), hipSuccess);
         hipEvent_t startZero = nullptr;
         hipEvent_t stopZero  = nullptr;
@@ -2232,8 +1975,7 @@ namespace
         EXPECT_NE(stopOne, startZero) << "device 1 was handed device 0's pair";
         EXPECT_NE(stopOne, stopZero) << "device 1 was handed device 0's pair";
 
-        // The assertion that does not depend on how the pool is organised:
-        // whatever device 1 was given has to be recordable on device 1.
+        // Whatever device 1 was given must be recordable there.
         EXPECT_EQ(hipEventRecord(startOne, one.stream()), hipSuccess)
             << "the pair handed to device 1 cannot be recorded there";
         EXPECT_EQ(hipEventRecord(stopOne, one.stream()), hipSuccess);
@@ -2244,11 +1986,8 @@ namespace
 
 } // namespace
 
-// The configuration the tuner is built with, which inside hipBLASLt comes from
-// the tuning mode and TuningPolicy. Supplied here instead, for the test
-// binary's private copy of the tuner, so these tests pin the bookkeeping to
-// known values whatever the environment says. The library's copy is built from
-// its own definition and never sees this one.
+// The configuration this file's private copy of the tuner is built from, so the
+// tests pin it to known values whatever the environment says.
 rocblaslt::OnlineTunerConfig rocblaslt::onlineTunerConfig()
 {
     OnlineTunerConfig config;

@@ -248,10 +248,8 @@ namespace TensileLite
                     << " fellback=" << fellback << " tuned=" << tuned
                     << " invalidated=" << invalidated << " unrecorded=" << unrecorded;
 
-                // The one tally that is a fault rather than a count, so it says
-                // so where it is read rather than leaving a bare number to be
-                // recognised. The cause was reported once, when the first one
-                // happened.
+                // A fault rather than a count, so it says so. The cause was
+                // reported once, when the first one happened.
                 if(unrecorded != 0)
                     msg << " (unrecorded winners were measured but could not be written; this "
                            "run's cache file is incomplete)";
@@ -315,10 +313,8 @@ namespace TensileLite
             << " loaded=" << TuningCounters::instance().entriesLoaded.load()
             << " rejected=" << rejected;
 
-        // The one tally on this line that is a fault rather than a count, so
-        // it says so where it is read, the way the closing summary says it of
-        // unrecorded. loaded=0 on a file full of rows reads exactly like
-        // loaded=0 on an empty one otherwise.
+        // A fault rather than a count, so it says so: otherwise loaded=0 on a
+        // file full of unreadable rows reads like an empty file.
         if(rejected != 0)
             msg << "; rejected rows were in the file but could not be read, so whatever tuning "
                    "they hold is not in effect";

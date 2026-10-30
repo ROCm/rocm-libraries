@@ -221,32 +221,21 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
                         size_t                             maxWorkSpaceBytes);
 
 /**
- * Which of the two contracts a solution lookup is made under.
+ * How the caller of a solution lookup uses the answer.
  *
- * Both leave the choice of kernel to the library and both reach
- * getBestSolutions() below with the same problem, so nothing about the call
- * itself tells them apart -- but what the caller does with the answer differs,
- * and online tuning's rotation is only sound under one of them. The rotation
- * dispatches a candidate it does not believe is best, on the understanding
- * that the next visit reconsiders. That understanding holds for one of these
- * and is the caller's business for the other.
- *
- * Only PerDispatch is tuned online. The scope note on rocblaslt::OnlineTuner
- * is the authoritative statement of which calls are and are not.
+ * Online tuning dispatches a candidate it does not believe is best, relying on
+ * the next call to ask again, so it only explores PerDispatch lookups. See the
+ * scope note on rocblaslt::OnlineTuner.
  */
 enum class SolutionLookup
 {
-    /// hipblasLtMatmul with algo == nullptr. The library chooses, this call
-    /// dispatches what it chose, and the next call asks again. The one lookup
-    /// online tuning explores.
+    /// hipblasLtMatmul with algo == nullptr: this call dispatches the answer,
+    /// and the next call asks again. Explored by online tuning.
     PerDispatch,
 
-    /// hipblasLtMatmulAlgoGetHeuristic. The caller is handed an algo and
-    /// dispatches it itself, as often and for as long as it likes. Whether it
-    /// ever asks again is not knowable here, and that dispatch is a
-    /// caller-supplied algo, which online tuning never measures, so it is
-    /// served a measured winner if there is one and never a probe. Not tuned
-    /// online.
+    /// hipblasLtMatmulAlgoGetHeuristic: the caller keeps the algo and
+    /// dispatches it itself. Served a measured winner if there is one, never a
+    /// probe.
     Heuristic,
 };
 

@@ -1566,12 +1566,8 @@ namespace
         EXPECT_EQ(counters().tuned, 1u) << "the gradient call was not tuned";
     }
 
-    // Provenance is what the tuning_mode column is for, so the mode that
-    // recorded a row has to stamp it rather than inherit it. Tune's search
-    // descriptor set every other field and left this one to the struct's
-    // default, which says Tune because tune was the only writer when the
-    // column was added -- correct by accident of ordering, and silently wrong
-    // for the next writing mode that forgets the line.
+    // The mode that records a row stamps it in the tuning_mode column; tune sets it
+    // explicitly rather than relying on the struct default.
     TEST_F(TuningTune_pre_checkin, ATuneRowSaysTuneRecordedIt)
     {
         enterMode("tune", m_path);
@@ -2932,22 +2928,13 @@ namespace
     constexpr int kOnlineVisits  = 3 * kOnlineTopK * kOnlineRepeats;
 
     /**
-     * One fp16 NN batched problem, dispatched repeatedly with no algo.
+     * One fp16 NN batched problem, dispatched repeatedly with no algo, the call
+     * shape online tunes. Handle, buffers and descriptors are built once, since
+     * exploration takes tens of visits.
      *
-     * No algo is the only shape of call online tuning sees: it is where the
-     * library picks the kernel afresh on every dispatch, so it is where a probe
-     * candidate can be offered and the launch that follows timed.
-     *
-     * Handle, buffers and descriptors are built once and reused. Exploration
-     * takes tens of visits, and a handle per visit would be most of the case's
-     * runtime.
-     *
-     * pointerArray puts all four layouts in HIPBLASLT_BATCH_MODE_POINTER_ARRAY
-     * and passes device arrays of per-batch pointers instead of a base and a
-     * stride. That is the problem class the tuning cache will not key.
-     *
-     * m is the row count, so a case can make as many distinct shapes as it
-     * needs; every other dimension is fixed.
+     * pointerArray uses HIPBLASLT_BATCH_MODE_POINTER_ARRAY, the problem class
+     * the tuning cache will not key. m is the row count, so a case can make
+     * distinct shapes; every other dimension is fixed.
      */
     class OnlineProblem
     {
@@ -3317,13 +3304,9 @@ namespace
         }
 
         /**
-         * Dispatch until exploration must have finished, reporting how many
-         * distinct kernels were launched along the way.
-         *
-         * That count is what says whether the problem was explored at all: a
-         * problem online leaves alone launches whatever default selection ranks
-         * first, every time, while an explored one is handed a different
-         * candidate on each probing visit.
+         * Dispatch until exploration must have finished, returning how many
+         * distinct kernels were launched: one means the problem was never
+         * explored.
          */
         size_t runToResolution(OnlineProblem& problem)
         {
@@ -3337,10 +3320,7 @@ namespace
                     break;
                 }
 
-                // Without this the count below could be one because nothing was
-                // reported rather than because nothing varied, and a case
-                // asserting that online left a problem alone would pass for the
-                // wrong reason.
+                // Without this, a count of one could mean nothing was reported.
                 if(launched < 0)
                 {
                     ADD_FAILURE() << "dispatch " << visit << " reported no launched solution";
@@ -3356,10 +3336,8 @@ namespace
         std::vector<std::pair<std::string, std::optional<std::string>>> m_savedEnv;
     };
 
-    // The control for the case below, and the reason it is not vacuous: the
-    // same harness, the same shape, the same visit count, on a problem the
-    // tuning cache can key. Online rotates through the ranked prefix and leaves
-    // a row behind.
+    // The control for the pointer-array case: the same harness and shape on a
+    // keyable problem is explored and leaves a row.
     TEST_F(TuningOnline_pre_checkin, AnOrdinaryBatchedProblemIsExploredAndRecorded)
     {
         OnlineProblem problem(/*pointerArray=*/false);
@@ -3376,19 +3354,13 @@ namespace
         EXPECT_EQ(valueRowCount(m_path), 1u) << "online recorded no winner";
         EXPECT_EQ(counters().tuned, 1u);
 
-        // The other half of the provenance pair: online stamps its own mode, so
-        // the two writers are distinguishable in a file they share.
+        // Online stamps its own mode, so the two writers are distinguishable.
         EXPECT_EQ(columnValues(m_path, "tuning_mode"), std::vector<std::string>{"online"});
     }
 
-    // An application that asks the heuristic before every call and dispatches
-    // the algo it is handed. Online used to take the second query of a shape
-    // as an ordinary visit and promote a probe into its answer, and then time
-    // the caller-supplied launch of it -- a pairing the library cannot keep
-    // exact, since all it can see is that this thread was offered a candidate
-    // under this key. Such a caller is now handed its own ranking, or a
-    // measured winner once there is one, and never a probe; with no null-algo
-    // dispatch to measure one, nothing is recorded either.
+    // An application that queries the heuristic before every call and dispatches
+    // the returned algo is never handed a probe, and with no null-algo dispatch
+    // nothing is recorded.
     TEST_F(TuningOnline_pre_checkin, AHeuristicQueryPerCallIsNeverHandedAProbe)
     {
         OnlineProblem problem(/*pointerArray=*/false);
@@ -3415,18 +3387,11 @@ namespace
             << "a winner was recorded from launches of caller-supplied algos";
     }
 
-    // The same problem, with a heuristic query made while online is on.
-    //
-    // The case above queries the heuristic before switching the mode on, so the
-    // first visit online sees is always a dispatch. An application that queries
-    // first and then dispatches with no algo hands online the same problem
-    // twice, and to the solution library they are two problems: the query ranks
-    // under a dummy beta of one and the preference's workspace ceiling, the
-    // dispatch under its own beta and allocation. The resolution key merges the
-    // two, so whichever registers first owns the exploration and the other is a
-    // merged sibling of it. When the query owned it, every beta == 0 dispatch
-    // was offered nothing and sampled by nothing, and the shape ended with no
-    // winner and no row.
+    // A heuristic query made while online is on, before the dispatches. The query
+    // and the dispatch are different problems to the solution library (the query
+    // ranks with a dummy beta and the preference's workspace) under one resolution
+    // key. The query registers nothing, so the dispatches still explore and record
+    // a winner.
     TEST_F(TuningOnline_pre_checkin, AHeuristicQueryMadeFirstDoesNotStopItsDispatchesExploring)
     {
         OnlineProblem problem(/*pointerArray=*/false);
@@ -3437,8 +3402,7 @@ namespace
 
         enterOnline(m_path);
 
-        // Twice, so the query is not only the problem's first sight but also
-        // a visit that comes back.
+        // Twice, so the query is also a visit that comes back.
         ASSERT_GE(problem.distinctCandidates(kOnlineTopK), 2u);
         ASSERT_GE(problem.distinctCandidates(kOnlineTopK), 2u);
 
@@ -3450,12 +3414,9 @@ namespace
     }
 
     /**
-     * One fp32 NN matmul with a GELU_AUX epilogue, dispatched with no algo.
-     *
-     * The epilogue is what makes it interesting for an xf32 compute type: on
+     * One fp32 NN matmul with a GELU_AUX epilogue, dispatched with no algo. On
      * gfx950 the Aux and Grad epilogues have fp32 kernels only, so an xf32
-     * request finds nothing and getBestSolutions falls back to fp32. A
-     * single batch and nothing else, since only the fallback is under test.
+     * request falls back to fp32 in getBestSolutions.
      */
     class GeluAuxProblem
     {
@@ -3573,18 +3534,10 @@ namespace
         void*                   m_ws      = nullptr;
     };
 
-    // Online's two hooks have to agree on the key they file a problem under,
-    // and for an xf32 problem the library has to fall back to fp32 for, they
-    // did not. Selection ranks the problem again after setting the fp32 math
-    // op, and registers it under that key; the measurement hook re-derived the
-    // key after updateTensileProblem() had put the xf32 math op back. Nothing
-    // was ever registered under the key it asked with, so no launch could be
-    // sampled, nothing resolved there, and every dispatch paid a locked lookup
-    // to be told so -- for the life of the process.
-    //
-    // On gfx950 such a problem has a single candidate, so there is no winner to
-    // look for. What the defect leaves behind is a measurement hook that misses
-    // on every dispatch, and that is what is counted here.
+    // Both online hooks must use the same key for an xf32 problem that falls back
+    // to fp32: selection registers under the fp32 key, and the measurement hook
+    // must ask with it rather than re-deriving the xf32 one. Such a problem has a
+    // single candidate on gfx950, so the misses counter is what is checked.
     TEST_F(TuningOnline_pre_checkin, AnXf32ProblemThatFallsBackIsMeasuredUnderTheKeyItRegistered)
     {
         constexpr int kDispatches = 20;
@@ -3597,8 +3550,7 @@ namespace
         int fp32Kernel = -1;
         ASSERT_TRUE(fp32.dispatch(&fp32Kernel));
 
-        // The control: the same problem asked for in fp32 is not a fallback,
-        // so its two hooks agree whether or not the fix is there.
+        // The control: a plain fp32 problem is not a fallback.
         EXPECT_EQ(counters().onlineMisses, 0u) << "an fp32 problem's measurement hook missed";
 
         GeluAuxProblem xf32(HIPBLAS_COMPUTE_32F_FAST_TF32);
@@ -3618,22 +3570,15 @@ namespace
             << "the measurement hook asked under a key selection never registered";
     }
 
-    // The defect this case exists for: online used to decide whether to explore
-    // on its own switch alone, while the cache decided whether a shape is
-    // keyable on a predicate online never consulted. Pointer-array batch mode
-    // is the class where the two disagreed -- grouped GEMM is excluded in
-    // practice because it dispatches through an entry point online does not
-    // hook, but a pointer-array batch runs the ordinary single-GEMM path. So
-    // online explored it, reordered its kernels and appended rows that cache
-    // mode's own keyed test would then refuse to look up: dead weight in a file
-    // shared with tune, bought with a reordering nobody asked for.
+    // Online explores only problems the tuning cache can key. A pointer-array
+    // batch runs the ordinary single-GEMM path but cannot be keyed, so exploring
+    // it would reorder its kernels for rows cache mode never looks up.
     TEST_F(TuningOnline_pre_checkin, APointerArrayBatchProblemIsNeverExplored)
     {
         OnlineProblem problem(/*pointerArray=*/true);
         ASSERT_TRUE(problem.create());
 
-        // Below two, default selection has nothing to rotate and the case could
-        // not fail however the guard behaved.
+        // With fewer than two candidates the case could not fail.
         if(problem.distinctCandidates(kOnlineTopK) < 2)
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
 
@@ -3647,13 +3592,9 @@ namespace
         EXPECT_EQ(counters().tuned, 0u);
     }
 
-    // One line per shape, the same bound tune's terminal line is under.
-    //
-    // Reaching it needs one shape to settle twice in a process, which only the
-    // test hook can arrange: the tuner is told to forget everything while the
-    // diagnostics, which are what hold the bound, keep what they have seen. The
-    // second pin is real -- it writes its own row and counts its own winner --
-    // and only the notice is suppressed.
+    // The winner notice is bounded to one line per shape, like tune's terminal
+    // line. A test hook makes one shape settle twice while the diagnostics keep
+    // what they have seen; the second pin is real, only the notice is suppressed.
     TEST_F(TuningOnline_pre_checkin, TheWinnerNoticeIsEmittedOncePerShape)
     {
         if(!loggingEnvIsClean())
@@ -3672,9 +3613,8 @@ namespace
             CerrCapture capture;
             runToResolution(problem);
 
-            // A settled shape is served from the in-memory cache on every later
-            // dispatch, so nothing of it is measured again. Both the rows and
-            // the file have to go for it to be learned a second time.
+            // A settled shape is served from the in-memory cache, so both the rows and
+            // the file have to go for it to be learned again.
             std::remove(m_path.c_str());
             hipblaslt_tuning_forget_shapes_for_test();
 
@@ -3691,14 +3631,9 @@ namespace
             << output;
     }
 
-    // A winner that cannot be recorded must not fail the matmul that measured
-    // it, must not go unnoticed, and must not report itself once per shape.
-    //
-    // The injected failure stands in for the handler's real reach: a throw out
-    // of the writer, the override map, the counters or the logger. The ordinary
-    // I/O failures are not here because they do not throw -- a read-only path
-    // or a full disk returns false from the writer and the winner's own line
-    // names the path.
+    // A winner that cannot be recorded must not fail the matmul, must be counted,
+    // and is reported once. The injected throw stands in for the writer, override
+    // map, counters or logger; ordinary I/O failures return false instead.
     TEST_F(TuningOnline_pre_checkin, AWinnerThatCannotBeRecordedIsCountedAndReportedOnce)
     {
         if(!loggingEnvIsClean())
@@ -3717,14 +3652,10 @@ namespace
         {
             CerrCapture capture;
 
-            // Every dispatch still has to succeed: the whole point of swallowing
-            // the failure is that a user's GEMM does not fail because an
-            // optimisation for the next process did not work out. runToResolution
-            // fails the case if any of them does not.
+            // Every dispatch must still succeed; runToResolution fails the case if not.
             runToResolution(problem);
 
-            // Twice, so one failure reported once is distinguishable from one
-            // reported per shape.
+            // Twice, so once per process is distinguishable from once per shape.
             hipblaslt_tuning_forget_shapes_for_test();
             runToResolution(problem);
 
@@ -3742,18 +3673,9 @@ namespace
             << output;
     }
 
-    // Online's scope, on the caller-supplied side: a hipblasLtMatmul that
-    // passes its own algo is launched as given and the tuner is never asked
-    // about it -- no harvest, no measurement, nothing counted. The algo is the
-    // ranking's second answer, taken before the mode is on, so it is neither
-    // what default selection would launch nor something a heuristic query in
-    // online mode handed out; AHeuristicQueryPerCallIsNeverHandedAProbe covers
-    // that flow.
-    //
-    // onlineMisses is what makes this observable. The problem is never
-    // dispatched without an algo, so selection never registers it, and any
-    // launch that reached the measurement hook would be counted as a lookup
-    // under an unregistered key.
+    // A hipblasLtMatmul with its own algo is launched as given and never reaches
+    // the tuner. The problem is never dispatched without an algo, so any launch
+    // reaching the measurement hook would show up in onlineMisses.
     TEST_F(TuningOnline_pre_checkin, ACallerSuppliedAlgoIsLaunchedAsGivenAndNeverMeasured)
     {
         OnlineProblem problem(/*pointerArray=*/false);
@@ -3785,19 +3707,14 @@ namespace
             << "a winner was recorded from launches of a caller-supplied algo";
     }
 
-    // The calls online leaves untuned are reported, once per kind per process,
-    // and only at info level: a heuristic query and a hipblasLtMatmul with its
-    // own algo each log one online-not-tuned line however often they recur,
-    // and a dispatch with no algo logs none.
-    //
-    // The logger reads its environment once, at startup, so the info-level half
-    // runs in a fresh process that inherits HIPBLASLT_LOG_LEVEL=4 from this
-    // one. This process, with logging off, checks the other half: nothing is
-    // written without the info bit.
+    // Untuned calls are reported once per kind per process, at info level only. The
+    // logger reads its environment at startup, so the info-level half runs in a
+    // child process with HIPBLASLT_LOG_LEVEL=4; this process checks that nothing is
+    // written with logging off.
     TEST_F(TuningOnline_pre_checkin, ACallOnlineDoesNotTuneIsReportedOnceAtInfoLevel)
     {
-        // Each query and each dispatch with an algo is made twice, so a line
-        // per call is distinguishable from a line per process.
+        // Each call is made twice, so a line per call is distinguishable from one per
+        // process.
         auto exercise = [this](std::string* output) {
             OnlineProblem problem(/*pointerArray=*/false);
             if(!problem.create())
@@ -3865,14 +3782,10 @@ namespace
         }
     }
 
-    // HIPBLASLT_TUNING_MAX_EVENT_PAIRS is read as the other counts are: unset
-    // or unparsable keeps the default, and a value below one counts as one.
-    // Then the value reaches the cap the measurement hook applies: shapes
-    // dispatched once each keep a pair apiece under the default, and share
-    // one under a cap of one.
-    //
-    // The second half runs in a fresh process, so the device holds no pair
-    // that an earlier case pooled and the count starts from zero.
+    // HIPBLASLT_TUNING_MAX_EVENT_PAIRS is read like the other counts (unset or
+    // unparsable keeps the default, below one counts as one) and is the cap the
+    // measurement hook applies. The second half runs in a child process so no
+    // pooled pair from an earlier case is on the device.
     TEST_F(TuningOnline_pre_checkin, TheEventPairCapComesFromItsVariable)
     {
         enterOnline(m_path);
@@ -3888,8 +3801,7 @@ namespace
                 << "HIPBLASLT_TUNING_MAX_EVENT_PAIRS=" << value;
         }
 
-        // Three shapes, each dispatched once, and the pairs left live on the
-        // device afterwards.
+        // Three shapes dispatched once each; returns the pairs left live.
         auto oneShots = []() -> int {
             for(int64_t m : {kOnlineM, kOnlineM + 64, kOnlineM + 128})
             {
@@ -3909,8 +3821,7 @@ namespace
                 hipblaslt_tuning_reset_for_test();
                 const int underDefault = oneShots();
 
-                // Retires the outstanding pairs of the shapes above, which
-                // were never pooled, so the device starts from none again.
+                // Retires the shapes' outstanding pairs, so the device starts from none.
                 setenv("HIPBLASLT_TUNING_MAX_EVENT_PAIRS", "1", 1);
                 hipblaslt_tuning_reset_for_test();
                 const int underOne = oneShots();
@@ -3923,14 +3834,10 @@ namespace
             "");
     }
 
-    // A shape dispatched once keeps the only pair a cap of one allows, and its
-    // launch is long finished. The next shape keeps coming back and must still
-    // be explored and recorded: at the cap the finished launch is read back and
-    // its pair reused, rather than every later shape on the device running
-    // untimed for the rest of the process.
-    //
-    // In a fresh process, so no pair an earlier case pooled can stand in for
-    // the one the cap allows.
+    // Under a cap of one, a shape dispatched once holds the only pair with its
+    // launch long finished. A shape that keeps coming back is still explored and
+    // recorded, because the finished pair is reclaimed. In a child process so no
+    // earlier pooled pair stands in for the one the cap allows.
     TEST_F(TuningOnline_pre_checkin, AShapeDispatchedOnceDoesNotStopTheNextOneBeingTuned)
     {
         GTEST_FLAG_SET(death_test_style, "threadsafe");
@@ -3949,8 +3856,7 @@ namespace
                 if(!once.dispatch(&launched))
                     std::exit(2);
 
-                // One kernel throughout is the shape never having been probed,
-                // and no row is it never having been recorded.
+                // One kernel throughout means never probed; no row means never recorded.
                 if(runToResolution(repeated) < 2)
                     std::exit(3);
                 std::exit(valueRowCount(m_path) == 1 ? 0 : 4);
@@ -3959,23 +3865,15 @@ namespace
             "");
     }
 
-    // More shapes in rotation than a cap of one has pairs for, and more than
-    // the waves the cap used to let through could reach. Every one of them
-    // must be explored and recorded. Without reclaiming the pairs of finished
-    // launches, shapes went through one wave per pair, each waiting shape
-    // spending its visit budget on declined launches, and the shapes past the
-    // last wave the budget allows were never recorded.
-    //
-    // The child exits with 100 plus the number of rows written, so a failure
-    // says how many shapes were recorded. Fresh process, as above.
+    // More shapes in rotation than a cap of one has pairs for are all explored and
+    // recorded. The child exits with 100 plus the number of rows written, so a
+    // failure says how many shapes were recorded.
     TEST_F(TuningOnline_pre_checkin, ShapesInRotationPastTheCapAreAllTuned)
     {
-        // The last wave the visit budget lets a cap of one through, plus two.
+        // More than the visit budget would let through one pair at a time.
         constexpr int kShapes = 10;
 
-        // Long enough for every wave to have run out, so a shape the waves
-        // never reached has also resolved, with no row, by the time rows are
-        // counted.
+        // Long enough for every shape to have resolved, recorded or not.
         constexpr int kRounds = kOnlineTopK * kOnlineRepeats * 8 + 5;
 
         GTEST_FLAG_SET(death_test_style, "threadsafe");
@@ -4008,13 +3906,10 @@ namespace
             "");
     }
 
-    // A launch that goes untimed because every event pair on its device is
-    // still in flight is reported once per device, and only at info level.
-    // Under a cap of one, on a stream the GPU is held on, the first shape takes
-    // the only pair and the next two find it still timing that launch.
-    //
-    // Info logging is read once, at startup, so the info-level half runs in a
-    // fresh process, as ACallOnlineDoesNotTuneIsReportedOnceAtInfoLevel does.
+    // A launch untimed because every pair on its device is in flight is reported
+    // once per device, at info level only. Under a cap of one on a held stream,
+    // the first shape takes the only pair and the next two find it in flight. The
+    // info-level half runs in a child process, since logging is read at startup.
     TEST_F(TuningOnline_pre_checkin, ALaunchUntimedAtTheEventPairCapIsReportedOnceAtInfoLevel)
     {
         auto exercise = [this](std::string* output) {
@@ -4025,10 +3920,9 @@ namespace
                 if(!problem->create() || problem->distinctCandidates(kOnlineTopK) < 2)
                     return false;
 
-            // Held on a host-visible value, and non-blocking so nothing the
-            // library does on the null stream waits behind it. A watchdog lets
-            // it go regardless, so a dispatch that does wait cannot hang the
-            // suite; it fails the count instead.
+            // Non-blocking, so nothing the library does on the null stream waits behind
+            // it. A watchdog releases it regardless, so a dispatch that waits fails the
+            // count instead of hanging the suite.
             int canWait = 0;
             if(hipDeviceGetAttribute(&canWait, hipDeviceAttributeCanUseStreamWaitValue, 0)
                    != hipSuccess
@@ -4112,10 +4006,9 @@ namespace
         }
     }
 
-    // HIPBLASLT_TUNING_MAX_CANDIDATES below 2 leaves online nothing to choose
-    // between, so it is off, while the startup line still names online as the
-    // mode. That is said once, with no logging variable set, and a usable
-    // depth says nothing of the kind.
+    // HIPBLASLT_TUNING_MAX_CANDIDATES below 2 leaves nothing to choose between, so
+    // online is off although the startup line names it. That is said once with no
+    // logging variable set; a usable depth says nothing.
     TEST_F(TuningOnline_pre_checkin, ACandidateCapBelowTwoSaysOnlineIsOff)
     {
         if(!loggingEnvIsClean())
@@ -4155,13 +4048,11 @@ namespace
     constexpr uint16_t kHalfReduction = 0x6400;
     static_assert(kOnlineK == 1024, "kHalfReduction is fp16 1024");
 
-    // A few eager calls of a shape and then a capture of the same call into a
-    // HIP graph, in the global capture mode HIP and most frameworks default to.
-    // Online is still exploring the shape when the capture starts, with
-    // launches outstanding, and reading those back must not invalidate the
-    // capture: the captured call succeeds, the capture ends with a graph, and
-    // the graph computes the GEMM. Run part way through exploration and at the
-    // visit that completes it.
+    // Eager calls of a shape, then a global-mode capture of the same call while
+    // online is still exploring it with launches outstanding. Reading those back
+    // must not invalidate the capture: the call succeeds, the capture yields a
+    // graph, and the graph computes the GEMM. Run part way through exploration and
+    // at the visit that completes it.
     TEST_F(TuningOnline_pre_checkin, CapturingAShapeStillBeingExploredLeavesTheGraphValid)
     {
         OnlineProblem problem(/*pointerArray=*/false);
@@ -4213,10 +4104,8 @@ namespace
         static_cast<void>(hipStreamDestroy(stream));
     }
 
-    // The same reading back, done by an ordinary uncaptured call on one thread
-    // while another thread holds a global-mode capture open on a stream of its
-    // own. Global mode is process-wide, so this is reachable by any
-    // multithreaded application that captures graphs.
+    // An uncaptured exploring call on one thread while another thread holds a
+    // global-mode capture open on its own stream. Global mode is process-wide.
     TEST_F(TuningOnline_pre_checkin, AnExploringCallDoesNotInvalidateAnotherThreadsCapture)
     {
         OnlineProblem problem(/*pointerArray=*/false);
@@ -4239,8 +4128,7 @@ namespace
         for(int visit = 0; visit < 3; visit++)
             ASSERT_TRUE(problem.dispatch(nullptr)) << "eager call " << visit;
 
-        // Both waits are bounded, so a dispatch that hangs fails the case
-        // instead of the suite.
+        // Both waits are bounded, so a hang fails the case instead of the suite.
         constexpr int    kWaits = 3000;
         std::atomic<int> phase{0};
         hipError_t       began = hipErrorUnknown;

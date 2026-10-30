@@ -309,13 +309,10 @@ namespace TensileLite
      */
     struct TuningSearch
     {
-        // Which mode measured this. Only tune and online write rows, and the
-        // two measure in regimes that do not compare: tune benchmarks on
-        // library-owned scratch over a rotating buffer with the instruction
-        // cache flushed between launches, while online times the caller's own
-        // dispatch on the caller's own buffers, in place, with none of that.
-        // Default Tune, because that is the only mode that recorded a search
-        // before online existed.
+        // Which mode measured this. Tune benchmarks on library scratch over a
+        // rotating buffer with the instruction cache flushed; online times the
+        // caller's own dispatches in place, so the two do not compare. Default
+        // Tune, the only mode that recorded rows before this field existed.
         TuningMode mode           = TuningMode::Tune;
         bool       allKernels     = true;
         int32_t    maxCandidates  = 0; // ranked-prefix length, ignored with allKernels
@@ -340,12 +337,8 @@ namespace TensileLite
      */
     inline bool tuningSearchCovers(const TuningSearch& done, const TuningSearch& now)
     {
-        // Searches from different modes are not comparable at all, so one never
-        // covers the other however its counts read. An online row records a
-        // ranked prefix measured a handful of times in place, which against
-        // tune's settings reads as a weaker search of the same kind; it is not
-        // one. The numbers below count launches and candidates, and they only
-        // mean the same thing when both sides spent them the same way.
+        // Searches from different modes never cover each other: the counts
+        // below mean the same thing only when both spent them the same way.
         if(done.mode != now.mode)
             return false;
 
@@ -720,11 +713,9 @@ namespace TensileLite
         // they were not written by the running build.
         uint64_t skippedUnnamed = 0;
 
-        // Rows that were there and could not be read at all: a value line that
-        // does not line up with its header, a schema version this build does
-        // not know, or a key or search cell missing or damaged. Counted so
-        // that a file which parses to nothing can say so, instead of reading
-        // the way an empty one does.
+        // Rows the file held that could not be read at all (misaligned, an
+        // unknown schema version, or a missing or damaged cell), so a file
+        // that parses to nothing does not read like an empty one.
         uint64_t rejected = 0;
 
         // The file's "Git Version:" line, or empty when it has none.

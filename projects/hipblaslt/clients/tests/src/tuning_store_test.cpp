@@ -268,14 +268,10 @@ namespace
         std::vector<std::pair<std::string, std::optional<std::string>>> m_savedEnv;
     };
 
-    // The loader pairs cells by position before it pairs them by name, and
-    // skips a row whose two lines disagree in width. That makes a fixture that
-    // gained a column in one line and not the other vanish silently instead of
-    // failing, and a suite every row of which was skipped passes.
-    //
-    // So it is asserted once, outright: the writer emits one value per column,
-    // a row one cell short is skipped rather than read, and the row every case
-    // below is built from really does reach the map.
+    // The loader skips a row whose two lines disagree in width, so a fixture that
+    // gained a column in one line only would vanish silently. Assert once that the
+    // writer emits one value per column, a short row is skipped, and the base row
+    // reaches the map.
     TEST_F(TuningStore, EveryWrittenColumnHasAValueAndAShortRowIsSkipped)
     {
         const auto row   = tunedRow(halfKey(), tunedEntry(7, "kernel"));
@@ -948,11 +944,9 @@ namespace
         }
     }
 
-    // A mode cell that is there and does not read is damage rather than age,
-    // and defaulting it would file an online winner, measured in place on a
-    // live dispatch, as a tune winner measured on scratch, after which the two
-    // are compared against each other. A cell naming a mode that writes no
-    // rows at all is the same kind of damage.
+    // A mode cell that is present but does not read is damage, and defaulting it
+    // would file an online winner as a tune winner. A mode that writes no rows is
+    // the same kind of damage.
     TEST_F(TuningStore, RowWhoseModeDoesNotReadIsRejected)
     {
         const auto row = tunedRow(halfKey(), tunedEntry(7, "kernel"));
@@ -967,15 +961,9 @@ namespace
         }
     }
 
-    // tuning_mode was added to version 2 after builds had already written rows
-    // under that version, so a file from the build before it carries every
-    // other version 2 column and not this one. It is absent from both lines,
-    // which makes the row whole rather than short, so the width guard passes
-    // and the mode cell decides: refusing it there dropped every row in the
-    // file and reported loaded=0 without saying why.
-    //
-    // Such a row reads as tune, the only mode that recorded a search before
-    // online existed, which is what TuningSearch::mode defaults to.
+    // A version 2 row from before the tuning_mode column has neither the cell nor
+    // the column, so it is whole, not short. It reads as tune, the only mode that
+    // recorded a search before the column existed.
     TEST_F(TuningStore, RowWrittenBeforeTheModeColumnReadsAsTune)
     {
         const ProblemOverride key      = halfKey();
@@ -983,8 +971,8 @@ namespace
         const auto            previous = withoutColumn(
             tunedRow(key, tunedEntry(7, "kernel", true, 1000, search)), "tuning_mode");
 
-        // The version is unchanged, which is why the row has to be readable:
-        // nothing in the file tells it apart from one this build wrote.
+        // The version is unchanged, so nothing tells this row apart from one this
+        // build wrote.
         const auto cells = cellsOf(previous);
         EXPECT_EQ(cells.values[columnIndex(cells, "schema_version")], "2");
         EXPECT_EQ(std::find(cells.names.begin(), cells.names.end(), "tuning_mode"),
@@ -1027,10 +1015,8 @@ namespace
         EXPECT_EQ(map.size(), 0u);
     }
 
-    // The two modes measure in regimes that do not compare, so neither ever
-    // covers the other however its counts read. Online's row is a short ranked
-    // prefix with no rotation and no flush, which against tune's settings
-    // reads as a weaker search of the same kind; it is not one.
+    // The two modes measure in regimes that do not compare, so neither covers the
+    // other however its counts read.
     TEST_F(TuningStore, SearchesFromDifferentModesNeverCoverEachOther)
     {
         EXPECT_FALSE(tuningSearchCovers(onlineSearch(16), rankedSearch(2)));
@@ -1048,10 +1034,9 @@ namespace
         EXPECT_FALSE(onlineSearch(5) == asTune);
     }
 
-    // What the gate is for: a tune run meets a shape online already settled.
-    // The online row is complete and its counts look like a narrower search of
-    // the same kind, which without the mode on the row could read as covering
-    // a modest tune search and close the gate on it.
+    // A tune run meeting a shape online settled: the online row's counts look like
+    // a narrower search of the same kind, so only the mode keeps it from covering
+    // a modest tune search.
     TEST_F(TuningStore, OnlineRowNeitherCoversNorIsCoveredByATuneSearch)
     {
         const ProblemOverride key = halfKey();

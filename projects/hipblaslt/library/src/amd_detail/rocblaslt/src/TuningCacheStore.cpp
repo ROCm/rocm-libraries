@@ -339,26 +339,15 @@ namespace TensileLite
         // whether tune mode revisits the row.
         bool hasRequiredSearchColumns(const std::map<std::string, std::string>& row)
         {
-            // tuning_mode was added to version 2 after builds had already
-            // written rows under that version, so a row from one of those
-            // carries every other version 2 column and not this one. Absent
-            // therefore means "written before the column existed", and before
-            // it existed tune was the only mode that recorded a search, which
-            // is what TuningSearch::mode already defaults to.
-            //
-            // A cell that is there and does not read is damage rather than
-            // age, and is still refused: defaulting that one would file an
-            // online row, measured in place on a live dispatch, as a tune row
-            // measured on scratch, and the two are then compared against each
-            // other. An interrupted write cannot arrive here as an absent
-            // column, because it leaves the value line narrower than its
-            // header and loadTuningRows refuses a short row outright.
-            //
-            // That is the rule for the next column added to a version already
-            // in the field: default it to what rows written before it
-            // recorded, honour the default when the cell is absent, and
-            // validate it when it is there. The columns below predate no row
-            // of this version, so they stay required.
+            // tuning_mode was added to version 2 after rows had been written
+            // under that version, so an absent cell means an older row, which
+            // reads as Tune, TuningSearch::mode's default and the only mode
+            // that recorded rows then. A cell that is present but unreadable is
+            // damage and is refused, since misfiling an online row as a tune
+            // row would compare searches that do not compare. An interrupted
+            // write cannot look like an absent column: loadTuningRows refuses
+            // a short row. The columns below predate every version 2 row, so
+            // they stay required.
             if(has(row, "tuning_mode"))
             {
                 const auto mode = tuningModeFromName(str(row, "tuning_mode"));
@@ -644,10 +633,8 @@ namespace TensileLite
 
         const TuningSearch search = entry.search.value_or(TuningSearch{});
 
-        // Which mode measured this winner. Written beside the search rather
-        // than in a format of its own, because it is the first thing the
-        // search columns have to be read against: the same counts mean
-        // different things in the two modes that write rows.
+        // Which mode measured this winner, which the search columns are read
+        // against.
         column("tuning_mode", tuningModeName(search.mode));
         column("search_all_kernels", search.allKernels ? 1 : 0);
         column("search_max_candidates", search.maxCandidates);

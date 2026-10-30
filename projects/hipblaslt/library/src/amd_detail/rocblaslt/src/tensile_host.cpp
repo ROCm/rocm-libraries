@@ -3537,12 +3537,11 @@ struct TensileDataGemm
     // Only set while a tuning file is in play.
     TensileLite::ProblemOverride tuningKey;
 
-    // The key online tuning's selection hook ranked the returned solutions
-    // under, set by getBestSolutions once its xf32 fallback has run, so that
-    // runContractionProblem's measurement hook asks under the same one rather
-    // than deriving its own from a problem updateTensileProblem() has since
-    // put the xf32 math op back on. Cleared by runContractionProblem before
-    // the call that sets it; empty means selection did not run in this call.
+    // The key online tuning's selection hook used, set by getBestSolutions
+    // after its xf32 fallback, so the measurement hook in
+    // runContractionProblem uses the same key rather than deriving one from a
+    // problem that has the xf32 math op back. Empty when selection did not run
+    // in this call.
     std::optional<size_t> onlineTuningKey;
 };
 
@@ -3705,21 +3704,11 @@ TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void> ge
     return &data->problem;
 }
 
-// Whether the tuning cache can key on this problem at all.
-//
-// Two classes of problem it cannot. A grouped GEMM is several contractions
-// behind one descriptor, so there is no single shape to write a row under; a
-// pointer-array batch is a list of operands the key does not describe. Cache
-// mode asks this before it looks anything up, so a row recorded for either
-// class could never be found again.
-//
-// Online tuning asks the same question, and must ask it here rather than
-// spelling the test out a second time. What it is deciding is different --
-// whether to spend a shape's visits probing candidates and reordering its
-// ranking -- but it turns on the same fact: a winner the cache cannot key is
-// a winner no later run can replay, so the exploration buys nothing and the
-// row it appends is dead weight in a file shared with tune. Both read this,
-// so widening or narrowing what the cache can key on moves online with it.
+// Whether the tuning cache can key on this problem at all. A grouped GEMM has
+// no single shape to write a row under, and a pointer-array batch is a list of
+// operands the key does not describe. Online tuning asks the same question: a
+// winner the cache cannot key could never be replayed, so exploring it would
+// buy nothing.
 inline bool tuningCacheKeyable(const RocblasltContractionProblem& prob)
 {
     return !prob.grouped_gemm && prob.batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
@@ -3728,20 +3717,12 @@ inline bool tuningCacheKeyable(const RocblasltContractionProblem& prob)
 // The problem identity online tuning keys on, shared by the selection hook in
 // getSolutions() and the measurement hook in runContractionProblem().
 //
-// Neither of the library's existing keys can serve. ProblemOverride is what a
-// file row is written under and separates problems that differ only in
-// epilogue, bias or strides; it also costs forty-odd fields to build, which is
-// the whole per-call budget of the resolved path. std::hash of the Tensile
-// problem covers workspaceSize, which is the preference's ceiling while the
-// heuristic ranks solutions and the caller's own allocation by the time the
-// dispatch runs, so the two hooks would hash one problem to two values and
-// never meet.
-//
-// The fields below are the geometry and types the prediction model ranks on,
-// all of them rewritten from the caller's problem description by every
-// updateTensileProblem(), so they survive that window. The cost is that
-// problems differing only in epilogue, bias or strides share a key; what that
-// costs and why it is safe is PinnedWinner::tuningKey.
+// Neither existing key serves. ProblemOverride is too costly to build on the
+// resolved path, and std::hash of the Tensile problem covers workspaceSize,
+// which differs between ranking and dispatch, so the two hooks would not
+// agree. These are the fields the prediction model ranks on. Problems that
+// differ only in epilogue, bias or strides share a key; see
+// OnlineTuner::PinnedWinner for how that is handled.
 inline size_t onlineTuningProblemKey(const TensileLite::ContractionProblemGemm& problem)
 {
     const rocisa::DataType computeType = problem.f32XdlMathOp() == rocisa::DataType::XFloat32
@@ -3968,16 +3949,9 @@ namespace
         }
 
         /**
-         * The same three knobs as read for online mode, which spends them on
-         * the caller's own dispatches instead of on a search of its own.
-         *
-         * The units are what make the defaults differ, not a different opinion
-         * about how carefully to measure. Here a candidate costs the shape one
-         * visit per timed launch and a visit is a call the application was
-         * going to make anyway, so the prefix is the five the prediction model
-         * is worth second-guessing within and the repeats are the three the
-         * score needs to have a disturbed sample to discard. tune's 128 x 1000
-         * is minutes of GPU work, which is why it blocks for them.
+         * The same knobs as read for online mode. The defaults are smaller
+         * because online spends one of the caller's own calls per timed
+         * launch, where tune runs a blocking search of its own.
          */
         static int onlineCandidateCap()
         {
@@ -3988,39 +3962,20 @@ namespace
             return std::max(1, envInt("HIPBLASLT_TUNING_HOT_ITERS", 3));
         }
         /**
-         * Visits of a shape that dispatch the ranking's own pick and are
-         * sampled by nothing.
-         *
-         * None by default, so exploration starts on the first visit. tune's
-         * 1000 is not a candidate here: there a cold iteration is one untimed
-         * launch inside a search the caller is already blocked on, here it is a
-         * whole call that goes by unexplored, so 1000 would silence the feature
-         * on everything but a shape seen thousands of times.
-         *
-         * Nor is a smaller gate cheap against what it gates. Exploration
-         * finishes in K*R+1 visits for K candidates of R repeats each --
-         * sixteen at the defaults -- so a gate of 32 would make a shape wait
-         * 48 visits to resolve rather than 16 and would never resolve one seen
-         * fewer than 48 times. Short-lived shapes are most of a real trace.
-         *
-         * There is no per-candidate warm-up left for it to cover either:
-         * candidates are issued round-robin and scored on their smallest
-         * sample, so each gets a first launch of its own and has its slowest
-         * sample discarded. Zero is also the regime every result this feature
-         * was validated in was measured in, the POC it is ported from having
-         * had no such gate at all.
+         * Untimed visits of a shape before exploration starts. None by
+         * default: here a cold iteration is a whole call that goes unexplored,
+         * and exploration already finishes in K*R+1 visits, so any gate delays
+         * every shape and drops short-lived ones. Candidates are scored on
+         * their smallest sample, so a slow first launch is discarded anyway.
          */
         static int onlineColdIterations()
         {
             return std::max(0, envInt("HIPBLASLT_TUNING_COLD_ITERS", 0));
         }
         /**
-         * The most HIP event pairs online keeps alive on one device, and
-         * online's alone: tune keeps no pairs between calls. A positive
-         * count, read like MAX_CANDIDATES and
-         * HOT_ITERS, so a value below one counts as one and one that does not
-         * parse keeps the default. The default and why it is a flat number are
-         * on rocblaslt::OnlineTunerConfig::c_defaultLivePairCap.
+         * The most HIP event pairs online keeps alive on one device. Read like
+         * MAX_CANDIDATES and HOT_ITERS. The default is
+         * rocblaslt::OnlineTunerConfig::c_defaultLivePairCap.
          */
         static int onlineLivePairCap()
         {
@@ -4129,9 +4084,7 @@ namespace
         {
             TensileLite::TuningSearch s;
 
-            // Stamped, not inherited. The column exists to say which mode
-            // measured a row, and a default cannot say that: it says whichever
-            // mode happened to be written first. Online already stamps its own.
+            // Stamped explicitly: the column says which mode measured a row.
             s.mode           = TensileLite::TuningMode::Tune;
             s.allKernels     = allKernels();
             s.maxCandidates  = s.allKernels ? 0 : candidateCap();
@@ -4801,11 +4754,8 @@ namespace
         TruncateAfterFirst = 4,
         BudgetSpent        = 5,
 
-        // Not a tune stage: makes recording an online winner throw, which is
-        // the one failure the handler there cannot reach any other way. The
-        // ordinary I/O failures do not throw -- appendTuningRow returns false
-        // and the winner line reports it with the path. Numbered after
-        // BudgetSpent, which upstream took 5 for.
+        // Not a tune stage: makes recording an online winner throw, which
+        // the ordinary I/O failures do not do.
         OnlineRecord = 6,
     };
 
@@ -4877,10 +4827,8 @@ namespace
         std::vector<rocblaslt_matmul_heuristic_result> ranked(cap);
         int                                            returned = 0;
         RocblasltContractionProblem                    probe    = prob;
-        // Not a dispatch: nothing returned here is launched by this call, the
-        // indexes go to benchmarkAndSelectWinner, which measures them on
-        // isolated scratch. Online's rotation is only sound where the next
-        // visit reconsiders, so this asks as the heuristic entry point does.
+        // Not a dispatch: the indexes are benchmarked on scratch, so this
+        // asks as the heuristic entry point does and online offers no probe.
         const bool                                     found
             = getBestSolutions(probe,
                                handle,
@@ -5559,28 +5507,15 @@ size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
 namespace rocblaslt
 {
     /**
-     * Online tuning's knobs, mapped off the tuning mode and TuningPolicy.
+     * Online tuning's settings, mapped from the tuning mode and TuningPolicy.
+     * Defined here, next to the mode singleton and the secure environment
+     * accessor, and called once from the tuner singleton's constructor.
      *
-     * The declaration lives in OnlineTuner.hpp and the definition here, because
-     * this is where the mode singleton and the secure environment accessor are:
-     * the tuner reads nothing itself, so there is exactly one set of knobs and
-     * one set of security rules for all four modes.
-     *
-     * Called once, from the tuner singleton's constructor, which runs on the
-     * first lookup and therefore after the mode singleton can be built. That
-     * ordering is why the mapping is pulled rather than pushed; a push would
-     * have to happen somewhere that is guaranteed to run before the first
-     * selection, and no such place exists on the matmul path.
-     *
-     * MAX_CANDIDATES, HOT_ITERS and COLD_ITERS are the same three variables
-     * tune mode reads, at defaults that suit a search spread over a live
-     * workload rather than one blocking search. MAX_EVENT_PAIRS is online's
-     * alone: the cap on the event pairs it keeps per device. ALL_KERNELS is
-     * not read at all: online reorders a ranking it was handed, so it is always
-     * a ranked prefix.
-     * BUDGET_MS_PER_SHAPE, ROTATING_MB, FLUSH_ICACHE and SCRATCH_MAX_BYTES have
-     * no counterpart here -- online measures the caller's own dispatch on the
-     * caller's own buffers, so there is no scratch to cap and no stall to bound.
+     * MAX_CANDIDATES, HOT_ITERS and COLD_ITERS are tune's variables with online
+     * defaults; MAX_EVENT_PAIRS is online's alone. ALL_KERNELS,
+     * BUDGET_MS_PER_SHAPE, ROTATING_MB, FLUSH_ICACHE and SCRATCH_MAX_BYTES are
+     * not read: online reorders a ranked prefix and times the caller's own
+     * dispatches on the caller's buffers.
      */
     OnlineTunerConfig onlineTunerConfig()
     {
@@ -5588,9 +5523,7 @@ namespace rocblaslt
 
         OnlineTunerConfig config;
 
-        // A mode with no cache file does nothing, the same rule reads() and
-        // writes() apply, so online without a path stays off rather than
-        // exploring for a winner it could never record.
+        // Without a cache file there is nowhere to record a winner.
         config.enabled
             = tuning.mode() == TensileLite::TuningMode::Online && !tuning.cachePath().empty();
 
@@ -5599,16 +5532,13 @@ namespace rocblaslt
         config.coldCalls   = TuningPolicy::onlineColdIterations();
         config.livePairCap = TuningPolicy::onlineLivePairCap();
 
-        // The per-candidate trace is a diagnostic, so it rides the logging
-        // level the rest of the tuning lifecycle reports at rather than a
-        // variable of its own.
+        // The per-candidate trace follows info-level logging.
         config.verbose = (get_logger_layer_mode() & rocblaslt_layer_mode_log_info) != 0;
 
         config.livePairCapReached = TensileLite::noteOnlineEventPairCap;
 
-        // One candidate is nothing to choose between, so the tuner stays off
-        // however the mode is set. Said on the channel the startup line uses,
-        // because that line still names online as the mode.
+        // The tuner stays off below two candidates, while the startup line
+        // still names online as the mode, so say so on the same channel.
         if(config.enabled && config.topK < 2)
             log_tuning_lifecycle(__func__,
                                  "online-off max-candidates=" + std::to_string(config.topK)
@@ -5732,14 +5662,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
         const bool  keyed  = tuning.reads() && tuningCacheKeyable(prob);
-        // Tune mode and no other, because what tunes gates is the blocking
-        // search: it waits on tuningLock() and benchmarks on library scratch
-        // while this call stands still. writes() is true for online too, since
-        // the two modes share one file, which is why the gate cannot be
-        // writes() -- online pays for its samples out of later dispatches of
-        // the same problem and must never stall this one. writes() stays the
-        // predicate for whether a winner is recorded, which is a different
-        // question from who searches here.
+        // Only tune mode runs the blocking search here. writes() is also true
+        // for online, which shares the file but never searches inside a call.
         const bool tunes = keyed && tuning.mode() == TensileLite::TuningMode::Tune
                            && !streamIsCapturing(prob.stream) && !isFusedAllToAll(prob);
 
@@ -5811,37 +5735,19 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         int* solutionIndex = (int*)algo->data;
 
-        // Online tuning's measurement half, keyed on the key the selection hook
-        // in getSolutions() used. Where selection ran in this call that key is
-        // handed over rather than derived again: getBestSolutions can fall back
-        // from xf32 to fp32, which changes the key, and updateTensileProblem()
-        // above has put the xf32 math op back, so a key derived here would be
-        // one nothing was registered under. A replayed algo ran no selection
-        // here, and derives it from the problem as before.
+        // Online tuning's measurement half. Where selection ran in this call
+        // its key is reused: the xf32-to-fp32 fallback changes the key, and
+        // updateTensileProblem() above has put the xf32 math op back. A
+        // replayed algo derives the key from the problem.
         //
-        // A caller-supplied algo is left alone entirely: no harvest and no
-        // measurement. This is the caller-supplied half of the scope note on
-        // rocblaslt::OnlineTuner, which says what online does and does not
-        // tune. Nothing pairs its launch with the selection visit that
-        // produced it -- the algo is a public type, and the thread may have
-        // made other visits since -- so a sample of it could be filed under a
-        // different problem's candidate. The heuristic query that handed it
-        // out was offered nothing for the same reason; see
-        // OnlineTuner::selectCandidateImpl(). Leaving the harvest to the
-        // dispatches online does measure also keeps such a launch free of the
-        // tuner's lock, for a shape that may never be dispatched any other way.
+        // A caller-supplied algo is neither harvested nor measured; see the
+        // scope note on rocblaslt::OnlineTuner. Nor is a problem the cache
+        // cannot key.
         //
-        // tuningCacheKeyable is the same test the cache's own `keyed` makes
-        // below, and the selection hook makes it too: a problem class the cache
-        // refuses to key is one online leaves entirely alone, so nothing it
-        // dispatched is ever sampled.
-        //
-        // Nothing below this point waits on the GPU. harvestPending() reads back
-        // the event pairs of launches that have already retired and leaves the
-        // rest outstanding; beginMeasurement() hands out a pair for this launch
-        // and reads nothing. While the problem is still being explored both
-        // take the tuner's process-wide lock exclusively, so concurrent calls
-        // exploring at the same time are serialised on it for that long.
+        // Nothing here waits on the GPU: harvestPending() reads back only
+        // finished launches and beginMeasurement() reads nothing. While a
+        // problem is exploring, both take the tuner's process-wide lock
+        // exclusively, so concurrent exploring calls serialise on it.
         auto&        onlineTuner  = rocblaslt::OnlineTuner::getInstance();
         const bool   onlineTuning
             = onlineTuner.enabled() && !callerSuppliedAlgo && tuningCacheKeyable(prob);
@@ -6351,28 +6257,16 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 }
                 isPreloaded = true;
             }
-            // Left null unless the tuner wants this dispatch sampled, which
-            // keeps the launch below identical to an untuned one. launchKernels
-            // records start before the first kernel and stop after the last, so
-            // a multi-kernel solution is bracketed as a whole, and the pair is
-            // read back on a later visit to this problem rather than here.
+            // Left null unless the tuner wants this dispatch sampled, so the
+            // launch is otherwise identical to an untuned one. launchKernels
+            // records start before the first kernel and stop after the last,
+            // and the pair is read back on a later visit.
             //
-            // Only a dispatch online itself chose is sampled; a caller-supplied
-            // algo has already turned onlineTuning off above (see the scope
-            // note on rocblaslt::OnlineTuner). A launchIndex means the tuner
-            // named the kernel and replayed means the cache did, so what ran
-            // is not the candidate the rotation asked for, and timing it would
-            // credit one candidate with another's number. The two modes
-            // sharing a file is what makes this reachable: online
-            // replays a row the cache already holds for a shape, rather than
-            // measuring it again. Replay is asked separately because it now
-            // runs above selection and so leaves launchIndex at -1.
-            //
-            // Nor is a captured launch sampled: an event recorded into a
-            // capture can be neither queried nor read back, and the attempt
-            // would invalidate the caller's graph. Asked behind the same
-            // lock-free resolution load beginMeasurement() starts with, so a
-            // problem there is nothing left to learn about reaches no HIP call.
+            // Only a kernel online chose itself is sampled: launchIndex means
+            // the tuner named it and replayed means the cache did. Nor is a
+            // captured launch: an event recorded into a capture cannot be read
+            // back. The resolution check comes first, so a resolved problem
+            // makes no HIP call here.
             hipEvent_t measureStart = nullptr;
             hipEvent_t measureStop  = nullptr;
             if(onlineTuning && launchIndex < 0 && !replayed
@@ -6380,9 +6274,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 static_cast<void>(onlineTuner.beginMeasurement(
                     onlineKey, solution->index, prob.stream, measureStart, measureStop));
 
-            // Handed back once the launch below has returned, by any route, so
-            // no other dispatch of the problem reads or retires the pair while
-            // this one may still be recording it. Nothing when there is no pair.
+            // Hands the pair back once the launch has returned, however it
+            // returns; see OnlineTuner::endMeasurement().
             struct MeasuredLaunch
             {
                 rocblaslt::OnlineTuner& tuner;
@@ -6395,19 +6288,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 }
             } const measuredLaunch{onlineTuner, onlineKey, measureStart};
 
-            // The pair is passed best effort, which is the difference between
-            // a tuner that stops measuring and one that breaks the call it was
-            // measuring. launchKernel returns hipEventRecord's error, and this
-            // is a production dispatch, so without it an unrecordable event is
-            // the status of the caller's hipblasLtMatmul: a correct GEMM
-            // reported as a failure, or no GEMM at all when it is the start
-            // record that fails. Both arguments here were a hardcoded nullptr
-            // before online tuning, so the exposure is this feature's to carry.
-            //
-            // The lost sample needs no handling of its own. A pair no launch
-            // recorded reads back non-positive -- see harvestPendingImpl's sign
-            // test -- so the next harvest drops it and retires the pair instead
-            // of pooling it, which is exactly "no measurement this visit".
+            // Best effort: an event that cannot be recorded costs the sample,
+            // not the caller's GEMM. A pair the launch did not record reads
+            // back non-positive, so the next harvest drops it.
             t_lastLaunchedIndex = solution->index;
             status              = hip2RocStatus(adapter->launchKernels(kernels,
                                                           prob.stream,
@@ -7353,65 +7236,20 @@ inline bool isCustomKernelForPointerArray(TensileLite::ContractionProblemGemm co
            && !solution.customKernel.name.empty() && !solution.customKernel.generated;
 }
 
-// Write a pinned online winner into the tuning file, through the writer tune
-// uses and in the row format cache mode replays. There is no second format and
-// no second validation path: the row carries the same key, the same index and
-// the same kernel name, and is read back by the same parser.
+// Write a pinned online winner to the tuning file, through tune's writer and
+// in the row format cache mode replays.
 //
-// Written here, where the winner is pinned, and not deferred to a later visit
-// or to process exit. Three things decided that.
-//
-//   The cost is one small append, once per resolved shape, after the K*R+1
-//   visits exploration takes. It is not the thing online exists to
-//   avoid: tune stalls a caller for a benchmark run of every candidate under a
-//   lock held for the whole search, which is seconds to minutes. This is a
-//   file open, a kilobyte and a flush.
-//
-//   Deferring to the measurement path would not even move that cost off the
-//   caller. runContractionProblem is the same call on the same thread -- for a
-//   matmul passing no algo it is the caller of this function -- so a write
-//   from there blocks exactly what a write from here does, while needing new
-//   state to remember what is owed and leaving a shape that is never
-//   dispatched again unrecorded.
-//
-//   Buffering to flush at exit is the only option that writes nothing on a
-//   call, and it is the only one that writes nothing at all when the process
-//   is killed rather than returned from, which is how the long-lived serving
-//   processes online is for usually end. A winner nobody can read is worth
-//   what no winner is worth.
-//
-// Writing at pin time also settles eviction: the resolution table is
-// direct-mapped and a colliding key displaces the entry, but by then the row
-// is already in the file and in the map, so eviction costs the lock-free
-// lookup and nothing else. The problem's own state is in m_problems, which
-// never evicts, so the tuner keeps answering with the measured winner through
-// the locked path.
+// Written when the winner is pinned rather than deferred: it is one small
+// append per resolved shape, a later visit on the same thread would block the
+// same way, and buffering until exit would lose everything when a long-running
+// process is killed. By then the row is in the file and the in-memory map, so
+// an eviction from the resolved table costs only the lock-free lookup.
 
-// A winner that could not be recorded at all, counted here and explained once.
-//
-// Swallowing the failure is the right call and stays: the only handler above
-// is runContractionProblem's, which would turn a throw into
-// rocblaslt_status_internal_error for a plain hipblasLtMatmul -- a correct
-// GEMM reported as a failure because an optimisation for the next process did
-// not work out. Swallowing it in silence is not: a user whose cache never
-// fills sees tuned=0 and has nothing to read that says why, and a systematic
-// failure looks exactly like the feature working.
-//
-// The counter is the part that is always there, because it is the part that
-// cannot become noise: it is one number in the summary the process already
-// prints at exit, beside the `tuned` it explains, and it reads the same
-// whether one shape failed or a hundred thousand did. A per-shape line cannot
-// say that -- the failures that matter most are the persistent ones, a
-// read-only directory or a logger that throws, and those fail on every shape.
-//
-// So the line is emitted once and never again. It carries what the count
-// cannot: which exception, and which path was being written. Together they
-// answer both halves -- how widespread, and what went wrong -- without either
-// one being able to spam.
-//
-// what may be null for a throw that is not a std::exception. Nothing in here
-// may throw: this runs in an exception handler whose whole purpose is that
-// nothing escapes it.
+// A winner that could not be recorded: counted, and explained once. The
+// failure is swallowed, because it must not fail the caller's matmul, but not
+// silently: the summary's unrecorded= counts every one, and a single line names
+// the exception and the path. what may be null for a throw that is not a
+// std::exception. Runs in an exception handler, so nothing here may throw.
 inline void noteUnrecordedOnlineWinner(const char* what)
 {
     TensileLite::TuningCounters::instance().unrecorded++;
@@ -7447,10 +7285,8 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&         
 
     const auto& tuner = rocblaslt::OnlineTuner::getInstance();
 
-    // Recording a winner is an optimisation for the next process and must
-    // never fail this one's matmul. The stream, the map and the logger can all
-    // throw, and the call that reaches here is a plain hipblasLtMatmul whose
-    // handler would turn that into an internal error.
+    // Recording is an optimisation for the next process and must never fail
+    // this one's matmul.
     try
     {
         if(tuningFailureInjected(TuningFailureStage::OnlineRecord))
@@ -7459,19 +7295,17 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&         
         TensileLite::TunedEntry entry;
         entry.solutionIndex = winner.solution->index;
 
-        // From the measured object, like tune's, so the name written here is
-        // the name replay compares against via getKernelNameFromAlgoIndex.
+        // From the measured object, like tune's, so replay compares the same
+        // name.
         entry.kernelName             = winner.solution->kernelName;
         entry.schemaVersion          = TensileLite::kCurrentTuningSchemaVersion;
         entry.buildStamp             = TensileLite::currentBuildStamp();
         entry.requiredWorkspaceBytes = winner.requiredWorkspace;
         entry.winnerTimeUs           = winnerTimeUs;
 
-        // Complete, under no ceiling. Online's search is the ranked prefix and
-        // it measured all of it; there is no budget that could have cut it
-        // short, because it never spends a caller's time waiting. That reads
-        // as final only against another online search, since the mode on the
-        // row is what tuningSearchCovers compares first.
+        // Complete and unbudgeted: online measured its whole ranked prefix.
+        // tuningSearchCovers compares the mode first, so this is final only
+        // against another online search.
         entry.complete = true;
         entry.budgetMs = 0;
 
@@ -7483,48 +7317,33 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&         
         search.coldIters      = tuner.coldCalls();
         search.hotIters       = tuner.repeats();
 
-        // Neither has a counterpart here: online times the caller's own
-        // dispatch on the caller's own buffers, so there is nothing to rotate
-        // and nothing between two launches to flush.
+        // Online times the caller's own dispatches on the caller's buffers.
         search.flushICache = false;
         search.rotatingMb  = 0;
         entry.search       = search;
 
-        // The key off the record, never one rebuilt from whichever problem is
-        // in hand. One resolution covers several file keys, and only the key
-        // the record carries belongs to a problem that was measured; a merged
-        // sibling is served this winner at run time wherever its own ranking
-        // confirms it, but a row written under its key would record timings
-        // nobody took.
+        // The record's key, not one rebuilt from the problem in hand: only
+        // the measured problem's key may have a row.
         const bool persisted
             = TensileLite::appendTunedEntry(tuning.cachePath(), prob, winner.tuningKey, entry);
 
-        // Beside whatever the file already held rather than instead of it. The
-        // file is shared with tune and is append-only, and online has no
-        // standing to drop another mode's winner; find() puts the newest
-        // complete row first, which is this one.
+        // Added beside whatever the shared file already holds; find() puts
+        // the newest complete row first.
         static_cast<void>(
             TensileLite::OverrideMap::getMap().addIfAbsent(winner.tuningKey, entry));
 
-        // The shape is served by a measured kernel from here on, whether or not
-        // the append reached the file, so the summary counts it as matched
-        // rather than as the fallback its first lookups recorded. tuned counts
-        // the rows that will outlive the process.
+        // Served by a measured kernel from here on, so counted as matched
+        // whether or not the append reached the file; tuned counts the rows
+        // that did.
         auto& counters = TensileLite::TuningCounters::instance();
         if(persisted)
             counters.tuned++;
         TensileLite::recordTuningLookup(winner.tuningKey, true);
         TensileLite::recordTuningWinner(winner.tuningKey);
 
-        // Through the gate the tune path's terminal line goes through, not
-        // around it. This is online's equivalent of tuning-done: the one line
-        // that says a shape was settled and what it cost. Tune emits one per
-        // shape too, but a tune line is paid for by a search the caller waited
-        // seconds for, while online settles a shape every K*R+1 visits, so an
-        // ungated line here is the same notice at a rate nothing limits.
-        // Routing it through shouldLogTuningTerminal puts both modes under one
-        // policy -- per key, and unconditional once info logging is on -- so a
-        // later change to what the stack reports moves online with it.
+        // Online's tuning-done line, under the same per-key gate as tune's:
+        // online settles a shape every K*R+1 visits, so ungated it could be
+        // printed at any rate.
         if(TensileLite::shouldLogTuningTerminal(winner.tuningKey,
                                                 TensileLite::TuningAttempt::Tuned))
         {
@@ -7550,21 +7369,10 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&         
 }
 
 // Move the candidate online tuning wants to sample next to the front of the
-// ranking, leaving the order of the rest alone.
-//
-// Candidates the caller's workspace cannot cover are withheld from the tuner:
-// they rank, but runContractionProblem refuses to dispatch them.
-//
-// A caller recording into a HIP graph is told so, and is never offered a probe
-// candidate as a result -- only a measured winner, if there is one. The
-// measurement hook already refuses a capturing stream; this is the other half
-// of the same rule, and the half that decides what the graph keeps. See
-// OnlineTuner::selectCandidateImpl().
-//
-// A caller that fetched this answer from the heuristic is told so too, and is
-// likewise offered nothing but a measured winner: it keeps the algo and
-// dispatches it itself, and a caller-supplied algo is never measured. See the
-// scope note on rocblaslt::OnlineTuner.
+// ranking, leaving the order of the rest alone. Candidates the caller's
+// workspace cannot cover are withheld from the tuner. A capturing caller and a
+// heuristic query are offered only a measured winner; see
+// OnlineTuner::selectCandidate().
 inline void promoteOnlineTuningCandidate(
     std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
     const TensileLite::ContractionProblemGemm&                      tensile_prob,
@@ -7588,13 +7396,8 @@ inline void promoteOnlineTuningCandidate(
         rankedPositions.push_back(i);
     }
 
-    // Which problem is asking, as against which resolution it falls under. The
-    // key merges problems that rank and run differently, so this is what says
-    // whose exploration this is and who may leave a record behind; see
-    // OnlineTuner::ProblemState::m_problem. Taken here rather than in the pin
-    // branch below because selection needs it too, and this whole function is
-    // off the resolved path -- a problem with a record of its own is answered
-    // before the ranking it would reorder is even fetched.
+    // Which problem is asking, as against the resolution key it falls under;
+    // see OnlineTuner::ProblemState::m_problem.
     const size_t problemIdentity = std::hash<TensileLite::ContractionProblemGemm>{}(tensile_prob);
 
     auto&     tuner   = rocblaslt::OnlineTuner::getInstance();
@@ -7608,25 +7411,17 @@ inline void promoteOnlineTuningCandidate(
 
     const size_t position = rankedPositions[promote];
 
-    // The call that resolves a problem is the last one to hold its ranking, so
-    // it is also the one that can tell the fast path where the winner sits --
-    // and the only one that can hand it the winner itself, which is what lets a
-    // later call skip the ranking altogether. selectCandidate() names the winner
-    // once the problem is resolved, which is also the only time resolution()
-    // answers, so the index compare holds wherever this runs; it is here so that
-    // what gets pinned is checkably the winner and not whatever was promoted.
+    // Once resolved, record where the winner sits and pin the winner object,
+    // so later calls can skip the ranking. The index check makes sure what is
+    // pinned is the winner and not whatever was promoted.
     if(const auto* resolved = tuner.resolution(problemKey))
     {
         resolved->setPosition(static_cast<int>(position));
 
         if(!resolved->pinned() && solutions[position]->index == resolved->winner())
         {
-            // Recorded by whoever installed the record and by nobody else. The
-            // test above is a hint taken without the lock, so two callers with
-            // different file keys can both reach here; pinWinner decides which
-            // of them the record belongs to -- the problem its samples were
-            // taken on -- and only that one has a key worth writing a row
-            // under.
+            // The check above is taken without the lock, so two callers can
+            // get here; only the one pinWinner() installs for writes a row.
             const auto* installed = tuner.pinWinner(
                 *resolved,
                 solutions[position],
@@ -7644,63 +7439,23 @@ inline void promoteOnlineTuningCandidate(
     std::rotate(solutions.begin(), picked, picked + 1);
 }
 
-// Answer a resolved problem from the pinned winner alone, without asking the
-// library for a ranking to pick it out of.
+// Answer a resolved problem from the pinned winner alone, without fetching a
+// ranking. CachingLibrary returns its cached ranking whole, at the deeper depth
+// exploration asked for, so fetching costs topK() copies however few solutions
+// the caller wants.
 //
-// This is the only thing on the path that does not grow with topK(). Lowering
-// the fetch depth would not have done it: CachingLibrary caches one ranking per
-// problem with no depth in the key and returns it whole and by value, so once
-// exploration has grown that entry to topK() every later lookup copies topK()
-// shared_ptrs however few the caller asks for, and the resize back down
-// destroys them again. Not fetching is the only way to stop paying for it.
-//
-// What the fetch was still buying was the check that the winner is in the list
-// this problem ranked, and m_problem replaces it with a stronger one. It is the
-// key the solution library caches rankings at, so a problem matching it would
-// be handed the very ranking the winner was recorded in, and returning the
-// winner is exactly what fronting it in that ranking would have returned. A
-// problem that does not match is one the coarser resolution key covers but that
-// may rank differently, and it goes and asks, as it did before.
-//
-// Empty on anything less than that, which leaves the caller to fetch and to
-// answer the way it always has.
-//
-// KNOWN CAVEAT, MEASURED. That last sentence is the whole cost of the merged
-// key, and it is a stated limit rather than a defect: a problem the key covers
-// but that is not the one the record names never reaches this shortcut, and
-// pays more per dispatch than it would with the tuner switched off. Timing
-// this whole lookup over a long steady-state run, differenced against a
-// shorter one so the cold start cancels, shows the problem that owns the
-// record answered several times faster than with the tuner off, and every
-// sibling -- one differing only in workspace size, one with another epilogue,
-// two alternating -- paying a similar extra amount per dispatch, about as
-// much as the owner saves. That is a small fraction of a small GEMM's own
-// time, and less at every larger size. Most of it is the problem hash that
-// has to be computed to learn this caller is not the one named, and
-// promoteResolvedOnlineTuningWinner with the resize back to the caller's
-// depth; the rest is key, table lookup and extra fetch depth.
-//
-// It is NOT the position hint. Two problems under one key get the same ranking
-// by construction -- onlineTuningProblemKey() hashes what the ranking model
-// ranks on and nothing else -- so the winner sits at the same index for all of
-// them and the hint, written once during exploration, hits from then on. Over
-// the same run the full promote path ran only a few dozen times in every
-// sibling arm, exploration included. Siblings can only shift each other's
-// hint where one of them cannot afford a candidate ranked above the winner,
-// so the workspace filter drops it and renumbers what is left.
-//
-// Removing that extra cost means a record per problem identity rather than per
-// resolution key, which is a second lock-free table and a separation of "the
-// problem a cache row is written under" from "the problem this answer is for".
-// That is a design change, not a fix, and wants a workload that shows merged
-// siblings are both common and hot before it is worth the surface.
+// Only for the problem the winner was measured on: it would be handed the very
+// ranking the winner was recorded in. Any other problem under the same
+// resolution key may rank differently, so it gets an empty answer and fetches
+// its ranking as usual. That costs a merged sibling the problem hash on every
+// dispatch on top of the untuned path; avoiding it would need a record per
+// problem rather than per resolution key.
 inline std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
     resolvedOnlineTuningAnswer(const TensileLite::ContractionProblemGemm& tensile_prob,
                                const rocblaslt::OnlineTuner::Resolution&  resolved,
                                int                                        requestedAlgoCount)
 {
-    // More than one wanted means the ranking is wanted, and the winner is only
-    // the head of it. Nothing to save, so nothing is attempted.
+    // More than one wanted means the ranking is wanted.
     if(requestedAlgoCount != 1)
         return {};
 
@@ -7710,25 +7465,17 @@ inline std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
        || pinned->problem != std::hash<TensileLite::ContractionProblemGemm>{}(tensile_prob))
         return {};
 
-    // All that is left of the per-candidate workspace filter: the requirement is
-    // fixed once the problem and the solution are, and only the caller's own
-    // allocation still varies. A caller that cannot cover the winner is one the
-    // winner is withheld from, which is its ranking untouched.
+    // The workspace filter, for the one candidate that matters.
     if(pinned->requiredWorkspace > tensile_prob.workspaceSize())
         return {};
 
     return {pinned->solution};
 }
 
-// Front the pinned winner of an already-resolved problem, doing nothing that
-// grows with topK(): the recorded position names it outright, and the caller's
-// workspace is the only thing about it that can have changed since.
-//
-// Returns false when the recording does not describe this list, which leaves
-// the full path to answer and to record. That is not an edge case to tolerate
-// but the mechanism that keeps the choice honest: one problem key can cover
-// more than one ranking, so the winner is only ever fronted where it has been
-// seen, never asserted into a list it was not ranked in.
+// Front the pinned winner of a resolved problem using the recorded position.
+// Returns false when the position does not describe this list, which leaves
+// the full path to answer: one key can cover more than one ranking, so the
+// winner is only fronted where it has been seen.
 inline bool promoteResolvedOnlineTuningWinner(
     std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
     const TensileLite::ContractionProblemGemm&                      tensile_prob,
@@ -7737,20 +7484,13 @@ inline bool promoteResolvedOnlineTuningWinner(
 {
     const int winner = resolved.winner();
 
-    // Resolved without pinning anything, because there was never more than one
-    // candidate to compare. The caller's own ranking is the answer.
+    // Resolved with no winner; the caller's own ranking is the answer.
     if(winner < 0)
         return true;
 
-    // No record yet, and only the full path can install one. Answering from the
-    // position hint here would be correct for this caller and would also be the
-    // end of it: the hint is written by whichever caller a merged key brings
-    // along next, so a sibling can set it to a position that happens to hold
-    // the winner in the measured problem's list too, and the measured problem
-    // would then never take the branch that pins. Nothing would be written to
-    // the file and no caller would ever reach the resolved fast path. Costs an
-    // acquire load until some caller pins, which is at most one visit when the
-    // key covers one problem.
+    // Only the full path can pin the winner. Answering from the position hint
+    // before then could keep the measured problem from ever reaching the branch
+    // that pins, so nothing would be recorded.
     if(!resolved.pinned())
         return false;
 
@@ -7760,9 +7500,7 @@ inline bool promoteResolvedOnlineTuningWinner(
        || solutions[position]->index != winner)
         return false;
 
-    // The filter the full path runs over every candidate, run over the one that
-    // matters. A caller whose workspace cannot cover the winner gets its ranking
-    // untouched, which is what withholding the winner from the tuner amounts to.
+    // A caller whose workspace cannot cover the winner keeps its own ranking.
     if(solutions[position]->requiredWorkspaceSize(tensile_prob, hardware)
        > tensile_prob.workspaceSize())
         return true;
@@ -7773,19 +7511,11 @@ inline bool promoteResolvedOnlineTuningWinner(
     return true;
 }
 
-// onlineTuningProb is both the switch for online tuning at this call site and
-// the problem the file key is built from when a winner is pinned. Null means
-// this is not a lookup online may act on, which is every caller whose dispatch
-// does not come back through runContractionProblem's measurement hook: a
-// promoted candidate nothing times would spend the shape's visit budget for no
-// samples, and tune mode's own candidate enumeration is not a dispatch at all.
-// A hooked site still declines a problem the tuning cache cannot key; see
-// tuningCacheKeyable.
-//
-// lookup says which contract the caller holds this answer under, which decides
-// whether a probe may be promoted into it at all. It is read only where
-// onlineTuningProb is non-null, so the default is the one that promotes
-// nothing.
+// onlineTuningProb turns online tuning on for this lookup and is the problem a
+// pinned winner's file key is built from. Null for every caller whose dispatch
+// does not reach runContractionProblem's measurement hook. lookup says how the
+// caller uses the answer, which decides whether a probe may be promoted into
+// it; see SolutionLookup.
 template <typename T>
 inline auto getSolutions(
     const T& inputs,
@@ -7805,19 +7535,14 @@ inline auto getSolutions(
     if(reportEmpty)
         TensileLite::uniformSummationOrderSelectionTallyReset();
 
-    // Short-circuited on the pointer, so a site online does not serve never
-    // builds the tuner and never reads anything off it.
-    //
-    // tuningCacheKeyable last, so a run with the feature off pays exactly what
-    // it paid before: the pointer test, then the member flag. See the function
-    // itself for why online declines the same problem classes the cache does.
+    // Ordered so a run with online tuning off pays a pointer test and a
+    // member-flag test.
     const bool onlineTuning = onlineTuningProb != nullptr
                               && rocblaslt::OnlineTuner::getInstance().enabled()
                               && tuningCacheKeyable(*onlineTuningProb);
 
-    // Both hooks key on this, so computing it once here is what lets a resolved
-    // problem be recognised -- a masked index and a compare, no lock -- before
-    // any of the work that scales with topK() has been started.
+    // Lets a resolved problem be recognised, without a lock, before any work
+    // that scales with topK().
     const size_t problemKey = onlineTuning ? onlineTuningProblemKey(tensile_prob) : 0;
 
     const rocblaslt::OnlineTuner::Resolution* resolved
@@ -7831,9 +7556,8 @@ inline auto getSolutions(
             return answered;
     }
 
-    // Exploration rotates through the top K, and the caller may well have asked
-    // for one. CachingLibrary grows its entry in place on the deeper request, so
-    // only the first lookup of a problem pays for it.
+    // Exploration rotates through the top K, however many the caller asked
+    // for.
     const int fetchCount
         = onlineTuning ? std::max(requestedAlgoCount, rocblaslt::OnlineTuner::getInstance().topK())
                        : requestedAlgoCount;
@@ -8083,16 +7807,10 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
 
     bool enableEpilogue = prob.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
 
-    // The one lookup online tuning acts on. Both callers leave the choice of
-    // kernel to the library -- hipblasLtMatmul with no algo, which dispatches
-    // the answer below immediately, and hipblasLtMatmulAlgoGetHeuristic, whose
-    // answer the caller hands back to hipblasLtMatmul. Only the first is
-    // explored: its dispatch reaches the measurement hook in
-    // runContractionProblem as the launch this ranking chose, while the
-    // second comes back as a caller-supplied algo, which is never measured.
-    // lookup carries which of the two this is; a heuristic query is served a
-    // measured winner once there is one and otherwise its own ranking. The
-    // scope note on rocblaslt::OnlineTuner is the authoritative statement.
+    // The lookup online tuning acts on. lookup says whether this is a
+    // null-algo hipblasLtMatmul, which is explored, or a heuristic query,
+    // which is only served a measured winner; see the scope note on
+    // rocblaslt::OnlineTuner.
     auto solutions = getSolutions(
         prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount, &prob, lookup);
 
@@ -8111,9 +7829,7 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                  lookup);
     }
 
-    // Derived after the fallback, from the problem the returned ranking was
-    // taken under, which is the key getSolutions() registered it with. See
-    // TensileDataGemm::onlineTuningKey.
+    // After the fallback, so it is the key getSolutions() registered under.
     if(rocblaslt::OnlineTuner::getInstance().enabled())
         data->onlineTuningKey = onlineTuningProblemKey(data->problem);
 

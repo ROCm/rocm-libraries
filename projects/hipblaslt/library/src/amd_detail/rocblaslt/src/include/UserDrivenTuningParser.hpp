@@ -159,19 +159,13 @@ namespace TensileLite
         // Searches that got as far as tuning-start, whatever their outcome.
         std::atomic<uint64_t> attempts{0};
 
-        // Winners a mode measured but could not record, because recording
-        // threw. Counted rather than reported per shape: recording fails for
-        // reasons that do not go away between shapes, and the count is what
-        // separates one unlucky write from a cache that can never fill. The
-        // ordinary I/O failures are not here -- they do not throw, and the
-        // winner's own line names them with the path.
+        // Winners measured but not recorded because recording threw. Counted
+        // rather than reported per shape, since such failures tend to persist.
+        // I/O failures do not throw; the winner's own line reports them.
         std::atomic<uint64_t> unrecorded{0};
 
-        // Rows a tuning file held that could not be read. The read-side
-        // counterpart of unrecorded above: that one says a winner never
-        // reached the file, this one says the file's own rows never reached
-        // the map. Without it a file every row of which is refused reports
-        // loaded=0, which is also what an empty file reports.
+        // Rows a tuning file held that could not be read. Without it a file
+        // whose rows are all refused reports loaded=0, like an empty one.
         std::atomic<uint64_t> rejected{0};
 
         std::string summary() const
@@ -217,18 +211,9 @@ namespace TensileLite
 
     /**
      * The same, under a key the caller hands over rather than one rebuilt from
-     * `problem`.
-     *
-     * Online tuning holds one pinned record per resolved problem and that
-     * record carries the key its row must be written under. Its resolution key
-     * is coarser than a file key, so several distinct keys share one record,
-     * and only the one on the record names a problem that was measured. Taking
-     * the key off the record rather than off whichever caller is in hand is
-     * what keeps a merged sibling from restating it.
-     *
-     * `problem` is still read, for the type columns: they keep a spelling the
-     * parser reads back, which the key cannot supply because it holds Tensile
-     * types and several compute types share one.
+     * `problem`. Online tuning writes under the key on its pinned record, which
+     * belongs to the problem that was measured. `problem` is still read for the
+     * type columns, whose spelling the key cannot supply.
      */
     bool appendTunedEntry(const std::string&                 path,
                           const RocblasltContractionProblem& problem,
@@ -374,30 +359,18 @@ namespace TensileLite
     };
 
     /**
-     * Log that online mode saw a call of this kind and leaves it untuned:
-     * only with the info bit set, like the key events above, and once per kind
-     * per process rather than per key, since the line is about the kind of
-     * call and not about any shape. Without it the only sign is the absence of
-     * online-winner lines, which reads exactly like a feature switched off.
-     *
-     * Callers test OnlineTuner::enabled() first. Past that it is a logger-mode
-     * test and, with info on, one atomic load; it takes no lock and reads
-     * nothing off the problem, so a caller-supplied launch stays as free of
-     * the tuner as the measurement hook keeps it.
+     * Log that online mode saw a call of this kind and leaves it untuned. Only
+     * with the info bit set, and once per kind per process. Callers test
+     * OnlineTuner::enabled() first; past that it takes no lock and reads
+     * nothing off the problem.
      */
     void noteOnlineScopeEvent(OnlineScopeEvent kind);
 
     /**
-     * Log that online mode ran a launch on device untimed because the device
-     * held cap event pairs and every one was still timing a launch not yet
-     * read back. The tuner calls it once per device per process, through
-     * rocblaslt::OnlineTunerConfig::livePairCapReached, with no lock held.
-     *
-     * Info-level, like the scope events above, and for the same reason those
-     * are: nothing about the call changes. It runs the kernel online off would
-     * have run, and the shape goes on being explored as the launches in flight
-     * finish and their pairs are reused. A line without any logging variable
-     * is reserved for what pauses a call or changes what it launches.
+     * Log that a launch on device ran untimed because the device held cap
+     * event pairs, all still in flight. Called once per device per process
+     * through rocblaslt::OnlineTunerConfig::livePairCapReached, with no lock
+     * held. Info level, because the call itself runs as it would untuned.
      */
     void noteOnlineEventPairCap(int device, int cap);
 

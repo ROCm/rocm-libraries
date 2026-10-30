@@ -569,9 +569,8 @@ namespace TensileLite
 
         namespace
         {
-            // Record an optional instrumentation event. See
-            // SolutionAdapter::launchKernel for why a caller may choose to
-            // carry the failure itself. swallowed is set when it does.
+            // Record an optional instrumentation event; swallowed is set when a
+            // best-effort record fails. See SolutionAdapter::launchKernel.
             hipError_t recordLaunchEvent(hipEvent_t  event,
                                          hipStream_t stream,
                                          bool        bestEffortEvents,
@@ -586,24 +585,17 @@ namespace TensileLite
                 if(status == hipSuccess || !bestEffortEvents)
                     return status;
 
-                // Swallowed here, so it must not be left behind for the
-                // caller's own next hipGetLastError() to find and attribute to
-                // their work instead of ours. Cleared only when the thread had
-                // no error before the record: one that was already there is
-                // the caller's, and is left for the caller to read.
+                // Not left behind for the caller's next hipGetLastError(), but
+                // an error the thread already had is the caller's and stays.
                 if(before == hipSuccess)
                     static_cast<void>(hipGetLastError());
                 swallowed = true;
                 return hipSuccess;
             }
 
-            // The stop half of a measured launch. Left unrecorded when the
-            // start record was swallowed, so the pair reads as never recorded
-            // rather than half recorded. A half-recorded pair is not always
-            // detectable afterwards: a pair reused from a pool holds an older
-            // timestamp in its start, and a fresh stop against it reads as a
-            // plausible positive duration -- the time since that older
-            // measurement, not this launch.
+            // The stop half of a measured launch. Skipped when the start record
+            // was swallowed: a fresh stop against a reused pair's older start
+            // would read as a plausible positive duration.
             hipError_t recordStopEvent(hipEvent_t  stopEvent,
                                        hipStream_t stream,
                                        bool        bestEffortEvents,

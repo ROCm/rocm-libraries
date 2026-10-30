@@ -13,70 +13,54 @@
 #include <unordered_set>
 #include <vector>
 
-// The tuning file's problem key, so a pinned winner can carry the key a cache
-// row is written under. Nothing in that header touches a device, the solution
-// library or the logger, which is why including it leaves the tuner compilable
-// and testable on its own.
+// For the tuning file's problem key. Touches no device, solution library or
+// logger, so the tuner stays compilable and testable on its own.
 #include "TuningCacheStore.hpp"
 
-// Carried through a shared_ptr and never dereferenced here, so the declaration
-// is all this needs. Keeping the solution library's headers out is what lets
-// the tuner be compiled and tested without one.
+// Only carried through a shared_ptr, so the tuner needs no solution library.
 namespace TensileLite
 {
     class ContractionSolution;
 }
 
-// What a resolved problem has stopped holding is not something it can be asked,
-// so the test that guards releaseExploration() reaches in. Declared here and
-// defined only by that test; nothing in the library names it.
+// Defined only by the tuner's unit tests, which read private state.
 struct OnlineTunerTestAccess;
 
 namespace rocblaslt
 {
     /**
-     * @brief The tuner's knobs, as whoever links it supplies them.
+     * @brief The tuner's settings, supplied by whoever links it.
      *
-     * The tuner reads no environment of its own. Inside hipBLASLt these come from
-     * HIPBLASLT_TUNING_MODE and the HIPBLASLT_TUNING_* search settings, read
-     * through the same secure accessor the rest of the tuning stack uses, which is
-     * only reachable from the library and not from here.
+     * The tuner reads no environment itself. Inside hipBLASLt the settings come
+     * from HIPBLASLT_TUNING_MODE and the HIPBLASLT_TUNING_* variables, read
+     * through the library's secure accessor; see onlineTunerConfig().
      */
     struct OnlineTunerConfig
     {
-        // Off unless the link says otherwise, so the feature stays off by
-        // default and every entry point costs one branch on a member flag.
+        // Off by default; then every entry point costs one branch.
         bool enabled = false;
 
         // Ranked-prefix depth. Below two there is nothing to choose between,
-        // and the tuner stays off however the mode is set.
+        // and the tuner stays off.
         int topK = 0;
 
         // Timed launches per candidate.
         int repeats = 1;
 
-        // Visits of a problem that dispatch the ranking's own pick and are
-        // sampled by nothing, so exploration begins on a device the problem has
-        // already warmed. Counted in visits, not in launches: each one is a
-        // whole call that goes untouched.
+        // Visits of a problem that run the ranking's own pick untimed before
+        // exploration starts. Counted in visits, not launches.
         int coldCalls = 0;
 
         /**
-         * The live-pair cap a link that sets nothing gets.
+         * The default live-pair cap.
          *
-         * A fixed number of pairs rather than a multiple of the search depth,
-         * because what it bounds is per pair. A pair is a little host memory
-         * and two runtime handles; it holds no device memory and no file
-         * descriptor, and costs the same whatever topK and repeats are.
-         * Scaling the bound by them would let a deep search, configured for
-         * reasons of its own, lift the bound by orders of magnitude.
-         *
-         * Sized to the resolved table, OnlineTuner::c_resolutionSlots, which
-         * is already this design's statement of how many distinct problems a
-         * process is expected to explore. A pair for each of them fits, so a
-         * process inside that expectation is never refused a pair by one-shot
-         * shapes alone, and a device at the cap still holds only a small,
-         * fixed amount of host memory.
+         * A fixed number of pairs rather than a multiple of topK * repeats: a
+         * pair costs a little host memory and two runtime handles whatever the
+         * search depth, and scaling the cap by the depth would let a deep
+         * search lift it by orders of magnitude. Sized to
+         * OnlineTuner::c_resolutionSlots, the number of distinct problems a
+         * process is expected to explore, so one-shot shapes alone do not run
+         * a process inside that expectation out of pairs.
          */
         static constexpr int c_defaultLivePairCap = 4096;
 
@@ -87,13 +71,10 @@ namespace rocblaslt
         bool verbose = false;
 
         /**
-         * Told the first time, per device, that a launch there went untimed
-         * because the device was at livePairCap() with every pair it holds
-         * still in flight. Optional.
-         *
-         * A callback rather than a log call because the tuner links no logger;
-         * inside hipBLASLt it is TensileLite::noteOnlineEventPairCap(), which
-         * logs one info-level line. Called with no lock held.
+         * Called once per device, with no lock held, the first time a launch
+         * there goes untimed because every pair on the device is in flight at
+         * livePairCap(). Optional. A callback because the tuner links no
+         * logger; hipBLASLt passes TensileLite::noteOnlineEventPairCap().
          */
         void (*livePairCapReached)(int device, int cap) = nullptr;
     };
@@ -101,106 +82,77 @@ namespace rocblaslt
     /**
      * @brief The configuration the tuner is built with.
      *
-     * Defined by whoever links the tuner rather than read here, because the
-     * mapping needs the tuning mode and TuningPolicy, which live where the secure
-     * environment accessor does. Called once, from the singleton's constructor,
-     * which is the first use of the tuner and so is after everything it reads can
-     * be constructed.
+     * Defined by whoever links the tuner, because the mapping needs the tuning
+     * mode and TuningPolicy, which live with the secure environment accessor.
+     * Called from the singleton's constructor, on first use.
      */
     OnlineTunerConfig onlineTunerConfig();
 
     /**
-     * @brief Explore-then-cache kernel selection on top of the Origami ranking.
+     * @brief Explore-then-cache kernel selection on top of the ranked
+     * candidates.
      *
-     * The first topK() * repeats() times a problem is seen, each of the top-K
-     * ranked candidates is dispatched in turn and timed on the GPU; once every
-     * candidate has been sampled the measured winner is pinned for every later
-     * call with that problem. A candidate's repeats are reduced to one score by
-     * taking the smallest of them.
+     * The first topK() * repeats() times a problem is dispatched, each of the
+     * top-K ranked candidates is launched in turn and timed on the GPU. Once
+     * every candidate has been sampled, the one with the smallest sample is
+     * pinned for every later call with that problem.
      *
-     * Timing is deferred-read. beginMeasurement() hands back an event pair for the
-     * caller to wrap the launch with, and the elapsed time is only read on a later
-     * visit to the same problem, once hipEventQuery() reports the stop event
-     * complete. A whole exploration may be outstanding at once, so a caller that
-     * enqueues the same problem back to back without synchronising still explores
-     * at dispatch rate rather than at queue-drain rate. No entry point here ever
-     * waits on the GPU.
-     *
-     * Every entry point is a branch on a member flag when the configuration does
-     * not switch the tuner on, so the feature costs nothing when it is off.
+     * Timing is read back lazily. beginMeasurement() hands out an event pair
+     * for the caller to record around the launch, and the elapsed time is read
+     * on a later visit of the same problem, once the stop event has completed.
+     * A whole exploration can be outstanding at once, so exploration runs at
+     * dispatch rate, and no entry point ever waits on the GPU.
      *
      * SCOPE: WHICH CALLS ARE TUNED. This is the authoritative statement; the
-     * hooks in tensile_host.cpp and the comments elsewhere in this class refer
-     * here rather than restating it.
+     * hooks in tensile_host.cpp and the comments elsewhere refer here.
      *
      *  - Tuned: hipblasLtMatmul with algo == nullptr. The library chooses the
      *    kernel (SolutionLookup::PerDispatch) and launches it in the same call
-     *    on the same thread, so a probe can be offered at selection and paired
-     *    exactly with the launch that measures it.
-     *  - Not tuned: hipblasLtMatmul with an algo the caller supplies, whatever
-     *    its source. It is launched as given, never measured and never
-     *    harvested, and the tuner is not consulted for it.
+     *    on the same thread, so a probe offered at selection is paired exactly
+     *    with the launch that measures it.
+     *  - Not tuned: hipblasLtMatmul with an algo the caller supplies, from any
+     *    source. It is launched as given, never measured and never harvested.
      *  - Not tuned: hipblasLtMatmulAlgoGetHeuristic (SolutionLookup::Heuristic).
-     *    It is inert: it is answered with the measured winner if there is one,
-     *    and otherwise with its normal ranking, and is never offered a probe;
-     *    nothing is registered or counted for it. So the GetHeuristic-then-
-     *    hipblasLtMatmul(algo) flow is not tuned. It is served only what
-     *    null-algo dispatches of the same problem, or the cache file, provide.
+     *    It is answered with the measured winner if there is one and its normal
+     *    ranking otherwise, is never offered a probe, and registers nothing. So
+     *    the GetHeuristic-then-hipblasLtMatmul(algo) flow is not tuned; it is
+     *    served only what null-algo dispatches of the problem, or the cache
+     *    file, provide.
      *  - Not tuned: the hipblaslt_ext GEMM and grouped GEMM interfaces, and
      *    problems tuningCacheKeyable() refuses.
      *
-     * Why the line is drawn there: a caller-supplied launch cannot be paired
-     * with the selection visit that produced it (see t_offer in
-     * OnlineTuner.cpp), and a probe handed to a caller that keeps the algo
-     * would be kept unmeasured. With info logging on, the first
-     * hipblasLtMatmulAlgoGetHeuristic call and the first caller-supplied algo
-     * of a process each log one online-not-tuned line saying so; see
-     * TensileLite::noteOnlineScopeEvent().
+     * The line is drawn there because a launch of a caller-supplied algo
+     * cannot be paired with the selection visit that produced it (see t_offer
+     * in OnlineTuner.cpp), and a probe handed to a caller that keeps the algo
+     * would never be measured. With info logging on, the first heuristic query
+     * and the first caller-supplied algo of a process each log one
+     * online-not-tuned line; see TensileLite::noteOnlineScopeEvent().
      * docs/reference/env-variables.rst states the same scope for users.
      */
     class OnlineTuner
     {
     public:
         /**
-         * @brief The winner itself, for a caller that would otherwise have to ask
-         * the library for a ranked list only to pick one entry out of it.
+         * @brief The pinned winner itself, so a resolved call need not fetch a
+         * ranking only to pick it out.
          *
-         * problem identifies the problem the winner was offered for, at the
-         * granularity the solution library caches its rankings at rather than the
-         * granularity resolution() is keyed on. A caller whose problem matches it
-         * would be handed the very ranking the winner was recorded in, so it can
-         * use the winner without fetching that ranking to look for it; one whose
-         * problem does not match has to go and ask, because a key deliberately
-         * covers problems that rank differently.
+         * problem is the problem the winner was measured on, at the granularity
+         * the solution library caches rankings at: the problem that registered
+         * the exploration (pinWinner() enforces this). A caller whose problem
+         * matches would get the very ranking the winner was recorded in, so it
+         * can use the winner directly; any other caller under the same
+         * resolution key has to check its own ranking, because a key
+         * deliberately covers problems that rank differently.
          *
-         * requiredWorkspace is that same ranking's workspace answer for the
-         * winner, which depends only on the solution and the problem and so is
-         * fixed alongside them. Only the caller's own allocation still varies, and
-         * comparing against it is all that remains of the filter.
+         * requiredWorkspace is that ranking's workspace answer for the winner,
+         * so only the caller's own allocation remains to be checked.
          *
-         * tuningKey is the same problem again, in the key the tuning file is
-         * written and replayed under. It is here and not on the Resolution for the
-         * reason the two keys differ at all: resolution() is keyed on the fields
-         * the prediction model ranks on, which deliberately merges problems that
-         * differ in epilogue, bias, strides or scaling, while a file row
-         * deliberately separates exactly those. One resolution key can therefore
-         * cover several distinct file keys, and this is the one that belongs to the
-         * problem this record describes -- the problem whose ranking held the
-         * winner where it was recorded, whose hash problem is, and whose
-         * workspace answer requiredWorkspace is. A record is written once and
-         * never overwritten, so a merged sibling is served the winner at run time
-         * wherever its own ranking confirms it, but is never the key a row is
-         * written under, because nothing measured it.
+         * tuningKey is the same problem in the key the tuning file uses. One
+         * resolution key can cover several file keys, and only the measured
+         * problem's key may have a row written under it.
          *
-         * pinWinner() holds that last sentence up rather than leaving it to the
-         * order callers happen to arrive in. A record is installed only for the
-         * problem that registered the exploration, which is also the only problem
-         * whose launches were sampled, so problem here is ProblemState::m_problem
-         * and tuningKey is that problem's file key and no other's.
-         *
-         * Built at pin time and nowhere else: it costs a pass over forty-odd fields
-         * and a cached device query, which is affordable once per resolved problem
-         * and would not be affordable per call.
+         * Built once, at pin time: it costs a pass over the problem and a
+         * device query.
          */
         struct PinnedWinner
         {
@@ -208,36 +160,22 @@ namespace rocblaslt
             size_t                                            problem           = 0;
             size_t                                            requiredWorkspace = 0;
 
-            // The workspace the candidate list was filtered by, which is the
-            // limit of the caller whose ranking the winner was recorded in.
-            // Recorded for the same reason a tune row records one: a winner
-            // chosen from candidates a small allocation could cover says
-            // nothing about the kernels it ruled out.
+            // The workspace limit the candidates were filtered by, recorded as
+            // a tune row records it: a winner chosen under a small limit says
+            // nothing about the kernels the limit ruled out.
             size_t searchWorkspace = 0;
 
             TensileLite::ProblemOverride tuningKey;
         };
 
         /**
-         * @brief Everything a problem still needs once its winner is pinned.
+         * @brief Everything a problem needs once its winner is pinned.
          *
-         * Published once, while the write lock is held, and read from then on
-         * without taking anything: the key and the winner never change afterwards,
-         * so the release store that publishes the pointer and the acquire load that
-         * finds it are the whole synchronisation.
-         *
-         * pinned() is filled in later, by the first caller to offer the winner
-         * object, and is published the same way for the same reason -- a release
-         * store under the write lock against an acquire load taking none. It is
-         * written at most once, so a reader either sees nothing or sees a record
-         * that is complete and will never change, and copying the shared_ptr out of
-         * it is a read of an object nothing mutates.
-         *
-         * position() is the exception and is only a hint -- where the caller found
-         * the winner in the list it was offered last time. Callers check it against
-         * the list in hand before acting on it, so a wrong value costs one trip down
-         * the full path and can never change which kernel is chosen. Nothing is
-         * ordered against it, hence relaxed.
+         * Published once under the write lock with a release store, and read
+         * without a lock through an acquire load; the key and winner never
+         * change afterwards. pinned() is published the same way, at most once.
+         * position() is only a hint, checked by callers against the list in
+         * hand, so it is relaxed.
          */
         class Resolution
         {
@@ -250,15 +188,8 @@ namespace rocblaslt
                 return m_winner;
             }
 
-            /**
-             * The winner's score, in microseconds, or zero when exploration
-             * measured nothing.
-             *
-             * Published with the winner and never changed afterwards, so it is
-             * read the same way: it is the number a recorded row reports, and
-             * the only evidence in the file that the kernel was measured here
-             * rather than predicted.
-             */
+            /// The winner's score in microseconds, or zero if nothing was
+            /// measured. This is the time a recorded row reports.
             float winnerTimeUs() const
             {
                 return m_winnerUs;
@@ -304,70 +235,33 @@ namespace rocblaslt
             return m_enabled;
         }
 
-        // Slack over the candidates * repeats launches exploration needs. A
-        // caller is free to ignore the rotation selectCandidate() asks for, so
-        // without a ceiling a problem could stay in the exploring state, and on
-        // the write lock, for the life of the process.
+        // Slack over the topK * repeats launches exploration needs, so a
+        // caller that ignores the requested rotation cannot keep a problem
+        // exploring, and on the write lock, for the life of the process.
         static constexpr int c_visitBudgetFactor = 8;
 
-        // Slack over the visit budget before a problem NOBODY is exploring is
-        // given up on. Deliberately much larger, because what it bounds is a
-        // different thing: see ProblemState::m_dispatchesSinceSelection. The
-        // counter it caps is advanced by every dispatch under the key,
-        // including a merged sibling's, and only the registrant's own visits
-        // reset it -- so this has to leave room for however much sibling
-        // traffic separates two of the registrant's visits, or heavy sibling
-        // traffic would end a healthy exploration early. Overshooting costs an
-        // abandoned problem a bounded run of cheap locked dispatches before it
-        // short-circuits for the life of the process; undershooting costs a
-        // live exploration its samples.
+        // Slack over the visit budget before a problem nobody is exploring is
+        // given up on. Much larger, because the counter it bounds also counts
+        // merged siblings' dispatches; see
+        // ProblemState::m_dispatchesSinceSelection.
         static constexpr int c_abandonBudgetFactor = 16;
 
-        // The resolved table is deliberately not the problem map: it is fixed
-        // in size and never rehashes, which is what lets resolution() follow a
-        // published entry with no lock at all. The entries themselves outlive
-        // the process, so a reader can never be handed a dangling one.
-        //
-        // A power of two so the index is a mask, and far larger than the number
-        // of distinct problems a process is expected to see; overshooting only
-        // costs the table's own footprint, 32KiB.
-        //
-        // KNOWN BOUNDARY. This is the one limit the fast path has. Past roughly
-        // this many live resolved keys, keys start landing in occupied slots
-        // and the later one evicts the earlier, which costs the evicted problem
-        // the fast path for good -- publishing happens once, at the moment a
-        // problem resolves, and nothing republishes it. The degradation is
-        // gradual and proportional, each evicted problem falling back to the
-        // locked path it took while it was still being explored, and nothing it
-        // is told is wrong; resolution() answers on the key, so a slot holding
-        // someone else's entry reads as absent. The resolution and winner
-        // pools are deliberately NOT capped at this number: capping them turned the same
-        // boundary into a cliff, where the 4097th problem to resolve and every
-        // one after it was refused a published entry outright.
+        // Size of the resolved table. It is direct-mapped over the key and
+        // never rehashes, which is what lets resolution() run without a lock,
+        // and its entries live as long as the tuner. Past roughly this many
+        // resolved keys, a colliding key evicts the earlier one, which then
+        // takes the locked path for good; nothing it is told is wrong. The
+        // resolution and winner pools are not capped at this number.
         static constexpr size_t c_resolutionSlots = 4096;
 
         /**
-         * @brief Re-read the configuration and forget everything learned under
-         * the old one. Tests only, like TuningModeSingleton::reloadForTest.
+         * @brief Re-read the configuration and forget every problem. Tests
+         * only, like TuningModeSingleton::reloadForTest.
          *
-         * The configuration is read once, in the constructor of a
-         * process-lifetime singleton, and that constructor runs on the process's
-         * first dispatch -- long before a test that sets the tuning variables in
-         * its own setup can have set them. Without this a single-process test
-         * suite can only ever observe online tuning as whatever the first
-         * dispatch of the binary happened to configure, which is off.
-         *
-         * Drops the published resolutions along with the problems. They are
-         * normally kept for the life of the process precisely so that a reader
-         * following a published pointer without a lock can never be handed a
-         * dangling one, so this must only be called with no other thread inside
-         * the library.
-         *
-         * The event pool is deliberately left alone. A pooled pair belongs to a
-         * device and to the HIP runtime, not to a configuration, and destroying
-         * events is what the destructor already declines to do. The pairs the
-         * dropped problems still had outstanding are retired, since nothing could
-         * reach them again and they would go on counting against livePairCap().
+         * Drops the published resolutions, so it must only be called with no
+         * other thread inside the library. Outstanding pairs are retired;
+         * pooled pairs are kept, since they belong to a device and not to a
+         * configuration.
          */
         void reloadForTest();
 
@@ -387,68 +281,41 @@ namespace rocblaslt
         }
 
         /**
-         * @brief The most event pairs the tuner keeps alive on one device,
-         * pooled and outstanding together.
+         * @brief The most event pairs, pooled and outstanding, kept alive on
+         * one device.
          *
-         * A problem's own harvest hands a pair back on the problem's next
-         * visit, so a shape dispatched once and never again would keep its
-         * pair for the life of the process; with no cold visits that is the
-         * ordinary life of a one-shot shape. The cap is what bounds that.
-         * Once a device holds this many and none is pooled, the finished
-         * launches other problems still hold pairs for are read back and
-         * their pairs pooled; see reclaimFinishedPairs(). Only when every
-         * pair on the device is still in flight does no new measurement
-         * start there: beginMeasurement() declines, and the launch runs
-         * exactly as an untuned one would. So the cap bounds launches
-         * measured and not yet read back, not shapes.
-         *
-         * Configured, as OnlineTunerConfig::livePairCap, and a fixed number of
-         * pairs rather than a multiple of topK() * repeats(): see
-         * OnlineTunerConfig::c_defaultLivePairCap for why, and for the
-         * default. A small, fixed number of runtime handles however many
-         * shapes the process goes through.
+         * A problem's pairs come back on its next visit, so a shape dispatched
+         * once would otherwise keep its pair for the life of the process. At
+         * the cap with nothing pooled, the finished launches other problems
+         * hold pairs for are read back and their pairs pooled
+         * (reclaimFinishedPairs()). Only when every pair on the device is still
+         * in flight does beginMeasurement() decline, and the launch then runs
+         * as an untuned one would.
          */
         int livePairCap() const
         {
             return m_livePairCap;
         }
 
-        /**
-         * @brief Pairs created on device and not yet retired, pooled and
-         * outstanding together: what livePairCap() bounds.
-         *
-         * Takes the lock shared, so it is for tests and diagnostics, never
-         * for the dispatch path.
-         */
+        /// Pairs created on device and not yet retired. Takes the lock, so it
+        /// is for tests and diagnostics, not the dispatch path.
         int livePairs(int device);
 
-        /**
-         * @brief Launches the measurement hook asked about under a key the
-         * selection hook never registered.
-         *
-         * The two hooks derive the key separately, so this is how a
-         * disagreement between them shows, rather than as a problem that is
-         * quietly never measured. Counted since construction or the last
-         * reloadForTest().
-         */
+        /// Launches the measurement hook saw under a key selection never
+        /// registered, i.e. the two hooks disagreeing on the key. Counted since
+        /// construction or the last reloadForTest().
         uint64_t misses() const
         {
             return m_misses.load(std::memory_order_relaxed);
         }
 
         /**
-         * @brief The pinned winner for a problem, or nullptr while it is still
-         * being explored.
+         * @brief The resolution of a problem, or nullptr.
          *
-         * One acquire load and one compare, taking no lock and doing no work that
-         * grows with topK(). A caller holding a Resolution already has its answer,
-         * so it can skip the candidate filtering and the search that dominate the
-         * per-call cost of a problem there is nothing left to learn about.
-         *
-         * The table is direct-mapped over the key and a colliding key evicts, so
-         * nullptr is not an answer -- it only means the caller must go through
-         * selectCandidate() and take the lock, which is what every call did before.
-         * Nothing here can be wrong, only absent.
+         * One acquire load and one compare, with no lock. nullptr is not an
+         * answer: the problem may still be exploring or its slot may hold
+         * another key, and the caller takes the locked path through
+         * selectCandidate().
          */
         const Resolution* resolution(size_t problemKey) const
         {
@@ -459,36 +326,16 @@ namespace rocblaslt
         }
 
         /**
-         * @brief Offer a resolved problem the winner object itself, so later calls
-         * need not ask the library for a ranking to find it in.
+         * @brief Record the winner object of a resolved problem, so later calls
+         * need not fetch a ranking to find it.
          *
-         * Taken from the first caller to offer one and ignored afterwards. A key can
-         * cover problems that rank differently, and the one recorded here is the one
-         * the winner was measured on; letting a later problem overwrite it would
-         * only make the two take turns invalidating each other's record.
-         *
-         * problem is the caller's own identifier for the problem the winner was
-         * offered for, in the same terms selectCandidate() takes it, and is checked
-         * against the problem that registered the exploration rather than merely
-         * carried. A caller the resolution key merges with that problem measured
-         * none of it, so it has no key worth writing a row under; it is handed the
-         * winner through its own ranking and leaves no record behind. What comes
-         * back is handed on through pinned(), where a later caller compares its own
-         * identifier against it. Calling this cannot change which kernel is chosen
-         * for any problem: a caller that does not recognise what comes back has
-         * lost nothing but the shortcut.
-         *
-         * tuningKey is that same problem in the tuning file's key, carried for
-         * whoever records the winner; see PinnedWinner::tuningKey.
-         *
-         * Returns the record this call installed, or null when it installed
-         * nothing -- because this caller is not the problem that was measured,
-         * because another caller got there first, or because there was nothing to
-         * offer. Whoever records the winner outside
-         * this process has to know which caller's key was taken, and this is the
-         * only answer that is not a race: the check above is a hint taken without
-         * the lock, so two callers can both reach here and only one of them leaves
-         * a record behind.
+         * Installed at most once, and only when problem (in selectCandidate()'s
+         * terms) is the problem that registered the exploration: only its
+         * launches were sampled, so only its tuningKey may be written. Returns
+         * the record this call installed, or nullptr; whoever records the
+         * winner outside the process must use that return value, since the
+         * caller's own pinned() check is taken without the lock. Cannot change
+         * which kernel any call runs.
          */
         const PinnedWinner*
             pinWinner(const Resolution&                                        resolved,
@@ -502,27 +349,19 @@ namespace rocblaslt
          * @brief Pick which of the ranked candidates should run next.
          *
          * Registers the problem's candidate list on first sight. Returns the
-         * position within rankedSolutionIndices to promote to the front, or -1 to
-         * leave the caller's ordering alone.
+         * position within rankedSolutionIndices to promote to the front, or -1
+         * to leave the caller's ordering alone.
          *
          * problem identifies the caller at the granularity the solution library
-         * caches its rankings at, and is what decides whose exploration this is.
-         * One resolution key covers several such problems by design; the first to
-         * register owns the exploration and every other is left its own ordering
-         * until there is a measured winner to serve it. See
+         * caches rankings at. A resolution key covers several such problems;
+         * the first to register owns the exploration, and the others are left
+         * their own ordering until there is a winner. See
          * ProblemState::m_problem.
          *
-         * capturing says the caller's dispatch is being recorded into a HIP graph
-         * rather than executed. Such a caller is never offered a probe candidate;
-         * it is served a measured winner if there is one, and otherwise left its
-         * own ordering. See selectCandidateImpl() for why.
-         *
-         * retained says the caller keeps this answer and dispatches it itself,
-         * rather than being asked again on its next dispatch -- a heuristic query.
-         * It is treated as a capture is: served a measured winner if there is
-         * one, and otherwise left its own ordering, with nothing registered,
-         * counted or offered. Heuristic queries are outside what online tunes;
-         * see the scope note on this class.
+         * capturing (the dispatch is being recorded into a HIP graph) and
+         * retained (a heuristic query, whose answer the caller keeps) are never
+         * offered a probe: they are served the winner if there is one, and
+         * otherwise their own ordering, with nothing registered or counted.
          */
         int selectCandidate(size_t                  problemKey,
                             size_t                  problem,
@@ -546,10 +385,9 @@ namespace rocblaslt
             if(!m_enabled)
                 return;
 
-            // A resolved problem has nothing outstanding and can never acquire
-            // any: resolve() only runs with m_pending empty, and beginMeasurement
-            // refuses every launch afterwards. So this is the same early return
-            // harvestPendingImpl() makes, reached without the lock.
+            // A resolved problem has nothing outstanding and never acquires
+            // more, so this is harvestPendingImpl()'s early return without the
+            // lock.
             if(resolution(problemKey))
                 return;
 
@@ -559,30 +397,16 @@ namespace rocblaslt
         /**
          * @brief Claim an event pair for the imminent launch of solutionIndex.
          *
-         * On true, start and stop must both be recorded around that launch,
-         * otherwise the sample is dropped on the next harvest and the pair is
-         * retired rather than pooled again. On false neither argument is touched
-         * and nothing is owed. Problems that selectCandidate() has not registered
-         * are never measured.
+         * Succeeds only for the launch selectCandidate() last offered this
+         * thread for this problem; see t_offer in OnlineTuner.cpp. On true,
+         * start and stop are to be recorded around the launch on stream, and
+         * endMeasurement() called once the launch has returned, whether or not
+         * it recorded anything. A pair the launch did not record is dropped by
+         * the next harvest. On false nothing is touched and nothing is owed.
          *
-         * Nor is any dispatch other than the one selectCandidate() last asked THIS
-         * THREAD for. The solution index alone does not identify it: a problem the
-         * resolution key merges with the one being explored is left its own
-         * ordering, and its own pick is very often a candidate of that exploration
-         * that still owes samples, so timing it would credit one problem with a
-         * launch of another. The offer is held on the thread selection answered
-         * rather than on the problem, because one problem can have as many offers
-         * outstanding as there are threads in the library; see the offer paragraph
-         * on ProblemState for what that does and does not close.
-         *
-         * stream is the one the launch will record the pair on. A pair created
-         * for this call is first recorded there once, inverted, so that no pair
-         * the tuner ever reads back is one HIP has never seen recorded; see
+         * A pair created for this call is first recorded once on stream,
+         * inverted, so every pair the tuner reads back has been recorded; see
          * acquireEvents().
-         *
-         * On true the caller owns the pair until it calls endMeasurement(),
-         * which it must do once the launch has returned, whether or not the
-         * launch recorded anything.
          */
         bool beginMeasurement(size_t      problemKey,
                               int         solutionIndex,
@@ -593,10 +417,8 @@ namespace rocblaslt
             if(!m_enabled)
                 return false;
 
-            // measurableCandidate() refuses every launch once the problem is
-            // resolved, so this returns what the locked path would. A resolved
-            // problem was registered to get here, so skipping that path cannot
-            // swallow the miss event either.
+            // measurableCandidate() refuses every launch of a resolved problem,
+            // so this is what the locked path would return.
             if(resolution(problemKey))
                 return false;
 
@@ -604,15 +426,13 @@ namespace rocblaslt
         }
 
         /**
-         * @brief Hand back the pair beginMeasurement() gave the launch, once the
+         * @brief Hand back the pair beginMeasurement() gave a launch, once the
          * launch has returned. start is the start event it was given.
          *
-         * Until then the pair is the launch's: nothing reads it back, pools it
-         * or destroys it, however many other dispatches of the problem, on any
-         * thread, harvest in the meantime. A pair that has been handed out and
-         * not yet recorded reads exactly like one whose launch failed to record
-         * it, and only the second may be destroyed; this call is what tells
-         * them apart. See PendingMeasurement::m_launched.
+         * Until then nothing reads, pools or destroys the pair, whichever
+         * thread harvests the problem. A pair not yet recorded reads like one
+         * whose launch failed to record it, and only the latter may be
+         * destroyed. See PendingMeasurement::m_launched.
          */
         void endMeasurement(size_t problemKey, hipEvent_t start)
         {
@@ -623,27 +443,23 @@ namespace rocblaslt
         }
 
     private:
-        // A pooled pair, kept whole so two handles from different measurements
-        // can never be paired up with each other. Pairs in the pool obey one
-        // invariant, which is what makes an unrecorded reuse detectable:
-        // a pair is only ever returned to the pool after a launch recorded it
-        // and the sample was accepted, and it is returned inverted, so reusing
-        // it without recording it reads a negative elapsed time.
+        // A pooled pair, kept whole so handles from different measurements are
+        // never paired. A pair is pooled only after a launch recorded it and
+        // its sample was accepted, and it is pooled inverted, so reusing it
+        // without recording it reads a negative elapsed time.
         struct EventPair
         {
             hipEvent_t m_start = nullptr;
             hipEvent_t m_stop  = nullptr;
         };
 
-        // One launch the GPU has not been observed to finish yet. m_device is
-        // the device the pair was created on, carried so recycleEvents() can
-        // put it back where it came from.
+        // A launch not yet observed to finish. m_device is the device the pair
+        // was created on, so it goes back to that device's pool.
         //
-        // m_launched is set by endMeasurement(), once the launch the pair was
-        // handed to has returned. Until then the pair is not read at all: the
-        // launch records it outside the lock, so a harvest by another dispatch
-        // of the same problem could otherwise reject it and destroy it just
-        // before the launch records it.
+        // m_launched is set by endMeasurement() once the launch has returned.
+        // The launch records the pair outside the lock, so until then the pair
+        // is not read at all: a harvest by another dispatch of the problem
+        // would reject it and destroy it just before it is recorded.
         struct PendingMeasurement
         {
             hipEvent_t m_start     = nullptr;
@@ -653,130 +469,49 @@ namespace rocblaslt
             bool       m_launched  = false;
         };
 
-        // m_pending holds the outstanding measurements in launch order, capped
-        // at inFlightCap(). m_gaveUp means exploration ran past its visit
-        // budget: no further launch is measured, but m_pending is still drained
-        // before a winner is picked, so samples already paid for are not thrown
-        // away. m_declined counts launches refused because a cap was full:
-        // this problem's inFlightCap(), or its device's livePairCap().
+        // One problem's exploration.
         //
-        // m_coldCalls counts the visits spent before the candidate list was
-        // registered at all, which is the only state a problem still inside
-        // coldCalls() carries. It is deliberately not m_calls: the visit budget
-        // bounds how long exploration may run, and a problem that has not
-        // started exploring must not be able to exhaust it.
+        // m_pending holds the outstanding measurements in launch order, at most
+        // inFlightCap(). m_gaveUp stops new measurements once a budget is
+        // spent; m_pending is still drained before a winner is picked.
+        // m_declined counts launches refused because a cap was full.
+        // m_coldCalls counts the visits before registration, separately from
+        // m_calls, so the cold phase cannot spend the visit budget.
         //
-        // m_problem and the offer are what make the samples below comparable
-        // with one another, which is the one thing resolve() assumes and the
-        // key alone does not give. The resolution key deliberately merges
-        // problems differing in epilogue, bias, strides or scaling -- all of
-        // which move a kernel's runtime -- so an unattributed sample set is a
-        // set of measurements of different things, and picking the smallest of
-        // them says which sibling dispatched rather than which kernel is
-        // faster. The two answer that in the two places it can go wrong, and
-        // each is needed:
+        // The resolution key merges problems that differ in epilogue, bias,
+        // strides or scaling, all of which change a kernel's runtime, so
+        // samples are comparable only if they all come from one problem. Two
+        // things ensure it:
         //
-        // m_problem is the problem that registered the candidate list, at the
-        // granularity the solution library caches its rankings at -- the same
-        // quantity PinnedWinner::problem carries, and equal to it by
-        // construction. Exploration belongs to whoever registered: a merged
-        // sibling is offered no candidate, spends none of the visit budget and
-        // installs no record, and is served the measured winner through its own
-        // ranking once there is one.
+        //  - m_problem is the problem that registered, at the solution
+        //    library's ranking granularity (equal to PinnedWinner::problem).
+        //    Only its visits explore. A merged sibling is offered nothing,
+        //    spends none of the budget, installs no record, and is served the
+        //    winner through its own ranking.
+        //  - The offer: beginMeasurement() times only the launch selection last
+        //    offered on the calling thread. A sibling still dispatches its own
+        //    pick, often one of this problem's candidates, so matching on the
+        //    solution index alone would take its sample. The offer is held per
+        //    thread rather than here because one problem can have an offer
+        //    outstanding on every thread in the library; see t_offer in
+        //    OnlineTuner.cpp. On the measured path selection and launch are
+        //    the same call on the same thread, so the pairing is exact. A
+        //    caller-supplied algo cannot be paired that way, which is why it is
+        //    out of scope.
         //
-        // The offer is the candidate selectCandidate() last asked a caller to
-        // dispatch, and the only launch beginMeasurement() will time. Refusing
-        // the sibling a candidate is not enough on its own, because it still
-        // dispatches its own ranking's pick, and that is very often a candidate
-        // of this problem's that still owes samples -- matching on the solution
-        // index alone would take the sample anyway.
+        // m_registration is a process-wide serial, so an offer names one
+        // registration and not just a key. A problem registers once and is
+        // never erased, so this matters only across reloadForTest().
         //
-        // IT IS DELIBERATELY NOT A FIELD HERE. What it has to express is a
-        // pairing between two events -- this selection visit, that launch --
-        // and the number of those outstanding under one resolution key at any
-        // moment is the number of threads in the library, not one.
-        // hipblasLtMatmul is documented as callable from many threads and
-        // streams, so a single slot per problem is both losable, because the
-        // next visit overwrites it, and claimable by a launch it was never
-        // made to. That is a cardinality mismatch and not a window that can be
-        // narrowed. The offer therefore lives on the thread selection answered
-        // -- see t_offer in OnlineTuner.cpp -- and m_registration below is what
-        // ties it to one registration of one problem.
-        //
-        // What that delivers, exactly. On the dispatch path (hipblasLtMatmul
-        // with algo == nullptr) selection and launch are the same library call
-        // on the same thread with nothing of this tuner's in between, and every
-        // selection visit a thread makes drops the offer it was holding, so the
-        // offer a launch claims is the one that call's own visit made and no
-        // caller on any thread can take it. That is exact.
-        //
-        // It is also the only path that is measured; the scope note on this
-        // class is the authoritative list. A launch of an algo the
-        // caller supplied -- what hipblasLtMatmulAlgoGetHeuristic hands out --
-        // reaches neither measurement hook, and a heuristic query is offered
-        // nothing. The application holds such an algo and dispatches it when
-        // and where it likes, so a launch of it can arrive with no selection
-        // visit of that thread in between, and all the library could pair it
-        // with is "this thread was offered this candidate for this
-        // registration": a merged sibling dispatching an older answer from the
-        // same thread would claim a sample of a launch that was not the one
-        // offered. Pairing them exactly would need the offer carried on the
-        // algo, which is a public type. Instead online tuning explores only
-        // what the library dispatches itself, and a heuristic query is served
-        // the winner those dispatches measure.
-        //
-        // m_registration is a process-wide serial taken at registerProblem(),
-        // so an offer names one registration and not merely one key. A problem
-        // registers once and is never erased, so the only way a key gets a
-        // second candidate list is reloadForTest(); without the serial, an
-        // offer a thread still held from before it could be matched against a
-        // list it was never made from.
-        //
-        // m_dispatchesSinceSelection is how a problem the library is never
-        // asked about again still comes to an end.
-        //
-        // m_calls only moves where the registrant visits selection. A problem
-        // whose registrant stops dispatching -- the application has moved on
-        // from the shape, while merged siblings under the same key go on
-        // dispatching -- sits short of its budget for the life of the process:
-        // m_gaveUp never becomes true, nextCandidate() keeps naming a candidate
-        // nothing will ever issue, and neither resolve condition fires. Nothing
-        // is wrong with the answers it gives, but resolution() returns null for
-        // ever, and that is what the two entry points check before taking the
-        // lock. Every one of the siblings' dispatches therefore pays two shared
-        // acquisitions and two map lookups to be told there is nothing to do.
-        //
-        // Counted at the measurement hook, which every dispatch whose kernel
-        // the library chose reaches, and reset by a visit of the problem that
-        // owns the exploration -- so it measures the run of dispatches THE
-        // REGISTRANT has not made, not the run nobody has made. The distinction
-        // is the whole mechanism: a merged sibling is exempt from spending the
-        // visit budget, so letting its visits reset this counter let it hold an
-        // exploration the registrant had abandoned open for ever, taking the
-        // exclusive lock on every dispatch -- the very failure this counter was
-        // added to end.
-        //
-        // Bounded by abandonBudget() and not by visitBudget(), because it is no
-        // longer counting an exploration's own progress. It counts everyone's
-        // dispatches, including a busy sibling's, so a ceiling tight enough to
-        // bound progress would end a healthy exploration early on whatever
-        // samples sibling traffic let it take. The two questions want two
-        // ceilings: visitBudget() bounds how many visits the registrant may
-        // spend, abandonBudget() bounds how long a problem nobody is exploring
-        // may stay unresolved. Past it the problem gives up, publishes a
-        // winner-less resolution and both entry points short-circuit without a
-        // lock, which is what the design already does for every other terminal
-        // state.
-        //
-        // Atomic because the measurement hook advances it under the shared
-        // lock; the exclusive lock excludes that, so the reset needs nothing
-        // further.
-        //
-        // Deliberately not a second identity check at the measurement hook.
-        // The offer already ties a launch to the selection visit that asked for
-        // it, and on the only path that is measured that visit is the same
-        // call's, so a hash of the problem there would cost a pass over the
-        // problem to learn nothing the offer does not say for one compare.
+        // m_dispatchesSinceSelection ends a problem whose registrant has
+        // stopped dispatching while merged siblings go on dispatching under
+        // the key; otherwise it would never resolve, and every sibling dispatch
+        // would keep paying for the locked path. It is advanced by every
+        // dispatch at the harvest hook and reset only by the registrant's own
+        // visits, since a sibling's visits do not move the exploration on. It
+        // is bounded by abandonBudget() rather than visitBudget() because it
+        // counts sibling traffic too. Atomic because it is advanced under the
+        // shared lock.
         struct ProblemState
         {
             std::vector<int>                m_candidates;
@@ -799,8 +534,8 @@ namespace rocblaslt
         OnlineTuner();
         ~OnlineTuner();
 
-        /// Read onlineTunerConfig() into the member flags. Constructor-shaped
-        /// work, named so reloadForTest cannot drift from it.
+        /// Read onlineTunerConfig() into the members. Shared by the
+        /// constructor and reloadForTest().
         void applyConfig();
 
         int  selectCandidateImpl(size_t                  problemKey,
@@ -867,56 +602,43 @@ namespace rocblaslt
         int  m_livePairCap = 1;
         bool m_verbose   = false;
 
-        // Stamped onto every registration so a thread-held offer names one
-        // registration of one problem and not merely one key. Written under the
-        // write lock; never reset, including by reloadForTest(), which is the
-        // point -- an offer a test's earlier problem left on some thread must
-        // not match the problem that replaces it.
+        // Source of ProblemState::m_registration. Never reset, so an offer left
+        // on a thread before reloadForTest() cannot match a later registration.
         size_t m_registrations = 0;
 
         std::atomic<uint64_t> m_misses{0};
 
-        // Keyed by device, because a HIP event belongs to the device that
-        // created it: hipEventRecord onto another device's stream is refused
-        // with hipErrorInvalidResourceHandle. One flat pool would hand device
-        // B a pair device A created as soon as both explore in the same
-        // process, which is the ordinary shape of a multi-GPU application.
-        //
-        // The map is only ever read and written under m_mutex held
-        // exclusively, so the vectors it owns cannot move under a reader.
+        // The pools are keyed by device, because hipEventRecord refuses an
+        // event created on another device. All the containers below are
+        // guarded by m_mutex.
         std::unordered_map<size_t, ProblemState>        m_problems;
         std::unordered_map<int, std::vector<EventPair>> m_pairs;
         std::shared_timed_mutex                         m_mutex;
 
-        // The problems that may hold a pending pair, which are all
-        // reclaimFinishedPairs() has to look at. A problem is listed, and its
-        // m_listed set, the first time it is handed a pair, and stays listed
-        // until a pass finds it holding none. So outside a pass this costs a
-        // flag test per measured launch and one append per problem, and a pass
-        // walks the problems holding pairs -- no more than the live pairs --
-        // plus those listed since the previous pass, not every problem the
-        // tuner has seen. Same lock as m_problems.
+        // The problems that may hold a pending pair, which is all
+        // reclaimFinishedPairs() has to walk. A problem is listed (m_listed)
+        // the first time it is handed a pair and dropped by the first pass
+        // that finds it holding none. Outside a pass this costs a flag test
+        // per measured launch and one append per problem; a pass walks the
+        // problems holding pairs, which the cap bounds, plus those listed
+        // since the previous pass.
         std::vector<size_t> m_holders;
 
-        // Pairs created on each device and not yet retired, whether pooled or
-        // outstanding; what livePairCap() bounds. Same lock as m_pairs.
+        // Live pairs per device, pooled and outstanding: what livePairCap()
+        // bounds.
         std::unordered_map<int, int> m_livePairs;
 
-        // Devices that have already reported a launch going untimed at the
-        // cap, so each reports it once; see OnlineTunerConfig::livePairCapReached.
-        // Same lock as m_pairs.
+        // Devices that have already reported a launch untimed at the cap.
         std::unordered_set<int> m_capReported;
         void (*m_livePairCapReached)(int device, int cap) = nullptr;
 
-        // The resolved table, sized by c_resolutionSlots above.
-
+        // Never freed while the tuner lives, so a lock-free reader of a
+        // published entry cannot be handed a dangling one.
         std::vector<std::unique_ptr<Resolution>> m_resolutionPool;
         std::atomic<const Resolution*>           m_resolutions[c_resolutionSlots] = {};
 
-        // Kept alive for the same reason: at most one per resolved problem,
-        // taken from the first caller to offer one. The solutions themselves
-        // are owned by the library, which outlives the tuner, so what this
-        // holds is a reference count and not the kernel.
+        // Likewise: at most one per resolved problem. The solutions are owned
+        // by the library, so this holds a reference count, not a kernel.
         std::vector<std::unique_ptr<PinnedWinner>> m_winnerPool;
 
         friend struct ::OnlineTunerTestAccess;
