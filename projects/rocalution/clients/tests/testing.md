@@ -393,8 +393,9 @@ compiler and instruments the host code of the library (the `rocalution_objects` 
 `librocalution` and the unit tests are built from) and of `librocalution_hip` with
 `-fprofile-instr-generate -fcoverage-mapping`; the device code and the tests themselves are not
 instrumented. `install.sh
---codecoverage` selects `amdclang++`, sets `BUILD_SUPPORT_COMPLEX=OFF` and requires a Debug or
-RelWithDebInfo build.
+--codecoverage` selects `amdclang++` and requires a Debug or RelWithDebInfo build. Complex
+support stays on, so the unit tests cover the complex instantiations; `rocalution-test` tests
+the real types only.
 
 **How to build and run:**
 
@@ -431,9 +432,9 @@ preprocessor directives), which `llvm-cov` can report as missed. Jenkins `codeco
 * *Code coverage* = fraction of lines executed by the suite.
 * *Test coverage* = fraction of intended functionality exercised (solvers × preconditioners × formats
   × backends × precisions × MPI). Host-only instrumentation does not capture the HIP device kernels, so measured
-  code coverage understates GPU-path work; disabling complex under coverage also narrows scope.
+  code coverage understates GPU-path work.
 
-**Scope:** measured on Linux; Windows/complex coverage not tracked separately.
+**Scope:** measured on Linux; Windows coverage not tracked separately.
 
 ---
 
@@ -463,7 +464,6 @@ Default GPU targets come from `GPU_TARGETS` in the root `CMakeLists.txt`.
 
 **Explicitly not tested / guaranteed:**
 
-- Complex-number paths are disabled under coverage builds
 - Non-listed gfx targets
 - Windows coverage
 - Global (MPI) stencil tests (`test_global_stencil.cpp` is
@@ -512,7 +512,7 @@ device configurations are not ASAN-covered.
 | No `known_bugs.yaml` / quarantine mechanism for `rocalution-test` | Medium | Medium | The unit tests skip known bugs with `KNOWN_BUG`; flaky tests handled ad-hoc |
 | Unit tests not wired into the TheRock CI categories | Medium | Medium | CTest label `quick`; they run in the Jenkins coverage job |
 | Unit tests not built on Windows (they use POSIX calls such as `alarm`, and some helpers do not compile there) | Medium | Medium | Windows runs `rocalution-test` only |
-| Device-code coverage not captured; complex disabled under coverage | Medium | Medium | Host-only LLVM coverage |
+| Device-code coverage not captured | Medium | Medium | Host-only LLVM coverage |
 | MPI/multi-node validation is partial; global stencil test commented out | Medium | Medium | Nightly MPI variant build |
 | No TSAN/UBSAN/MSAN | Low | Medium | ASAN only |
 
