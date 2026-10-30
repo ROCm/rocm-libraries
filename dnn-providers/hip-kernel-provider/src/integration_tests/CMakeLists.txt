@@ -92,6 +92,19 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
         )
     endif()
+    # The Unified2D/3D knobs suite: compiled on any build arch when the product carries
+    # both bundles, GTEST_SKIPs off gfx950 (see the dense block above).
+    hkp_product_offers_engine(_hkp_unified_2d_bundle "hipkernel:Gfx950AttentionUnified2D")
+    hkp_product_offers_engine(_hkp_unified_3d_bundle "hipkernel:Gfx950AttentionUnified3D")
+    if(_hkp_unified_2d_bundle AND _hkp_unified_3d_bundle AND NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING
+                "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+                "Skipping gfx950 unified attention knob integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
+    elseif(_hkp_unified_2d_bundle AND _hkp_unified_3d_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx950AttentionUnifiedKnobs.cpp
+        )
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
@@ -265,6 +278,57 @@ foreach(_hkp_bwd_engine IN ITEMS split merged)
         )
     endforeach()
 endforeach()
+
+set(_hkp_gfx950_attention_unified_2d FALSE)
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    hkp_gfx950_attention_unified_2d_available(_hkp_gfx950_attention_unified_2d)
+endif()
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+   AND _hkp_gfx950_attention_unified_2d
+   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    # Routed into the gfx950 shard for the reason the dense registration above sets out.
+    hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
+    set(_gfx950_shard_args
+        INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
+        INSTALL_STAGING_KEY hkp_census_gfx950)
+
+    add_external_integration_test_target(
+        TARGET_NAME hip_kernel_provider_gfx950_attention_unified_2d_gpu_ref_integration_tests
+        PLUGIN_TARGET hip_kernel_provider
+        ENGINE_NAME   "hipkernel:Gfx950AttentionUnified2D"
+        INSTALL_SUBDIR hip_kernel_provider
+        ${_gfx950_shard_args}
+        REFERENCE_EXECUTOR gpu
+        GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
+        ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+    )
+endif()
+
+set(_hkp_gfx950_attention_unified_3d FALSE)
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    hkp_gfx950_attention_unified_3d_available(_hkp_gfx950_attention_unified_3d)
+endif()
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+   AND _hkp_gfx950_attention_unified_3d
+   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    # Routed into the gfx950 shard for the reason the dense registration above sets out.
+    # Serves the sweeps' decode (seqlen_q 1) cases only.
+    hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
+    set(_gfx950_shard_args
+        INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
+        INSTALL_STAGING_KEY hkp_census_gfx950)
+
+    add_external_integration_test_target(
+        TARGET_NAME hip_kernel_provider_gfx950_attention_unified_3d_gpu_ref_integration_tests
+        PLUGIN_TARGET hip_kernel_provider
+        ENGINE_NAME   "hipkernel:Gfx950AttentionUnified3D"
+        INSTALL_SUBDIR hip_kernel_provider
+        ${_gfx950_shard_args}
+        REFERENCE_EXECUTOR gpu
+        GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
+        ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+    )
+endif()
 
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)

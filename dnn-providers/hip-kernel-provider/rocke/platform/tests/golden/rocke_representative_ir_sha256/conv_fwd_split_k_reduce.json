@@ -1,0 +1,71 @@
+{
+  "aliases": {
+    "llvm24": "llvm23"
+  },
+  "flavors": {
+    "llvm20": {
+      "cases": {
+        "conv_fwd_split_k_reduce/gfx1250/bf16_v4": {
+          "arch": "gfx1250",
+          "bytes": 3339,
+          "family": "conv_fwd_split_k_reduce",
+          "kernel_name": "conv_fwd_splitk_reduce_v4_b256_bf16",
+          "sha256": "9f5d2e0e9448f4b577f054434b9f1ef1d23bc2f3ea573b6e034515f862199af2",
+          "status": "ok"
+        },
+        "conv_fwd_split_k_reduce/gfx1250/fp16_v2_s4": {
+          "arch": "gfx1250",
+          "bytes": 2802,
+          "family": "conv_fwd_split_k_reduce",
+          "kernel_name": "conv_fwd_splitk_reduce_v2_b256_s4_fp16",
+          "sha256": "e58fd98cfb623117fc877b644243ba385014a8deb4af1f1b56df2d5f5fe1bfa9",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm22": {
+      "cases": {
+        "conv_fwd_split_k_reduce/gfx1250/bf16_v4": {
+          "arch": "gfx1250",
+          "bytes": 3346,
+          "family": "conv_fwd_split_k_reduce",
+          "kernel_name": "conv_fwd_splitk_reduce_v4_b256_bf16",
+          "sha256": "1224e46c4cc351f7d63cdf21cbbfb446eaec8e64fe5460148da7bb543ac2e689",
+          "status": "ok"
+        },
+        "conv_fwd_split_k_reduce/gfx1250/fp16_v2_s4": {
+          "arch": "gfx1250",
+          "bytes": 2809,
+          "family": "conv_fwd_split_k_reduce",
+          "kernel_name": "conv_fwd_splitk_reduce_v2_b256_s4_fp16",
+          "sha256": "d3f6b4e3314c207f3cc441e6e1015d340e5a77e0fc48fc2bbc31d53edbf3be75",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm23": {
+      "cases": {
+        "conv_fwd_split_k_reduce/gfx1250/bf16_v4": {
+          "arch": "gfx1250",
+          "bytes": 3410,
+          "family": "conv_fwd_split_k_reduce",
+          "kernel_name": "conv_fwd_splitk_reduce_v4_b256_bf16",
+          "sha256": "e6b13e9985e7fcd3aa641ba3fc078d40c6e38f3b92edc8f4c64ac86067dff3dc",
+          "status": "ok"
+        },
+        "conv_fwd_split_k_reduce/gfx1250/fp16_v2_s4": {
+          "arch": "gfx1250",
+          "bytes": 2873,
+          "family": "conv_fwd_split_k_reduce",
+          "kernel_name": "conv_fwd_splitk_reduce_v2_b256_s4_fp16",
+          "sha256": "333a82f4dd3088e68945d7206f6346ee2c15aace62611f2ba1e74354be4cd0e4",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    }
+  },
+  "schema": "ck.dsl.ir_golden_sha256/v2"
+}

@@ -884,6 +884,21 @@ class UnifiedAttention2DTiledSpec:
     def dtype_ir(self) -> Type:
         return F16 if self.dtype == "fp16" else BF16
 
+    def mask_type(self) -> int:
+        """The band as one ``AttentionMaskType`` value: 0 no mask, 1 top-left causal,
+        2 bottom-right causal, 3 any other band (a sliding window or a right bound above
+        zero).
+
+        A bound method rather than a property so ``hkp_pack`` can observe it as an
+        effective accessor: a descriptor's metadata cannot carry ``right_bound``'s -1
+        (the generator's unset sentinel), and this is what it carries instead.
+        """
+        if self.sliding_window > 0 or self.right_bound > 0:
+            return 3
+        if self.right_bound < 0:
+            return 0
+        return 1 if self.causal_top_left else 2
+
     @property
     def binary_search_iters(self) -> int:
         # AITER/Triton uses a true while-loop binary search. Our IR currently

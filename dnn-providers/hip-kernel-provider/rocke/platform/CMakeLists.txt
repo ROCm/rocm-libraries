@@ -344,13 +344,15 @@ if(ROCKE_INSTALL_TESTS)
     # Host-only golden IR byte-stability gate. The relocatable runner rebuilds the
     # representative IR from the co-located rocke package and compares digests to
     # the committed golden. It needs the parity harness module (imported by name)
-    # and the golden JSON co-located next to it; no GPU and no examples required.
+    # and the golden's per-family JSON shards co-located next to it; no GPU and no
+    # examples required.
     install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/tests/rocke_installed_golden_test.py"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR})
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/instances/rocke_ir_parity_harness.py"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR})
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/rocke_representative_ir_sha256.json"
-            DESTINATION ${ROCKE_TEST_INSTALL_DIR}/golden)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/rocke_representative_ir_sha256"
+            DESTINATION ${ROCKE_TEST_INSTALL_DIR}/golden
+            FILES_MATCHING PATTERN "*.json")
 
     # Host-only differential golden check (Python reference emitters only; no
     # compiler). The rest of tests/instances/differential needs the C++ build and
@@ -642,8 +644,9 @@ if(ROCKE_INSTALL_TESTS)
 
     # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
     # dense block-order decodes, spec-wrapper parity gate, the 3D decode split rule
-    # and K/V cache policy, and the scalar fallback's cache key and block-table
-    # stride kernarg.
+    # and K/V cache policy, the scalar fallback's cache key and block-table
+    # stride kernarg, the 2D/3D mask_type spec fields, and the 3D
+    # segment+reduce module's pairing.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -651,8 +654,11 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
         "tests/library/tests/test_attention_scalar_cache_key.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
+        "tests/library/tests/test_attention_tiled_2d_mask_type.py"
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
-        "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py")
+        "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
+        "tests/library/tests/test_attention_tiled_3d_mask_type.py"
+        "tests/library/tests/test_attention_tiled_3d_module.py")
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
     foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
