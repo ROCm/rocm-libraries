@@ -825,7 +825,7 @@ enforced numbers cannot see the characterization-to-unit migration at all, is in
 
 Beyond PR validation, the following run on a nightly or postsubmit cadence rather than per PR:
 
-- **Random GEMMs under CPU rocJITsu.** The Multi-Arch nightly sidecar checks 1,000
+- **Random GEMMs under CPU rocjitsu.** The Multi-Arch nightly sidecar checks 1,000
   fixed-seed gfx950 GEMMs, including MXFP8 and MXFP4, using the nightly run's BLAS
   artifacts for numerics and races. It is advisory, requires no GPU, and retains
   every case's input and logs.

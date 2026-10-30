@@ -1,10 +1,10 @@
-# Nightly GEMM race detection with rocJITsu
+# Nightly GEMM race detection with rocjitsu
 
-The nightly job runs 1,000 sampled hipBLASLt GEMMs through rocJITsu with race
+The nightly job runs 1,000 sampled hipBLASLt GEMMs through rocjitsu with race
 detection enabled. It executes gfx950 GPU instructions on CPUs and checks the
 numerical output with `hipblaslt-bench`.
 
-See [rocJITsu's race detector documentation](https://github.com/ROCm/rocm-systems/blob/6f5d9658a4b13656e0c1a3719d86a320c9206dbe/emulation/rocjitsu/docs/race-detector.md)
+See [rocjitsu's race detector documentation](https://github.com/ROCm/rocm-systems/blob/6f5d9658a4b13656e0c1a3719d86a320c9206dbe/emulation/rocjitsu/docs/race-detector.md)
 for how detection works and its coverage limits.
 
 ## Design
@@ -14,7 +14,7 @@ The test repeats three steps for each sample:
 1. The [sampler](../../../.github/scripts/sample_hipblaslt_gemms.py) chooses the
    matrix dimensions, number formats and operation options.
 2. The [runner](../../../.github/scripts/run_random_hipblaslt_gemms.py) sends
-   that input to `hipblaslt-bench` under rocJITsu. The library chooses the GPU
+   that input to `hipblaslt-bench` under rocjitsu. The library chooses the GPU
    function, or kernel, as it normally would. No explicit solution index is used
    to force a particular kernel.
 3. The runner checks the numerical result and race report, then saves the input,
@@ -63,7 +63,7 @@ family.
 
 The [CPU test job](../../../.github/workflows/therock-rocjitsu-race-check-linux.yml)
 uses the library and benchmark built by the same workflow, then builds a fixed
-version of rocJITsu. It attempts every sample and uploads reports even after a
+version of rocjitsu. It attempts every sample and uploads reports even after a
 failure. The job is advisory: its failure is visible, but does not fail the
 required Multi-Arch summary.
 
@@ -71,7 +71,7 @@ The same job can be dispatched manually with the ID of a completed Multi-Arch
 run. It then tests that run's artifacts with the requested sample count, seed
 and number of concurrent GEMMs.
 
-To run locally, provide a matching library and benchmark, rocJITsu, and its
+To run locally, provide a matching library and benchmark, rocjitsu, and its
 gfx950 configuration. The Python environment needs PyYAML, and the benchmark
 build must enable MX data generation.
 
@@ -84,7 +84,7 @@ HIPBLASLT_TENSILE_LIBPATH=/path/to/library/gfx950 python3 .github/scripts/run_ra
 
 Use `--case N` with the same seed to replay one sample. `--dry-run` lets you
 inspect the sampled inputs before running them: it writes inputs and reports
-without starting the benchmark or rocJITsu. These samples are marked `dry-run`,
+without starting the benchmark or rocjitsu. These samples are marked `dry-run`,
 so they do not count as passes. `--stop-on-failure` stops starting new samples
 after a failure; already running samples finish. Each run creates a new output
 directory, with `summary.json` for totals and `cases.md` for individual results.
