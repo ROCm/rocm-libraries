@@ -261,24 +261,60 @@ def check_result(
     verifier.check_reduced(p, d_out)
 
 
-def screening_only_entry(index: int, timing: Timing) -> dict:
+def screening_only_entry(index: int, timing: Timing, verified: str) -> dict:
     """A ranked configuration from the screening pass only (--one-shot)."""
     entry = {
         "index": index,
         "timeUs": round(timing.total_ns / NS_PER_US, 3),
         "gemmUs": round(min(timing.gemm_ns) / NS_PER_US, 3),
         "screeningUs": round(timing.total_ns / NS_PER_US, 3),
-        "verified": "screening",
+        "verified": verified,
     }
     if timing.reduce_ns:
         entry["reduceUs"] = round(min(timing.reduce_ns) / NS_PER_US, 3)
     return entry
 
 
-def rank_all_screened(screening: dict[int, Timing], outcome: dict) -> None:
+def verify_screened(
+    job: Job,
+    buffers: CaseBuffers,
+    screening: dict[int, Timing],
+    outcome: dict,
+) -> dict[int, str]:
+    """One host check per screened configuration (--one-shot)."""
+    if not job.verify:
+        return {index: "no" for index in screening}
+    first = job.entries[0][1]
+    elements = (first.m + first.n) * first.k
+    full = elements <= job.settings["verify_full_max_elems"]
+    verifier = Verifier(buffers.inputs, full)
+    labels: dict[int, str] = {}
+    for index in screening:
+        name, p = job.entries[index]
+        try:
+            check_result(job, buffers, p, name, verifier)
+        except AssertionError as err:
+            outcome["failures"].append(
+                run_failure(index, VERIFY_STATUS, "verify", err)
+            )
+            labels[index] = "failed"
+            continue
+        except (RuntimeError, OSError) as err:
+            outcome["failures"].append(run_failure(index, RUN_STATUS, "verify", err))
+            labels[index] = "failed"
+            continue
+        labels[index] = verifier.label(p)
+    return labels
+
+
+def rank_all_screened(
+    screening: dict[int, Timing], outcome: dict, verified: dict[int, str]
+) -> None:
     """Fills outcome['ranked'] with every screened configuration, fastest first."""
     for index in sorted(screening, key=lambda i: screening[i].total_ns):
-        outcome["ranked"].append(screening_only_entry(index, screening[index]))
+        outcome["ranked"].append(
+            screening_only_entry(index, screening[index], verified[index])
+        )
 
 
 def winner_entry(index: int, refined: Timing, screened: Timing, verified: str) -> dict:
@@ -349,8 +385,10 @@ def time_case(job: Job, gpu: int, flush, cache: OperandCache, outcome: dict) -> 
         if job.one_shot:
             outcome["clocks"]["end"] = sample_clocks(gpu)
             phases["refinementS"] = 0.0
-            phases["verificationS"] = 0.0
-            rank_all_screened(screening, outcome)
+            start = time.perf_counter()
+            verified = verify_screened(job, buffers, screening, outcome)
+            phases["verificationS"] = time.perf_counter() - start
+            rank_all_screened(screening, outcome, verified)
             return
         start = time.perf_counter()
         refined = refine(job, buffers, flush, screening, outcome)

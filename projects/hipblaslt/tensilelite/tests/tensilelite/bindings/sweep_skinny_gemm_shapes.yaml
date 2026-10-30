@@ -119,6 +119,13 @@ problems:
     n: 151936
     k: 5120
     transpose: true
+  # hipblaslt-bench bring-up (TN M×N×K); not a shipped projection — transpose
+  # emits (4, 5120, 5120) and (5120, 4, 5120).
+  - name: hipblaslt-bench-5120x4x5120
+    m: 4
+    n: 5120
+    k: 5120
+    transpose: true
   # The extra_points of data/SkinnyGEMMGrid.yaml, [m, n, k], verbatim.
   - {name: grid-extra-2x32768x14336, m: 2, n: 32768, k: 14336}
   - {name: grid-extra-3x16384x25600, m: 3, n: 16384, k: 25600}

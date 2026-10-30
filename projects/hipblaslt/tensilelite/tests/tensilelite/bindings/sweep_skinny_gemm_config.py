@@ -80,7 +80,9 @@ beta draws. Every winner is verified against the host reference, whatever the
 size: with (m + n) * k up to verify_full_max_elems (default 2^31, about 1 s of
 host time per 10^9 elements) the reference is dense and the whole result is
 compared ("full"), above it the reference is computed for a sample of the output
-elements ("sampled(N)"). Only the winners are verified, not the screened candidates.
+elements ("sampled(N)"), failed (verify mismatch), or no (--no-verify). In refine+top
+mode only the winners are verified, not the other screened candidates. In one-shot
+mode every screened configuration is verified once.
 """
 
 import itertools

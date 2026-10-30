@@ -25,8 +25,9 @@ YAML_HEADER = """\
 # Times are microseconds: timeUs is the refined minimum of gemm (+ reduce for
 # split-K), screeningUs the minimum of the screening pass. verified is full (the
 # whole result was compared with a dense host reference), sampled(N) (N output
-# elements were compared, each over all its splits) or no (--no-verify); a
-# configuration that fails verification is dropped, not listed. phaseSeconds
+# elements were compared, each over all its splits), failed (one-shot verify
+# mismatch), or no (--no-verify). In refine+top mode a failing winner is dropped;
+# in one-shot every timed configuration stays listed. phaseSeconds
 # splits the wall time of a case on its GPU.
 """
 

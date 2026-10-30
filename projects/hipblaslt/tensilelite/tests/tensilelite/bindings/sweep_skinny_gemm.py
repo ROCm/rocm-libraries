@@ -51,10 +51,12 @@ spawned child can safely own a GPU):
      winners are ranked by that refined score and verified in rank order against
      the host reference; a failing configuration is dropped and the next refined
      one promoted. With --one-shot every screened configuration is written to
-     top (ranked by screening time), refinement and verification are skipped, and
-     --output-format msgpack (or a .msgpack path) stores the document in binary.
-     Every reported winner is verified (never skipped), but only the winners: the
-     screened candidates are not. The reference is dense ("full")
+     top (ranked by screening time), refinement is skipped, and each timed
+     configuration gets one verification launch (full or sampled by size); failures
+     are recorded in the failed list with verified=failed. --output-format msgpack
+     (or a .msgpack path) stores the document in binary.
+     In refine+top mode every reported winner is verified (never skipped), but only
+     the winners: the other screened candidates are not. The reference is dense ("full")
      when (m + n) * k <= verify_full_max_elems, else sampled (see
      sweep_skinny_gemm_inputs.py); --no-verify turns the verification off and
      marks the winners "no".
@@ -432,13 +434,15 @@ class Sweep:
         }
 
     def verification_note(self) -> str:
-        if self.options.one_shot:
-            return (
-                "one-shot: every timed configuration is listed with "
-                "verified=screening (no host check)"
-            )
         if self.options.no_verify:
-            return "disabled by --no-verify: winners are marked no"
+            return "disabled by --no-verify: configurations are marked no"
+        if self.options.one_shot:
+            limit = self.settings["verify_full_max_elems"]
+            return (
+                "one-shot: every timed configuration is verified once (full when "
+                f"(m + n) * k <= {limit}, else sampled); failures stay listed with "
+                "verified=failed"
+            )
         limit = self.settings["verify_full_max_elems"]
         return (
             f"every winner is verified: full when (m + n) * k <= {limit}, "

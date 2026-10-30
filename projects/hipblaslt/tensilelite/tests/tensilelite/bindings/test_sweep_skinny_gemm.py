@@ -492,9 +492,10 @@ def test_rank_all_screened_lists_every_configuration():
         2: worker.Timing([2000], []),
     }
     outcome: dict = {"ranked": []}
-    worker.rank_all_screened(timings, outcome)
+    verified = {0: "full", 1: "sampled(4)", 2: "no"}
+    worker.rank_all_screened(timings, outcome, verified)
     assert [entry["index"] for entry in outcome["ranked"]] == [1, 2, 0]
-    assert outcome["ranked"][0]["verified"] == "screening"
+    assert outcome["ranked"][0]["verified"] == "sampled(4)"
     assert outcome["ranked"][0]["timeUs"] == outcome["ranked"][0]["screeningUs"]
 
 
