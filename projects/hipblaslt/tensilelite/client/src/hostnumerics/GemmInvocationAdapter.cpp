@@ -399,9 +399,10 @@ namespace TensileLite::Client::hostnumerics
         }
 
         template <typename Indices>
-        std::optional<TranslationFailure> normalizeProblem(ContractionProblemGemm const& problem,
-                                                           const Indices&                indices,
-                                                           const roc::hostnumerics::Permutation& globalOrder)
+        std::optional<TranslationFailure>
+            normalizeProblem(ContractionProblemGemm const&         problem,
+                             const Indices&                        indices,
+                             const roc::hostnumerics::Permutation& globalOrder)
         {
             using detail::failure;
             using roc::hostnumerics::IdentityActivation;
@@ -1596,10 +1597,10 @@ namespace TensileLite::Client::hostnumerics
     }
 
     std::variant<GemmInvocationAdapter, TranslationFailure>
-        translateGemmInvocation(ContractionProblemGemm const&        problem,
-                                ContractionInputs const&             inputs,
-                                const roc::hostnumerics::IndexRange& indices,
-                                const roc::hostnumerics::Permutation&       order)
+        translateGemmInvocation(ContractionProblemGemm const&         problem,
+                                ContractionInputs const&              inputs,
+                                const roc::hostnumerics::IndexRange&  indices,
+                                const roc::hostnumerics::Permutation& order)
     {
         auto state = std::make_unique<GemmInvocationAdapter::State>();
         if(auto normalizationFailure = state->normalizeProblem(problem, indices, order))
@@ -1610,9 +1611,9 @@ namespace TensileLite::Client::hostnumerics
     }
 
     std::variant<GemmInvocationAdapter, TranslationFailure>
-        translateGemmInvocation(ContractionProblemGemm const& problem,
-                                ContractionInputs const&      inputs,
-                                const std::set<size_t>&       indices,
+        translateGemmInvocation(ContractionProblemGemm const&         problem,
+                                ContractionInputs const&              inputs,
+                                const std::set<size_t>&               indices,
                                 const roc::hostnumerics::Permutation& order)
     {
         auto state = std::make_unique<GemmInvocationAdapter::State>();

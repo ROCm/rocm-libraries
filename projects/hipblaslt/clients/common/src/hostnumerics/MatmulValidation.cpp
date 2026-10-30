@@ -46,8 +46,8 @@ namespace hipblaslt::hostnumerics
             return (std::isnan(candidate) && !std::isnan(current)) || candidate > current;
         }
 
-        MatmulAllCloseFailure describeAllCloseFailure(const Tensor&                         expected,
-                                                      const Tensor&                         observed,
+        MatmulAllCloseFailure describeAllCloseFailure(const Tensor& expected,
+                                                      const Tensor& observed,
                                                       const roc::hostnumerics::Permutation& order)
         {
             const bool complex = roc::hostnumerics::scalarTypeInfo(expected.type()).category
@@ -153,7 +153,7 @@ namespace hipblaslt::hostnumerics
                                                bool computeUlp)
         {
             const auto& [expected, observed] = tensors;
-            ComparisonEvidence  result;
+            ComparisonEvidence result;
             const auto order = roc::hostnumerics::Permutation::reverse(expected.shape().rank());
 
             if(validation.compareAllClose || specialValueConsistency)
@@ -209,8 +209,9 @@ namespace hipblaslt::hostnumerics
                     = expected.shape().rank() == 3 ? expected.shape()[2] : size_t{1};
                 for(size_t batch = 0; batch < batches; ++batch)
                 {
-                    const Tensor        batchExpected = batchView(expected, batch);
-                    const auto batchOrder = roc::hostnumerics::Permutation::reverse(batchExpected.shape().rank());
+                    const Tensor batchExpected = batchView(expected, batch);
+                    const auto   batchOrder
+                        = roc::hostnumerics::Permutation::reverse(batchExpected.shape().rank());
 
                     const ComparisonReport batchReport
                         = compare(batchView(observed, batch),

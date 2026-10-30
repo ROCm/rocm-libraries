@@ -175,7 +175,8 @@ namespace hipblaslt::hostnumerics::maf
                 GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::zero(), 0))
                           : MxDataGeneration::preserveGeneratedEncoding(GenerationRecipe::realOnly(
                               GenerationRecipe::uniformFiniteEncodedValue(),
-                              {.seed = seed(operand, batch), .indexOrder = roc::hostnumerics::Permutation{1, 0}})),
+                              {.seed       = seed(operand, batch),
+                               .indexOrder = roc::hostnumerics::Permutation{1, 0}})),
             options);
         if(numericalData)
             fill(generated.data, mode, operand, batch);
