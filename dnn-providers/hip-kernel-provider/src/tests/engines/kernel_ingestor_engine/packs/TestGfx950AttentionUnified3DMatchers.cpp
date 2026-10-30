@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -18,8 +19,10 @@
  * must be refused: decode only (a longer query leaves rows unwritten), a GQA group dividing
  * 16, D256 at bf16 only, the NO_MASK decode graph served by the bottom-right causal kernel,
  * and a record that is not a decode-grid kernel launching exactly its segment and reduce
- * kernels. The SDPA-shape
- * rules it shares with Unified2D are spot-checked; Unified2D's suite covers them in full.
+ * kernels. graph_match is its own copy of Unified2D's (layout, shape/dtype agreement, the
+ * 32-bit K/V addressing cap, and the alibi/padding/mma_core_mode/implementation declines), so
+ * this suite repeats those rows against the decode shape rather than relying on Unified2D's
+ * suite to cover its copy.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
@@ -34,6 +37,23 @@ int64_t boundMask(const GraphSpec& spec)
     const auto bound = matchGraph(spec);
     EXPECT_TRUE(bound.has_value());
     return bound.has_value() ? tryGetBoundInt(*bound, MASK_TOKEN).value_or(-1) : -1;
+}
+
+/// A named perturbation of the default graph that graph_match must decline.
+struct DeclineCase
+{
+    std::string name;
+    GraphSpec spec;
+};
+
+void expectEveryCaseDeclines(const std::vector<DeclineCase>& cases)
+{
+    ASSERT_FALSE(cases.empty());
+    for(const auto& declineCase : cases)
+    {
+        EXPECT_FALSE(matchGraph(declineCase.spec).has_value())
+            << declineCase.name << ": graph_match bound a graph the kernel cannot serve";
+    }
 }
 
 } // namespace
@@ -128,11 +148,117 @@ TEST(TestGfx950AttentionUnified3DMatchers, DeclinesASlidingWindow)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(TestGfx950AttentionUnified3DMatchers, DeclinesANonBshdKeyCache)
+/// The kernel reads K/V as a gap-free paged cache and takes no stride arguments, so a
+/// differently-strided K or V is read as if it were this one: elements in bounds, wrong
+/// values, no fault. Each operand on its own, in each wrong layout.
+TEST(TestGfx950AttentionUnified3DMatchers, DeclinesAKeyOrValueThatIsNotDenseBshd)
 {
-    GraphSpec spec;
-    spec.kLayout = Layout::BHSD;
-    EXPECT_FALSE(matchGraph(spec).has_value());
+    std::vector<DeclineCase> cases;
+    for(const auto layout : {Layout::BHSD, Layout::PADDED_BSHD})
+    {
+        const std::string spelling = layout == Layout::BHSD ? "BHSD" : "padded BSHD";
+        GraphSpec k;
+        k.kLayout = layout;
+        cases.push_back({"K " + spelling, k});
+        GraphSpec v;
+        v.vLayout = layout;
+        cases.push_back({"V " + spelling, v});
+    }
+    expectEveryCaseDeclines(cases);
+}
+
+/// Q and O carry one query token at decode (seqlen_q 1), so BHSD and BSHD are byte-identical
+/// for them -- the sequence axis's stride is never read when its extent is 1 -- and declining
+/// BHSD would refuse a graph the kernel serves perfectly. Padded BSHD still introduces a real
+/// batch-stride gap at any seqlen_q, so it is declined like K/V's.
+TEST(TestGfx950AttentionUnified3DMatchers, AcceptsQAndOInBhsdButNotPaddedBshd)
+{
+    GraphSpec qBhsd;
+    qBhsd.qLayout = Layout::BHSD;
+    EXPECT_TRUE(matchGraph(qBhsd).has_value());
+    GraphSpec oBhsd;
+    oBhsd.oLayout = Layout::BHSD;
+    EXPECT_TRUE(matchGraph(oBhsd).has_value());
+
+    std::vector<DeclineCase> cases;
+    GraphSpec qPadded;
+    qPadded.qLayout = Layout::PADDED_BSHD;
+    cases.push_back({"Q padded BSHD", qPadded});
+    GraphSpec oPadded;
+    oPadded.oLayout = Layout::PADDED_BSHD;
+    cases.push_back({"O padded BSHD", oPadded});
+    expectEveryCaseDeclines(cases);
+}
+
+TEST(TestGfx950AttentionUnified3DMatchers, DeclinesOperandsThatDisagreeInShapeOrType)
+{
+    std::vector<DeclineCase> cases;
+    GraphSpec mixed;
+    mixed.kDataType = data_objects::DataType::HALF;
+    cases.push_back({"K dtype differs from Q", mixed});
+    GraphSpec vShorter;
+    vShorter.vSeqLen = 64;
+    cases.push_back({"V sequence differs from K", vShorter});
+    GraphSpec oHeads;
+    oHeads.oHeads = 4;
+    cases.push_back({"O heads differ from Q", oHeads});
+    GraphSpec f32;
+    f32.dataType = data_objects::DataType::FLOAT;
+    cases.push_back({"float32", f32});
+    expectEveryCaseDeclines(cases);
+}
+
+/// The kernels are built with 32-bit K/V byte addressing and bound their buffer loads at
+/// 0x7FFF0000 bytes: past that, loads return zeros. The default decode graph's Sq is 1, so only
+/// K/V (not Q/O) can reach the bound; batch 1, Hkv 8, D128 matches Unified2D's boundary case.
+/// 1048592 keys is 2147516416 bytes, over the bound; 1048576 keys is 2^31 bytes, still over;
+/// 1048000 is 2146304000, under.
+TEST(TestGfx950AttentionUnified3DMatchers, DeclinesACacheBeyondThirtyTwoBitAddressing)
+{
+    GraphSpec over;
+    over.batch = 1;
+    over.numQueryHeads = 8;
+    over.numKvHeads = 8;
+    over.seqLenKv = 1048592;
+    EXPECT_FALSE(matchGraph(over).has_value());
+
+    GraphSpec under = over;
+    under.seqLenKv = 1048576; // 2147483648 bytes
+    EXPECT_FALSE(matchGraph(under).has_value());
+    under.seqLenKv = 1048000; // 2146304000 bytes
+    EXPECT_TRUE(matchGraph(under).has_value());
+}
+
+/// This copy of Unified2D's catch-all feature decline: no ALiBi, no padding mask, an
+/// allow-listed mma_core_mode, and AUTO-only execution hints.
+TEST(TestGfx950AttentionUnified3DMatchers, DeclinesAlibiPaddingMmaCoreModeAndImplementationHints)
+{
+    std::vector<DeclineCase> cases;
+    GraphSpec alibi;
+    alibi.alibiMask = true;
+    cases.push_back({"alibi_mask", alibi});
+    GraphSpec padding;
+    padding.paddingMask = true;
+    cases.push_back({"padding_mask", padding});
+    GraphSpec mma;
+    mma.mmaCoreMode = data_objects::DataType::FLOAT;
+    cases.push_back({"mma_core_mode FLOAT", mma});
+    GraphSpec composite;
+    composite.implementation = data_objects::AttentionImplementation::COMPOSITE;
+    cases.push_back({"implementation COMPOSITE", composite});
+    expectEveryCaseDeclines(cases);
+}
+
+/// Explicit UNSET/HALF/BFLOAT16 mma_core_mode is inert, not a feature: declining it would
+/// refuse decode graphs the cuDNN-compat shim writes by default.
+TEST(TestGfx950AttentionUnified3DMatchers, AcceptsTheInertMmaCoreModeSpellings)
+{
+    for(const auto mode : {data_objects::DataType::HALF, data_objects::DataType::BFLOAT16})
+    {
+        GraphSpec spec;
+        spec.mmaCoreMode = mode;
+        EXPECT_TRUE(matchGraph(spec).has_value());
+    }
 }
 
 /// A ragged (RFC-0014) operand packs its tokens behind an offsets tensor, padded per
