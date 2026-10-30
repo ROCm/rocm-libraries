@@ -92,6 +92,11 @@ struct ModelInfo {
   // lists as trained serves that cell degraded (CandidateSet::degraded_cells);
   // 0 for a model without it.
   std::uint32_t drift_keep_ppm = 0;
+  // MLREC_v3: the model was trained with kernel guards: the integration's
+  // guards sidecar offers some kernels only for problems whose free sizes
+  // reach a minimum, so an integration serves the model only with that
+  // sidecar applied. Ranking does not read it.
+  bool kernel_guards = false;
   // Base grid labels with no node in the split tree. An MLREC_v3 model scores
   // their problems through the nearest base label that has a trained cell.
   std::size_t uncovered_base_labels = 0;

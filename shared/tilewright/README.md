@@ -367,7 +367,7 @@ width) must be 0. The header tail is:
 | arch | `u16` length + ASCII | |
 | parallel_mi_cu, mi_default_cycles | `f64` each | > 0 |
 | n_mi, MI table | as in v2 | |
-| serving_flags | `u32` | bit 0 small-batched rule, bit 1 Dot2 rule, bit 2 non-temporal rule (each applied when set), bit 3 no whitelist tier, bit 4 launch keys (the pool is grouped by launch key), bit 5 family-wise non-temporal rule (only with bit 2), bit 6 trained on the integration's bank as well as its table (ranking ignores it; an integration with a bank serves both), bit 7 trained-key gate, bit 8 CU floor, bit 9 alignment veto (never with bit 2), bit 10 drift fallback (not with bit 3 or bit 4, and no cell may list signatures); other bits 0 |
+| serving_flags | `u32` | bit 0 small-batched rule, bit 1 Dot2 rule, bit 2 non-temporal rule (each applied when set), bit 3 no whitelist tier, bit 4 launch keys (the pool is grouped by launch key), bit 5 family-wise non-temporal rule (only with bit 2), bit 6 trained on the integration's bank as well as its table (ranking ignores it; an integration with a bank serves both), bit 7 trained-key gate, bit 8 CU floor, bit 9 alignment veto (never with bit 2), bit 10 drift fallback (not with bit 3 or bit 4, and no cell may list signatures), bit 11 kernel guards (ranking ignores it; an integration serves the model only with its guards sidecar); other bits 0 |
 | cascade_keys | `u32` | the cascade width, 0 for none |
 | min_cu_fraction, max_cu_fraction | `f64` each | `0 < min <= max <= 1`: the `N_eff / N_CU` the model supports |
 | schedules | `u8` | bit 0 Default, bit 1 Dynamic, bit 2 Auto; not 0 |
@@ -578,8 +578,9 @@ if (!tilewright::scoring_context(*model, context, hw)) { /* use another ranking 
   the spec hash, supported contexts (the CU floor as `min_effective_cus`, 0
   for none), serving flags (with the alignment veto as `alignment_veto`, whose
   `on` is false for a model without one, and with `bank`, which an
-  integration reads to decide whether it serves its bank, the number of
-  view keys the trained-key gate lists, and the drift fallback's
+  integration reads to decide whether it serves its bank, `kernel_guards`,
+  which it reads to decide whether it applies its guards sidecar, the number
+  of view keys the trained-key gate lists, and the drift fallback's
   `drift_keep_ppm`, 0 for none), the number of base
   labels without a trained cell and the provenance the file records;
   `CandidateSet::untrained_keys()` and `untrained_configs()` count the pool's

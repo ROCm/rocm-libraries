@@ -2816,6 +2816,7 @@ ModelInfo describe(const Model& model) {
   info.trained_key_gate         = model.trained_key_gate;
   info.trained_keys             = model.trained_keys.size();
   info.drift_keep_ppm           = model.drift_keep_ppm;
+  info.kernel_guards            = model.kernel_guards;
   for (std::size_t b = 0; b < detail::kBaseCells; ++b)
     if (model.base_nodes[b] < 0) ++info.uncovered_base_labels;
   info.provenance   = model.provenance;

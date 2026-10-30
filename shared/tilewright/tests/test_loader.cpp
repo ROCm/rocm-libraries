@@ -459,7 +459,7 @@ TEST_CASE("the v3 CU floor is validated", "[loader][v3]") {
   }
   SECTION("an unknown flag beside it") {
     Image bad = good;
-    put_u32(bad, bad.at.at("v3_serving_flags"), kFloor | 0x800);
+    put_u32(bad, bad.at.at("v3_serving_flags"), kFloor | 0x1000);
     CHECK(mentions(load_error(bad), "unknown serving flags"));
   }
   SECTION("truncated at any byte of the header") {
@@ -544,7 +544,7 @@ TEST_CASE("the v3 alignment veto is validated", "[loader][v3]") {
   }
   SECTION("an unknown flag beside it") {
     Image bad = good;
-    put_u32(bad, bad.at.at("v3_serving_flags"), kVeto | 0x800);
+    put_u32(bad, bad.at.at("v3_serving_flags"), kVeto | 0x1000);
     CHECK(mentions(load_error(bad), "unknown serving flags"));
   }
   SECTION("truncated at any byte of the header") {
@@ -637,7 +637,7 @@ TEST_CASE("the v3 drift fallback is validated", "[loader][v3][drift]") {
     CHECK_FALSE(load_error(bad).empty());
   }
   SECTION("an engine that predates a flag refuses a file that has it") {
-    for (std::uint32_t unknown : {0x800u, 0x80000000u}) {
+    for (std::uint32_t unknown : {0x1000u, 0x80000000u}) {
       Image bad = good;
       put_u32(bad, bad.at.at("v3_serving_flags"), kDrift | unknown);
       CHECK(mentions(load_error(bad), "unknown serving flags"));
@@ -728,6 +728,46 @@ TEST_CASE("the v3 drift fallback is validated", "[loader][v3][drift]") {
       put_u32(bad, bad.at.at("v3_serving_flags"), flags);
       CHECK_FALSE(load_error(bad).empty());
     }
+    for (std::size_t n = 0; n <= image.header_size; ++n) {
+      INFO("size " << n);
+      REQUIRE_FALSE(load_error(image.bytes, n).empty());
+    }
+  }
+  SECTION("with the kernel guards flag, which has no field") {
+    constexpr std::uint32_t kVeto = 0x200, kGuards = 0x800;
+
+    ModelSpec all         = spec;
+    all.v3_serving_flags  = kGate | kFloor | kVeto | kDrift | kGuards;
+    all.trained_keys      = {7, 8};
+    all.min_effective_cus = 32;
+    all.veto_k_min        = 512;
+    all.veto_align_bits   = 1024;
+    all.drift_keep_ppm    = 950000;
+    all.provenance        = {{"config_id", "cfg"}};
+    const Image image     = write_model(all);
+    // The image is the one without the flag but for the serving flags.
+    ModelSpec unguarded        = all;
+    unguarded.v3_serving_flags = kGate | kFloor | kVeto | kDrift;
+    Image cleared              = image;
+    put_u32(cleared, cleared.at.at("v3_serving_flags"), unguarded.v3_serving_flags);
+    CHECK(cleared.bytes == write_model(unguarded).bytes);
+    const tw::ModelPtr loaded = tw::load_model_from_memory(image.bytes.data(), image.bytes.size());
+    REQUIRE(loaded);
+    const tw::ModelInfo info = tw::describe(*loaded);
+    CHECK(info.kernel_guards);
+    CHECK(info.alignment_veto.on);
+    CHECK(info.drift_keep_ppm == 950000);
+    CHECK(info.min_effective_cus == 32);
+    CHECK(info.trained_keys == 2);
+    // Each rewrite puts its fields where the writer does and keeps the flag.
+    ModelSpec veto        = all;
+    veto.v3_serving_flags = kGate | kFloor | kVeto | kGuards;
+    CHECK(with_drift_fallback(write_model(veto).bytes, 950000) == image.bytes);
+    CHECK(without_drift_fallback(image.bytes) == write_model(veto).bytes);
+    ModelSpec drift        = all;
+    drift.v3_serving_flags = kGate | kFloor | kDrift | kGuards;
+    CHECK(with_alignment_veto(write_model(drift).bytes, 512, 1024) == image.bytes);
+    CHECK(without_alignment_veto(image.bytes) == write_model(drift).bytes);
     for (std::size_t n = 0; n <= image.header_size; ++n) {
       INFO("size " << n);
       REQUIRE_FALSE(load_error(image.bytes, n).empty());

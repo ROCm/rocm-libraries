@@ -508,8 +508,9 @@ std::vector<unsigned char> with_drift_fallback(const std::vector<unsigned char>&
   const std::size_t at = drift_field(bytes, &flags_at, &flags);
   if ((flags & 0x400) != 0) throw std::invalid_argument("the image has the drift fallback");
   // The field follows the fields of every flag before it, and this walk knows
-  // those of the trained keys, the CU floor and the alignment veto only.
-  if ((flags & ~std::uint32_t{0x3FF}) != 0)
+  // those of the trained keys, the CU floor and the alignment veto only; the
+  // kernel guards flag (bit 11) has no field.
+  if ((flags & ~std::uint32_t{0xBFF}) != 0)
     throw std::invalid_argument("serving flags with header fields the rewrite does not know");
   std::vector<unsigned char> out(bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(at));
   out.resize(at + 4);

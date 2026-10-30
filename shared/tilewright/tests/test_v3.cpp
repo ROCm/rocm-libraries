@@ -372,7 +372,7 @@ TEST_CASE("v3 header defects are rejected", "[v3][loader]") {
   CHECK(mentions(with([](ModelSpec& s) { s.i_dim += 1; }), "feature dims"));
   CHECK(mentions(with([](ModelSpec& s) { s.q_dim = 55; }), "feature dims"));
   CHECK(mentions(with([](ModelSpec& s) { s.x_dim = 37; }), "feature dims"));
-  CHECK(mentions(with([](ModelSpec& s) { s.v3_serving_flags = 0x800; }), "unknown serving flags"));
+  CHECK(mentions(with([](ModelSpec& s) { s.v3_serving_flags = 0x1000; }), "unknown serving flags"));
   ModelSpec veto        = good;
   veto.v3_serving_flags = 0x200;
   veto.veto_k_min       = 512;
@@ -2230,12 +2230,13 @@ TEST_CASE("v3 pools rank alike through every entry point", "[v3][pool]") {
 namespace {
 
 // MLREC_v3 serving flags of the non-temporal rule, the whitelist switch, the
-// family-wise rule, the bank and the trained-key gate.
+// family-wise rule, the bank, the trained-key gate and the kernel guards.
 constexpr std::uint32_t kNonTemporal = 0x04;
 constexpr std::uint32_t kNoWhitelist = 0x08;
 constexpr std::uint32_t kFamilyRule  = 0x20;
 constexpr std::uint32_t kBank        = 0x40;
 constexpr std::uint32_t kGate        = 0x80;
+constexpr std::uint32_t kGuards      = 0x800;
 
 // The non-temporal rule as lib/feasibility.py states it, refined family-wise
 // over `pool` when `family` is set: per config, whether it passes.
@@ -2577,6 +2578,31 @@ TEST_CASE("the bank flag never changes a ranking", "[v3][rules]") {
     const tw::Problem p = rnd.problem();
     CHECK(same_results(a.rank(p, test_hardware(), 1), b.rank(p, test_hardware(), 1)));
   }
+}
+
+TEST_CASE("v3 models describe the kernel guards flag, which never changes a ranking",
+          "[v3][rules][guards]") {
+  Random rnd(67);
+  ModelSpec spec        = v3_grid({});
+  spec.v3_serving_flags = kNonTemporal;
+  spec.v3_cascade_keys  = 3;
+  ModelSpec guarded     = spec;
+  guarded.v3_serving_flags |= kGuards;
+  const tw::ModelPtr plain_model = load_spec(spec), guarded_model = load_spec(guarded);
+  CHECK_FALSE(tw::describe(*plain_model).kernel_guards);
+  CHECK(tw::describe(*guarded_model).kernel_guards);
+  // The flag only tells an integration to apply its guards sidecar; the
+  // engine ranks a guarded model's pool as it ranks the unflagged one's.
+  const std::vector<tw::Config> pool = rnd.pool(10, 40);
+  const tw::CandidateSet a(plain_model, pool), b(guarded_model, pool);
+  for (int i = 0; i < 40; ++i) {
+    const tw::Problem p = rnd.problem();
+    CHECK(same_results(a.rank(p, test_hardware(), 1), b.rank(p, test_hardware(), 1)));
+  }
+  // A bit above it is still unknown.
+  ModelSpec unknown = spec;
+  unknown.v3_serving_flags |= 0x1000;
+  CHECK(mentions(spec_error(unknown), "unknown serving flags"));
 }
 
 TEST_CASE("the family-wise rule ranks alike through the cascade, launch keys and the cache",

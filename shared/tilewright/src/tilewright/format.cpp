@@ -37,9 +37,10 @@ constexpr std::uint8_t kServingFlagsKnown = kNoNonTemporalRule;
 // was trained on the bank as well as the table, whether only the keys the
 // header lists as trained are scored while one of them is feasible, whether
 // the header declares the fewest usable CUs the model supports, whether it
-// declares the alignment veto (never with the non-temporal rule), and whether
-// a cell whose pool lacks too many of its whitelisted keys is served from its
-// other keys as well (the drift fallback, whose share the header declares).
+// declares the alignment veto (never with the non-temporal rule), whether a
+// cell whose pool lacks too many of its whitelisted keys is served from its
+// other keys as well (the drift fallback, whose share the header declares),
+// and whether the model was trained with the integration's kernel guards.
 constexpr std::uint32_t kV3SmallBatchedRule  = 0x01;
 constexpr std::uint32_t kV3Dot2Rule          = 0x02;
 constexpr std::uint32_t kV3NonTemporalRule   = 0x04;
@@ -51,10 +52,11 @@ constexpr std::uint32_t kV3TrainedKeyGate    = 0x80;
 constexpr std::uint32_t kV3CuFloor           = 0x100;
 constexpr std::uint32_t kV3AlignmentVeto     = 0x200;
 constexpr std::uint32_t kV3DriftFallback     = 0x400;
+constexpr std::uint32_t kV3KernelGuards      = 0x800;
 constexpr std::uint32_t kV3ServingFlagsKnown =
     kV3SmallBatchedRule | kV3Dot2Rule | kV3NonTemporalRule | kV3NoWhitelistTier | kV3LaunchKeys |
     kV3NonTemporalFamily | kV3Bank | kV3TrainedKeyGate | kV3CuFloor | kV3AlignmentVeto |
-    kV3DriftFallback;
+    kV3DriftFallback | kV3KernelGuards;
 constexpr std::uint8_t kScheduleBits     = 0x07;
 constexpr std::uint16_t kMaxAttributes   = 64;
 constexpr std::uint16_t kMaxOneHotValues = 64;
@@ -487,6 +489,7 @@ class Parser {
     model_->launch_keys                       = (flags & kV3LaunchKeys) != 0;
     model_->bank                              = (flags & kV3Bank) != 0;
     model_->trained_key_gate                  = (flags & kV3TrainedKeyGate) != 0;
+    model_->kernel_guards                     = (flags & kV3KernelGuards) != 0;
     model_->cascade_keys                      = cascade;
     model_->schedules                         = schedules;
     model_->clip                              = clip != 0;

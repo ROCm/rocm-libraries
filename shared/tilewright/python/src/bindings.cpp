@@ -589,6 +589,10 @@ NB_MODULE(_tilewright, m) {
               "The drift fallback's share of a cell's trained whitelisted view keys, in "
               "millionths, that a pool must hold for the cell to be served from its whitelist "
               "alone (0: no drift fallback).")
+      .def_ro("kernel_guards",
+              &tw::ModelInfo::kernel_guards,
+              "Whether the model was trained with the integration's kernel guards, which it "
+              "is served with.")
       .def_ro("uncovered_base_labels", &tw::ModelInfo::uncovered_base_labels)
       .def_ro("packed_bytes", &tw::ModelInfo::packed_bytes, "Bytes of the packed weights.")
       .def_ro("expanded_bytes",

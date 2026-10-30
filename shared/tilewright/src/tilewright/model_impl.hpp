@@ -190,10 +190,11 @@ class Model {
   bool launch_keys         = false;
   bool clip                = false;
   // MLREC_v3: whether the model was trained on the integration's bank as well
-  // as its table, which ranking does not read, and whether it has the
-  // trained-key gate (trained_keys).
+  // as its table and with the integration's kernel guards, neither of which
+  // ranking reads, and whether it has the trained-key gate (trained_keys).
   bool bank             = false;
   bool trained_key_gate = false;
+  bool kernel_guards    = false;
   // MLREC_v3: the alignment veto the header declares (Feasibility applies it).
   AlignmentVeto alignment_veto;
 

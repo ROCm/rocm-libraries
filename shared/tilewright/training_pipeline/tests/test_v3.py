@@ -1574,7 +1574,7 @@ def test_cu_floor_defects_are_rejected_by_reader_and_engine():
     with pytest.raises(mlrec.FormatError):
         mlrec.read_model(bytes(unflagged))
     unknown = bytearray(data)
-    struct.pack_into("<I", unknown, at, 0x900)
+    struct.pack_into("<I", unknown, at, 0x1100)
     with pytest.raises(mlrec.FormatError, match="unknown serving flags"):
         mlrec.read_model(bytes(unknown))
     tw = pytest.importorskip("tilewright")
@@ -1853,7 +1853,7 @@ def test_drift_fallback_defects_are_rejected_by_reader_and_engine():
     with pytest.raises(mlrec.FormatError, match="whitelist tier"):
         mlrec.read_model(bytes(tierless))
     unknown = bytearray(data)
-    struct.pack_into("<I", unknown, at, 0x80 | 0x100 | 0x400 | 0x800)
+    struct.pack_into("<I", unknown, at, 0x80 | 0x100 | 0x400 | 0x1000)
     with pytest.raises(mlrec.FormatError, match="unknown serving flags"):
         mlrec.read_model(bytes(unknown))
     tw = pytest.importorskip("tilewright")

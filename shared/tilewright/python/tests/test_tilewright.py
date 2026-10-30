@@ -314,6 +314,7 @@ def test_describe_route_and_labels(model):
     veto = info.alignment_veto
     assert isinstance(veto, tw.AlignmentVeto)
     assert (veto.on, veto.k_min, veto.align_bits) == (False, 0, 0)
+    assert info.kernel_guards is False
     assert tw.cell_label(model, tw.route(model, _problem(m=2048))) == LARGE + "#M<=2048"
     assert tw.cell_label(model, tw.route(model, _problem(m=2049))) == LARGE
     assert tw.route(model, _problem(m=8, n=8, k=8)) == -1
@@ -1165,8 +1166,9 @@ def _with_drift_fallback(data, keep_ppm):
     image that has it another share."""
     flags_at, flags, at = _drift_field(data)
     # The field follows the fields of every flag before it, and this walk
-    # knows those of the trained keys, the CU floor and the alignment veto only.
-    assert not flags & ~0x3FF, f"serving flags {flags:#x} beyond what it walks"
+    # knows those of the trained keys, the CU floor and the alignment veto
+    # only; the kernel guards flag (bit 11) has no field.
+    assert not flags & ~0xBFF, f"serving flags {flags:#x} beyond what it walks"
     out = bytearray(data[:at] + struct.pack("<I", keep_ppm) + data[at:])
     struct.pack_into("<I", out, flags_at, flags | 0x400)
     struct.pack_into("<I", out, 12, struct.unpack_from("<I", data, 12)[0] + 4)
@@ -1224,6 +1226,15 @@ def test_drift_fallback(model):
         other = _with_drift_fallback(_without_drift_fallback(image), 1)
         assert tw.describe(tw.load_model_from_memory(other)).drift_keep_ppm == 1
         assert _without_drift_fallback(other) == data
+        # A model trained with kernel guards (bit 11, which has no field)
+        # takes the fallback alike.
+        flags_at, flags, _ = _drift_field(data)
+        guarded = bytearray(data)
+        struct.pack_into("<I", guarded, flags_at, flags | 0x800)
+        both = _with_drift_fallback(bytes(guarded), 1000000)
+        g = tw.describe(tw.load_model_from_memory(both))
+        assert (g.kernel_guards, g.drift_keep_ppm) == (True, 1000000)
+        assert _without_drift_fallback(both) == bytes(guarded)
         name = info.provenance.launch_model
         launch = _ShippedLaunch(name) if name else None
         # A pool that grows never degrades more cells, and order never matters.
