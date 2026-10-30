@@ -859,6 +859,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_dgrad_correctness.py"
         "tests/library/tests/test_direct_conv_correctness.py"
         "tests/library/tests/test_conv_dgrad_depthwise_windowed.py"
+        "tests/library/tests/test_direct_depthwise_dgrad_v2.py"
         "tests/library/tests/test_conv_dgrad_4c.py"
         "tests/library/tests/test_conv_dgrad_fused_weights.py"
         "tests/library/tests/test_direct_mfma_dgrad_correctness.py"
