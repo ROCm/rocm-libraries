@@ -84,6 +84,8 @@ enum ComputeScheme
     CS_3D_PP,
     CS_KERNEL_3D_STOCKHAM_BLOCK_CC, // not implemented yet
     CS_KERNEL_3D_SINGLE // not implemented yet
+    // adding a scheme after this one? update lastScheme in
+    // tests/kernel_name_test.cpp so the new scheme gets tested
 };
 
 // print abbreviation for kernel scheme

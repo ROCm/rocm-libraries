@@ -28,51 +28,80 @@
 #include <gtest/gtest.h>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
+
+// Kernels built at runtime are cached on disk under their name, so two
+// different kernels sharing a name would make the cache hand back the wrong
+// kernel. These tests vary every input that goes into a name and stop at the
+// first repeated name, printing it.
+
+// last ComputeScheme value; update if a scheme is added after it
+static constexpr int lastScheme = CS_KERNEL_3D_SINGLE;
 
 TEST(rocfft_internal, transpose_kernel_names_are_unique)
 {
-    const std::vector<unsigned int>     tiles = {16, 32, 64};
-    const std::vector<size_t>           dims  = {2, 3};
+    // the tiles the library uses (64x16 for single, 32x32 otherwise), plus
+    // 16x64 to check that X and Y are not mixed up
+    const std::vector<std::pair<unsigned int, unsigned int>> tiles = {{64, 16}, {32, 32}, {16, 64}};
+    // higher dims all use one generic kernel, so they don't get their own name
+    const std::vector<size_t>           dims   = {2, 3};
+    const std::vector<KIntType>         itypes = {KIntType::U32, KIntType::U64};
     const std::vector<rocfft_precision> precisions
         = {rocfft_precision_half, rocfft_precision_single, rocfft_precision_double};
+    // hermitian types generate the same code as complex ones, so they
+    // deliberately share a name and are left out
     const std::vector<rocfft_array_type> arrayTypes = {rocfft_array_type_complex_interleaved,
                                                        rocfft_array_type_complex_planar,
                                                        rocfft_array_type_real};
-    const std::vector<CallbackType> callbacks = {CallbackType::NONE, CallbackType::USER_LOAD_STORE};
+    // {steps, direction}: the library uses 0-5 large twiddle steps, and the
+    // direction only matters (and only appears in the name) when steps > 0
+    std::vector<std::pair<size_t, int>> largeTwds = {{0, -1}};
+    for(size_t steps = 1; steps <= 5; ++steps)
+        for(int direction : {-1, 1})
+            largeTwds.push_back({steps, direction});
+    const std::vector<CallbackType> callbacks = {CallbackType::NONE,
+                                                 CallbackType::USER_LOAD_STORE,
+                                                 CallbackType::USER_LOAD_STORE_R2C,
+                                                 CallbackType::USER_LOAD_STORE_C2R};
 
     std::set<std::string> names;
-    size_t                combinations = 0;
-
-    for(auto tile : tiles)
+    for(auto [tileX, tileY] : tiles)
         for(auto dim : dims)
-            for(auto precision : precisions)
-                for(auto inType : arrayTypes)
-                    for(auto outType : arrayTypes)
-                        for(auto cb : callbacks)
-                            for(bool diagonal : {false, true})
-                                for(bool tileAligned : {false, true})
-                                {
-                                    TransposeSpecs specs{};
-                                    specs.tileX        = tile;
-                                    specs.tileY        = tile;
-                                    specs.dim          = dim;
-                                    specs.precision    = precision;
-                                    specs.inArrayType  = inType;
-                                    specs.outArrayType = outType;
-                                    specs.diagonal     = diagonal;
-                                    specs.tileAligned  = tileAligned;
-                                    specs.cbtype       = cb;
+            for(auto itype : itypes)
+                for(auto precision : precisions)
+                    for(auto inType : arrayTypes)
+                        for(auto outType : arrayTypes)
+                            for(auto [steps, direction] : largeTwds)
+                                for(auto cb : callbacks)
+                                    for(bool diagonal : {false, true})
+                                        for(bool tileAligned : {false, true})
+                                            for(bool grid3D : {false, true})
+                                            {
+                                                TransposeSpecs specs{};
+                                                specs.itype             = itype;
+                                                specs.tileX             = tileX;
+                                                specs.tileY             = tileY;
+                                                specs.dim               = dim;
+                                                specs.precision         = precision;
+                                                specs.inArrayType       = inType;
+                                                specs.outArrayType      = outType;
+                                                specs.largeTwdSteps     = steps;
+                                                specs.largeTwdDirection = direction;
+                                                specs.diagonal          = diagonal;
+                                                specs.tileAligned       = tileAligned;
+                                                specs.cbtype            = cb;
+                                                specs.grid3D            = grid3D;
 
-                                    names.insert(transpose_rtc_kernel_name(specs));
-                                    ++combinations;
-                                }
-
-    EXPECT_EQ(names.size(), combinations);
+                                                const auto name = transpose_rtc_kernel_name(specs);
+                                                ASSERT_TRUE(names.insert(name).second)
+                                                    << "duplicate kernel name " << name;
+                                            }
 }
 
 TEST(rocfft_internal, twiddle_and_chirp_kernel_names_are_unique)
 {
+    // every table type, precision and index type
     const std::vector<TwiddleTableType> types = {TwiddleTableType::RADICES,
                                                  TwiddleTableType::LENGTH_N,
                                                  TwiddleTableType::HALF_N,
@@ -82,29 +111,26 @@ TEST(rocfft_internal, twiddle_and_chirp_kernel_names_are_unique)
         = {rocfft_precision_half, rocfft_precision_single, rocfft_precision_double};
     const std::vector<KIntType> itypes = {KIntType::U32, KIntType::U64};
 
+    // twiddle and chirp kernels share one cache, so check them together
     std::set<std::string> names;
-    size_t                combinations = 0;
-
-    for(auto type : types)
-        for(auto precision : precisions)
-            for(auto itype : itypes)
-            {
-                names.insert(twiddle_rtc_kernel_name(type, precision, itype));
-                ++combinations;
-            }
-
     for(auto precision : precisions)
         for(auto itype : itypes)
         {
-            names.insert(chirp_rtc_kernel_name(precision, itype));
-            ++combinations;
+            for(auto type : types)
+            {
+                const auto name = twiddle_rtc_kernel_name(type, precision, itype);
+                ASSERT_TRUE(names.insert(name).second) << "duplicate kernel name " << name;
+            }
+            const auto name = chirp_rtc_kernel_name(precision, itype);
+            ASSERT_TRUE(names.insert(name).second) << "duplicate kernel name " << name;
         }
-
-    EXPECT_EQ(names.size(), combinations);
 }
 
 TEST(rocfft_internal, load_store_ops_change_the_name)
 {
+    // a kernel that scales its output is different code from one that does
+    // not, so it needs a different name; a kernel with no ops keeps the plain
+    // name so existing cache entries stay valid
     LoadOps  plainLoad;
     StoreOps plainStore;
     StoreOps scalingStore;
@@ -118,43 +144,43 @@ TEST(rocfft_internal, load_store_ops_change_the_name)
               load_store_name_suffix(plainLoad, plainStore));
 }
 
-TEST(rocfft_internal, kernel_scheme_abbreviations)
+TEST(rocfft_internal, kernel_scheme_abbreviations_are_unique)
 {
+    // the abbreviation goes into stockham kernel names, so two schemes that
+    // generate different code must not share one
     std::set<std::string> abbreviations;
     size_t                handled = 0;
 
-    for(int i = CS_NONE; i <= CS_KERNEL_3D_SINGLE; ++i)
+    for(int i = CS_NONE; i <= lastScheme; ++i)
     {
-        const auto scheme = static_cast<ComputeScheme>(i);
         try
         {
-            abbreviations.insert(PrintKernelSchemeAbbr(scheme));
+            abbreviations.insert(PrintKernelSchemeAbbr(static_cast<ComputeScheme>(i)));
             ++handled;
         }
         catch(const std::runtime_error&)
         {
-            // scheme has no kernel abbreviation, which is expected for the
             // schemes that describe a decomposition rather than a kernel
+            // have no abbreviation
         }
     }
 
-    // the schemes that do have an abbreviation must actually be reachable
-    EXPECT_GT(handled, 0u);
-    // stockham and its partial-pass variant deliberately share one name, so
-    // there are fewer distinct names than handled schemes
-    EXPECT_GT(abbreviations.size(), 0u);
-    EXPECT_LE(abbreviations.size(), handled);
-
-    // spot-check a couple so a wholesale rename does not slip through
-    EXPECT_EQ(PrintKernelSchemeAbbr(CS_KERNEL_STOCKHAM), "sbrr");
-    EXPECT_EQ(PrintKernelSchemeAbbr(CS_KERNEL_STOCKHAM_BLOCK_CC), "sbcc");
-    EXPECT_EQ(PrintKernelSchemeAbbr(CS_KERNEL_STOCKHAM_BLOCK_CR), "sbcr");
-    EXPECT_EQ(PrintKernelSchemeAbbr(CS_KERNEL_STOCKHAM_BLOCK_RC), "sbrc");
+    // stockham and its partial-pass variants deliberately share a name; every
+    // other kernel scheme must have a distinct abbreviation
+    EXPECT_EQ(PrintKernelSchemeAbbr(CS_KERNEL_STOCKHAM_PP),
+              PrintKernelSchemeAbbr(CS_KERNEL_STOCKHAM));
+    EXPECT_EQ(PrintKernelSchemeAbbr(CS_KERNEL_STOCKHAM_PP_BLOCK_CC),
+              PrintKernelSchemeAbbr(CS_KERNEL_STOCKHAM_BLOCK_CC));
+    EXPECT_EQ(abbreviations.size() + 2, handled);
 }
 
+// Tuning results are saved to disk with the scheme, precision and other
+// settings written as text, then read back with the StrTo* functions. If a
+// value does not come back as itself, a saved solution would load the wrong
+// kernel or fail to load.
 TEST(rocfft_internal, every_scheme_round_trips_through_its_name)
 {
-    for(int i = CS_NONE; i <= CS_KERNEL_3D_SINGLE; ++i)
+    for(int i = CS_NONE; i <= lastScheme; ++i)
     {
         const auto scheme = static_cast<ComputeScheme>(i);
         const auto name   = PrintScheme(scheme);
