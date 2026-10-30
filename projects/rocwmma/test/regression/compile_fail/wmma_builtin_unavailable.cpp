@@ -24,11 +24,9 @@
  *
  *******************************************************************************/
 // Using an operation whose builtin the compiler does not provide fails with a
-// message that names the builtin. Simulated here by reporting the f16 -> f32
-// builtins of every WMMA interface unavailable.
-#define ROCWMMA_TEST_NO_AMDGCN_BUILTIN_wmma_f32_16x16x16_f16_w32 1
-#define ROCWMMA_TEST_NO_AMDGCN_BUILTIN_wmma_f32_16x16x16_f16_w32_gfx12 1
-#define ROCWMMA_TEST_NO_AMDGCN_BUILTIN_wmma_f32_16x16x32_f16 1
+// message that names the builtin. Simulated here by reporting every WMMA builtin
+// unavailable.
+#define ROCWMMA_TEST_NO_AMDGCN_BUILTINS
 
 #include <rocwmma/rocwmma.hpp>
 

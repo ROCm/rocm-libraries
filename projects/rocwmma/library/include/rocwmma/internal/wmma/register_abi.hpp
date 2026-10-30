@@ -31,9 +31,12 @@
 
 // Whether the compiler provides __builtin_amdgcn_<name> in the pass being compiled.
 // Only meaningful in device passes: the host pass reports no amdgcn builtins.
-// Tests may define ROCWMMA_TEST_NO_AMDGCN_BUILTIN_<name>=1 to simulate a compiler
-// that lacks one.
-#if defined(__has_builtin)
+// Tests may simulate a compiler that lacks builtins: defining
+// ROCWMMA_TEST_NO_AMDGCN_BUILTIN_<name>=1 hides one, and defining
+// ROCWMMA_TEST_NO_AMDGCN_BUILTINS hides all of them.
+#if defined(ROCWMMA_TEST_NO_AMDGCN_BUILTINS)
+#define ROCWMMA_HAS_BUILTIN_IMPL(builtin) 0
+#elif defined(__has_builtin)
 #define ROCWMMA_HAS_BUILTIN_IMPL(builtin) __has_builtin(builtin)
 #else
 #define ROCWMMA_HAS_BUILTIN_IMPL(builtin) 0
