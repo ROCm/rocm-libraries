@@ -2579,6 +2579,46 @@ TEST(PredictionLibraryTest, TilewrightAsksForAsManyMoreKernelsAsTheGuardsDeny)
     }
 }
 
+TEST(PredictionLibraryTest, TilewrightGuardsACallAtAnyCuBudgetAndSchedule)
+{
+    // The guards read the problem's free sizes alone. writeV3Model's model
+    // declares every CU of the default schedule: a smaller budget is ranked
+    // at the whole device, and a schedule it does not list is left to origami,
+    // whose ranking offers 33 only at or above its guard too.
+    ScopedStreamK5ForceMode             respectApi(nullptr);
+    auto const                          device = makeGfx950Device();
+    SolutionMap<ContractionSolution>    solutions;
+    ScratchDir                          dir("tensilelite_tilewright_guarded_budget");
+    ContractionProblemPredictionLibrary lib;
+    writeGuards(dir, "probe_33 M 4\n");
+    loadBlocked(dir, {"probe_33"}, solutions, lib, TrainedWithGuards);
+    ASSERT_NE(lib.tilewright_ranker, nullptr);
+    auto const& ranker = *lib.tilewright_ranker;
+    for(int budget : {224, 31, 1})
+    {
+        for(size_t m = 1; m <= 8; m++)
+        {
+            SCOPED_TRACE("smCountTarget " + std::to_string(budget) + ", M " + std::to_string(m));
+            bool const admitted = m >= 4;
+            auto const whole    = gemmOf(m, 8);
+            auto       problem  = gemmOf(m, 8);
+            problem.setParams().setSmCountTarget(budget);
+            auto const ranked = ranker.rank(problem, device, -1);
+            EXPECT_EQ(ranked, ranker.rank(whole, device, -1));
+            EXPECT_EQ(std::count(ranked.begin(), ranked.end(), size_t{2}), admitted ? 1 : 0);
+            auto const served = solutionIndices(lib.findTopSolutions(problem, device, 3));
+            EXPECT_EQ(served, solutionIndices(lib.findTopSolutions(whole, device, 3)));
+            EXPECT_EQ(std::count(served.begin(), served.end(), 33), admitted ? 1 : 0);
+
+            problem.setParams().setStreamKTileSchedulingMode(2);
+            EXPECT_TRUE(ranker.rank(problem, device, -1).empty());
+            auto const fallback = solutionIndices(lib.findTopSolutions(problem, device, 3));
+            EXPECT_EQ(fallback.size(), admitted ? 3u : 2u);
+            EXPECT_EQ(std::count(fallback.begin(), fallback.end(), 33), admitted ? 1 : 0);
+        }
+    }
+}
+
 TEST(PredictionLibraryTest, TilewrightRefusesAGuardedModelWithoutUsableGuards)
 {
     // Missing, malformed and unreadable guards make a flagged model
