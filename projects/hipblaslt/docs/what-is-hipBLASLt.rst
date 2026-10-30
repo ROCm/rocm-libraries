@@ -113,9 +113,11 @@ between consecutive columns. That lets a matrix be a window into a larger array.
 keeps that idea and adds three more:
 
 * A **memory order**. ``HIPBLASLT_ORDER_COL`` (column-major) is the default.
-  ``HIPBLASLT_ORDER_ROW`` (row-major) is accepted only by ``hipblasLtMatrixTransform``; matmul returns
-  ``HIPBLAS_STATUS_NOT_SUPPORTED`` for it. To multiply row-major data, keep column-major layouts and
-  use the identity (A * B)\ :sup:`T` = B\ :sup:`T` * A\ :sup:`T`. Some architectures additionally accept **swizzled**
+  ``HIPBLASLT_ORDER_ROW`` (row-major) is accepted by ``hipblasLtMatmul`` and
+  ``hipblasLtMatrixTransform``. Matmul computes a row-major matrix as its column-major transpose,
+  so C and D must share an order, and a row-major D cannot be combined with a bias, aux, or gradient
+  epilogue; ``hipblasLtOrder_t`` in the datatypes reference lists every limit. The C++ extension
+  API does not accept row-major layouts. Some architectures additionally accept **swizzled**
   orders, such as ``HIPBLASLT_ORDER_COL16_4R8`` and ``HIPBLASLT_ORDER_COL16_4R16``, in which the
   data is pre-arranged into the exact pattern the kernel reads. That saves the kernel from
   rearranging values itself. However, a swizzled order is valid only for particular type, transpose,
