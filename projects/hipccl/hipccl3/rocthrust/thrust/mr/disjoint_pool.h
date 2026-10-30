@@ -34,7 +34,7 @@
 #include <thrust/detail/config.h>
 
 #include <thrust/binary_search.h>
-#include <thrust/detail/algorithm_wrapper.h>
+#include _THRUST_STD_INCLUDE(__cccl/algorithm_wrapper.h)
 #include <thrust/detail/seq.h>
 #include <thrust/find.h>
 #include <thrust/host_vector.h>

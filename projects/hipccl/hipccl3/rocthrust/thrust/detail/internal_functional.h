@@ -33,7 +33,7 @@
 
 #include <thrust/detail/libcxx_wrapper/__functional/address_stability.h>
 #include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
-#include <thrust/detail/memory_wrapper.h> // for ::new
+#include _THRUST_STD_INCLUDE(__cccl/memory_wrapper.h) // for ::new
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/static_assert.h>
 #include <thrust/detail/type_traits.h>

@@ -39,7 +39,7 @@
 #  include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
 #  include _THRUST_STD_INCLUDE(cassert)
 #else
-#  include <thrust/detail/algorithm_wrapper.h>
+#  include <algorithm>
 #endif
 
 #include _THRUST_STD_INCLUDE(iterator)

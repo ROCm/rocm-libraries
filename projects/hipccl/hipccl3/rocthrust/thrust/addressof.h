@@ -18,7 +18,7 @@
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(__memory/addressof.h)
 #else
-#  include <thrust/detail/memory_wrapper.h>
+#  include <memory>
 #endif
 
 THRUST_NAMESPACE_BEGIN

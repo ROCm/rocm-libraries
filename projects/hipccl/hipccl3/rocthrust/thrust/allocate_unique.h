@@ -16,7 +16,7 @@
 #endif // no system header
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/memory_algorithms.h>
-#include <thrust/detail/memory_wrapper.h>
+#include _THRUST_STD_INCLUDE(__cccl/memory_wrapper.h)
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/detail/type_deduction.h>
 #include <thrust/detail/type_traits.h> // for internal::remove_cvref_t

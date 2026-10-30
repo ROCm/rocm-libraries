@@ -36,7 +36,7 @@
 #  include _THRUST_STD_INCLUDE(cassert)
 #  include _THRUST_STD_INCLUDE(type_traits)
 #else
-#  include <thrust/detail/algorithm_wrapper.h>
+#  include <algorithm>
 #  include <type_traits>
 #endif
 

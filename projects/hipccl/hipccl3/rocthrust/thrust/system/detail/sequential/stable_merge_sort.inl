@@ -32,7 +32,7 @@
 #include <thrust/merge.h>
 #include <thrust/system/detail/sequential/insertion_sort.h>
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <thrust/detail/algorithm_wrapper.h>
+#  include <algorithm>
 #endif
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD

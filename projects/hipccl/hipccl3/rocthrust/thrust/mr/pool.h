@@ -32,7 +32,7 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/algorithm_wrapper.h>
+#include _THRUST_STD_INCLUDE(__cccl/algorithm_wrapper.h)
 #include <thrust/host_vector.h>
 #include <thrust/mr/allocator.h>
 #include <thrust/mr/memory_resource.h>

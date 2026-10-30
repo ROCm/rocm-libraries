@@ -28,7 +28,7 @@
 #include <thrust/advance.h>
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/copy.h>
-#include <thrust/detail/memory_wrapper.h>
+#include _THRUST_STD_INCLUDE(__cccl/memory_wrapper.h)
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/distance.h>
 #include <thrust/for_each.h>

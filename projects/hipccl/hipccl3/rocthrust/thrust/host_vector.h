@@ -30,7 +30,7 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/detail/memory_wrapper.h>
+#include _THRUST_STD_INCLUDE(__cccl/memory_wrapper.h)
 #include <thrust/detail/vector_base.h>
 
 #include _THRUST_STD_INCLUDE(initializer_list)

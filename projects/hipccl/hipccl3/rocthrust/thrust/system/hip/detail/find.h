@@ -45,8 +45,7 @@
 #  include <thrust/iterator/transform_iterator.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
 #  if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#    include <thrust/detail/algorithm_wrapper.h>
-
+#    include <algorithm>
 #    include <iterator>
 #  endif
 

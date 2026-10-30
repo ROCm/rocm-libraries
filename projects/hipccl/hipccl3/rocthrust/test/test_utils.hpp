@@ -40,8 +40,7 @@
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(__algorithm/min.h)
 #else
-#  include <thrust/detail/algorithm_wrapper.h>
-
+#  include <algorithm>
 #  include <limits>
 #endif
 
