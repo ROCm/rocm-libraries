@@ -5,7 +5,7 @@
 """Run AOTriton's SDPA suite against hipDNN and record one CSV row per case.
 
     run_aotriton.py [--suite default|forward] [--release N] [--shard I/N] [--fake always-decline]
-                    [--packed-gpu] [--out DIR | --arch ARCH --run NAME] [--workers N]
+                    [--fwd-no-stats] [--packed-gpu] [--out DIR | --arch ARCH --run NAME] [--workers N]
                     [--hipdnn-prefix DIR] [-- PYTEST...]
 
 Per pass the runner (1) collects with the same options and writes the node ids to
@@ -18,6 +18,11 @@ flushed per row; ``reconcile.py`` adds ``not-run`` rows for whatever never finis
 collection. ``--packed-gpu`` adds a second pass over the ``gpu``-marked cases of
 ``sdpa_conformance/tests``. The default ``--out`` is
 ``./sdpa_conformance_results/<arch>/<run>/shard-<I>of<N>/`` under the working directory.
+
+``--fwd-no-stats`` runs the forward without Stats (``HIPDNN_SDPA_CONFORMANCE_FWD_NO_STATS=1`` in
+the pytest workers), for engines that decline when Stats are requested. The backward tests
+consume the forward's Stats, so the runner refuses the flag unless every collected case is in
+``test_forward.py``.
 
 Every pytest process checks that the ``libhipdnn_backend`` mapped into it is the one under
 ``--hipdnn-prefix`` (default ``$ROCM_PATH``, which dnn-benchmarking's ``setup_env.py``
@@ -34,6 +39,8 @@ import aotriton_layout as layout
 import reconcile
 
 DEFAULT_RESULTS = Path.cwd() / "sdpa_conformance_results"
+FWD_NO_STATS_ENV = "HIPDNN_SDPA_CONFORMANCE_FWD_NO_STATS"
+FWD_NO_STATS_TESTS = "test_forward.py"
 
 
 def parse_args(argv):
@@ -45,6 +52,11 @@ def parse_args(argv):
     parser.add_argument("--shard", metavar="I/N")
     parser.add_argument("--fake", choices=("always-decline",))
     parser.add_argument("--packed-gpu", action="store_true")
+    parser.add_argument(
+        "--fwd-no-stats",
+        action="store_true",
+        help=f"run the forward without Stats; only valid for {FWD_NO_STATS_TESTS}",
+    )
     parser.add_argument("--out", type=Path)
     parser.add_argument(
         "--arch", help="gfx arch for the default --out (default: detected)"
@@ -127,6 +139,11 @@ def main(argv=None):
             "no hipDNN prefix: activate the setup_env.py venv (it sets ROCM_PATH) or pass "
             "--hipdnn-prefix; every run checks that this prefix's libhipdnn_backend is loaded"
         )
+    if args.fwd_no_stats and (args.suite != "forward" or args.packed_gpu):
+        raise SystemExit(
+            f"--fwd-no-stats needs --suite forward and no --packed-gpu: the backward tests "
+            f"consume the forward's Stats, so only {FWD_NO_STATS_TESTS} is valid"
+        )
     gpus, arch = (0, None)
     if args.workers is None or not (args.out or (args.arch and args.run)):
         gpus, arch = detect_gpus()
@@ -141,6 +158,10 @@ def main(argv=None):
             f"{results} already has rows; use a fresh --out per run and shard"
         )
     env = layout.clean_env(release=args.release)
+    env.pop(FWD_NO_STATS_ENV, None)
+    if args.fwd_no_stats:
+        env[FWD_NO_STATS_ENV] = "1"
+        print("forward mode: no Stats", flush=True)
     collected_path = out / reconcile.COLLECTED_NAME
     collected_path.write_text("")
     status = 0
@@ -157,6 +178,19 @@ def main(argv=None):
                 f"collection failed in pass '{label}':\n"
                 + "\n".join(collect.stdout.splitlines()[-40:])
                 + collect.stderr
+            )
+            return 2
+        foreign = sorted(
+            {
+                i.split("::")[0]
+                for i in ids
+                if Path(i.split("::")[0]).name != FWD_NO_STATS_TESTS
+            }
+        )
+        if args.fwd_no_stats and foreign:
+            print(
+                f"--fwd-no-stats is only valid for {FWD_NO_STATS_TESTS}; pass '{label}' "
+                f"also collected: {', '.join(foreign)}"
             )
             return 2
         with open(collected_path, "a") as f:

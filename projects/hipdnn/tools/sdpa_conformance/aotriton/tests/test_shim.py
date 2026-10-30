@@ -163,6 +163,19 @@ def test_engine_env_vars_pin_engines(fake_sdpa, mode_record, monkeypatch):
     assert [c[1]["engine"] for c in fake_sdpa.calls] == ["eng_f", "eng_b"]
 
 
+def test_fwd_no_stats_env_var_drops_stats_from_the_forward_only(
+    fake_sdpa, mode_record, monkeypatch
+):
+    q, k, v, o, M = dense()
+    fwd(q, k, v, M, o)
+    assert fake_sdpa.calls[-1][1]["stats"] is not None
+    monkeypatch.setenv("HIPDNN_SDPA_CONFORMANCE_FWD_NO_STATS", "1")
+    fwd(q, k, v, M, o)
+    assert fake_sdpa.calls[-1][1]["stats"] is None
+    bwd(q, k, v, o, M)
+    assert fake_sdpa.calls[-1][1]["stats"] is not None
+
+
 def test_bias_forms(fake_sdpa, mode_record):
     q, k, v, o, M = dense()
     real = torch.randn(2, 3, 5, 7)

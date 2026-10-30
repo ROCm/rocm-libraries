@@ -150,3 +150,39 @@ def test_runner_refuses_to_start_without_a_hipdnn_prefix(monkeypatch, tmp_path):
     monkeypatch.delenv("ROCM_PATH")
     with pytest.raises(SystemExit, match="no hipDNN prefix"):
         run_aotriton.main(["--workers", "1", "--out", str(tmp_path / "o")])
+
+
+def test_fwd_no_stats_is_refused_outside_test_forward(runner, tmp_path):
+    for argv, ids in (
+        (["--suite", "default"], []),
+        (["--suite", "forward", "--packed-gpu"], []),
+    ):
+        with pytest.raises(SystemExit, match="--fwd-no-stats"):
+            runner(
+                ids,
+                "--workers",
+                "1",
+                "--out",
+                str(tmp_path / "o"),
+                "--fwd-no-stats",
+                *argv,
+            )
+    status, commands = runner(
+        [["tests/test_forward.py::a", "tests/test_backward.py::b"]],
+        "--workers", "1", "--out", str(tmp_path / "p"),
+        "--suite", "forward", "--fwd-no-stats",
+    )  # fmt: skip
+    assert status == 2 and len(commands) == 1  # collection only; nothing ran
+
+
+def test_fwd_no_stats_exports_the_env_var_only_when_asked(
+    runner, tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        run_aotriton.FWD_NO_STATS_ENV, "1"
+    )  # stale value from the caller
+    _, plain = runner([["t/test_forward.py::a"]], "--workers", "1", "--out", str(tmp_path / "a"), "--suite", "forward")  # fmt: skip
+    _, flagged = runner([["t/test_forward.py::a"]], "--workers", "1", "--out", str(tmp_path / "b"), "--suite", "forward", "--fwd-no-stats")  # fmt: skip
+    assert all(run_aotriton.FWD_NO_STATS_ENV not in env for _, env in plain)
+    assert len(flagged) == 2
+    assert all(env[run_aotriton.FWD_NO_STATS_ENV] == "1" for _, env in flagged)
