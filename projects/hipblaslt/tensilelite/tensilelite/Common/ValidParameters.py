@@ -1278,6 +1278,9 @@ validParameters = { # we need to make sure this matches develop
     #   3  {B,MXSA,MXSB} + {A}, the mirror of 2: B on waves 0-1, MXSA on
     #      wave 2, MXSB on wave 3, A on every wave. NumWaves==4.
     #
+    # th/scope/nv are instruction-wide: at 1/2/3 the data tensor's (A or B) hints decide and the
+    # scale tensors' are ignored; at 0 a field is emitted only if the members of a set agree.
+    #
     # This list and Components/TDMFuse.TDM_FUSE_GROUPING must name the same integers.
     "TDMFuse": [0, 1, 2, 3],
     # In-device layout of the MX scale tensors (MXSA/MXSB).

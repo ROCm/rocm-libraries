@@ -96,7 +96,7 @@ class rocIsa:
 
     Implemented members (real, all forward to ``base.*``):
         - ``getInstance``
-        - ``init`` / ``isInit``
+        - ``init`` / ``initMany`` / ``isInit``
         - ``getIsaInfo`` (returns ``IsaInfo``)
         - ``getAsmCaps`` / ``getArchCaps`` / ``getRegCaps`` / ``getAsmBugs``
         - ``setKernel`` / ``getKernel``
@@ -130,6 +130,9 @@ class rocIsa:
 
     def init(self, arch: Any, assemblerPath: str = "", debug: bool = False) -> None:
         _base.init(arch, assemblerPath, debug)
+
+    def initMany(self, archs: Any, assemblerPath: str = "", debug: bool = False) -> None:
+        _base.initMany(archs, assemblerPath, debug)
 
     def isInit(self) -> bool:
         return _base.isInit()
