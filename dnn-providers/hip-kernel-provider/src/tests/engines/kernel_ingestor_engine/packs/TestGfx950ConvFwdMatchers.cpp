@@ -1443,7 +1443,9 @@ KernelDefinition aotKernel(AotWidths widths = {},
                        {"iglp", int64_t{-1}},
                        {"waves_per_eu", int64_t{0}},
                        {"group_merge", int64_t{1}},
-                       {"split_c", int64_t{1}}};
+                       {"split_c", int64_t{1}},
+                       {"prefetch_rows", int64_t{0}},
+                       {"w_fold", int64_t{0}}};
     return kernel;
 }
 

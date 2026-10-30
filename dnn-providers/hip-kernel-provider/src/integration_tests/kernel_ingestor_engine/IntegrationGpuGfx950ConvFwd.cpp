@@ -1010,17 +1010,17 @@ struct AotGraph
 const std::vector<AotGraph>& aotGraphs()
 {
     static const std::vector<AotGraph> s_graphs{
-        {"Smoke", {}, 11, 4, 10, 53, 53},
-        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 4, 0, 53, 53},
+        {"Smoke", {}, 11, 4, 11, 58, 58},
+        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 4, 0, 58, 58},
         // An instance is built against a 3x3 probe, so it is never the pointwise GEMM.
-        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 4, 0, 53, 53},
-        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 1, 4, 3, 53, 53},
-        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 1, 4, 3, 53, 53},
-        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 4, 0, 53, 53},
+        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 4, 0, 58, 58},
+        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 1, 4, 3, 58, 58},
+        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 1, 4, 5, 58, 58},
+        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 4, 0, 58, 58},
         // Three channels per group: only instances 1 wide along C/groups and K/groups.
         {"GroupedG4Cpg3", {2, 12, 24, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 0, 1, 0, 2, 2},
         // Eight channels per group: the grouped direct instances serve it too.
-        {"GroupedG8Cpg8", {2, 64, 64, 13, 15, 3, 3, 1, 1, 1, 1, 1, 1, 8}, 5, 4, 6, 53, 53},
+        {"GroupedG8Cpg8", {2, 64, 64, 13, 15, 3, 3, 1, 1, 1, 1, 1, 1, 8}, 5, 4, 7, 58, 58},
         {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 8, 3, 9, 8, 8},
         {"DepthwiseG5N3", {3, 5, 5, 9, 21, 3, 3, 1, 1, 1, 1, 1, 1, 5}, 8, 1, 3, 2, 2},
         // 64 groups and more: no spatial instance.
@@ -1034,15 +1034,15 @@ const std::vector<AotGraph>& aotGraphs()
         {"DepthwiseG64Pad0", {2, 64, 64, 12, 12, 3, 3, 1, 1, 0, 0, 1, 1, 64}, 1, 3, 0, 8, 8},
         // C = 12 admits load widths up to 4 and K = 20 store widths up to 4.
         {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 2, 2},
-        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 4, 0, 53, 53},
-        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 9, 4, 21, 53, 53},
+        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 4, 0, 58, 58},
+        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 9, 4, 22, 58, 58},
         // Each selects a seed width pair that no row above selects: 2/2/2, 4/4/2, 8/8/4,
         // 1/1/4, the default epilogue's 4/4/1 and cshuffle 2/2/1. The shipped catalog builds
         // no 4/4/2, 1/1/8, 4/4/1 or 2/2/1, so for C12K6, C3K8, C12K5 and C6K5 it runs every
         // instance that serves.
         {"C6K10", {2, 6, 10, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 2, 2},
         {"C12K6", {2, 12, 6, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 2, 2},
-        {"C16K12", {2, 16, 12, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 3, 3},
+        {"C16K12", {2, 16, 12, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 4, 4},
         {"C3K8", {2, 3, 8, 15, 15, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 2, 0, 4, 4},
         {"C12K5", {2, 12, 5, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 2, 2},
         {"C6K5", {2, 6, 5, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 2, 2},

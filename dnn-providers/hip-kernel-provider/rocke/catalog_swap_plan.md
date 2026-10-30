@@ -2,6 +2,134 @@
 
 Stan na 2026-10-29, branch `users/aledudek/gfx950-conv-aot-uhd` (repo `/home/barkocot/rocm3`).
 
+## Commit
+
+Scalono i wypchnięto na `users/aledudek/gfx950-conv-aot-uhd`: `18318f32980`
+"feat(hip-kernel-provider): swap gfx950 conv fwd AOT catalog to 207 kernels/dtype,
+add windowed direct win variant" (23 pliki, +3274/-3681).
+
+## Postęp wykonania — sesja 2026-10-30 (Krok 3.3 fix + Krok 4 UHD)
+
+### Naprawa `artifacts.dvc` (blokowało Krok 4 od commita `18318f32980`)
+
+- **Problem**: `artifacts.dvc` dla `gfx950_conv_fwd_aot` wskazywał na niekompletny/przestarzały
+  katalog `artifacts/*.kdp.json` (sprzed podmiany katalogu, bez wariantu "win", z
+  niezgodnymi ID-kami dokumentów względem 40-polowego KMD z Kroku 2). Zdalny pipeline
+  UHD, budując obraz silnika z czystego commita `18318f32980`, łapał dokładnie to:
+  `hkp_pack: error: ... [gfx950: specialization fields must exhaustively partition the KMD]`
+  (zweryfikowane w logu `sbatch_austin.out` zawiedzionego joba `f1ac40a9-...`).
+- **Naprawa**: `dvc add artifacts` (nowy hash `394467292ba21e27fc55cf4ec09557cb.dir`, 16
+  plików, 733106 B — katalog zgodny z nowym KMD, zremapowane ID-ki, przygotowany
+  wcześniej lokalnie w working tree), `dvc push -r ingestor` (wymagało jednorazowego
+  `dvc remote modify --local ingestor allow_anonymous_login false` w git-ignorowanym
+  `.dvc/config.local` — committed `.dvc/config` ma `allow_anonymous_login = true`, więc
+  bez override każdy zapis dostawał `AccessDenied` niezależnie od poprawności klucza AWS;
+  opisane w `src/engines/kernel_ingestor_engine/descriptors/README.md:145-149`), commit
+  `b6cdc991fd64c5eb421187097459fc0479b88265` (tylko wskaźnik `.dvc`), push na
+  `users/aledudek/gfx950-conv-aot-uhd`.
+- **Potwierdzone działa**: `build-hipdnn-image` na nowym SHA `b6cdc991fd64...` zakończył
+  się `COMPLETED` (silnik `hipkernel:Gfx950ConvFwdAot` poprawnie się zarejestrował, bez
+  błędu KMD) — zarówno w pierwszej próbie zgłoszenia, jak i w cache przy drugiej.
+
+### Zgłoszenia treningu UHD (Krok 4) na nowym SHA
+
+Parametry (stałe dla obu prób): `engine=hipkernel:Gfx950ConvFwdAot`,
+`sku=gfx950-mi355x`, `ref=b6cdc991fd64c5eb421187097459fc0479b88265`, `tier=exhaustive`,
+`corpus_operation=conv_fwd`.
+
+1. **Próba 1** — `request_id 4fa999feae416003`, job `ae7fd642-...`. `build-hipdnn-image`
+   OK. Padło na `uhd-corpus`: `model_shapes /home/barkocot/work/uhd_train/cases_conv_fwd_model_shapes.csv
+   is not a file the pipeline can read` — ścieżka lokalna, pipeline czyta tylko pliki
+   wgrane przez dashboard (`/projects/uhd_pipeline_cerb/uploads/...`).
+2. **Próba 2** — plik wgrany przez usera na
+   `/projects/uhd_pipeline_cerb/uploads/f5eafd7bbd31d2bf/graphs/cases_conv_fwd_model_shapes.csv`.
+   `request_id 480d067b90665433`, job `c14bdff9-f609-43f3-ae2c-a2ba27045c78`.
+   `build-hipdnn-image` cache hit (OK). Padło na `uhd-corpus` (GPU job, slurm job
+   `68217131`): `Slurm accounting (sacct) unreachable for 1810s` —
+   **czysto infrastrukturalne** (ta sama awaria dotknęła tego dnia inne joby w kolejce
+   UHD pipeline'u, nie nasz kod/dane). `outcome: failed_infra`, retryowalne.
+   Przypadkowo wywołany retry (job `4956a82d-...`) został **anulowany na żądanie
+   użytkownika** — decyzja o ponowieniu zostaje do niego.
+
+**Status**: Krok 4 zatrzymany tuż po starcie etapu `uhd-corpus` (pierwszy GPU etap tego
+pipeline'u — wymaga realnego GPU gfx950, bo `hipdnn_corpus_gen` oferuje każdy
+proponowany problem silnikowi na prawdziwym sprzęcie). Reszta pipeline'u: `uhd-collect`
+(GPU), `uhd-generate` (CPU), `uhd-validate` (GPU).
+
+**Próba awaryjna na innym SKU/klastrze (mi350x, Markham)**: `gfx950-mi355x` jest tylko
+na klastrze Austin, `gfx950-mi350x` tylko na Markham (`list_clusters`) — różne klastry,
+różny Slurm.
+
+**Ważna korekta (wcześniej błędnie uogólnione w tej sesji)**: podczas *treningu* dataset/
+corpus/model są trzymane ściśle per dokładny SKU (stąd osobne joby) — ale w **runtime**
+hipDNN wybiera zainstalowany model po `uhd_id` zadeklarowanym **per arch**
+(`declared_ids_by: "arch"`, potwierdzone dla `Gfx950ConvFwdAot` przez `get_uhd_engine`),
+nie per SKU — sterownik zgłasza tylko arch (`gfx950`), nie dokładny model karty. Czyli
+**jeden zainstalowany model faktycznie obsługuje oba SKU** w produkcji, niezależnie na
+którym był trenowany; potwierdzone wprost w metadanych realnego packetu
+(`get_uhd_packet` dla `Gfx950ConvDgradAot`): *"trained on gfx950-mi355x; the runtime
+keys models by gfx950, so installed it also serves gfx950-mi350x"*. Konsekwencja: "działa"
+≠ "dobrze wybiera" — model nigdy nie widział pomiarów z SKU, na którym go nie trenowano,
+więc jego jakość tam jest nieprzetestowaną ekstrapolacją. Zwalidowany model z mi355x
+*już teraz* obsłużyłby też mi350x bez osobnego treningu — drugi job (mi350x) nie jest
+więc "wymagany do pokrycia obu SKU", tylko: (a) obejściem awarii Austin, żeby dostać
+jakikolwiek model, (b) weryfikacją realnej jakości na mi350x zamiast ekstrapolacji. Jeśli
+oba joby dojdą do końca, trzeba będzie **wybrać jeden do promocji** pod wspólny `uhd_id`
+(instaluje się tylko jeden model na arch) — ten wybór wpłynie na jakość na obu SKU.
+Złożone jako osobne zgłoszenie:
+`request_id 396e4a41c337fe8e`, job `922ea0fe-5988-41be-981b-869cae7a0088`,
+`sku=gfx950-mi350x`. `build-hipdnn-image` cache hit, `uhd-corpus` ruszył i faktycznie
+działa (nie czeka w kolejce) — awaria `sacct` była specyficzna dla Austin, Markham nie
+jest nią dotknięty.
+
+**Decyzja użytkownika (po korekcie powyżej): porzucić mi355x, dokończyć tylko mi350x.**
+Skoro model trenowany na jednym SKU i tak obsługuje oba w runtime (per-arch `uhd_id`),
+nie ma sensu ciągnąć dwóch równoległych treningów — `c14bdff9-f609-43f3-ae2c-a2ba27045c78`
+(mi355x, Austin, `FAILED`/`failed_infra`) **porzucony bez retry**. Po dokończeniu
+(`uhd-collect` → `uhd-generate` → `uhd-validate` → packet) ten model, po walidacji, ma
+zostać **promowany jako jedyny model dla `gfx950_conv_fwd_aot`** — obsłuży wtedy zarówno
+mi350x, jak i mi355x.
+
+**Ale mi350x też padł** (job `922ea0fe-5988-41be-981b-869cae7a0088`), i to szybko
+(12:31→12:36), na etapie `uhd-corpus`, zanim korpus zdążył się realnie policzyć —
+podczas kopiowania obrazu silnika na Markham przez cross-site broker:
+```
+RemoteJobError: sacct failed 15 times in a row ...
+sacct: error: Unable to connect to database (ctr2-alola-ctrl-01:6819)
+```
+To **Slurm accounting na Markham**, inna baza niż ta, która zawiodła na Austin dla
+mi355x — czyli to już nie jest problem specyficzny dla jednego klastra, wygląda na
+szerszą awarię Slurm accounting obejmującą oba klastry w tym samym oknie czasowym
+(2026-10-30, ok. 09:50–12:40 UTC). Retryowalne (`actions.retry: true`), ale **nie
+wywołane automatycznie** — czeka na decyzję użytkownika, czy retry'ować teraz (ryzyko
+złapania tej samej awarii ponownie) czy poczekać, aż accounting wróci.
+
+Monitorowane cronem co 10 min (tylko ten job, `922ea0fe-...`).
+
+### Próba lokalnego builda hipDNN (niezależny tor, dla Kroku 3.5 — testy C++ "win")
+
+- Cel: skompilować lokalnie `Gfx950ConvFwdGeometry.hpp`/`Gfx950ConvFwdNative.cpp` (Krok 2,
+  dotąd tylko ręcznie przejrzane + `g++ -fsyntax-only` na samym nagłówku), żeby dopisać i
+  zweryfikować testy C++ geometrii dla wariantu "win"
+  (`TestGfx950ConvFwdGeometry.cpp`/`TestGfx950ConvFwdAotPacks.cpp`) bez zgadywania
+  wartości grid/block. **Niezależne od UHD** — UHD trenuje na obrazie zbudowanym przez
+  zdalny pipeline (który już poprawnie kompiluje ten kod), nie na lokalnym buildzie.
+- Standalone build `projects/hipdnn` (`cmake --preset release`, instalacja w drzewie,
+  `build/release/installdir`, zero ryzyka dla `/opt`): konfiguracja przeszła po
+  doinstalowaniu lokalnie `clang-format 18.1.4` (`/tmp/cf_bin`) i dodaniu
+  `/opt/lib/llvm/bin` do PATH (clang-tidy 24 → tylko warning o niezgodności wersji,
+  jak w zdalnym pipeline) oraz `-DALLOW_FETCH_DEPS=ON` (brakujący GTest, sieć dostępna).
+- **Build padł** (nie w naszym kodzie) na `TestRuntimeLoadHeaderCpp20.cpp.o`:
+  `-Werror` łapie błędy (`-Wshadow`, `-Wold-style-cast`) w **systemowych nagłówkach HIP**
+  pod `/opt/include/hip/amd_detail/...` — bo lokalny ROCm to **7.1.1**
+  (`ROCM_CMAKE_PATH /opt/rocm-7.1.1`), a branch oczekuje **7.14.0** (dokładnie to, czego
+  używa kontener zdalnego pipeline'u `rocm/dev-ubuntu-24.04:7.14.0-full`, gdzie build
+  przechodzi czysto). To ta sama rodzina niezgodności co blokada Kroku 3.5 z 2026-10-29
+  (tam: clang-tidy 20 oczekiwane vs 24 znalezione w `/opt`'owym SDK).
+- **Decyzja usera**: odpuścić lokalny build na razie — testy C++ dla "win" zostają jako
+  jawnie oznaczony dług do zrobienia później (albo z poprawnym lokalnym ROCm 7.14.0,
+  albo przez kogoś z dostępem do środowiska zgodnego z pipeline'owym obrazem).
+
 ## Postęp wykonania (ta sesja, zakres: Kroki 1–3.5)
 
 Szczegółowy plan wykonawczy: `/home/barkocot/.claude/plans/distributed-munching-peacock.md`.
@@ -487,6 +615,51 @@ zainwestuje się czas w pełny UHD retrening:
    poziomie katalogu (dodać/poprawić etykiety) niż odkryć je dopiero po
    kosztownym treningu UHD.
 
+#### 3.6 — wyniki (sesja 2026-10-30, katalog `instancesv3.txt`, 466 kerneli/dtype)
+
+Odpalono dokładnie zgodnie z recepturą wyżej, bez MIOpen i bez `--validate pytorch`:
+
+```
+source ~/work/dnn-benchmarking/.workspace/.venv/bin/activate
+export LD_LIBRARY_PATH=/home/barkocot/work/aot-prefix-rocm3/lib:$LD_LIBRARY_PATH
+P=/home/barkocot/work/aot-prefix-rocm3/lib/hipdnn_plugins/engines
+dnn-benchmark -g $(cat ~/work/reval/fwd_graphs.txt) -e hipkernel:Gfx950ConvFwdAot \
+  --autotune --plugin-path $P \
+  --hipdnn-cache-dir ~/work/aot_cases/fwd_cache_v3 \
+  -o ~/work/aot_cases/results_cases_new_catalog_v3.json
+```
+
+- **2013/2013 grafów zmierzone, 0 błędów, 0 skipped, `no_engine_graphs: 0`** — **pełne
+  pokrycie**: każdy graf z `cases.txt`→`fwd_graphs.txt` (corpus conv-kpi) ma co
+  najmniej jedną serwującą instancję w nowym 466-kernelowym katalogu. Zero dziur
+  do łatania na poziomie katalogu przed Krokiem 4.
+- TFLOPS (z `ootb.tflops`, 2013 punktów): mediana **252.4**, p10 **7.8**, p90
+  **856.2**, max **1170.4** — szeroki rozkział bo `cases.txt` miesza bardzo różne
+  kształty (depthwise niskiej intensywności arytmetycznej vs duże dense conv).
+- **Rozkład zwycięzców autotune po rodzinie kernela** (z cache'u autotune
+  `fwd_cache_v3/ingestor-winners/.../winners.jsonl`, per-graf najszybszy z
+  realnie zmierzonych kandydatów, średnio ~60 kandydatów/graf, zakres 1–108):
+
+  | rodzina | grafów | udział |
+  |---|---:|---:|
+  | `implicit_gemm` | 946 | 47.0% |
+  | `direct_nongrouped` | 708 | 35.2% |
+  | `direct_win` (nowa, z Kroku 1) | 249 | 12.4% |
+  | `direct_col` | 45 | 2.2% |
+  | `direct_grouped_halo` | 34 | 1.7% |
+  | `direct_tiled` | 30 | 1.5% |
+  | `direct_spatial` | 1 | 0.0% |
+
+  Nowa rodzina `direct_win` realnie wygrywa na **12.4%** grafów `cases.txt` — nie
+  jest martwym dodatkiem, konkretnie bierze udział w autotune i czasem wygrywa.
+  `direct_nongrouped`+`implicit_gemm` razem to >80% zwycięstw, zgodnie z
+  oczekiwaniem (te dwie rodziny mają najszerszy sweep w katalogu).
+- **Checkpoint zamknięty — czekam na decyzję przed Krokiem 4** (trening UHD).
+  Brak dziur w pokryciu oznacza, że nie trzeba nic dokładać do
+  `instancesv3.txt`/`labels.txt` przed treningiem; `direct_win` jest już realnie
+  użyteczna, więc trening UHD dla tego katalogu ma sens, jeśli user da zielone
+  światło.
+
 ### Krok 4 — trening UHD (dopiero po akceptacji wyników Kroku 3.6)
 
 UHD retrening to osobna, wielostopniowa praca na serwerze UHD pipeline
@@ -575,3 +748,160 @@ opakowanie). Kroki 3.1–3.5 (sama podmiana) mają sens dopiero po Kroku 2.
 **Nie przechodzić do Kroku 4 (trening UHD) bez jawnej zgody po zobaczeniu wyników
 Kroku 3.6** — to zgodnie z poleceniem: policzyć autotune na `cases.txt` na nowym
 katalogu, tylko rocKE (bez MIOpen), pokazać wyniki i zatrzymać plan w tym miejscu.
+
+## Postęp wykonania — sesja 2026-10-30 (druga podmiana: `instancesv3.txt`, 466 instancji)
+
+Po commicie `18318f32980` (414 instancji z `instance_fwd_gfx950_new.txt`) user poprosił
+o kolejną podmianę katalogu na instancje z `/home/barkocot/rocm3/instancesv3.txt`
+(466 linii, nadzbiór poprzedniego — głównie dokłada warianty `direct_depthwise_win`).
+**UHD pipeline nadal nie działa** (zob. sekcja wyżej, `uhd-corpus` padał na
+infrastrukturę) — to zadanie dotyczy wyłącznie Kroków 3.1–3.5 i rozgrzewki do
+lokalnego autotune (Krok 3.6), **nie** Kroku 4.
+
+### Katalog dispatchera rocKE (`library/dispatch/grouped_convolution_instances/gfx950_fwd.json`)
+
+- Podmieniono na 466 instancji z `instancesv3.txt` (`instance_list.py new`), co
+  zepsuło 12/113 testów `library/tests/dispatch/test_grouped_conv_dispatch.py` —
+  `instancesv3.txt` nie ma żadnej `direct_depthwise_tiled` ze stride 1x1 (tylko
+  stride 2x2), więc stride-1 depthwise (3x3/7x7/11x11) traciło kandydata z rodziny
+  `tiled` i spadało na `implicit_gemm`/`direct_depthwise_spatial`.
+- **Decyzja usera**: dołożyć z powrotem 132 instancje `direct_depthwise_tiled`
+  stride 1x1 ze starego katalogu (1136 instancji, backup `/tmp/gfx950_fwd.json.bak`)
+  przez `instance_list.py add --from`. Katalog rocKE ma teraz **598 instancji**
+  (466 + 132), kanonicznie sformatowany, komentarz nagłówkowy zachowany.
+  **Uwaga**: to rozjeżdża katalog rocKE (598) z katalogiem wysyłanym do hipDNN
+  (466, patrz niżej, zgodnie z dosłowną prośbą o `instancesv3.txt`) — świadomie,
+  tylko po to, by nie zostawić czerwonych testów dispatchera; do rozważenia przy
+  następnej synchronizacji obu katalogów.
+- Po dołożeniu 132 instancji zostało **11/113 testów czerwonych** z dwóch
+  nieoczywistych luk w harness rocke, **nigdy wcześniej nie ćwiczonych** (nie z
+  braku treści katalogu):
+  1. `KeyError: 'ws_split'` (`dense3x3`, `dense_stride2`) — nowy katalog dopuszcza
+     dla tych C/K instancje `direct_nongrouped` ze `split_c=2`, czego stary katalog
+     (1136) nigdy nie dopuszczał dla tych kształtów; fixture testu (`_PTRS`/`_SIZES`
+     w `test_grouped_conv_dispatch.py`) nigdy nie definiował `'ws_split'`.
+  2. Niezgodność launch-planu (`depthwise11x11`, `11x11_g32`, `7x7`, `s2`) — wariant
+     `implicit_gemm` z `group_merge=8` (dopuszczony teraz po raz pierwszy dla tych
+     kształtów) daje inny plan z prawdziwego dispatchera niż referencyjny
+     `_cache_side_plan` w samym teście.
+  - **Decyzja usera**: zostawić te 11 testów czerwone jako osobny, znany temat
+    (luka w harness, nie w kernelach) i iść dalej do właściwego celu (katalog
+    hipDNN + autotune). **Do zrobienia osobno**: zdiagnozować/naprawić `ws_split`
+    i `group_merge=8` w `direct_kernel_sweep.py` / `test_grouped_conv_dispatch.py`.
+
+### Katalog hipDNN (`tools/IngestorGenerator/configs/gfx950_conv_fwd_aot.labels.txt`)
+
+Podmieniono dokładnie na `instancesv3.txt` (466 linii, bez dodatkowych 132
+stride-1 `tiled` — to rozmyślnie inny zestaw niż katalog rocKE, patrz wyżej).
+Powtórzono Kroki 3.1–3.4 z poprzedniej sesji, analogicznie:
+
+- **Krok 3.1**: `enumerate_conv_aot_instances.py --rocke-root "$ROCKE"` pod
+  `ROCKE_LLVM_FLAVOR=llvm22` (ta sama pułapka co poprzednio — domyślny
+  `current_llvm_flavor()` to `llvm20` lokalnie) — **466/466 zwalidowane, 0
+  błędów**: `fp16 89 implicit + 144 direct`, `bf16` tak samo.
+- **Krok 3.2**: `make_conv_aot_config.py --instances <fp16,bf16>.instances.json
+  --output /tmp/gfx950_conv_fwd_aot_v3.yaml --engine-name hipkernel:Gfx950ConvFwdAot
+  --authored-subpath rocKE/gfx950_conv_fwd_aot --sharding k-loop` — **466/466
+  zaakceptowane przez adapter, 0 unsupported**.
+- **Krok 3.3**: `generate.py --config ... --output-dir /tmp/gfx950_aot_gen_v3 --force`
+  (30 plików jak poprzednio, 16 kdp.json). Tym razem **knob vocabulary identyczny**
+  jak w już zakomitowanym 40-polowym KMD z poprzedniej sesji (`instancesv3.txt` nie
+  wprowadza nowych knobów) — zweryfikowane programowo: `kmd`/`udd`/`split_c.udd`/
+  `uhd`/`umd`/`ued` wygenerowane na nowo są bajtowo identyczne z zakomitowanymi,
+  **poza `id`** (i poza `ued.metadata`/`ued.sort_kernel_catalog`, referencjami do
+  wytrenowanego modelu UHD). Scalono zachowując stare ID-ki (mały skrypt
+  rekurencyjnego remapu `{new_id: old_id}` na kmd/udd/split_c.udd/uhd/umd/ued) —
+  **zero zmian w tych 6 deskryptorach względem HEAD**.
+  - `make_conv_aot_config.py --stabilize-ids` na 16 nowych kdp.json (UUID-y
+    kerneli z `instance_id`), następnie **ten sam remap ID-ków** zastosowany do
+    pól `engine`/`dispatch`/`matchers`/`provenance.*` wewnątrz kdp.json (żeby
+    wskazywały na zachowane stare ID-ki kmd/udd/uhd/umd zamiast na świeżo
+    wygenerowane) — bez tego testy `test_shipped_bundle_is_its_catalog_with_instance_derived_ids`
+    i `..._is_sharded_below_the_hosting_size_limit` failowały na niezgodności ID.
+  - **DVC**: `dvc` jest zainstalowany w tym środowisku (3.67.1, w odróżnieniu od
+    poprzedniej sesji) i `artifacts/` był już lokalnie wyewidencjonowany (z
+    poprzedniej podmiany, 414-katalog) — podmieniono 16 plików `*.kdp.json` pod
+    `artifacts/` i przeliczono wskaźnik `dvc add` **lokalnie**
+    (`b9fe46e388cd03bc8c5ac074db167ad7.dir`, 1275446 B). **`dvc pull`/`dvc push`
+    nie działa w tym środowisku** (`Unable to locate credentials` do S3) — nowy
+    hash NIE jest wypchnięty na `ingestor`, tylko lokalny. Trzeba `dvc push -r
+    ingestor` z maszyny/sesji z dostępem do AWS, zanim commit z nowym
+    `artifacts.dvc` będzie użyteczny dla kogokolwiek poza tym workdir.
+- **Krok 3.4**: zaktualizowano dwa miejsca ze sztywnymi liczbami:
+  - `test_enumerate_conv_aot_instances.py`:
+    `test_the_catalog_lists_207_kernels_per_dtype_the_same_in_both` →
+    `..._233_...`, `{True: 79, False: 128}` → `{True: 89, False: 144}`.
+  - `IntegrationGpuGfx950ConvFwd.cpp` (`aotGraphs()`, 26 wierszy) — przeliczono
+    programowo (`test_make_conv_aot_config.py`'s `_selected_counts` na realnym
+    466-instancyjnym katalogu) i podmieniono tylko 3 końcowe pola (`direct`,
+    `implicitFp16`, `implicitBf16`) na linię, `name`/`problem`/`seedDirect`/
+    `seedImplicit` bez zmian (seed niezmieniony) — diff ograniczony do 26 linii,
+    bez zmiany indentacji.
+  - **Wynik**: `test_enumerate_conv_aot_instances.py` (19/19) +
+    `test_make_conv_aot_config.py` (65/65) — **84/84 passed**.
+  - `test_convolution_forward_aot_packaging.py` (rocKE) — **92/92 passed**
+    (307s, długi test).
+
+### Krok 3.5 — build zrealizowany (osobny build tree wskazany na `/home/barkocot/rocm3`)
+
+`howtobuild.md` opisywał build tree `/home/barkocot/rocm-libraries/build-aot` —
+**to inny checkout** (branch `users/barkocot/gfx950-dgrad-aot-catalog-prune-150`,
+z własnymi niezacommitowanymi zmianami dgrad), nie ten, w którym robiono dzisiejszą
+podmianę katalogu (`/home/barkocot/rocm3`, branch `users/aledudek/gfx950-conv-aot-uhd`).
+Zamiast mieszać te dwa drzewa, skonfigurowano **nowy, osobny build tree**:
+
+- Źródło: `/home/barkocot/rocm3` (ten sam layout monorepo co `rocm-libraries`).
+- Build dir: `/home/barkocot/work/build-aot-rocm3`, install prefix:
+  `/home/barkocot/work/aot-prefix-rocm3`.
+- Flagi z `howtobuild.md` (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, `..._LLVM_FLAVOR=llvm22`,
+  `..._COMGR_LIB=...`) **nie wystarczyły same** — konfiguracja monorepo wymagała
+  dodatkowo:
+  - `-DROCM_LIBS_ENABLE_COMPONENTS="hipdnn;miopen-provider;hipblaslt-provider;hip-kernel-provider"`
+    (bez tego configure ciągnie cały monorepo, w tym rocRoller → brak `msgpackc-cxx`).
+  - `-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON` (domyślnie off na tej ścieżce configure).
+  - `-DHIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON` (brak lokalnego `shared/kpack/python`
+    w `rocm3`, w przeciwieństwie do `rocm-libraries`).
+  - `-DCMAKE_CXX_COMPILER=/opt/rocm/lib/llvm/bin/clang++` / `CMAKE_C_COMPILER=...clang`
+    (AMD clang 20) — bez tego configure bierze systemowy `/usr/bin/c++` (GCC 11),
+    co dalej psuje build warningami-jako-błędami na kodzie generowanym pod clanga.
+  - `PATH` musiał zawierać **oba** `/tmp/cf_tool/bin` (clang-format 18.1.4,
+    doinstalowany lokalnie, `PYTHONPATH=/tmp/cf_tool`) i `/opt/10.1.0a20260826/lib/llvm/bin`
+    (clang-tidy, tylko jako WARNING o niezgodnej wersji, nie blocker) —
+    `/opt/10.1.0a20260826` samo nie ma clang-format, `/opt/rocm` samo nie ma clang-tidy.
+  - `-DCMAKE_CXX_FLAGS="-Wno-error=deprecated-declarations"` — **twardy bloker bez
+    tego**: nagłówki systemowego libstdc++ GCC 12 (`bits/stl_tempbuf.h`) oznaczają
+    `std::get_temporary_buffer` jako deprecated, co pod `-Werror` wywala kompilację
+    `std::stable_sort` wszędzie, gdzie jest użyty (w tym w samym
+    `hip_kernel_provider_impl` — `ResampleFwdPlan.cpp`, `LayernormFwdPlan.cpp`, oraz
+    w `hipdnn_plugin_sdk`/`corpus_gen`/`miopen-provider` testach). Dokładnie ta sama
+    flaga jest już w działającym `rocm-libraries/build-aot`'s `CMakeCache.txt`.
+  - Jedna przejściowa race condition przy `-j64` (`rocke-pyenv.dir`: "Text file busy"
+    na `rocke-pyenv/bin/python3.12`, dwa cele edytowalnie instalujące jednocześnie) —
+    zniknęła po prostym retry builda.
+  - `-k` (keep-going) żeby nie przerywać się na niepowiązanym, pre-istniejącym
+    `miopen_plugin_tests`/`hipdnn_corpus_gen_tests` (ten sam deprecated-declarations
+    problem, ale w testach spoza mojej ścieżki — po dodaniu `-Wno-error=...` globalnie
+    te też przestały failować, `-k` ostatecznie nie był już potrzebny do sukcesu).
+- **Wynik: `cmake --build . --target install -- -j64` zakończony sukcesem, 0 błędów.**
+  `libhip_kernel_provider.so` zbudowane z nowym (466-instancyjnym) katalogiem
+  (mtime 2026-10-30 11:07), `hip_kernel_provider_tests`/`hip_kernel_provider_integration_tests`
+  skompilowane (w tym `IntegrationGpuGfx950ConvFwd.cpp` z przeliczonym `aotGraphs()`).
+
+Poprzednia notatka o blockerze `/opt` SDK (poniżej) dotyczyła prób budowania
+*przeciw zainstalowanemu system-wide SDK pod `/opt`* — ten nowy build tree
+**nie korzysta z tej ścieżki** (buduje cały stack hipDNN+providers z monorepo od
+zera), więc blocker jej nie dotyczy.
+
+### Historyczna notatka (nieaktualna dla tego build tree) — blocker `/opt` SDK
+
+`HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON` nadal nie istnieje w zainstalowanym
+pod `/opt` `hipdnn_plugin_sdkConfig.cmake` (sprawdzone programowo, `grep` nie
+znajduje tej zmiennej nigdzie w configu) — **zainstalowany SDK pod `/opt` jest
+wciąż starszy niż to, czego oczekuje obecne źródło `hip-kernel-provider`**. Bez
+tego nie da się zbudować providera przeciw `/opt`, więc **nie da się przebudować
+`IntegrationGpuGfx950ConvFwd.cpp`/`TestGfx950ConvFwdAotPacks.cpp` ani uruchomić
+realnego lokalnego autotune** (`dnn-benchmark --autotune` wymaga działającego
+pluginu z nowym katalogiem). Jedyna właściwa naprawa to pełny build hipDNN z
+`projects/hipdnn` do świeżego prefiksu (duży, wielogodzinny build, poza
+budżetem automatycznej sesji) — **zatrzymano się tutaj i czeka na decyzję usera**,
+zgodnie z poleceniem "jak będziesz gotowy do autotune to zatrzymaj się i daj znać".
