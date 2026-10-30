@@ -42,6 +42,7 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DGeometry.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified3DGeometry.hpp"
 
 /**
  * @file Gfx950AttentionUnified2DNative.cpp
@@ -382,10 +383,6 @@ AttentionUnified2DProblem problemFor(const data_objects::TensorAttributes& q,
     return problem;
 }
 
-/// The split-KV segment kernel's query rows per CTA (GFX950_UNIFIED_3D_BLOCK_M): the decode
-/// GQA groups Unified3D can build are its divisors.
-constexpr int64_t GFX950_UNIFIED_3D_DECODE_BLOCK_M = 16;
-
 /// The smallest paged-KV block any candidate is built with: a Skv no block divides cannot be
 /// served by any candidate, so graph_match declines it instead of emptying nothing.
 constexpr int64_t SMALLEST_BLOCK_SIZE = GFX950_UNIFIED_2D_BLOCK_SIZE_SMALL;
@@ -557,7 +554,7 @@ std::optional<BoundTokens> gfx950AttentionUnified2DGraphMatches(const MatchConte
     // 16 query rows per CTA, so it builds only GQA groups dividing 16; any other group stays
     // here. No select_path crossover is replayed: the boundary is this static rule.
     if(problem.seqLenQ == 1
-       && GFX950_UNIFIED_3D_DECODE_BLOCK_M % (problem.numQueryHeads / problem.numKvHeads) == 0)
+       && GFX950_UNIFIED_3D_BLOCK_M % (problem.numQueryHeads / problem.numKvHeads) == 0)
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"decode"} << "decode (seqlen_q 1) with a GQA group of "
                                                   << problem.numQueryHeads / problem.numKvHeads
