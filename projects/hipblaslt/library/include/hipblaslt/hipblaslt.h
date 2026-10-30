@@ -252,11 +252,11 @@ typedef enum {
 
   /** Memory order of the data. See ``hipblasLtOrder_t``.
    *
-   * ``hipblasLtMatmul``, ``hipblasLtMatmulAlgoGetHeuristic``, and the ``hipblaslt_ext`` ``Gemm`` and
+   * ``hipblasLtMatmul`` and ``hipblasLtMatmulAlgoGetHeuristic`` accept ``HIPBLASLT_ORDER_ROW``; see
+   * ``hipblasLtOrder_t`` for the combinations they support. The ``hipblaslt_ext`` ``Gemm`` and
    * ``GroupedGemm`` APIs return ``HIPBLAS_STATUS_NOT_SUPPORTED`` when any of A, B, C, or D uses
-   * ``HIPBLASLT_ORDER_ROW``. Only ``hipblasLtMatrixTransform`` accepts ``HIPBLASLT_ORDER_ROW``.
-   * Grouped layouts (``HIPBLASLT_BATCH_MODE_GROUPED``) accept only ``HIPBLASLT_ORDER_COL`` and return
-   * ``HIPBLAS_STATUS_INVALID_VALUE`` for any other order.
+   * ``HIPBLASLT_ORDER_ROW``. Grouped layouts (``HIPBLASLT_BATCH_MODE_GROUPED``) accept only
+   * ``HIPBLASLT_ORDER_COL`` and return ``HIPBLAS_STATUS_INVALID_VALUE`` for any other order.
    *
    * ``int32_t``, default: ``HIPBLASLT_ORDER_COL``.
    */
@@ -487,10 +487,14 @@ typedef enum {
    *
    * Leading dimension is the stride (in elements) to the beginning of the next row in memory.
    *
-   * Supported by ``hipblasLtMatrixTransform`` only. Matmul does not support this order and returns
-   * ``HIPBLAS_STATUS_NOT_SUPPORTED``. To multiply row-major data, keep ``HIPBLASLT_ORDER_COL`` and
-   * use the identity ``(A * B)^T = B^T * A^T``: swap A and B, swap ``m`` and ``n``, and describe each
-   * matrix as its column-major transpose.
+   * Supported by ``hipblasLtMatrixTransform``, and by ``hipblasLtMatmul`` and
+   * ``hipblasLtMatmulAlgoGetHeuristic`` for any of A, B, and C with D. Matmul computes a row-major
+   * matrix as its column-major transpose, and a row-major D as ``D^T = op(B)^T * op(A)^T``. C and D
+   * must have the same order. Matmul returns ``HIPBLAS_STATUS_NOT_SUPPORTED`` for a row-major
+   * layout combined with ``HIPBLAS_OP_C``, a block or vector scale mode, or an ``HIP_R_4I`` matrix,
+   * and for a row-major D combined with a bias, aux, or gradient epilogue or with
+   * ``HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST``. The ``hipblaslt_ext`` APIs return
+   * ``HIPBLAS_STATUS_NOT_SUPPORTED`` for this order.
    */
   HIPBLASLT_ORDER_ROW = 1,
   
