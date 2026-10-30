@@ -26,13 +26,27 @@ from ....instances.gfx1250.mxfp4_tdm_gemm_variants import (
 from ....runtime.hip_module import Runtime, get_device_arch
 
 
-def make_inputs(spec: MxFp4TdmGemmSpec, seed: int = 0x32F4):
-    """Create finite, exactly representable FP4/E8M0 verification inputs."""
+_FP4_ONE = 2  # E2M1 code of +1.0
+_FP4_MINUS_ONE = 10  # E2M1 code of -1.0
+_FP8_MAX = 448.0
+
+
+def make_inputs(spec: MxFp4TdmGemmSpec, seed: int = 0x32F4, *, signed: bool = False):
+    """Create finite, exactly representable FP4/E8M0 verification inputs.
+
+    FP4 values are 0 and +1; ``signed`` adds -1 so that, with a large alpha,
+    outputs overflow FP8 in both directions (the saturation check).
+    """
     import ml_dtypes
 
     rng = np.random.default_rng(seed)
-    a_codes = rng.integers(0, 2, (spec.M, spec.K), dtype=np.uint8) * 2
-    b_codes = rng.integers(0, 2, (spec.N, spec.K), dtype=np.uint8) * 2
+    if signed:
+        choices = np.array([0, _FP4_ONE, _FP4_MINUS_ONE], dtype=np.uint8)
+        a_codes = choices[rng.integers(0, 3, (spec.M, spec.K))]
+        b_codes = choices[rng.integers(0, 3, (spec.N, spec.K))]
+    else:
+        a_codes = rng.integers(0, 2, (spec.M, spec.K), dtype=np.uint8) * 2
+        b_codes = rng.integers(0, 2, (spec.N, spec.K), dtype=np.uint8) * 2
     a_scale = rng.integers(125, 129, (spec.M, spec.K // spec.block_k), dtype=np.uint8)
     b_scale = rng.integers(125, 129, (spec.K // spec.block_k, spec.N), dtype=np.uint8)
     c_values = rng.integers(0, 3, (spec.M, spec.N), dtype=np.uint8).astype(np.float32)
@@ -48,19 +62,50 @@ def make_inputs(spec: MxFp4TdmGemmSpec, seed: int = 0x32F4):
     )
 
 
+def swizzle_mx_scales_gfx1250(scales_mn_k: np.ndarray) -> np.ndarray:
+    """``[MN][K/32]`` E8M0 scales in TensileLite's gfx1250 ``InMemorySwizzle``
+    layout ``[K/128][MN][4]``: one row per 128-K WMMA step, 4 bytes per MN."""
+    mn, groups = scales_mn_k.shape
+    per_step = 128 // 32
+    if groups % per_step:
+        raise ValueError(f"K/32 = {groups} is not a multiple of {per_step}")
+    swizzled = scales_mn_k.reshape(mn, groups // per_step, per_step).transpose(1, 0, 2)
+    return np.ascontiguousarray(swizzled)
+
+
+def kernel_inputs(spec: MxFp4TdmGemmSpec, inputs) -> tuple[np.ndarray, ...]:
+    """The five device inputs (A, B, A_scale, B_scale, C) in the kernel's layout.
+
+    ``inputs`` keeps the canonical scales for the reference: A_scale
+    ``[M][K/32]`` and B_scale ``[K/32][N]``. ``scale_tdm`` kernels read both
+    swizzled.
+    """
+    a, b, a_scale, b_scale, c = inputs[:5]
+    if spec.scale_tdm:
+        a_scale = swizzle_mx_scales_gfx1250(a_scale)
+        b_scale = swizzle_mx_scales_gfx1250(np.ascontiguousarray(b_scale.T))
+    return a, b, a_scale, b_scale, c
+
+
 def reference(
     spec: MxFp4TdmGemmSpec,
     inputs,
     *,
     alpha: np.float32,
     beta: np.float32,
+    saturate: bool = False,
 ):
-    """Independent grouped-scale FP32 reference rounded to FP8 E4M3."""
+    """Independent grouped-scale FP32 reference rounded to FP8 E4M3.
+
+    ``saturate`` models hipBLASLt's FP8 store (the ``vector_epilogue``
+    kernels): +-inf becomes NaN and finite values clamp to +-448 before
+    rounding. Without it, values past the FP8 range round to NaN.
+    """
     import ml_dtypes
 
     _, _, a_scale, b_scale, c, a_codes, b_codes = inputs
-    a = (a_codes == 2).astype(np.float32)
-    b = (b_codes == 2).astype(np.float32)
+    a = (a_codes == _FP4_ONE).astype(np.float32) - (a_codes == _FP4_MINUS_ONE)
+    b = (b_codes == _FP4_ONE).astype(np.float32) - (b_codes == _FP4_MINUS_ONE)
     sa = decode_e8m0(a_scale).astype(np.float32)
     sb = decode_e8m0(b_scale).astype(np.float32)
     out = np.zeros((spec.M, spec.N), dtype=np.float32)
@@ -71,6 +116,9 @@ def reference(
             b[:, begin:end] * sb[group, :, None]
         ).T
     out = alpha * out + beta * c.astype(np.float32)
+    if saturate:
+        out = np.where(np.isinf(out), np.float32(np.nan), out)
+        out = np.clip(out, -_FP8_MAX, _FP8_MAX)
     return out.astype(ml_dtypes.float8_e4m3fn)
 
 
@@ -84,8 +132,13 @@ def run_case(
     *,
     alpha: float | None = None,
     beta: float = 0.5,
-) -> None:
-    """Compile, launch, and require byte-exact FP8 output."""
+    signed: bool = False,
+) -> str:
+    """Compile, launch, and require byte-exact FP8 output.
+
+    ``vector_epilogue`` kernels saturate, so they are checked against the
+    saturating reference. Returns the kernel name.
+    """
     import ml_dtypes
 
     ok, reason = is_valid_spec(spec)
@@ -97,8 +150,10 @@ def run_case(
 
     alpha32 = np.float32(1.0 / max(spec.K, 256) if alpha is None else alpha)
     beta32 = np.float32(beta)
-    inputs = make_inputs(spec)
-    expected = reference(spec, inputs, alpha=alpha32, beta=beta32)
+    inputs = make_inputs(spec, signed=signed)
+    expected = reference(
+        spec, inputs, alpha=alpha32, beta=beta32, saturate=spec.vector_epilogue
+    )
     out = np.zeros((spec.M, spec.N), dtype=ml_dtypes.float8_e4m3fn)
 
     artifact = compile_kernel(
@@ -111,7 +166,7 @@ def run_case(
     allocations = []
     try:
         function = module.get_function(artifact.kernel_name)
-        for array in (*inputs[:5], out):
+        for array in (*kernel_inputs(spec, inputs), out):
             pointer = runtime.alloc(array.nbytes)
             allocations.append(pointer)
             runtime.memcpy_h2d(pointer, _u8_buffer(array), array.nbytes)
@@ -153,9 +208,20 @@ def run_case(
         f"PASS: {artifact.kernel_name} {spec.M}x{spec.N}x{spec.K} bad=0",
         flush=True,
     )
+    return artifact.kernel_name
+
+
+YAML_TILE = {"tile_m": 256, "tile_n": 256, "tile_k": 512, "warp_m": 2, "warp_n": 2}
+"""The hipBLASLt YAML winner's macro tile in rocKE terms; every Step 6 variant
+is built at this tile."""
+
+SATURATION_ALPHA = 64.0
+"""With signed inputs, this alpha pushes most outputs past +-448."""
 
 
 def _geometry_kwargs(args: argparse.Namespace) -> dict:
+    if args.yaml_tile:
+        return dict(YAML_TILE)
     return {
         "tile_m": args.tile_m,
         "tile_n": args.tile_n,
@@ -175,22 +241,43 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tile-k", type=int, default=128)
     parser.add_argument("--warp-m", type=int, default=2)
     parser.add_argument("--warp-n", type=int, default=2)
+    parser.add_argument(
+        "--yaml-tile",
+        action="store_true",
+        help="use the YAML winner's 256x256x512 tile with 2x2 waves",
+    )
     parser.add_argument("--alpha", type=float, default=None)
     parser.add_argument("--beta", type=float, default=0.5)
+    parser.add_argument(
+        "--saturation",
+        action="store_true",
+        help=(
+            "signed inputs and a large alpha (default "
+            f"{SATURATION_ALPHA:g}) so outputs overflow FP8"
+        ),
+    )
     parser.add_argument(
         "--variant",
         default=BASE_VARIANT,
         help=(
-            f"named cumulative kernel variant ({', '.join(variant_names())}) "
-            "or 'all'"
+            f"named cumulative kernel variant ({', '.join(variant_names())}), "
+            "'all', or 'trials'"
         ),
     )
     args = parser.parse_args(argv)
     geo = _geometry_kwargs(args)
-    names = variant_names() if args.variant == "all" else [args.variant]
+    if args.variant == "all":
+        names = variant_names()
+    elif args.variant == "trials":
+        names = variant_names(trials=True)[len(variant_names()) :]
+    else:
+        names = [args.variant]
+    alpha = args.alpha
+    if args.saturation and alpha is None:
+        alpha = SATURATION_ALPHA
     for name in names:
         spec = variant_spec(name, args.m, args.n, args.k, **geo)
-        run_case(spec, alpha=args.alpha, beta=args.beta)
+        run_case(spec, alpha=alpha, beta=args.beta, signed=args.saturation)
     return 0
 
 

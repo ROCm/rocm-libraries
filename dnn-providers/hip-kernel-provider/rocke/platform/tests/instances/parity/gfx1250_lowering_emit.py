@@ -21,7 +21,18 @@
 # arch is per-config (see _spec), llvm_flavor = AUTO, matching the C side.
 from rocke.core.arch import ArchTarget
 from rocke.core.arch.target import _gfx1250_scale_combination_valid
-from rocke.core.ir import BF16, F16, F32, I16, I32, I64, IRBuilder, KernelDef, PtrType
+from rocke.core.ir import (
+    BF16,
+    F16,
+    F32,
+    I8,
+    I16,
+    I32,
+    I64,
+    IRBuilder,
+    KernelDef,
+    PtrType,
+)
 
 from _emit_common import run_emit
 
@@ -483,6 +494,40 @@ def build_tdm(b: IRBuilder) -> None:
 
 
 CONFIGS.append((build_tdm, "gfx1250"))
+
+
+def build_tdm_iterate(b: IRBuilder) -> None:
+    """An iterate-mode TDM load with a runtime workgroup mask, then a cluster
+    barrier without fences: group 2's fields, the ORed mask and the bare
+    barrier intrinsic all show up."""
+    src = b.param("src", PtrType(I8, "global"), readonly=True, align=16)
+    dim0 = b.param("dim0", I32)
+    dim1 = b.param("dim1", I32)
+    stride = b.param("stride", I32)
+    mask = b.param("mask", I32)
+    lds = b.smem_addr_of(b.smem_alloc(I8, [8 * 2064], name_hint="tile"))
+    b.tensor_load_to_lds(
+        *b.tdm_descriptor_2d(
+            src,
+            lds,
+            elem_bytes=1,
+            tensor_dim0=dim0,
+            tensor_dim1=dim1,
+            row_stride=stride,
+            tile_dim0=256,
+            tile_dim1=8,
+            workgroup_mask=mask,
+            iterate_count=8,
+            lds_increment=2064,
+            global_increment=b.mul(stride, b.const_i32(8)),
+        )
+    )
+    b.s_wait_tensorcnt(0)
+    b.cluster_barrier(fences=False)
+    b.ret()
+
+
+CONFIGS.append((build_tdm_iterate, "gfx1250"))
 
 
 def _spec(idx: int):

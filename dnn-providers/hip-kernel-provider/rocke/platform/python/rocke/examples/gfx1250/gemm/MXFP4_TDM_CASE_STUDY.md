@@ -93,22 +93,123 @@ The YAML tile uses 735 of 1024 VGPRs with no VGPR/SGPR spill and no scratch.
 ## Cumulative variants (Step 6)
 
 Named presets over the same builder live in
-`rocke.instances.gfx1250.mxfp4_tdm_gemm_variants`. Each landed substep adds a
-cumulative `step6_N_mxfp4_gemm` entry. Use
-`python -m rocke.examples.gfx1250.gemm.mxfp4_tdm_gemm --variant all` for FFM
-checks and
-`python -m rocke.examples.gfx1250.gemm.mxfp4_tdm_gemm_variants_bench` for the
-silicon bench harness (timings outside the repo).
+`rocke.instances.gfx1250.mxfp4_tdm_gemm_variants`. Step 6 brings the kernel to
+the hipBLASLt YAML winner (`mxf4_tn_maf.yaml`, SourceSwap, MT 256x256x512,
+MIWaveTile 8x4, waves 2x2) one source-level feature at a time. Each
+`step6_N_mxfp4_gemm` includes every earlier flag, so a sweep shows what each
+feature is worth. Every variant is built at the YAML tile. Tensile A/B/M are
+rocKE B/A/N.
 
-| Variant | Flags on | FFM |
+`python -m rocke.examples.gfx1250.gemm.mxfp4_tdm_gemm --yaml-tile --m 1024 --n
+1024 --k 2048 --variant all` checks the chain byte-exactly (`--saturation`
+adds the FP8 overflow check). `mxfp4_tdm_gemm_variants_bench` checks at beta 0
+and 0.5, then times beta 0 (host-timed batch and HIP-event median);
+`--host-only` reports resources without a device. Timings stay outside the
+repo.
+
+| Step | Variant | Adds | YAML parameter |
+| --- | --- | --- | --- |
+| 6.1 | `base_kernel_mxfp4_gemm` | (none) | MT, MIWaveTile, waves, DepthU |
+| 6.2 | `step6_2_mxfp4_gemm` | `vector_epilogue` | `VectorWidthA=8`, `StoreVectorWidth=8`, saturating FP8 store |
+| 6.3 | `step6_3_mxfp4_gemm` | `local_read_prefetch` | `PrefetchLocalRead=1`, `HalfPLRA=1` (rocKE B) |
+| 6.4 | `step6_4_mxfp4_gemm` | `wave_parity_tdm` | `TDMInstruction=3`, `TDMInstMode=1` |
+| 6.5 | `step6_5_mxfp4_gemm` | `scale_tdm` | `MXLoadInstr=TDM`, `MXSwizzle=InMemorySwizzle`, `VectorWidthB=4` |
+| 6.6 | `step6_6_mxfp4_gemm` | `lds_pad` | `LdsPad*`, `LdsBlockSizePerPad*` |
+| 6.7 | `step6_7_mxfp4_gemm` | `lds_segment_interleave` | `LDSSegmentInterleave=1` |
+| 6.8 | `step6_8_mxfp4_gemm` | `init_c_wmma` | `InitCWMMA` |
+| 6.9 | `step6_9_mxfp4_gemm` | `cluster_dim=(4,4,1)`, `tdm_multicast` | `ClusterDim=4x4`, `TDMMulticast` |
+| 6.10 | `step6_10_mxfp4_gemm` | `prefetch_gl2` | `PrefetchGlobalRead2` (cluster-split) |
+
+Design of each step:
+
+- **6.2 vector epilogue.** The N-repeats of one WMMA column position become
+  adjacent D columns: `n = wave_n*128 + n_local*8 + rn`. Each lane then owns 8
+  consecutive FP8 outputs per row and writes them with one 8-byte store.
+  `beta == 0` takes a branch that never reads C. The FP8 conversion
+  saturates like hipBLASLt: +-inf become NaN, finite values clamp to +-448,
+  and NaN is preserved by an explicit `fcmp uno` select (`fmax`/`fmin` lower
+  to `maxnum`/`minnum`, which drop NaN). The reference has a matching
+  `saturate=` mode.
+- **6.3 local-read prefetch.** HalfPLR order: before the WMMAs of K-step `s`,
+  the kernel reads K-step `s+1`'s scales, A fragments and the first half of
+  B. The second half of B is read after the first half of the WMMAs.
+  gfx1250 LDS loads are volatile, so source order is the issue order.
+- **6.4 wave-parity TDM.** Each operand is split into two row components.
+  Even waves load component 0 and odd waves load component 1, so two waves
+  issue the operand's TDM loads. The wave id goes through `readfirstlane`
+  and both descriptors are built. Each descriptor group is picked with a
+  `select`, so the issue has no branch. Step 6.5 uses this same select and
+  adds the scale TDM load after it.
+- **6.5 scale TDM.** Scales come in TensileLite's gfx1250 `InMemorySwizzle`
+  layout `[K/128][MN][4]` (`swizzle_mx_scales_gfx1250`) and are staged to
+  LDS by TDM next to the data. The A mapping changes to
+  `m = wave_m*128 + m_local*4 + rm`, the YAML's `VectorWidthB=4`. A lane's
+  A scales for a K-step are then one 16-byte read, and with 6.2's N mapping
+  its B scales are two. That makes 12 scale reads per K tile.
+- **6.6 LDS pad.** These pads match the winner's local-read math:
+  - rocKE A data: 16 B every 1024 B. This uses the TDM pad fields
+    `pad_interval = log2(period/4) - 1` and `pad_amount = pad/4 - 1`.
+  - rocKE B data: one TDM transfer in iterate mode. It moves 8 rows per
+    iteration, with a 2064 B LDS stride (2048 B plus 16 B of pad).
+  - rocKE B scales: 16 B every 256 B, with the region aligned to 512 B.
+- **6.7 segment interleave.** The buffer becomes `[B0][A][B1][B scales][A
+  scales]`, so the second B component sits past A. The resulting offsets
+  are the winner's: A at 33024, B1 at 99584, B scales at 132608, A scales at
+  137216, and the second buffer at 141312.
+- **6.8 InitC WMMA.** The first K tile is peeled. Its first K-step multiplies
+  into C = 0 directly, so the kernel never zeroes 512 accumulators with moves.
+- **6.9 cluster and multicast.** The grid launches as 4x4 clusters. Every
+  workgroup in a TDM multicast mask issues the same full-tile load:
+  `0x1111 << x` for rocKE B, `0xF << 4y` for rocKE A. A fenceless cluster
+  barrier replaces the workgroup barrier. It is the expansion of
+  `llvm.amdgcn.s.cluster.barrier`, emitted as inline asm: LLVM expands the
+  intrinsic into a real branch (only the first wave signals the cluster
+  barrier). That branch splits the main loop into several blocks, and LLVM
+  then keeps about 35 LDS reads in flight instead of 62 (900 instead of
+  1008 VGPRs).
+- **6.10 GL2 prefetch.** The cluster's 16 workgroups split the GL2 prefetch
+  of tile `k + 2`'s A, B and swizzled-scale lines, one 256 B line per thread,
+  with `th:TH_LOAD_NT scope:SCOPE_SE` as in the winner. The A and B lines
+  fill the 2048 threads exactly. The 128 scale lines take a second round, in
+  which every thread prefetches line `thread mod 128`. Past K, the last tile
+  is prefetched again. Both choices keep the prefetch branch-free, for the
+  same reason as the asm barrier. The prefetch is issued ahead of the
+  cluster barrier. Both scale prefetches use `global_prefetch` because
+  rocKE IR has no global-to-flat pointer cast; the winner uses
+  `flat_prefetch` for one of them.
+
+Host resources at M=4096, N=4096, K=65536 (no VGPR/SGPR spills and no scratch
+for any step):
+
+| Step | VGPR | LDS |
 | --- | --- | --- |
-| `base_kernel_mxfp4_gemm` | (none) | `bad=0` (Step 4/5) |
+| 6.1 | 735 | 262144 |
+| 6.2 | 699 | 262144 |
+| 6.3 | 682 | 262144 |
+| 6.4 | 813 | 262144 |
+| 6.5 | 805 | 278528 |
+| 6.6 | 815 | 282624 |
+| 6.7 | 815 | 282624 |
+| 6.8 | 1016 | 282624 |
+| 6.9 | 1008 | 282624 |
+| 6.10 | 1008 | 282624 |
 
-## Deferred controls
+Host tests pin one LLVM-IR fact per step and check the LDS layout model.
+`MxFp4LdsLayout` is the single address model used by the builder. The test
+checks it against an independent simulation of the TDM writes (pad and
+iterate semantics), and also checks that no writes overlap and that all
+writes stay inside the buffer.
 
-Step 6 lands hipBLASLt SIA0 features one default-off flag at a time (HalfPLR,
-PrefetchGL2, scale buffering/TDM, wave-separated TDM, LDS layout, third buffer,
-InitC WMMA, cluster). StinkyTofu / SIA4 schedule fidelity stays out of scope.
+Known differences from the winner, kept on purpose:
+
+- The FP8 pack uses two `cvt_pk_fp8_f32x4` calls instead of one 8-wide pack.
+- NaN is kept with a select instead of `v_maximumminimum`.
+- Both scale prefetches use `global_prefetch`, as noted under 6.10.
+
+StinkyTofu / SIA4 schedule fidelity (instruction interleave and
+assembly-level tuning) stays out of scope for Step 6. The base variant is
+byte-identical between the Python and C++ engines; the C++ builder rejects
+every Step 6 flag.
 
 A four-way feature comparison against CK Tile `comp_tdm` / `comp_tdm_v2` and
 the hipBLASLt YAML lives in `my_experiment/MXFP4_PIPELINE_COMPARISON.md`

@@ -1837,10 +1837,17 @@ void rocke_b_flat_prefetch(rocke_ir_builder_t* b, rocke_value_t* ptr, int cachep
 
 void rocke_b_cluster_barrier(rocke_ir_builder_t* b)
 {
+    rocke_b_cluster_barrier_ex(b, true);
+}
+
+void rocke_b_cluster_barrier_ex(rocke_ir_builder_t* b, bool fences)
+{
     rocke_attr_map_t attrs;
     if(!rocke_i_live(b))
         return;
     attrs = rocke_i_attrs(b);
+    if(!fences)
+        rocke_attr_set_bool(b, &attrs, "fences", false);
     rocke_i_op0(b, ROCKE_OP_TILE_CLUSTER_BARRIER, NULL, 0, &attrs);
 }
 
@@ -1947,14 +1954,49 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
                               int pad_amount,
                               rocke_value_t* out[5])
 {
+    return rocke_b_tdm_descriptor_2d_ex(b,
+                                        global_ptr,
+                                        lds_addr,
+                                        elem_bytes,
+                                        tensor_dim0,
+                                        tensor_dim1,
+                                        row_stride,
+                                        tile_dim0,
+                                        tile_dim1,
+                                        workgroup_mask,
+                                        pad_interval,
+                                        pad_amount,
+                                        NULL,
+                                        out);
+}
+
+int rocke_b_tdm_descriptor_2d_ex(rocke_ir_builder_t* b,
+                                 rocke_value_t* global_ptr,
+                                 rocke_value_t* lds_addr,
+                                 int elem_bytes,
+                                 rocke_value_t* tensor_dim0,
+                                 rocke_value_t* tensor_dim1,
+                                 rocke_value_t* row_stride,
+                                 int tile_dim0,
+                                 int tile_dim1,
+                                 int workgroup_mask,
+                                 int pad_interval,
+                                 int pad_amount,
+                                 const rocke_tdm_descriptor_opts_t* opts,
+                                 rocke_value_t* out[5])
+{
     static const char* name = "tdm_descriptor_2d";
+    static const rocke_tdm_descriptor_opts_t no_opts = {NULL, 0, 0, NULL};
     const rocke_type_t* lty = lds_addr ? lds_addr->type : NULL;
-    int lds_is_i32, lds_is_i64, data_size, pad_enable;
+    int lds_is_i32, lds_is_i64, data_size, pad_enable, iterate;
     uint32_t flags;
-    rocke_value_t *c16, *lds32, *gaddr, *g_hi, *lo, *hi, *group0[4], *group1[8], *zero4;
+    rocke_value_t *c16, *lds32, *gaddr, *g_hi, *lo, *hi, *group0[4], *group1[8], *group2[4],
+        *zero4;
     int i;
     if(!rocke_i_live(b))
         return 0;
+    if(!opts)
+        opts = &no_opts;
     if(!rocke_i_is_global_ptr(global_ptr))
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s global_ptr must be a global pointer", name);
@@ -2002,7 +2044,13 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
             b, ROCKE_ERR_VALUE, "%s tile_dim1 must be in 1..65535 (got %d)", name, tile_dim1);
         return 0;
     }
-    if(workgroup_mask < 0 || workgroup_mask > 0xFFFF)
+    if(opts->workgroup_mask_value)
+    {
+        if(!rocke_i_check_i32_value(b, name, "workgroup_mask", opts->workgroup_mask_value))
+            return 0;
+        workgroup_mask = 0;
+    }
+    else if(workgroup_mask < 0 || workgroup_mask > 0xFFFF)
     {
         rocke_i_set_err(b,
                         ROCKE_ERR_VALUE,
@@ -2011,6 +2059,29 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
                         workgroup_mask);
         return 0;
     }
+    iterate = opts->iterate_count > 0;
+    if(opts->iterate_count < 0 || opts->iterate_count > 0x10000)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s iterate_count must be in 0..65536 (got %d)",
+                        name,
+                        opts->iterate_count);
+        return 0;
+    }
+    if(iterate && !opts->global_increment)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s iterate_count needs global_increment", name);
+        return 0;
+    }
+    if(!iterate && (opts->lds_increment || opts->global_increment))
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s lds_increment / global_increment need iterate_count", name);
+        return 0;
+    }
+    if(iterate && !rocke_i_check_i32_value(b, name, "global_increment", opts->global_increment))
+        return 0;
     /* pad_interval < 0 means "no LDS padding" (Python: pad_interval=None). */
     pad_enable = pad_interval >= 0;
     if(pad_enable && pad_interval > 7)
@@ -2045,9 +2116,12 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
     group0[3] = rocke_b_lor(b, lo, hi);
     /* Group 1: flags | tensor dims split 16/16 across words | tile dims |
      * dim-0 stride = row_stride; dim-1 stride = 1, as CK Tile programs rank 2. */
-    flags = (uint32_t)workgroup_mask | (uint32_t)data_size << 16 | (uint32_t)pad_enable << 20
-            | (uint32_t)(pad_enable ? pad_interval : 0) << 22 | (uint32_t)pad_amount << 25;
+    flags = (uint32_t)workgroup_mask | (uint32_t)data_size << 16 | (uint32_t)iterate << 19
+            | (uint32_t)pad_enable << 20 | (uint32_t)(pad_enable ? pad_interval : 0) << 22
+            | (uint32_t)pad_amount << 25;
     group1[0] = rocke_i_tdm_word(b, flags);
+    if(opts->workgroup_mask_value)
+        group1[0] = rocke_b_lor(b, group1[0], opts->workgroup_mask_value);
     group1[1] = rocke_b_shl(b, tensor_dim0, c16);
     lo = rocke_b_lshr(b, tensor_dim0, c16);
     hi = rocke_b_shl(b, tensor_dim1, c16);
@@ -2067,6 +2141,18 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
     out[1] = rocke_b_vec_pack(b, group1, 8, rocke_i32());
     zero4 = rocke_b_zero_vec(b, rocke_i32(), 4);
     out[2] = zero4;
+    if(iterate)
+    {
+        /* Group 2 (mode 0): tensor_dim2 = 0 | lds increment | global increment
+         * lo | global increment hi[15:0], iterate_count - 1 [31:16]. */
+        group2[0] = rocke_b_const_i32(b, 0);
+        group2[1] = rocke_i_tdm_word(b, opts->lds_increment);
+        group2[2] = opts->global_increment;
+        group2[3] = rocke_i_tdm_word(b, (uint32_t)(opts->iterate_count - 1) << 16);
+        for(i = 0; i < 4; ++i)
+            group2[i] = rocke_b_readfirstlane(b, group2[i]);
+        out[2] = rocke_b_vec_pack(b, group2, 4, rocke_i32());
+    }
     out[3] = zero4;
     out[4] = rocke_b_zero_vec(b, rocke_i32(), 8);
     return rocke_i_live(b);

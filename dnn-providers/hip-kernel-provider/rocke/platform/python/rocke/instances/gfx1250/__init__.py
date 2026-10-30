@@ -32,6 +32,7 @@ from .mxfp4_tdm_gemm import (
 from .mxfp4_tdm_gemm_variants import (
     BASE_VARIANT as MXFP4_BASE_VARIANT,
     MXFP4_GEMM_BLOCKED_VARIANTS,
+    MXFP4_GEMM_TRIAL_VARIANTS,
     MXFP4_GEMM_VARIANTS,
     assert_variants_cumulative,
     variant_flags as mxfp4_variant_flags,
@@ -83,6 +84,7 @@ __all__ = [
     "mxfp4_tdm_gemm_signature",
     "MXFP4_BASE_VARIANT",
     "MXFP4_GEMM_BLOCKED_VARIANTS",
+    "MXFP4_GEMM_TRIAL_VARIANTS",
     "MXFP4_GEMM_VARIANTS",
     "assert_variants_cumulative",
     "mxfp4_variant_flags",

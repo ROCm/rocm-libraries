@@ -2416,7 +2416,7 @@ class IRBuilder:
         """Workgroups per cluster along ``axis``: ``cluster_workgroup_max_id + 1``."""
         return self.add(self.cluster_workgroup_max_id(axis), self.const_i32(1))
 
-    def cluster_barrier(self) -> None:
+    def cluster_barrier(self, *, fences: bool = True) -> None:
         """Barrier across every workgroup of the cluster.
 
         Lowers to ``fence syncscope("cluster") release``,
@@ -2427,8 +2427,16 @@ class IRBuilder:
         barrier, then one wave per workgroup signals the cluster barrier and
         all waves wait on it; the workgroup barrier immediates used by
         :meth:`s_barrier_signal` stay separate.
+
+        ``fences=False`` emits only the intrinsic, for callers that order
+        their memory traffic with explicit wait counters (for example TDM
+        loads tracked by ``s_wait_tensorcnt``). The acquire fence otherwise
+        invalidates the vector cache on every call.
         """
-        self._op("tile.cluster_barrier")
+        if fences:
+            self._op("tile.cluster_barrier")
+        else:
+            self._op("tile.cluster_barrier", attrs={"fences": False})
 
     # ----- memory -----
 
@@ -5128,9 +5136,12 @@ class IRBuilder:
         row_stride: Value,
         tile_dim0: int,
         tile_dim1: int,
-        workgroup_mask: int = 0,
+        workgroup_mask: int | Value = 0,
         pad_interval: int | None = None,
         pad_amount: int = 0,
+        iterate_count: int = 0,
+        lds_increment: int = 0,
+        global_increment: Value | None = None,
     ) -> tuple[Value, Value, Value, Value, Value]:
         """Build the five D# groups for a rank-2 TDM tile transfer.
 
@@ -5143,12 +5154,23 @@ class IRBuilder:
         ``pad_interval`` is given, which enables LDS padding with the raw
         ``pad_interval`` (0..7) and ``pad_amount`` (0..127) fields.
         ``workgroup_mask`` selects the cluster workgroups that receive the
-        tile (0 = only the issuing workgroup).
+        tile (0 = only the issuing workgroup). It may be an ``int`` or a
+        wave-uniform i32 IR value whose bits above 15 are zero; bit ``i`` is
+        the workgroup whose ``cluster_workgroup_flat_id`` is ``i``.
+
+        ``iterate_count`` > 0 enables iterate mode: the transfer repeats the
+        tile ``iterate_count`` times (1..65536), advancing the LDS address by
+        ``lds_increment`` elements and the global address by
+        ``global_increment`` elements (an i32 value) after each one. It is
+        how an LDS pad period longer than the 1024 B the pad field can encode
+        is built: each iteration writes one pad period and ``lds_increment``
+        skips the pad.
 
         Group 0 holds the addresses, group 1 the shape and element size;
-        groups 2..4 are zero (no rank > 2, no gather, no iteration). Every
-        dword is made wave-uniform with ``readfirstlane``. The layout
-        matches CK Tile's ``TDM_GROUP0`` / ``TDM_GROUP1``.
+        group 2 holds the iteration fields (zero unless iterating); groups
+        3..4 are zero (no rank > 2, no gather). Every dword is made
+        wave-uniform with ``readfirstlane``. The layout matches CK Tile's
+        ``TDM_GROUP0`` / ``TDM_GROUP1`` / ``TDM_GROUP2_MODE0``.
         """
         name = "tdm_descriptor_2d"
         if (
@@ -5174,9 +5196,31 @@ class IRBuilder:
         for field, value in (("tile_dim0", tile_dim0), ("tile_dim1", tile_dim1)):
             if not 1 <= value <= 0xFFFF:
                 raise ValueError(f"{name} {field} must be in 1..65535 (got {value})")
-        if not 0 <= workgroup_mask <= 0xFFFF:
+        if isinstance(workgroup_mask, Value):
+            self._check_i32_value(name, "workgroup_mask", workgroup_mask)
+            dynamic_mask, static_mask = workgroup_mask, 0
+        elif not 0 <= workgroup_mask <= 0xFFFF:
             raise ValueError(
                 f"{name} workgroup_mask must be in 0..65535 (got {workgroup_mask})"
+            )
+        else:
+            dynamic_mask, static_mask = None, workgroup_mask
+        iterate = iterate_count > 0
+        if not 0 <= iterate_count <= 0x10000:
+            raise ValueError(
+                f"{name} iterate_count must be in 0..65536 (got {iterate_count})"
+            )
+        if iterate and global_increment is None:
+            raise ValueError(f"{name} iterate_count needs global_increment")
+        if not iterate and (lds_increment or global_increment is not None):
+            raise ValueError(
+                f"{name} lds_increment / global_increment need iterate_count"
+            )
+        if iterate:
+            self._check_i32_value(name, "global_increment", global_increment)
+        if lds_increment < 0 or lds_increment > 0xFFFFFFFF:
+            raise ValueError(
+                f"{name} lds_increment must fit in 32 bits (got {lds_increment})"
             )
         pad_enable = pad_interval is not None
         if pad_enable and not 0 <= pad_interval <= 7:
@@ -5206,14 +5250,18 @@ class IRBuilder:
         # Group 1: flags | tensor dims split 16/16 across words | tile dims |
         # dim-0 stride = row_stride; dim-1 stride = 1, as CK Tile programs rank 2.
         flags = (
-            workgroup_mask
+            static_mask
             | data_size << 16
+            | int(iterate) << 19
             | int(pad_enable) << 20
             | (pad_interval or 0) << 22
             | pad_amount << 25
         )
+        flags_word = word(flags)
+        if dynamic_mask is not None:
+            flags_word = self.lor(flags_word, dynamic_mask)
         group1 = (
-            word(flags),
+            flags_word,
             self.shl(tensor_dim0, c16),
             self.lor(self.lshr(tensor_dim0, c16), self.shl(tensor_dim1, c16)),
             self.lor(self.lshr(tensor_dim1, c16), word(tile_dim0 << 16)),
@@ -5225,7 +5273,18 @@ class IRBuilder:
         d0 = self.vec_pack([self.readfirstlane(v) for v in group0], I32)
         d1 = self.vec_pack([self.readfirstlane(v) for v in group1], I32)
         zero4 = self.zero_vec(I32, 4)
-        return d0, d1, zero4, zero4, self.zero_vec(I32, 8)
+        d2 = zero4
+        if iterate:
+            # Group 2 (mode 0): tensor_dim2 = 0 | lds increment | global
+            # increment lo | global increment hi[15:0], iterate_count - 1 [31:16].
+            group2 = (
+                self.const_i32(0),
+                word(lds_increment),
+                global_increment,
+                word((iterate_count - 1) << 16),
+            )
+            d2 = self.vec_pack([self.readfirstlane(v) for v in group2], I32)
+        return d0, d1, d2, zero4, self.zero_vec(I32, 8)
 
     def iglp_opt(self, level: int = 0) -> None:
         """`__builtin_amdgcn_iglp_opt(level)`.

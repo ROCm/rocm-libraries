@@ -1705,6 +1705,9 @@ void rocke_b_flat_prefetch(rocke_ir_builder_t* b, rocke_value_t* ptr, int cachep
 /* gfx1250 cluster barrier: cluster-scope release fence, s.cluster.barrier,
  * cluster-scope acquire fence. */
 void rocke_b_cluster_barrier(rocke_ir_builder_t* b);
+/* rocke_b_cluster_barrier with ``fences`` false emits only the intrinsic
+ * (Python ``cluster_barrier(fences=False)``). */
+void rocke_b_cluster_barrier_ex(rocke_ir_builder_t* b, bool fences);
 /* gfx1250 cluster multicast loads. mask (i32, wave-uniform) selects the
  * receiving workgroups by cluster flat id (M0[15:0]). cluster_load returns i32
  * (4 bytes), vec<i32x2> (8) or vec<i32x4> (16). */
@@ -1737,6 +1740,31 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
                               int pad_interval,
                               int pad_amount,
                               rocke_value_t* out[5]);
+/* Optional rocke_b_tdm_descriptor_2d_ex fields (zero-initialise for the
+ * defaults). ``workgroup_mask_value`` (i32, wave-uniform) is ORed into the
+ * static mask. ``iterate_count`` > 0 enables iterate mode with
+ * ``lds_increment`` / ``global_increment`` (i32 value) in elements. */
+typedef struct rocke_tdm_descriptor_opts
+{
+    rocke_value_t* workgroup_mask_value;
+    int iterate_count;
+    uint32_t lds_increment;
+    rocke_value_t* global_increment;
+} rocke_tdm_descriptor_opts_t;
+int rocke_b_tdm_descriptor_2d_ex(rocke_ir_builder_t* b,
+                                 rocke_value_t* global_ptr,
+                                 rocke_value_t* lds_addr,
+                                 int elem_bytes,
+                                 rocke_value_t* tensor_dim0,
+                                 rocke_value_t* tensor_dim1,
+                                 rocke_value_t* row_stride,
+                                 int tile_dim0,
+                                 int tile_dim1,
+                                 int workgroup_mask,
+                                 int pad_interval,
+                                 int pad_amount,
+                                 const rocke_tdm_descriptor_opts_t* opts,
+                                 rocke_value_t* out[5]);
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level);
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level);
 void rocke_b_sched_barrier(rocke_ir_builder_t* b, int mask);
