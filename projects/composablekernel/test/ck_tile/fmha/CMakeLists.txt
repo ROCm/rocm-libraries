@@ -210,6 +210,13 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         TIMEOUT 1200)
 
     foreach(dtype IN ITEMS bf16 fp16)
+        set(window_target test_ck_tile_fmha_qr_tdm_bhsd_window_${dtype})
+        add_qr_tdm_sched_gtest(${window_target} test_qr_tdm_bhsd_window.cpp)
+        if(dtype STREQUAL "fp16")
+            target_compile_definitions(${window_target} PRIVATE CK_TILE_FMHA_BHSD_WINDOW_FP16=1)
+        endif()
+        target_compile_options(${window_target} PRIVATE -Wno-float-equal
+            -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
         if(TARGET ${FMHA_FWD_INSTANCES})
             set(target test_ck_tile_fmha_qr_tdm_sched_fwd_${dtype})
             add_qr_tdm_sched_gtest(${target} test_qr_tdm_sched_fwd.cpp)
