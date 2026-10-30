@@ -816,15 +816,16 @@ rankings the memo answered. The entry `tilewright-levers-parity`
 option, with each alone, and with both, with and without the check, and runs
 them on every shipped model with the sample kernel pool and the benches'
 default shapes, and on a copy of each model that takes the drift fallback
-served with it (`tests/drift_flag.cpp`), whose cells that pool mostly
-degrades: every build must print the hashes of the build with neither, and
-the memo must answer some re-rank in every build that has it. It does
-the same with copies of the models it ranks that the alignment veto can
-serve (the drift fallback's copies among them), given the veto whether or
-not they ship with one (`tests/veto_models.cpp`), on problems of the two
-layouts it applies to, with each sample kernel's non-temporal siblings in
-the pool, and requires the veto to change some of their hashes against the
-copies without it. Without a materialized shipped model it is skipped.
+served with it, whether or not it ships with one (`tests/drift_flag.cpp`),
+whose cells that pool mostly degrades: every build must print the hashes of
+the build with neither, and the memo must answer some re-rank in every build
+that has it. It does the same with copies of the models it ranks that the
+alignment veto can serve (the drift fallback's copies among them), given the
+veto whether or not they ship with one (`tests/veto_models.cpp`), on problems
+of the two layouts it applies to, with each sample kernel's non-temporal
+siblings in the pool, and requires the veto to change some of their hashes
+against the copies without it. Without a materialized shipped model it is
+skipped.
 
 As a subproject, `add_subdirectory(shared/tilewright)` provides the static
 library `roc::tilewright`. An installed tilewright is found with

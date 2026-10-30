@@ -448,30 +448,37 @@ void refresh_crc(Image& image) {
   put_u32(image, image.at.at("crc"), crc32(image.bytes.data() + begin, n));
 }
 
-std::vector<unsigned char> with_drift_fallback(const std::vector<unsigned char>& bytes,
-                                               std::uint32_t keep_ppm) {
+namespace {
+
+std::uint32_t get_u32(const std::vector<unsigned char>& bytes, std::size_t at) {
+  std::uint32_t v = 0;
+  for (std::size_t i = 4; i-- > 0;) v = v << 8 | bytes.at(at + i);
+  return v;
+}
+
+void set_u32(std::vector<unsigned char>& out, std::size_t at, std::uint32_t v) {
+  for (std::size_t i = 0; i < 4; ++i) out[at + i] = static_cast<unsigned char>(v >> (8 * i));
+}
+
+// Where an MLREC_v3 image's serving flags are (*flags_at, their value *flags)
+// and where the drift fallback's field is, or would go: after the fields of
+// the trained keys, the CU floor and the alignment veto.
+std::size_t drift_field(const std::vector<unsigned char>& bytes,
+                        std::size_t* flags_at,
+                        std::uint32_t* flags) {
   const auto u16 = [&](std::size_t at) {
     return static_cast<std::uint32_t>(bytes.at(at)) | static_cast<std::uint32_t>(bytes.at(at + 1))
                                                           << 8;
   };
-  const auto u32 = [&](std::size_t at) {
-    std::uint32_t v = 0;
-    for (std::size_t i = 4; i-- > 0;) v = v << 8 | bytes.at(at + i);
-    return v;
-  };
-  const auto put = [](std::vector<unsigned char>& out, std::size_t at, std::uint32_t v) {
-    for (std::size_t i = 0; i < 4; ++i) out[at + i] = static_cast<unsigned char>(v >> (8 * i));
-  };
-  if (bytes.size() < 52 || std::memcmp(bytes.data(), "MLREC_v3", 8) != 0)
-    throw std::invalid_argument("not an MLREC_v3 image");
+  const auto u32 = [&](std::size_t at) { return get_u32(bytes, at); };
   std::size_t at = 52;
   at += 2 + u16(at);                    // feature_catalog_hash
   at += 8;                              // feature_spec_hash
   at += 2 + u16(at);                    // arch
   at += 16;                             // parallel_mi_cu, mi_default_cycles
   at += 4 + 24 * std::size_t{u32(at)};  // MI table
-  const std::size_t flags_at = at;
-  const std::uint32_t flags  = u32(at);
+  *flags_at = at;
+  *flags    = u32(at);
   at += 4 + 4 + 16 + 1 + 1;  // serving flags, cascade, CU fractions, schedules, clip
   const std::uint32_t n_attr = u16(at);
   at += 2;
@@ -481,20 +488,48 @@ std::vector<unsigned char> with_drift_fallback(const std::vector<unsigned char>&
     at += 1;
     if (transform == 3) at += 2 + 8 * std::size_t{u16(at)};
   }
+  if ((*flags & 0x80) != 0) at += 4 + 8 * std::size_t{u32(at)};
+  if ((*flags & 0x100) != 0) at += 4;
+  if ((*flags & 0x200) != 0) at += 8;
+  return at;
+}
+
+bool is_v3(const std::vector<unsigned char>& bytes) {
+  return bytes.size() >= 52 && std::memcmp(bytes.data(), "MLREC_v3", 8) == 0;
+}
+
+}  // namespace
+
+std::vector<unsigned char> with_drift_fallback(const std::vector<unsigned char>& bytes,
+                                               std::uint32_t keep_ppm) {
+  if (!is_v3(bytes)) throw std::invalid_argument("not an MLREC_v3 image");
+  std::size_t flags_at = 0;
+  std::uint32_t flags  = 0;
+  const std::size_t at = drift_field(bytes, &flags_at, &flags);
   if ((flags & 0x400) != 0) throw std::invalid_argument("the image has the drift fallback");
   // The field follows the fields of every flag before it, and this walk knows
   // those of the trained keys, the CU floor and the alignment veto only.
   if ((flags & ~std::uint32_t{0x3FF}) != 0)
     throw std::invalid_argument("serving flags with header fields the rewrite does not know");
-  if ((flags & 0x80) != 0) at += 4 + 8 * std::size_t{u32(at)};
-  if ((flags & 0x100) != 0) at += 4;
-  if ((flags & 0x200) != 0) at += 8;
   std::vector<unsigned char> out(bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(at));
   out.resize(at + 4);
-  put(out, at, keep_ppm);
+  set_u32(out, at, keep_ppm);
   out.insert(out.end(), bytes.begin() + static_cast<std::ptrdiff_t>(at), bytes.end());
-  put(out, flags_at, flags | 0x400);
-  put(out, 12, u32(12) + 4);
+  set_u32(out, flags_at, flags | 0x400);
+  set_u32(out, 12, get_u32(bytes, 12) + 4);
+  return out;
+}
+
+std::vector<unsigned char> without_drift_fallback(const std::vector<unsigned char>& bytes) {
+  if (!is_v3(bytes)) return bytes;
+  std::size_t flags_at = 0;
+  std::uint32_t flags  = 0;
+  const std::size_t at = drift_field(bytes, &flags_at, &flags);
+  if ((flags & 0x400) == 0) return bytes;
+  std::vector<unsigned char> out(bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(at));
+  out.insert(out.end(), bytes.begin() + static_cast<std::ptrdiff_t>(at + 4), bytes.end());
+  set_u32(out, flags_at, flags & ~std::uint32_t{0x400});
+  set_u32(out, 12, get_u32(bytes, 12) - 4);
   return out;
 }
 

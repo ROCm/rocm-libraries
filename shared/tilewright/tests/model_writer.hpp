@@ -154,9 +154,15 @@ void refresh_crc(Image& image);
 // floor and the alignment veto's fields): the header grows by the field, the
 // payload is unchanged. Throws std::invalid_argument for a file that has the
 // flag, or a serving flag above 0x200, whose header fields it cannot place the
-// field after.
+// field after; without_drift_fallback first gives a file that has the flag
+// another share.
 std::vector<unsigned char> with_drift_fallback(const std::vector<unsigned char>& bytes,
                                                std::uint32_t keep_ppm);
+
+// `bytes` without the drift fallback (its serving flag and field removed, as
+// training_pipeline/lib/mlrec.py's without_drift_fallback removes them): the
+// file itself when it is not an MLREC_v3 file or has none.
+std::vector<unsigned char> without_drift_fallback(const std::vector<unsigned char>& bytes);
 
 void put_u16(Image& image, std::size_t offset, std::uint16_t v);
 void put_u32(Image& image, std::size_t offset, std::uint32_t v);

@@ -14,6 +14,7 @@
 #include <fstream>
 #include <initializer_list>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -666,10 +667,20 @@ TEST_CASE("the v3 drift fallback is validated", "[loader][v3][drift]") {
     CHECK(info.min_effective_cus == 32);
     CHECK(info.trained_keys == 2);
     CHECK(info.provenance.config_id == "cfg");
-    // The rewrite that flags a file makes the bytes the writer makes.
+    // The rewrite that flags a file makes the bytes the writer makes; the one that removes the
+    // flag gives the file without it, so that a file that has it takes another share; a file
+    // without it, or a file that is not MLREC_v3, is its own.
     ModelSpec plain        = all;
     plain.v3_serving_flags = kGate | kFloor;
     CHECK(with_drift_fallback(write_model(plain).bytes, 1000000) == image.bytes);
+    CHECK(without_drift_fallback(image.bytes) == write_model(plain).bytes);
+    CHECK_THROWS_AS(with_drift_fallback(image.bytes, 1), std::invalid_argument);
+    ModelSpec other      = all;
+    other.drift_keep_ppm = 1;
+    CHECK(with_drift_fallback(without_drift_fallback(image.bytes), 1) == write_model(other).bytes);
+    CHECK(without_drift_fallback(write_model(plain).bytes) == write_model(plain).bytes);
+    CHECK(without_drift_fallback(write_model(small_spec()).bytes) ==
+          write_model(small_spec()).bytes);
     Image swapped = image;
     put_u32(swapped, swapped.at.at("v3_serving_flags"), kGate | kDrift);
     CHECK_FALSE(load_error(swapped).empty());
@@ -707,6 +718,10 @@ TEST_CASE("the v3 drift fallback is validated", "[loader][v3][drift]") {
     drift.v3_serving_flags = kGate | kFloor | kDrift;
     CHECK(with_alignment_veto(write_model(drift).bytes, 512, 1024) == image.bytes);
     CHECK(without_alignment_veto(image.bytes) == write_model(drift).bytes);
+    CHECK(without_drift_fallback(image.bytes) == write_model(veto).bytes);
+    ModelSpec other      = all;
+    other.drift_keep_ppm = 1;
+    CHECK(with_drift_fallback(without_drift_fallback(image.bytes), 1) == write_model(other).bytes);
     // Clearing either flag leaves its fields as bytes the header does not expect.
     for (const std::uint32_t flags : {kGate | kFloor | kVeto, kGate | kFloor | kDrift}) {
       Image bad = image;

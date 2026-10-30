@@ -279,23 +279,26 @@ TEST_CASE("shipped models given the alignment veto rank as without the kernels i
     std::ifstream in(path, std::ios::binary);
     const std::vector<unsigned char> shipped((std::istreambuf_iterator<char>(in)),
                                              std::istreambuf_iterator<char>());
-    // The model without the veto, whether or not it ships with one.
-    const std::vector<unsigned char> stripped = without_alignment_veto(shipped);
-    const std::vector<unsigned char>& bytes   = stripped.empty() ? shipped : stripped;
+    // The model without the drift fallback, whose degraded cells the pool
+    // decides (the reference below ranks the pool less the kernels the veto
+    // names), and without the veto, whether or not it ships with them.
+    const std::vector<unsigned char> undrifted = without_drift_fallback(shipped);
+    const std::vector<unsigned char> stripped  = without_alignment_veto(undrifted);
+    const std::vector<unsigned char>& bytes    = stripped.empty() ? undrifted : stripped;
     std::string err;
     const tw::ModelPtr plain = tw::load_model_from_memory(bytes.data(), bytes.size(), &err);
     INFO(err);
     REQUIRE(plain);
     const tw::ModelInfo info = tw::describe(*plain);
     REQUIRE_FALSE(info.alignment_veto.on);
-    if (bytes.size() != shipped.size()) {
+    if (bytes.size() != undrifted.size()) {
       // A model shipped with the veto is the model without it, the veto added.
       const tw::ModelPtr as_shipped =
-          tw::load_model_from_memory(shipped.data(), shipped.size(), &err);
+          tw::load_model_from_memory(undrifted.data(), undrifted.size(), &err);
       REQUIRE(as_shipped);
       const tw::AlignmentVeto v = tw::describe(*as_shipped).alignment_veto;
       REQUIRE(v.on);
-      CHECK(with_alignment_veto(bytes, v.k_min, v.align_bits) == shipped);
+      CHECK(with_alignment_veto(bytes, v.k_min, v.align_bits) == undrifted);
     }
     const std::vector<unsigned char> veto = with_alignment_veto(bytes, 512, 1024);
     if (info.format_version < 3) {
@@ -532,9 +535,11 @@ TEST_CASE("shipped models served with the drift fallback rank as its rule says",
     INFO(path.string());
     if (path.filename() == kNotFlagged) continue;
     std::ifstream in(path, std::ios::binary);
-    const std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(in)),
-                                           std::istreambuf_iterator<char>());
-    const tw::ModelPtr plain = tw::load_model_from_memory(bytes.data(), bytes.size());
+    const std::vector<unsigned char> shipped((std::istreambuf_iterator<char>(in)),
+                                             std::istreambuf_iterator<char>());
+    // The model without the fallback, whether or not it ships with one.
+    const std::vector<unsigned char> bytes = without_drift_fallback(shipped);
+    const tw::ModelPtr plain               = tw::load_model_from_memory(bytes.data(), bytes.size());
     REQUIRE(plain);
     const tw::ModelInfo info = tw::describe(*plain);
     if (info.format_version < 3 || !info.whitelist_tier || info.launch_keys) continue;

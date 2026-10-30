@@ -1124,10 +1124,10 @@ def test_alignment_veto_reads_the_width_of_the_operand_it_applies_to():
 NOT_FLAGGED = "gfx950_Cijk_Alik_Bjlk_S_MX_B_Bias_HAS_SAV_UserArgs.tilewright.bin"
 
 
-def _with_drift_fallback(data, keep_ppm):
-    """An MLREC_v3 image served with the drift fallback (serving flag bit 10 and
-    its u32 keep_ppm after the trained keys, the CU floor and the alignment
-    veto's fields)."""
+def _drift_field(data):
+    """(where the serving flags are, their value, where the drift fallback's
+    u32 keep_ppm is or would go) of an MLREC_v3 image: the field follows
+    those of the trained keys, the CU floor and the alignment veto."""
     at = 52
     (n,) = struct.unpack_from("<H", data, at)
     at += 2 + n + 8
@@ -1137,9 +1137,6 @@ def _with_drift_fallback(data, keep_ppm):
     at += 4 + 24 * n_mi
     flags_at = at
     (flags,) = struct.unpack_from("<I", data, at)
-    # The field follows the fields of every flag before it, and this walk
-    # knows those of the trained keys, the CU floor and the alignment veto only.
-    assert not flags & ~0x3FF, f"serving flags {flags:#x} beyond what it walks"
     at += 4 + 4 + 16 + 2
     (n_attr,) = struct.unpack_from("<H", data, at)
     at += 2
@@ -1158,9 +1155,35 @@ def _with_drift_fallback(data, keep_ppm):
         at += 4
     if flags & 0x200:
         at += 8
+    return flags_at, flags, at
+
+
+def _with_drift_fallback(data, keep_ppm):
+    """An MLREC_v3 image without the drift fallback served with it (serving
+    flag bit 10 and its u32 keep_ppm after the trained keys, the CU floor and
+    the alignment veto's fields); _without_drift_fallback first gives an
+    image that has it another share."""
+    flags_at, flags, at = _drift_field(data)
+    # The field follows the fields of every flag before it, and this walk
+    # knows those of the trained keys, the CU floor and the alignment veto only.
+    assert not flags & ~0x3FF, f"serving flags {flags:#x} beyond what it walks"
     out = bytearray(data[:at] + struct.pack("<I", keep_ppm) + data[at:])
     struct.pack_into("<I", out, flags_at, flags | 0x400)
     struct.pack_into("<I", out, 12, struct.unpack_from("<I", data, 12)[0] + 4)
+    return bytes(out)
+
+
+def _without_drift_fallback(data):
+    """An image without the drift fallback (its serving flag and field
+    removed): the image itself when it is not MLREC_v3 or has none."""
+    if data[:8] != b"MLREC_v3":
+        return data
+    flags_at, flags, at = _drift_field(data)
+    if not flags & 0x400:
+        return data
+    out = bytearray(data[:at] + data[at + 4 :])
+    struct.pack_into("<I", out, flags_at, flags & ~0x400)
+    struct.pack_into("<I", out, 12, struct.unpack_from("<I", data, 12)[0] - 4)
     return bytes(out)
 
 
@@ -1182,7 +1205,8 @@ def test_drift_fallback(model):
     for path in models:
         if path.name == NOT_FLAGGED:
             continue
-        data = path.read_bytes()
+        # The model without the fallback, whether or not it ships with one.
+        data = _without_drift_fallback(path.read_bytes())
         plain = tw.load_model_from_memory(data)
         info = tw.describe(plain)
         if info.format_version < 3 or not info.whitelist_tier or info.launch_keys:
@@ -1194,6 +1218,12 @@ def test_drift_fallback(model):
             continue  # a cell lists signatures, which the fallback does not count
         flagged += 1
         assert tw.describe(m).drift_keep_ppm == 1000000
+        # An image that has the fallback is the model without it, the fallback
+        # added, and takes another share once it is removed.
+        assert _without_drift_fallback(image) == data
+        other = _with_drift_fallback(_without_drift_fallback(image), 1)
+        assert tw.describe(tw.load_model_from_memory(other)).drift_keep_ppm == 1
+        assert _without_drift_fallback(other) == data
         name = info.provenance.launch_model
         launch = _ShippedLaunch(name) if name else None
         # A pool that grows never degrades more cells, and order never matters.

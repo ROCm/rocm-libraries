@@ -12,18 +12,18 @@
 # memo_check, the same pair of rankings, for some shape of some model, so that
 # the comparison reaches the memo. With DRIFT_FLAG (tests/drift_flag.cpp), a
 # copy of every model the drift fallback can serve, served with it at the
-# largest share, is ranked as well, except the models DRIFT_SKIP names (file
-# names without .tilewright.bin); the sample pool degrades most of their
-# cells. With VETO_MODELS (tests/veto_models.cpp), copies of the models the
-# alignment veto can serve, the drift fallback's copies among them, each
-# without the veto and with the veto of the gfx950 recipes (K above 512,
-# 128-byte lines) whether or not it ships with one, rank bf16 problems of the
-# two layouts the veto applies to (A and B transposed, and neither) with the
-# sample kernels and their siblings whose cache hint on A or on B is the
-# non-temporal one, and the same holds of the copies with the veto: equal
-# hashes in every build, memo answers in each memo build, and, so that the
-# comparison reaches the veto, hashes of some copy that differ from those of
-# the copy without it in the first build.
+# largest share whether or not it ships with it, is ranked as well, except the
+# models DRIFT_SKIP names (file names without .tilewright.bin); the sample pool
+# degrades most of their cells. With VETO_MODELS (tests/veto_models.cpp),
+# copies of the models the alignment veto can serve, the drift fallback's
+# copies among them, each without the veto and with the veto of the gfx950
+# recipes (K above 512, 128-byte lines) whether or not it ships with one, rank
+# bf16 problems of the two layouts the veto applies to (A and B transposed, and
+# neither) with the sample kernels and their siblings whose cache hint on A or
+# on B is the non-temporal one, and the same holds of the copies with the veto:
+# equal hashes in every build, memo answers in each memo build, and, so that
+# the comparison reaches the veto, hashes of some copy that differ from those
+# of the copy without it in the first build.
 # Without a materialized shipped model the entry is skipped. Each run's output
 # is kept in OUT.
 #

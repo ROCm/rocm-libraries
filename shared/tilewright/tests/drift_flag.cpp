@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 // drift_flag IN OUT KEEP_PPM writes the model file IN served with the drift
-// fallback at KEEP_PPM to OUT, for the ctest entry tilewright-levers-parity
-// (levers_parity.cmake). It exits 3 without writing for a file that is not
-// MLREC_v3 or that the engine refuses with the fallback (no whitelist tier,
-// launch keys, a cell that lists signatures), and 1 on any other error.
+// fallback at KEEP_PPM to OUT, whether or not IN has the fallback, for the
+// ctest entry tilewright-levers-parity (levers_parity.cmake). It exits 3
+// without writing for a file that is not MLREC_v3 or that the engine refuses
+// with the fallback (no whitelist tier, launch keys, a cell that lists
+// signatures), and 1 on any other error.
 
 #include "model_writer.hpp"
 
@@ -42,7 +43,8 @@ int main(int argc, char** argv) {
   }
   std::vector<unsigned char> image;
   try {
-    image = tilewright_test::with_drift_fallback(bytes, static_cast<std::uint32_t>(ppm));
+    image = tilewright_test::with_drift_fallback(tilewright_test::without_drift_fallback(bytes),
+                                                 static_cast<std::uint32_t>(ppm));
   } catch (const std::exception& e) {
     std::fprintf(stderr, "%s: %s\n", argv[1], e.what());
     return 1;
