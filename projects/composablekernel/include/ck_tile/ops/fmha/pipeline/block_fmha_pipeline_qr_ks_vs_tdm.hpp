@@ -107,6 +107,11 @@ struct BlockFmhaPipelineQRKSVSTdm
     // fp8 O goes to global through LDS and one TDM store per wave (the kernel's tdm_store_2d),
     // so no per-lane O address is carried through the mainloop.
     static constexpr bool kTdmOStore = is_any_of<KDataType, fp8_t, bf8_t>::value;
+    // Edge-tile masking selects -INF through VGPR keep bits instead of per-element lane-mask
+    // predicates, which fill the SGPR file on causal/mask kernels.
+    static constexpr bool kMaskByBits = is_any_of<KDataType, fp8_t, bf8_t>::value;
+    // fp8 casts and sums P one M band at a time (MakePForGemm1AndRowSum).
+    static constexpr bool kBandedPCast = is_any_of<KDataType, fp8_t, bf8_t>::value;
 
     static constexpr bool kStoreLSE        = Problem::kStoreLSE;
     static constexpr bool kHasUnevenSplits = true;
@@ -665,6 +670,50 @@ struct BlockFmhaPipelineQRKSVSTdm
         // no per-block max is needed.
         p_scale = e8m0_one();
         return p_tile;
+    }
+
+    // MakePForGemm1 plus the local row sum, one M band (MIter) at a time: band mi is cast and
+    // summed before band mi + 1, so only one band of fp32 P has to outlive the exp2 pass.
+    // Both thread buffers are M-outer, so band mi is chunk mi of P and of the row sums.
+    template <typename Gemm1, typename PComputeTensor>
+    CK_TILE_DEVICE static auto MakePForGemm1AndRowSum(const PComputeTensor& p_compute,
+                                                      int32_t& p_scale)
+    {
+        constexpr index_t kPMI      = Gemm1::MIterPerWarp;
+        constexpr index_t kPKI      = kN0 / Gemm1::WarpGemm::kK;
+        constexpr index_t kBandRows = kM0 / kPMI;
+
+        auto p_tile = make_static_distributed_tensor<PDataType>(
+            Policy::template MakePRegTileDistribution<Problem>());
+        using RowSum = remove_cvref_t<decltype(ReduceRowSumLocal(p_compute))>;
+        auto rowsum =
+            make_static_distributed_tensor<SMPLComputeDataType>(RowSum::get_tile_distribution());
+        constexpr index_t kBandSums = RowSum::get_thread_buffer_size() / kPMI;
+
+        static_for<0, kPMI, 1>{}([&](auto mi) {
+            constexpr index_t m0 = decltype(mi)::value * kBandRows;
+            const auto band =
+                get_slice_tile(p_compute, sequence<m0, 0>{}, sequence<m0 + kBandRows, kN0>{});
+            static_assert(decltype(band)::get_thread_buffer_size() * kPMI ==
+                          PComputeTensor::get_thread_buffer_size());
+
+            const auto p_src        = cast_tile<PDataType>(band);
+            constexpr index_t kPSub = decltype(p_src)::get_thread_buffer_size() / kPKI;
+            using p_bulk_t          = array<PDataType, kPSub>;
+            static_for<0, kPKI, 1>{}([&](auto ki) {
+                p_tile.get_thread_buffer().template set_as<p_bulk_t>(
+                    number<ki * kPMI + mi>{},
+                    p_src.get_thread_buffer().template get_as<p_bulk_t>(ki));
+            });
+
+            const auto band_sum = ReduceRowSumLocal(band);
+            static_assert(decltype(band_sum)::get_thread_buffer_size() == kBandSums);
+            using sum_bulk_t = array<SMPLComputeDataType, kBandSums>;
+            rowsum.get_thread_buffer().template set_as<sum_bulk_t>(
+                mi, band_sum.get_thread_buffer().template get_as<sum_bulk_t>(number<0>{}));
+        });
+        p_scale = e8m0_one();
+        return make_tuple(p_tile, rowsum);
     }
 
     // Single V, double K LDS buffer path.
@@ -2123,15 +2172,30 @@ struct BlockFmhaPipelineQRKSVSTdm
                     mask.IsEdgeTile(q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
                 if(need_perpixel_check)
                 {
-                    set_tile_if(
-                        s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
-                            const auto row = q_origin.at(I0) + tile_idx.at(I0);
-                            const auto col = k_origin.at(I0) + tile_idx.at(I1);
-                            if constexpr(kHasSink)
-                                return mask.IsOutOfSinkBound(row, col);
-                            else
-                                return mask.IsOutOfBound(row, col);
-                        });
+                    if constexpr(kMaskByBits)
+                    {
+                        set_tile_unless_kept(
+                            s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
+                                const auto row = q_origin.at(I0) + tile_idx.at(I0);
+                                const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                                if constexpr(kHasSink)
+                                    return mask.GetInSinkBoundBits(row, col);
+                                else
+                                    return mask.GetInBoundBits(row, col);
+                            });
+                    }
+                    else
+                    {
+                        set_tile_if(
+                            s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
+                                const auto row = q_origin.at(I0) + tile_idx.at(I0);
+                                const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                                if constexpr(kHasSink)
+                                    return mask.IsOutOfSinkBound(row, col);
+                                else
+                                    return mask.IsOutOfBound(row, col);
+                            });
+                    }
                 }
             }
 
@@ -2276,27 +2340,33 @@ struct BlockFmhaPipelineQRKSVSTdm
                 next_kv_descale = load_tile_descale(i_total_loops + 1);
             }
 
-            // Cast P before its row sum: the sum's tree then overwrites fp32 P registers the
-            // cast has consumed, instead of holding its partials beside all of P.
-            int32_t p_scale = 0;
-            auto p_tile     = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
-
             // The current PV consumes P and corrected O, not the denominator.
             // Keep whole-P production unchanged and defer only l's reduction
             // in the guarded path. The original left-fold and row sync remain.
             constexpr bool kDeferDenominator = kStagedKPairs && FmhaMask::IsMasking;
-            auto rowsum_p                    = [&]() {
-                if constexpr(kDeferDenominator)
+            static_assert(!(kBandedPCast && kDeferDenominator));
+
+            // Cast P before its row sum: the sum's tree then overwrites fp32 P registers the
+            // cast has consumed, instead of holding its partials beside all of P.
+            int32_t p_scale   = 0;
+            auto p_and_rowsum = [&]() {
+                if constexpr(kBandedPCast)
                 {
-                    return m;
+                    return MakePForGemm1AndRowSum<decltype(gemm_1)>(p_compute, p_scale);
                 }
                 else
                 {
-                    auto sum = ReduceRowSumLocal(p_compute);
-                    ReduceRowSync(sum, f_sum);
-                    return sum;
+                    auto p = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
+                    if constexpr(kDeferDenominator)
+                        return make_tuple(p, m);
+                    else
+                        return make_tuple(p, ReduceRowSumLocal(p_compute));
                 }
             }();
+            auto p_tile   = p_and_rowsum.at(I0);
+            auto rowsum_p = p_and_rowsum.at(I1);
+            if constexpr(!kDeferDenominator)
+                ReduceRowSync(rowsum_p, f_sum);
             auto l_correction = m;
 
             // l{j}, Oacc{j}

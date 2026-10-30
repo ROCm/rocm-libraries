@@ -9,6 +9,7 @@
 #include "ck_tile/core/algorithm/coordinate_transform.hpp"
 #include "ck_tile/core/container/container_helper.hpp"
 #include "ck_tile/core/numeric/math.hpp"
+#include "ck_tile/core/utility/bit_cast.hpp"
 #include "ck_tile/core/utility/functional.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/core/tensor/tile_distribution.hpp"
@@ -203,6 +204,36 @@ set_tile_if(static_distributed_tensor<DataType, StaticTileDistribution>& out_ten
             {
                 out_tensor(distributed_indices) = value;
             }
+        });
+    });
+}
+
+// Like set_tile_if, but keep_bits(x_indices) returns an int32 that is all-ones to keep the element
+// and zero to write value. The element is chosen by a bit select on a VGPR, so no per-element
+// wave lane-mask predicate is formed (those can fill the SGPR file on large tiles). Columns are
+// the outer sweep so column-only terms of keep_bits die after the rows that share them.
+template <typename DataType, typename StaticTileDistribution, typename XIndicesKeepBits>
+CK_TILE_HOST_DEVICE void
+set_tile_unless_kept(static_distributed_tensor<DataType, StaticTileDistribution>& out_tensor,
+                     DataType value,
+                     XIndicesKeepBits keep_bits)
+{
+    static_assert(sizeof(DataType) == sizeof(int32_t), "bit select needs a 32-bit element");
+    const int32_t value_bits = bit_cast<int32_t>(value);
+    constexpr auto out_spans =
+        static_distributed_tensor<DataType, StaticTileDistribution>::get_distributed_spans();
+    sweep_tile_span(out_spans[number<1>{}], [&](auto idx1) {
+        sweep_tile_span(out_spans[number<0>{}], [&](auto idx0) {
+            constexpr auto distributed_indices = make_tuple(idx0, idx1);
+            const auto x_indices = get_x_indices_from_distributed_indices(StaticTileDistribution{},
+                                                                          distributed_indices);
+            int32_t keep         = keep_bits(x_indices);
+#if defined(__HIP_DEVICE_COMPILE__)
+            asm("" : "+v"(keep)); // stop the select folding back into a compare
+#endif
+            const int32_t bits = bit_cast<int32_t>(out_tensor(distributed_indices));
+            out_tensor(distributed_indices) =
+                bit_cast<DataType>((bits & keep) | (value_bits & ~keep));
         });
     });
 }

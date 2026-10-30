@@ -76,6 +76,16 @@ namespace impl {
 }
 // clang-format on
 
+namespace impl {
+// All-ones if a < b, else zero. The unsigned subtraction keeps this a VALU sub + shift; a signed
+// compare would fold into a wave lane-mask compare. Valid while |a - b| < 2^31, which holds when
+// seqlen_q + seqlen_k < 2^31: the bounds below (row + x, -y + row + 1) share that limit.
+CK_TILE_HOST_DEVICE constexpr int32_t lt_bits(index_t a, index_t b)
+{
+    return static_cast<int32_t>(static_cast<uint32_t>(a) - static_cast<uint32_t>(b)) >> 31;
+}
+} // namespace impl
+
 template <bool IsMasking_ = true, bool IsLocal_ = false>
 struct GenericAttentionMask
 {
@@ -277,6 +287,28 @@ struct GenericAttentionMask
         else
             return i_x >= x_end || i_y >= y_total;
 #endif
+    }
+
+    // All-ones where IsOutOfBound is false, zero where it is true, kept in a VGPR.
+    CK_TILE_HOST_DEVICE constexpr int32_t GetInBoundBits(index_t i_y, index_t i_x) const
+    {
+        if constexpr(!IsMasking)
+            return impl::lt_bits(i_x, x_total);
+        const index_t x_end = min(i_y + x, x_total);
+        if constexpr(IsLocal)
+            return ~impl::lt_bits(i_x, -y + i_y + 1) & impl::lt_bits(i_x, x_end);
+        else
+            return impl::lt_bits(i_x, x_end) & impl::lt_bits(i_y, y_total);
+    }
+
+    // All-ones where IsOutOfSinkBound is false, zero where it is true, kept in a VGPR.
+    CK_TILE_HOST_DEVICE constexpr int32_t GetInSinkBoundBits(index_t i_y, index_t i_x) const
+    {
+        if constexpr(!IsMasking)
+            return impl::lt_bits(i_x, x_total);
+        const int32_t in_sink = impl::lt_bits(i_x, sink) & impl::lt_bits(i_x, i_y + x) &
+                                impl::lt_bits(y, y_total) & impl::lt_bits(i_y, x_total);
+        return in_sink | GetInBoundBits(i_y, i_x);
     }
 
     // if current tile is at the edge, means need per-pixel mask check.
@@ -550,6 +582,26 @@ struct SimplifiedGenericAttentionMask
         else
             return i_x < x_start || i_x >= x_end || i_y >= y_total;
 #endif
+    }
+
+    // All-ones where IsOutOfBound is false, zero where it is true, kept in a VGPR.
+    CK_TILE_HOST_DEVICE constexpr int32_t GetInBoundBits(index_t i_y, index_t i_x) const
+    {
+        if constexpr(!IsMasking)
+            return impl::lt_bits(i_x, x_total);
+        const index_t x_end = min(i_y + x, x_total);
+        return ~impl::lt_bits(i_x, -y + i_y + 1) & impl::lt_bits(i_x, x_end) &
+               impl::lt_bits(i_y, y_total);
+    }
+
+    // All-ones where IsOutOfSinkBound is false, zero where it is true, kept in a VGPR.
+    CK_TILE_HOST_DEVICE constexpr int32_t GetInSinkBoundBits(index_t i_y, index_t i_x) const
+    {
+        if constexpr(!IsMasking)
+            return impl::lt_bits(i_x, x_total);
+        const int32_t in_sink = impl::lt_bits(i_x, sink) & impl::lt_bits(i_x, i_y + x) &
+                                impl::lt_bits(y, y_total) & impl::lt_bits(i_y, x_total);
+        return in_sink | GetInBoundBits(i_y, i_x);
     }
 
     // if current tile is at the edge, means need per-pixel mask check.
