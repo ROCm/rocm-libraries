@@ -244,8 +244,6 @@ struct fmha_bwd_args
     ck_tile::index_t nhead_q_offset    = 0;
     ck_tile::index_t nhead_ratio_qk_in = 0;
 
-    // Two-stage d_sink buffers in the workspace, filled in by fmha_bwd_launcher. Leave them
-    // at the defaults, which select the atomicAdd onto d_sink_ptr.
     void* sink_partial_ptr               = nullptr;
     ck_tile::index_t sink_slots_per_head = 0;
     void* sink_counter_ptr               = nullptr; // only for kernel sets without ConvertQGrad
@@ -752,9 +750,6 @@ struct fmha_bwd_launcher
     }
 
     private:
-    // Runs the selected instance once on exactly the batch/heads in `args`. Private because
-    // the workspace is sized for one chunk; callers must go through operator(), which splits
-    // the problem into chunks when the tile-split workspace would otherwise be too large.
     std::function<float(fmha_bwd_args, const ck_tile::stream_config&)> run{
         [](fmha_bwd_args, const ck_tile::stream_config&) {
             std::cerr << "fmha_bwd: no kernel found for given traits, skipping run\n";
@@ -841,11 +836,6 @@ struct fmha_bwd_launcher
             workspace_size = dq_ws_size_;
         }
 
-        // Two-stage d_sink: OGradDotO stores one partial per block instead of every warp
-        // atomically adding into d_sink, and the partials are folded afterwards: by
-        // ConvertQGrad when the kernel set has one, otherwise by the last OGradDotO block of
-        // each head. The latter is slower than the atomics, so those kernel sets only use it
-        // for deterministic runs, where the atomics' arrival-order dependence is not allowed.
         constexpr bool kHasConvertDq = !std::is_same_v<T2, void>;
         size_t sink_offset           = 0;
         size_t sink_bytes            = 0;
@@ -877,10 +867,8 @@ struct fmha_bwd_launcher
                   fmha_bwd_args a, const ck_tile::stream_config& s) {
             if(sink_bytes > 0 && a.d_sink_ptr != nullptr && a.workspace_ptr != nullptr)
             {
-                // Same block count as the OGradDotO grid: batch x ceil(max_seqlen_q / m0).
                 const ck_tile::index_t slots =
                     a.batch * ck_tile::integer_divide_ceil(a.max_seqlen_q, dot_do_o_m0);
-                // A run larger than the traits the workspace was sized for does not fit.
                 const bool fits =
                     sizeof(float) * a.nhead_q * slots <= sink_bytes &&
                     (counter_bytes == 0 ||
@@ -893,8 +881,6 @@ struct fmha_bwd_launcher
                         a.sink_counter_ptr = static_cast<char*>(a.workspace_ptr) + counter_offset;
                 }
             }
-            // Outside deterministic mode a run that does not fit keeps the atomic path.
-            // Inside it that would quietly give up the bit-identical d_sink, so refuse.
             if(deterministic && a.d_sink_ptr != nullptr && a.sink_partial_ptr == nullptr)
             {
                 std::cerr << "fmha_bwd: deterministic d_sink needs a workspace of this "

@@ -41,8 +41,6 @@ struct BlockFmhaBwdOGradDotO
     // Computes D = diag(dO * O) and optionally the sink token gradient.
     // sink_value: log-space sink score; pass -inf and both sink pointers as nullptr to skip sink.
     // atomic_sink_grad_ptr: per-head accumulator in global memory; nullptr disables sink path.
-    // sink_partial_slot: this block's slot in the two-stage d_sink buffer; when set, the block
-    //   sum is stored there instead of being atomically added to atomic_sink_grad_ptr.
     CK_TILE_HOST_DEVICE void operator()(const ODramBlockWindowTmp& o_dram_block_window_tmp,
                                         const OGradDramBlockWindowTmp& do_dram_block_window_tmp,
                                         const LSEDramBlockWindowTmp& lse_dram_block_window_tmp,
@@ -179,8 +177,6 @@ struct BlockFmhaBwdOGradDotO
 #if defined(__HIP_DEVICE_COMPILE__) || defined(__CUDA_ARCH__)
         if(sink_partial_slot != nullptr)
         {
-            // Two-stage path: sum the warps of the block and store it. Written even when the
-            // sink path was skipped, since every slot of the head is read. Block-uniform.
             constexpr index_t kWarps = kBlockSize / get_warp_size();
             __shared__ float warp_sums[kWarps];
 
@@ -197,8 +193,6 @@ struct BlockFmhaBwdOGradDotO
         }
         else if(sink_on && get_lane_id() == 0)
         {
-            // Single-pass path: one atomicAdd per warp onto d_sink[head]. The float sum depends
-            // on arrival order, so fmha_bwd_launcher keeps deterministic runs off this path.
             atomicAdd(reinterpret_cast<float*>(atomic_sink_grad_ptr), thread_sum);
         }
 #endif

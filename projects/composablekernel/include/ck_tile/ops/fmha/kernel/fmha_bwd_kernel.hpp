@@ -690,9 +690,6 @@ struct FmhaBwdPrepareWorkspaceKernel
     }
 };
 
-// Second stage of the two-stage d_sink: adds the sum of one head's per-block partials to
-// d_sink[head]. Single writer and fixed summation order, so the result is bit-identical from
-// run to run. Must be called by the whole block.
 template <index_t kBlockSize>
 CK_TILE_DEVICE void FmhaBwdFoldSinkPartials(const float* partials, float* d_sink, index_t num_slots)
 {
@@ -718,7 +715,6 @@ CK_TILE_DEVICE void FmhaBwdFoldSinkPartials(const float* partials, float* d_sink
     }
 }
 
-// Spacing, in ints, of the per-head arrival counters: one 128 B line each.
 inline constexpr index_t kFmhaBwdSinkCounterStride = 32;
 
 template <typename FmhaPipeline_,
@@ -792,8 +788,6 @@ struct FmhaBwdDQDKDVKernel
     static constexpr bool kUseTdmDKDVStore = false;
 #endif
 
-    // Batch-mode deterministic with one dq_acc slot per kv tile rather than per persistent
-    // worker. Chosen per instance by codegen; see FmhaBwdWorkspaceManager.
     static constexpr bool kDetTileSplit = kDetTileSplit_;
     static_assert(!kDetTileSplit || (kIsDeterministic && !kIsGroupMode && !kUseQrQtrDorPipeline),
                   "tile-split determinism is only defined for batch-mode deterministic "
@@ -820,10 +814,6 @@ struct FmhaBwdDQDKDVKernel
 
     CK_TILE_HOST static std::string GetName()
     {
-        // Best-effort name for standalone users of this kernel; it only covers the
-        // template parameters. The example and the generated *_get_name_() API report
-        // the codegen name from codegen/ops/fmha_bwd.py instead, which is the one that
-        // matches the generated .cpp file name.
         // clang-format off
         using bfs  = typename FmhaPipeline::BlockFmhaShape;
         using gbr0 = typename bfs::Gemm0BlockWarps;
@@ -1893,10 +1883,7 @@ struct FmhaBwdDQDKDVKernel
         const QDataType* q_ptr = reinterpret_cast<const QDataType*>(kargs.q_ptr) +
                                  static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_q +
                                  batch_offset_q;
-        // A tile-split launch may be head-chunked by the caller, with k/v pointed at the
-        // chunk's own first kv head. A chunk boundary need not land on a kv group boundary,
-        // so the kv head comes from the global q head number, rebased onto that window.
-        // Other instances are never chunked and keep the plain division.
+
         const index_t i_nhead_kv = [&]() {
             if constexpr(kDetTileSplit)
                 return (kargs.nhead_q_offset + i_nhead) / kargs.nhead_ratio_qk -
@@ -2397,8 +2384,6 @@ struct FmhaBwdOGradDotOKernel
 
     CK_TILE_HOST static std::string GetName()
     {
-        // Best-effort name for standalone users of this kernel; it only covers the
-        // template parameters. The example and the generated *_get_name_() API report
         // the codegen name from codegen/ops/fmha_bwd.py instead, which is the one that
         // matches the generated .cpp file name.
         // clang-format off
@@ -2445,11 +2430,7 @@ struct FmhaBwdOGradDotOKernel
         // LSE and D always share the same layout; this stride covers both.
         ck_tile::index_t nhead_stride_lsed;
 
-        // Two-stage d_sink: one partial per block, laid out [nhead][batch][gridDim.x].
-        // nullptr keeps the atomicAdd onto d_sink_ptr.
         float* sink_partial_ptr;
-        // Per-head arrival counters, zero at launch. Set only when no ConvertQGrad follows to
-        // fold the partials; the last block of each head folds them instead.
         int* sink_counter_ptr;
     };
 
@@ -2583,11 +2564,6 @@ struct FmhaBwdOGradDotOKernel
 
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize() { return 0; }
 
-    // Last-block fold, used when no ConvertQGrad follows (deterministic decode tiles). Every
-    // block counts itself in after storing its slot; the last one folds the head in slot order
-    // and rearms the counter. The integer count only elects that block, so d_sink does not
-    // depend on arrival order. Called block-uniformly, after thread 0 stored the slot.
-    // noinline keeps the atomic and fences out of the code of runs that never fold.
     __attribute__((noinline)) CK_TILE_DEVICE static void
     FoldSinkIfLast(const float* head_partials, float* d_sink, int* counter, index_t num_blocks)
     {
@@ -2811,10 +2787,7 @@ struct FmhaBwdConvertQGradKernel
 
     CK_TILE_HOST static std::string GetName()
     {
-        // Best-effort name for standalone users of this kernel; it only covers the
-        // template parameters. The example and the generated *_get_name_() API report
-        // the codegen name from codegen/ops/fmha_bwd.py instead, which is the one that
-        // matches the generated .cpp file name.
+        // sync with generate.py
         // clang-format off
         
         #define _SS_  std::string
@@ -2858,8 +2831,6 @@ struct FmhaBwdConvertQGradKernel
         ck_tile::index_t stride_dq;
         ck_tile::index_t nhead_stride_dq;
 
-        // Two-stage d_sink partials stored by OGradDotO, [nhead][sink_slots_per_head], folded
-        // here. nullptr when OGradDotO took the atomic path.
         const float* sink_partial_ptr;
         float* d_sink_ptr;
         ck_tile::index_t sink_slots_per_head;
@@ -3018,9 +2989,6 @@ struct FmhaBwdConvertQGradKernel
         // divide problem
         const auto [i_tile_m, i_nhead, i_batch] = GetTileIndex();
 
-        // One block per head also folds the d_sink partials, after its own dQ tile (folding
-        // first slowed short no-sink runs). The group-mode early exit folds too, so no head is
-        // skipped when batch 0 is empty.
         const bool fold_sink = kargs.sink_partial_ptr != nullptr && i_tile_m == 0 && i_batch == 0;
         auto fold_sink_partials = [&, i_nhead_ = i_nhead]() {
             FmhaBwdFoldSinkPartials<kBlockSize>(kargs.sink_partial_ptr +
