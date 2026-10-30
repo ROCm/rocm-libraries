@@ -411,8 +411,16 @@ def expandAllArchitectures(archs: List[str]) -> List[str]:
 
     Names the expansion does not cover survive beside it and reach the
     mixed-build guard, rather than being dropped into a silent build of another
-    architecture. Qualified specs (``gfx942:xnack+``) name architectures ``all``
-    already covers, so they stay absorbed.
+    architecture. A qualified spec usually names an architecture ``all`` already
+    covers, so it stays absorbed: ``gfx942:xnack+`` says nothing about the build
+    that ``gfx942`` does not already say.
+
+    One whose xnack mode selects a capability override is kept, because then it
+    is not another spelling of what ``all`` covers but a different build of it.
+    ``all;gfx1250:xnack-`` asks for every architecture at its default settings
+    and for gfx1250 with replay off, and one run cannot produce both; absorbing
+    the qualified spec answered that by silently building the first. Kept, it
+    arrives beside the bare name at the mixed-build guard, which says so.
 
     Empty entries are dropped: cmake joins ``GPU_TARGETS`` with ``;``, so a
     trailing one arrives as an empty spec the predicate splitter would reject.
@@ -429,7 +437,10 @@ def expandAllArchitectures(archs: List[str]) -> List[str]:
     expanded = SUPPORTED_GFX + supportedSteppings()
     covered = set(expanded)
     return expanded + [
-        a for a in archs if a != "all" and baseArchName(a) not in covered
+        a for a in archs
+        if a != "all"
+        and (baseArchName(a) not in covered
+             or (xnackQualifierOf(a) and capOverrideKeyOf(a) in ARCH_CAP_OVERRIDES))
     ]
 
 
