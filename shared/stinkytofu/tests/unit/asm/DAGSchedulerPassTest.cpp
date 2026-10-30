@@ -786,8 +786,9 @@ TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWhenPerWmmaBudgetsSeparateWindo
 // Non-overlapping after/before groups still keep the after token's next
 // tensor_load between them when the after threshold is earlier. The load
 // defines that token, so it is not a register user of the barrier. The before
-// barrier starts ahead of the load, so only the new hard edges can move it
-// behind the load.
+// barrier starts ahead of the load, so only the hard edges can move it behind
+// the load. Unrelated ds_loads shrink each claim window to one WMMA, so the
+// pair is not a Layer 2 merge candidate.
 TEST_F(DAGSchedulerPassTest, NonOverlappingBarrierPairKeepsTensorLoadBetweenGroups) {
     bb->addSuccessor(bb);
 
@@ -801,6 +802,9 @@ TEST_F(DAGSchedulerPassTest, NonOverlappingBarrierPairKeepsTensorLoadBetweenGrou
         createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224, /*ldsToken=*/0);
     createMovableDsLoad(/*destReg=*/500, /*addrReg=*/204, /*ldsToken=*/1);
     createWmmaF32_16x16x16_bf16(/*destStart=*/800, /*src0Start=*/500);
+    // 24 ds_loads over 24 WMMAs: one window per ds_load, so the after claim
+    // (window + drain) ends before the before group starts.
+    createUnrelatedDsLoads(22);
 
     runPassWithUnrollGemm();
 
@@ -826,7 +830,7 @@ TEST_F(DAGSchedulerPassTest, NonOverlappingBarrierPairKeepsTensorLoadBetweenGrou
 
     const auto* overlaps = am.getCachedResult<Layer2BarrierOverlapAnalysis>();
     ASSERT_NE(overlaps, nullptr);
-    EXPECT_FALSE(overlaps->contains(afterSignal, beforeSignal));
+    EXPECT_FALSE(overlaps->contains(afterSignal, beforeSignal)) << scheduleOrder(*bb);
 }
 
 // The latest matching ds_load does not overlap any WMMA, so lastOverlap is 0.
