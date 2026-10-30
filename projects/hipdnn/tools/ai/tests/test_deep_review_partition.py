@@ -476,6 +476,46 @@ def test_packets_drift_lane_follows_the_trigger(part, tmp_path):
     assert "drift.txt" in (rd / "packets" / "DRIFT.md").read_text()
 
 
+def test_impact_scope_is_the_ingestor_path_only(part):
+    inside = (
+        "dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/attention_dense.py",
+        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/Descriptors.hpp",
+        "projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json",
+        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets.hpp",
+        "projects/hipdnn/tools/IngestorGenerator/configs/gfx950_attention_dense.engine.yaml",
+    )
+    outside = (
+        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h",
+        "dnn-providers/miopen-provider/src/a.cpp",
+        "projects/hipdnn/tools/DescriptorGenerator/gen.py",
+    )
+    rows = [(p, 1, "") for p in inside + outside]
+    assert {r[0] for r in part.concern_scope("IMPACT", rows)} == set(inside)
+
+
+def test_packets_impact_lane_takes_ingestor_files_only(part, tmp_path, capsys):
+    # catches: IMPACT not registered as a concern lane, or scoped to every changed file
+    for sub in ("a", "b"):
+        (tmp_path / sub).mkdir()
+    header = (
+        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets.hpp"
+    )
+    other = "projects/hipdnn/backend/a.cpp"
+    rd = make_round(tmp_path / "a", [(3, 1, header), (2, 0, other)])
+    run(part, "areas", rd)
+    run(part, "plan", rd)
+    run(part, "packets", rd, "--lanes", "IMPACT")
+    packet = (rd / "packets" / "IMPACT.md").read_text()
+    assert header in packet and other not in packet
+    rd = make_round(tmp_path / "b", [(2, 0, other)])
+    run(part, "areas", rd)
+    run(part, "plan", rd)
+    capsys.readouterr()
+    run(part, "packets", rd, "--lanes", "IMPACT")
+    assert not (rd / "packets" / "IMPACT.md").exists()
+    assert "IMPACT: no changed file in scope, N/A" in capsys.readouterr().out
+
+
 def test_orient_gate_accepts_added_files_and_flags_paths_absent_at_base(
     part, tmp_path, capsys
 ):
