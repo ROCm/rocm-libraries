@@ -152,6 +152,10 @@ struct PassFeatureConfig {
         /// before a pending barrier's threshold) issue back to back: a ready WMMA there goes
         /// ahead of the fillers and ds_loads. Needs the barrier cover on. false = off.
         bool barrierTailBackToBack = false;
+        /// Mirrors ModuleOptions::HoldAfterBarrier. Until this many WMMAs have issued after
+        /// the last s_barrier_wait, only WMMAs, tensor_load_to_lds and barriers are picked;
+        /// other work issues only when no WMMA is left to pick. 0 = off.
+        int holdAfterBarrier = 0;
         /// In the region that ends at a loop's back-edge branch, the last loopTailWmmaRun WMMAs
         /// issue back to back, and the non-WMMA work queued before them (the next iteration's
         /// ds_loads) goes first, also when it has to wait for a ds credit; the ds spread paces

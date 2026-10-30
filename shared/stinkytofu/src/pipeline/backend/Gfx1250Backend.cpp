@@ -210,6 +210,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                     moduleOptions.WmmaBarrierCoverCycles;
                 passFeatureConfig.dagFeatures.barrierTailBackToBack =
                     moduleOptions.BarrierTailBackToBack;
+                passFeatureConfig.dagFeatures.holdAfterBarrier = moduleOptions.HoldAfterBarrier;
                 passFeatureConfig.dagFeatures.loopTailWmmaRun = moduleOptions.LoopTailWmmaRun;
                 passFeatureConfig.dagFeatures.dsCatchUpPace = moduleOptions.DsCatchUpPace;
                 passFeatureConfig.dagFeatures.dsBatchWmmas = moduleOptions.DsBatchWmmas;

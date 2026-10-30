@@ -975,6 +975,19 @@ class CDNA5ReadyQueue : public ReadyQueue {
         }
         return false;
     }
+    // dagFeatures.holdAfterBarrier: while a barrier span hold is open only WMMAs,
+    // tensor_loads and barriers are picked. Phase G still takes held work once
+    // no WMMA is left, so the region always makes progress.
+    bool barrierSpanHolds(const DAGNode* node) const {
+        const StinkyInstruction& inst = *node->inst;
+        if (isMatrixInstruction(inst) || isTensorLoad(inst) || isBarrier(inst)) return false;
+        const int wmmas = getPassContext().getPassFeatureConfig().dagFeatures.holdAfterBarrier;
+        return wmmas > 0 && lastBarrierWaitWmma_ >= 0 &&
+               wmmaIssuedCountThisRegion_ - lastBarrierWaitWmma_ < wmmas;
+    }
+    // wmmaIssuedCountThisRegion_ when the last s_barrier_wait issued: 0 for a region that
+    // starts right after one, -1 when none has issued in this region.
+    int lastBarrierWaitWmma_ = -1;
     // Planned WMMA windows of the region's s_barrier_wait instructions, ascending.
     std::vector<int> barrierWaitWindows_;
     // WMMA count when each node entered the ready set (push), for needsWaitAlu.
@@ -1092,6 +1105,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
                 std::cerr << "[CDNA5 barrierCover] wmmaIssued=" << wmmaIssuedCountThisRegion_
                           << " queuedCover=" << queuedCoverCycles() << "\n";
         });
+        if (isBarrierWait(inst)) lastBarrierWaitWmma_ = wmmaIssuedCountThisRegion_;
         if (waitAlu_) waitAlu_->commit(inst);
     }
 };
@@ -1717,7 +1731,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // decidePromote(), not here — a flagged producer competes on equal terms with
     // everything else unless/until decidePromote() forces it.
     auto consider = [&](DAGNode* cand, int candKind, int candWait) {
-        if (!cand) return;
+        if (!cand || barrierSpanHolds(cand)) return;
         const int availabilityRank = candWait == 0 ? 0 : (candKind == kLocalRead ? 1 : 2);
         const int kindRank = (candKind == kGlobalRead) ? 0 : 1;
         if (considerBest(cand, std::make_tuple(availabilityRank, kindRank, (int)cand->id), best,
@@ -1982,7 +1996,7 @@ bool CDNA5ReadyQueue::promoteDueHazardHoist(bool prefetch) {
     // The most urgent due candidate wins (earliest deadline, then push order).
     const HazardHoistCandidate* best = nullptr;
     for (const HazardHoistCandidate& hc : hazardHoistCandidates_) {
-        if ((hc.kind == kPrefetch) != prefetch) continue;
+        if ((hc.kind == kPrefetch) != prefetch || barrierSpanHolds(hc.node)) continue;
         const int deadline = hc.node->hazardDeadline;
         if (best && deadline >= best->node->hazardDeadline) continue;
         if (clock_ < deadline && !wmmaPassesDeadline(deadline)) continue;
@@ -2761,8 +2775,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // Loop tail run: a ds_load the fill phases could not fit (a credit wait longer than the
     // window) still goes before the run, and the wave takes the stall. A ds_load gated by the
     // queued WMMAs' sources is left to Phase E.
-    if (blockWmmaForLoopTailRun && pickedDS != nullptr && !destOverlapsActiveWmmaSrc(pickedDS) &&
-        !pipeOpGateBlocks(pickedDS)) {
+    if (blockWmmaForLoopTailRun && pickedDS != nullptr && !barrierSpanHolds(pickedDS) &&
+        !destOverlapsActiveWmmaSrc(pickedDS) && !pipeOpGateBlocks(pickedDS)) {
         int wait = std::max(getMaxSrcDataWait(pickedDS), getHazardWait(pickedDS));
         if (dsReadQueueFull()) wait = std::max(wait, dsReadInflight_.minResidual());
         if (wait > 0) advanceTime(wait, TimeKind::Elapsed);
@@ -3058,6 +3072,11 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     carryQueuedWar();
     wmmaIssuedCountThisRegion_ = 0;
     readyWmmaCount_.clear();
+    lastBarrierWaitWmma_ = -1;
+    if (regionStart != blockBegin) {
+        auto* prev = dyn_cast<StinkyInstruction>(std::prev(regionStart).getNodePtr());
+        if (prev != nullptr && isBarrierWait(*prev)) lastBarrierWaitWmma_ = 0;
+    }
     wmmaRefilling_ = false;
     wmmaRefillLeft_ = 0;
     burstLeft_ = 0;

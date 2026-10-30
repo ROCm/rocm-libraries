@@ -137,6 +137,8 @@
     X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                    \
     X(WmmaBarrierCoverCycles, int, -1)    /* cover kept for a barrier; < 0 = automatic */          \
     X(BarrierTailBackToBack, bool, false) /* WMMAs the barrier cover counts on, back to back */    \
+    X(HoldAfterBarrier, int,                                                                       \
+      0) /* N WMMAs after a barrier wait: only WMMA/tensor_load; 0 = off */                        \
     X(LoopTailWmmaRun, int, 0)            /* last WMMAs before the back edge, back to back */      \
     X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */                 \
     X(DsBatchWmmas, int, 4)               /* WMMAs per ds_load pacing batch */                     \
