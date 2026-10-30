@@ -48,7 +48,10 @@
       "kernel_source": {
         "kind": "hip",
         "source": "kernels/MegakernelStandIn.cpp",
-        "entry": "megakernel_standin"
+        "entry": "megakernel_standin",
+        "build": {
+          "defines": {}
+        }
       },
       "metadata": {
         "model": "megakernel-standin-gfx942",
