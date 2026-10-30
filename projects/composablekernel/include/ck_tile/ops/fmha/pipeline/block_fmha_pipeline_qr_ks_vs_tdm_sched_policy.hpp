@@ -274,26 +274,21 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
 
     template <index_t Stage,
               typename Mode,
+              typename Problem,
               typename BlockGemm,
               typename CBlockTensor,
               typename ABlockTensor,
               typename BBlockTensor,
               typename NextBBlockTensor,
-              typename BTileWindow,
-              bool UsePreparedTailBase = false>
-    CK_TILE_DEVICE static void
-    RunQkScheduledStage(const BlockGemm&,
-                        CBlockTensor& c_block_tensor,
-                        const ABlockTensor& a_block_tensor,
-                        const BBlockTensor& b_block_tensor,
-                        NextBBlockTensor& next_b_block_tensor,
-                        const BTileWindow& b_lds_window,
-                        const FmhaTdmPreparedKRead::Address* prepared_stage0 = nullptr,
-                        bool_constant<UsePreparedTailBase>                   = {})
+              typename BTileWindow>
+    CK_TILE_DEVICE static void RunQkScheduledStage(const BlockGemm&,
+                                                   CBlockTensor& c_block_tensor,
+                                                   const ABlockTensor& a_block_tensor,
+                                                   const BBlockTensor& b_block_tensor,
+                                                   NextBBlockTensor& next_b_block_tensor,
+                                                   const BTileWindow& b_lds_window,
+                                                   const PreparedLdsReadContext& prepared_context)
     {
-        // UsePreparedTailBase: the caller formed the tail stage's V access-0 address before the
-        // WMMA stream and passes it in prepared_stage0.
-        static_assert(!UsePreparedTailBase || Stage == Geometry::kQkStages - 1);
         using SelectedSchedule = typename Mode::SelectedPolicy::Schedule;
         using Executor         = FmhaTdmSchedPlacementExecutor<SelectedSchedule, Mode>;
         using Kind             = FmhaTdmSchedLoadKind;
@@ -303,23 +298,24 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                       (Stage == SelectedSchedule::kNumQkStages - 1 &&
                        BTileWindow::NumAccessPerCoord == Geometry::kVStageLoadCount));
         constexpr bool kUseAffineKRead = Stage < Geometry::kQkStages - 1;
+        constexpr bool kUsePreparedTailBase =
+            Stage == Geometry::kQkStages - 1 &&
+            Mode::SelectedPolicy::template UseEarlyLdsBases<Problem>();
 
         const auto affine_k0 = [&]() {
             if constexpr(kUseAffineKRead)
             {
                 if constexpr(Stage == 0)
-                {
-                    if(prepared_stage0 != nullptr)
-                        return *prepared_stage0;
-                }
-                return FmhaTdmPreparedKRead::Prepare<0>(b_lds_window);
+                    return prepared_context.qk_stage0;
+                else
+                    return FmhaTdmPreparedKRead::Prepare<0>(b_lds_window);
             }
             else
                 return FmhaTdmPreparedKRead::Address{};
         }();
         const auto affine_v0 = [&]() {
-            if constexpr(UsePreparedTailBase)
-                return *prepared_stage0;
+            if constexpr(kUsePreparedTailBase)
+                return prepared_context.v0;
             else if constexpr(Stage == Geometry::kQkStages - 1)
                 return FmhaTdmPreparedKRead::Prepare<0>(b_lds_window);
             else

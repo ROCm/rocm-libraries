@@ -479,11 +479,6 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         // is excluded with the countdown loop; without the countdown loop it was not measured.
         constexpr bool kRematerializeVStride =
             kUseCountdownLoop && kN0 == 128 && kN1 == 128 && std::is_same_v<VDataType, bf16_t>;
-        // Form every LDS read base of a tile once, before the WMMA streams (see begin_iteration).
-        // D192 only: the D64 read-first placement already forms its addresses ahead of the reads
-        // (no measurable change), the D128 lead-first placement is not wired for prepared PV
-        // bases, and masked D192 N128 runs out of VGPRs (scratch spills in the tile loop).
-        constexpr bool kEarlyLdsBases = Policy::template UseEarlyLdsBases<Problem>();
         bool even_buffer           = true;
         index_t i_total_loops      = 0;
         index_t remaining_loops    = num_total_loop;
@@ -679,33 +674,28 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                         move_tile_window(k_lds_su_read_window, {Geometry::kQkSuColumns, 0});
                         decltype(k_su_tile) k_su_tile_next;
 
-                        Policy::template RunQkScheduledStage<decltype(i_su)::value, Mode>(
+                        Policy::template RunQkScheduledStage<decltype(i_su)::value, Mode, Problem>(
                             gemm_0_su,
                             s_acc_su,
                             q_tile,
                             k_su_tile,
                             k_su_tile_next,
                             k_lds_su_read_window,
-                            &prepared_lds_reads.qk_stage0);
+                            prepared_lds_reads);
 
                         k_su_tile = k_su_tile_next;
                     }
-                    else if constexpr(kEarlyLdsBases)
-                    {
-                        Policy::template RunQkScheduledStage<Geometry::kQkStages - 1, Mode>(
-                            gemm_0_su,
-                            s_acc_su,
-                            q_tile,
-                            k_su_tile,
-                            v_tile,
-                            v_lds_read_window,
-                            &prepared_lds_reads.v0,
-                            bool_constant<true>{});
-                    }
                     else
                     {
-                        Policy::template RunQkScheduledStage<Geometry::kQkStages - 1, Mode>(
-                            gemm_0_su, s_acc_su, q_tile, k_su_tile, v_tile, v_lds_read_window);
+                        Policy::template RunQkScheduledStage<Geometry::kQkStages - 1,
+                                                             Mode,
+                                                             Problem>(gemm_0_su,
+                                                                      s_acc_su,
+                                                                      q_tile,
+                                                                      k_su_tile,
+                                                                      v_tile,
+                                                                      v_lds_read_window,
+                                                                      prepared_lds_reads);
                     }
                     set_slice_tile(
                         s_acc,
