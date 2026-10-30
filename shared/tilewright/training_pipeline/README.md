@@ -3505,8 +3505,13 @@ to the model when the model the directory's `tilewright_index` names
 declares kernel guards, as the runtime reads it for no other model): a pick
 line whose engine top-1 is a guarded kernel below its
 guards and whose bench ran another solution is passed over, and a bench
-that ran a guarded kernel there is a violation. The report notes a
-blocklist it cannot read and analyzes the
+that ran a guarded kernel there is a violation. `check_guarded_picks.py`
+checks picks of a ranking that reads no sidecar (Origami's, predicted with
+the solution names of a TensileLite pick table, or the solutions
+hipblaslt-bench logs say ran) against a guards sidecar, and lists those of
+a guarded kernel below its guards (`--any-free-size`: below on M or N,
+whichever the guard reads), for a caller to leave out before a run or stop
+on after it. The report notes a blocklist it cannot read and analyzes the
 whole pool.
 
 ### Deployment (stage06)
