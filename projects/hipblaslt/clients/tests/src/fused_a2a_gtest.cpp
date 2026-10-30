@@ -570,6 +570,28 @@ namespace
         }
     }
 
+    struct DeviceBuffer
+    {
+        explicit DeviceBuffer(size_t bytes)
+        {
+            if(bytes == 0 || hipMalloc(&ptr, bytes) != hipSuccess)
+                ptr = nullptr;
+            else if(hipMemset(ptr, 0, bytes) != hipSuccess)
+                ADD_FAILURE() << "hipMemset failed";
+        }
+
+        ~DeviceBuffer()
+        {
+            if(ptr)
+                (void)hipFree(ptr);
+        }
+
+        DeviceBuffer(const DeviceBuffer&)            = delete;
+        DeviceBuffer& operator=(const DeviceBuffer&) = delete;
+
+        void* ptr = nullptr;
+    };
+
     /************************************************************************
      * Dispatch: the shape and layout requirements, checked where both the
      * communicator and D's layout are in hand.
@@ -795,6 +817,46 @@ namespace
         ASSERT_FALSE(all.empty());
         for(hipblasLtMatmulHeuristicResult_t& result : all)
             EXPECT_NE(hipblaslt_ext::getIndexFromAlgo(result.algo), fusedIndex);
+    }
+
+    TEST_F(FusedA2ADispatch_pre_checkin, ExtGroupedGemmRejectsAFusedDescriptor)
+    {
+        transposeA();
+        registerOneRank();
+        completeAndAttach();
+        makeD();
+
+        hipblasLtMatmulDesc_t plainDesc = nullptr;
+        ASSERT_EQ(hipblasLtMatmulDescCreate(&plainDesc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+                  HIPBLAS_STATUS_SUCCESS);
+        const hipblasOperation_t op = HIPBLAS_OP_T;
+        EXPECT_EQ(hipblasLtMatmulDescSetAttribute(
+                      plainDesc, HIPBLASLT_MATMUL_DESC_TRANSA, &op, sizeof(op)),
+                  HIPBLAS_STATUS_SUCCESS);
+
+        DeviceBuffer a(kK * kM * 2), b(kK * kN * 2), d(kLdd * kN * 2);
+        ASSERT_TRUE(a.ptr && b.ptr && d.ptr);
+        float alpha = 1.f;
+        float beta  = 0.f;
+
+        std::vector<hipblasLtMatmulDesc_t>   descs = {plainDesc, matmulDesc};
+        std::vector<void*>                   alphas(2, &alpha), betas(2, &beta);
+        std::vector<void*>                   as(2, a.ptr), bs(2, b.ptr), ds(2, d.ptr);
+        std::vector<hipblasLtMatrixLayout_t> matAs(2, Adesc), matBs(2, Bdesc), matDs(2, Ddesc);
+
+        hipblaslt_ext::GroupedGemm grouped(handle,
+                                           HIPBLAS_OP_T,
+                                           HIPBLAS_OP_N,
+                                           HIP_R_16BF,
+                                           HIP_R_16BF,
+                                           HIP_R_16BF,
+                                           HIP_R_16BF,
+                                           HIPBLAS_COMPUTE_32F);
+        EXPECT_EQ(
+            grouped.setProblem(descs, alphas, as, matAs, bs, matBs, betas, ds, matDs, ds, matDs),
+            HIPBLAS_STATUS_INVALID_VALUE);
+
+        EXPECT_EQ(hipblasLtMatmulDescDestroy(plainDesc), HIPBLAS_STATUS_SUCCESS);
     }
 
     TEST_F(FusedA2ADispatch_pre_checkin, RejectsMissingExtent)
