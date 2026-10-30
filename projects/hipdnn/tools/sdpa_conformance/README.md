@@ -45,6 +45,12 @@ python aotriton/run_aotriton.py --out <dir> --fake always-decline          # har
 
 Other options: `--packed-gpu` (adds `tests/`' `gpu` cases), `--workers N` (default one per GPU),
 `-- <pytest args>`, `--hipdnn-nodeids-file PATH` (plugin option: run only the listed node ids). Pin engines with `HIPDNN_FWD_ENGINE` / `HIPDNN_BWD_ENGINE`.
+`--layout-mode {pytorch,efficient,aotriton}` (default `pytorch`) chooses the memory layout every SDPA
+tensor is allocated in, with no copies: `pytorch` stores O, dO and the gradients like Q (dQ/dK/dV/dB
+like their inputs), `efficient` stores O, dO, dQ, dK and dV BSHD (dB like the bias), `aotriton` keeps
+the vendored suite's own layouts (O and dO BHSD). q/k/v/b keep the vendored cases' own layouts in every
+mode. The mode reaches the pytest workers as `HIPDNN_SDPA_CONFORMANCE_LAYOUT_MODE`, appears in the pytest
+header, and `--all-engines` pass 2 inherits it. Varlen cases are unaffected.
 `--fwd-no-stats` (with `--suite forward`) runs the forward without Stats, so engines that decline
 when Stats are requested can be exercised; AOTriton's M buffer is filled with zeros (its wrapper rejects NaN in M) and
 `test_forward.py` compares only O. The runner refuses it for any collection that includes

@@ -19,6 +19,13 @@ LOCK = AOTRITON_DIR / "vendor.lock.json"
 PLUGIN = "hipdnn_aotriton_plugin"
 GPU_LEASE_PLUGIN = "pytest_gpu_lease.plugin"
 
+# Memory layout of every SDPA tensor the vendored suite allocates; the runner exports the mode
+# to the pytest workers and the plugin acts on it. `pytorch` and `efficient` follow the layouts of
+# PyTorch's flash/efficient SDPA paths, `aotriton` keeps the suite's own.
+LAYOUT_MODE_ENV = "HIPDNN_SDPA_CONFORMANCE_LAYOUT_MODE"
+LAYOUT_MODES = ("pytorch", "efficient", "aotriton")
+DEFAULT_LAYOUT_MODE = "pytorch"
+
 # Knobs of the vendored suite the plugin refuses (see hipdnn_aotriton_plugin).
 REFUSED_KNOBS = (
     "USE_ADIFFS_TXT",

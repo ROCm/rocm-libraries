@@ -188,6 +188,22 @@ def test_fwd_no_stats_exports_the_env_var_only_when_asked(
     assert all(env[run_aotriton.FWD_NO_STATS_ENV] == "1" for _, env in flagged)
 
 
+def test_layout_mode_is_exported_to_every_pytest_process(runner, tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        layout.LAYOUT_MODE_ENV, "efficient"
+    )  # stale value from the caller
+    _, default = runner([["t/test_forward.py::a"]], "--workers", "1", "--out", str(tmp_path / "a"), "--suite", "forward")  # fmt: skip
+    _, chosen = runner([["t/test_forward.py::a"]], "--workers", "1", "--out", str(tmp_path / "b"), "--suite", "forward", "--layout-mode", "aotriton")  # fmt: skip
+    assert len(default) == len(chosen) == 2
+    assert all(env[layout.LAYOUT_MODE_ENV] == "pytorch" for _, env in default)
+    assert all(env[layout.LAYOUT_MODE_ENV] == "aotriton" for _, env in chosen)
+
+
+def test_an_unknown_layout_mode_is_refused(runner, tmp_path):
+    with pytest.raises(SystemExit):
+        runner([], "--workers", "1", "--out", str(tmp_path), "--layout-mode", "bshd")
+
+
 FWD = "vendor/test_forward.py"
 BWD = "vendor/test_backward.py"
 
@@ -231,11 +247,12 @@ def test_all_engines_sweeps_each_non_winning_engine_over_its_cases_only(
     monkeypatch.setattr(run_aotriton.subprocess, "run", call)
     monkeypatch.setenv("ROCM_PATH", "/opt/fake-rocm")
     status = run_aotriton.main(
-        ["--workers", "2", "--out", str(tmp_path), "--all-engines", "--shard", "1/2"]
+        ["--workers", "2", "--out", str(tmp_path), "--all-engines", "--shard", "1/2", "--layout-mode", "efficient"]  # fmt: skip
     )
     assert status == 0
     sweeps = {}
     for cmd, env in fake.commands[2:]:
+        assert env[layout.LAYOUT_MODE_ENV] == "efficient"  # pass 2 inherits the mode
         (pin,) = [k for k in env if k in run_aotriton.ENGINE_ENV.values() and env[k]]
         listing = next(a for a in cmd if a.startswith("--hipdnn-nodeids-file=")).split(
             "="
