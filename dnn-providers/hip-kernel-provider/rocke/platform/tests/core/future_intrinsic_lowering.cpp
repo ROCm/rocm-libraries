@@ -144,36 +144,37 @@ rocke_value_t* global_ptr_param(rocke_ir_builder_t* b, const char* name, const r
 
 void case_gfx1250_standalone_bridge()
 {
-    const std::string ir = lower_one(
-        "gfx1250_bridge",
-        [](rocke_ir_builder_t* b) {
-            const int shape[] = {1};
-            rocke_value_t* dst = global_ptr_param(b, "dst", rocke_i16());
-            rocke_value_t* smem = rocke_b_smem_alloc(b, rocke_i64(), shape, 1, "barrier");
-            rocke_value_t* local = rocke_b_smem_addr_of(b, smem);
-            rocke_value_t* members = rocke_b_const_i32(b, 2);
-            rocke_value_t* d4 = rocke_b_zero_vec(b, rocke_i32(), 4);
-            rocke_value_t* d8 = rocke_b_zero_vec(b, rocke_i32(), 8);
+    const auto build = [](rocke_ir_builder_t* b) {
+        const int shape[] = {1};
+        rocke_value_t* dst = global_ptr_param(b, "dst", rocke_i16());
+        rocke_value_t* smem = rocke_b_smem_alloc(b, rocke_i64(), shape, 1, "barrier");
+        rocke_value_t* local = rocke_b_smem_addr_of(b, smem);
+        rocke_value_t* members = rocke_b_const_i32(b, 2);
+        rocke_value_t* d4 = rocke_b_zero_vec(b, rocke_i32(), 4);
+        rocke_value_t* d8 = rocke_b_zero_vec(b, rocke_i32(), 8);
 
-            rocke_b_s_wait_tensorcnt(b, 3);
-            rocke_b_s_barrier_signal(b, 1);
-            rocke_b_s_barrier_wait(b, 2);
-            rocke_b_s_barrier_init(b, local, members);
-            rocke_b_s_barrier_signal_var(b, local, members);
-            rocke_b_s_barrier_join(b, local);
-            rocke_b_s_wakeup_barrier(b, local);
-            rocke_b_s_barrier_leave(b, 4);
-            rocke_b_s_delay_alu(b, 0x1234);
-            rocke_b_s_wait_alu(b, 0x2345);
-            rocke_b_s_clause(b, 0x3456);
-            rocke_b_s_wait_xcnt(b, 0x4567);
-            rocke_b_global_store_async_from_lds(b, dst, local, 16, -4, 31);
-            rocke_b_global_load_tr16_b128(b, dst, rocke_i16());
-            rocke_b_tensor_load_to_lds(b, d4, d8, d4, d4, d8, 5);
-            rocke_b_tensor_store_from_lds(b, d4, d8, d4, d4, d8, 6);
-        },
-        "gfx1250",
-        ROCKE_LLVM_FLAVOR_LLVM23);
+        rocke_b_s_wait_tensorcnt(b, 3);
+        rocke_b_s_barrier_signal(b, 1);
+        rocke_b_s_barrier_wait(b, 2);
+        rocke_b_s_barrier_init(b, local, members);
+        rocke_b_s_barrier_signal_var(b, local, members);
+        rocke_b_s_barrier_join(b, local);
+        rocke_b_s_wakeup_barrier(b, local);
+        rocke_b_s_barrier_leave(b, 4);
+        rocke_b_s_delay_alu(b, 0x1234);
+        rocke_b_s_wait_alu(b, 0x2345);
+        rocke_b_s_clause(b, 0x3456);
+        rocke_b_s_wait_xcnt(b, 0x4567);
+        rocke_b_global_store_async_from_lds(b, dst, local, 16, -4, 31);
+        rocke_b_global_load_tr16_b128(b, dst, rocke_i16());
+        rocke_b_tensor_load_to_lds(b, d4, d8, d4, d4, d8, 5);
+        rocke_b_tensor_store_from_lds(b, d4, d8, d4, d4, d8, 6);
+    };
+    const std::string ir = lower_one("gfx1250_bridge", build, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23);
+    const std::string ir24
+        = lower_one("gfx1250_bridge", build, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM24);
+    if(ir24 != ir)
+        fail("LLVM24 bridge output differs from its shared LLVM23 profile", __LINE__);
 
     EXPECT_IR(ir, "call void @llvm.amdgcn.s.wait.tensorcnt(i16 3)");
     EXPECT_IR(ir, "call void @llvm.amdgcn.s.barrier.signal(i32 1)");
@@ -186,6 +187,60 @@ void case_gfx1250_standalone_bridge()
     EXPECT_IR(ir, "call <8 x i16> @llvm.amdgcn.global.load.tr.b128.v8i16(");
     EXPECT_IR(ir, "call void @llvm.amdgcn.tensor.load.to.lds(");
     EXPECT_IR(ir, "call void @llvm.amdgcn.tensor.store.from.lds(");
+}
+
+void case_inline_asm_rejects_non_string_minimum_flavor()
+{
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "malformed_minimum_flavor") != ROCKE_OK)
+    {
+        fail("rocke_ir_builder_init", __LINE__);
+        return;
+    }
+    rocke_value_t* operand = rocke_b_const_i32(&b, 0);
+    rocke_value_t* operands[] = {operand};
+    const rocke_type_t* result_types[] = {rocke_i32()};
+    rocke_op_t* op
+        = rocke_b_inline_asm(&b, "v_mov_b32 $0, $1", "=v,v", operands, 1, result_types, 1, nullptr);
+    rocke_attr_set_int(&b, &op->attrs, "minimum_llvm_flavor", 23);
+    rocke_b_ret(&b);
+
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    const rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        rocke_ir_builder_kernel(&b), ROCKE_LLVM_FLAVOR_LLVM20, "gfx950", &ll, err, sizeof(err));
+    if(st != ROCKE_ERR_TYPE)
+        fail("non-string minimum_llvm_flavor did not return ROCKE_ERR_TYPE", __LINE__);
+    const char* expected
+        = "tile.inline_asm failed - minimum_llvm_flavor has a non-string value, expected a string";
+    if(strcmp(err, expected) != 0)
+        fail("non-string minimum_llvm_flavor diagnostic changed", __LINE__);
+    std::free(ll);
+    rocke_ir_builder_free(&b);
+}
+
+void case_scaled_mfma_shared_profile()
+{
+    const auto build = [](rocke_ir_builder_t* b) {
+        rocke_value_t* a = rocke_b_zero_vec(b, rocke_i32(), 8);
+        rocke_value_t* bb = rocke_b_zero_vec(b, rocke_i32(), 8);
+        rocke_value_t* c = rocke_b_zero_vec(b, rocke_f32(), 4);
+        rocke_value_t* a_scale = rocke_b_const_i32(b, 3);
+        rocke_value_t* b_scale = rocke_b_const_i32(b, 5);
+        rocke_b_mfma_scale_f32_16x16x128_f8f6f4(b, a, bb, c, a_scale, b_scale);
+    };
+    const std::string ir23
+        = lower_one("scaled_mfma_profile", build, "gfx950", ROCKE_LLVM_FLAVOR_LLVM23);
+    const std::string ir24
+        = lower_one("scaled_mfma_profile", build, "gfx950", ROCKE_LLVM_FLAVOR_LLVM24);
+    if(ir24 != ir23)
+        fail("LLVM24 scaled-MFMA output differs from its shared LLVM23 profile", __LINE__);
+    EXPECT_IR(ir24,
+              "declare <4 x float> "
+              "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32("
+              "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
+              "i32 immarg, i32, i32 immarg, i32)");
 }
 
 /* Build one kernel and return the C++ engine's HIP source. */
@@ -2587,8 +2642,178 @@ void case_global_ptr_to_i64()
         rejected = true;
         err = e.what();
     }
-    if(!rejected || err.find("global_ptr_to_i64 ptr must be a global pointer") == std::string::npos)
+    if(!rejected
+       || err.find("global_ptr_to_i64 ptr must be a global pointer, got ptr<f32,private>")
+              == std::string::npos)
         fail("global_ptr_to_i64 must reject a non-global pointer", __LINE__);
+    rocke_ir_builder_free(&b);
+
+    /* A raw op with an f32 result, past the builder's check: the verifier
+     * refuses it. */
+    rocke_ir_builder_init(&b, "p2i_raw");
+    rocke_value_t* ptr = global_ptr_param(&b, "X", rocke_f32());
+    const rocke_type_t* result_types[] = {rocke_f32()};
+    rocke_b_op(&b,
+               ROCKE_OP_TILE_GLOBAL_PTR_TO_I64,
+               &ptr,
+               1,
+               result_types,
+               1,
+               nullptr,
+               nullptr,
+               0,
+               "gaddr",
+               nullptr);
+    rocke_b_ret(&b);
+    rocke_diag_t* diags = nullptr;
+    size_t n = 0;
+    rocke_verify(rocke_ir_builder_kernel(&b), &diags, &n);
+    bool saw = false;
+    for(size_t i = 0; i < n; ++i)
+    {
+        const std::string m = diags[i].message ? diags[i].message : "";
+        saw |= m.find("global_ptr_to_i64 result must be i64, got f32") != std::string::npos;
+    }
+    rocke_diags_free(diags, n);
+    if(!saw)
+        fail("verifier must reject a global_ptr_to_i64 with an f32 result", __LINE__);
+    rocke_ir_builder_free(&b);
+}
+
+/* global_ptr_offset: the C++ builder's op lowers without inbounds to LLVM, in
+ * integer arithmetic to HIP; the builder refuses a non-global pointer and a
+ * non-i64 offset, and the verifier the same offset in a raw op. */
+void build_global_ptr_offset(rocke_ir_builder_t* b)
+{
+    rocke_value_t* x = global_ptr_param(b, "X", rocke_f32());
+    rocke_value_t* z = global_ptr_param(b, "Z", rocke_i64());
+    rocke_value_t* off = rocke_b_param(b, "off", rocke_i64(), nullptr);
+    rocke_value_t* moved = rocke_b_global_ptr_offset(b, x, off);
+    rocke_b_global_store(b, z, rocke_b_const_i32(b, 0), rocke_b_global_ptr_to_i64(b, moved), 8);
+}
+
+std::string builder_error_of(rocke_value_t* (*build)(rocke_ir_builder_t*))
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "gpo_bad");
+    std::string err;
+    try
+    {
+        build(&b);
+        const char* msg = rocke_ir_builder_error(&b);
+        err = msg ? msg : "";
+    }
+    catch(const std::exception& e)
+    {
+        err = e.what();
+    }
+    rocke_ir_builder_free(&b);
+    return err;
+}
+
+void case_global_ptr_offset()
+{
+    const std::string ir = lower_one("gpo", build_global_ptr_offset, "gfx942");
+    EXPECT_IR(ir, " = getelementptr i8, ptr addrspace(1) %X, i64 %off\n");
+    EXPECT_NO_IR(ir, "getelementptr inbounds i8, ptr addrspace(1) %X");
+    EXPECT_IR(ir, " = ptrtoint ptr addrspace(1) %gptr");
+
+    const std::string hip = lower_one_hip("gpo_hip", build_global_ptr_offset, "gfx942");
+    EXPECT_IR(hip, " = (float*)((uintptr_t)X + (uint64_t)off);");
+    EXPECT_IR(hip, " = (int64_t)(uintptr_t)gptr");
+
+    const std::string non_global = builder_error_of([](rocke_ir_builder_t* b) {
+        return rocke_b_global_ptr_offset(
+            b, private_ptr_param(b, "flat", rocke_f32()), rocke_b_const_i64(b, 4));
+    });
+    if(non_global.find("global_ptr_offset ptr must be a global pointer, got ptr<f32,private>")
+       == std::string::npos)
+        fail("global_ptr_offset must reject a non-global pointer", __LINE__);
+    const std::string narrow = builder_error_of([](rocke_ir_builder_t* b) {
+        return rocke_b_global_ptr_offset(
+            b, global_ptr_param(b, "X", rocke_f32()), rocke_b_const_i32(b, 4));
+    });
+    if(narrow.find("global_ptr_offset byte_off must be i64, got i32; widen it with sext (a "
+                   "signed offset) or zext (an unsigned one)")
+       == std::string::npos)
+        fail("global_ptr_offset must reject an i32 offset", __LINE__);
+
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "gpo_raw");
+    rocke_value_t* x = global_ptr_param(&b, "X", rocke_f32());
+    rocke_value_t* operands[] = {x, rocke_b_const_i32(&b, 4)};
+    const rocke_type_t* result_types[] = {x->type};
+    rocke_b_op(&b,
+               ROCKE_OP_TILE_GLOBAL_PTR_OFFSET,
+               operands,
+               2,
+               result_types,
+               1,
+               nullptr,
+               nullptr,
+               0,
+               "gptr",
+               nullptr);
+    rocke_b_ret(&b);
+    rocke_diag_t* diags = nullptr;
+    size_t n = 0;
+    rocke_verify(rocke_ir_builder_kernel(&b), &diags, &n);
+    bool saw = false;
+    for(size_t i = 0; i < n; ++i)
+    {
+        const std::string m = diags[i].message ? diags[i].message : "";
+        saw |= m.find("global_ptr_offset byte_off must be i64, got i32") != std::string::npos;
+    }
+    rocke_diags_free(diags, n);
+    if(!saw)
+        fail("verifier must reject a global_ptr_offset with an i32 offset", __LINE__);
+    rocke_ir_builder_free(&b);
+
+    if(!rocke_opcode_is_pure(ROCKE_OP_TILE_GLOBAL_PTR_OFFSET))
+        fail("tile.global_ptr_offset must be pure", __LINE__);
+}
+
+/* trap: the C++ builder's op lowers to a call of llvm.trap, declared once, and
+ * to __builtin_trap() in HIP source; it is effectful, so nothing removes it;
+ * the verifier refuses a raw trap with a result. */
+void build_trap(rocke_ir_builder_t* b)
+{
+    rocke_b_trap(b);
+}
+
+void case_trap()
+{
+    const std::string ir = lower_one("trap", build_trap, "gfx90a");
+    EXPECT_IR_COUNT(ir, "  call void @llvm.trap()\n", 1);
+    EXPECT_IR_COUNT(ir, "declare void @llvm.trap()\n", 1);
+
+    const std::string hip = lower_one_hip("trap_hip", build_trap, "gfx90a");
+    EXPECT_IR_COUNT(hip, "__builtin_trap();", 1);
+
+    if(rocke_opcode_is_pure(ROCKE_OP_TILE_TRAP))
+        fail("tile.trap must not be pure", __LINE__);
+    if(std::string(rocke_opcode_name(ROCKE_OP_TILE_TRAP)) != "tile.trap")
+        fail("ROCKE_OP_TILE_TRAP must be named tile.trap", __LINE__);
+
+    /* A raw trap with a result, past the builder: the verifier refuses it. */
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "trap_raw");
+    const rocke_type_t* result_types[] = {rocke_i32()};
+    rocke_b_op(
+        &b, ROCKE_OP_TILE_TRAP, nullptr, 0, result_types, 1, nullptr, nullptr, 0, "t", nullptr);
+    rocke_b_ret(&b);
+    rocke_diag_t* diags = nullptr;
+    size_t n = 0;
+    rocke_verify(rocke_ir_builder_kernel(&b), &diags, &n);
+    bool saw = false;
+    for(size_t i = 0; i < n; ++i)
+    {
+        const std::string m = diags[i].message ? diags[i].message : "";
+        saw |= m.find("trap takes no operands, results or regions") != std::string::npos;
+    }
+    rocke_diags_free(diags, n);
+    if(!saw)
+        fail("verifier must reject a trap with a result", __LINE__);
     rocke_ir_builder_free(&b);
 }
 
@@ -2891,13 +3116,104 @@ void case_memory_caps()
         rocke_memory_caps_t caps;
     };
     static const expected_caps table[] = {
-        {"gfx11-generic", {false, false, false, false, 4, 0, false, false, false, false}},
-        {"gfx1151", {false, false, false, false, 4, 0, false, false, false, false}},
-        {"gfx1201", {false, false, false, false, 4, 0, false, false, false, false}},
-        {"gfx1250", {false, true, false, true, 4, 0, true, true, true, true}},
-        {"gfx90a", {false, false, false, false, 4, 0, false, false, false, false}},
-        {"gfx942", {true, true, false, false, 4, 1, false, false, false, false}},
-        {"gfx950", {true, true, true, false, 4, 4, false, false, false, false}},
+        {"gfx11-generic",
+         {
+             .has_async_lds = false,
+             .has_async_global_lds = false,
+             .has_ds_read_tr = false,
+             .has_tdm = false,
+             .buffer_load_max_dwords = 4,
+             .async_lds_max_dwords = 0,
+             .has_scalar_data_prefetch = false,
+             .has_global_prefetch = false,
+             .has_cluster_launch = false,
+             .has_multicast_load = false,
+             .has_global_float_atomic_add = false,
+         }},
+        {"gfx1151",
+         {
+             .has_async_lds = false,
+             .has_async_global_lds = false,
+             .has_ds_read_tr = false,
+             .has_tdm = false,
+             .buffer_load_max_dwords = 4,
+             .async_lds_max_dwords = 0,
+             .has_scalar_data_prefetch = false,
+             .has_global_prefetch = false,
+             .has_cluster_launch = false,
+             .has_multicast_load = false,
+             .has_global_float_atomic_add = false,
+         }},
+        {"gfx1201",
+         {
+             .has_async_lds = false,
+             .has_async_global_lds = false,
+             .has_ds_read_tr = false,
+             .has_tdm = false,
+             .buffer_load_max_dwords = 4,
+             .async_lds_max_dwords = 0,
+             .has_scalar_data_prefetch = false,
+             .has_global_prefetch = false,
+             .has_cluster_launch = false,
+             .has_multicast_load = false,
+             .has_global_float_atomic_add = false,
+         }},
+        {"gfx1250",
+         {
+             .has_async_lds = false,
+             .has_async_global_lds = true,
+             .has_ds_read_tr = false,
+             .has_tdm = true,
+             .buffer_load_max_dwords = 4,
+             .async_lds_max_dwords = 0,
+             .has_scalar_data_prefetch = true,
+             .has_global_prefetch = true,
+             .has_cluster_launch = true,
+             .has_multicast_load = true,
+             .has_global_float_atomic_add = true,
+         }},
+        {"gfx90a",
+         {
+             .has_async_lds = false,
+             .has_async_global_lds = false,
+             .has_ds_read_tr = false,
+             .has_tdm = false,
+             .buffer_load_max_dwords = 4,
+             .async_lds_max_dwords = 0,
+             .has_scalar_data_prefetch = false,
+             .has_global_prefetch = false,
+             .has_cluster_launch = false,
+             .has_multicast_load = false,
+             .has_global_float_atomic_add = false,
+         }},
+        {"gfx942",
+         {
+             .has_async_lds = true,
+             .has_async_global_lds = true,
+             .has_ds_read_tr = false,
+             .has_tdm = false,
+             .buffer_load_max_dwords = 4,
+             .async_lds_max_dwords = 1,
+             .has_scalar_data_prefetch = false,
+             .has_global_prefetch = false,
+             .has_cluster_launch = false,
+             .has_multicast_load = false,
+             .has_global_float_atomic_add = false,
+         }},
+        {"gfx950",
+         {
+             .has_async_lds = true,
+             .has_async_global_lds = true,
+             .has_ds_read_tr = true,
+             .has_tdm = false,
+             .buffer_load_max_dwords = 4,
+             .async_lds_max_dwords = 4,
+             .has_scalar_data_prefetch = false,
+             .has_global_prefetch = false,
+             .has_cluster_launch = false,
+             .has_multicast_load = false,
+             .has_global_float_atomic_add = false,
+         }},
     };
     for(const expected_caps& row : table)
     {
@@ -2917,7 +3233,8 @@ void case_memory_caps()
            || got.has_scalar_data_prefetch != want.has_scalar_data_prefetch
            || got.has_global_prefetch != want.has_global_prefetch
            || got.has_cluster_launch != want.has_cluster_launch
-           || got.has_multicast_load != want.has_multicast_load)
+           || got.has_multicast_load != want.has_multicast_load
+           || got.has_global_float_atomic_add != want.has_global_float_atomic_add)
             fail(row.gfx, __LINE__);
     }
 }
@@ -2976,7 +3293,36 @@ void case_buffer_load_lds_async()
     EXPECT_IR(ir, "ptr addrspace(3) %lds_ptr");
 }
 
-/* ---- dtype-generic buffer_load_vN (Python IRBuilder.buffer_load_vN) ---- */
+/* ---- dtype-generic buffer_load_vN / buffer_store_vN (Python IRBuilder) ---- */
+
+/* Run `build` on a fresh builder; return the refusal text, or "" when the
+ * builder accepted. The builder reports a refusal either as an error status or
+ * by throwing. */
+template <typename BuildFn>
+std::string buffer_refusal(BuildFn build)
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "buf_vn_bad");
+    std::string err;
+    try
+    {
+        rocke_value_t* X = global_ptr_param(&b, "X", rocke_i8());
+        rocke_value_t* rsrc = rocke_b_buffer_rsrc(&b, X, rocke_b_const_i32(&b, 256));
+        build(&b, rsrc, rocke_b_const_i32(&b, 0));
+        if(rocke_ir_builder_status(&b) != ROCKE_OK)
+        {
+            const char* msg = rocke_ir_builder_error(&b);
+            err = msg ? msg : "(no message)";
+        }
+    }
+    catch(const std::exception& e)
+    {
+        err = e.what();
+    }
+    rocke_ir_builder_free(&b);
+    return err;
+}
+
 void case_buffer_load_vN_generic()
 {
     const std::string ir = lower_one("buf_vn", [](rocke_ir_builder_t* b) {
@@ -2986,27 +3332,33 @@ void case_buffer_load_vN_generic()
         rocke_value_t* i32x4 = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_i32(), 4);
         rocke_value_t* bf16x8 = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_bf16(), 8);
         rocke_value_t* f32x1 = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_f32(), 1);
-        if(i32x4 == nullptr || bf16x8 == nullptr || f32x1 == nullptr)
+        rocke_value_t* i8x1 = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_i8(), 1);
+        rocke_value_t* f16x1 = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_f16(), 1);
+        rocke_value_t* f64x1 = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_f64(), 1);
+        if(i32x4 == nullptr || bf16x8 == nullptr || f32x1 == nullptr || i8x1 == nullptr
+           || f16x1 == nullptr || f64x1 == nullptr)
         {
             fail("buffer_load_vN returned NULL", __LINE__);
             return;
         }
-        /* Result type <n x dtype>, hint bl{n}, attrs dwords + elem_type. */
-        const rocke_value_t* want[] = {i32x4, bf16x8, f32x1};
-        const int lanes[] = {4, 8, 1};
-        const int64_t dwords[] = {4, 4, 1};
-        const char* elems[] = {"i32", "bf16", "f32"};
-        for(int i = 0; i < 3; ++i)
+        /* Result type <n x dtype>, hint bl{n}, attr elem_type, and attr dwords
+         * only for an access of whole dwords (-1 = absent). */
+        const rocke_value_t* want[] = {i32x4, bf16x8, f32x1, i8x1, f16x1, f64x1};
+        const int lanes[] = {4, 8, 1, 1, 1, 1};
+        const int64_t dwords[] = {4, 4, 1, -1, -1, 2};
+        const char* elems[] = {"i32", "bf16", "f32", "i8", "f16", "f64"};
+        for(int i = 0; i < 6; ++i)
         {
             const rocke_value_t* v = want[i];
             const rocke_attr_value_t* dw = rocke_attr_get(&v->op->attrs, "dwords");
             const rocke_attr_value_t* et = rocke_attr_get(&v->op->attrs, "elem_type");
+            const bool dwords_ok
+                = dwords[i] < 0 ? dw == nullptr : (dw != nullptr && dw->u.i == dwords[i]);
             char hint[16];
             snprintf(hint, sizeof(hint), "%%bl%d", lanes[i]);
             if(v->type->kind != ROCKE_TYPE_VECTOR || v->type->count != lanes[i]
-               || v->op->opcode != ROCKE_OP_TILE_BUFFER_LOAD_VN || dw == nullptr
-               || dw->u.i != dwords[i] || et == nullptr || strcmp(et->u.s, elems[i]) != 0
-               || strncmp(v->name, hint, strlen(hint)) != 0)
+               || v->op->opcode != ROCKE_OP_TILE_BUFFER_LOAD_VN || !dwords_ok || et == nullptr
+               || strcmp(et->u.s, elems[i]) != 0 || strncmp(v->name, hint, strlen(hint)) != 0)
                 fail(elems[i], __LINE__);
         }
     });
@@ -3015,6 +3367,12 @@ void case_buffer_load_vN_generic()
     EXPECT_IR(ir, " to <8 x bfloat>");
     EXPECT_IR(ir, "call i32 @llvm.amdgcn.raw.ptr.buffer.load.i32(");
     EXPECT_IR(ir, "bitcast i32 ");
+    EXPECT_IR(ir, "call i8 @llvm.amdgcn.raw.ptr.buffer.load.i8(");
+    EXPECT_IR(ir, " to <1 x i8>");
+    EXPECT_IR(ir, "call i16 @llvm.amdgcn.raw.ptr.buffer.load.i16(");
+    EXPECT_IR(ir, " to <1 x half>");
+    EXPECT_IR(ir, "call <2 x i32> @llvm.amdgcn.raw.ptr.buffer.load.v2i32(");
+    EXPECT_IR(ir, " to <1 x double>");
 
     struct Reject
     {
@@ -3022,43 +3380,204 @@ void case_buffer_load_vN_generic()
         const rocke_type_t* (*dtype)(void);
         int n;
     };
+    /* The Python builder's texts (tests/core/test_buffer_access_widths.py). */
     static const Reject rejects[] = {
-        {"buffer_load_vN: unsupported dtype 'f64'", rocke_f64, 2},
-        {"buffer_load_vN: n=16 dtype=f16 -> dwords=8 must be 1, 2, or 4", rocke_f16, 16},
-        {"buffer_load_vN: n=3 dtype=f32 -> dwords=3 must be 1, 2, or 4", rocke_f32, 3},
-        {"buffer_load_vN: n=3 dtype=bf16 is not a whole number of dwords", rocke_bf16, 3},
-        {"buffer_load_vN: n=5 dtype=f16 is not a whole number of dwords", rocke_f16, 5},
-        {"buffer_load_vN: n=0 dtype=f32 is not a whole number of dwords", rocke_f32, 0},
+        {"buffer_load_vN: 16 x f16 is 32 bytes; a buffer access moves 1, 2, 4, 8 or 16 bytes",
+         rocke_f16,
+         16},
+        {"buffer_load_vN: 3 x f32 is 12 bytes; a buffer access moves 1, 2, 4, 8 or 16 bytes",
+         rocke_f32,
+         3},
+        {"buffer_load_vN: 3 x bf16 is 6 bytes; a buffer access moves 1, 2, 4, 8 or 16 bytes",
+         rocke_bf16,
+         3},
+        {"buffer_load_vN: 3 x f64 is 24 bytes; a buffer access moves 1, 2, 4, 8 or 16 bytes",
+         rocke_f64,
+         3},
+        {"buffer_load_vN: n must be at least 1, got 0", rocke_f32, 0},
+        /* count * bits overflows a 32-bit int here: the width is computed in
+         * 64 bits, as Python's ints are. */
+        {"buffer_load_vN: 536870913 x i8 is 536870913 bytes; a buffer access moves 1, 2, 4, 8 "
+         "or 16 bytes",
+         rocke_i8,
+         536870913},
+        {"buffer_load_vN: i1 elements are 1 bits, not whole bytes; a buffer access moves whole "
+         "bytes",
+         rocke_i1,
+         8},
+        {"buffer_load_vN: e8m0 is an MMA scale encoding with no value form; move its bytes as u8",
+         rocke_e8m0,
+         1},
+        {"buffer_load_vN: e5m3 is an MMA scale encoding with no value form; move its bytes as u8",
+         rocke_e5m3,
+         16},
     };
     for(const Reject& r : rejects)
     {
-        rocke_ir_builder_t b;
-        rocke_ir_builder_init(&b, "buf_vn_bad");
-        bool rejected = false;
-        std::string err;
-        try
-        {
-            rocke_value_t* X = global_ptr_param(&b, "X", rocke_f16());
-            rocke_value_t* rsrc = rocke_b_buffer_rsrc(&b, X, rocke_b_const_i32(&b, 256));
-            rocke_value_t* zero = rocke_b_const_i32(&b, 0);
-            rocke_value_t* v = rocke_b_buffer_load_vN(&b, rsrc, zero, zero, r.dtype(), r.n);
-            rejected = v == nullptr && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE;
-            const char* msg = rocke_ir_builder_error(&b);
-            err = msg ? msg : "";
-        }
-        catch(const std::exception& e)
-        {
-            rejected = true;
-            err = e.what();
-        }
-        if(!rejected || err.find(r.want) == std::string::npos)
+        const std::string err
+            = buffer_refusal([&](rocke_ir_builder_t* b, rocke_value_t* rsrc, rocke_value_t* zero) {
+                  rocke_b_buffer_load_vN(b, rsrc, zero, zero, r.dtype(), r.n);
+              });
+        if(err.find(r.want) == std::string::npos)
         {
             char msg[ROCKE_ERR_MSG_CAP + 128];
             snprintf(msg, sizeof(msg), "want \"%s\", err \"%s\"", r.want, err.c_str());
             fail(msg, __LINE__);
         }
-        rocke_ir_builder_free(&b);
     }
+}
+
+void case_buffer_store_vN_generic()
+{
+    const std::string ir = lower_one("buf_store_vn", [](rocke_ir_builder_t* b) {
+        rocke_value_t* X = global_ptr_param(b, "X", rocke_i8());
+        rocke_value_t* rsrc = rocke_b_buffer_rsrc(b, X, rocke_b_const_i32(b, 256));
+        rocke_value_t* zero = rocke_b_const_i32(b, 0);
+        const struct
+        {
+            const rocke_type_t* (*dtype)(void);
+            int n;
+        } widths[] = {{rocke_i8, 1}, {rocke_i8, 2}, {rocke_f16, 2}, {rocke_f64, 1}, {rocke_i8, 16}};
+        for(const auto& w : widths)
+        {
+            rocke_value_t* v = rocke_b_buffer_load_vN(b, rsrc, zero, zero, w.dtype(), w.n);
+            const int before = b->kernel->body->num_ops;
+            rocke_b_buffer_store_vN(b, rsrc, zero, zero, v);
+            if(!rocke_ir_builder_ok(b) || b->kernel->body->num_ops != before + 1
+               || b->kernel->body->ops[before]->opcode != ROCKE_OP_TILE_BUFFER_STORE_VN
+               || b->kernel->body->ops[before]->attrs.count != 0)
+                fail("buffer_store_vN op", __LINE__);
+        }
+    });
+    EXPECT_IR(ir, "call void @llvm.amdgcn.raw.ptr.buffer.store.i8(i8 ");
+    EXPECT_IR(ir, "bitcast <1 x i8> ");
+    EXPECT_IR(ir, "bitcast <2 x i8> ");
+    EXPECT_IR(ir, "bitcast <2 x half> ");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.raw.ptr.buffer.store.i16(i16 ");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.raw.ptr.buffer.store.i32(i32 ");
+    EXPECT_IR(ir, "bitcast <1 x double> ");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.raw.ptr.buffer.store.v2i32(<2 x i32> ");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.raw.ptr.buffer.store.v4i32(<4 x i32> ");
+    EXPECT_IR(ir, "declare void @llvm.amdgcn.raw.ptr.buffer.store.i8(i8, ");
+
+    const std::string hip = lower_one_hip(
+        "buf_store_vn_hip",
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* X = global_ptr_param(b, "X", rocke_i8());
+            rocke_value_t* rsrc = rocke_b_buffer_rsrc(b, X, rocke_b_const_i32(b, 256));
+            rocke_value_t* zero = rocke_b_const_i32(b, 0);
+            rocke_value_t* v = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_i8(), 1);
+            rocke_b_buffer_store_vN(b, rsrc, zero, zero, v);
+        },
+        "gfx942");
+    EXPECT_IR(hip, "= __builtin_amdgcn_raw_buffer_load_b8(");
+    EXPECT_IR(hip, "{ unsigned char _bs; __builtin_memcpy(&_bs, &");
+    EXPECT_IR(hip, "__builtin_amdgcn_raw_buffer_store_b8(_bs, ");
+
+    /* The Python builder's texts (tests/core/test_buffer_access_widths.py). */
+    std::string err
+        = buffer_refusal([](rocke_ir_builder_t* b, rocke_value_t* rsrc, rocke_value_t* zero) {
+              rocke_b_buffer_store_vN(b, rsrc, zero, zero, rocke_b_const_i32(b, 1));
+          });
+    const char* want_scalar = "buffer_store_vN: the value must be a vector, got i32; a "
+                              "one-element vector is vector_splat(x, 1)";
+    if(err.find(want_scalar) == std::string::npos)
+        fail(("scalar value: " + err).c_str(), __LINE__);
+    err = buffer_refusal([](rocke_ir_builder_t* b, rocke_value_t* rsrc, rocke_value_t* zero) {
+        rocke_value_t* v = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_f32(), 4);
+        rocke_value_t* wide = rocke_b_vector_splat(b, rocke_b_vec_extract(b, v, 0), 8);
+        rocke_b_buffer_store_vN(b, rsrc, zero, zero, wide);
+    });
+    const char* want_wide
+        = "buffer_store_vN: 8 x f32 is 32 bytes; a buffer access moves 1, 2, 4, 8 or 16 bytes";
+    if(err.find(want_wide) == std::string::npos)
+        fail(("wide value: " + err).c_str(), __LINE__);
+}
+
+/* The verifier's messages for the kernel `b` has built so far. */
+std::vector<std::string> verify_messages(rocke_ir_builder_t* b)
+{
+    rocke_diag_t* diags = nullptr;
+    size_t n = 0;
+    rocke_verify(rocke_ir_builder_kernel(b), &diags, &n);
+    std::vector<std::string> out;
+    for(size_t i = 0; i < n; ++i)
+        out.emplace_back(diags[i].message ? diags[i].message : "");
+    rocke_diags_free(diags, n);
+    return out;
+}
+
+bool has_message(const std::vector<std::string>& messages, const char* want)
+{
+    for(const std::string& m : messages)
+    {
+        if(m == want)
+            return true;
+    }
+    return false;
+}
+
+/* Buffer loads and stores written as raw ops, past the builder's checks, as
+ * serialized IR reaches the verifier: the verifier refuses a wrong width and a
+ * wrong operand count with the Python engine's texts
+ * (tests/core/test_buffer_access_widths.py). */
+void case_buffer_vN_verify()
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "buf_vn_verify");
+    rocke_value_t* X = global_ptr_param(&b, "X", rocke_i8());
+    rocke_value_t* rsrc = rocke_b_buffer_rsrc(&b, X, rocke_b_const_i32(&b, 256));
+    rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+    rocke_value_t* load_operands[] = {rsrc, zero, zero};
+    const rocke_type_t* f32x3[] = {rocke_vector_type(&b, rocke_f32(), 3)};
+    rocke_b_op(&b,
+               ROCKE_OP_TILE_BUFFER_LOAD_VN,
+               load_operands,
+               3,
+               f32x3,
+               1,
+               nullptr,
+               nullptr,
+               0,
+               "bl3",
+               nullptr);
+    rocke_value_t* f32x8 = rocke_b_vector_splat(&b, rocke_b_const_f32(&b, 1.0), 8);
+    rocke_value_t* wide_operands[] = {rsrc, zero, zero, f32x8};
+    rocke_b_op(&b,
+               ROCKE_OP_TILE_BUFFER_STORE_VN,
+               wide_operands,
+               4,
+               nullptr,
+               0,
+               nullptr,
+               nullptr,
+               0,
+               nullptr,
+               nullptr);
+    rocke_b_op(&b,
+               ROCKE_OP_TILE_BUFFER_STORE_VN,
+               load_operands,
+               3,
+               nullptr,
+               0,
+               nullptr,
+               nullptr,
+               0,
+               nullptr,
+               nullptr);
+    rocke_b_ret(&b);
+    const std::vector<std::string> messages = verify_messages(&b);
+    if(!has_message(messages,
+                    "tile.buffer_load_vN: 3 x f32 is 12 bytes; a buffer access moves 1, 2, 4, 8 "
+                    "or 16 bytes"))
+        fail("verifier must reject a 12-byte buffer_load_vN", __LINE__);
+    if(!has_message(messages,
+                    "tile.buffer_store_vN: 8 x f32 is 32 bytes; a buffer access moves 1, 2, 4, 8 "
+                    "or 16 bytes"))
+        fail("verifier must reject a 32-byte buffer_store_vN", __LINE__);
+    if(!has_message(messages, "tile.buffer_store_vN: expected 4 operands / 0 results, got 3 / 0"))
+        fail("verifier must reject a three-operand buffer_store_vN", __LINE__);
+    rocke_ir_builder_free(&b);
 }
 
 void case_global_load_async_to_lds_b8()
@@ -3091,6 +3610,90 @@ void case_global_load_async_to_lds_b8()
     EXPECT_IR(ir, "call void @llvm.amdgcn.global.load.async.to.lds.b8(");
     /* Per-lane source/destination addresses are computed with GEPs. */
     EXPECT_IR(ir, "getelementptr inbounds");
+}
+
+/* An scf.if_else with results, its branches yielding `then_value` and
+ * `else_value`. */
+rocke_if_else_t build_if_else_yielding(rocke_ir_builder_t* b,
+                                       const rocke_type_t* result_type,
+                                       rocke_value_t* then_value,
+                                       rocke_value_t* else_value)
+{
+    const rocke_type_t* result_types[] = {result_type};
+    rocke_value_t* cond = rocke_b_cmp_lt(b, rocke_b_thread_id_x(b), rocke_b_const_i32(b, 4));
+    rocke_if_else_t branch = rocke_b_scf_if_else_results(b, cond, result_types, 1);
+    rocke_b_region_enter(b, branch.then_region);
+    rocke_b_scf_yield(b, &then_value, 1);
+    rocke_b_region_leave(b);
+    rocke_b_region_enter(b, branch.else_region);
+    rocke_b_scf_yield(b, &else_value, 1);
+    rocke_b_region_leave(b);
+    return branch;
+}
+
+/* The verifier refuses an if/else whose branch yields the wrong type or a
+ * buffer descriptor, and one without one condition and two branches, with the
+ * Python engine's texts (tests/core/test_scf_if_else_results.py). */
+void case_scf_if_else_verify()
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "if_else_verify");
+    rocke_value_t* X = global_ptr_param(&b, "X", rocke_f32());
+    build_if_else_yielding(&b, rocke_f32(), rocke_b_const_f32(&b, 1.0), rocke_b_const_i32(&b, 1));
+    rocke_if_else_t descriptor
+        = build_if_else_yielding(&b,
+                                 rocke_vector_type(&b, rocke_i32(), 4),
+                                 rocke_b_buffer_rsrc(&b, X, rocke_b_const_i32(&b, 64)),
+                                 rocke_b_buffer_rsrc(&b, X, rocke_b_const_i32(&b, 32)));
+    rocke_if_else_t short_op = build_if_else_yielding(
+        &b, rocke_i32(), rocke_b_const_i32(&b, 1), rocke_b_const_i32(&b, 2));
+    short_op.op->num_regions = 1;
+    rocke_b_ret(&b);
+    if(descriptor.op->num_results != 1 || descriptor.op->results[0] == nullptr)
+        fail("rocke_b_scf_if_else_results must give the op its result", __LINE__);
+    const std::vector<std::string> messages = verify_messages(&b);
+    if(!has_message(messages, "scf.if_else result 0 is f32, but its else branch yields i32"))
+        fail("verifier must reject a branch that yields the wrong type", __LINE__);
+    if(!has_message(messages,
+                    "scf.if_else result 0: its then branch yields a buffer descriptor, which an "
+                    "if/else cannot carry; yield the values the descriptor is built from and "
+                    "build it after the if/else"))
+        fail("verifier must reject a branch that yields a buffer descriptor", __LINE__);
+    if(!has_message(messages, "scf.if_else: expected 1 condition / 2 branches, got 1 / 1"))
+        fail("verifier must reject an if/else with one branch", __LINE__);
+    rocke_ir_builder_free(&b);
+}
+
+/* The builder refuses an LDS allocation as an if/else result, with the Python
+ * engine's text (tests/core/test_scf_if_else_results.py). */
+void case_scf_if_else_refuses_an_lds_result()
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "if_else_lds");
+    std::string err;
+    rocke_op_t* op = nullptr;
+    try
+    {
+        const int shape[] = {64};
+        const rocke_type_t* result_types[] = {rocke_smem_type(&b, rocke_f32(), shape, 1, 0)};
+        rocke_value_t* cond = rocke_b_cmp_lt(&b, rocke_b_thread_id_x(&b), rocke_b_const_i32(&b, 4));
+        op = rocke_b_scf_if_else_results(&b, cond, result_types, 1).op;
+        if(rocke_ir_builder_status(&b) != ROCKE_OK)
+        {
+            const char* msg = rocke_ir_builder_error(&b);
+            err = msg ? msg : "(no message)";
+        }
+    }
+    catch(const std::exception& e)
+    {
+        err = e.what();
+    }
+    if(op != nullptr
+       || err.find("scf.if_else result 0 is an LDS allocation, which an if/else cannot carry; "
+                   "allocate before the if/else and yield an offset into the allocation instead")
+              == std::string::npos)
+        fail("rocke_b_scf_if_else_results must refuse an LDS allocation result", __LINE__);
+    rocke_ir_builder_free(&b);
 }
 
 /* ---- HIP zero-extension source signedness ---- */
@@ -3385,6 +3988,7 @@ struct TestCase
 };
 
 const TestCase k_cases[] = {
+    {"scaled_mfma_shared_profile", case_scaled_mfma_shared_profile},
     {"lowbit_dtype_aliases", case_lowbit_dtype_aliases},
     {"wmma_result_count", case_wmma_result_count},
     {"ds_swizzle_raw_offset", case_ds_swizzle_raw_offset},
@@ -3445,6 +4049,8 @@ const TestCase k_cases[] = {
     {"gfx1250_tdm_i32_lds_address", case_gfx1250_tdm_i32_lds_address},
     {"gfx1250_tdm_group_types", case_gfx1250_tdm_group_types},
     {"global_ptr_to_i64", case_global_ptr_to_i64},
+    {"global_ptr_offset", case_global_ptr_offset},
+    {"trap", case_trap},
     {"gfx1250_tdm_gated", case_gfx1250_tdm_gated},
     {"gfx1250_tdm_builder_rejects", case_gfx1250_tdm_builder_rejects},
     {"gfx1250_tdm_purity", case_gfx1250_tdm_purity},
@@ -3454,10 +4060,16 @@ const TestCase k_cases[] = {
     {"vmcnt_bits", case_vmcnt_bits},
     {"buffer_load_lds_async", case_buffer_load_lds_async},
     {"buffer_load_vN_generic", case_buffer_load_vN_generic},
+    {"buffer_store_vN_generic", case_buffer_store_vN_generic},
+    {"buffer_vN_verify", case_buffer_vN_verify},
     {"global_load_async_to_lds_b8", case_global_load_async_to_lds_b8},
+    {"scf_if_else_verify", case_scf_if_else_verify},
+    {"scf_if_else_refuses_an_lds_result", case_scf_if_else_refuses_an_lds_result},
     {"hip_zext_uses_unsigned_source_cast", case_hip_zext_uses_unsigned_source_cast},
     {"gfx1250_scaled_wmma", case_gfx1250_scaled_wmma},
     {"gfx1250_standalone_bridge", case_gfx1250_standalone_bridge},
+    {"inline_asm_rejects_non_string_minimum_flavor",
+     case_inline_asm_rejects_non_string_minimum_flavor},
     {"flag_ops", case_flag_ops},
     {"fence_system_scope", case_fence_system_scope},
     {"flag_ops_hip", case_flag_ops_hip},

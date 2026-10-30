@@ -34,6 +34,7 @@ from ..arch.wmma_scale import gfx1250_scaled_wmma
 from ..ir import BF16, F16, F32, I32, I64
 from ..wmma import validate_scaled_wmma_sources, validate_unscaled_wmma
 from ..ir import I32, Op, VectorType
+from ..llvm_profile import _supports_llvm23_target_ops
 from .wmma_scale import ScaledWmmaLLVM
 
 
@@ -231,7 +232,7 @@ class ISABackend:
                 f"{name} is not available on {self.arch.gfx}: "
                 "its MMA catalog does not list it"
             )
-        if lowerer._flavor != "llvm23":
+        if not _supports_llvm23_target_ops(lowerer._flavor):
             raise NotImplementedError(
                 f"{name} requires llvm23 (ROCm 7.13+), got {lowerer._flavor}"
             )

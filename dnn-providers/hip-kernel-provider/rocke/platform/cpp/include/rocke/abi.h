@@ -83,13 +83,17 @@ extern "C" {
  * 3: rocke_mma_op_t gained emulation_recipe and emulation_physical_op_id at its
  *    end, which changes sizeof and with it the stride of every ops[] array a
  *    catalog hands out.
- * 4: indexed matrix sources, independent destination, and source-owned scales
+ * 4: rocke_memory_caps_t gained has_global_float_atomic_add at its end, which
+ *    changes its size and with it the offset of rocke_arch_target_t.limits.
+ * 5: indexed matrix sources, independent destination, and source-owned scales
  *    replace the flat MMA fields and role enum; native consumers must rebuild. */
-#define ROCKE_ABI_VERSION 4
+#define ROCKE_ABI_VERSION 5
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
- * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them. */
-#define ROCKE_RECIPE_ABI 2
+ * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.
+ * 3: the scf_if_else instruction (converging runtime if/else, scf.if_else);
+ *    older engines reject it as an unknown instruction op. */
+#define ROCKE_RECIPE_ABI 3
 
 /* The values the LOADED library was compiled with. A caller compares these
  * against the ROCKE_* macros it was itself compiled with; they differ exactly

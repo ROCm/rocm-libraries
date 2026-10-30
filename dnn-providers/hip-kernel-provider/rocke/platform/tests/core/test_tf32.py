@@ -27,7 +27,7 @@ from rocke.core.ir import (
 from rocke.core.ir_serialize import serialize, parse
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-from rocke.core.verify import verify
+from rocke.core.verify import verify, verify_or_raise
 from rocke.examples.gfx942.tf32_numerics import rne_bits
 from rocke.tests.engines import assert_both_engines_reject
 from rocke.instances.gfx942.tf32_mma_probe import (
@@ -617,6 +617,26 @@ def test_non_xf32_mma_rejects_tf32_result(m, scalar_result):
             _lower_kernel_to_llvm_python(kernel, arch="gfx942", llvm_flavor=flavor)
         with pytest.raises(Exception, match=message):
             native.lower_serialized_ir(ir, arch="gfx942", flavor=flavor)
+
+
+@pytest.mark.parametrize("m", [16, 32])
+def test_concrete_mma_identity_conflict_is_a_verifier_diagnostic(m):
+    kernel = build_tf32_mma_probe(Tf32MmaProbeSpec(m))
+    mma = next(op for op in kernel.body.ops if op.name == "tile.mma")
+    mma.name = "tile." + mma.attrs["op_id"]
+    assert verify(kernel) == []
+    conflicting_id = {
+        16: "mfma_f32_32x32x4_xf32",
+        32: "mfma_f32_16x16x8_xf32",
+    }[m]
+    mma.attrs["op_id"] = conflicting_id
+    kernel = parse(serialize(kernel))
+    message = f"concrete MFMA {mma.name} has conflicting op_id {conflicting_id}"
+    assert any(message in str(d) for d in verify(kernel))
+    with pytest.raises(ValueError, match=re.escape(message)):
+        verify_or_raise(kernel)
+    with pytest.raises(ValueError, match=re.escape(message)):
+        _lower_kernel_to_llvm_python(kernel, arch="gfx942")
 
 
 @pytest.mark.parametrize("m", [16, 32])

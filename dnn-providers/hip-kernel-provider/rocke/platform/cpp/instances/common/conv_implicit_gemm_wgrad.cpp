@@ -771,22 +771,36 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         return false;
     }
 
-    /* split_k > 1 (atomic) requires a MFMA arch
-     * (ctx->atom != NULL at build time).
-     *
-     * TODO: gate on resolved wave_size == 64 / op->family == "mma" (matching
-     * Python which uses family == "wmma") instead of the arch string, so
-     * gfx10* and any future or unknown arch prefix cannot fall through.  This
-     * is not reachable on today's supported targets but would be more robust. */
+    /* WMMA (wave32) split-K takes the WMMA atomic epilogue
+     * (wgrad_emit_split_k_epilogue_wmma), which decodes the C fragment from the
+     * WMMA layout rather than from ctx->atom. Mirrors Python is_valid_wgrad_spec,
+     * which derives the family from the target wave size. */
+    const bool is_wmma_family = target->wave_size == 32;
     if(sk > 1)
     {
-        /* Quick arch check: gfx11xx / gfx12xx are RDNA.
-         * Note: gfx10* and any unknown prefix are not rejected here — they would
-         * reach the split-K epilogue where ctx->atom is NULL (null deref). */
-        if(arch && (strncmp(arch, "gfx11", 5) == 0 || strncmp(arch, "gfx12", 5) == 0))
+        /* The two-stage scratch-atomic epilogue is MFMA-only: it decodes the C
+         * fragment through ctx->atom, which is NULL on the WMMA path. */
+        if(s->two_stage && is_wmma_family)
         {
             if(reason && reason_cap)
-                snprintf(reason, reason_cap, "split_k atomic is only supported on CDNA targets");
+                snprintf(reason,
+                         reason_cap,
+                         "two-stage wgrad is CDNA-only (got family 'wmma' on %s); the "
+                         "scratch-atomic epilogue has no WMMA variant",
+                         arch);
+            return false;
+        }
+        /* WMMA split-K is enabled for every dW dtype where the arch catalog marks
+         * the float global atomics as run on a device. Mirrors Python
+         * wgrad_wmma_split_k_available. */
+        if(is_wmma_family && !target->memory.has_global_float_atomic_add)
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "WMMA split_k atomic is enabled only on arches with validated float "
+                         "global atomics (has_global_float_atomic_add; got %s)",
+                         arch);
             return false;
         }
 
@@ -825,9 +839,16 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
              * Checking only wg_N admits a spec that CShuffleEpilogue::atomic_store
              * then rejects -- the same admits/build split this gate exists to
              * close. store_vec mirrors default_vector_sizes(..., split_k=1):
-             * widest of 8/4/2/1 dividing the channel run (per-group when grouped). */
+             * widest of 8/4/2/1 dividing the channel run (per-group when grouped).
+             * MFMA only: the WMMA epilogue (wave32) issues one pair per
+             * accumulator element with a zero partner and never reads the store
+             * width, so only the row parity applies there. */
             int store_vec;
-            if(s->has_vector_size_c)
+            if(is_wmma_family)
+            {
+                store_vec = 2;
+            }
+            else if(s->has_vector_size_c)
             {
                 store_vec = s->vector_size_c;
             }
@@ -870,14 +891,16 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
      * workspace store.  Neither emits packed atomics, so the default epilogue
      * is fine for both.  Guarding on sk rather than on dtype alone keeps the
      * non-atomic 16-bit output path reachable -- it is the only one WMMA wgrad
-     * can use, since WMMA rejects cshuffle.
+     * can use, since WMMA rejects cshuffle.  Where WMMA split-K is admitted
+     * (memory.has_global_float_atomic_add) the WMMA epilogue forms each packed
+     * pair itself, so 'default' is admitted there.
      * Matches Python is_valid_wgrad_spec / validate(): _needs_atomic guard. */
     if(sk > 1)
     {
         /* Mirrors the builder's is_two_stage = is_split_k && two_stage: a
          * two-stage spec takes the f32 scratch epilogue, not the packed atomic. */
         bool effective_two_stage_v = s->two_stage;
-        if(!effective_two_stage_v)
+        if(!effective_two_stage_v && !is_wmma_family)
         {
             const char* dt = s->dtype_d ? s->dtype_d : "fp16";
             bool is_default_epi = (s->epilogue == NULL || strcmp(s->epilogue, "default") == 0);
@@ -1099,7 +1122,58 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         return false;
 
     /* The forward validator has pinned wave_size to the arch, so wave32 is the
-     * WMMA family here. Mirrors the Python WMMA flag gate. */
+     * WMMA family here. Its WMMA subset is the forward conv's, which is wider
+     * than wgrad's (it also admits cshuffle, wavelet and 16x16x4); mirror the
+     * Python wgrad WMMA gates so both engines admit the same specs -- the WMMA
+     * split-K epilogue in particular is only defined for this subset. */
+    if(s->wave_size == 32)
+    {
+        const bool atom_ok = s->warp_tile_m == 16 && s->warp_tile_n == 16
+                             && (s->warp_tile_k == 16 || s->warp_tile_k == 32);
+        if(!atom_ok)
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "WMMA wgrad supports only 16x16x16 or 16x16x32 (got (%d, %d, %d)) on %s",
+                         s->warp_tile_m,
+                         s->warp_tile_n,
+                         s->warp_tile_k,
+                         arch);
+            return false;
+        }
+        const char* pipeline = s->pipeline ? s->pipeline : "mem";
+        if(strcmp(pipeline, "mem") != 0)
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "WMMA wgrad supports only the 'mem' pipeline (got '%s') on %s",
+                         pipeline,
+                         arch);
+            return false;
+        }
+        const char* epilogue = s->epilogue ? s->epilogue : "default";
+        if(strcmp(epilogue, "default") != 0)
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "WMMA wgrad supports only the 'default' epilogue (got '%s') on %s",
+                         epilogue,
+                         arch);
+            return false;
+        }
+        if(s->chiplet_swizzle)
+        {
+            if(reason && reason_cap)
+                snprintf(
+                    reason, reason_cap, "WMMA wgrad does not support chiplet_swizzle on %s", arch);
+            return false;
+        }
+    }
+
+    /* Mirrors the Python WMMA flag gate. */
     if(s->prefetch_addr && s->wave_size == 32)
     {
         if(reason && reason_cap)
@@ -1964,6 +2038,112 @@ static void wgrad_emit_split_k_epilogue_f32(rocke_ir_builder_t* b,
                     }
                     rocke_b_region_leave(b);
                 }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Wgrad split-K WMMA epilogue
+// Mirrors Python _emit_wgrad_split_k_epilogue_wmma: the per-slot (row, col)
+// comes from the WMMA C-fragment layout (op.c_layout().coord), not from the
+// MFMA distribution decoder, so it needs no ctx->atom.
+//   fp32      -- scalar global_atomic_add per element.
+//   fp16/bf16 -- one packed <2 x dtype> atomic per element, value in its half
+//                and zero in the partner (the validator guarantees an even
+//                dW row length, so the pair is dword-aligned).
+// The caller must zero-initialise dW before launch.
+// ---------------------------------------------------------------------------
+static void wgrad_emit_split_k_epilogue_wmma(rocke_ir_builder_t* b,
+                                             const rocke_conv_build_ctx_t* ctx,
+                                             const rocke_implicit_gemm_conv_wgrad_spec_t* spec,
+                                             rocke_value_t* dw_ptr)
+{
+    const rocke_mmaop_t* op = ctx->op;
+    int mfmas_m = ctx->mfmas_m;
+    int mfmas_n = ctx->mfmas_n;
+    const char* dtype_d = spec->dtype_d ? spec->dtype_d : "fp16";
+    bool is_fp32 = (strcmp(dtype_d, "fp32") == 0);
+    bool is_bf16 = (strcmp(dtype_d, "bf16") == 0);
+
+    rocke_value_t* warp_m_off
+        = rocke_b_mul(b, ctx->warp_m_idx, rocke_b_const_i32(b, mfmas_m * spec->warp_tile_m));
+    rocke_value_t* warp_n_off
+        = rocke_b_mul(b, ctx->warp_n_idx, rocke_b_const_i32(b, mfmas_n * spec->warp_tile_n));
+    rocke_value_t* block_warp_m_off = rocke_b_add(b, ctx->block_m_off_v, warp_m_off);
+    rocke_value_t* block_warp_n_off = rocke_b_add(b, ctx->block_n_off_v, warp_n_off);
+
+    /* AOT: the GEMM extents are kernargs, not folded constants. */
+    rocke_value_t* wg_M_v = ctx->p_wg_M;
+    rocke_value_t* wg_N_v = ctx->p_wg_N;
+    /* Grouped: the atomic row lands in the group's output-channel slab
+     * (Python _row_addr) while the bounds stay on the per-group row. */
+    rocke_value_t* c_kpg_e = ctx->group_idx != NULL ? ctx->p_kpg : NULL;
+
+    const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
+
+    int flat = 0;
+    for(int mi = 0; mi < mfmas_m; ++mi)
+    {
+        rocke_value_t* atom_m_base
+            = rocke_b_add(b, block_warp_m_off, rocke_b_const_i32(b, mi * spec->warp_tile_m));
+        for(int ni = 0; ni < mfmas_n; ++ni)
+        {
+            rocke_value_t* acc = ctx->final_accs[flat++];
+            rocke_value_t* atom_n_base
+                = rocke_b_add(b, block_warp_n_off, rocke_b_const_i32(b, ni * spec->warp_tile_n));
+            for(int i = 0; i < op->dst.frag_len; ++i)
+            {
+                rocke_value_t* row_off = NULL;
+                rocke_value_t* col_off = NULL;
+                rocke_arch_layout_map_coord(c_map, b, ctx->lane, i, &row_off, &col_off);
+                rocke_value_t* c_m = rocke_b_add(b, atom_m_base, row_off);
+                rocke_value_t* c_n = rocke_b_add(b, atom_n_base, col_off);
+
+                if(is_fp32)
+                {
+                    /* Python: the element is extracted inside the bounds check. */
+                    rocke_value_t* m_ok = rocke_b_cmp_lt(b, c_m, wg_M_v);
+                    rocke_value_t* n_ok = rocke_b_cmp_lt(b, c_n, wg_N_v);
+                    rocke_value_t* row = wgrad_row_addr(b, c_m, ctx->group_idx, c_kpg_e);
+                    rocke_value_t* c_off = rocke_b_add(b, rocke_b_mul(b, row, wg_N_v), c_n);
+                    rocke_if_t if_op = rocke_b_scf_if(b, rocke_b_land(b, m_ok, n_ok));
+                    rocke_b_region_enter(b, if_op.then_region);
+                    rocke_b_global_atomic_add(
+                        b, dw_ptr, c_off, rocke_b_vec_extract(b, acc, i), NULL);
+                    rocke_b_region_leave(b);
+                    continue;
+                }
+
+                /* Python _emit_single_packed_atomic: the element is extracted by
+                 * the caller, before the pair is built. */
+                rocke_value_t* val_f32 = rocke_b_vec_extract(b, acc, i);
+                rocke_value_t* zero = is_bf16
+                                          ? rocke_b_trunc_f32_to_bf16(b, rocke_b_const_f32(b, 0.0))
+                                          : rocke_b_trunc_f32_to_f16(b, rocke_b_const_f32(b, 0.0));
+                rocke_value_t* val = is_bf16 ? rocke_b_trunc_f32_to_bf16(b, val_f32)
+                                             : rocke_b_trunc_f32_to_f16(b, val_f32);
+                rocke_value_t* m_ok = rocke_b_cmp_lt(b, c_m, wg_M_v);
+                rocke_value_t* n_ok = rocke_b_cmp_lt(b, c_n, wg_N_v);
+                rocke_if_t if_op = rocke_b_scf_if(b, rocke_b_land(b, m_ok, n_ok));
+                rocke_b_region_enter(b, if_op.then_region);
+                {
+                    rocke_value_t* c_n_is_odd = rocke_b_mod(b, c_n, rocke_b_const_i32(b, 2));
+                    rocke_value_t* is_odd = rocke_b_cmp_ne(b, c_n_is_odd, rocke_b_const_i32(b, 0));
+                    rocke_value_t* c_n_even = rocke_b_sub(b, c_n, c_n_is_odd);
+                    rocke_value_t* row = wgrad_row_addr(b, c_m, ctx->group_idx, c_kpg_e);
+                    rocke_value_t* c_off_even
+                        = rocke_b_add(b, rocke_b_mul(b, row, wg_N_v), c_n_even);
+                    rocke_value_t* v_even = rocke_b_select(b, is_odd, zero, val);
+                    rocke_value_t* v_odd = rocke_b_select(b, is_odd, val, zero);
+                    rocke_value_t* elems[2] = {v_even, v_odd};
+                    rocke_value_t* vec = rocke_b_vec_pack(b, elems, 2, val->type);
+                    if(is_bf16)
+                        rocke_b_global_atomic_add_pk_bf16(b, dw_ptr, c_off_even, vec, NULL);
+                    else
+                        rocke_b_global_atomic_add_pk_f16(b, dw_ptr, c_off_even, vec, NULL);
+                }
+                rocke_b_region_leave(b);
             }
         }
     }
@@ -3826,7 +4006,11 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         for(int i = 0; i < ctx.num_final_accs; ++i)
             ctx.final_accs[i] = post_accs[i];
 
-        if(spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0)
+        /* Same order as Python: the WMMA epilogue is chosen before the
+         * epilogue knob, since WMMA has no cshuffle. */
+        if(ctx.is_wmma)
+            wgrad_emit_split_k_epilogue_wmma(b, &ctx, spec, dW);
+        else if(spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0)
             wgrad_emit_split_k_cshuffle_epilogue(b, &ctx, spec, dW, wg_M, wg_N);
         else
             wgrad_emit_split_k_epilogue_f32(b, &ctx, spec, dW, wg_M, wg_N);

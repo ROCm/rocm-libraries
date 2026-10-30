@@ -994,7 +994,7 @@ static void rocke_b_gfx1250_scalar_control(rocke_ir_builder_t* b, const char* mn
     if(!op)
         return;
     rocke_attr_set_str(b, &op->attrs, "required_arch", "gfx1250");
-    rocke_attr_set_str(b, &op->attrs, "required_llvm_flavor", "llvm23");
+    rocke_attr_set_str(b, &op->attrs, "minimum_llvm_flavor", "llvm23");
 }
 
 void rocke_b_s_delay_alu(rocke_ir_builder_t* b, int imm)

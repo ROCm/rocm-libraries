@@ -31,13 +31,18 @@
  * rocke/abi.h and update both numbers in the same change. 64-bit only, where
  * the pointer width that is part of the layout is known. */
 #if INTPTR_MAX == INT64_MAX
-static_assert(sizeof(rocke_mma_op_t) == 216 && ROCKE_ABI_VERSION == 4,
+static_assert(sizeof(rocke_mma_op_t) == 216 && ROCKE_ABI_VERSION == 5,
               "rocke_mma_op_t changed size: bump ROCKE_ABI_VERSION in rocke/abi.h, then "
               "update this pin");
 static_assert(offsetof(rocke_mma_op_t, srcs) == 8 && offsetof(rocke_mma_op_t, dst) == 152
                   && offsetof(rocke_mma_op_t, op_id) == 192
                   && offsetof(rocke_mma_op_t, emulation_physical_op_id) == 208,
               "rocke_mma_op_t fields moved: review the binary ABI and update this pin");
+/* Same canary for rocke_memory_caps_t, which sits inside rocke_arch_target_t
+ * ahead of its limits. */
+static_assert(sizeof(rocke_memory_caps_t) == 20 && ROCKE_ABI_VERSION >= 4,
+              "rocke_memory_caps_t changed size: bump ROCKE_ABI_VERSION in rocke/abi.h, then "
+              "update this pin");
 #endif
 
 static const char* short_dtype(const char* dtype)
@@ -882,12 +887,17 @@ static int test_independent_accumulator_width()
 {
     rocke_ir_builder_t b = {};
     CHECK(rocke_ir_builder_init(&b, "independent_accumulator") == ROCKE_OK);
-    rocke_mmaop_t op = {};
-    op.srcs[2].frag_len = 4;
-    op.dst.frag_len = 7;
-    auto* acc = rocke_gemm_emit_zero_acc_op(&b, &op);
-    CHECK(acc && acc->type->count == 4);
-    CHECK(acc->type->elem == rocke_f32());
+    for(const auto* dtype : {"fp32", "fp64"})
+    {
+        rocke_mmaop_t op = {};
+        op.srcs[2].dtype = dtype;
+        op.srcs[2].frag_len = 4;
+        op.dst.dtype = strcmp(dtype, "fp32") == 0 ? "fp64" : "fp32";
+        op.dst.frag_len = 7;
+        auto* acc = rocke_gemm_emit_zero_acc_op(&b, &op);
+        CHECK(acc && acc->type->count == 4);
+        CHECK(acc->type->elem == (strcmp(dtype, "fp32") == 0 ? rocke_f32() : rocke_f64()));
+    }
     rocke_ir_builder_free(&b);
     return 0;
 }

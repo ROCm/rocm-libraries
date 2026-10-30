@@ -832,6 +832,162 @@
         "seed": 1,
         "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulActivFp32.Correctness_35"
       }
+    },
+    {
+      "id": "3_16_128_fp32_ncl_operationrelu_fwd_norlo_noswish_beta",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              128,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": null,
+          "relu_upper_clip": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "matmul+ReLU with no ReLU parameters set, derived from comprehensive/MatmulPointwise/Variant2 case 3_16_128_fp32_ncl_operationrelu_fwd_rlo0_norhi_852683",
+        "notes": "Unset relu_lower_clip must run as standard ReLU",
+        "seed": 1,
+        "generator": "import_graph.py"
+      }
+    },
+    {
+      "id": "3_16_128_fp32_ncl_operationrelu_fwd_norlo_rhi6",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              128,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": null,
+          "relu_upper_clip": 6.0,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "matmul+ReLU6 with only relu_upper_clip set, derived from comprehensive/MatmulPointwise/Variant2 case 3_16_128_fp32_ncl_operationrelu_fwd_rlo0_norhi_852683",
+        "notes": "Upper-clip-only ReLU must clamp to [0, upper]",
+        "seed": 1,
+        "generator": "import_graph.py"
+      }
     }
   ]
 }

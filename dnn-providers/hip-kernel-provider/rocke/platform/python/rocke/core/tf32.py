@@ -84,7 +84,10 @@ def mma_instruction_id(op):
 
 
 def tf32_op_error(op):
-    op_id = mma_instruction_id(op)
+    try:
+        op_id = mma_instruction_id(op)
+    except ValueError as error:
+        return str(error)
     error = (
         tf32_mma_error(op_id, op.operands, op.results)
         if op.name == "tile.mma" or op.name.startswith(("tile.mfma", "tile.wmma"))

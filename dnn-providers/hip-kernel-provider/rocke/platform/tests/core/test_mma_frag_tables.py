@@ -161,6 +161,16 @@ class TestMmaFragTables(unittest.TestCase):
                     _mma_c_frag_len(op_id), _MMA_FRAGMENT_INFO[physical].dst.frag_len
                 )
 
+    def test_non_integer_destinations_are_not_integer(self):
+        for op_id in (
+            "mfma_f64_16x16x4_f64",
+            "mfma_f64_4x4x4_f64",
+            "mfma_f32_16x16x16_f16",
+            "not_a_real_op_id",
+        ):
+            with self.subTest(op_id=op_id):
+                self.assertFalse(_mma_dst_is_int(op_id))
+
     def test_an_op_id_outside_the_catalog_accumulates_in_fp32(self):
         # mfma_f32_4x4x4_f16 has fragment information but no catalog row.
         self.assertNotIn("mfma_f32_4x4x4_f16", _op_id_c_dtype())
