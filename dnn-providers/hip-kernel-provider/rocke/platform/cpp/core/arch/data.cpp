@@ -50,12 +50,12 @@
             return;                                \
     } while(0)
 
-/* MFMA 16x16 accumulator: slot i -> (m_blk*4 + i, lane % 16). */
-static void _mfma_acc_16x16(rocke_ir_builder_t* b,
-                            rocke_value_t* lane,
-                            int slot,
-                            rocke_value_t** out0,
-                            rocke_value_t** out1)
+/* MFMA 16x16 src2/dst: slot i -> (m_blk * 4 + i, lane % 16). */
+static void _mfma_row_col_16x16(rocke_ir_builder_t* b,
+                                rocke_value_t* lane,
+                                int slot,
+                                rocke_value_t** out0,
+                                rocke_value_t** out1)
 {
     rocke_value_t *c16, *n_in_atom, *m_blk, *row;
     ROCKE_ATI_COORD_GUARD(b, out0, out1);
@@ -75,13 +75,13 @@ static void _mfma_acc_16x16(rocke_ir_builder_t* b,
         *out1 = n_in_atom;
 }
 
-/* MFMA 32x32 accumulator:
+/* MFMA 32x32 src2/dst row-column map:
  *   row = (slot//4)*8 + (lane//32)*4 + (slot%4), col = lane % 32. */
-static void _mfma_acc_32x32(rocke_ir_builder_t* b,
-                            rocke_value_t* lane,
-                            int slot,
-                            rocke_value_t** out0,
-                            rocke_value_t** out1)
+static void _mfma_row_col_32x32(rocke_ir_builder_t* b,
+                                rocke_value_t* lane,
+                                int slot,
+                                rocke_value_t** out0,
+                                rocke_value_t** out1)
 {
     rocke_value_t *c32, *n_in_atom, *m_blk, *row;
     int rb, ri;
@@ -305,13 +305,13 @@ static void _mfma_b_32x32x16(rocke_ir_builder_t* b,
         *out1 = n_in_atom;
 }
 
-/* MFMA 16x16x4 fp32 / f64 A operand (#8348): one scalar per lane.
+/* MFMA 16x16x4 fp32 / f64 src0 operand: one scalar per lane.
  * (lane % 16, lane // 16); slot is always 0 (a_frag_len == 1). */
-static void _mfma_a_16x16x4(rocke_ir_builder_t* b,
-                            rocke_value_t* lane,
-                            int slot,
-                            rocke_value_t** out0,
-                            rocke_value_t** out1)
+static void _mfma_a_16x16x4_f32(rocke_ir_builder_t* b,
+                                rocke_value_t* lane,
+                                int slot,
+                                rocke_value_t** out0,
+                                rocke_value_t** out1)
 {
     rocke_value_t *c16, *m_in_atom, *k;
     (void)slot;
@@ -325,13 +325,13 @@ static void _mfma_a_16x16x4(rocke_ir_builder_t* b,
         *out1 = k;
 }
 
-/* MFMA 16x16x4 fp32 / f64 B operand (#8348): one scalar per lane.
+/* MFMA 16x16x4 fp32 / f64 src1 operand: one scalar per lane.
  * (lane // 16, lane % 16); slot is always 0 (b_frag_len == 1). */
-static void _mfma_b_16x16x4(rocke_ir_builder_t* b,
-                            rocke_value_t* lane,
-                            int slot,
-                            rocke_value_t** out0,
-                            rocke_value_t** out1)
+static void _mfma_b_16x16x4_f32(rocke_ir_builder_t* b,
+                                rocke_value_t* lane,
+                                int slot,
+                                rocke_value_t** out0,
+                                rocke_value_t** out1)
 {
     rocke_value_t *c16, *n_in_atom, *k;
     (void)slot;
@@ -386,11 +386,11 @@ static void _mfma_b_32x32x2_f32(rocke_ir_builder_t* b,
 }
 
 /* MFMA 16x16x4 f64 accumulator: slot i -> (i*4 + lane // 16, lane % 16). */
-static void _mfma_acc_16x16x4_f64(rocke_ir_builder_t* b,
-                                  rocke_value_t* lane,
-                                  int slot,
-                                  rocke_value_t** out0,
-                                  rocke_value_t** out1)
+static void _mfma_row_col_16x16x4_f64(rocke_ir_builder_t* b,
+                                      rocke_value_t* lane,
+                                      int slot,
+                                      rocke_value_t** out0,
+                                      rocke_value_t** out1)
 {
     rocke_value_t *c16, *n_in_atom, *m_blk, *row;
     ROCKE_ATI_COORD_GUARD(b, out0, out1);
@@ -428,11 +428,11 @@ static void _mfma_b_4x4x4_f64(rocke_ir_builder_t* b,
 
 /* MFMA 4x4x4 f64 accumulator (4 blocks stacked along rows, one scalar per lane):
  * lane 16*m + 4*blk + n -> (blk*4 + m, n). */
-static void _mfma_acc_4x4x4_f64(rocke_ir_builder_t* b,
-                                rocke_value_t* lane,
-                                int slot,
-                                rocke_value_t** out0,
-                                rocke_value_t** out1)
+static void _mfma_row_col_4x4x4_f64(rocke_ir_builder_t* b,
+                                    rocke_value_t* lane,
+                                    int slot,
+                                    rocke_value_t** out0,
+                                    rocke_value_t** out1)
 {
     rocke_value_t *c4, *n_in_blk, *blk, *m, *row;
     (void)slot;
@@ -448,12 +448,12 @@ static void _mfma_acc_4x4x4_f64(rocke_ir_builder_t* b,
         *out1 = n_in_blk;
 }
 
-/* WMMA 16x16x16 accumulator (wave32): (2*slot + lane//16, lane % 16). */
-static void _wmma_acc_16x16(rocke_ir_builder_t* b,
-                            rocke_value_t* lane,
-                            int slot,
-                            rocke_value_t** out0,
-                            rocke_value_t** out1)
+/* WMMA 16x16x16 src2/dst row-column map (wave32). */
+static void _wmma_row_col_16x16(rocke_ir_builder_t* b,
+                                rocke_value_t* lane,
+                                int slot,
+                                rocke_value_t** out0,
+                                rocke_value_t** out1)
 {
     rocke_value_t *c16, *col, *half, *row;
     ROCKE_ATI_COORD_GUARD(b, out0, out1);
@@ -569,12 +569,12 @@ static void _wmma_b_16x16_iu4(rocke_ir_builder_t* b,
         *out1 = col;
 }
 
-/* RDNA4 WMMA 16x16x16 accumulator (wave32): ((lane//16)*8 + slot, lane % 16). */
-static void _wmma_gfx12_acc_16x16(rocke_ir_builder_t* b,
-                                  rocke_value_t* lane,
-                                  int slot,
-                                  rocke_value_t** out0,
-                                  rocke_value_t** out1)
+/* RDNA4 WMMA 16x16x16 src2/dst row-column map (wave32). */
+static void _wmma_gfx12_row_col_16x16(rocke_ir_builder_t* b,
+                                      rocke_value_t* lane,
+                                      int slot,
+                                      rocke_value_t** out0,
+                                      rocke_value_t** out1)
 {
     rocke_value_t *c16, *col, *half, *row;
     ROCKE_ATI_COORD_GUARD(b, out0, out1);
@@ -670,11 +670,12 @@ bool rocke_layout_map_coord(const rocke_layout_map_t* m,
     {
         if(b != NULL)
         {
-            const char* role_txt = (m->role == ROCKE_MMA_ROLE_ACC)       ? "acc"
-                                   : (m->role == ROCKE_MMA_ROLE_A)       ? "a"
-                                   : (m->role == ROCKE_MMA_ROLE_B)       ? "b"
-                                   : (m->role == ROCKE_MMA_ROLE_A_SCALE) ? "a_scale"
-                                                                         : "b_scale";
+            const char* role_txt = (m->role == ROCKE_MMA_ROLE_SRC0)         ? "src0"
+                                   : (m->role == ROCKE_MMA_ROLE_SRC1)       ? "src1"
+                                   : (m->role == ROCKE_MMA_ROLE_SRC2)       ? "src2"
+                                   : (m->role == ROCKE_MMA_ROLE_SCALE_SRC0) ? "scale_src0"
+                                   : (m->role == ROCKE_MMA_ROLE_SCALE_SRC1) ? "scale_src1"
+                                                                            : "dst";
             b->status = ROCKE_ERR_VALUE;
             snprintf(b->err,
                      ROCKE_ERR_MSG_CAP,
@@ -730,47 +731,67 @@ static void _wmma_gfx1250_b_scale(rocke_ir_builder_t* b,
  * Per-op_id LayoutMap statics (the precomputed _build_mma_op output)
  * =========================================================================
  *
- * In Python _build_mma_op constructs, for each catalog row, up to three
+ * In Python _build_mma_op constructs, for each catalog row, up to four
  * LayoutMap instances from the op_id's _FragInfo (role + frag_len + wave_size +
  * fn). Because the maps depend ONLY on op_id (not on the per-arch row), we define
- * one static LayoutMap triplet per op_id here and point every arch's catalog rows
+ * one static set of LayoutMaps per op_id here and point every arch's catalog rows
  * at them. A map is omitted (left NULL) when the _FragInfo has no fn for that
  * role or a zero frag_len (the `_mk(...) is None` case).
  *
- * Naming: lm_<opidkey>_{a,b,c}. Only op_ids with at least one verified map need a
- * struct; the rest carry NULL layout pointers in the catalog directly.
+ * Private names, declaration order, stored roles, and catalog positions all use
+ * the canonical src0/src1/src2/dst machine operand order. Only op_ids with at
+ * least one verified map need descriptors; the rest carry NULL layout pointers
+ * in the catalog directly.
  */
 
 static const rocke_layout_map_t lm_wmma_scale_k32_a
-    = {ROCKE_MMA_ROLE_A_SCALE, 4, 32, _wmma_gfx1250_a_scale};
+    = {ROCKE_MMA_ROLE_SCALE_SRC0, 4, 32, _wmma_gfx1250_a_scale};
 static const rocke_layout_map_t lm_wmma_scale_k32_b
-    = {ROCKE_MMA_ROLE_B_SCALE, 4, 32, _wmma_gfx1250_b_scale};
+    = {ROCKE_MMA_ROLE_SCALE_SRC1, 4, 32, _wmma_gfx1250_b_scale};
 static const rocke_layout_map_t lm_wmma_scale_k16_a
-    = {ROCKE_MMA_ROLE_A_SCALE, 8, 32, _wmma_gfx1250_a_scale};
+    = {ROCKE_MMA_ROLE_SCALE_SRC0, 8, 32, _wmma_gfx1250_a_scale};
 static const rocke_layout_map_t lm_wmma_scale_k16_b
-    = {ROCKE_MMA_ROLE_B_SCALE, 8, 32, _wmma_gfx1250_b_scale};
+    = {ROCKE_MMA_ROLE_SCALE_SRC1, 8, 32, _wmma_gfx1250_b_scale};
 
-/* --- mfma_f32_16x16x16_f16 / _bf16: a/b/c all present (frag 4/4/4, wave64) --- */
-static const rocke_layout_map_t lm_mfma_16x16x16_a = {ROCKE_MMA_ROLE_A, 4, 64, _mfma_a_16x16};
-static const rocke_layout_map_t lm_mfma_16x16x16_b = {ROCKE_MMA_ROLE_B, 4, 64, _mfma_b_16x16};
-static const rocke_layout_map_t lm_mfma_16x16x16_c = {ROCKE_MMA_ROLE_ACC, 4, 64, _mfma_acc_16x16};
+/* --- mfma_f32_16x16x16_f16 / _bf16: src0/src1/src2/dst (frag 4/4/4/4, wave64) --- */
+static const rocke_layout_map_t lm_mfma_16x16x16_src0 = {ROCKE_MMA_ROLE_SRC0, 4, 64, _mfma_a_16x16};
+static const rocke_layout_map_t lm_mfma_16x16x16_src1 = {ROCKE_MMA_ROLE_SRC1, 4, 64, _mfma_b_16x16};
+static const rocke_layout_map_t lm_mfma_16x16x16_src2
+    = {ROCKE_MMA_ROLE_SRC2, 4, 64, _mfma_row_col_16x16};
+static const rocke_layout_map_t lm_mfma_16x16x16_dst
+    = {ROCKE_MMA_ROLE_DST, 4, 64, _mfma_row_col_16x16};
 
-/* --- mfma_f32_16x16x32_{f16,bf16,fp8,bf8}: a/b/c present (frag 8/8/4, wave64).
+/* --- mfma_f32_16x16x32_{f16,bf16,fp8,bf8}: src0/src1/src2/dst (frag 8/8/4/4, wave64).
  * fp8/bf8 share the f16 operand lane layout (same a_per_lane=8, K-packing). --- */
-static const rocke_layout_map_t lm_mfma_16x16x32_a = {ROCKE_MMA_ROLE_A, 8, 64, _mfma_a_16x16x32};
-static const rocke_layout_map_t lm_mfma_16x16x32_b = {ROCKE_MMA_ROLE_B, 8, 64, _mfma_b_16x16x32};
-static const rocke_layout_map_t lm_mfma_16x16x32_c = {ROCKE_MMA_ROLE_ACC, 4, 64, _mfma_acc_16x16};
+static const rocke_layout_map_t lm_mfma_16x16x32_src0
+    = {ROCKE_MMA_ROLE_SRC0, 8, 64, _mfma_a_16x16x32};
+static const rocke_layout_map_t lm_mfma_16x16x32_src1
+    = {ROCKE_MMA_ROLE_SRC1, 8, 64, _mfma_b_16x16x32};
+static const rocke_layout_map_t lm_mfma_16x16x32_src2
+    = {ROCKE_MMA_ROLE_SRC2, 4, 64, _mfma_row_col_16x16};
+static const rocke_layout_map_t lm_mfma_16x16x32_dst
+    = {ROCKE_MMA_ROLE_DST, 4, 64, _mfma_row_col_16x16};
 
-/* --- mfma_f32_32x32x8_f16: a/b/c present (frag 4/4/16, wave64) --- */
-static const rocke_layout_map_t lm_mfma_32x32x8_a = {ROCKE_MMA_ROLE_A, 4, 64, _mfma_a_32x32x8};
-static const rocke_layout_map_t lm_mfma_32x32x8_b = {ROCKE_MMA_ROLE_B, 4, 64, _mfma_b_32x32x8};
-static const rocke_layout_map_t lm_mfma_32x32x8_c = {ROCKE_MMA_ROLE_ACC, 16, 64, _mfma_acc_32x32};
+/* --- mfma_f32_32x32x8_f16: src0/src1/src2/dst (frag 4/4/16/16, wave64) --- */
+static const rocke_layout_map_t lm_mfma_32x32x8_src0
+    = {ROCKE_MMA_ROLE_SRC0, 4, 64, _mfma_a_32x32x8};
+static const rocke_layout_map_t lm_mfma_32x32x8_src1
+    = {ROCKE_MMA_ROLE_SRC1, 4, 64, _mfma_b_32x32x8};
+static const rocke_layout_map_t lm_mfma_32x32x8_src2
+    = {ROCKE_MMA_ROLE_SRC2, 16, 64, _mfma_row_col_32x32};
+static const rocke_layout_map_t lm_mfma_32x32x8_dst
+    = {ROCKE_MMA_ROLE_DST, 16, 64, _mfma_row_col_32x32};
 
-/* --- mfma_f32_32x32x16_{f16,bf16,fp8,bf8}: a/b/c present (frag 8/8/16, wave64).
+/* --- mfma_f32_32x32x16_{f16,bf16,fp8,bf8}: src0/src1/src2/dst (frag 8/8/16/16, wave64).
  * fp8/bf8 share the f16 operand lane layout (same a_per_lane=8, K-packing). --- */
-static const rocke_layout_map_t lm_mfma_32x32x16_a = {ROCKE_MMA_ROLE_A, 8, 64, _mfma_a_32x32x16};
-static const rocke_layout_map_t lm_mfma_32x32x16_b = {ROCKE_MMA_ROLE_B, 8, 64, _mfma_b_32x32x16};
-static const rocke_layout_map_t lm_mfma_32x32x16_c = {ROCKE_MMA_ROLE_ACC, 16, 64, _mfma_acc_32x32};
+static const rocke_layout_map_t lm_mfma_32x32x16_src0
+    = {ROCKE_MMA_ROLE_SRC0, 8, 64, _mfma_a_32x32x16};
+static const rocke_layout_map_t lm_mfma_32x32x16_src1
+    = {ROCKE_MMA_ROLE_SRC1, 8, 64, _mfma_b_32x32x16};
+static const rocke_layout_map_t lm_mfma_32x32x16_src2
+    = {ROCKE_MMA_ROLE_SRC2, 16, 64, _mfma_row_col_32x32};
+static const rocke_layout_map_t lm_mfma_32x32x16_dst
+    = {ROCKE_MMA_ROLE_DST, 16, 64, _mfma_row_col_32x32};
 
 static void _mfma_a_16x16x8_xf32(
     rocke_ir_builder_t* b, rocke_value_t* lane, int slot, rocke_value_t** c0, rocke_value_t** c1)
@@ -828,54 +849,80 @@ static void _mfma_b_32x32x4_xf32(
     *c1 = axis;
 }
 
-static const rocke_layout_map_t lm_xf32_16_a = {ROCKE_MMA_ROLE_A, 2, 64, _mfma_a_16x16x8_xf32};
-static const rocke_layout_map_t lm_xf32_16_b = {ROCKE_MMA_ROLE_B, 2, 64, _mfma_b_16x16x8_xf32};
-static const rocke_layout_map_t lm_xf32_32_a = {ROCKE_MMA_ROLE_A, 2, 64, _mfma_a_32x32x4_xf32};
-static const rocke_layout_map_t lm_xf32_32_b = {ROCKE_MMA_ROLE_B, 2, 64, _mfma_b_32x32x4_xf32};
+static const rocke_layout_map_t lm_xf32_16_src0
+    = {ROCKE_MMA_ROLE_SRC0, 2, 64, _mfma_a_16x16x8_xf32};
+static const rocke_layout_map_t lm_xf32_16_src1
+    = {ROCKE_MMA_ROLE_SRC1, 2, 64, _mfma_b_16x16x8_xf32};
+static const rocke_layout_map_t lm_xf32_32_src0
+    = {ROCKE_MMA_ROLE_SRC0, 2, 64, _mfma_a_32x32x4_xf32};
+static const rocke_layout_map_t lm_xf32_32_src1
+    = {ROCKE_MMA_ROLE_SRC1, 2, 64, _mfma_b_32x32x4_xf32};
 
-/* --- mfma_f32_16x16x4_f32: a/b/c present (frag 1/1/4, wave64) (#8348) --- */
-static const rocke_layout_map_t lm_mfma_16x16x4_a = {ROCKE_MMA_ROLE_A, 1, 64, _mfma_a_16x16x4};
-static const rocke_layout_map_t lm_mfma_16x16x4_b = {ROCKE_MMA_ROLE_B, 1, 64, _mfma_b_16x16x4};
-static const rocke_layout_map_t lm_mfma_16x16x4_f32_c
-    = {ROCKE_MMA_ROLE_ACC, 4, 64, _mfma_acc_16x16};
+/* --- mfma_f32_16x16x4_f32: src0/src1/src2/dst (frag 1/1/4/4, wave64) --- */
+static const rocke_layout_map_t lm_mfma_16x16x4_f32_src0
+    = {ROCKE_MMA_ROLE_SRC0, 1, 64, _mfma_a_16x16x4_f32};
+static const rocke_layout_map_t lm_mfma_16x16x4_f32_src1
+    = {ROCKE_MMA_ROLE_SRC1, 1, 64, _mfma_b_16x16x4_f32};
+static const rocke_layout_map_t lm_mfma_16x16x4_f32_src2
+    = {ROCKE_MMA_ROLE_SRC2, 4, 64, _mfma_row_col_16x16};
+static const rocke_layout_map_t lm_mfma_16x16x4_f32_dst
+    = {ROCKE_MMA_ROLE_DST, 4, 64, _mfma_row_col_16x16};
 
-/* --- mfma_f32_32x32x2_f32: a/b/c present (frag 1/1/16, wave64) (#8348) --- */
-static const rocke_layout_map_t lm_mfma_32x32x2_f32_a
-    = {ROCKE_MMA_ROLE_A, 1, 64, _mfma_a_32x32x2_f32};
-static const rocke_layout_map_t lm_mfma_32x32x2_f32_b
-    = {ROCKE_MMA_ROLE_B, 1, 64, _mfma_b_32x32x2_f32};
-static const rocke_layout_map_t lm_mfma_32x32x2_f32_c
-    = {ROCKE_MMA_ROLE_ACC, 16, 64, _mfma_acc_32x32};
+/* --- mfma_f32_32x32x2_f32: src0/src1/src2/dst (frag 1/1/16/16, wave64) --- */
+static const rocke_layout_map_t lm_mfma_32x32x2_f32_src0
+    = {ROCKE_MMA_ROLE_SRC0, 1, 64, _mfma_a_32x32x2_f32};
+static const rocke_layout_map_t lm_mfma_32x32x2_f32_src1
+    = {ROCKE_MMA_ROLE_SRC1, 1, 64, _mfma_b_32x32x2_f32};
+static const rocke_layout_map_t lm_mfma_32x32x2_f32_src2
+    = {ROCKE_MMA_ROLE_SRC2, 16, 64, _mfma_row_col_32x32};
+static const rocke_layout_map_t lm_mfma_32x32x2_f32_dst
+    = {ROCKE_MMA_ROLE_DST, 16, 64, _mfma_row_col_32x32};
 
-/* --- mfma_f64_16x16x4_f64: a/b shared with fp32 16x16x4, own c (frag 1/1/4, wave64) --- */
-static const rocke_layout_map_t lm_mfma_16x16x4_f64_c
-    = {ROCKE_MMA_ROLE_ACC, 4, 64, _mfma_acc_16x16x4_f64};
+/* F64 MFMA sources and independent result maps (wave64). */
+static const rocke_layout_map_t lm_mfma_16x16x4_f64_src2
+    = {ROCKE_MMA_ROLE_SRC2, 4, 64, _mfma_row_col_16x16x4_f64};
+static const rocke_layout_map_t lm_mfma_16x16x4_f64_dst
+    = {ROCKE_MMA_ROLE_DST, 4, 64, _mfma_row_col_16x16x4_f64};
+static const rocke_layout_map_t lm_mfma_4x4x4_f64_src1
+    = {ROCKE_MMA_ROLE_SRC1, 1, 64, _mfma_b_4x4x4_f64};
+static const rocke_layout_map_t lm_mfma_4x4x4_f64_src2
+    = {ROCKE_MMA_ROLE_SRC2, 1, 64, _mfma_row_col_4x4x4_f64};
+static const rocke_layout_map_t lm_mfma_4x4x4_f64_dst
+    = {ROCKE_MMA_ROLE_DST, 1, 64, _mfma_row_col_4x4x4_f64};
 
-/* --- mfma_f64_4x4x4_f64: a shared with 16x16x4 (frag 1/1/1, wave64) --- */
-static const rocke_layout_map_t lm_mfma_4x4x4_f64_b = {ROCKE_MMA_ROLE_B, 1, 64, _mfma_b_4x4x4_f64};
-static const rocke_layout_map_t lm_mfma_4x4x4_f64_c
-    = {ROCKE_MMA_ROLE_ACC, 1, 64, _mfma_acc_4x4x4_f64};
+/* --- wmma_f32_16x16x16_{f16,bf16}: src0/src1/src2/dst (frag 16/16/8/8, wave32) --- */
+static const rocke_layout_map_t lm_wmma_16x16x16_src0
+    = {ROCKE_MMA_ROLE_SRC0, 16, 32, _wmma_a_16x16};
+static const rocke_layout_map_t lm_wmma_16x16x16_src1
+    = {ROCKE_MMA_ROLE_SRC1, 16, 32, _wmma_b_16x16};
+static const rocke_layout_map_t lm_wmma_16x16x16_src2
+    = {ROCKE_MMA_ROLE_SRC2, 8, 32, _wmma_row_col_16x16};
+static const rocke_layout_map_t lm_wmma_16x16x16_dst
+    = {ROCKE_MMA_ROLE_DST, 8, 32, _wmma_row_col_16x16};
 
-/* --- wmma_f32_16x16x16_{f16,bf16}: a/b/c present (frag 16/16/8, wave32) --- */
-static const rocke_layout_map_t lm_wmma_16x16x16_a = {ROCKE_MMA_ROLE_A, 16, 32, _wmma_a_16x16};
-static const rocke_layout_map_t lm_wmma_16x16x16_b = {ROCKE_MMA_ROLE_B, 16, 32, _wmma_b_16x16};
-static const rocke_layout_map_t lm_wmma_16x16x16_c = {ROCKE_MMA_ROLE_ACC, 8, 32, _wmma_acc_16x16};
+/* --- wmma_i32_16x16x16_iu8: src0/src1/src2/dst (frag 4/4/8/8, wave32) --- */
+static const rocke_layout_map_t lm_wmma_iu8_src0 = {ROCKE_MMA_ROLE_SRC0, 4, 32, _wmma_a_16x16_iu8};
+static const rocke_layout_map_t lm_wmma_iu8_src1 = {ROCKE_MMA_ROLE_SRC1, 4, 32, _wmma_b_16x16_iu8};
+static const rocke_layout_map_t lm_wmma_iu8_src2
+    = {ROCKE_MMA_ROLE_SRC2, 8, 32, _wmma_row_col_16x16};
+static const rocke_layout_map_t lm_wmma_iu8_dst = {ROCKE_MMA_ROLE_DST, 8, 32, _wmma_row_col_16x16};
 
-/* --- wmma_i32_16x16x16_iu8: a/b/c present (frag 4/4/8, wave32) --- */
-static const rocke_layout_map_t lm_wmma_iu8_a = {ROCKE_MMA_ROLE_A, 4, 32, _wmma_a_16x16_iu8};
-static const rocke_layout_map_t lm_wmma_iu8_b = {ROCKE_MMA_ROLE_B, 4, 32, _wmma_b_16x16_iu8};
-static const rocke_layout_map_t lm_wmma_iu8_c = {ROCKE_MMA_ROLE_ACC, 8, 32, _wmma_acc_16x16};
+/* --- wmma_i32_16x16x16_iu4: src0/src1/src2/dst (frag 2/2/8/8, wave32) --- */
+static const rocke_layout_map_t lm_wmma_iu4_src0 = {ROCKE_MMA_ROLE_SRC0, 2, 32, _wmma_a_16x16_iu4};
+static const rocke_layout_map_t lm_wmma_iu4_src1 = {ROCKE_MMA_ROLE_SRC1, 2, 32, _wmma_b_16x16_iu4};
+static const rocke_layout_map_t lm_wmma_iu4_src2
+    = {ROCKE_MMA_ROLE_SRC2, 8, 32, _wmma_row_col_16x16};
+static const rocke_layout_map_t lm_wmma_iu4_dst = {ROCKE_MMA_ROLE_DST, 8, 32, _wmma_row_col_16x16};
 
-/* --- wmma_i32_16x16x16_iu4: a/b/c present (frag 2/2/8, wave32) --- */
-static const rocke_layout_map_t lm_wmma_iu4_a = {ROCKE_MMA_ROLE_A, 2, 32, _wmma_a_16x16_iu4};
-static const rocke_layout_map_t lm_wmma_iu4_b = {ROCKE_MMA_ROLE_B, 2, 32, _wmma_b_16x16_iu4};
-static const rocke_layout_map_t lm_wmma_iu4_c = {ROCKE_MMA_ROLE_ACC, 8, 32, _wmma_acc_16x16};
-
-/* --- wmma_gfx12_f32_16x16x16_{f16,bf16}: a/b/c present (frag 8/8/8, wave32) --- */
-static const rocke_layout_map_t lm_wmma_gfx12_a = {ROCKE_MMA_ROLE_A, 8, 32, _wmma_gfx12_a_16x16};
-static const rocke_layout_map_t lm_wmma_gfx12_b = {ROCKE_MMA_ROLE_B, 8, 32, _wmma_gfx12_b_16x16};
-static const rocke_layout_map_t lm_wmma_gfx12_c
-    = {ROCKE_MMA_ROLE_ACC, 8, 32, _wmma_gfx12_acc_16x16};
+/* --- wmma_gfx12_f32_16x16x16_{f16,bf16}: src0/src1/src2/dst (frag 8/8/8/8, wave32) --- */
+static const rocke_layout_map_t lm_wmma_gfx12_src0
+    = {ROCKE_MMA_ROLE_SRC0, 8, 32, _wmma_gfx12_a_16x16};
+static const rocke_layout_map_t lm_wmma_gfx12_src1
+    = {ROCKE_MMA_ROLE_SRC1, 8, 32, _wmma_gfx12_b_16x16};
+static const rocke_layout_map_t lm_wmma_gfx12_src2
+    = {ROCKE_MMA_ROLE_SRC2, 8, 32, _wmma_gfx12_row_col_16x16};
+static const rocke_layout_map_t lm_wmma_gfx12_dst
+    = {ROCKE_MMA_ROLE_DST, 8, 32, _wmma_gfx12_row_col_16x16};
 
 /* gfx1250 WMMA 16x16x4 fp32 A operand (wave32): kABKLane=2, kAK1PerLane=2.
  * row = lane / 2  (M index 0..15);  K = (lane % 2) * 2 + slot  (slot in {0,1}).
@@ -917,11 +964,11 @@ static void _wmma_gfx1250_b_16x16x4_f32(rocke_ir_builder_t* b,
         *out1 = col;
 }
 
-/* --- wmma_gfx1250_f32_16x16x4_f32: a/b/c present (frag 2/2/8, wave32) --- */
-static const rocke_layout_map_t lm_wmma_gfx1250_f32_a
-    = {ROCKE_MMA_ROLE_A, 2, 32, _wmma_gfx1250_a_16x16x4_f32};
-static const rocke_layout_map_t lm_wmma_gfx1250_f32_b
-    = {ROCKE_MMA_ROLE_B, 2, 32, _wmma_gfx1250_b_16x16x4_f32};
+/* --- wmma_gfx1250_f32_16x16x4_f32: src0/src1 plus shared gfx12 src2/dst maps --- */
+static const rocke_layout_map_t lm_wmma_gfx1250_f32_src0
+    = {ROCKE_MMA_ROLE_SRC0, 2, 32, _wmma_gfx1250_a_16x16x4_f32};
+static const rocke_layout_map_t lm_wmma_gfx1250_f32_src1
+    = {ROCKE_MMA_ROLE_SRC1, 2, 32, _wmma_gfx1250_b_16x16x4_f32};
 
 /* gfx1250 WMMA 16x16x32 A operand (wave32): row = lane % 16,
  * k = (lane / 16) * 16 + slot  (slot in 0..15, a_frag_len=16).
@@ -971,14 +1018,14 @@ static void _wmma_gfx1250_b_16x16x32(rocke_ir_builder_t* b,
         *out1 = col;
 }
 
-/* --- wmma_gfx1250_f32_16x16x32_{f16,bf16}: a/b/c present (frag 16/16/8, wave32) --- */
-static const rocke_layout_map_t lm_wmma_gfx1250_32_a
-    = {ROCKE_MMA_ROLE_A, 16, 32, _wmma_gfx1250_a_16x16x32};
-static const rocke_layout_map_t lm_wmma_gfx1250_32_b
-    = {ROCKE_MMA_ROLE_B, 16, 32, _wmma_gfx1250_b_16x16x32};
+/* --- wmma_gfx1250_f32_16x16x32_{f16,bf16}: src0/src1 plus shared gfx12 src2/dst maps --- */
+static const rocke_layout_map_t lm_wmma_gfx1250_32_src0
+    = {ROCKE_MMA_ROLE_SRC0, 16, 32, _wmma_gfx1250_a_16x16x32};
+static const rocke_layout_map_t lm_wmma_gfx1250_32_src1
+    = {ROCKE_MMA_ROLE_SRC1, 16, 32, _wmma_gfx1250_b_16x16x32};
 
 /* =========================================================================
- * op_id -> accumulator fragment length (the c_frag_len projection of
+ * op_id -> dst fragment length (the dst.frag_len projection of
  * target.py::_MMA_FRAGMENT_INFO).
  * =========================================================================
  *
@@ -997,31 +1044,31 @@ static const rocke_layout_map_t lm_wmma_gfx1250_32_b
  * through the physical atom it expands into.
  *
  * NOTE (drift): this is still a hand-maintained mirror of the Python
- * _MMA_FRAGMENT_INFO c_frag_len column, not generated from it.
+ * _MMA_FRAGMENT_INFO dst.frag_len values, not generated from them.
  * TODO: codegen this table from the Python SSOT (_MMA_FRAGMENT_INFO) at build
  * time so the two engines share a single source of truth. Until then there is
  * no direct mirror-agreement test; each side's frag lengths are pinned
  * independently -- C via tests/core/mma_frag_ssot.cpp (rocke_b_mma) and Python
  * via tests/core/test_mma_frag_tables.py (_MMA_FRAGMENT_INFO) -- and the
  * byte-identity gate (tools/check_byte_identity.py) catches any cross-engine
- * c_frag_len drift, since a wrong length changes the emitted tile.mma result
+ * dst-fragment drift, since a wrong length changes the emitted tile.mma result
  * vector width.
  */
 typedef struct rocke_ati_mma_frag_row
 {
     const char* op_id;
-    int c_frag_len;
+    int dst_frag_len;
 } rocke_ati_mma_frag_row_t;
 
-/* Layout guard for the rocke_arch_mma_c_frag_len lookup below, which derives its
+/* Layout guard for the rocke_arch_mma_dst_frag_len lookup below, which derives its
  * row count from sizeof(table)/sizeof(row). That division is exact for any
  * element size, so padding of rocke_ati_mma_frag_row_t (12 bytes of data padded
  * out to 16 for op_id's 8-byte alignment) cannot desync the count. These asserts
  * pin the field order so a future reorder/resize is caught at compile time. */
 static_assert(offsetof(rocke_ati_mma_frag_row_t, op_id) == 0,
               "op_id must be the first field of rocke_ati_mma_frag_row_t");
-static_assert(offsetof(rocke_ati_mma_frag_row_t, c_frag_len) == sizeof(const char*),
-              "c_frag_len must immediately follow op_id (no leading padding)");
+static_assert(offsetof(rocke_ati_mma_frag_row_t, dst_frag_len) == sizeof(const char*),
+              "dst_frag_len must immediately follow op_id (no leading padding)");
 
 static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     {"mfma_f32_32x32x4_xf32", 16},
@@ -1092,13 +1139,15 @@ static const rocke_ati_mma_frag_row_t* rocke_ati_mma_frag_row_for(const char* op
  * =========================================================================
  *
  * Frag lengths come from _MMA_FRAGMENT_INFO[op_id]; op_ids absent from that
- * table carry (0,0,0,64) and NULL maps. dtype fields hold the normalised
- * (canonical) catalog keys from rocke_normalize_dtype, exactly as
- * normalize_dtype(o["a"/"b"/"c"]) would produce.
+ * table carry zero fragment lengths and NULL maps. dtype fields hold the normalised
+ * (canonical) catalog keys (interned strings from k_dtype_aliases), exactly as
+ * normalize_dtype() would produce for each indexed src and dst.
  *
  * Field order of rocke_mma_op_t:
- *   family, a_dtype, b_dtype, c_dtype, m, n, k, op_id,
- *   a_frag_len, b_frag_len, c_frag_len, wave_size, a_layout, b_layout, c_layout
+ *   family, srcs[0], srcs[1], srcs[2], dst, m, n, k, op_id, wave_size.
+ * Each source stores dtype, frag_len, layout, optional scale value dtype, and
+ * scale block size along K (zero when unscaled); dst stores dtype, frag_len,
+ * and layout. Scale value dtype is independent of the packed register carrier.
  *
  * The trailing scale and emulation fields are left to zero-init below: every
  * atom here is unscaled unless it spells its scale metadata, and every one is
@@ -1115,280 +1164,189 @@ static const rocke_ati_mma_frag_row_t* rocke_ati_mma_frag_row_for(const char* op
  * bf16 arrived in CDNA2 with the same layout maps as fp16 for those shapes). */
 static const rocke_mma_op_t k_mma_gfx90a[] = {
     {"mma",
-     "fp16",
-     "fp16",
-     "fp32",
+     {{"fp16", 4, &lm_mfma_16x16x16_src0},
+      {"fp16", 4, &lm_mfma_16x16x16_src1},
+      {"fp32", 4, &lm_mfma_16x16x16_src2}},
+     {"fp32", 4, &lm_mfma_16x16x16_dst},
      16,
      16,
      16,
      "mfma_f32_16x16x16_f16",
-     4,
-     4,
-     4,
-     64,
-     &lm_mfma_16x16x16_a,
-     &lm_mfma_16x16x16_b,
-     &lm_mfma_16x16x16_c},
+     64},
     {"mma",
-     "fp16",
-     "fp16",
-     "fp32",
+     {{"fp16", 4, &lm_mfma_32x32x8_src0},
+      {"fp16", 4, &lm_mfma_32x32x8_src1},
+      {"fp32", 16, &lm_mfma_32x32x8_src2}},
+     {"fp32", 16, &lm_mfma_32x32x8_dst},
      32,
      32,
      8,
      "mfma_f32_32x32x8_f16",
-     4,
-     4,
-     16,
-     64,
-     &lm_mfma_32x32x8_a,
-     &lm_mfma_32x32x8_b,
-     &lm_mfma_32x32x8_c},
+     64},
     {"mma",
-     "bf16",
-     "bf16",
-     "fp32",
+     {{"bf16", 4, &lm_mfma_16x16x16_src0},
+      {"bf16", 4, &lm_mfma_16x16x16_src1},
+      {"fp32", 4, &lm_mfma_16x16x16_src2}},
+     {"fp32", 4, &lm_mfma_16x16x16_dst},
      16,
      16,
      16,
      "mfma_f32_16x16x16_bf16",
-     4,
-     4,
-     4,
-     64,
-     &lm_mfma_16x16x16_a,
-     &lm_mfma_16x16x16_b,
-     &lm_mfma_16x16x16_c},
+     64},
     {"mma",
-     "bf16",
-     "bf16",
-     "fp32",
+     {{"bf16", 4, &lm_mfma_32x32x8_src0},
+      {"bf16", 4, &lm_mfma_32x32x8_src1},
+      {"fp32", 16, &lm_mfma_32x32x8_src2}},
+     {"fp32", 16, &lm_mfma_32x32x8_dst},
      32,
      32,
      8,
      "mfma_f32_32x32x8_bf16",
-     4,
-     4,
-     16,
-     64,
-     &lm_mfma_32x32x8_a,
-     &lm_mfma_32x32x8_b,
-     &lm_mfma_32x32x8_c},
+     64},
 };
 
 /* ----------------------------- gfx942 (CDNA) ----------------------------- */
 static const rocke_mma_op_t k_mma_gfx942[] = {
     {"mma",
-     "tf32",
-     "tf32",
-     "fp32",
+     {{"tf32", 2, &lm_xf32_16_src0},
+      {"tf32", 2, &lm_xf32_16_src1},
+      {"fp32", 4, &lm_mfma_16x16x4_f32_src2}},
+     {"fp32", 4, &lm_mfma_16x16x4_f32_dst},
      16,
      16,
      8,
      "mfma_f32_16x16x8_xf32",
-     2,
-     2,
-     4,
-     64,
-     &lm_xf32_16_a,
-     &lm_xf32_16_b,
-     &lm_mfma_16x16x4_f32_c},
+     64},
     {"mma",
-     "tf32",
-     "tf32",
-     "fp32",
+     {{"tf32", 2, &lm_xf32_32_src0},
+      {"tf32", 2, &lm_xf32_32_src1},
+      {"fp32", 16, &lm_mfma_32x32x2_f32_src2}},
+     {"fp32", 16, &lm_mfma_32x32x2_f32_dst},
      32,
      32,
      4,
      "mfma_f32_32x32x4_xf32",
-     2,
-     2,
-     16,
-     64,
-     &lm_xf32_32_a,
-     &lm_xf32_32_b,
-     &lm_mfma_32x32x2_f32_c},
-
+     64},
     {"mma",
-     "fp32",
-     "fp32",
-     "fp32",
+     {{"fp32", 1, &lm_mfma_16x16x4_f32_src0},
+      {"fp32", 1, &lm_mfma_16x16x4_f32_src1},
+      {"fp32", 4, &lm_mfma_16x16x4_f32_src2}},
+     {"fp32", 4, &lm_mfma_16x16x4_f32_dst},
      16,
      16,
      4,
      "mfma_f32_16x16x4_f32",
-     1,
-     1,
-     4,
-     64,
-     &lm_mfma_16x16x4_a,
-     &lm_mfma_16x16x4_b,
-     &lm_mfma_16x16x4_f32_c},
+     64},
     {"mma",
-     "fp32",
-     "fp32",
-     "fp32",
+     {{"fp32", 1, &lm_mfma_32x32x2_f32_src0},
+      {"fp32", 1, &lm_mfma_32x32x2_f32_src1},
+      {"fp32", 16, &lm_mfma_32x32x2_f32_src2}},
+     {"fp32", 16, &lm_mfma_32x32x2_f32_dst},
      32,
      32,
      2,
      "mfma_f32_32x32x2_f32",
-     1,
-     1,
-     16,
-     64,
-     &lm_mfma_32x32x2_f32_a,
-     &lm_mfma_32x32x2_f32_b,
-     &lm_mfma_32x32x2_f32_c},
+     64},
     {"mma",
-     "fp64",
-     "fp64",
-     "fp64",
-     16,
-     16,
-     4,
-     "mfma_f64_16x16x4_f64",
-     1,
-     1,
-     4,
-     64,
-     &lm_mfma_16x16x4_a,
-     &lm_mfma_16x16x4_b,
-     &lm_mfma_16x16x4_f64_c},
-    {"mma",
-     "fp64",
-     "fp64",
-     "fp64",
-     4,
-     4,
-     4,
-     "mfma_f64_4x4x4_f64",
-     1,
-     1,
-     1,
-     64,
-     &lm_mfma_16x16x4_a,
-     &lm_mfma_4x4x4_f64_b,
-     &lm_mfma_4x4x4_f64_c},
-    {"mma",
-     "fp16",
-     "fp16",
-     "fp32",
+     {{"fp16", 4, &lm_mfma_16x16x16_src0},
+      {"fp16", 4, &lm_mfma_16x16x16_src1},
+      {"fp32", 4, &lm_mfma_16x16x16_src2}},
+     {"fp32", 4, &lm_mfma_16x16x16_dst},
      16,
      16,
      16,
      "mfma_f32_16x16x16_f16",
-     4,
-     4,
-     4,
-     64,
-     &lm_mfma_16x16x16_a,
-     &lm_mfma_16x16x16_b,
-     &lm_mfma_16x16x16_c},
+     64},
     {"mma",
-     "fp16",
-     "fp16",
-     "fp32",
+     {{"fp16", 4, &lm_mfma_32x32x8_src0},
+      {"fp16", 4, &lm_mfma_32x32x8_src1},
+      {"fp32", 16, &lm_mfma_32x32x8_src2}},
+     {"fp32", 16, &lm_mfma_32x32x8_dst},
      32,
      32,
      8,
      "mfma_f32_32x32x8_f16",
-     4,
-     4,
-     16,
-     64,
-     &lm_mfma_32x32x8_a,
-     &lm_mfma_32x32x8_b,
-     &lm_mfma_32x32x8_c},
+     64},
     {"mma",
-     "bf16",
-     "bf16",
-     "fp32",
+     {{"bf16", 4, &lm_mfma_16x16x16_src0},
+      {"bf16", 4, &lm_mfma_16x16x16_src1},
+      {"fp32", 4, &lm_mfma_16x16x16_src2}},
+     {"fp32", 4, &lm_mfma_16x16x16_dst},
      16,
      16,
      16,
      "mfma_f32_16x16x16_bf16",
-     4,
-     4,
-     4,
-     64,
-     &lm_mfma_16x16x16_a,
-     &lm_mfma_16x16x16_b,
-     &lm_mfma_16x16x16_c},
+     64},
     {"mma",
-     "bf16",
-     "bf16",
-     "fp32",
+     {{"bf16", 4, &lm_mfma_32x32x8_src0},
+      {"bf16", 4, &lm_mfma_32x32x8_src1},
+      {"fp32", 16, &lm_mfma_32x32x8_src2}},
+     {"fp32", 16, &lm_mfma_32x32x8_dst},
      32,
      32,
      8,
      "mfma_f32_32x32x8_bf16",
-     4,
-     4,
-     16,
-     64,
-     &lm_mfma_32x32x8_a,
-     &lm_mfma_32x32x8_b,
-     &lm_mfma_32x32x8_c},
+     64},
     {"mma",
-     "fp8e4m3",
-     "fp8e4m3",
-     "fp32",
+     {{"fp8e4m3", 8, &lm_mfma_16x16x32_src0},
+      {"fp8e4m3", 8, &lm_mfma_16x16x32_src1},
+      {"fp32", 4, &lm_mfma_16x16x32_src2}},
+     {"fp32", 4, &lm_mfma_16x16x32_dst},
      16,
      16,
      32,
      "mfma_f32_16x16x32_fp8",
-     8,
-     8,
-     4,
-     64,
-     &lm_mfma_16x16x32_a,
-     &lm_mfma_16x16x32_b,
-     &lm_mfma_16x16x32_c},
+     64},
     {"mma",
-     "fp8e4m3",
-     "fp8e4m3",
-     "fp32",
+     {{"fp8e4m3", 8, &lm_mfma_32x32x16_src0},
+      {"fp8e4m3", 8, &lm_mfma_32x32x16_src1},
+      {"fp32", 16, &lm_mfma_32x32x16_src2}},
+     {"fp32", 16, &lm_mfma_32x32x16_dst},
      32,
      32,
      16,
      "mfma_f32_32x32x16_fp8",
-     8,
-     8,
-     16,
-     64,
-     &lm_mfma_32x32x16_a,
-     &lm_mfma_32x32x16_b,
-     &lm_mfma_32x32x16_c},
+     64},
     {"mma",
-     "bf8e5m2",
-     "bf8e5m2",
-     "fp32",
+     {{"bf8e5m2", 8, &lm_mfma_16x16x32_src0},
+      {"bf8e5m2", 8, &lm_mfma_16x16x32_src1},
+      {"fp32", 4, &lm_mfma_16x16x32_src2}},
+     {"fp32", 4, &lm_mfma_16x16x32_dst},
      16,
      16,
      32,
      "mfma_f32_16x16x32_bf8",
-     8,
-     8,
-     4,
-     64,
-     &lm_mfma_16x16x32_a,
-     &lm_mfma_16x16x32_b,
-     &lm_mfma_16x16x32_c},
+     64},
     {"mma",
-     "bf8e5m2",
-     "bf8e5m2",
-     "fp32",
+     {{"bf8e5m2", 8, &lm_mfma_32x32x16_src0},
+      {"bf8e5m2", 8, &lm_mfma_32x32x16_src1},
+      {"fp32", 16, &lm_mfma_32x32x16_src2}},
+     {"fp32", 16, &lm_mfma_32x32x16_dst},
      32,
      32,
      16,
      "mfma_f32_32x32x16_bf8",
-     8,
-     8,
+     64},
+    {"mma",
+     {{"fp64", 1, &lm_mfma_16x16x4_f32_src0},
+      {"fp64", 1, &lm_mfma_16x16x4_f32_src1},
+      {"fp64", 4, &lm_mfma_16x16x4_f64_src2}},
+     {"fp64", 4, &lm_mfma_16x16x4_f64_dst},
      16,
-     64,
-     &lm_mfma_32x32x16_a,
-     &lm_mfma_32x32x16_b,
-     &lm_mfma_32x32x16_c},
+     16,
+     4,
+     "mfma_f64_16x16x4_f64",
+     64},
+    {"mma",
+     {{"fp64", 1, &lm_mfma_16x16x4_f32_src0},
+      {"fp64", 1, &lm_mfma_4x4x4_f64_src1},
+      {"fp64", 1, &lm_mfma_4x4x4_f64_src2}},
+     {"fp64", 1, &lm_mfma_4x4x4_f64_dst},
+     4,
+     4,
+     4,
+     "mfma_f64_4x4x4_f64",
+     64},
 };
 
 /* ----------------------------- gfx950 (CDNA) ----------------------------- */
@@ -1432,777 +1390,412 @@ static void mfma_scaled_scale_b(
 {
     mfma_scaled_scale_a(b, lane, slot, col, k);
 }
-static const rocke_layout_map_t lm_mfma_scaled_f8_a = {ROCKE_MMA_ROLE_A, 32, 64, mfma_scaled_f8_a};
-static const rocke_layout_map_t lm_mfma_scaled_f8_b = {ROCKE_MMA_ROLE_B, 32, 64, mfma_scaled_f8_b};
-static const rocke_layout_map_t lm_mfma_scaled_a = {ROCKE_MMA_ROLE_A, 32, 64, mfma_scaled_a};
-static const rocke_layout_map_t lm_mfma_scaled_b = {ROCKE_MMA_ROLE_B, 32, 64, mfma_scaled_b};
-static const rocke_layout_map_t lm_mfma_scaled_c = {ROCKE_MMA_ROLE_ACC, 16, 64, _mfma_acc_32x32};
+static const rocke_layout_map_t lm_mfma_scaled_f8_a
+    = {ROCKE_MMA_ROLE_SRC0, 32, 64, mfma_scaled_f8_a};
+static const rocke_layout_map_t lm_mfma_scaled_f8_b
+    = {ROCKE_MMA_ROLE_SRC1, 32, 64, mfma_scaled_f8_b};
+static const rocke_layout_map_t lm_mfma_scaled_a = {ROCKE_MMA_ROLE_SRC0, 32, 64, mfma_scaled_a};
+static const rocke_layout_map_t lm_mfma_scaled_b = {ROCKE_MMA_ROLE_SRC1, 32, 64, mfma_scaled_b};
+static const rocke_layout_map_t lm_mfma_scaled_src2
+    = {ROCKE_MMA_ROLE_SRC2, 16, 64, _mfma_row_col_32x32};
+static const rocke_layout_map_t lm_mfma_scaled_dst
+    = {ROCKE_MMA_ROLE_DST, 16, 64, _mfma_row_col_32x32};
 static const rocke_layout_map_t lm_mfma_scaled_sa
-    = {ROCKE_MMA_ROLE_A_SCALE, 1, 64, mfma_scaled_scale_a};
+    = {ROCKE_MMA_ROLE_SCALE_SRC0, 1, 64, mfma_scaled_scale_a};
 static const rocke_layout_map_t lm_mfma_scaled_sb
-    = {ROCKE_MMA_ROLE_B_SCALE, 1, 64, mfma_scaled_scale_b};
+    = {ROCKE_MMA_ROLE_SCALE_SRC1, 1, 64, mfma_scaled_scale_b};
 
 static const rocke_mma_op_t k_mma_gfx950[] = {
     {"mfma_scaled",
-     "fp8e4m3",
-     "fp8e4m3",
-     "fp32",
+     {{"fp8e4m3", 32, &lm_mfma_scaled_f8_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp8e4m3", 32, &lm_mfma_scaled_f8_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_fp8_fp8_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_f8_a,
-     &lm_mfma_scaled_f8_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp8e4m3",
-     "bf8e5m2",
-     "fp32",
+     {{"fp8e4m3", 32, &lm_mfma_scaled_f8_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"bf8e5m2", 32, &lm_mfma_scaled_f8_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_fp8_bf8_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_f8_a,
-     &lm_mfma_scaled_f8_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp8e4m3",
-     "fp6e2m3",
-     "fp32",
+     {{"fp8e4m3", 32, &lm_mfma_scaled_f8_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp6e2m3", 32, &lm_mfma_scaled_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_fp8_fp6_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_f8_a,
-     &lm_mfma_scaled_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp8e4m3",
-     "fp6e3m2",
-     "fp32",
+     {{"fp8e4m3", 32, &lm_mfma_scaled_f8_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp6e3m2", 32, &lm_mfma_scaled_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_fp8_bf6_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_f8_a,
-     &lm_mfma_scaled_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp8e4m3",
-     "fp4e2m1",
-     "fp32",
+     {{"fp8e4m3", 32, &lm_mfma_scaled_f8_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp4e2m1", 32, &lm_mfma_scaled_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_fp8_fp4_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_f8_a,
-     &lm_mfma_scaled_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "bf8e5m2",
-     "fp8e4m3",
-     "fp32",
+     {{"bf8e5m2", 32, &lm_mfma_scaled_f8_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp8e4m3", 32, &lm_mfma_scaled_f8_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_bf8_fp8_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_f8_a,
-     &lm_mfma_scaled_f8_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "bf8e5m2",
-     "bf8e5m2",
-     "fp32",
+     {{"bf8e5m2", 32, &lm_mfma_scaled_f8_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"bf8e5m2", 32, &lm_mfma_scaled_f8_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_bf8_bf8_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_f8_a,
-     &lm_mfma_scaled_f8_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "bf8e5m2",
-     "fp6e2m3",
-     "fp32",
+     {{"bf8e5m2", 32, &lm_mfma_scaled_f8_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp6e2m3", 32, &lm_mfma_scaled_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_bf8_fp6_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_f8_a,
-     &lm_mfma_scaled_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "bf8e5m2",
-     "fp6e3m2",
-     "fp32",
+     {{"bf8e5m2", 32, &lm_mfma_scaled_f8_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp6e3m2", 32, &lm_mfma_scaled_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_bf8_bf6_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_f8_a,
-     &lm_mfma_scaled_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "bf8e5m2",
-     "fp4e2m1",
-     "fp32",
+     {{"bf8e5m2", 32, &lm_mfma_scaled_f8_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp4e2m1", 32, &lm_mfma_scaled_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_bf8_fp4_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_f8_a,
-     &lm_mfma_scaled_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp6e2m3",
-     "fp8e4m3",
-     "fp32",
+     {{"fp6e2m3", 32, &lm_mfma_scaled_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp8e4m3", 32, &lm_mfma_scaled_f8_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_fp6_fp8_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_a,
-     &lm_mfma_scaled_f8_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp6e2m3",
-     "bf8e5m2",
-     "fp32",
+     {{"fp6e2m3", 32, &lm_mfma_scaled_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"bf8e5m2", 32, &lm_mfma_scaled_f8_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_fp6_bf8_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_a,
-     &lm_mfma_scaled_f8_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp6e2m3",
-     "fp6e2m3",
-     "fp32",
+     {{"fp6e2m3", 32, &lm_mfma_scaled_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp6e2m3", 32, &lm_mfma_scaled_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_fp6_fp6_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_a,
-     &lm_mfma_scaled_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp6e2m3",
-     "fp6e3m2",
-     "fp32",
+     {{"fp6e2m3", 32, &lm_mfma_scaled_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp6e3m2", 32, &lm_mfma_scaled_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_fp6_bf6_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_a,
-     &lm_mfma_scaled_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp6e2m3",
-     "fp4e2m1",
-     "fp32",
+     {{"fp6e2m3", 32, &lm_mfma_scaled_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp4e2m1", 32, &lm_mfma_scaled_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_fp6_fp4_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_a,
-     &lm_mfma_scaled_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp6e3m2",
-     "fp8e4m3",
-     "fp32",
+     {{"fp6e3m2", 32, &lm_mfma_scaled_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp8e4m3", 32, &lm_mfma_scaled_f8_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_bf6_fp8_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_a,
-     &lm_mfma_scaled_f8_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp6e3m2",
-     "bf8e5m2",
-     "fp32",
+     {{"fp6e3m2", 32, &lm_mfma_scaled_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"bf8e5m2", 32, &lm_mfma_scaled_f8_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_bf6_bf8_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_a,
-     &lm_mfma_scaled_f8_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp6e3m2",
-     "fp6e2m3",
-     "fp32",
+     {{"fp6e3m2", 32, &lm_mfma_scaled_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp6e2m3", 32, &lm_mfma_scaled_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_bf6_fp6_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_a,
-     &lm_mfma_scaled_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp6e3m2",
-     "fp6e3m2",
-     "fp32",
+     {{"fp6e3m2", 32, &lm_mfma_scaled_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp6e3m2", 32, &lm_mfma_scaled_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_bf6_bf6_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_a,
-     &lm_mfma_scaled_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp6e3m2",
-     "fp4e2m1",
-     "fp32",
+     {{"fp6e3m2", 32, &lm_mfma_scaled_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp4e2m1", 32, &lm_mfma_scaled_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_bf6_fp4_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_a,
-     &lm_mfma_scaled_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp4e2m1",
-     "fp8e4m3",
-     "fp32",
+     {{"fp4e2m1", 32, &lm_mfma_scaled_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp8e4m3", 32, &lm_mfma_scaled_f8_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_fp4_fp8_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_a,
-     &lm_mfma_scaled_f8_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp4e2m1",
-     "bf8e5m2",
-     "fp32",
+     {{"fp4e2m1", 32, &lm_mfma_scaled_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"bf8e5m2", 32, &lm_mfma_scaled_f8_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_fp4_bf8_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_a,
-     &lm_mfma_scaled_f8_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp4e2m1",
-     "fp6e2m3",
-     "fp32",
+     {{"fp4e2m1", 32, &lm_mfma_scaled_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp6e2m3", 32, &lm_mfma_scaled_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_fp4_fp6_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_a,
-     &lm_mfma_scaled_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp4e2m1",
-     "fp6e3m2",
-     "fp32",
+     {{"fp4e2m1", 32, &lm_mfma_scaled_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp6e3m2", 32, &lm_mfma_scaled_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_fp4_bf6_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_a,
-     &lm_mfma_scaled_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mfma_scaled",
-     "fp4e2m1",
-     "fp4e2m1",
-     "fp32",
+     {{"fp4e2m1", 32, &lm_mfma_scaled_a, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sa},
+      {"fp4e2m1", 32, &lm_mfma_scaled_b, "e8m0", ROCKE_MMA_SCALE_K32, 1, &lm_mfma_scaled_sb},
+      {"fp32", 16, &lm_mfma_scaled_src2}},
+     {"fp32", 16, &lm_mfma_scaled_dst},
      32,
      32,
      64,
      "mfma_gfx950_f32_32x32x64_fp4_fp4_scale_e8m0_e8m0_k32",
-     32,
-     32,
-     16,
-     64,
-     &lm_mfma_scaled_a,
-     &lm_mfma_scaled_b,
-     &lm_mfma_scaled_c,
-     "e8m0",
-     "e8m0",
-     ROCKE_MMA_SCALE_K32,
-     1,
-     1,
-     &lm_mfma_scaled_sa,
-     &lm_mfma_scaled_sb},
+     64},
     {"mma",
-     "fp32",
-     "fp32",
-     "fp32",
+     {{"fp32", 1, &lm_mfma_16x16x4_f32_src0},
+      {"fp32", 1, &lm_mfma_16x16x4_f32_src1},
+      {"fp32", 4, &lm_mfma_16x16x4_f32_src2}},
+     {"fp32", 4, &lm_mfma_16x16x4_f32_dst},
      16,
      16,
      4,
      "mfma_f32_16x16x4_f32",
-     1,
-     1,
-     4,
-     64,
-     &lm_mfma_16x16x4_a,
-     &lm_mfma_16x16x4_b,
-     &lm_mfma_16x16x4_f32_c},
+     64},
     {"mma",
-     "fp32",
-     "fp32",
-     "fp32",
+     {{"fp32", 1, &lm_mfma_32x32x2_f32_src0},
+      {"fp32", 1, &lm_mfma_32x32x2_f32_src1},
+      {"fp32", 16, &lm_mfma_32x32x2_f32_src2}},
+     {"fp32", 16, &lm_mfma_32x32x2_f32_dst},
      32,
      32,
      2,
      "mfma_f32_32x32x2_f32",
-     1,
-     1,
-     16,
-     64,
-     &lm_mfma_32x32x2_f32_a,
-     &lm_mfma_32x32x2_f32_b,
-     &lm_mfma_32x32x2_f32_c},
+     64},
     {"mma",
-     "fp16",
-     "fp16",
-     "fp32",
+     {{"fp16", 4, &lm_mfma_16x16x16_src0},
+      {"fp16", 4, &lm_mfma_16x16x16_src1},
+      {"fp32", 4, &lm_mfma_16x16x16_src2}},
+     {"fp32", 4, &lm_mfma_16x16x16_dst},
      16,
      16,
      16,
      "mfma_f32_16x16x16_f16",
-     4,
-     4,
-     4,
-     64,
-     &lm_mfma_16x16x16_a,
-     &lm_mfma_16x16x16_b,
-     &lm_mfma_16x16x16_c},
+     64},
     {"mma",
-     "fp16",
-     "fp16",
-     "fp32",
+     {{"fp16", 8, &lm_mfma_16x16x32_src0},
+      {"fp16", 8, &lm_mfma_16x16x32_src1},
+      {"fp32", 4, &lm_mfma_16x16x32_src2}},
+     {"fp32", 4, &lm_mfma_16x16x32_dst},
      16,
      16,
      32,
      "mfma_f32_16x16x32_f16",
-     8,
-     8,
-     4,
-     64,
-     &lm_mfma_16x16x32_a,
-     &lm_mfma_16x16x32_b,
-     &lm_mfma_16x16x32_c},
+     64},
     {"mma",
-     "fp16",
-     "fp16",
-     "fp32",
+     {{"fp16", 4, &lm_mfma_32x32x8_src0},
+      {"fp16", 4, &lm_mfma_32x32x8_src1},
+      {"fp32", 16, &lm_mfma_32x32x8_src2}},
+     {"fp32", 16, &lm_mfma_32x32x8_dst},
      32,
      32,
      8,
      "mfma_f32_32x32x8_f16",
-     4,
-     4,
-     16,
-     64,
-     &lm_mfma_32x32x8_a,
-     &lm_mfma_32x32x8_b,
-     &lm_mfma_32x32x8_c},
+     64},
     {"mma",
-     "fp16",
-     "fp16",
-     "fp32",
+     {{"fp16", 8, &lm_mfma_32x32x16_src0},
+      {"fp16", 8, &lm_mfma_32x32x16_src1},
+      {"fp32", 16, &lm_mfma_32x32x16_src2}},
+     {"fp32", 16, &lm_mfma_32x32x16_dst},
      32,
      32,
      16,
      "mfma_f32_32x32x16_f16",
-     8,
-     8,
-     16,
-     64,
-     &lm_mfma_32x32x16_a,
-     &lm_mfma_32x32x16_b,
-     &lm_mfma_32x32x16_c},
+     64},
     {"mma",
-     "bf16",
-     "bf16",
-     "fp32",
+     {{"bf16", 4, &lm_mfma_16x16x16_src0},
+      {"bf16", 4, &lm_mfma_16x16x16_src1},
+      {"fp32", 4, &lm_mfma_16x16x16_src2}},
+     {"fp32", 4, &lm_mfma_16x16x16_dst},
      16,
      16,
      16,
      "mfma_f32_16x16x16_bf16",
-     4,
-     4,
-     4,
-     64,
-     &lm_mfma_16x16x16_a,
-     &lm_mfma_16x16x16_b,
-     &lm_mfma_16x16x16_c},
+     64},
     {"mma",
-     "bf16",
-     "bf16",
-     "fp32",
+     {{"bf16", 8, &lm_mfma_16x16x32_src0},
+      {"bf16", 8, &lm_mfma_16x16x32_src1},
+      {"fp32", 4, &lm_mfma_16x16x32_src2}},
+     {"fp32", 4, &lm_mfma_16x16x32_dst},
      16,
      16,
      32,
      "mfma_f32_16x16x32_bf16",
-     8,
-     8,
-     4,
-     64,
-     &lm_mfma_16x16x32_a,
-     &lm_mfma_16x16x32_b,
-     &lm_mfma_16x16x32_c},
+     64},
     {"mma",
-     "bf16",
-     "bf16",
-     "fp32",
+     {{"bf16", 4, &lm_mfma_32x32x8_src0},
+      {"bf16", 4, &lm_mfma_32x32x8_src1},
+      {"fp32", 16, &lm_mfma_32x32x8_src2}},
+     {"fp32", 16, &lm_mfma_32x32x8_dst},
      32,
      32,
      8,
      "mfma_f32_32x32x8_bf16",
-     4,
-     4,
-     16,
-     64,
-     &lm_mfma_32x32x8_a,
-     &lm_mfma_32x32x8_b,
-     &lm_mfma_32x32x8_c},
+     64},
     {"mma",
-     "bf16",
-     "bf16",
-     "fp32",
+     {{"bf16", 8, &lm_mfma_32x32x16_src0},
+      {"bf16", 8, &lm_mfma_32x32x16_src1},
+      {"fp32", 16, &lm_mfma_32x32x16_src2}},
+     {"fp32", 16, &lm_mfma_32x32x16_dst},
      32,
      32,
      16,
      "mfma_f32_32x32x16_bf16",
-     8,
-     8,
-     16,
-     64,
-     &lm_mfma_32x32x16_a,
-     &lm_mfma_32x32x16_b,
-     &lm_mfma_32x32x16_c},
+     64},
     {"mma",
-     "fp8e4m3",
-     "fp8e4m3",
-     "fp32",
+     {{"fp8e4m3", 8, &lm_mfma_16x16x32_src0},
+      {"fp8e4m3", 8, &lm_mfma_16x16x32_src1},
+      {"fp32", 4, &lm_mfma_16x16x32_src2}},
+     {"fp32", 4, &lm_mfma_16x16x32_dst},
      16,
      16,
      32,
      "mfma_f32_16x16x32_fp8",
-     8,
-     8,
-     4,
-     64,
-     &lm_mfma_16x16x32_a,
-     &lm_mfma_16x16x32_b,
-     &lm_mfma_16x16x32_c},
+     64},
     {"mma",
-     "fp8e4m3",
-     "fp8e4m3",
-     "fp32",
+     {{"fp8e4m3", 8, &lm_mfma_32x32x16_src0},
+      {"fp8e4m3", 8, &lm_mfma_32x32x16_src1},
+      {"fp32", 16, &lm_mfma_32x32x16_src2}},
+     {"fp32", 16, &lm_mfma_32x32x16_dst},
      32,
      32,
      16,
      "mfma_f32_32x32x16_fp8",
-     8,
-     8,
-     16,
-     64,
-     &lm_mfma_32x32x16_a,
-     &lm_mfma_32x32x16_b,
-     &lm_mfma_32x32x16_c},
+     64},
     {"mma",
-     "bf8e5m2",
-     "bf8e5m2",
-     "fp32",
+     {{"bf8e5m2", 8, &lm_mfma_16x16x32_src0},
+      {"bf8e5m2", 8, &lm_mfma_16x16x32_src1},
+      {"fp32", 4, &lm_mfma_16x16x32_src2}},
+     {"fp32", 4, &lm_mfma_16x16x32_dst},
      16,
      16,
      32,
      "mfma_f32_16x16x32_bf8",
-     8,
-     8,
-     4,
-     64,
-     &lm_mfma_16x16x32_a,
-     &lm_mfma_16x16x32_b,
-     &lm_mfma_16x16x32_c},
+     64},
     {"mma",
-     "bf8e5m2",
-     "bf8e5m2",
-     "fp32",
+     {{"bf8e5m2", 8, &lm_mfma_32x32x16_src0},
+      {"bf8e5m2", 8, &lm_mfma_32x32x16_src1},
+      {"fp32", 16, &lm_mfma_32x32x16_src2}},
+     {"fp32", 16, &lm_mfma_32x32x16_dst},
      32,
      32,
      16,
      "mfma_f32_32x32x16_bf8",
-     8,
-     8,
-     16,
-     64,
-     &lm_mfma_32x32x16_a,
-     &lm_mfma_32x32x16_b,
-     &lm_mfma_32x32x16_c},
+     64},
     /* TF32 via BF16x3 emulation. No native encoding: each row issues three
      * mfma_*_bf16 over a Dekker-style split of the fp32 payload of its TF32
      * operands. Frag lengths, wave size and layout maps are inherited verbatim
@@ -2217,51 +1810,27 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      * naming every member before it. The NULL/0/NONE run is the unscaled
      * default that every other row gets from zero-init. */
     {"mma",
-     "tf32",
-     "tf32",
-     "fp32",
+     {{"tf32", 8, &lm_mfma_16x16x32_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"tf32", 8, &lm_mfma_16x16x32_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 4, &lm_mfma_16x16x32_src2}},
+     {"fp32", 4, &lm_mfma_16x16x32_dst},
      16,
      16,
      32,
      "mfma_f32_16x16x32_xf32",
-     8,
-     8,
-     4,
      64,
-     &lm_mfma_16x16x32_a,
-     &lm_mfma_16x16x32_b,
-     &lm_mfma_16x16x32_c,
-     NULL,
-     NULL,
-     ROCKE_MMA_SCALE_NONE,
-     0,
-     0,
-     NULL,
-     NULL,
      ROCKE_MMA_EMULATION_BF16X3,
      "mfma_f32_16x16x32_bf16"},
     {"mma",
-     "tf32",
-     "tf32",
-     "fp32",
+     {{"tf32", 8, &lm_mfma_32x32x16_src0, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"tf32", 8, &lm_mfma_32x32x16_src1, NULL, ROCKE_MMA_SCALE_NONE, 0, NULL},
+      {"fp32", 16, &lm_mfma_32x32x16_src2}},
+     {"fp32", 16, &lm_mfma_32x32x16_dst},
      32,
      32,
      16,
      "mfma_f32_32x32x16_xf32",
-     8,
-     8,
-     16,
      64,
-     &lm_mfma_32x32x16_a,
-     &lm_mfma_32x32x16_b,
-     &lm_mfma_32x32x16_c,
-     NULL,
-     NULL,
-     ROCKE_MMA_SCALE_NONE,
-     0,
-     0,
-     NULL,
-     NULL,
      ROCKE_MMA_EMULATION_BF16X3,
      "mfma_f32_32x32x16_bf16"},
 };
@@ -2269,281 +1838,179 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
 /* ----------------------------- gfx1151 (RDNA3.5) ------------------------- */
 static const rocke_mma_op_t k_mma_gfx1151[] = {
     {"wmma",
-     "fp16",
-     "fp16",
-     "fp32",
+     {{"fp16", 16, &lm_wmma_16x16x16_src0},
+      {"fp16", 16, &lm_wmma_16x16x16_src1},
+      {"fp32", 8, &lm_wmma_16x16x16_src2}},
+     {"fp32", 8, &lm_wmma_16x16x16_dst},
      16,
      16,
      16,
      "wmma_f32_16x16x16_f16",
-     16,
-     16,
-     8,
-     32,
-     &lm_wmma_16x16x16_a,
-     &lm_wmma_16x16x16_b,
-     &lm_wmma_16x16x16_c},
+     32},
     {"wmma",
-     "bf16",
-     "bf16",
-     "fp32",
+     {{"bf16", 16, &lm_wmma_16x16x16_src0},
+      {"bf16", 16, &lm_wmma_16x16x16_src1},
+      {"fp32", 8, &lm_wmma_16x16x16_src2}},
+     {"fp32", 8, &lm_wmma_16x16x16_dst},
      16,
      16,
      16,
      "wmma_f32_16x16x16_bf16",
-     16,
-     16,
-     8,
-     32,
-     &lm_wmma_16x16x16_a,
-     &lm_wmma_16x16x16_b,
-     &lm_wmma_16x16x16_c},
+     32},
     {"wmma",
-     "i8",
-     "i8",
-     "i32",
+     {{"i8", 4, &lm_wmma_iu8_src0}, {"i8", 4, &lm_wmma_iu8_src1}, {"i32", 8, &lm_wmma_iu8_src2}},
+     {"i32", 8, &lm_wmma_iu8_dst},
      16,
      16,
      16,
      "wmma_i32_16x16x16_iu8",
-     4,
-     4,
-     8,
-     32,
-     &lm_wmma_iu8_a,
-     &lm_wmma_iu8_b,
-     &lm_wmma_iu8_c},
+     32},
     {"wmma",
-     "i4",
-     "i4",
-     "i32",
+     {{"i4", 2, &lm_wmma_iu4_src0}, {"i4", 2, &lm_wmma_iu4_src1}, {"i32", 8, &lm_wmma_iu4_src2}},
+     {"i32", 8, &lm_wmma_iu4_dst},
      16,
      16,
      16,
      "wmma_i32_16x16x16_iu4",
-     2,
-     2,
-     8,
-     32,
-     &lm_wmma_iu4_a,
-     &lm_wmma_iu4_b,
-     &lm_wmma_iu4_c},
+     32},
 };
 
 /* ----------------------------- gfx1201 (RDNA4) -------------------------- */
 static const rocke_mma_op_t k_mma_gfx1201[] = {
     {"wmma",
-     "fp16",
-     "fp16",
-     "fp32",
+     {{"fp16", 8, &lm_wmma_gfx12_src0},
+      {"fp16", 8, &lm_wmma_gfx12_src1},
+      {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
      16,
      "wmma_gfx12_f32_16x16x16_f16",
-     8,
-     8,
-     8,
-     32,
-     &lm_wmma_gfx12_a,
-     &lm_wmma_gfx12_b,
-     &lm_wmma_gfx12_c},
+     32},
     {"wmma",
-     "bf16",
-     "bf16",
-     "fp32",
+     {{"bf16", 8, &lm_wmma_gfx12_src0},
+      {"bf16", 8, &lm_wmma_gfx12_src1},
+      {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
      16,
      "wmma_gfx12_f32_16x16x16_bf16",
-     8,
-     8,
-     8,
-     32,
-     &lm_wmma_gfx12_a,
-     &lm_wmma_gfx12_b,
-     &lm_wmma_gfx12_c},
+     32},
 };
 
 /* --------------------------- gfx11-generic (RDNA3) ---------------------- */
 static const rocke_mma_op_t k_mma_gfx11_generic[] = {
     {"wmma",
-     "fp16",
-     "fp16",
-     "fp32",
+     {{"fp16", 16, &lm_wmma_16x16x16_src0},
+      {"fp16", 16, &lm_wmma_16x16x16_src1},
+      {"fp32", 8, &lm_wmma_16x16x16_src2}},
+     {"fp32", 8, &lm_wmma_16x16x16_dst},
      16,
      16,
      16,
      "wmma_f32_16x16x16_f16",
-     16,
-     16,
-     8,
-     32,
-     &lm_wmma_16x16x16_a,
-     &lm_wmma_16x16x16_b,
-     &lm_wmma_16x16x16_c},
+     32},
     {"wmma",
-     "bf16",
-     "bf16",
-     "fp32",
+     {{"bf16", 16, &lm_wmma_16x16x16_src0},
+      {"bf16", 16, &lm_wmma_16x16x16_src1},
+      {"fp32", 8, &lm_wmma_16x16x16_src2}},
+     {"fp32", 8, &lm_wmma_16x16x16_dst},
      16,
      16,
      16,
      "wmma_f32_16x16x16_bf16",
-     16,
-     16,
-     8,
-     32,
-     &lm_wmma_16x16x16_a,
-     &lm_wmma_16x16x16_b,
-     &lm_wmma_16x16x16_c},
+     32},
     {"wmma",
-     "i8",
-     "i8",
-     "i32",
+     {{"i8", 4, &lm_wmma_iu8_src0}, {"i8", 4, &lm_wmma_iu8_src1}, {"i32", 8, &lm_wmma_iu8_src2}},
+     {"i32", 8, &lm_wmma_iu8_dst},
      16,
      16,
      16,
      "wmma_i32_16x16x16_iu8",
-     4,
-     4,
-     8,
-     32,
-     &lm_wmma_iu8_a,
-     &lm_wmma_iu8_b,
-     &lm_wmma_iu8_c},
+     32},
     {"wmma",
-     "i4",
-     "i4",
-     "i32",
+     {{"i4", 2, &lm_wmma_iu4_src0}, {"i4", 2, &lm_wmma_iu4_src1}, {"i32", 8, &lm_wmma_iu4_src2}},
+     {"i32", 8, &lm_wmma_iu4_dst},
      16,
      16,
      16,
      "wmma_i32_16x16x16_iu4",
-     2,
-     2,
-     8,
-     32,
-     &lm_wmma_iu4_a,
-     &lm_wmma_iu4_b,
-     &lm_wmma_iu4_c},
+     32},
 };
 
 /* ----------------------------- gfx1250 (CDNA/GFX12) ---------------------- */
-/* gfx1250: wave32, WMMA only (no MFMA). fp32 K=4 atom: A/B are scalar float
- * per lane (same lane layout as mfma_f32_16x16x4_f32 on CDNA — reuses
- * lm_mfma_16x16x4_{a,b}); accumulator is <8 x float> in the gfx12
- * column-distributed layout (lm_wmma_gfx12_c, c_frag_len=8).
- * Primary fp16/bf16 atom is 16x16x32 (K=32, not the gfx12 RDNA 16x16x16).
- * A/B frag_len=16 (16 fp16/bf16 elements per lane); A/B layout maps are NULL
- * pending the gfx1250 ISA backend port (rocke_ll_backend_for); the accumulator
- * reuses lm_wmma_gfx12_c (same 16x16 tile layout). FP8/BF8 K=64 atoms carry
- * frag_len=8 (8 i32 per lane) with NULL A/B maps. */
+/* gfx1250: wave32, WMMA only (no MFMA). The fp32 K=4 atom has two fp32 values
+ * per lane in src0 and src1; src2 and dst use separate
+ * descriptors with the same gfx12 column-distributed row/column function.
+ * The primary fp16/bf16 atom is 16x16x32 (K=32, not the gfx12 RDNA
+ * 16x16x16). Its src0 and src1 have 16 fp16/bf16 values per lane. FP8/BF8
+ * K=64 atoms carry eight packed i32 values per lane in src0 and src1; those
+ * source layout maps remain NULL pending the gfx1250 ISA backend port
+ * (rocke_ll_backend_for). */
 static constexpr rocke_mma_op_t k_mma_gfx1250_unscaled[] = {
     {"wmma",
-     "fp32",
-     "fp32",
-     "fp32",
+     {{"fp32", 2, &lm_wmma_gfx1250_f32_src0},
+      {"fp32", 2, &lm_wmma_gfx1250_f32_src1},
+      {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
      4,
      "wmma_gfx1250_f32_16x16x4_f32",
-     2,
-     2,
-     8,
-     32,
-     &lm_wmma_gfx1250_f32_a,
-     &lm_wmma_gfx1250_f32_b,
-     &lm_wmma_gfx12_c},
+     32},
     {"wmma",
-     "fp16",
-     "fp16",
-     "fp32",
+     {{"fp16", 16, &lm_wmma_gfx1250_32_src0},
+      {"fp16", 16, &lm_wmma_gfx1250_32_src1},
+      {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
      32,
      "wmma_gfx1250_f32_16x16x32_f16",
-     16,
-     16,
-     8,
-     32,
-     &lm_wmma_gfx1250_32_a,
-     &lm_wmma_gfx1250_32_b,
-     &lm_wmma_gfx12_c},
+     32},
     {"wmma",
-     "bf16",
-     "bf16",
-     "fp32",
+     {{"bf16", 16, &lm_wmma_gfx1250_32_src0},
+      {"bf16", 16, &lm_wmma_gfx1250_32_src1},
+      {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
      32,
      "wmma_gfx1250_f32_16x16x32_bf16",
-     16,
-     16,
-     8,
-     32,
-     &lm_wmma_gfx1250_32_a,
-     &lm_wmma_gfx1250_32_b,
-     &lm_wmma_gfx12_c},
+     32},
     {"wmma",
-     "fp8e4m3",
-     "fp8e4m3",
-     "fp32",
+     {{"fp8e4m3", 8, NULL}, {"fp8e4m3", 8, NULL}, {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
      64,
      "wmma_gfx1250_f32_16x16x64_fp8_fp8",
-     8,
-     8,
-     8,
-     32,
-     NULL,
-     NULL,
-     &lm_wmma_gfx12_c},
+     32},
     {"wmma",
-     "fp8e4m3",
-     "bf8e5m2",
-     "fp32",
+     {{"fp8e4m3", 8, NULL}, {"bf8e5m2", 8, NULL}, {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
      64,
      "wmma_gfx1250_f32_16x16x64_fp8_bf8",
-     8,
-     8,
-     8,
-     32,
-     NULL,
-     NULL,
-     &lm_wmma_gfx12_c},
+     32},
     {"wmma",
-     "bf8e5m2",
-     "fp8e4m3",
-     "fp32",
+     {{"bf8e5m2", 8, NULL}, {"fp8e4m3", 8, NULL}, {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
      64,
      "wmma_gfx1250_f32_16x16x64_bf8_fp8",
-     8,
-     8,
-     8,
-     32,
-     NULL,
-     NULL,
-     &lm_wmma_gfx12_c},
+     32},
     {"wmma",
-     "bf8e5m2",
-     "bf8e5m2",
-     "fp32",
+     {{"bf8e5m2", 8, NULL}, {"bf8e5m2", 8, NULL}, {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {"fp32", 8, &lm_wmma_gfx12_dst},
      16,
      16,
      64,
      "wmma_gfx1250_f32_16x16x64_bf8_bf8",
-     8,
-     8,
-     8,
-     32,
-     NULL,
-     NULL,
-     &lm_wmma_gfx12_c},
+     32},
 };
 
 /* Private PODs evaluated at compile time. IDs have separate final static
@@ -2659,27 +2126,27 @@ consteval gfx1250_catalog make_gfx1250_catalog()
         const bool k32 = key.mode == 0;
         result.ops[k_unscaled_count + i] = {
             "wmma_scaled",
-            k_input_dtypes[key.a],
-            k_input_dtypes[key.b],
-            "fp32",
+            {{k_input_dtypes[key.a],
+              16,
+              NULL,
+              k_scales[key.sa],
+              k32 ? ROCKE_MMA_SCALE_K32 : ROCKE_MMA_SCALE_K16,
+              128 / k_blocks[key.mode],
+              k32 ? &lm_wmma_scale_k32_a : &lm_wmma_scale_k16_a},
+             {k_input_dtypes[key.b],
+              16,
+              NULL,
+              k_scales[key.sb],
+              k32 ? ROCKE_MMA_SCALE_K32 : ROCKE_MMA_SCALE_K16,
+              128 / k_blocks[key.mode],
+              k32 ? &lm_wmma_scale_k32_b : &lm_wmma_scale_k16_b},
+             {"fp32", 8, &lm_wmma_gfx12_src2}},
+            {"fp32", 8, &lm_wmma_gfx12_dst},
             16,
             16,
             128,
             k_scaled_ids.rows[i],
-            16,
-            16,
-            8,
             32,
-            NULL,
-            NULL,
-            &lm_wmma_gfx12_c,
-            k_scales[key.sa],
-            k_scales[key.sb],
-            k32 ? ROCKE_MMA_SCALE_K32 : ROCKE_MMA_SCALE_K16,
-            128 / k_blocks[key.mode],
-            128 / k_blocks[key.mode],
-            k32 ? &lm_wmma_scale_k32_a : &lm_wmma_scale_k16_a,
-            k32 ? &lm_wmma_scale_k32_b : &lm_wmma_scale_k16_b,
         };
     }
     return result;
@@ -2687,7 +2154,7 @@ consteval gfx1250_catalog make_gfx1250_catalog()
 constexpr auto k_mma_gfx1250 = make_gfx1250_catalog();
 } // namespace
 
-int rocke_arch_mma_c_frag_len(const char* op_id)
+int rocke_arch_mma_dst_frag_len(const char* op_id)
 {
     if(!op_id)
     {
@@ -2705,19 +2172,19 @@ int rocke_arch_mma_c_frag_len(const char* op_id)
     }
     if(row)
     {
-        return row->c_frag_len;
+        return row->dst_frag_len;
     }
     for(const auto& op : k_mma_gfx1250.ops)
     {
         if(strcmp(op.op_id, op_id) == 0)
-            return op.c_frag_len;
+            return op.dst.frag_len;
     }
     /* An atom with no fragment row at all -- the gfx950 scaled MFMAs -- takes its
      * accumulator length from its catalog row. */
     const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx950");
     const rocke_mma_op_t* atom = rocke_mma_catalog_by_op_id(&target->mma, op_id);
     if(atom)
-        return atom->c_frag_len;
+        return atom->dst.frag_len;
     return 0; /* unknown atom: the zero-length _frag_info fallback */
 }
 

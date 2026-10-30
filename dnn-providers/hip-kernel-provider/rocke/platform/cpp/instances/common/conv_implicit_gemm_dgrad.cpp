@@ -15,8 +15,6 @@
  *   B = W  (KYXC, weights)
  *   D = dX (NHWC, input gradient)
  */
-#include "rocke/instance_conv_implicit_gemm_dgrad.h"
-
 #include <cmath> /* ceil, log2 */
 #include <cstdio> /* snprintf */
 #include <cstdlib> /* malloc, free */
@@ -37,6 +35,7 @@
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_abi.h" /* rocke_conv_arg_names, emit_param_block */
 #include "rocke/instance_conv_implicit_gemm.h" /* rocke_conv_acc_epilogue_default */
+#include "rocke/instance_conv_implicit_gemm_dgrad.h"
 #include "rocke/instance_conv_implicit_gemm_internal.h" /* rocke_conv_build_ctx_t, phase fns */
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
@@ -1008,7 +1007,7 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                                                                           nullptr)
                                           : NULL;
             const int tr_lanes = s->wave_size == 32 ? 8 : 4;
-            if(!kop || kop->b_frag_len % tr_lanes != 0)
+            if(!kop || kop->srcs[1].frag_len % tr_lanes != 0)
             {
                 snprintf(reason,
                          reason_cap,
@@ -1019,7 +1018,7 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                          s->wave_size == 32 ? "ds_load_tr16_b128" : "ds_read_tr16_b64",
                          tr_lanes,
                          s->wave_size,
-                         kop ? kop->b_frag_len : 0,
+                         kop ? kop->srcs[1].frag_len : 0,
                          s->warp_tile_m,
                          s->warp_tile_n,
                          s->warp_tile_k);
@@ -1579,7 +1578,7 @@ static void _emit_dgrad_direct_epilogue_wmma(rocke_ir_builder_t* b,
                 = rocke_b_add(b, _bwn, rocke_b_const_i32(b, ni * spec->warp_tile_n));
 
             const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
-            for(int i = 0; i < op->c_frag_len; i++)
+            for(int i = 0; i < op->dst.frag_len; i++)
             {
                 rocke_value_t* row_off;
                 rocke_value_t* col_off;
@@ -2370,7 +2369,7 @@ static void _emit_dgrad_tilde_direct_epilogue_wmma(rocke_ir_builder_t* b,
             rocke_value_t* atom_n_off
                 = rocke_b_add(b, _bwn, rocke_b_const_i32(b, ni * spec->warp_tile_n));
 
-            for(int i = 0; i < op->c_frag_len; i++)
+            for(int i = 0; i < op->dst.frag_len; i++)
             {
                 rocke_value_t* row_off;
                 rocke_value_t* col_off;
@@ -2829,9 +2828,9 @@ static rocke_kernel_def_t*
         = is_wmma ? NULL
                   : rocke_mfma_atom(
                         spec->dtype_a, spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
-    int a_per_lane = op->a_frag_len;
-    int b_per_lane = op->b_frag_len;
-    int c_per_lane = op->c_frag_len;
+    int a_per_lane = op->srcs[0].frag_len;
+    int b_per_lane = op->srcs[1].frag_len;
+    int c_per_lane = op->dst.frag_len;
 
     // ---- 1D grid: block_id_x covers all sub-GEMMs' tiles ----
     rocke_value_t* flat_block_id = rocke_b_block_id_x(b);
@@ -3775,9 +3774,9 @@ static rocke_kernel_def_t*
                     if(spec->lds_k_outer)
                     {
                         /* Python skips the b_row computation entirely on this
-                             * path, so emitting it here would add ops the Python
-                             * engine never emits. Operands sequenced into
-                             * temporaries to preserve left-to-right evaluation. */
+                         * path, so emitting it here would add ops the Python
+                         * engine never emits. Operands sequenced into
+                         * temporaries to preserve left-to-right evaluation. */
                         rocke_value_t* mn_c = rocke_b_const_i32(b, ni * spec->warp_tile_n);
                         rocke_value_t* mn_base = rocke_b_add(b, warp_n_off, mn_c);
                         rocke_value_t* k_c = rocke_b_const_i32(b, kk * spec->warp_tile_k);

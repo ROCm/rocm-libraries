@@ -29,20 +29,20 @@
  * Every opcode is registered in the dispatch table; none is dropped.
  */
 #include <ctype.h>
+#include <stdio.h> /* snprintf */
+#include <stdlib.h> /* atoi     */
+#include <string.h> /* strcmp   */
 
 #include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
+#include "rocke/mfma_internal.h"
 #include "rocke/mfma_scale_internal.h"
 #include "rocke/mma_operand_internal.h"
 #include "rocke/tf32_internal.h"
 #include "rocke/wmma_scale_internal.h"
-
-#include <stdio.h> /* snprintf */
-#include <stdlib.h> /* atoi     */
-#include <string.h> /* strcmp   */
 
 namespace ckc
 {
@@ -146,8 +146,35 @@ static rocke_status_t h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const ro
     }
     if(op->num_operands != 5 || op->num_results != 1)
     {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s expects 5 operands and 1 result", op_id);
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.%s expects 5 operands and 1 result", op_id);
     }
+    const rocke_type_t* acc_types[] = {op->operands[2]->type, op->results[0]->type};
+    for(const auto* type : acc_types)
+        if(!type || type->kind != ROCKE_TYPE_VECTOR || type->count != 8
+           || !rocke_type_eq(type->elem, rocke_f32()))
+            return rocke_h_fail(
+                lw, ROCKE_ERR_VALUE, "scaled WMMA requires src2 and dst to be vec<f32x8>");
+    for(int role = 0; role < 2; ++role)
+    {
+        const auto* type = op->operands[role]->type;
+        if(!type || type->kind != ROCKE_TYPE_VECTOR || type->count != spec->matrix_words[role]
+           || !rocke_type_eq(type->elem, rocke_i32()))
+            return rocke_h_fail(lw,
+                                ROCKE_ERR_VALUE,
+                                "scaled WMMA requires src%d to be vec<i32x%d>",
+                                role,
+                                spec->matrix_words[role]);
+    }
+    const auto* scale_type = scale16 ? rocke_i64() : rocke_i32();
+    if(!rocke_type_eq(op->operands[3]->type, scale_type)
+       || !rocke_type_eq(op->operands[4]->type, scale_type))
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_VALUE,
+                            "tile.%s expects %s scale operands, got %s/%s",
+                            op_id,
+                            scale_type->name,
+                            op->operands[3]->type->name,
+                            op->operands[4]->type->name);
     rocke_h_emitf(lw,
                   "f32x8 %s = %s(%d, %s, %d, %s, (int16_t)0, %s, "
                   "0, %d, %s, 0, %d, %s, false, false);",
@@ -196,8 +223,8 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
                       rocke_h_name(lw, op->operands[0]),
                       rocke_h_name(lw, op->operands[1]),
                       rocke_h_name(lw, op->operands[2]),
-                      rocke_mfma_matrix_format(atom->a_dtype),
-                      rocke_mfma_matrix_format(atom->b_dtype),
+                      rocke_mfma_matrix_format(atom->srcs[0].dtype),
+                      rocke_mfma_matrix_format(atom->srcs[1].dtype),
                       rocke_h_name(lw, op->operands[3]),
                       rocke_h_name(lw, op->operands[4]));
         return ROCKE_OK;
@@ -205,6 +232,12 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     int tf32_count = rocke_tf32_mma_count(op_id);
     if(tf32_count)
     {
+        char message[160];
+        const char* accumulator_type = tf32_count == 4 ? "vec<f32x4>" : "vec<f32x16>";
+        const char* error = rocke_mfma_operand_error(
+            op, "vec<tf32x2>", accumulator_type, accumulator_type, 0, 0, message, sizeof(message));
+        if(error)
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
         char tf32_error[ROCKE_ERR_MSG_CAP];
         if(rocke_tf32_mma_target_error(op_id, lw->arch.gfx, tf32_error, sizeof tf32_error))
             return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", tf32_error);
@@ -243,8 +276,14 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     if(strcmp(op_id, "mfma_f32_16x16x4_f32") == 0 || strcmp(op_id, "mfma_f32_32x32x2_f32") == 0)
     {
         bool small = strcmp(op_id, "mfma_f32_16x16x4_f32") == 0;
-        const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_A, rocke_f32());
-        const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_B, rocke_f32());
+        char message[160];
+        const char* accumulator_type = small ? "vec<f32x4>" : "vec<f32x16>";
+        const char* error = rocke_mfma_operand_error(
+            op, "f32", accumulator_type, accumulator_type, 0, 0, message, sizeof(message));
+        if(error)
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+        const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_SRC0, rocke_f32());
+        const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_SRC1, rocke_f32());
         rocke_h_emitf(lw,
                       "f32x%d %s = __builtin_amdgcn_%s(%s, %s, %s, 0, 0, 0);",
                       small ? 4 : 16,
@@ -260,6 +299,17 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     if(strcmp(op_id, "mfma_f32_4x4x4_f16") == 0 || strcmp(op_id, "mfma_f32_4x4x4_bf16") == 0)
     {
         bool bf16 = strcmp(op_id, "mfma_f32_4x4x4_bf16") == 0;
+        char message[160];
+        const char* error = rocke_mfma_operand_error(op,
+                                                     bf16 ? "vec<bf16x4>" : "vec<f16x4>",
+                                                     "vec<f32x4>",
+                                                     "vec<f32x4>",
+                                                     0,
+                                                     0,
+                                                     message,
+                                                     sizeof(message));
+        if(error)
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
         rocke_h_emitf(lw,
                       "f32x4 %s = __builtin_amdgcn_%s(%s, %s, %s, 0, 0, 0);",
                       rocke_h_name(lw, op->results[0]),
@@ -272,8 +322,13 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     /* f64 atoms: A and B are passed as f64 (h_mma_operand). */
     if(strcmp(op_id, "mfma_f64_4x4x4_f64") == 0)
     {
-        const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_A, rocke_f64());
-        const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_B, rocke_f64());
+        char message[160];
+        const char* error = rocke_mfma_operand_error(
+            op, "f64", "vec<f64x1>", "vec<f64x1>", 0, 0, message, sizeof(message));
+        if(error)
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+        const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_SRC0, rocke_f64());
+        const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_SRC1, rocke_f64());
         rocke_h_emitf(lw,
                       "f64x1 %s = {__builtin_amdgcn_mfma_f64_4x4x4f64(%s, %s, %s[0], 0, 0, 0)};",
                       rocke_h_name(lw, op->results[0]),
@@ -284,8 +339,13 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     }
     if(strcmp(op_id, "mfma_f64_16x16x4_f64") == 0)
     {
-        const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_A, rocke_f64());
-        const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_B, rocke_f64());
+        char message[160];
+        const char* error = rocke_mfma_operand_error(
+            op, "f64", "vec<f64x4>", "vec<f64x4>", 0, 0, message, sizeof(message));
+        if(error)
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+        const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_SRC0, rocke_f64());
+        const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_SRC1, rocke_f64());
         rocke_h_emitf(lw,
                       "f64x4 %s = __builtin_amdgcn_mfma_f64_16x16x4f64(%s, %s, %s, 0, 0, 0);",
                       rocke_h_name(lw, op->results[0]),

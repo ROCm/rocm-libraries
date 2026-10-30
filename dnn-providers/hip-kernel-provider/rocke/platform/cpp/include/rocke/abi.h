@@ -86,8 +86,10 @@ extern "C" {
  * 4: rocke_memory_caps_t gained has_global_float_atomic_add at its end, which
  *    changes its size and with it the offset of rocke_arch_target_t.limits.
  * 5: rocke_tensor_view_t gained buffer (rocke_tv_buffer_resource_t) at its end,
- *    which changes its size and that of every struct embedding a view. */
-#define ROCKE_ABI_VERSION 5
+ *    which changes its size and that of every struct embedding a view.
+ * 6: indexed matrix sources, independent destination, and source-owned scales
+ *    replace the flat MMA fields and role enum; native consumers must rebuild. */
+#define ROCKE_ABI_VERSION 6
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

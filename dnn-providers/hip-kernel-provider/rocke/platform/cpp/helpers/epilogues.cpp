@@ -10,7 +10,6 @@
  * rocke_i_set_err (the sticky-error spelling used across the C port).
  */
 #include "rocke/helper_rocke.helpers.epilogues.h"
-
 #include "rocke/helper_rocke.helpers.tensor_view.h" /* make_lds_view, rocke_tensor_view_t */
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
@@ -589,7 +588,7 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
 
             if(epi->mma_op != NULL)
             {
-                c_per_lane = epi->mma_op->c_frag_len;
+                c_per_lane = epi->mma_op->dst.frag_len;
                 atom_m = epi->mma_op->m;
                 atom_n = epi->mma_op->n;
             }
@@ -863,7 +862,7 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
 
             if(epi->mma_op != NULL)
             {
-                c_per_lane = epi->mma_op->c_frag_len;
+                c_per_lane = epi->mma_op->dst.frag_len;
                 atom_m = epi->mma_op->m;
                 atom_n = epi->mma_op->n;
             }

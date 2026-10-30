@@ -44,15 +44,14 @@
  *     constructs the ImplicitGemmConvSpec with warp_tile_k=self.warp_tile_k, so
  *     the two are equal by construction and spec is the non-opaque handle here.
  */
-#include "rocke/instance_deep_fused_conv_pool_internal.h"
+#include <stddef.h>
 
 #include "rocke/helper_rocke.core.arch.h" /* rocke_mmaop_*_layout, layout coord */
 #include "rocke/helper_rocke.helpers.epilogues.h" /* rocke_warp_grid_t accessors */
 #include "rocke/helper_rocke.helpers.loads.h" /* CoalescedTileLoader */
 #include "rocke/helper_rocke.helpers.tensor_view.h" /* make_lds_view, rocke_tensor_view_t */
+#include "rocke/instance_deep_fused_conv_pool_internal.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
-
-#include <stddef.h>
 
 /* ------------------------------------------------------------------ *
  * Peer forward declaration (link-resolved; see PEER NOTES).
@@ -160,7 +159,7 @@ rocke_value_t* rocke_dfcp_stage_accumulators_to_cshuffle_lds(rocke_ir_builder_t*
         return NULL;
     }
 
-    c_frag_len = op->c_frag_len;
+    c_frag_len = op->dst.frag_len;
     mfmas_m = rocke_warp_grid_mfmas_per_warp_m(b, grid);
     mfmas_n = rocke_warp_grid_mfmas_per_warp_n(b, grid);
     if(!rocke_ir_builder_ok(b))
@@ -428,8 +427,8 @@ rocke_status_t rocke_dfcp_emit_conv1_1x1(rocke_ir_builder_t* b,
         return rocke_ir_builder_status(b);
     }
 
-    a_frag = op->a_frag_len;
-    b_frag = op->b_frag_len;
+    a_frag = op->srcs[0].frag_len;
+    b_frag = op->srcs[1].frag_len;
     mfmas_m = rocke_warp_grid_mfmas_per_warp_m(b, grid);
     mfmas_n = rocke_warp_grid_mfmas_per_warp_n(b, grid);
     if(!rocke_ir_builder_ok(b))
@@ -476,7 +475,7 @@ rocke_status_t rocke_dfcp_emit_conv1_1x1(rocke_ir_builder_t* b,
         int idx;
         for(idx = 0; idx < num_accs; ++idx)
         {
-            accs[idx] = rocke_b_zero_vec_f32(b, op->c_frag_len);
+            accs[idx] = rocke_b_zero_vec_f32(b, op->srcs[2].frag_len);
         }
     }
 

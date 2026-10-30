@@ -58,6 +58,8 @@ def _type_bits(t):
     count = getattr(t, "count", None)
     elem = getattr(t, "elem", None)
     if count is not None and elem is not None:
+        if type(count) is not int or count <= 0:
+            return None
         bits = _type_bits(elem)
         return None if bits is None else count * bits
     try:
