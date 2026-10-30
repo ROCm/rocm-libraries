@@ -13,10 +13,10 @@ set(TEST_NAME "test_ck_tile_fmha")
 
 function(add_gtest_fwd test_group)
     set(V_TYPES "fp16" "bf16" "fp8bf16" "fp32" "mxfp8" "mxfp4")
-    # fp8/fp8fp32 targets and the quantization-scale sweep only have instances on gfx125x.
+    # fp8/fp8fp32/mxfp8bf16 targets and the quantization-scale sweep only have instances on gfx125x.
     # Keep them off every other target so their test time does not grow.
     if(GPU_TARGETS MATCHES "gfx125")
-        list(APPEND V_TYPES "fp8" "fp8fp32")
+        list(APPEND V_TYPES "fp8" "fp8fp32" "mxfp8bf16")
     endif()
     if(GPU_TARGETS MATCHES "gfx908|gfx90a" AND NOT CK_USE_FP8_ON_UNSUPPORTED_ARCH)
         # fp8 instances are built for all gfx9, do not test on archs without hardware support
@@ -29,6 +29,7 @@ function(add_gtest_fwd test_group)
     set(CPP_TYPE_fp8fp32 "FmhaFwdFp8Fp32")
     set(CPP_TYPE_fp32 "FmhaFwdFp32")
     set(CPP_TYPE_mxfp8 "FmhaFwdMxFp8")
+    set(CPP_TYPE_mxfp8bf16 "FmhaFwdMxFp8Bf16")
     set(CPP_TYPE_mxfp4 "FmhaFwdMxFp4")
 
     set(sources)
@@ -188,6 +189,31 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     set_tests_properties(test_ck_tile_fmha_qr_tdm_sched_read_first PROPERTIES
         LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS"
         TIMEOUT 180)
+
+    # Post-build check that instances with a codegen residency target fit its VGPR budget.
+    if(TARGET ${FMHA_FWD_INSTANCES})
+        set(objects_list ${CMAKE_CURRENT_BINARY_DIR}/fmha_fwd_instance_objects.txt)
+        file(GENERATE OUTPUT ${objects_list}
+            CONTENT "$<JOIN:$<TARGET_OBJECTS:${FMHA_FWD_INSTANCES}>,\n>\n")
+        set(vgpr_budget_archs ${SUPPORTED_GPU_TARGETS})
+        list(FILTER vgpr_budget_archs INCLUDE REGEX "^gfx125")
+        list(JOIN vgpr_budget_archs "," vgpr_budget_archs)
+        add_test(NAME test_ck_tile_fmha_fwd_vgpr_budget
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_fmha_fwd_vgpr_budget.py
+                --compiler=${CMAKE_HIP_COMPILER}
+                --archs=${vgpr_budget_archs}
+                --objects=${objects_list} -v)
+        # SMOKE_TEST: the gfx1250 CI stage only runs `ninja smoke` (ctest -L SMOKE_TEST).
+        set_tests_properties(test_ck_tile_fmha_fwd_vgpr_budget PROPERTIES
+            LABELS "SMOKE_TEST;${TEST_NAME};CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS"
+            TIMEOUT 300)
+        add_dependencies(${TEST_NAME} ${FMHA_FWD_INSTANCES})
+        # Makes `ninja smoke` build the whole fwd instance library on gfx125x targets.
+        if(TARGET smoke)
+            add_dependencies(smoke ${FMHA_FWD_INSTANCES})
+        endif()
+    endif()
 
     foreach(dtype IN ITEMS bf16 fp16)
         if(TARGET ${FMHA_FWD_INSTANCES})

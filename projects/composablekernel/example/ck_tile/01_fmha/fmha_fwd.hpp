@@ -54,6 +54,10 @@ struct FmhaFwdMxFp8
 {
 };
 
+struct FmhaFwdMxFp8Bf16
+{
+};
+
 struct FmhaFwdMxFp4
 {
 };
@@ -195,6 +199,13 @@ struct FmhaFwdTypeConfig<FmhaFwdMxFp8>
 
     static constexpr ck_tile::index_t kQKScaleGranularity = 32;
     static constexpr ck_tile::index_t kVScaleGranularity  = 32;
+};
+
+// MXFP8 inputs with a BF16 output (gfx125x qr_tdm_fp8_sched only).
+template <>
+struct FmhaFwdTypeConfig<FmhaFwdMxFp8Bf16> : FmhaFwdTypeConfig<FmhaFwdMxFp8>
+{
+    using ODataType = ck_tile::bf16_t;
 };
 
 template <>
@@ -888,12 +899,45 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
             args.batch, args.nhead_q, args.max_seqlen_q, args.hdim_v, args.seqlen_k_ptr != nullptr);
         return ck_tile::make_tuple(kargs, grids);
     }
+    else if constexpr(FmhaKernel::kMergeNumHeadGroupsSeqLenQ)
+    {
+        // One workgroup row per KV head; its query heads become nhead_q / nhead_k row groups.
+        dim3 grids = FmhaKernel::GridSize(args.batch,
+                                          args.nhead_k,
+                                          args.max_seqlen_q * (args.nhead_q / args.nhead_k),
+                                          args.hdim_v,
+                                          false);
+        return ck_tile::make_tuple(kargs, grids);
+    }
     else
     {
         dim3 grids =
             FmhaKernel::GridSize(args.batch, args.nhead_q, args.max_seqlen_q, args.hdim_v, false);
         return ck_tile::make_tuple(kargs, grids);
     }
+}
+
+// Batch-mode decode GQA whose query heads fold into one tile of query rows per KV head.
+inline bool fmha_fwd_can_merge_head_groups(const fmha_fwd_args& a,
+                                           ck_tile::index_t max_rows,
+                                           bool has_lse,
+                                           bool has_mx_scale,
+                                           bool allow_one_group = false)
+{
+    if(a.nhead_k <= 0 || a.nhead_q < a.nhead_k || a.nhead_q % a.nhead_k != 0)
+        return false;
+    if(!allow_one_group && a.nhead_q == a.nhead_k)
+        return false;
+    if(a.cu_seqlen_q_ptr != nullptr || a.cu_seqlen_k_ptr != nullptr)
+        return false;
+    const ck_tile::index_t s = a.seqlen_q;
+    if(s != a.max_seqlen_q || s * (a.nhead_q / a.nhead_k) > max_rows)
+        return false;
+    if(s == 1)
+        return true;
+    return a.nhead_stride_q == s * a.stride_q && a.nhead_stride_o == s * a.stride_o &&
+           (!has_lse || a.nhead_stride_lse == s) &&
+           (!has_mx_scale || a.nhead_stride_q_descale == s * a.stride_q_descale);
 }
 
 template <typename FmhaKernel>
