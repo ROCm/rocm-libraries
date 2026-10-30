@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "harness/input-init/FillInputs.hpp"
+#include "harness/input-init/SdpaBackwardInputs.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -245,6 +246,8 @@ void setSdpaBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Nod
     recipes.setDefault(a->dropout_scale_tensor_uid(), FillRecipe::free(0.1f, 1.0f));
     recipes.setDefault(a->dropout_scale_inv_tensor_uid(), FillRecipe::free(0.1f, 1.0f));
 
+    // Overwritten by fillInputs() with the forward of Q, K and V. The fill stands only
+    // where the CPU forward rejects the shapes, and the backward reference fails those.
     recipes.setDefault(a->o_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
     recipes.setDefault(a->stats_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
 }
@@ -580,6 +583,27 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
     if(device != nullptr)
     {
         device->waitForFills();
+    }
+
+    // O and the LSE of an SDPA backward node are outputs of a forward, not free inputs:
+    // once Q, K and V hold their values, recompute them. Done after the waits, since
+    // the forward reads Q, K and V on the host.
+    for(flatbuffers::uoffset_t i = 0; i < graph.nodes()->size(); ++i)
+    {
+        const auto& node = *graph.nodes()->Get(i);
+        const auto* sdpaBackward = node.attributes_as_SdpaBackwardAttributes();
+        if(sdpaBackward == nullptr)
+        {
+            continue;
+        }
+        if(auto why = deriveSdpaBackwardForwardOutputs(graph, *sdpaBackward, inputs, ownedUids))
+        {
+            const auto* name = node.name();
+            return FillResult::unsupported(
+                "cannot derive O and stats of SDPA backward node "
+                + std::string(name != nullptr ? name->c_str() : "(unnamed)")
+                + " from its Q, K and V: " + *why);
+        }
     }
     return FillResult::ok(deviceFilled);
 }
