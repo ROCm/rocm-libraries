@@ -3,11 +3,10 @@
 
 #pragma once
 
-#include <stdexcept>
-#include <string>
-
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceNotApplicableError.hpp>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <unordered_map>
 
 #include "IReferenceGraphExecutor.hpp"
 #include "ReferenceCapabilityError.hpp"
@@ -15,35 +14,28 @@
 namespace hipdnn_integration_tests
 {
 
+// Adapts the test_sdk CPU reference executor to IReferenceGraphExecutor. The
+// executor is held behind a pimpl so the heavy test_sdk executor header is
+// compiled once (CpuReferenceGraphExecutorAdapter.cpp) instead of in every
+// translation unit that needs a CPU reference.
 class CpuReferenceGraphExecutorAdapter : public IReferenceGraphExecutor
 {
 public:
-    bool isApplicable(void* graphBuffer, size_t size) override
-    {
-        return _executor.isApplicable(graphBuffer, size);
-    }
+    CpuReferenceGraphExecutorAdapter();
+    ~CpuReferenceGraphExecutorAdapter() override;
 
+    CpuReferenceGraphExecutorAdapter(const CpuReferenceGraphExecutorAdapter&) = delete;
+    CpuReferenceGraphExecutorAdapter& operator=(const CpuReferenceGraphExecutorAdapter&) = delete;
+    CpuReferenceGraphExecutorAdapter(CpuReferenceGraphExecutorAdapter&&) = delete;
+    CpuReferenceGraphExecutorAdapter& operator=(CpuReferenceGraphExecutorAdapter&&) = delete;
+
+    bool isApplicable(void* graphBuffer, size_t size) override;
+
+    // Translates the test_sdk CpuReferenceNotApplicableError into a
+    // ReferenceCapabilityError; any other exception propagates unchanged.
     void execute(void* graphBuffer,
                  size_t size,
-                 const std::unordered_map<int64_t, void*>& variantPack) override
-    {
-        // The test_sdk CPU executor throws CpuReferenceNotApplicableError for
-        // capability misses (no plan for this node type, or plan builder says
-        // not applicable). We translate that into a ReferenceCapabilityError
-        // (case A) so the harness can skip. Any other exception is a genuine
-        // runtime failure (case C) and propagates unchanged — the harness
-        // reports it as RUNTIME_ERROR → FAIL().
-        try
-        {
-            _executor.execute(graphBuffer, size, variantPack);
-        }
-        catch(const hipdnn_test_sdk::utilities::CpuReferenceNotApplicableError& e)
-        {
-            throw ReferenceCapabilityError(std::string("CPU reference executor could not run "
-                                                       "this graph: ")
-                                           + e.what());
-        }
-    }
+                 const std::unordered_map<int64_t, void*>& variantPack) override;
 
     bool requiresDeviceMemory() const override
     {
@@ -51,7 +43,8 @@ public:
     }
 
 private:
-    hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor _executor;
+    struct Impl;
+    std::unique_ptr<Impl> _impl;
 };
 
 } // namespace hipdnn_integration_tests

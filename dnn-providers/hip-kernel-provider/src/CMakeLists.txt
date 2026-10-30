@@ -491,7 +491,10 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                     set_property(GLOBAL PROPERTY
                                  HKP_CENSUS_EXTERNAL_TEST_FILE_${_arch} "${_shard_ctest}")
                 endif()
-                hkp_reserve_census_shard(_shard_dest ${_arch})
+                # The TOML goes to the reservation as well as TEST_CONFIG, or the shard check
+                # in _hkp_write_census_shard() fails configure: nothing else places it
+                # beside the build-tree shard.
+                hkp_reserve_census_shard(_shard_dest ${_arch} FILES "${_toml}")
 
                 set(_category_args "")
                 if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
