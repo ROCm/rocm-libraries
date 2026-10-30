@@ -14,6 +14,33 @@ The baseline bundle: one engine (`hipkernel:ValidateFixture`), one pack targetin
 `gfx942`, two inline kernels with distinct `(block_size, dtype)` metadata tuples.
 Expected: exit 0.
 
+## `multi_launch/`
+
+A standalone loader-valid bundle (engine `hipkernel:ValidateFixtureMultiLaunch`, one pack
+targeting `gfx942`) whose two kernels carry a UKD 1.1 `sources` map with the launches
+`decode` and `merge`: `fixture.two_kernels_block64` names two kernels, and
+`fixture.one_kernel_twice_block256` names one kernel under both launch names. Expected:
+exit 0 with the engine loaded. The validator's stub handler declares the launch names of
+its pack's kernels, so this proves load and keep for a multi-launch pack, not equality
+with a real handler. The `kpack` entries name an archive that is not shipped; the loader
+reads only the descriptors.
+
+## `multi_launch_mismatch/`
+
+`multi_launch/`'s bundle (engine `hipkernel:ValidateFixtureLaunchMismatch`, one pack
+targeting `gfx942`) with its two kernels naming different launch sets: `fixture.decode_merge_block64`
+carries `decode` and `merge`, `fixture.decode_reduce_block256` carries `decode` and `reduce`.
+Every UUID is distinct from the other fixtures; the launch-set disagreement is the only
+defect.
+
+Expected failure: the validator's stub handler declares the first kernel's launch set
+(`{decode, merge}`), so `KernelIngestorStateManager.hpp`'s `validateAndIndexPacks()` drops
+the second kernel with "carries the launches {decode, reduce}, but the dispatch handler ...
+launches {decode, merge}" and the run exits non-zero. Unlike the other malformed
+fixtures the engine still loads, on the kernel that matches, so the test asserts the
+diagnostic and the exit status rather than a missing engine; it is not in
+`MALFORMED_FIXTURES`.
+
 ## `bad_arch/`
 
 The pack's `arch` list is `["GFX942"]` (uppercase) instead of `["gfx942"]`.
@@ -88,4 +115,4 @@ GenericEngine evaluates it with (`uhd::prediction_detail::validateBinding` and `
   `sort_kernel_catalog` and `predict_engine` both succeed.
 
 `tests/test_round_trip.py` and the `hipdnn_validate_descriptors_<fixture>` CTest cases
-(`tools/CMakeLists.txt`) assert these exit statuses and `model_checks` verdicts.
+(`tools/CMakeLists.txt`; `multi_launch/` is `hipdnn_validate_descriptors_smoke_multi_launch`) assert these exit statuses and `model_checks` verdicts.

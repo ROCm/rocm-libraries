@@ -21,6 +21,7 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `arith.fneg`           | `fneg`                            | `fneg`                                 |
 | `arith.fmax`           | `fmax`                            | `llvm.maxnum.{f64,f32,f16,bf16}`       |
 | `arith.fmin`           | `fmin`                            | `llvm.minnum.{f64,f32,f16,bf16}`       |
+| `arith.fdot2`          | `fdot2`                           | `llvm.amdgcn.fdot2` (f16) / `llvm.amdgcn.fdot2.f32.bf16` (bf16), clamp off; f32 accumulator |
 | `arith.cmp`            | `cmp_lt`, `cmp_le`, `cmp_gt`, `cmp_ge`, `cmp_eq`, `cmp_ne`, `cmp_ult` | `icmp {slt,sle,sgt,sge,eq,ne,ult}` |
 | `arith.assume_range`   | (private `_assume_range`, for checked callers only) | nothing: uses of the result print the marked value; the attrs record a range and congruence for the tiling layer's range walk |
 | `arith.fcmp`           | `fcmp(pred, ...)`                 | `fcmp {olt,ole,ogt,oge,oeq,one,ord,uno}` |
@@ -105,6 +106,20 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 
 `masked_global_load(ptr, idx, mask, other, dtype)` clamps the false-lane index to 0 before loading, then selects `other` afterward.
 
+### Global pointers
+
+| Op name                  | Builder             | LLVM emission                                        | HIP emission |
+|--------------------------|---------------------|------------------------------------------------------|--------------|
+| `tile.global_ptr_add`    | `global_ptr_add`    | `getelementptr inbounds i8, ptr addrspace(1)`        | `(const char*)p + (int64_t)off` |
+| `tile.global_ptr_offset` | `global_ptr_offset` | `getelementptr i8, ptr addrspace(1)` (no `inbounds`) | `(T*)((uintptr_t)p + (uint64_t)off)` |
+| `tile.global_ptr_to_i64` | `global_ptr_to_i64` | `ptrtoint ptr addrspace(1) ... to i64`               | `(int64_t)(uintptr_t)p` |
+
+`global_ptr_add` promises the compiler that the result stays inside the allocation `p` points into;
+`global_ptr_offset` does not, so its result may point outside it (before it, with a negative offset)
+-- for an address that is only compared, converted to an integer, or given to a buffer descriptor
+that range-checks every access. Its offset is i64 and is never widened implicitly; widen an i32 with
+`sext` or `zext`. The HIP result keeps `p`'s element type `T`, so indexing it counts elements.
+
 ### LDS
 
 | Op name                | Builder                  | LLVM emission                                  |
@@ -128,8 +143,16 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `tile.buffer_load_vN_f16`        | `buffer_load_vN_f16`             | `raw.ptr.buffer.load.{i32,v2i32,v4i32}` + `vec_bitcast`      |
 | `tile.buffer_store_f16`          | `buffer_store_f16`               | `raw.ptr.buffer.store.i16`                                   |
 | `tile.buffer_store_vN_f16`       | `buffer_store_vN_f16`            | `raw.ptr.buffer.store.{i32,v2i32,v4i32}`                     |
+| `tile.buffer_load_vN`            | `buffer_load_vN`                 | `raw.ptr.buffer.load.{i8,i16,i32,v2i32,v4i32}` + `bitcast` to `<n x dtype>` |
+| `tile.buffer_store_vN`           | `buffer_store_vN`                | `bitcast` + `raw.ptr.buffer.store.{i8,i16,i32,v2i32,v4i32}`  |
 | `tile.async_buffer_load_lds`     | `async_buffer_load_lds`          | `llvm.amdgcn.raw.ptr.buffer.load.lds`                        |
 | `tile.async_buffer_load_lds_addr`| `async_buffer_load_lds_addr`     | same as above; explicit LDS i64 address                       |
+
+`buffer_load_vN` / `buffer_store_vN` take any scalar whose width is whole bytes (i8, u8, fp8, bf8,
+i16, f16, bf16, i32, f32, i64, f64); one access moves 1, 2, 4, 8 or 16 bytes. The hardware checks an
+access of 4 bytes or more per 4-byte component and a 1- or 2-byte access whole: a load past
+`num_records` reads 0, a store past it writes nothing. The HIP lowering has no vector type for u8 or
+i64 elements, so those two lower through LLVM only.
 
 ## MFMA
 
@@ -142,6 +165,7 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `tile.mfma_f32_32x32x8_f16`      | `<4xhalf>`, `<4xhalf>`, `<16xfloat>` | `<16xfloat>`   |
 | `tile.mfma_f32_32x32x16_f16`     | `<8xhalf>`, `<8xhalf>`, `<16xfloat>` | `<16xfloat>`   |
 | `tile.mfma_f32_4x4x4_f16`        | `<4xhalf>`, `<4xhalf>`, `<4xfloat>` | `<4xfloat>`     |
+| `tile.mfma_f32_4x4x4_bf16`       | `<4xi16>` (bf16 bitcast), same, `<4xfloat>` | `<4xfloat>` |
 
 All MFMAs take three literal immarg constants (`cbsz=0, abid=0, blgp=0`) at the LLVM level.
 
@@ -166,10 +190,40 @@ All MFMAs take three literal immarg constants (`cbsz=0, abid=0, blgp=0`) at the 
 | `scf.for`    | `scf_for`              | header / body / latch / exit blocks + phi (induction) |
 | `scf.for_iter` | `scf_for_iter`       | header / body / latch / exit + phi for each iter_var  |
 | `scf.if`     | `scf_if` (ctx manager) | conditional branch + then block + join block          |
-| `scf.yield`  | `scf_yield(*values)`   | records yielded values; consumed by enclosing for/if  |
+| `scf.if_else` | `scf_if_else(cond, result_types=())` (ctx manager) | conditional branch + then and else blocks + join block; one phi per result |
+| `scf.yield`  | `scf_yield(*values)`   | records yielded values; consumed by enclosing for/if_else |
 | `cf.return`  | (auto-emitted)         | `ret void`                                            |
+| `tile.trap`  | `trap()`               | `call void @llvm.trap()` (`s_trap 2`); HIP `__builtin_trap()` |
+
+`trap()` ends the kernel with a hardware exception. What the host sees depends on the HIP runtime:
+the launch reports an error, or the runtime aborts the process. Either way the process cannot use the
+GPU afterwards, so a trap is a last resort: put it under an `scf_if` on a condition the host already
+checks before the launch, to stop a launch that slipped past that check before it reaches a memory
+access.
+
+A loop cannot carry a buffer descriptor (`buffer_rsrc`), as an iter_arg's initial value or as a yielded value: it is `<4 x i32>` in the IR but an opaque `ptr addrspace(8)` (HIP `rsrc_t`) once lowered, which neither a phi nor a variable can hold. The builder, the verifier and every lowering refuse it; build the descriptor before the loop and advance the offset, or rebuild it inside the loop body.
 
 `static_for` and `unroll` are Python-time helpers that emit no `scf.for`; they execute their body in Python and emit straight-line IR.
+
+An `scf_if_else` with `result_types` yields one value per type: each branch ends in `scf_yield` of
+values of those types, and the builder's `results` are the values of the branch that ran. LLVM gets a
+`phi` per result in the join block; HIP declares the results before the `if` and assigns them at the
+end of both branches. A branch that does not end that way is refused by the builder, the verifier
+and both lowerings. A buffer descriptor (`buffer_rsrc`) cannot be a result, for the same reason a
+loop cannot carry one (above): yield what it is built from and build it after the if/else. Nor can
+an LDS allocation (`smem_alloc`): allocate before the if/else and yield an offset into it. Portable
+IR (the recorded recipe and the IR JSON importer) does not carry an if/else with results yet and
+refuses one; lower such a kernel directly.
+
+```python
+branch = b.scf_if_else(ok, result_types=[VectorType(F16, 8)])
+with branch as (then_ctx, else_ctx):
+    with then_ctx:
+        b.scf_yield(b.buffer_load_vN(rsrc, voffset, soffset, F16, 8))
+    with else_ctx:
+        b.scf_yield(b.zero_vec_f16(8))
+(value,) = branch.results
+```
 
 ## Compile-Time Helpers
 

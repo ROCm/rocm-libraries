@@ -26,6 +26,8 @@ from functools import lru_cache
 
 from ..Common.Constants import MAX_FILENAME_LENGTH
 from ..Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
+from ..Common.Utilities import isMxf4SubtilePath, printWarning
+from ..Common.ValidParameters import parseStinkyTofuRegisterAllocation
 
 from .Problem import ProblemType
 
@@ -40,6 +42,37 @@ def getKernelCompileKey(state, splitGSU: bool) -> str:
   """
   s = state._state if hasattr(state, '_state') else state
   return getKernelNameMin(s, splitGSU)
+
+
+class RegisterAllocationMerges:
+  """Kernels that took the name of an earlier kernel with another register allocation.
+
+  The name records only the StinkyTofuRegisterAllocation mode, so two configs
+  with one mode are one kernel, built with the first. Spellings of one config
+  are not merges. warn() reports each pair of configs once.
+  """
+
+  def __init__(self):
+    self._merged = {}
+
+  def add(self, built, merged, name: str) -> None:
+    pair = (_registerAllocationConfig(built), _registerAllocationConfig(merged))
+    if pair[0] != pair[1]:
+      self._merged.setdefault(pair, [name, 0])[1] += 1
+
+  def warn(self, consequence: str) -> None:
+    for (built, merged), (name, count) in self._merged.items():
+      printWarning(
+          f"StinkyTofuRegisterAllocation {merged!r} is not built for {count} kernel(s): "
+          f"each has the name of an earlier kernel with {built!r}, and a kernel name "
+          f"records only the mode. {consequence} First: {name}")
+
+
+def _registerAllocationConfig(kernel):
+  state = kernel._state if hasattr(kernel, '_state') else kernel
+  key = "StinkyTofuRegisterAllocation"
+  # Not .get(): tests pass MagicMock kernels, whose .get() ignores the default.
+  return parseStinkyTofuRegisterAllocation(state[key] if key in state else 0)[0]
 
 
 # Parameters that are "internal args" — runtime dispatch parameters that don't
@@ -131,9 +164,18 @@ def getPrimitiveParameterValueAbbreviation(key, value):
     return s
 
 
+def _registerAllocationAbbreviation(value) -> str:
+  """STRA's value: the mode alone. The rest of the config stays in the solution
+  and is not part of the kernel name; RegisterAllocationMerges reports configs
+  that a shared name merges."""
+  return "%u" % parseStinkyTofuRegisterAllocation(value)[1]
+
+
 def getParameterValueAbbreviation(key, value):
   if key == "ISA":
     return f"{value[0]}{value[1]}{value[2]:x}"
+  if key == "StinkyTofuRegisterAllocation":
+    return _registerAllocationAbbreviation(value)
   compositieTypes = (dict, list, tuple,)
   if not isinstance(value, compositieTypes):
     return getPrimitiveParameterValueAbbreviation(key, value)
@@ -195,8 +237,17 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       requiredParametersTemp.difference_update({"WorkAssignment", "PersistentXCCMapping", "WorkQueueStealing"})
 
 
+    # PostLoopStoreInNll only ever applies on the MXF4 subtile path, where
+    # assignPostLoopStoreInNll auto-disables it for everything else. Naming it
+    # unconditionally would append PLSIN0 to every kernel in the library and change
+    # its name hash, so drop it where it cannot be set.
+    if not isMxf4SubtilePath(state):
+      requiredParametersTemp.discard("PostLoopStoreInNll")
+
     if ignoreInternalArgs:
-      if state["GlobalSplitU"] > 0 or state["GlobalSplitU"] == -1:
+      # In split mode, GSU>1 and auto GSU use the distinct GSUM kernel name.
+      # Decide from the numeric value saved before GlobalSplitU was masked to "M".
+      if gsuBackup == 1 or (not splitGSU and (gsuBackup > 0 or gsuBackup == -1)):
         requiredParametersTemp.discard("GlobalSplitU")
     else:
       requiredParametersTemp = requiredParametersTemp.union(["WorkGroupMapping",
@@ -231,7 +282,8 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       components.append('CMS')
 
     components.append('SN')
-    if state.get("TileProcessingStrategy") == "DataParallel":
+    if (state.get("TileProcessingStrategy") == "DataParallel"
+        or state.get("InternalSupportParams", {}).get("PersistentLoopArgsVersion", 0) == 2):
       components.append(f'PLAV{state.get("InternalSupportParams", {}).get("PersistentLoopArgsVersion", 0)}')
 
     # Skip SFA tag if using default wgm algo
@@ -249,6 +301,15 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       requiredParametersTemp.add("TDMFuse")
     else:
       requiredParametersTemp.discard("TDMFuse")
+
+    # StinkyTofuRegisterAllocation=0 leaves Tensile's colouring, so naming it
+    # would rename every kernel that does not opt in. Any other value changes
+    # the colouring (and mode 3 changes which kernels are accepted), so it
+    # stays in the name. Mode off is 0 whatever else the string says.
+    if parseStinkyTofuRegisterAllocation(state.get("StinkyTofuRegisterAllocation", 0))[1] != 0:
+      requiredParametersTemp.add("StinkyTofuRegisterAllocation")
+    else:
+      requiredParametersTemp.discard("StinkyTofuRegisterAllocation")
 
     # LDSSegmentBRotate=0 is the default layout; naming it would rename every kernel.
     if state.get("LDSSegmentBRotate", 0):

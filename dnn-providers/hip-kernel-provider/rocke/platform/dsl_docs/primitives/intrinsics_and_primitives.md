@@ -181,6 +181,8 @@ buffer_load_f16(rsrc, voffset, soffset)
 buffer_load_vN_f16(rsrc, voffset, soffset, dwords) # vN in halves; dwords = N/2
 buffer_store_f16(rsrc, voffset, soffset, value)
 buffer_store_vN_f16(rsrc, voffset, soffset, value, dwords)
+buffer_load_vN(rsrc, voffset, soffset, dtype, n)   # any whole-byte dtype; n * size in {1,2,4,8,16} bytes
+buffer_store_vN(rsrc, voffset, soffset, value)     # value: a vector, same widths
 ```
 
 Canonical masked-access pattern:
@@ -449,11 +451,17 @@ dequant_i4_byte_to_fp8_pair(b, packed_byte, *, inv_scale)
 dequant_i4_byte_to_bf8_pair(b, packed_byte, *, inv_scale)
 
 # OCP MX E8M0 shared-exponent decode + apply.
-# decode_mx_scale_e8m0(e8m0) -> f32 multiplier ``2^(e - 127)`` with
-# ``e == 0`` and ``e == 255`` mapped to ``0.0`` (matches the AMDGPU
-# MX MFMA hardware path's denormal flush).
+# decode_mx_scale_e8m0(e8m0) -> f32 multiplier, per the OCP MX spec:
+# the byte is unsigned, codes 0..254 give exactly ``2^(code - 127)``
+# (code 0 is the f32 subnormal ``2^-127``) and code 255 gives NaN.
 decode_mx_scale_e8m0(b, e8m0)
 apply_mx_scale(b, value_f32, scale_f32)
+# addend + value * 2^(ea + eb) for an A and a B scale byte, rounded once,
+# without forming the product of the two scales (it can leave f32 range).
+# The split comes from the element formats of the group's A and B values:
+# exact_mx_scale_split(a_format, b_format, group_size) -> MxScaleSplit,
+# with the formats FP8_E4M3_OCP, BF8_E5M2_OCP, FP8_E4M3_FNUZ, BF8_E5M2_FNUZ.
+fma_with_mx_scale_pair(b, value_f32xN, a_e8m0, b_e8m0, addend_f32xN, *, split)
 load_and_decode_mx_scale_byte(b, scale_ptr, scale_idx)
 
 # Preshuffled-B tile-major layout helper. The launcher uses

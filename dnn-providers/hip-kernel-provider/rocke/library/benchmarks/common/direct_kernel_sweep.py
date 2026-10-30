@@ -50,8 +50,19 @@ from kernels.common.conv_abi import conv_direct_transform_signature
 from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, re-exported)
     BLOCK_GROUPS,
     BLOCK_Q,
+    DGRAD_4C_BLOCK_GROUPS,
+    DGRAD_4C_BLOCK_Q,
+    DGRAD_4C_FORMS,
     DGRAD_BLOCK_H,
     DGRAD_BLOCK_Q,
+    DGRAD_FUSED_BLOCK_H,
+    DGRAD_FUSED_BLOCK_H_LARGE,
+    DGRAD_FUSED_CHANNELS,
+    DGRAD_FUSED_EXIT_BLOCK_H,
+    DGRAD_FUSED_FILTERS,
+    DGRAD_FUSED_LDS_PAD,
+    DGRAD_FUSED_WPE,
+    DGRAD_FUSED_WPE_MAX_VGPRS,
     DGRAD_RTC_LOOP_MAX_ATOMS,
     DGRAD_RTC_M_TILES,
     DGRAD_RTC_MAX_KPG,
@@ -71,6 +82,8 @@ from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, 
     DW_TILED_BLOCK_W,
     DW_TILED_BLOCK_WAVES,
     DW_TILED_UNROLL,
+    DW_WIN_MFMA_FILTERS,
+    DW_WIN_UNROLL_BUDGET,
     WGRAD_HPB,
     WGRAD_MFMA_K,
     WGRAD_WAVES_C_WIDE,
@@ -79,6 +92,7 @@ from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, 
     DirectCaps,
     _caps_jobs,
     _caps_of,
+    _dgrad_fused_rule_block_groups,
     _helper_identity,
     _split_reduce_identity,
     count_direct_jobs,
@@ -96,6 +110,7 @@ from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_sp
     DIRECT_DGRAD_TRANSPOSE as _TRANSPOSE,
     DIRECT_DGRAD_TRANSPOSE_RTC as _TRANSPOSE_RTC,
     DIRECT_HALO_VARIANTS as _HALO_VARIANTS,
+    DIRECT_DGRAD_FPROP_SINGLE as _DGRAD_FPROP_SINGLE,
     DIRECT_MFMA_DGRAD as _MFMA_DGRAD,
     DIRECT_SPLIT_REDUCE as _SPLIT_REDUCE,
     DIRECT_WGRAD_FOLD as _WGRAD_FOLD,
@@ -103,6 +118,7 @@ from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_sp
     direct_dgrad_weight_transforms,
     direct_wgrad_fold_knobs,
     direct_dgrad_workspaces,
+    direct_entry_wave_reason,
     direct_spec_for_problem,
     make_direct_spec as make_spec,
     validate_direct_spec as validate_spec,
@@ -414,10 +430,21 @@ class DirectPlan:
 def _conv_step(identity, hsaco_path, meta, spec, problem, direction, buffers):
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_dgrad_patch_wmma import DgradPatchWmmaSpec
+    from kernels.common.conv_dgrad_smallc_wmma import DgradSmallcWmmaSpec
+    from kernels.common.conv_direct_dgrad_wmma import DirectDgradWmmaSpec
     from kernels.common.conv_direct_grouped import direct_launch_geometry
     from kernels.common.conv_direct_nongrouped import DirectNongroupedConvSpec
 
-    if isinstance(spec, DirectNongroupedConvSpec):
+    if isinstance(
+        spec,
+        (
+            DirectNongroupedConvSpec,
+            DirectDgradWmmaSpec,
+            DgradPatchWmmaSpec,
+            DgradSmallcWmmaSpec,
+        ),
+    ):
         grid, block = spec.grid(), (spec.threads_per_block, 1, 1)
     elif hasattr(spec, "launch_geometry"):
         grid, block = spec.launch_geometry()
@@ -477,6 +504,9 @@ def plan_for(
     if not meta.get("kernel_name"):
         return None, "cache entry has no kernel_name (rebuild the cache)"
     variant = identity.algorithm
+    why = direct_entry_wave_reason(variant, identity.wave_size, meta)
+    if why is not None:
+        return None, why
     knobs = json.loads(identity.knobs) if identity.knobs else {}
     if variant in _HALO_VARIANTS and identity.direction == "direct_fwd":
         chunks = _batch_chunks(problem)
@@ -486,7 +516,9 @@ def plan_for(
             return _batch_split_plan(
                 cache, identity, hsaco_path, meta, problem, arch, knobs, chunks
             )
-    spec, why = direct_spec_for_problem(variant, problem, knobs, arch)
+    spec, why = direct_spec_for_problem(
+        variant, problem, knobs, arch, identity.wave_size
+    )
     if spec is None:
         return None, why
 
@@ -498,7 +530,7 @@ def plan_for(
         reduce_id = _split_reduce_identity(
             identity.arch, identity.wave_size, spec.split_c, identity.dtype_a
         )
-        entry = cache.get(reduce_id)
+        entry = cache.entry_meta(reduce_id)
         if entry is None:
             return None, f"missing cached {_SPLIT_REDUCE} helper (rebuild the cache)"
         reduce_spec = make_spec(_SPLIT_REDUCE, problem, {"split_c": spec.split_c})
@@ -506,7 +538,7 @@ def plan_for(
             identity, hsaco_path, meta, spec, problem, "fwd", ("x", "w", "ws_split")
         )
         fold = DirectStep(
-            kernel_name=entry[1]["kernel_name"],
+            kernel_name=entry["kernel_name"],
             hsaco_path=cache.hsaco_path(reduce_id),
             signature=conv.signature,
             grid=reduce_spec.grid(problem),
@@ -541,7 +573,7 @@ def plan_for(
             fold_knobs,
             identity.dtype_a,
         )
-        entry = cache.get(fold_id)
+        entry = cache.entry_meta(fold_id)
         if entry is None:
             return None, "missing cached wgrad fold (rebuild the cache)"
         fold_spec = make_spec(_WGRAD_FOLD, problem, fold_knobs)
@@ -553,7 +585,7 @@ def plan_for(
             identity, hsaco_path, meta, spec, problem, "wgrad", ("dy", "x", "ws")
         )
         fold = DirectStep(
-            kernel_name=entry[1]["kernel_name"],
+            kernel_name=entry["kernel_name"],
             hsaco_path=cache.hsaco_path(fold_id),
             signature=dw_wgrad_fold_signature(fold_spec),
             grid=grid,
@@ -567,6 +599,13 @@ def plan_for(
         # into atomically (the caller zeroes it).
         step = _conv_step(
             identity, hsaco_path, meta, spec, problem, "wgrad", ("dy", "x", "dw")
+        )
+        return DirectPlan(identity, (step,)), "ok"
+    if variant in _DGRAD_FPROP_SINGLE:
+        # A single forward kernel over the transposed problem that reads the
+        # original weights itself: forward ABI, transposed extents.
+        step = _conv_step(
+            identity, hsaco_path, meta, spec, spec.problem, "fwd", ("dy", "w", "dx")
         )
         return DirectPlan(identity, (step,)), "ok"
     if variant not in _MFMA_DGRAD:
@@ -597,7 +636,7 @@ def plan_for(
             helper_knobs,
             identity.dtype_a,
         )
-        entry = cache.get(helper_id)
+        entry = cache.entry_meta(helper_id)
         if entry is None:
             return None, f"missing cached {helper} helper (rebuild the cache)"
         helper_path = cache.hsaco_path(helper_id)
@@ -605,7 +644,7 @@ def plan_for(
         grid, block = dc.direct_launch_geometry(helper_spec)
         steps.append(
             DirectStep(
-                kernel_name=entry[1]["kernel_name"],
+                kernel_name=entry["kernel_name"],
                 hsaco_path=helper_path,
                 signature=conv_direct_transform_signature(
                     identity.dtype_a, runtime_channels

@@ -426,7 +426,7 @@ int64_t firstBlockSize(const DescriptorSet& set, const std::string& arch = "gfx9
     {
         throw std::runtime_error("Loaded descriptor set yielded no applicable candidates");
     }
-    return ranked.front().getIntMetadata("block_size");
+    return ranked.front()->getIntMetadata("block_size");
 }
 
 /// `predict_engine` scorers resolve through uhd::NativeScorerRegistry, not the ScoreRegistry
@@ -1505,35 +1505,6 @@ TEST(TestDescriptorLoader, CollapsesAnIdenticalDescriptorSetPresentInBothRoots)
     EXPECT_EQ(sets.front().engine.name, "test:mirrored");
 }
 
-/// The drop-in rule: a later root may add descriptors, never replace one. Two files
-/// disagreeing inside one root drop both, because nothing ranks them; across roots the
-/// installed tree is the answer, so the newcomer is refused and the incumbent survives
-/// intact -- an operator-controlled root that could delete a shipped engine would do it
-/// at a severity the default log level never shows.
-TEST(TestDescriptorLoader, RefusesADropInRedefiningAnInstalledId)
-{
-    auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("cross_root_conflict"));
-    const auto installed = dir.path() / "a";
-    const auto dropIn = dir.path() / "b";
-
-    auto documents = makeSetDocuments('1', "test:installed");
-    writeDocuments(installed, documents);
-
-    // Same UED id, different content, filed under the later root.
-    auto& engine = documentOfType(documents, ".ued.json");
-    engine["name"] = "test:redefined";
-    writeDocument(dropIn, TestDocument{".ued.json", engine});
-
-    const auto sets = loadFromRoots({installed, dropIn});
-
-    ASSERT_EQ(sets.size(), 1u);
-    EXPECT_EQ(sets.front().engine.name, "test:installed");
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "under an earlier root"))
-        << recorder.getRecordedLogsAsString();
-}
-
 /// The other half: a drop-in that claims no installed id is loaded like any other file,
 /// so the tree is genuinely additive rather than decorative.
 TEST(TestDescriptorLoader, LoadsAnEngineThatOnlyTheDropInRootDefines)
@@ -1694,73 +1665,327 @@ TEST(TestDescriptorLoader, DropsAnIdTwoFilesDisagreeAbout)
 namespace
 {
 
-/// One way the first of two same-id files stops being readable before the second arrives,
-/// and the ERROR that names it.
-struct RereadFailureCase
+/// What a catalog map holds after the walk: its entries, and how many of them two
+/// disagreeing files poisoned.
+struct Tally
 {
-    std::string name;
-    std::function<void(const std::filesystem::path&)> spoil;
-    std::string diagnostic;
+    size_t entries = 0;
+    size_t conflicted = 0;
 };
 
-class TestDescriptorLoaderRereadFailure : public ::testing::TestWithParam<RereadFailureCase>
+/// An id-keyed map's key is the id; a (id, arch) map's key carries it first.
+inline DescriptorId idPart(const DescriptorId& key)
 {
+    return key;
+}
+
+inline DescriptorId idPart(const ArchKey& key)
+{
+    return key.first;
+}
+
+/// Only the entries filed under @p id.
+template <typename Map>
+Tally tallyOf(const Map& map, const DescriptorId& id)
+{
+    Tally tally;
+    for(const auto& item : map)
+    {
+        if(idPart(item.first) == id)
+        {
+            ++tally.entries;
+            tally.conflicted += item.second.conflicted ? 1u : 0u;
+        }
+    }
+    return tally;
+}
+
+/// @p value with the members of every object in the reverse of nlohmann::json's sorted
+/// order, which no plain dump() of a nlohmann::json can produce.
+nlohmann::ordered_json reversedKeys(const nlohmann::json& value)
+{
+    if(value.is_object())
+    {
+        auto object = nlohmann::ordered_json::object();
+        for(auto it = value.rbegin(); it != value.rend(); ++it)
+        {
+            object[it.key()] = reversedKeys(it.value());
+        }
+        return object;
+    }
+    if(value.is_array())
+    {
+        auto array = nlohmann::ordered_json::array();
+        for(const auto& element : value)
+        {
+            array.push_back(reversedKeys(element));
+        }
+        return array;
+    }
+    nlohmann::ordered_json copy = value;
+    return copy;
+}
+
+/// @p document's twin that parses to the same descriptor but shares no bytes with what
+/// writeDocument() writes: a leading comment and every object's keys in reverse order.
+void writeCommentedAndReordered(const std::filesystem::path& directory,
+                                const TestDocument& document)
+{
+    std::filesystem::create_directories(directory);
+    std::ofstream file(
+        directory / (document.body.at("id").get<std::string>() + std::string(document.suffix)),
+        std::ios::binary);
+    file << "// the same descriptor, spelled differently\n"
+         << reversedKeys(document.body).dump(2) << '\n';
+}
+
+/// One descriptor file type, and what a collision on it looks like to a consumer.
+struct TypedCollisionCase
+{
+    std::string name;
+    std::string_view suffix; ///< the type under test; its first document in makeSetDocuments
+    /// Shapes the set so @c suffix exists as a file of its own, keyed the way the loader
+    /// keys it. The per-arch types get one arch, so both copies share a key.
+    std::function<void(Documents&)> prepare;
+    std::function<Tally(const DescriptorCatalog&, const DescriptorId&)> tally;
+    /// Whether losing this id takes the engine with it. A UHD is optional to an engine.
+    bool dropsEngine;
 };
+
+class TestDescriptorLoaderTypedCollision : public ::testing::TestWithParam<TypedCollisionCase>
+{
+protected:
+    /// A changed `name` keeps every type valid; a UED's stays scoped.
+    static TestDocument redefined(const Documents& documents, std::string_view suffix)
+    {
+        for(const auto& document : documents)
+        {
+            if(document.suffix == suffix)
+            {
+                auto body = document.body;
+                body["name"] = body.at("name").get<std::string>() + "_other";
+                return {suffix, std::move(body)};
+            }
+        }
+        throw std::runtime_error("no document of type " + std::string(suffix));
+    }
+
+    /// The catalog's entries for the id of @p documents' document under test: a set holds
+    /// other descriptors of the same type (two UMDs), which are not part of the collision.
+    static Tally collisionTally(const DescriptorCatalog& catalog, const Documents& documents)
+    {
+        for(const auto& document : documents)
+        {
+            if(document.suffix == GetParam().suffix)
+            {
+                return GetParam().tally(catalog,
+                                        hipdnn_flatbuffers_sdk::utilities::parseUuid(
+                                            document.body.at("id").get<std::string>()));
+            }
+        }
+        throw std::runtime_error("no document of type " + std::string(GetParam().suffix));
+    }
+};
+
+void useOneArch(Documents& documents)
+{
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942"});
+}
 
 } // namespace
 
-TEST_P(TestDescriptorLoaderRereadFailure, DropsAnIdWhoseEarlierFileCanNoLongerBeReRead)
+/// The collision compare sees the parsed descriptor, so a comment or a different key
+/// order never makes two copies of one descriptor collide -- a per-arch layout ships the
+/// same generic file in every shard, and each shard is free to format it.
+TEST_P(TestDescriptorLoaderTypedCollision, CollapsesCopiesThatDifferOnlyInBytes)
 {
-    // A collision is settled by re-reading both files, and a file that no longer reads cannot
-    // prove the two equal: even identical copies drop the id, under an ERROR that says the
-    // comparison failed rather than that the contents differ.
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(
-        uniqueDirectory("reread_failure_" + GetParam().name));
-    auto documents = makeSetDocuments('1', "test:reread");
+        uniqueDirectory("typed_bytes_" + GetParam().name));
+    auto documents = makeSetDocuments('1', "test:typed_bytes");
+    GetParam().prepare(documents);
+    writeDocuments(dir.path() / "a", documents);
+
+    const auto& body = documentOfType(documents, GetParam().suffix);
+    ASSERT_NE(reversedKeys(body).dump(2), body.dump(2));
+    writeCommentedAndReordered(dir.path() / "b", TestDocument{GetParam().suffix, body});
+
+    const auto catalog = loadDescriptorCatalog(dir.path());
+
+    EXPECT_EQ(collisionTally(catalog, documents).entries, 1u);
+    EXPECT_EQ(collisionTally(catalog, documents).conflicted, 0u);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0u)
+        << recorder.getRecordedLogsAsString();
+    const auto sets = resolveDescriptorSets(catalog);
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:typed_bytes");
+}
+
+/// Differing content inside one root has no defensible order, so the id is poisoned and
+/// whatever needs it is dropped (RFC 0020 §13.2.1).
+TEST_P(TestDescriptorLoaderTypedCollision, DropsTheIdWhenTwoFilesInOneRootDiffer)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("typed_same_root_" + GetParam().name));
+    auto documents = makeSetDocuments('1', "test:typed_same_root");
+    GetParam().prepare(documents);
+    writeDocuments(dir.path() / "a", documents);
+    writeDocument(dir.path() / "b", redefined(documents, GetParam().suffix));
+
+    const auto catalog = loadDescriptorCatalog(dir.path());
+
+    EXPECT_EQ(collisionTally(catalog, documents).entries, 1u);
+    EXPECT_EQ(collisionTally(catalog, documents).conflicted, 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "with different contents"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "under an earlier root"));
+    EXPECT_EQ(resolveDescriptorSets(catalog).size(), GetParam().dropsEngine ? 0u : 1u);
+}
+
+/// The drop-in rule: a later root may add descriptors, never replace one. Across roots the
+/// installed tree is the answer, so the newcomer is refused and the incumbent survives
+/// intact -- an operator-controlled root that could delete a shipped engine would do it
+/// at a severity the default log level never shows.
+TEST_P(TestDescriptorLoaderTypedCollision, KeepsTheEarlierRootsDescriptorOverALaterRedefinition)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("typed_earlier_root_" + GetParam().name));
+    auto documents = makeSetDocuments('1', "test:typed_earlier_root");
+    GetParam().prepare(documents);
+    writeDocuments(dir.path() / "a", documents);
+    writeDocument(dir.path() / "b", redefined(documents, GetParam().suffix));
+
+    const auto catalog = loadDescriptorCatalog(
+        std::vector<std::filesystem::path>{dir.path() / "a", dir.path() / "b"});
+
+    EXPECT_EQ(collisionTally(catalog, documents).entries, 1u);
+    EXPECT_EQ(collisionTally(catalog, documents).conflicted, 0u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "under an earlier root"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "with different contents"));
+    const auto sets = resolveDescriptorSets(catalog);
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:typed_earlier_root");
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Descriptor,
+    TestDescriptorLoaderTypedCollision,
+    ::testing::Values(TypedCollisionCase{"Kmd",
+                                         ".kmd.json",
+                                         [](Documents&) {},
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.schemas, id);
+                                         },
+                                         true},
+                      TypedCollisionCase{"Uhd",
+                                         ".uhd.json",
+                                         [](Documents&) {},
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.heuristics, id);
+                                         },
+                                         false},
+                      TypedCollisionCase{"Ued",
+                                         ".ued.json",
+                                         [](Documents&) {},
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.engines, id);
+                                         },
+                                         true},
+                      TypedCollisionCase{"Umd",
+                                         ".umd.json",
+                                         [](Documents&) {},
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.matchers, id);
+                                         },
+                                         true},
+                      TypedCollisionCase{"Udd",
+                                         ".udd.json",
+                                         [](Documents&) {},
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.dispatches, id);
+                                         },
+                                         true},
+                      TypedCollisionCase{"Kdp",
+                                         ".kdp.json",
+                                         useOneArch,
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.packs, id);
+                                         },
+                                         true},
+                      TypedCollisionCase{"Ukd",
+                                         ".ukd.json",
+                                         [](Documents& documents) {
+                                             referenceLastKernel(documents);
+                                             useOneArch(documents);
+                                             documentOfType(documents, ".ukd.json")["arch"]
+                                                 = nlohmann::json::array({"gfx942"});
+                                         },
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.kernels, id);
+                                         },
+                                         true}),
+    [](const ::testing::TestParamInfo<TypedCollisionCase>& info) { return info.param.name; });
+
+/// The collision compare reads no file: both entries here name paths that never existed,
+/// so a compare that opened them again could not call the copies identical.
+TEST(TestDescriptorLoader, SettlesACollisionWithoutOpeningEitherFile)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    auto documents = makeSetDocuments('1', "test:no_io");
     const auto& body = documentOfType(documents, ".udd.json");
-    const auto first = dir.path() / "first.udd.json";
-    const auto second = dir.path() / "second.udd.json";
-    for(const auto& path : {first, second})
-    {
-        std::ofstream(path, std::ios::binary) << body.dump(2);
-    }
+    const auto missing = uniqueDirectory("no_io");
+    const auto first = missing / "first.udd.json";
+    const auto second = missing / "second.udd.json";
 
     DescriptorMap<DispatchDescriptor> dispatches;
     detail::insertCatalogEntry(
         dispatches, detail::parseDispatchDescriptor(body, first.string()), first);
-    GetParam().spoil(first);
     detail::insertCatalogEntry(
         dispatches, detail::parseDispatchDescriptor(body, second.string()), second);
 
     ASSERT_EQ(dispatches.size(), 1u);
     const auto& entry = dispatches.begin()->second;
-    EXPECT_TRUE(entry.conflicted);
-    EXPECT_EQ(detail::findDescriptor(dispatches, entry.descriptor.id), nullptr);
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, GetParam().diagnostic))
-        << recorder.getRecordedLogsAsString();
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "could not be compared"))
-        << recorder.getRecordedLogsAsString();
-    EXPECT_FALSE(recorder.hasLogContaining("with different contents"))
+    EXPECT_FALSE(entry.conflicted);
+    EXPECT_EQ(entry.path, first);
+    EXPECT_NE(detail::findDescriptor(dispatches, entry.descriptor.id), nullptr);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0u)
         << recorder.getRecordedLogsAsString();
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Collision,
-    TestDescriptorLoaderRereadFailure,
-    ::testing::Values(RereadFailureCase{"deleted",
-                                        [](const std::filesystem::path& path) {
-                                            ASSERT_TRUE(std::filesystem::remove(path));
-                                        },
-                                        "failed to re-open"},
-                      RereadFailureCase{"unparsable",
-                                        [](const std::filesystem::path& path) {
-                                            std::ofstream(path, std::ios::binary | std::ios::trunc)
-                                                << "not json";
-                                        },
-                                        "failed to re-read"}),
-    [](const ::testing::TestParamInfo<RereadFailureCase>& info) { return info.param.name; });
+/// RFC 0020 §13.2.1's content-identical exception is over the parsed descriptor. Extension
+/// keys (`x-`, `_`) and `provenance` never reach it, so two UEDs that differ only there are
+/// one definition rather than a collision.
+TEST(TestDescriptorLoader, CollapsesCopiesDifferingOnlyInExtensionKeysAndProvenance)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("extension_keys"));
+    auto documents = makeSetDocuments('1', "test:extension_keys");
+    writeDocuments(dir.path() / "a", documents);
+
+    auto annotated = documentOfType(documents, ".ued.json");
+    annotated["x-note"] = "reviewed by hand";
+    annotated["_scratch"] = 7;
+    annotated["provenance"] = {{"packer", "descriptor-packer/1.0"}};
+    writeDocument(dir.path() / "b", TestDocument{".ued.json", std::move(annotated)});
+
+    const auto catalog = loadDescriptorCatalog(dir.path());
+
+    EXPECT_EQ(catalog.engines.size(), 1u);
+    EXPECT_FALSE(catalog.engines.begin()->second.conflicted);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0u)
+        << recorder.getRecordedLogsAsString();
+    const auto sets = resolveDescriptorSets(catalog);
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:extension_keys");
+}
 
 TEST(TestDescriptorLoader, LoadsNothingFromAnEmptyDirectory)
 {
@@ -1855,6 +2080,29 @@ struct ViolationCase
     std::string name;
     std::function<void(Documents&)> corrupt;
 };
+
+nlohmann::json launchSource(const std::string& symbol)
+{
+    return {{"kind", "kpack"},
+            {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+            {"toc_key", "multi/module"},
+            {"symbol", symbol},
+            {"sha256", std::string(64, 'a')},
+            {"signature",
+             nlohmann::json::array({{{"kind", "global_buffer"}, {"size", 8}, {"offset", 0}}})}};
+}
+
+/// Rewrites the first inline kernel of the pack from `kernel_source` to a valid two-launch
+/// `sources` map under UKD 1.1, so a row below breaks exactly one thing about it.
+nlohmann::json& spellAsMultiLaunch(Documents& documents)
+{
+    auto& kernel = documentOfType(documents, ".kdp.json").at("kernelDescriptors")[0];
+    kernel.erase("kernel_source");
+    kernel["version"] = "1.1";
+    kernel["sources"]
+        = {{"decode", launchSource("decode_kernel")}, {"merge", launchSource("merge_kernel")}};
+    return kernel;
+}
 
 class TestDescriptorLoaderViolation : public ::testing::TestWithParam<ViolationCase>
 {
@@ -2005,6 +2253,75 @@ INSTANTIATE_TEST_SUITE_P(
                           documentOfType(documents, ".kdp.json")
                               .at("kernelDescriptors")[0]["kernel_source"]["kind"]
                               = "hsaco_file";
+                      }},
+        // RFC 0017 §15.1: a kernel is one launch (`kernel_source`) or several (`sources`),
+        // never both and never neither, and `sources` is a UKD 1.1 key.
+        ViolationCase{"sources_beside_kernel_source",
+                      [](Documents& documents) {
+                          spellAsMultiLaunch(documents)["kernel_source"] = launchSource("single");
+                      }},
+        ViolationCase{"neither_kernel_source_nor_sources",
+                      [](Documents& documents) { spellAsMultiLaunch(documents).erase("sources"); }},
+        // One entry says what `kernel_source` says: two spellings of one fact drift.
+        ViolationCase{"sources_holds_a_single_launch",
+                      [](Documents& documents) {
+                          spellAsMultiLaunch(documents).at("sources").erase("merge");
+                      }},
+        ViolationCase{"sources_is_not_an_object",
+                      [](Documents& documents) {
+                          spellAsMultiLaunch(documents)["sources"]
+                              = nlohmann::json::array({launchSource("a"), launchSource("b")});
+                      }},
+        ViolationCase{"launch_name_is_uppercase",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources["Merge"] = sources.at("merge");
+                          sources.erase("merge");
+                      }},
+        ViolationCase{"launch_name_starts_with_a_digit",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources["2nd"] = sources.at("merge");
+                          sources.erase("merge");
+                      }},
+        ViolationCase{"launch_name_starts_with_an_underscore",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources["_x"] = sources.at("merge");
+                          sources.erase("merge");
+                      }},
+        ViolationCase{
+            "sources_under_version_1_0",
+            [](Documents& documents) { spellAsMultiLaunch(documents)["version"] = "1.0"; }},
+        ViolationCase{"launch_name_has_interior_uppercase",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources["segMent"] = sources.at("merge");
+                          sources.erase("merge");
+                      }},
+        ViolationCase{"launch_name_has_a_hyphen",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources["seg-1"] = sources.at("merge");
+                          sources.erase("merge");
+                      }},
+        ViolationCase{"launch_name_is_empty",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources[""] = sources.at("merge");
+                          sources.erase("merge");
+                      }},
+        ViolationCase{"launch_is_an_embedded_source",
+                      [](Documents& documents) {
+                          spellAsMultiLaunch(documents).at("sources")["merge"]
+                              = {{"kind", "embedded_source"},
+                                 {"source_file", "Kernel.cpp"},
+                                 {"entry_point", "Entry"}};
+                      }},
+        ViolationCase{"launch_signature_is_missing",
+                      [](Documents& documents) {
+                          spellAsMultiLaunch(documents).at("sources").at("merge").erase(
+                              "signature");
                       }},
         ViolationCase{"arch_has_duplicate_entries",
                       [](Documents& documents) {
@@ -2226,6 +2543,30 @@ TEST(TestDescriptorLoader, LoadsAnEngineWhoseModelArtifactIsPresent)
     // absolute.
     EXPECT_EQ(std::filesystem::path(sets.front().heuristic->modelArtifactPath).filename().string(),
               "model.bin");
+}
+
+/// The packer copies a shared model UHD and its artifact into every arch shard. Each copy
+/// resolves its artifact to a different absolute path, but they author the same relative
+/// path and digest the same bytes, so they are one definition and the model stays bound.
+TEST(TestDescriptorLoader, CollapsesPerArchCopiesOfAModelHeuristic)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_arch_dupes"));
+    for(const std::string arch : {"gfx942", "gfx950"})
+    {
+        writeModelHeuristicSet(dir.path() / arch, "test:model_sharded", "model.bin");
+        writeArtifact(dir.path() / arch / "model.bin");
+    }
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0u)
+        << recorder.getRecordedLogsAsString();
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().heuristic.has_value());
+    EXPECT_EQ(sets.front().heuristic->adapter, UhdAdapter::TREE_DATA);
 }
 
 /// RFC 0019 §4: every header field changes what the heuristic computes, so each must
@@ -2466,9 +2807,10 @@ TEST(TestDescriptorLoader, AcceptsAModelArtifactInASubdirectoryOfTheDescriptor)
 
     ASSERT_EQ(sets.size(), 1u);
     ASSERT_TRUE(sets.front().heuristic.has_value());
-    EXPECT_EQ(
-        sets.front().heuristic->modelArtifactPath,
-        std::filesystem::absolute(dir.path() / "models" / "model.bin").lexically_normal().string());
+    // The parser resolves the artifact canonically, so the expectation is canonical too. On
+    // Windows that yields the on-disk case of each component, which %TEMP% need not match.
+    EXPECT_EQ(sets.front().heuristic->modelArtifactPath,
+              std::filesystem::weakly_canonical(dir.path() / "models" / "model.bin").string());
 }
 
 /// RFC 0019 §11.2: a `predict_engine` model gets the same artifact pre-flight as a ranker.
@@ -3035,7 +3377,7 @@ TEST(TestDescriptorLoader, DropsEveryEngineClaimingTheSameEngineId)
     writeDocuments(dir.path(), makeSetDocuments('1', "test:same_name"));
     writeDocuments(dir.path(), makeSetDocuments('2', "test:same_name"));
 
-    // RFC 0020 §10.2.1: not keep-the-first. Directory order decides which set is seen
+    // RFC 0020 §13.2.1: not keep-the-first. Directory order decides which set is seen
     // first, so keeping one would make the surviving definition a property of the
     // filesystem.
     EXPECT_TRUE(loadFrom(dir.path()).empty());
@@ -3633,7 +3975,7 @@ TEST(TestDescriptorLoader, RejectsANonUedDescriptorWithNoVersion)
     EXPECT_TRUE(loadFrom(dir.path()).empty());
 }
 
-/// RFC 0020 §10.2.1: the version check runs before duplicate detection, so a UED the
+/// RFC 0020 §13.2.1: the version check runs before duplicate detection, so a UED the
 /// runtime cannot read is dropped for its version alone and the descriptor it would have
 /// collided with is retained. Ordered the other way, an unreadable file would take a
 /// perfectly good engine down with it.
@@ -3679,7 +4021,7 @@ TEST(TestDescriptorLoader, AnUnsupportedVersionDropsBeforeItCanCollideById)
 }
 
 /// RFC 0020 §4.3: the authored form is JSONC. Comments are the parser's business only --
-/// they must not reach the duplicate check, which compares parsed documents, so the same
+/// they must not reach the duplicate check, which compares parsed descriptors, so the same
 /// descriptor commented and uncommented is one definition rather than a collision.
 TEST(TestDescriptorLoader, ReadsCommentedDescriptorsAndIgnoresCommentsWhenComparing)
 {
@@ -3689,7 +4031,7 @@ TEST(TestDescriptorLoader, ReadsCommentedDescriptorsAndIgnoresCommentsWhenCompar
     writeDocuments(dir.path(), documents);
 
     // The same set again under a second arch directory, this time with a comment on every
-    // file: RFC 0020 §10.2.1's content-identical exception has to see through it.
+    // file: RFC 0020 §13.2.1's content-identical exception has to see through it.
     const auto commented = dir.path() / "gfx950";
     std::filesystem::create_directories(commented);
     for(const auto& document : documents)
@@ -4233,7 +4575,7 @@ TEST(TestDescriptorLoader, SkipsAnInlineKernelDeclaringANewerUkdVersion)
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_newer_version"));
     auto documents = makeSetDocuments('1', "test:valid");
-    documentOfType(documents, ".kdp.json").at("kernelDescriptors").front()["version"] = "1.1";
+    documentOfType(documents, ".kdp.json").at("kernelDescriptors").front()["version"] = "1.2";
     writeDocuments(dir.path(), documents);
 
     const auto sets = loadFrom(dir.path());
@@ -4242,7 +4584,7 @@ TEST(TestDescriptorLoader, SkipsAnInlineKernelDeclaringANewerUkdVersion)
     ASSERT_EQ(sets.front().packs.size(), 1u);
     const auto& kernels = sets.front().packs.front().kernels;
     ASSERT_EQ(kernels.size(), 2u);
-    // Which two, not merely how many: the gate has to drop the entry that declared 1.1.
+    // Which two, not merely how many: the gate has to drop the entry that declared 1.2.
     EXPECT_EQ(toString(kernels[0].id), testUuid('1', '9'));
     EXPECT_EQ(toString(kernels[1].id), testUuid('1', 'a'));
     // The locator names the pack file; "a 'kernelDescriptors' entry" alone names nothing,
@@ -4251,7 +4593,7 @@ TEST(TestDescriptorLoader, SkipsAnInlineKernelDeclaringANewerUkdVersion)
 }
 
 /// The gate runs before the body, so a skewed entry is not also judged for what its
-/// unreadable fields say. This one declares both 1.1 and an arch reaching past its pack:
+/// unreadable fields say. This one declares both 1.2 and an arch reaching past its pack:
 /// it is skipped for the version, and the arch violation -- which would otherwise fail
 /// the whole file -- is never reached. The file path orders it the same way, gating in
 /// the walk before any parser sees the document.
@@ -4264,7 +4606,7 @@ TEST(TestDescriptorLoader, SkewOnAnInlineKernelSupersedesItsOtherViolations)
     auto& pack = documentOfType(documents, ".kdp.json");
     pack["arch"] = nlohmann::json::array({"gfx942"});
     auto& skewed = pack.at("kernelDescriptors").front();
-    skewed["version"] = "1.1";
+    skewed["version"] = "1.2";
     skewed["arch"] = nlohmann::json::array({"gfx90a"});
     writeDocuments(dir.path(), documents);
 
@@ -4275,7 +4617,7 @@ TEST(TestDescriptorLoader, SkewOnAnInlineKernelSupersedesItsOtherViolations)
     ASSERT_EQ(sets.size(), 1u);
     ASSERT_EQ(sets.front().packs.size(), 1u);
     EXPECT_EQ(sets.front().packs.front().kernels.size(), 2u);
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "declares version 1.1"))
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "declares version 1.2"))
         << recorder.getRecordedLogsAsString();
 }
 
@@ -4316,7 +4658,7 @@ TEST(TestDescriptorLoader, DropsAPackReferencingAStandaloneKernelOfANewerUkdVers
 
     auto broken = makeSetDocuments('2', "test:broken");
     referenceLastKernel(broken);
-    documentOfType(broken, ".ukd.json")["version"] = "1.1";
+    documentOfType(broken, ".ukd.json")["version"] = "1.2";
     writeDocuments(dir.path(), broken);
 
     const auto sets = loadFrom(dir.path());
@@ -4369,7 +4711,7 @@ TEST_P(TestDescriptorLoaderPackReadings, WarnsOncePerReadingOfThePack)
     auto& pack = documentOfType(documents, ".kdp.json");
     pack["x-pack-note"] = "header";
     auto& kernels = pack.at("kernelDescriptors");
-    kernels[0]["version"] = "1.1";
+    kernels[0]["version"] = "1.2";
     kernels[1]["x-kernel-note"] = "kernel";
     writeDocuments(dir.path(), documents);
     overwritePack(dir.path(), documents, GetParam().spell(pack));
@@ -4381,7 +4723,7 @@ TEST_P(TestDescriptorLoaderPackReadings, WarnsOncePerReadingOfThePack)
     EXPECT_EQ(sets.front().packs.front().kernels.size(), 2u);
     const auto& param = GetParam();
     for(const std::string warning :
-        {"extension key 'x-pack-note'", "declares version 1.1", "extension key 'x-kernel-note'"})
+        {"extension key 'x-pack-note'", "declares version 1.2", "extension key 'x-kernel-note'"})
     {
         const auto count = countLogsContaining(recorder, warning);
         if(param.exactly)
@@ -4522,6 +4864,18 @@ void expectSameKernel(const KernelDescriptor& actual, const KernelDescriptor& ex
         EXPECT_EQ(actual.source.signature[i].size, expected.source.signature[i].size);
         EXPECT_EQ(actual.source.signature[i].offset, expected.source.signature[i].offset);
         EXPECT_EQ(actual.source.signature[i].name, expected.source.signature[i].name);
+    }
+    // Launches by name: a reading that dropped or re-bound one would otherwise load equal.
+    ASSERT_EQ(actual.sources.size(), expected.sources.size());
+    for(const auto& [launch, source] : expected.sources)
+    {
+        const auto found = actual.sources.find(launch);
+        ASSERT_NE(found, actual.sources.end()) << "launch '" << launch << "'";
+        EXPECT_EQ(found->second.library, source.library);
+        EXPECT_EQ(found->second.tocKey, source.tocKey);
+        EXPECT_EQ(found->second.symbol, source.symbol);
+        EXPECT_EQ(found->second.sha256, source.sha256);
+        EXPECT_EQ(found->second.signature.size(), source.signature.size());
     }
     EXPECT_TRUE(actual.metadata == expected.metadata);
     EXPECT_EQ(actual.priority, expected.priority);
@@ -4768,6 +5122,25 @@ std::vector<OracleCase> oracleCases()
              kernel["provenance"] = {{"tool", "hkp_pack"}, {"inputs", {1, 2.5, nullptr, true}}};
              return oraclePackText(oracleHeader(), nlohmann::json::array({kernel}));
          }},
+        {"multi_launch_kernel",
+         loads,
+         [] {
+             auto kernel = oracleKernel(1);
+             kernel.erase("kernel_source");
+             kernel["version"] = "1.1";
+             kernel["sources"] = {{"decode", launchSource("oracle_decode")},
+                                  {"merge", launchSource("oracle_merge")}};
+             return oraclePackText(oracleHeader(), nlohmann::json::array({kernel}));
+         }},
+        {"multi_launch_kernel_under_version_1_0",
+         rejected,
+         [] {
+             auto kernel = oracleKernel(1);
+             kernel.erase("kernel_source");
+             kernel["sources"] = {{"decode", launchSource("oracle_decode")},
+                                  {"merge", launchSource("oracle_merge")}};
+             return oraclePackText(oracleHeader(), nlohmann::json::array({kernel}));
+         }},
         {"kernel_arch_within_pack",
          loads,
          [] {
@@ -4780,7 +5153,7 @@ std::vector<OracleCase> oracleCases()
          loads,
          [] {
              auto skewed = oracleKernel(2);
-             skewed["version"] = "1.1";
+             skewed["version"] = "1.2";
              return oraclePackText(oracleHeader(),
                                    nlohmann::json::array({oracleKernel(1), skewed}));
          }},
@@ -5260,6 +5633,174 @@ TEST(TestDescriptorLoader, AcceptsAPackagedKernelAndCarriesItsCoordinates)
     // Each kind fills only its own fields, so a consumer may read them under the tag alone.
     EXPECT_TRUE(source.sourceFile.empty());
     EXPECT_TRUE(source.entryPoint.empty());
+}
+
+/// The shape the packer emits for a multi-launch kernel: `sources` under UKD 1.1, one
+/// complete kpack source per launch. Both launches live in one module, so they share a
+/// library and a toc_key and differ in symbol -- and `source`, which a multi-launch kernel
+/// does not have, stays default.
+TEST(TestDescriptorLoader, AcceptsAMultiLaunchKernelAndCarriesEachLaunchByName)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("multi_launch_kernel"));
+    auto documents = makeSetDocuments('1', "test:multi_launch");
+    spellAsMultiLaunch(documents);
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& kernel = sets.front().packs.front().kernels.front();
+    ASSERT_EQ(kernel.sources.size(), 2u);
+    EXPECT_EQ(kernel.sources.at("decode").symbol, "decode_kernel");
+    EXPECT_EQ(kernel.sources.at("merge").symbol, "merge_kernel");
+    EXPECT_EQ(kernel.sources.at("decode").tocKey, kernel.sources.at("merge").tocKey);
+    EXPECT_EQ(kernel.sources.at("merge").sha256, std::string(64, 'a'));
+    EXPECT_EQ(kernel.sources.at("merge").signature.size(), 1u);
+    EXPECT_TRUE(kernel.source.sourceFile.empty());
+    EXPECT_TRUE(kernel.source.symbol.empty());
+}
+
+/// Same shape in a standalone `.ukd.json`, whose version the FILE_TYPES gate reads: UKD 1.1
+/// is within what this build reads, where a 1.0 runtime skips it as a newer minor.
+TEST(TestDescriptorLoader, AcceptsAMultiLaunchKernelInAStandaloneUkd)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("multi_launch_ukd"));
+    auto documents = makeSetDocuments('1', "test:multi_launch_ukd");
+    auto inlineKernel = spellAsMultiLaunch(documents);
+    documentOfType(documents, ".kdp.json")["kernelDescriptors"]
+        = nlohmann::json::array({inlineKernel["id"]});
+    documents.push_back(TestDocument{".ukd.json", inlineKernel});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.front().kernels.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().kernels.front().sources.size(), 2u);
+}
+
+/// One kernel may be launched under two launch names (the same grid-shape-independent kernel
+/// run twice with different arguments): the loader keeps both entries, whichever spelling
+/// carries them.
+TEST(TestDescriptorLoader, AcceptsTwoLaunchNamesNamingOneKernelInAStandaloneUkd)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("same_kernel_ukd"));
+    auto documents = makeSetDocuments('1', "test:same_kernel_ukd");
+    auto inlineKernel = spellAsMultiLaunch(documents);
+    inlineKernel["sources"]["merge"]["symbol"] = inlineKernel["sources"]["decode"]["symbol"];
+    documentOfType(documents, ".kdp.json")["kernelDescriptors"]
+        = nlohmann::json::array({inlineKernel["id"]});
+    documents.push_back(TestDocument{".ukd.json", inlineKernel});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& kernel = sets.front().packs.front().kernels.front();
+    ASSERT_EQ(kernel.sources.size(), 2u);
+    EXPECT_EQ(kernel.sources.at("merge").symbol, "decode_kernel");
+    EXPECT_EQ(kernel.sources.at("decode").symbol, "decode_kernel");
+}
+
+TEST(TestDescriptorLoader, AcceptsTwoLaunchNamesNamingOneKernelInline)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("same_kernel_inline"));
+    auto documents = makeSetDocuments('1', "test:same_kernel_inline");
+    auto& sources = spellAsMultiLaunch(documents).at("sources");
+    sources["merge"]["symbol"] = sources.at("decode").at("symbol");
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& kernel = sets.front().packs.front().kernels.front();
+    ASSERT_EQ(kernel.sources.size(), 2u);
+    EXPECT_EQ(kernel.sources.at("merge").symbol, kernel.sources.at("decode").symbol);
+    EXPECT_EQ(kernel.sources.at("merge").tocKey, kernel.sources.at("decode").tocKey);
+}
+
+/// The selector revision digests every launch's code object, so a pack whose launch is
+/// rebuilt does not keep a revision a ranker was trained against. Each launch carries its
+/// own symbol, toc_key and sha256, and each of them counts on its own.
+TEST(TestDescriptorLoader, ChangingALaunchCodeObjectChangesTheEngineSelectorRevision)
+{
+    const auto revisionWith
+        = [&](const std::string& launch, const std::string& field, const std::string& value) {
+              const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("revision_a"));
+              auto documents = makeSetDocuments('1', "test:revision_a");
+              spellAsMultiLaunch(documents).at("sources").at(launch)[field] = value;
+              writeDocuments(dir.path(), documents);
+              return engineSelectorRevision(loadFrom(dir.path()).at(0));
+          };
+
+    // Setting a field to the value it already has leaves the pack as authored.
+    const std::string baseline = revisionWith("merge", "symbol", "merge_kernel");
+    EXPECT_EQ(baseline, revisionWith("decode", "symbol", "decode_kernel"));
+
+    const std::vector<std::pair<std::string, std::string>> edits
+        = {{"symbol", "rocke_changed"},
+           {"toc_key", "multi/changed"},
+           {"sha256", std::string(64, 'b')}};
+    for(const std::string launch : {"decode", "merge"})
+    {
+        for(const auto& [field, value] : edits)
+        {
+            SCOPED_TRACE(std::string(launch).append(".").append(field));
+            EXPECT_NE(revisionWith(launch, field, value), baseline);
+        }
+    }
+}
+
+/// A launch name is `^[a-z][a-z0-9_]*$`: underscores and digits after the first letter are
+/// part of the name.
+TEST(TestDescriptorLoader, AcceptsLaunchNamesWithUnderscoresAndDigits)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("launch_name_chars"));
+    auto documents = makeSetDocuments('1', "test:launch_name_chars");
+    auto& sources = spellAsMultiLaunch(documents).at("sources");
+    sources["seg_1"] = sources.at("decode");
+    sources["seg_2"] = sources.at("merge");
+    sources.erase("decode");
+    sources.erase("merge");
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& kernel = sets.front().packs.front().kernels.front();
+    ASSERT_EQ(kernel.sources.size(), 2u);
+    EXPECT_TRUE(kernel.sources.count("seg_1"));
+    EXPECT_TRUE(kernel.sources.count("seg_2"));
+}
+
+/// Both spellings of the exactly-one rule are refused with the rule's own message. The
+/// violation rows above only see that the engine was dropped, which a missing `kernel_source`
+/// would also cause by another route, so the message is what tells the rule from its absence.
+TEST(TestDescriptorLoader, RefusesAKernelWithBothOrNeitherOfKernelSourceAndSources)
+{
+    for(const bool both : {true, false})
+    {
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+            uniqueDirectory(both ? "both_source_spellings" : "no_source_spelling"));
+        auto documents = makeSetDocuments('1', "test:one_spelling");
+        auto& kernel = spellAsMultiLaunch(documents);
+        if(both)
+        {
+            kernel["kernel_source"] = launchSource("single");
+        }
+        else
+        {
+            kernel.erase("sources");
+        }
+        writeDocuments(dir.path(), documents);
+
+        EXPECT_TRUE(loadFrom(dir.path()).empty());
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                              "must carry exactly one of 'kernel_source'"))
+            << (both ? "both: " : "neither: ") << recorder.getRecordedLogsAsString();
+    }
 }
 
 namespace

@@ -34,6 +34,17 @@ Infer options from the user request:
      executable under it.
    - `<installed-ctest-root>`: the CTest root of an *installed* tree, which for this
      provider is `<install-prefix>/bin/hip_kernel_provider`, not the prefix itself.
+   - `<build-ctest-root>`: `<build-dir>/dnn-providers/hip-kernel-provider/src`, the
+     build-tree registration of the categorized engine-pinned suites, with absolute paths.
+     List one engine's with `ctest --test-dir <build-ctest-root> -N -L <engine-label>`,
+     where the label is the engine ID with every character outside `[A-Za-z0-9_.-]` mapped
+     to `_` (for example `hipkernel_Gfx950AttentionDense`). The provider's
+     `install_CTestTestfile.cmake` (or `CTestTestfile.cmake.install`) in the build tree is
+     install-only: CTest does not read it there. The per-arch census shard runs in either
+     tree, at
+     `<build-dir>/lib/hipdnn_plugins/engines/test_arch_content/hip-kernel-provider/census/<arch>`
+     in the build tree (`<build-dir>/bin/...` on Windows) and the same relative path under
+     the install prefix.
    - `<PY>`: for the corpus-sweep command below, the Python interpreter the active
      workspace or repository instructions mandate, otherwise the active venv's
      `python`. Resolve it once and substitute the full path.
@@ -131,14 +142,11 @@ architecture explicitly named under the production descriptor root that `GPU_TAR
 does not include (automatic; none when the build targets them all), `hkp-probe-<NAME>`,
 one per named `hkp_add_packaging_probe()` line in `probes.cmake`, and `hkp-probe-tools`. A full ctest run includes them;
 to run them alone, select with the anchored `-R '^hkp-probe-'` and `--no-tests=error`.
-`<build-dir>/hkp-probes/manifest.txt` lists the entries that must run. Check a ctest junit
-(`--output-junit`) against it with `.github/scripts/check_probe_junit.py --junit <junit>
---manifest <manifest>`, which fails on any listed entry missing, not run, failed or
-errored and ignores the other testcases.
+`-DHIPKERNELPROVIDER_MIN_PACKAGING_PROBES=N` fails configure when fewer than N probes are
+declared (default 0).
 
-In the superbuild CI lanes the probes run once, inside the "Run tests" ctest, which writes
-`build/ctest-junit.xml`; the "Check packaging probes ran" step then runs only the junit
-check, whenever "Run tests" ran, pass or fail. A pass does not cover device behavior,
+In the superbuild CI lanes the probes run once, inside the "Run tests" ctest, with N=1.
+A pass does not cover device behavior,
 install staging, UKDs the probe does not pack, or standalone-UKD references.
 
 ## Ingestor proof boundaries

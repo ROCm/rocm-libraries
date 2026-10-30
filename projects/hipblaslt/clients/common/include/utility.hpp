@@ -398,6 +398,11 @@ int32_t            hipblaslt_get_arch();
 int32_t            hipblaslt_get_arch_major();
 void hipblaslt_print_version();
 
+/*! \brief Timing clients call this first: returns false, after printing why, when
+ *  HIPBLASLT_ADAPTIVE_SM_COUNT may change the timed solution (adaptive mode
+ *  without HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE). */
+bool hipblaslt_timing_allowed_with_adaptive_sm_count();
+
 /* ==================================================================== */
 /*! \brief write a matrix to file. */
 void hipblasltDispatchValuesToFile(hipblasOperation_t transA, hipDataType TiA,
