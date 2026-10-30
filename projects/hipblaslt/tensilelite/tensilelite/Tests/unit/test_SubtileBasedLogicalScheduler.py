@@ -2874,7 +2874,7 @@ class TestEmit:
 class TestBuildPreloop:
 
     def test_256x256_fp4(self):
-        """Preloop contains GR(n), LR, GR(n+1). No GR(n+2) or gr_inc."""
+        """Legacy FP4 PGR2 waits and reads before issuing MT n+1 GRs."""
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
         sched.build()
@@ -2895,9 +2895,36 @@ class TestBuildPreloop:
         # (LR data is loaded fresh, not from a previous MT iteration)
         assert 'lr_inc' not in all_ops
 
-    def test_pgr2_mt1_precedes_partial_wait_with_guarded_full_wait(self):
-        """PGR2 overlaps MT1 GR with the first wait without weakening NLL."""
-        cfg = make_cfg_256x256_fp4()
+        emitted = preloop[0][0]
+        sources = [em.source for em in emitted]
+        wait_indices = [
+            i for i, em in enumerate(emitted) if em.opType == 'wait_gr'
+        ]
+        first_lr = next(
+            i for i, src in enumerate(sources)
+            if isinstance(src, LRPlacement)
+        )
+        nll_skip = next(
+            i for i, src in enumerate(sources)
+            if getattr(src, 'kind', None) == 'skip'
+            and src.target == 'NLL'
+        )
+        first_mt1 = next(
+            i for i, src in enumerate(sources)
+            if isinstance(src, GRPlacement) and src.mtIteration == 1
+        )
+
+        assert len(wait_indices) == 1
+        assert sources[wait_indices[0]].wait_gr_counts == WaitGRCounts()
+        assert wait_indices[0] < first_lr < nll_skip < first_mt1
+        assert not any(
+            getattr(src, 'target', None) == 'SubtilePreloopNoMT1'
+            for src in sources
+        )
+
+    def test_uniform_pgr2_mt1_precedes_partial_wait_with_guarded_full_wait(self):
+        """Uniform-epoch PGR2 overlaps MT1 GR without weakening NLL."""
+        cfg = replace(make_cfg_du128_4wave(), uniformPgrEpoch=True)
         sched = LogicalScheduler(cfg)
         sched.build()
         sched.build_preloop()
@@ -3823,6 +3850,36 @@ class TestDualPeriodMXFP8ScheduleFingerprint:
                 for line in partitions[2])
 
 
+class TestLegacyMXFP4ScheduleFingerprint:
+    """Pin representative MXFP4 loops to the parent branch's instructions."""
+
+    _EXPECTED = {
+        0: (230, "a5c4bbe3e88368bbaed2cc16b84d28aaf137d334022ec4e89780124b8ad15879"),
+        1: (230, "7be54659db2c45c376b89eac9996b6aac56826691c0b704c034ec25710d58c6c"),
+    }
+
+    def test_mt256x256_pgr2_keeps_parent_instruction_order(self):
+        import hashlib
+
+        kernel = create_kernel(256, 256, fp4=True)
+        cfg = make_cfg_256x256_fp4()
+        assert not cfg.prefetchNextPartition
+        assert not cfg.uniformPgrEpoch
+        assert not cfg.dualPeriodScale
+
+        assembly = _emit_mainloops(
+            kernel,
+            make_writer_and_tileinfos(kernel, fp4=True),
+            cfg)
+        for copy_index, (expected_lines, expected_hash) in \
+                self._EXPECTED.items():
+            normalized = TestDualPeriodMXFP8ScheduleFingerprint._normalize(
+                assembly, copy_index)
+            assert len(normalized.splitlines()) == expected_lines
+            assert hashlib.sha256(
+                normalized.encode()).hexdigest() == expected_hash
+
+
 class TestInstructionSchedulerWrapPrefetch:
     """Partition-prefetch LRs must not delay independent MFMAs."""
 
@@ -3884,7 +3941,8 @@ class TestInstructionSchedulerWrapPrefetch:
                 for _ in range(2)
             ], before=9),
         ]
-        return modules, list(instructionSchedule(modules).flatitems())
+        return modules, list(instructionSchedule(
+            modules, partitionPrefetch=True).flatitems())
 
     def test_wrap_payload_starts_after_second_mfma(self):
         from rocisa.instruction import (
@@ -3970,7 +4028,8 @@ class TestInstructionSchedulerWrapPrefetch:
         assert physical_counts == [3] * 7
         assert not placer.leftovers
 
-    def test_partition_zero_wait_precedes_interleaved_prefetch_reads(self):
+    def test_partition_zero_wait_precedes_interleaved_prefetch_reads(
+            self, monkeypatch):
         import shutil
         from types import SimpleNamespace
         from rocisa import rocIsa
@@ -3980,7 +4039,22 @@ class TestInstructionSchedulerWrapPrefetch:
             BufferLoadB128, DSLoadB128, MXMFMAInstruction, SAddU32,
             SBarrier, SWaitCnt)
         from tensilelite.Components.Subtile.InstructionEmitter import SWaitCntEx
-        from tensilelite.Components.Subtile.InstructionScheduler import instructionSchedule
+        from tensilelite.Components.Subtile import InstructionScheduler
+
+        instructionSchedule = InstructionScheduler.instructionSchedule
+        real_slot_placer = InstructionScheduler._SlotPlacer
+        placement_policies = []
+
+        class RecordingSlotPlacer(real_slot_placer):
+            def __init__(self, *args, **kwargs):
+                placement_policies.append((
+                    kwargs.get("slotsPerInterval", 2),
+                    kwargs.get("textBlocksConsumeSlots", False),
+                ))
+                super().__init__(*args, **kwargs)
+
+        monkeypatch.setattr(
+            InstructionScheduler, "_SlotPlacer", RecordingSlotPlacer)
 
         ri = rocIsa.getInstance()
         asm = shutil.which('amdclang++') or '/usr/bin/amdclang++'
@@ -4033,23 +4107,6 @@ class TestInstructionSchedulerWrapPrefetch:
                 ])
             return instructions
 
-        modules = [
-            emitted(0, 'mfma', [mfma(i) for i in range(16)], before=6),
-            emitted(1, 'lr', reads(0, 8), before=8, tensor='B',
-                    partition=0, targetPartition=1, mtIteration=0),
-            emitted(2, 'lr', reads(8, 12), before=1, tensor='SA',
-                    partition=0, targetPartition=0, mtIteration=0),
-            emitted(3, 'lr', reads(12, 16), before=2, tensor='SB',
-                    partition=0, targetPartition=0, mtIteration=0),
-            emitted(6, 'wait_lr', [
-                SWaitCnt(dscnt=0, comment="wait_lr")], before=3),
-            emitted(7, 'wait_gr', [
-                SWaitCntEx(vlcnt=13, dscnt=-1, comment="wait_gr")]),
-            emitted(8, 'sync', [
-                SBarrier(comment="barrier")], before=7),
-            emitted(9, 'gr', global_reads(4)),
-        ]
-
         # Semantic ranks mirror an 8x8 tile grid split into four 4x4
         # partitions. Data reads are two-instruction atomic groups; scale reads
         # are one-instruction groups. The scheduler must use these deadlines,
@@ -4059,15 +4116,53 @@ class TestInstructionSchedulerWrapPrefetch:
             8: 0, 9: 8, 10: 16, 11: 24,
             12: 16, 13: 18, 14: 0, 15: 2,
         }
-        for em in modules[1:4]:
-            em.instructionMetadata = []
-            for inst in em.instructions:
-                index = int(inst.comment[2:])
-                em.instructionMetadata.append(
-                    (rank_by_index[index], 2 if index < 8 else 1))
 
+        def make_modules():
+            modules = [
+                emitted(0, 'mfma', [mfma(i) for i in range(16)], before=6),
+                emitted(1, 'lr', reads(0, 8), before=8, tensor='B',
+                        partition=0, targetPartition=1, mtIteration=0),
+                emitted(2, 'lr', reads(8, 12), before=1, tensor='SA',
+                        partition=0, targetPartition=0, mtIteration=0),
+                emitted(3, 'lr', reads(12, 16), before=2, tensor='SB',
+                        partition=0, targetPartition=0, mtIteration=0),
+                emitted(6, 'wait_lr', [
+                    SWaitCnt(dscnt=0, comment="wait_lr")], before=3),
+                emitted(7, 'wait_gr', [
+                    SWaitCntEx(vlcnt=13, dscnt=-1, comment="wait_gr")]),
+                emitted(8, 'sync', [
+                    SBarrier(comment="barrier")], before=7),
+                emitted(9, 'gr', global_reads(4)),
+            ]
+            for em in modules[1:4]:
+                em.instructionMetadata = []
+                for inst in em.instructions:
+                    index = int(inst.comment[2:])
+                    em.instructionMetadata.append(
+                        (rank_by_index[index], 2 if index < 8 else 1))
+            return modules
+
+        # Semantic LR metadata alone must not opt a legacy kernel into the
+        # partition-prefetch policy.
+        legacy_items = list(instructionSchedule(
+            make_modules(), limitDtlBundlesPerMfma=True).flatitems())
+        assert placement_policies[-1] == (2, True)
+        legacy_first_mfma = next(
+            i for i, inst in enumerate(legacy_items)
+            if isinstance(inst, MXMFMAInstruction)
+        )
+        assert isinstance(legacy_items[1], SBarrier)
+        assert any(
+            isinstance(inst, DSLoadB128)
+            for inst in legacy_items[:legacy_first_mfma]
+        )
+
+        modules = make_modules()
         items = list(instructionSchedule(
-            modules, limitDtlBundlesPerMfma=True).flatitems())
+            modules,
+            partitionPrefetch=True,
+            limitDtlBundlesPerMfma=True).flatitems())
+        assert placement_policies[-1] == (3, False)
         mfma_positions = [
             i for i, inst in enumerate(items)
             if isinstance(inst, MXMFMAInstruction)

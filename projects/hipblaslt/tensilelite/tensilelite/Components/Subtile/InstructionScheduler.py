@@ -52,11 +52,13 @@ class _SlotPlacer:
                  validators=None, adjusters=None, onPlace=None,
                  slotsPerInterval: int = 2,
                  oneDtlPerInterval: bool = False,
-                 maxInstructionsPerInterval: Optional[int] = None):
+                 maxInstructionsPerInterval: Optional[int] = None,
+                 textBlocksConsumeSlots: bool = False):
         self.slotsPerInterval = slotsPerInterval
         self.totalSlots = intervals * slotsPerInterval
         self.oneDtlPerInterval = oneDtlPerInterval
         self.maxInstructionsPerInterval = maxInstructionsPerInterval
+        self.textBlocksConsumeSlots = textBlocksConsumeSlots
         self._n = numModules
         self._prevInPath: List[int] = [-1] * numModules
         self._nextInPath: List[int] = [-1] * numModules
@@ -90,7 +92,8 @@ class _SlotPlacer:
         end = min(self.totalSlots, begin + self.slotsPerInterval)
         return sum(
             sum(
-                not isinstance(item[1], TextBlock)
+                self.textBlocksConsumeSlots
+                or not isinstance(item[1], TextBlock)
                 for item in self._placed[slot]
             )
             for slot in range(begin, end)
@@ -120,10 +123,11 @@ class _SlotPlacer:
     def _canPlace(self, pos: int, inst) -> bool:
         if pos < 0 or pos >= self.totalSlots:
             return False
-        if isinstance(inst, TextBlock):
+        if isinstance(inst, TextBlock) and not self.textBlocksConsumeSlots:
             return True
         if sum(
-                not isinstance(item[1], TextBlock)
+                self.textBlocksConsumeSlots
+                or not isinstance(item[1], TextBlock)
                 for item in self._placed[pos]) >= 2:
             return False
         if (self.maxInstructionsPerInterval is not None
@@ -340,11 +344,13 @@ class _SlotPlacer:
                     pos = self._forceSlot(mid, limit, reverse)
                 self.place(pos, item, reverse=reverse)
                 remaining = sum(
-                    not isinstance(nextItem[1], TextBlock)
+                    self.textBlocksConsumeSlots
+                    or not isinstance(nextItem[1], TextBlock)
                     for nextItem in pathInsts[idx + 1:])
                 if reverse:
                     limit = pos - 1
-                elif isinstance(inst, TextBlock):
+                elif (isinstance(inst, TextBlock)
+                      and not self.textBlocksConsumeSlots):
                     limit = pos
                 else:
                     limit = self._nextForwardLimit(pos, remaining)
@@ -905,21 +911,6 @@ def _orderGlobalReadBundlesByFirstConsumer(grPaths, emittedModules):
     ] + tails
 
 
-def _hasPartitionPrefetchReads(emittedModules):
-    """Whether this cell belongs to partition-directed local-read prefetch."""
-    return any(
-        em.opType == "lr"
-        and any(_isDsRead(inst) for inst in em.instructions)
-        and (
-            getattr(em.source, "targetPartition",
-                    getattr(em.source, "partition", 0))
-            != getattr(em.source, "partition", 0)
-            or getattr(em.source, "mtIteration", 0) > 0
-        )
-        for em in emittedModules
-    )
-
-
 def _nextPlacementSlot(placer):
     """Return the first slot after all instructions placed so far."""
     for pos in range(placer.totalSlots - 1, -1, -1):
@@ -1430,14 +1421,16 @@ def instructionSchedule(
     isMx8Cycle = bool(mfmas) and all(
             isinstance(inst, MXMFMAInstruction)
             and inst.getIssueLatency() == 8 for inst in mfmas)
-    if isMx8Cycle:
+    # Partition-zero splitting is a dual-period MXFP8 policy, not a pattern
+    # inferred from arbitrary LR metadata.  Requiring the explicit scheduler
+    # mode keeps legacy MXFP4 and other subtile schedules byte-stable.
+    if isMx8Cycle and partitionPrefetch:
         p0Split = _splitPartitionZeroPrefetch(
             preMfmaOrders, emittedModules)
     partitionPrefetchPolicy = (
         isMx8Cycle
         and not multiDU
-        and (partitionPrefetch
-             or _hasPartitionPrefetchReads(emittedModules))
+        and partitionPrefetch
     )
 
     p0Payload = p0Split[3] if p0Split is not None else None
@@ -1451,7 +1444,8 @@ def instructionSchedule(
             p0PayloadReordered = True
 
     strictDtlSpacing = (
-        limitDtlBundlesPerMfma
+        partitionPrefetchPolicy
+        and limitDtlBundlesPerMfma
         and _hasDtlIntervalCapacity(
             pathOrders, emittedModules, max(0, len(mfmas) - 1))
     )
@@ -1527,7 +1521,12 @@ def instructionSchedule(
                        rules.minGapDsReadToWait]
     if not (partitionPrefetchPolicy or p0Split is not None):
         base_validators.append(rules.noM0WithBufferLoad)
-    base_adjusters = [rules.spreadLocalReads, rules.spreadBufferLoads]
+    # Full-range LR spreading is part of the explicit partition-prefetch
+    # policy.  Legacy schedules use only buffer-load spreading, matching the
+    # parent scheduler exactly.
+    base_adjusters = [rules.spreadBufferLoads]
+    if partitionPrefetchPolicy or p0Split is not None:
+        base_adjusters.insert(0, rules.spreadLocalReads)
     if partitionPrefetchPolicy or p0Split is not None:
         base_validators.append(rules.noDsReadOrValuInFirstSlot)
         if strictDtlSpacing:
@@ -1547,13 +1546,16 @@ def instructionSchedule(
         maxInstructionsPerInterval=(
             3 if strictDtlSpacing
             and (partitionPrefetchPolicy or p0Split is not None)
-            else None))
+            else None),
+        textBlocksConsumeSlots=not (
+            partitionPrefetchPolicy or p0Split is not None))
 
     def _placeRegularPaths():
         for order, hasWaitGR in paths:
             if not order:
                 continue
-            wrapPrefetch = (not multiDU) and hasWaitGR \
+            wrapPrefetch = partitionPrefetch \
+                and (not multiDU) and hasWaitGR \
                 and _isWrapPrefetchPath(order, emittedModules)
             if wrapPrefetch:
                 # The final partition wraps its local-read prefetch to partition 0
