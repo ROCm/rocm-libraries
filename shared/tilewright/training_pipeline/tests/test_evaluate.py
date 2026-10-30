@@ -967,6 +967,73 @@ def test_a_model_without_kernel_guards_is_served_without_the_guarded_kernel(
         )
 
 
+@pytest.mark.parametrize("budget", [1, 8, 16, 24])
+def test_a_budget_below_the_cu_range_is_guarded_as_the_nearest_budget(budget):
+    """A CU budget below a model's range is ranked at the nearest budget in
+    it, and the guards read the problem's free sizes alone, never its
+    context, as TensileLite's do: a model trained with kernel guards passes
+    over a guarded kernel below its guard at such a budget exactly as at the
+    nearest budget, and serves what the unguarded pool serves above it."""
+    tw = pytest.importorskip("tilewright")
+    data = v3_model(guards=True)
+    model = tw.load_model_from_memory(data)
+    nearest = 25  # v3_bundle's smallest share, a quarter of HW's 100 CUs
+    top = served_ranking(tw, model, dict(timed_gemm(2), cu_budget=nearest))[0]
+    ms = (1, 2, 3, 4, 5, 8)
+    low = [dict(timed_gemm(m), cu_budget=budget) for m in ms]
+    at = [dict(timed_gemm(m), cu_budget=nearest) for m in ms]
+    for g, h in zip(low, at):
+        assert served_ranking(tw, model, g, 3) == served_ranking(tw, model, h, 3)
+    key = ev.pool_key(low[0])
+
+    def served(rows, pool):
+        e = ev.evaluate_model(
+            data, rows, hardware=HW, pools={key: pool}, pick_measurement="timed"
+        )
+        return [
+            (r.pick_sol_idx, r.pick_us, r.pick_index, r.pick_rank, r.served_by)
+            + (r.n_scored,)
+            for r in e.results
+        ]
+
+    guarded = served(low, guarding(POOL, top))
+    assert guarded == served(at, guarding(POOL, top))
+    plain = served(low, POOL)
+    for m, g, p in zip(ms, guarded, plain):
+        if m < 4:
+            assert g[0] != top and g[4] == "model", m
+        else:
+            assert g[:2] == p[:2], m
+    assert any(p[0] == top for m, p in zip(ms, plain) if m < 4)
+
+
+def test_the_origami_fallback_of_a_budget_outside_the_range_obeys_the_guards():
+    """A schedule the model does not list leaves a GEMM to the Origami
+    fallback at any CU budget; for a model trained with kernel guards the
+    fallback passes over a guarded kernel below its guard there too, as
+    TensileLite's analytical ranking does, and serves it above."""
+    tw = pytest.importorskip("tilewright")
+    data = v3_model(guards=True)
+    model = tw.load_model_from_memory(data)
+    top = served_ranking(tw, model, timed_gemm(2))[0]
+    gemms = [
+        dict(timed_gemm(m, origami=top), schedule="auto", cu_budget=16)
+        for m in (1, 2, 3, 4, 8)
+    ]
+    out = ev.evaluate_model(
+        data,
+        gemms,
+        hardware=HW,
+        pools={ev.pool_key(gemms[0]): guarding(POOL, top)},
+        pick_measurement="timed",
+    )
+    for g, r in zip(gemms, out.results):
+        if g["m"] < 4:
+            assert r.pick_sol_idx != top, g["m"]
+        else:
+            assert (r.served_by, r.pick_sol_idx) == ("origami_fallback", top), g["m"]
+
+
 def test_origami_candidate_passes_over_the_rows_it_is_told_to():
     """Rows of excluded solutions count as absent, as a blocked kernel's
     dropped rows do: a flagged pick of one leaves the GEMM without Origami's
