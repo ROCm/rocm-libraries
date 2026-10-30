@@ -173,6 +173,88 @@ def test_run_worker_flow_updates_config_and_timing(monkeypatch: pytest.MonkeyPat
     assert (tuning / "timing.log").is_file()
 
 
+def _run_single_worker_and_capture_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, yaml_text: str
+) -> dict:
+    """Drive ocore.run() over one config and return the env passed to Popen."""
+    hip = tmp_path / "hip"
+    (hip / "tensilelite/tensilelite/bin").mkdir(parents=True)
+    tuning = tmp_path / "tuning"
+    tuning.mkdir()
+    cfg = tuning / "job_1.yaml"
+    cfg.write_text(yaml_text, encoding="utf-8")
+
+    monkeypatch.setattr(ocore, "list_optimization_configs", lambda _p, *_a: [str(cfg)])
+    monkeypatch.setattr(ocore, "build_tensilelite_client", lambda *_a, **_k: None)
+    monkeypatch.setattr(ocore, "parse_devices", lambda d: list(d))
+    state = {"n": 0}
+
+    def _get_state(_p):
+        state["n"] += 1
+        # setup path sees failed (so should_run stays True); teardown re-check sees completed.
+        return "failed" if state["n"] == 1 else "completed"
+
+    monkeypatch.setattr(ocore, "get_build_state", _get_state)
+    monkeypatch.setattr(ocore, "clean_failed_build", lambda _p: None)
+    monkeypatch.setattr(ocore, "wait_process_or_stop", lambda proc, *_a, **_k: setattr(proc, "returncode", 0))
+    monkeypatch.setattr(ocore, "estimate_workload", lambda _p: 1.0)
+    monkeypatch.setattr(ocore, "_log_work", lambda *_a, **_k: None)
+
+    captured = {}
+
+    class _Proc:
+        def __init__(self):
+            self.returncode = 0
+
+    def _fake_popen(*_a, **k):
+        captured["env"] = k["env"]
+        return _Proc()
+
+    monkeypatch.setattr(ocore.subprocess, "Popen", _fake_popen)
+
+    class _Runner:
+        def __init__(self, items, worker_impl, devices, n_slots, estimate_workload_fn, job_logger_fn, **_kw):
+            self.items = items
+            self.worker_impl = worker_impl
+            self.device = devices[0]
+
+        def __call__(self, _workdir):
+            for item in self.items:
+                w = self.worker_impl(item, self.device, 0, type("Stop", (), {"is_set": lambda self: False})(), None)
+                w.setup()
+                assert w.run() is True
+                w.teardown()
+            return self.items
+
+    monkeypatch.setattr(ocore, "Runner", _Runner)
+    ocore.run(hip, tuning, devices=[0], n_slots=1, retry=True)
+    return captured["env"]
+
+
+@pytest.mark.parametrize("arch", ["gfx1250-strict_96cu", "gfx1250-strict_192cu"])
+def test_run_worker_pins_cu_env_from_backend_arch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, arch: str
+) -> None:
+    # Both partitions share LibraryLogic.ArchitectureName == "gfx1250-strict";
+    # only Backend.Arch (the un-stripped ARCH key) can tell them apart.
+    env = _run_single_worker_and_capture_env(
+        monkeypatch,
+        tmp_path,
+        f"Device: 0\nLibraryLogic:\n  ArchitectureName: gfx1250-strict\nBackend:\n  Arch: {arch}\n",
+    )
+    assert env["CU"] == str(ocore.HARDWARE_MAP[arch]["CUs"])
+
+
+def test_run_worker_omits_cu_env_without_a_resolvable_backend_arch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Legacy/hand-written configs with no Backend.Arch must not crash the
+    # worker or pin a bogus CU value -- Tensile's own rocminfo fallback
+    # should still be reachable (i.e. "CU" must be absent, not "None").
+    env = _run_single_worker_and_capture_env(monkeypatch, tmp_path, "Device: 0\n")
+    assert "CU" not in env
+
+
 def test_analyze_no_kept_results_returns_none(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     df = pd.DataFrame(
         [

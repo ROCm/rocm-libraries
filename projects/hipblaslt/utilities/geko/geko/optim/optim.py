@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from geko import bench
 from geko.config_generator import config_generator as cg
 from geko.config_generator.load_input_config import apply_input_config_defaults, resolve_mx_defaults
+from geko.config_generator.constants import HARDWARE_MAP
 from geko.constants import GEMM_FIELDS, canonical_arch, runtime_env
 from geko.schemas import GemmConfig
 from geko.concurrency.runner import Runner, Worker
@@ -340,6 +341,10 @@ def run(
                 "PYTHONPATH": tensile_pythonpath(hipblaslt_path),
                 **runtime_env((tuning_config.get("LibraryLogic") or {}).get("ArchitectureName")),
             }
+            cu_count = HARDWARE_MAP.get(tuning_config.get("Backend", {}).get("Arch"), {}).get("CUs")
+            if cu_count is not None:
+                env["CU"] = str(cu_count)
+                
             with open(self.build_dir / f"{self.config_name}-tensilelite.log", "w") as f:
                 proc = subprocess.Popen(
                     [

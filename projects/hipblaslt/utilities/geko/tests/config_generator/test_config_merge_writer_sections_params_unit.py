@@ -11,6 +11,7 @@ from geko.config_generator import config_merger as cm
 from geko.config_generator import output_writer as ow
 from geko.config_generator import config_sections_generator as csg
 from geko.config_generator.constants import (
+    HARDWARE_MAP,
     LIST_OF_MT_MAX_SIZE_DEFAULT,
     LIST_OF_MT_MAX_SIZE_SUBTILE,
     get_list_of_mt_max_size,
@@ -231,6 +232,23 @@ def test_config_sections_generator_paths(monkeypatch) -> None:
     gen_bad = csg.ConfigSectionGenerator(bad)
     with pytest.raises(ValueError, match="Invalid DUCTILE_VALIDATION_PROFILE"):
         gen_bad._build_ductile(e.fork_params, e.sizes, "x", False, False)
+
+
+@pytest.mark.parametrize(
+    "arch", ["gfx950", "gfx1250-strict", "gfx1250-strict_96cu", "gfx1250-strict_192cu", "gfx942_80cu"]
+)
+def test_build_config_tags_backend_with_the_unstripped_arch_key(arch: str) -> None:
+    # LibraryLogic.ArchitectureName strips CU-partition suffixes (e.g.
+    # gfx1250-strict_96cu and _192cu both emit "gfx1250-strict"), so anything
+    # needing the real per-partition CU count (geko.optim's Tensile subprocess
+    # env) must read Backend.Arch instead, which must keep the full ARCH key.
+    cfg = _section_cfg()
+    cfg["ARCH"] = arch
+    cfg["CUs"] = HARDWARE_MAP[arch]["CUs"]
+    e = _mk_entry((16, 16, 1, 16), {"Groups": _fp("Groups", [[{"MatrixInstruction": _fp("MatrixInstruction", [1], metadata={"MT": (64, 64), "wave": (2, 2), "GSU": 1, "LSU": 1})}]])})
+    built = csg.ConfigSectionGenerator(cfg).build_config(e, backend="tensile")
+    assert built["Backend"]["Arch"] == arch
+
 
 
 def test_gfx942_params_branches(monkeypatch) -> None:
