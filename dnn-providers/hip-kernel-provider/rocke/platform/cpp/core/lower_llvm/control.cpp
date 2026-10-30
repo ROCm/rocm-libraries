@@ -1684,6 +1684,124 @@ static const char*
     return rocke_ll_llvm_type(L, type);
 }
 
+/* Python _ops_in_region: every op of `region` in order, each followed by the
+ * ops of the regions nested in it, to any depth. Returns an arena array of
+ * *out_count ops. */
+static void ll_count_ops_in_region(const rocke_region_t* region, int* count)
+{
+    if(!region)
+    {
+        return;
+    }
+    for(int i = 0; i < region->num_ops; i++)
+    {
+        const rocke_op_t* op = region->ops[i];
+        (*count)++;
+        for(int r = 0; r < op->num_regions; r++)
+        {
+            ll_count_ops_in_region(op->regions[r], count);
+        }
+    }
+}
+
+static void ll_fill_ops_in_region(const rocke_region_t* region, const rocke_op_t** ops, int* n)
+{
+    if(!region)
+    {
+        return;
+    }
+    for(int i = 0; i < region->num_ops; i++)
+    {
+        const rocke_op_t* op = region->ops[i];
+        ops[(*n)++] = op;
+        for(int r = 0; r < op->num_regions; r++)
+        {
+            ll_fill_ops_in_region(op->regions[r], ops, n);
+        }
+    }
+}
+
+static const rocke_op_t**
+    ll_ops_in_region(rocke_lower_t* L, const rocke_region_t* region, int* out_count)
+{
+    int count = 0;
+    ll_count_ops_in_region(region, &count);
+    const rocke_op_t** ops = (const rocke_op_t**)rocke_arena_alloc(
+        &L->arena, sizeof(const rocke_op_t*) * (size_t)(count > 0 ? count : 1));
+    if(!ops)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "scf.for: arena OOM");
+    }
+    int n = 0;
+    ll_fill_ops_in_region(region, ops, &n);
+    *out_count = n;
+    return ops;
+}
+
+/* Python _loop_block_values: the induction variable and the carried values of
+ * the scf.for `loop` that its body reads, nested regions included. The loop
+ * does not hold these values; they are found as operands of the body's ops. A
+ * value the body never reads is not returned (*out_iv is then NULL). Fills
+ * `carried` (room for the loop's iter-arg count) and returns how many. */
+static int ll_loop_block_values(rocke_lower_t* L,
+                                const rocke_op_t* loop,
+                                int64_t num_iter,
+                                rocke_value_t** out_iv,
+                                rocke_value_t** carried)
+{
+    const char* iv_name = rocke_attr_get_str(&loop->attrs, "iv");
+    *out_iv = NULL;
+    int n_carried = 0;
+    if(loop->num_regions < 1 || !loop->regions[0])
+    {
+        return 0;
+    }
+    int n_ops = 0;
+    const rocke_op_t** ops = ll_ops_in_region(L, loop->regions[0], &n_ops);
+    for(int bi = 0; bi < n_ops; bi++)
+    {
+        const rocke_op_t* bop = ops[bi];
+        for(int oi = 0; oi < bop->num_operands; oi++)
+        {
+            rocke_value_t* operand = bop->operands[oi];
+            if(!operand || !operand->name || operand->op != loop)
+            {
+                continue;
+            }
+            if(iv_name && strcmp(operand->name, iv_name) == 0)
+            {
+                *out_iv = operand;
+                continue;
+            }
+            bool is_carried = false;
+            for(int mi = 0; mi < (int)num_iter; mi++)
+            {
+                const char* mname = NULL;
+                if(ll_iter_meta(loop, mi, &mname, NULL) && mname
+                   && strcmp(operand->name, mname) == 0)
+                {
+                    is_carried = true;
+                    break;
+                }
+            }
+            bool present = false;
+            for(int k = 0; k < n_carried; k++)
+            {
+                if(carried[k] == operand)
+                {
+                    present = true;
+                    break;
+                }
+            }
+            if(is_carried && !present && n_carried < (int)num_iter)
+            {
+                carried[n_carried++] = operand;
+            }
+        }
+    }
+    return n_carried;
+}
+
 /* Python _lower_normal_for: header / body / latch / exit CFG with phi nodes.
  *
  *     num_iter = int(attrs.get("num_iter_args", 0))
@@ -1716,6 +1834,10 @@ static const char*
  *     for line in header.lines: replace %FOR_LATCH->%latch ; %FOR_EXIT->%exit
  *     for meta, result, ll_ty in zip(iter_meta, op.results, iter_llvm_types):
  *         exit_blk.emit(f"  {result.name} = bitcast {ll_ty} {meta['name']} to {ll_ty}")
+ *
+ * Inside a trip of an unrolled loop, iv_name and every meta['name'] above carry
+ * the trip's name suffix (L->unroll_suffix), so each trip defines its own; the
+ * body's reads of them are renamed to match while it lowers.
  */
 void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
 {
@@ -1727,11 +1849,13 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
     const rocke_value_t* lower = op->operands[0];
     const rocke_value_t* upper = op->operands[1];
     const rocke_value_t* step = op->operands[2];
-    const char* iv_name = rocke_attr_get_str(&op->attrs, "iv");
-    if(!iv_name)
+    const char* iv_attr = rocke_attr_get_str(&op->attrs, "iv");
+    if(!iv_attr)
     {
         rocke_ll_fail(L, ROCKE_ERR_KEY, "scf.for: missing iv attr");
     }
+    const char* suffix = L->unroll_suffix ? L->unroll_suffix : "";
+    const char* iv_name = rocke_arena_printf(&L->arena, "%s%s", iv_attr, suffix);
     const char* iv_ty = rocke_ll_llvm_type(L, lower->type);
 
     rocke_ll_block_t* pred = rocke_ll_current(L);
@@ -1760,15 +1884,16 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
         const char* mname = NULL;
         const rocke_value_t* init = op->operands[3 + i];
         const char* ll_ty = ll_iter_llvm_type(L, op, i, &mname);
+        const char* name = rocke_arena_printf(&L->arena, "%s%s", mname, suffix);
         rocke_ll_block_emitf(L,
                              header,
                              "  %s = phi %s [ %s, %%%s ], "
                              "[ %s.next.%s, %%FOR_LATCH ]",
-                             mname,
+                             name,
                              ll_ty,
                              rocke_ll_operand(L, init),
                              pred_block,
-                             mname,
+                             name,
                              header->label);
     }
 
@@ -1780,10 +1905,43 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_block_emitf(L, header, "  br i1 %s, label %%%s, label %%FOR_EXIT", cmp, body->label);
     header->terminated = true;
 
+    /* Rename the body's reads of the header's values to the names defined
+     * above while the body lowers. */
+    rocke_value_t* iv_value = NULL;
+    rocke_value_t** carried_values = (rocke_value_t**)rocke_arena_alloc(
+        &L->arena, sizeof(rocke_value_t*) * (size_t)(num_iter + 1));
+    if(!carried_values)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "scf.for: arena OOM");
+    }
+    const int n_carried = ll_loop_block_values(L, op, num_iter, &iv_value, carried_values);
+    rocke_value_t** block_values = carried_values;
+    int n_block_values = n_carried;
+    if(iv_value)
+    {
+        carried_values[n_carried] = iv_value;
+        n_block_values++;
+    }
+    const char** saved_names = (const char**)rocke_arena_alloc(
+        &L->arena, sizeof(const char*) * (size_t)(n_block_values > 0 ? n_block_values : 1));
+    if(!saved_names)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "scf.for: arena OOM");
+    }
+    for(int k = 0; k < n_block_values; k++)
+    {
+        saved_names[k] = block_values[k]->name;
+        block_values[k]->name = rocke_arena_printf(&L->arena, "%s%s", saved_names[k], suffix);
+    }
+
     rocke_ll_yield_push(L);
     if(op->num_regions > 0 && op->regions[0])
     {
         rocke_ll_lower_region(L, op->regions[0]);
+    }
+    for(int k = 0; k < n_block_values; k++)
+    {
+        block_values[k]->name = saved_names[k];
     }
 
     rocke_ll_block_t* last_body = rocke_ll_current(L);
@@ -1819,8 +1977,9 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
         const char* ll_ty = ll_iter_llvm_type(L, op, i, &mname);
         rocke_ll_block_emitf(L,
                              latch,
-                             "  %s.next.%s = bitcast %s %s to %s",
+                             "  %s%s.next.%s = bitcast %s %s to %s",
                              mname,
+                             suffix,
                              header->label,
                              ll_ty,
                              yielded ? yielded[i] : "",
@@ -1841,8 +2000,14 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
             const char* mname = NULL;
             const char* ll_ty = ll_iter_llvm_type(L, op, i, &mname);
             const rocke_value_t* result = op->results[i];
-            rocke_ll_block_emitf(
-                L, exit_blk, "  %s = bitcast %s %s to %s", result->name, ll_ty, mname, ll_ty);
+            rocke_ll_block_emitf(L,
+                                 exit_blk,
+                                 "  %s = bitcast %s %s%s to %s",
+                                 result->name,
+                                 ll_ty,
+                                 mname,
+                                 suffix,
+                                 ll_ty);
         }
     }
 }
@@ -1860,14 +2025,15 @@ typedef struct ll_rename
  *
  *   - eval constant lower/upper/step -> trip_count = (upper-lower)//step
  *   - current_iter_values[meta.name] = operand(init)
- *   - find the IV + iter-arg Value objects by scanning region operands for
- *     `operand.name == iv_name/meta.name and operand.op == op`
+ *   - find the IV + iter-arg Value objects by scanning the operands of every
+ *     body op, nested regions included (ll_loop_block_values)
  *   - detect a trailing tile.sync (second-last region op) when
  *     attrs["elide_trailing_barrier"] (default True)
  *   - per iteration: emit `iv_const = add iv_ty 0, iv_value`, rename the IV +
- *     iter-arg objects + ALL body op results to `%base.unrollN`, set the
- *     elide marker on non-final trips, lower the region under a yield frame,
- *     thread yielded values into current_iter_values, restore names
+ *     iter-arg objects + ALL body op results (nested regions included) to
+ *     `%base.unrollN`, set the elide marker on non-final trips, append
+ *     `.unrollN` to L->unroll_suffix, lower the region under a yield frame,
+ *     thread yielded values into current_iter_values, restore names + suffix
  *   - bind op.results to the final current_iter_values via bitcast
  *
  * The Value.name fields are `const char*`; the Python rebinds them in place, so
@@ -1915,53 +2081,20 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
     }
     int64_t trip_count = (upper_val - lower_val) / step_val;
 
-    /* Find the IV + iter-arg Value objects referenced by body operands. */
+    /* The IV + iter-arg Value objects the body reads, nested regions included. */
     rocke_value_t* iv_value_obj = NULL;
     rocke_value_t** iter_value_objs
         = num_iter > 0 ? (rocke_value_t**)rocke_arena_alloc(
                              &L->arena, sizeof(rocke_value_t*) * (size_t)num_iter)
                        : NULL;
-    int iter_value_count = 0;
-    for(int bi = 0; bi < body->num_ops; bi++)
+    if(num_iter > 0 && !iter_value_objs)
     {
-        const rocke_op_t* bop = body->ops[bi];
-        for(int oi = 0; oi < bop->num_operands; oi++)
-        {
-            rocke_value_t* operand = bop->operands[oi];
-            if(!operand || !operand->name)
-            {
-                continue;
-            }
-            if(operand->op == op && strcmp(operand->name, iv_name) == 0)
-            {
-                iv_value_obj = operand;
-            }
-            for(int mi = 0; mi < (int)num_iter; mi++)
-            {
-                const char* mname = NULL;
-                if(!ll_iter_meta(op, mi, &mname, NULL) || !mname)
-                {
-                    continue;
-                }
-                if(operand->op == op && strcmp(operand->name, mname) == 0)
-                {
-                    bool present = false;
-                    for(int k = 0; k < iter_value_count; k++)
-                    {
-                        if(iter_value_objs[k] == operand)
-                        {
-                            present = true;
-                            break;
-                        }
-                    }
-                    if(!present && iter_value_objs)
-                    {
-                        iter_value_objs[iter_value_count++] = operand;
-                    }
-                }
-            }
-        }
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "unrolled_for: arena OOM");
     }
+    const int iter_value_count
+        = ll_loop_block_values(L, op, num_iter, &iv_value_obj, iter_value_objs);
+    int n_body_ops = 0;
+    const rocke_op_t** body_ops = ll_ops_in_region(L, body, &n_body_ops);
 
     /* Trailing tile.sync detection (second-last body op). */
     bool elide_enabled = rocke_attr_get_bool(&op->attrs, "elide_trailing_barrier", true);
@@ -1985,9 +2118,9 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
 
         /* Collect (Value*, saved-name) for restoration after this trip. */
         int max_renames = 1 + iter_value_count;
-        for(int bi = 0; bi < body->num_ops; bi++)
+        for(int bi = 0; bi < n_body_ops; bi++)
         {
-            max_renames += body->ops[bi]->num_results;
+            max_renames += body_ops[bi]->num_results;
         }
         ll_rename_t* renames = (ll_rename_t*)rocke_arena_alloc(
             &L->arena, sizeof(ll_rename_t) * (size_t)(max_renames > 0 ? max_renames : 1));
@@ -2025,10 +2158,10 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
                 }
             }
         }
-        /* Rename all body op results to %base.unrollN. */
-        for(int bi = 0; bi < body->num_ops; bi++)
+        /* Rename all body op results, nested regions included, to %base.unrollN. */
+        for(int bi = 0; bi < n_body_ops; bi++)
         {
-            const rocke_op_t* bop = body->ops[bi];
+            const rocke_op_t* bop = body_ops[bi];
             for(int ri = 0; ri < bop->num_results; ri++)
             {
                 rocke_value_t* result = bop->results[ri];
@@ -2048,8 +2181,12 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
         bool is_final = (iteration == trip_count - 1);
         L->unroll_elide_sync_op = (trailing_sync_op && !is_final) ? trailing_sync_op : NULL;
 
+        const char* outer_suffix = L->unroll_suffix ? L->unroll_suffix : "";
+        L->unroll_suffix
+            = rocke_arena_printf(&L->arena, "%s.unroll%lld", outer_suffix, (long long)iteration);
         rocke_ll_yield_push(L);
         rocke_ll_lower_region(L, body);
+        L->unroll_suffix = outer_suffix;
         const char* const* yielded = NULL;
         int n_yield = 0;
         rocke_ll_yield_pop(L, &yielded, &n_yield);
