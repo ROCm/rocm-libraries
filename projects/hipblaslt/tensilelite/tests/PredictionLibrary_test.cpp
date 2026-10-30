@@ -1425,6 +1425,45 @@ TEST(PredictionLibraryTest, TilewrightNotesEachContextOutsideTheModelOnce)
         {.cu_budget = 0, .schedule = tilewright::Schedule::Auto}, hardware));
 }
 
+namespace
+{
+    // Ranks dummyProblem() at SM count target `smCountTarget` on the gfx950
+    // device with writeV2Model's model and exits: 0 when the model ranked it.
+    [[noreturn]] void rankAtSmCountTargetAndExit(int smCountTarget)
+    {
+        bool ranked = false;
+        {
+            SolutionMap<ContractionSolution> solutions;
+            addContestedKernels(solutions);
+
+            ScratchDir                          dir("tensilelite_tilewright_note");
+            ContractionProblemPredictionLibrary lib;
+            loadWithTilewright(dir, writeV2Model(dir), contestedTable, solutions, lib);
+            auto problem = TensileLite::testing::dummyProblem();
+            problem.setParams().setSmCountTarget(smCountTarget);
+            ranked = lib.tilewright_ranker != nullptr
+                     && !lib.tilewright_ranker->rank(problem, makeGfx950Device(), 3).empty();
+        }
+        std::exit(ranked ? 0 : 1);
+    }
+}
+
+TEST(PredictionLibraryTest, TilewrightNotesACallItRanksAtAnotherCuBudget)
+{
+    // TensileLite reads TILEWRIGHT_DIAG once per process, so the call is
+    // ranked in a newly started copy of this binary that sets it, and the
+    // test matches the note rank() prints to the copy's stderr.
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    EXPECT_EXIT(
+        {
+            setenv("TILEWRIGHT_DIAG", "1", 1);
+            rankAtSmCountTargetAndExit(224);
+        },
+        ::testing::ExitedWithCode(0),
+        "cu_budget=224 schedule=0 n_cu=256: outside the model's CU range; ranked as "
+        "cu_budget=0, the kernels launch with cu_budget=224");
+}
+
 TEST(PredictionLibraryTest, TilewrightRanksTheTopKernelsOrEveryScoredKernel)
 {
     SolutionMap<ContractionSolution> solutions;
